@@ -10,14 +10,13 @@
  * 부서(BG/ACT) 라벨은 노출하지 않는다.
  */
 
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users as UsersIcon, UserPlus, FolderMinus, Trash2, Pencil } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, AppUser } from '@/types';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
-import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { removeFromSet } from '@/services/revisionSetService';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -30,25 +29,28 @@ import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { canActAsAssignee, canReassignRevision, canFinalResolveRevision } from '@/utils/revisionWorkflow';
 import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
 import { summarizeAssignees, collectAssigneeNotes, canShowFinalResolveBar } from '@/utils/revisionCardView';
-import { resolveNotificationSceneTarget } from '@/utils/notificationSceneNavigation';
-import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { useRetakeSceneModal } from './RetakeSceneModalProvider';
 import { AssigneeChipRow } from '@/components/scenes/revision/AssigneeChipRow';
 import { CompletionNoteInput } from '@/components/scenes/revision/CompletionNoteInput';
 import { FinalResolveBar } from '@/components/scenes/revision/FinalResolveBar';
 import { ReassignInline } from '@/components/scenes/revision/ReassignInline';
 import { RevisionStatusAction } from '@/components/scenes/RevisionPanel';
+import { RemindRetakeButton } from '@/components/scenes/revision/RemindRetakeButton';
 
 interface Props {
   revision: CompRevision;
   allUsers: AppUser[];
   sideBarClass: string;
   reLabel: string;
+  focused?: boolean;
+  focusToken?: number;
 }
 
-export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: Props) {
+export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel, focused = false, focusToken }: Props) {
   const currentUser = useAuthStore((s) => s.currentUser);
   const { setView, setHighlightUserName } = useAppStore();
-  const episodes = useDataStore((s) => s.episodes);
+  const openRetakeScene = useRetakeSceneModal();
+  const rowRef = useRef<HTMLDivElement>(null);
 
   const startAssignee = useRevisionStore((s) => s.startAssignee);
   const completeAssignee = useRevisionStore((s) => s.completeAssignee);
@@ -71,6 +73,13 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(revision.description);
   const [savingDescription, setSavingDescription] = useState(false);
+
+  useEffect(() => {
+    if (!focused) return;
+    setExpanded(true);
+    const frame = requestAnimationFrame(() => rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    return () => cancelAnimationFrame(frame);
+  }, [focused, focusToken]);
 
   const entityUserNames = useMemo(() => allUsers.map((u) => u.name), [allUsers]);
   const handleEntityMentionClick = (name: string) => { setHighlightUserName(name); setView('team'); };
@@ -163,34 +172,11 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
     }
   };
   const handleOpenRevisionScene = () => {
-    if (isGeneral) {
-      sonnerToast.info('전반 항목은 연결된 씬이 없어 현재 허브에서 확인해주세요.');
-      return false;
-    }
-    const target = resolveNotificationSceneTarget({
-      sceneName: revision.sceneKey,
+    return openRetakeScene?.({
+      sceneKey: revision.sceneKey,
       department: revision.department,
-    }, episodes);
-    if (!target) {
-      sonnerToast.error('연결된 씬을 찾지 못했어요.');
-      return false;
-    }
-    navigateToSceneView({
-      episodeNumber: target.episodeNumber,
-      partId: target.partId,
-      department: 'all',
-      highlightSceneId: target.sceneName,
-      modalRequest: {
-        sceneUuid: target.sceneUuid,
-        sceneName: target.sceneName,
-        episodeNumber: target.episodeNumber,
-        partId: target.partId,
-        initialTab: 'revisions',
-        focusRevisionId: revision.id,
-        forceDeptFilter: 'all',
-      },
-    });
-    return true;
+      focusRevisionId: revision.id,
+    }) ?? false;
   };
   const handleRowClickCapture = (event: MouseEvent<HTMLDivElement>) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
@@ -252,6 +238,8 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
 
   return (
     <div
+      ref={rowRef}
+      data-retake-revision-id={revision.id}
       className={[
         'relative rounded-lg border border-bg-border/50 bg-bg-card/40 overflow-hidden transition-colors',
         isFinalResolved ? 'opacity-65' : '',
@@ -537,6 +525,10 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel }: 
 
               {/* 푸터 */}
               <div className="flex items-center gap-2 text-[11px] text-text-secondary/60 flex-wrap pt-1">
+                <RemindRetakeButton revision={revision} />
+                {!isGeneral && (
+                  <button type="button" onClick={handleOpenRevisionScene} className="text-accent-sub hover:underline cursor-pointer">씬 상세</button>
+                )}
                 <span>{revision.requesterName}</span>
                 {revision.status === 'resolved' && revision.finalResolvedBy && (
                   <>

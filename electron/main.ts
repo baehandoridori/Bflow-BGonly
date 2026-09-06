@@ -49,6 +49,10 @@ import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPa
 import { MarketAccountService } from './marketAccountService';
 import type { MarketAdminEventInput, MarketCommand } from './marketAccountService';
 import { ArcadeService, arcadeExecutePayload } from './arcadeService';
+import { RetakeNotificationService } from './retakeNotificationService';
+import { SlackWorkflowTransport } from './slackWorkflowTransport';
+import { parseBflowDeepLink, type BflowDeepLink } from '../src/shared/bflowDeepLink';
+import type { RetakeNotificationActor, RetakeNotificationRecord } from '../src/shared/retakeNotifications';
 import type { ArcadeExecuteCommand, ArcadeSlackRecord } from './arcadeService';
 import { getCanonicalMarketQuoteWon } from '../shared/playgroundMarketPrice.mjs';
 import { PersonalTodoRecoveryJournal } from './personalTodoRecoveryJournal';
@@ -1322,7 +1326,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion, broadcastCalendarCommittedDelete, setCalendarChangedLocalListener } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion, broadcastRetakeReminder, broadcastCalendarCommittedDelete, setCalendarChangedLocalListener } from './broadcast';
 import type { FeedbackBroadcastPayload, RetakeAssigneeCompletionBroadcastPayload } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
@@ -1367,6 +1371,7 @@ import {
   editComment as sbEditComment,
   deleteComment as sbDeleteComment,
   readAllRevisions as sbReadRevisions,
+  mapRevision as mapCanonicalRevision,
   addRevision as sbAddRevision,
   updateRevision as sbUpdateRevision,
   deleteRevision as sbDeleteRevision,
@@ -2622,6 +2627,36 @@ const icsSubscriptionIpc = registerIcsSubscriptionIpc({
 void icsSubscriptionIpc.primeOnStartup();
 
 // ─── Revisions ───
+const retakeNotificationService = new RetakeNotificationService({
+  getActor: async (): Promise<RetakeNotificationActor> => {
+    const ensured = await sessionManager.ensure();
+    const userId = sessionManager.getCanonicalUserId();
+    const epoch = sessionManager.getEpoch();
+    if (!ensured.ok || !userId || ensured.payload.user?.id !== userId || ensured.payload.epoch !== epoch) {
+      throw new Error('로그인이 필요합니다.');
+    }
+    // Read current role and Slack identity from the authoritative user directory.
+    const user = (await sbReadUsers()).find((candidate) => candidate.id === userId);
+    if (!user) throw new Error('사용자 정보를 찾을 수 없어요.');
+    return { id: user.id, name: user.name, role: user.role, isCompositor: user.isCompositor, slackId: user.slackId, epoch };
+  },
+  isActorCurrent: (actor) => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch,
+  readRevision: async (id): Promise<RetakeNotificationRecord | null> => {
+    const { data, error } = await supabaseClient.from('comp_revisions')
+      .select('id,requester_id,scene_id,revision_no,description,set_id,notify_user_ids,assignee_ids,assignee_states,final_resolved_at,status')
+      .eq('id', id).maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    return mapCanonicalRevision(data);
+  },
+  readUsers: sbReadUsers,
+  sendSlack: (payload, isCurrent) => postSlackWebhook(SLACK_WEBHOOK_URL, payload, 'Retake Slack', 8_000, isCurrent),
+  broadcast: broadcastRetakeReminder,
+  createEventId: randomUUID,
+});
+ipcMain.handle('supabase:remind-retake', wrapIpc(async (_e: unknown, revisionId: string) => {
+  return retakeNotificationService.remind(revisionId);
+}));
 ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
   return sbReadRevisions();
 }));
@@ -2629,6 +2664,7 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
     revisionNo: number, status: string, priority: string, description: string, frameNo: string,
     imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
     notifyUserIdsJson?: string, assigneeIdsJson?: string, setId?: string) => {
+    const notificationActor = await retakeNotificationService.captureActor();
     await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt, notifyUserIdsJson, assigneeIdsJson, setId);
     if (currentActivityUser) {
       try {
@@ -2704,6 +2740,7 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
         });
       } catch { /* 무시 */ }
     }
+    return retakeNotificationService.notifyAssignment(id, notificationActor);
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   // 권한 검증은 클라이언트 가드(revisionWorkflow canActAsAssignee/canReassignRevision/canFinalResolveRevision)에
@@ -2711,6 +2748,9 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
   // 별도 확인하는 비대칭은 삭제의 감사 귀속(Codex #8) 목적이며 실수가 아니다.
   // 리테이크 허브 2단계: __op 는 활동기록 분기 전용 신호 — DB 로는 보내지 않는다(fieldMap 미등록이라 분리).
   const { __op, ...dbUpdates } = updates;
+  const reassignmentNotification = typeof dbUpdates.assigneeIds === 'string'
+    ? await retakeNotificationService.captureReassignment(id, dbUpdates.assigneeIds)
+    : null;
   const { affected: revisionAffected } = await sbUpdateRevision(id, dbUpdates);
   // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
   // 우선순위: 최종완료 > 재배정(동반 status 전이보다 우선, 한솔 §7.3 '재배정 포함') > 담당완료 > 진행중 > 해결.
@@ -2805,6 +2845,9 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
         },
       });
     } catch { /* 무시 */ }
+  }
+  if (revisionAffected && reassignmentNotification) {
+    return retakeNotificationService.notifyReassignment(id, reassignmentNotification);
   }
 }));
 // Codex 리뷰 #8 P1: 리비전 삭제는 renderer-provided userId 를 신뢰하면 안 됨.
@@ -3202,17 +3245,15 @@ const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/triggers/T03HKE9MNCV/10736370
 // 리깅 완성 작업공지용 워크플로 트리거(멘션용과 별개 워크플로). 변수: CH_name / Path / bigo / image.
 const SLACK_RIGGING_WEBHOOK_URL = 'https://hooks.slack.com/triggers/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';
 
-async function postSlackWebhook(url: string, payload: Record<string, string>, tag: string): Promise<{ ok: boolean }> {
-  console.log(`[${tag}] 요청 페이로드:`, JSON.stringify(payload));
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+const slackWorkflowTransport = new SlackWorkflowTransport();
+
+async function postSlackWebhook(url: string, payload: Record<string, string>, tag: string, timeoutMs?: number, isCurrent?: () => boolean): Promise<{ ok: boolean }> {
+  const userId = sessionManager.getCanonicalUserId();
+  const epoch = sessionManager.getEpoch();
+  return slackWorkflowTransport.send(url, payload, {
+    tag, timeoutMs,
+    isCurrent: isCurrent ?? (() => sessionManager.getCanonicalUserId() === userId && sessionManager.getEpoch() === epoch),
   });
-  const body = await res.text();
-  console.log(`[${tag}] 응답:`, res.status, body);
-  if (!res.ok) throw new Error(`Slack webhook failed: ${res.status} — ${body}`);
-  return { ok: true };
 }
 
 ipcMain.handle('slack:send-webhook', wrapIpc(async (_e: unknown, payload: Record<string, string>) => {
@@ -4580,7 +4621,7 @@ ipcMain.handle('widget:resize', (_event, widgetId: string, width: number, height
 // 위젯 팝업의 씬 행 → 본체 윈도우 포커스 + 해당 씬 상세 열기 (feedback:jump-to-scene 패턴 미러링)
 ipcMain.handle('widget:navigate-main', (_e, payload: {
   sheetName: string; sceneId: string; sceneUuid: string;
-  episodeNumber?: number; partId?: string;
+  episodeNumber?: number; partId?: string; revisionId?: string;
 }) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -4798,17 +4839,8 @@ const DEEPLINK_FILE = path.join(app.getPath('userData'), 'deeplink.txt');
 
 let pendingDeepLink: string | null = null;
 
-function parseDeepLink(url: string): { sheetName: string; sceneId: string } | null {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== `${PROTOCOL}:`) return null;
-    if (u.host !== 'scene') return null;
-    const segments = u.pathname.replace(/^\/+/, '').split('/');
-    if (segments.length < 2) return null;
-    return { sheetName: decodeURIComponent(segments[0]), sceneId: decodeURIComponent(segments[1]) };
-  } catch {
-    return null;
-  }
+function parseDeepLink(url: string): BflowDeepLink | null {
+  return parseBflowDeepLink(url);
 }
 
 function sendDeepLinkToRenderer(url: string): void {

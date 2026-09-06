@@ -4,6 +4,7 @@
  */
 
 import type { ElectronAPI, AppUser, Episode, Scene, CompRevisionSet, SceneWorkLink } from '@/types';
+import { RetakeNotificationService } from '../../electron/retakeNotificationService';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -1264,6 +1265,19 @@ function emitMockSupabaseBroadcast(event: unknown): void {
     }
   }
 }
+
+// Same delivery selection, permission, and cooldown contract; preview never calls a remote webhook.
+const previewRetakeNotifications = new RetakeNotificationService({
+  getActor: async () => ({ ...requireMockCalendarUser(), epoch: previewCanonicalEpoch }),
+  isActorCurrent: (actor) => previewCanonicalUserId === actor.id && previewCanonicalEpoch === actor.epoch,
+  readRevision: async (id) => getMockRevisionRows().find((revision) => revision.id === id) ?? null,
+  readUsers: async () => getMockUsers(),
+  sendSlack: async (_payload, isCurrent) => {
+    if (isCurrent && !isCurrent()) throw new Error('로그인이 변경됐어요.');
+  },
+  broadcast: (payload) => { emitMockSupabaseBroadcast({ event: 'retake-reminder', payload }); return true; },
+  createEventId: createUuid,
+});
 
 function normalizeMockCalendarEventTagId(tagId: unknown): string | null {
   if (tagId === undefined || tagId === null) return null;
@@ -3028,6 +3042,7 @@ export function installDevElectronAPI(): void {
       }
     },
     supabaseReadRevisions: async () => getMockRevisionRows(),
+    remindRetake: async (revisionId) => ({ ...await previewRetakeNotifications.remind(revisionId), simulated: true }),
     supabaseAddRevision: async (
       id: string,
       _partUuid: string,
@@ -3048,6 +3063,7 @@ export function installDevElectronAPI(): void {
       assigneeIdsJson?: string,
       setId?: string,
     ) => {
+      const notificationActor = await previewRetakeNotifications.captureActor();
       const revisions = getMockRevisionRows();
       const mockAssigneeIds = parseJsonStringArray(assigneeIdsJson);
       revisions.push({
@@ -3090,8 +3106,12 @@ export function installDevElectronAPI(): void {
       });
       getMockActivityRows().unshift(activity);
       emitMockActivityRealtime(activity);
+      return { ...await previewRetakeNotifications.notifyAssignment(id, notificationActor), simulated: true };
     },
     supabaseUpdateRevision: async (id: string, updates: Record<string, string>) => {
+      const reassignmentNotification = typeof updates.assigneeIds === 'string'
+        ? await previewRetakeNotifications.captureReassignment(id, updates.assigneeIds)
+        : null;
       const revisions = getMockRevisionRows();
       const target = revisions.find((revision) => revision.id === id);
       if (!target) return;
@@ -3142,6 +3162,9 @@ export function installDevElectronAPI(): void {
           getMockActivityRows().unshift(activity);
           emitMockActivityRealtime(activity);
         }
+      }
+      if (reassignmentNotification) {
+        return { ...await previewRetakeNotifications.notifyReassignment(id, reassignmentNotification), simulated: true };
       }
     },
     supabaseDeleteRevision: async (id: string) => {

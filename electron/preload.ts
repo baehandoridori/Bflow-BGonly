@@ -13,6 +13,7 @@ import type { SessionActionResult } from './sessionManager';
 import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from './marketAccountService';
 import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeWalletUpdate } from './arcadeService';
 import type { RealtimeStatusMetadata } from './realtime';
+import type { BflowDeepLink } from '../src/shared/bflowDeepLink';
 
 let canonicalSessionEpoch = 0;
 function rememberSessionEpoch(result: SessionActionResult): SessionActionResult {
@@ -355,6 +356,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('calendar:notifications:mark-read', ids),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),
+  remindRetake: (revisionId: string) => ipcRenderer.invoke('supabase:remind-retake', revisionId),
     supabaseAddRevision: (
       id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,
       priority: string, description: string, frameNo: string, imageUrl: string,
@@ -504,8 +506,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('slack:send-rigging-webhook', payload),
 
   // 딥링크 수신 (bflow://scene/...)
-  onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => {
-    const handler = (_event: unknown, data: { sheetName: string; sceneId: string }) => callback(data);
+  onDeepLink: (callback: (data: BflowDeepLink) => void) => {
+    const handler = (_event: unknown, data: BflowDeepLink) => callback(data);
     ipcRenderer.on('deep-link', handler);
     return () => ipcRenderer.removeListener('deep-link', handler);
   },
@@ -659,11 +661,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('widget:navigate-main', payload),
   onWidgetNavigateMain: (callback: (payload: {
     sheetName: string; sceneId: string; sceneUuid: string;
-    episodeNumber?: number; partId?: string;
+    episodeNumber?: number; partId?: string; revisionId?: string;
   }) => void) => {
     const handler = (_event: unknown, data: {
       sheetName: string; sceneId: string; sceneUuid: string;
-      episodeNumber?: number; partId?: string;
+      episodeNumber?: number; partId?: string; revisionId?: string;
     }) => callback(data);
     ipcRenderer.on('widget:navigate-main', handler);
     return () => ipcRenderer.removeListener('widget:navigate-main', handler);

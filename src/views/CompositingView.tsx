@@ -34,6 +34,7 @@ import { ProgressKanbanSection } from './compositing/ProgressKanbanSection';
 import NewRevisionModal from './compositing/NewRevisionModal';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
+import { RetakeSceneModalProvider } from './retake-hub/RetakeSceneModalProvider';
 
 // v1.19.0: 그룹화 모드
 type GroupMode = 'scene' | 'episode' | 'progress';
@@ -57,6 +58,8 @@ export default function CompositingView({
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const { revisions, loadRevisions, updateStatus, isLoading } = useRevisionStore();
   const notifications = useNotificationStore((s) => s.notifications);
+  const pendingRetakeId = useAppStore((s) => s.pendingRetakeId);
+  const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
 
   const [selectedEp, setSelectedEp] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionStatus>('all');
@@ -203,6 +206,25 @@ export default function CompositingView({
     }
     return map;
   }, [episodes]);
+
+  useEffect(() => {
+    if (!pendingRetakeId || (!previewMode && !revisionsLoaded)) return;
+    const revision = revisions.find((item) => item.id === pendingRetakeId);
+    if (!revision || revision.setId) return;
+    const info = sceneInfoMap.get(revision.sceneKey);
+    setSelectedEp(null);
+    setStatusFilter('all');
+    setMyTasksOnly(false);
+    setSearchQuery('');
+    setGroupMode('scene');
+    setExpandedScenes((previous) => new Set([...previous, revision.sceneKey]));
+    if (info?.episodeNumber != null && info.partId) {
+      setExpandedFeedbackEpisodes((previous) => new Set([...previous, info.episodeNumber!]));
+      setExpandedFeedbackParts((previous) => new Set([...previous, buildFeedbackHubPartCollapseKey(info.episodeNumber!, info.partId!)]));
+    }
+    setSelectedRevisionId(revision.id);
+    useAppStore.getState().setPendingRetakeId(null);
+  }, [pendingRetakeId, revisions, revisionsLoaded, previewMode, sceneInfoMap]);
 
   // v1.19.0: 검색 + 정렬 적용된 리테이크. 그룹핑 단계 입력으로 사용.
   // 코덱스 P2 fix (5차, 2026-05-05): "댓글 많은순" 정렬 시 commentCountByRev 전달.
@@ -530,6 +552,7 @@ export default function CompositingView({
   };
 
   return (
+    <RetakeSceneModalProvider>
     <div className="h-full flex bg-bg-primary/40">
       {/* 좌측: 리테이크 허브 */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
@@ -743,5 +766,6 @@ export default function CompositingView({
         onClose={() => setNewRevModalOpen(false)}
       />
     </div>
+    </RetakeSceneModalProvider>
   );
 }

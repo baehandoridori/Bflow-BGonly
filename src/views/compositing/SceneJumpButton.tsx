@@ -1,13 +1,13 @@
 // ─── 씬 모달 점프 버튼 (v1.19.0, 코덱스 P1 fix 2026-05-05) ──────────
 //
-// store-based pending modal request → ScenesView 마운트 후 안정 처리.
-// 컴포지팅 뷰처럼 ScenesView 가 미마운트인 상태에서도 setView('scenes') 후 자동 처리.
-// (이전 CustomEvent 패턴은 listener 등록 race 로 이벤트 손실 가능했음)
+// 리테이크 화면에서는 현재 허브 위에 씬 카드를 연다.
+// 그 밖의 호출자는 기존 pending modal request → ScenesView 경로를 유지한다.
 
 import { ExternalLink } from 'lucide-react';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { parseSceneKey } from './utils';
+import { useRetakeSceneModal } from '../retake-hub/RetakeSceneModalProvider';
 
 interface Props {
   sceneKey: string;
@@ -15,6 +15,7 @@ interface Props {
   episodeNumber?: number;
   partId?: string;
   sceneUuid?: string;
+  focusRevisionId?: string;
 }
 
 export function SceneJumpButton({
@@ -23,9 +24,15 @@ export function SceneJumpButton({
   episodeNumber,
   partId,
   sceneUuid,
+  focusRevisionId,
 }: Props) {
+  const openRetakeScene = useRetakeSceneModal();
   function handleJump(e: React.MouseEvent) {
     e.stopPropagation();
+    if (openRetakeScene) {
+      openRetakeScene({ sceneKey, sceneUuid, focusRevisionId });
+      return;
+    }
     const parsed = parseSceneKey(sceneKey);
     // ep 토큰은 보통 "EP01_A_BG" 같은 sheetName 인 경우가 많아 숫자만 파싱.
     const epNum = episodeNumber ?? (parseInt(parsed.ep.replace(/\D/g, ''), 10) || 0);
@@ -39,6 +46,7 @@ export function SceneJumpButton({
         sceneUuid,
         sceneName: parsed.sceneId,
         initialTab: 'revisions',
+        focusRevisionId,
       },
     });
   }

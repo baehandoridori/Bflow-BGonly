@@ -11,6 +11,7 @@ import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget'
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
+import { MyRetakesWidget } from '@/components/widgets/MyRetakesWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
 import { RecentActivityWidget } from '@/components/widgets/RecentActivityWidget';
 import { VacationWidget } from '@/components/widgets/VacationWidget';
@@ -261,6 +262,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'dept-comparison': { label: '부서별 비교', component: <DepartmentComparisonWidget /> },
   'calendar': { label: '캘린더', component: <CalendarWidget /> },
   'my-tasks': { label: '내 할일', component: <MyTasksWidget /> },
+  'my-retakes': { label: '내 리테이크', component: <MyRetakesWidget /> },
   'vacation-today': { label: '휴가자 현황', component: <VacationWidget /> },
   'memo': { label: '메모', component: <MemoWidget /> },
   'whiteboard': { label: '화이트보드', component: <WhiteboardWidget /> },
@@ -527,6 +529,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
         const connected = await checkConnection();
         if (connected) {
+          useAppStore.getState().setDataConnected(true);
           setUsersSheetsMode(true); // 피드백 45: 재연결 후에도 아래 loadUsers() 가 원격 목록을 읽도록.
           const episodes = await readAll();
           useDataStore.getState().setEpisodes(episodes);
@@ -550,6 +553,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           if (urlToConnect) {
             const result = await connectGas(urlToConnect);
             if (result.ok) {
+              useAppStore.getState().setDataConnected(true);
               setUsersSheetsMode(true); // 피드백 45: GAS 폴백 재연결 성공 시에도 동일.
               const episodes = await readAll();
               useDataStore.getState().setEpisodes(episodes);
@@ -561,6 +565,9 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         useAuthStore.getState().setUsers(users);
       } catch (err) {
         console.error('[WidgetPopup] 동기화 실패:', err);
+      } finally {
+        // 120초 보충 조회에도 리테이크의 독립 cache를 비운 뒤 정본을 다시 읽는다.
+        if (widgetId === 'my-retakes') window.dispatchEvent(new Event('bflow:revisions-invalidated'));
       }
     };
 
@@ -665,6 +672,10 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       }
       if (data.event === 'data-change') {
         const table = data.payload?.table;
+        if (table === 'comp_revisions') {
+          window.dispatchEvent(new Event('bflow:revisions-invalidated'));
+          return;
+        }
         if (table === 'users') {
           void reconcilePopupUserDirectory()
             .then((result) => { if (result !== 'deleted') reloadData(); })
@@ -683,7 +694,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       clearInterval(emergencyPoll);
       if (reloadTimer) clearTimeout(reloadTimer);
     };
-  }, [ready]);
+  }, [ready, widgetId]);
 
   // 테마 + 데이터 초기화
   useEffect(() => {

@@ -32,6 +32,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, CompRevisionSet } from '@/types';
 import { RetakeHubItemTable, type HubTab } from './retake-hub/RetakeHubItemTable';
+import { RetakeSceneModalProvider } from './retake-hub/RetakeSceneModalProvider';
 
 const RevisionSetCreateModal = lazy(() =>
   import('./retake-hub/RevisionSetCreateModal').then((m) => ({ default: m.RevisionSetCreateModal })),
@@ -242,6 +243,9 @@ export default function RetakeHubView() {
   // 리비전 로드 완료 여부 — 자동완료 판정 가드(로드 전 빈 목록으로 done→open 오작동 방지).
   const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
   const dataConnected = useAppStore((s) => s.dataConnected);
+  const pendingRetakeId = useAppStore((s) => s.pendingRetakeId);
+  const [focusedRevisionId, setFocusedRevisionId] = useState<string | null>(null);
+  const [focusToken, setFocusToken] = useState(0);
 
   const [tab, setTab] = useState<HubTab>('part');
   const [showCreate, setShowCreate] = useState(false);
@@ -265,6 +269,17 @@ export default function RetakeHubView() {
       select(sets[0].id);
     }
   }, [sets, selectedSetId, select]);
+
+  useEffect(() => {
+    if (!pendingRetakeId || !revisionsLoaded || loadingSets) return;
+    const revision = revisions.find((item) => item.id === pendingRetakeId);
+    if (!revision?.setId || !sets.some((set) => set.id === revision.setId)) return;
+    select(revision.setId);
+    setTab('part');
+    setFocusedRevisionId(revision.id);
+    setFocusToken((value) => value + 1);
+    useAppStore.getState().setPendingRetakeId(null);
+  }, [pendingRetakeId, revisionsLoaded, loadingSets, revisions, sets, select]);
 
   const userNameOf = useMemo(() => {
     const map = new Map(allUsers.map((u) => [u.id, u.name]));
@@ -353,6 +368,7 @@ export default function RetakeHubView() {
   };
 
   return (
+    <RetakeSceneModalProvider>
     <div className="flex h-full min-h-0">
       {/* ─── 좌측 세트 목록 ─── */}
       <aside className="w-72 shrink-0 flex flex-col border-r border-bg-border/60 min-h-0">
@@ -448,6 +464,8 @@ export default function RetakeHubView() {
                 items={selectedItems}
                 tab={tab}
                 allUsers={allUsers}
+                focusRevisionId={focusedRevisionId}
+                focusToken={focusToken}
               />
             </div>
           </>
@@ -497,5 +515,6 @@ export default function RetakeHubView() {
         </Suspense>
       )}
     </div>
+    </RetakeSceneModalProvider>
   );
 }

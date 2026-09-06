@@ -255,6 +255,8 @@ interface AppState {
   // 딥링크 (bflow://scene/... → 씬 상세 모달 자동 오픈)
   pendingDeepLink: { sheetName: string; sceneId: string } | null;
   setPendingDeepLink: (link: { sheetName: string; sceneId: string } | null) => void;
+  pendingRetakeId: string | null;
+  setPendingRetakeId: (id: string | null) => void;
 
   // 설정 탭 (외부에서 특정 탭으로 이동 시 사용)
   settingsTab: string | null;
@@ -523,6 +525,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   pendingDeepLink: null,
   setPendingDeepLink: (link) => set({ pendingDeepLink: link }),
+  pendingRetakeId: null,
+  setPendingRetakeId: (id) => set({ pendingRetakeId: id }),
 
   settingsTab: null,
   setSettingsTab: (tab) => set({ settingsTab: tab }),

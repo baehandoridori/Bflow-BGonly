@@ -2309,7 +2309,7 @@ export async function updateRevision(
   return { affected: Array.isArray(rows) && rows.length > 0 };
 }
 
-function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string; notifyUserIds: string[] } {
+export function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string; notifyUserIds: string[] } {
   const rawNotify = r.notify_user_ids;
   const notifyUserIds: string[] = Array.isArray(rawNotify)
     ? (rawNotify.filter((x) => typeof x === 'string') as string[])

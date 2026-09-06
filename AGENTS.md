@@ -41,6 +41,13 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - preview는 공용 명령·권한을 사용하되 localStorage를 Web Locks로 직렬화한다. 기존 캘린더 authority 전체를 덮어쓰지 않는다. Realtime/BroadcastChannel은 재조회 신호만 전송한다.
 - 새 DB에는 간트 기본 스키마, containment, app-sessions 인증, password-lockdown 및 후속 간트 릴리스 migration을 순서대로 적용한다. 운영 적용 기록을 먼저 확인해 이전 권한을 다시 열지 않는다. `app_login`이 확인한 세션 토큰과 DB ACL을 함께 사용하며, 호출자가 보낸 actor 인자를 본인 인증으로 해석하지 않는다.
 
+### 리테이크 알림·바로가기 경계 (v1.116.0)
+
+- `bflow://retake/<revisionId>`는 공용 파서 → 로그인/데이터 연결 대기 → 최신 리테이크 조회를 거쳐 소속 세트와 해당 항목을 연다. 조회 실패를 삭제된 항목으로 처리하지 않는다.
+- 재알림은 `retakeNotificationService`가 main의 현재 사용자·세션과 정규화한 DB 리테이크로 권한·미완료 담당자를 확인한다. 기존 Slack workflow 변수를 사용하며 전송 실패는 저장 성공을 되돌리지 않는다.
+- 리테이크 화면과 세트 허브의 씬 상세는 `RetakeSceneModalProvider` 안에 연다. 상세의 BG/ACT 선택과 닫기는 허브의 화면·필터를 바꾸지 않는다.
+- 내 리테이크 위젯은 공용 담당 상태 명령을 사용한다. 로그인 시 미완료 배정 조회로 알림을 보강하지만 오프라인 중 개별 재알림 방송 이력은 별도 DB에 저장하지 않는다.
+
 ### 배플레이그라운드 v3 데이터 경계
 
 - **시세**: `shared/playgroundMarketModel.mjs`의 결정론 모델이 장 전체·업종·종목·이벤트 입력으로 로컬 계산한다. 실제 시장 API나 별도 시세 DB를 사용하지 않는다.

@@ -116,6 +116,8 @@ export interface UnifiedSceneDetailModalProps {
   initialTab?: TabKey;
   /** v1.18.0: 'revisions' 탭에서 강조할 리테이크 id — scrollIntoView + pulse 애니메이션. */
   focusRevisionId?: string;
+  /** A board-hosted card changes its own department tab without navigating or changing scene filters. */
+  localDepartmentSelection?: boolean;
   /** v1.24.0: 댓글 패널에서 강조할 댓글 id — 자동 스크롤 + comment-target-pulse. */
   focusCommentId?: string;
   /** 리테이크 카드 내부 댓글 스레드에서 강조할 댓글 id. */
@@ -173,6 +175,7 @@ export function UnifiedSceneDetailModal({
   episodeLabel,
   initialTab,
   focusRevisionId,
+  localDepartmentSelection = false,
   focusCommentId,
   focusRevisionCommentId,
   onActPhaseStateClick,
@@ -196,12 +199,18 @@ export function UnifiedSceneDetailModal({
   const headScene = bgScene ?? actScene;
   // v1.23.3 (#2 한솔 보고): 토글 클릭 시 전역 부서 모드 변경 + 같은 컷 모달 자동 재오픈 ("판딩").
   //   v1.23.2 의 "닫고 다시 클릭하라" 보다 직관적. setPendingSceneModalRequest 로 ScenesView 가 자동 처리.
-  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const globalSelectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const [localDepartment, setLocalDepartment] = useState<'all' | 'bg' | 'acting'>('all');
+  const selectedDepartment = localDepartmentSelection ? localDepartment : globalSelectedDepartment;
   const setSelectedDepartment = useAppStore((s) => s.setSelectedDepartment);
   const setDashboardDeptFilter = useAppStore((s) => s.setDashboardDeptFilter);
   const setPendingSceneModalRequest = useAppStore((s) => s.setPendingSceneModalRequest);
   const handleDeptToggle = useCallback((next: 'all' | 'bg' | 'acting') => {
     if (next === selectedDepartment) return;
+    if (localDepartmentSelection) {
+      setLocalDepartment(next);
+      return;
+    }
     // codex 1차 P1: target dept 에 씬이 있는지 검사 — 없으면 pending request 보내지 않음 (stale 방지).
     //   next='bg' → bgScene 필요, 'acting' → actScene, 'all' → 둘 중 하나라도.
     const targetScene =
@@ -233,7 +242,7 @@ export function UnifiedSceneDetailModal({
         duration: 2400,
       });
     }
-  }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, setPendingSceneModalRequest, onClose, bgScene, actScene, merged.sceneId]);
+  }, [selectedDepartment, localDepartmentSelection, setSelectedDepartment, setDashboardDeptFilter, setPendingSceneModalRequest, onClose, bgScene, actScene, merged.sceneId]);
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
   const modalMainRef = useRef<HTMLDivElement>(null);
@@ -546,6 +555,7 @@ export function UnifiedSceneDetailModal({
   useEffect(() => {
     if (dockMode !== 'modal') return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape') {
         if (showImageModal) { setShowImageModal(null); return; }
         if (deleteConfirm) { setDeleteConfirm(null); return; }
@@ -874,7 +884,7 @@ export function UnifiedSceneDetailModal({
                           selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
                         )}
                         style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
-                        title={d === 'all' ? '통합 모드로 전환 (모달 닫고 다시 클릭하면 BG+액팅 모달)' : d === 'bg' ? '배경 모드로 전환' : '액팅 모드로 전환'}
+                        title={d === 'all' ? (localDepartmentSelection ? 'BG와 액팅 함께 보기' : '통합 모드로 전환 (모달 닫고 다시 클릭하면 BG+액팅 모달)') : d === 'bg' ? '배경 모드로 전환' : '액팅 모드로 전환'}
                       >
                         {d === 'all' ? '통합' : d === 'bg' ? 'BG' : '액팅'}
                       </button>
@@ -901,13 +911,13 @@ export function UnifiedSceneDetailModal({
                         </button>
                       ))}
                     </div>
-                    <button
+                    {onDockPromote && <button
                       onClick={() => onDockPromote?.()}
                       className="px-2.5 py-1 rounded-md bg-accent/15 border border-accent/30 text-accent-sub text-[11px] font-medium hover:bg-accent/25 cursor-pointer transition-colors shrink-0 whitespace-nowrap"
                       title="이 참조 씬을 메인 모달로 열기"
                     >
                       메인으로
-                    </button>
+                    </button>}
                   </>
                 )}
 
@@ -1001,8 +1011,8 @@ export function UnifiedSceneDetailModal({
                         )}
 
                         {/* 좌 BG | 우 ACT — 듀얼 패널 (v1.23.0 동작 복원). 부서 전환은 헤더 토글로. */}
-                        <div className="grid grid-cols-2 gap-3 px-5 py-4">
-                          <DeptSection
+                        <div className={cn('grid gap-3 px-5 py-4', localDepartmentSelection && selectedDepartment !== 'all' ? 'grid-cols-1' : 'grid-cols-2')}>
+                          {(!localDepartmentSelection || selectedDepartment !== 'acting') && <DeptSection
                             dept="bg"
                             scene={bgScene}
                             sheetName={bgSheetName}
@@ -1019,8 +1029,8 @@ export function UnifiedSceneDetailModal({
                             onAssigneeActRoundBump={onAssigneeActRoundBump}
                             onHashClick={handleHash}
                             onHashContextMenu={handleHashContext}
-                          />
-                          <DeptSection
+                          />}
+                          {(!localDepartmentSelection || selectedDepartment !== 'bg') && <DeptSection
                             dept="acting"
                             scene={actScene}
                             sheetName={actSheetName}
@@ -1040,7 +1050,7 @@ export function UnifiedSceneDetailModal({
                             onAssigneeActRoundBump={onAssigneeActRoundBump}
                             onHashClick={handleHash}
                             onHashContextMenu={handleHashContext}
-                          />
+                          />}
                         </div>
 
                         {/* 메타 줄 — 등록/수정 (Supabase scenes.created_at / updated_at) */}

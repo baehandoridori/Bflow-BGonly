@@ -100,6 +100,8 @@ import {
   buildNotificationSceneDisplayLabelFromSceneKey,
 } from '@/utils/notificationEpisodeLabels';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
+import { useRetakeNotifications } from '@/hooks/useRetakeNotifications';
+import { openRetakeInApp } from '@/utils/retakeNavigation';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 import { buildCalendarNotificationText } from '@/shared/calendarNotifications';
 import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
@@ -2399,6 +2401,10 @@ export default function App() {
     // 즉시 해석(현재 비어 있는 episodes 기준) 시 대상 씬을 못 찾아 뷰만 전환되고 상세 모달이 안 열린다.
     // 즉시 해석 대신 pendingSceneModalRequest(대기) 경로로 보내 ScenesView 가 데이터 로드 후 처리하게 한다.
     const offWidgetNavigate = window.electronAPI.onWidgetNavigateMain?.((payload) => {
+      if (payload.revisionId) {
+        openRetakeInApp(payload.revisionId);
+        return;
+      }
       navigateToSceneView({
         episodeNumber: payload.episodeNumber,
         partId: payload.partId,
@@ -3024,12 +3030,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [isAdminMode, setAdminMode, setShowUserManager]);
 
-  // 딥링크 수신 (bflow://scene/...) → 씬 뷰로 이동
+  useRetakeNotifications();
+
+  // 씬/리테이크 바로가기 수신. 로그인 전 요청은 대상 ID를 보관한다.
   const { setPendingDeepLink } = useAppStore();
   useEffect(() => {
     if (!window.electronAPI?.onDeepLink) return;
     const cleanup = window.electronAPI.onDeepLink((data) => {
       console.log('[DeepLink] 수신:', data);
+      if ('revisionId' in data) {
+        openRetakeInApp(data.revisionId);
+        return;
+      }
       setPendingDeepLink(data);
       const app = useAppStore.getState();
       app.pushNavigationBackTarget();
