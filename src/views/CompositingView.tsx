@@ -211,6 +211,8 @@ export default function CompositingView({
   useEffect(() => {
     // The mount's load effect may already have started after this render.
     if (!pendingRetakeId || (!previewMode && useRevisionStore.getState().isLoading)) return;
+    const live = useAppStore.getState();
+    if (live.pendingRetakeId !== pendingRetakeId || live.pendingRetakeTarget !== pendingRetakeTarget) return;
     const verified = pendingRetakeTarget?.revision.id === pendingRetakeId ? pendingRetakeTarget.revision : undefined;
     // A finished list request may have failed. Its success is not needed to open this verified row.
     if (!verified && !previewMode && !revisionsLoaded) return;

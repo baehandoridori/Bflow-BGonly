@@ -3198,7 +3198,13 @@ export function installDevElectronAPI(): void {
       localStore.__revisionRows = getMockRevisionRows().filter((revision) => revision.id !== id);
       window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
     },
-    supabaseReadRevisionSets: async () => getMockRevisionSets(),
+    supabaseReadRevisionSets: async () => {
+      requireMockCalendarUser();
+      return [...getMockRevisionSets()].sort((a, b) => {
+        const time = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+        return (Number.isFinite(time) && time !== 0) ? time : a.id.localeCompare(b.id);
+      });
+    },
     supabaseAddRevisionSet: async (input) => {
       const now = new Date().toISOString();
       const set = {

@@ -2991,7 +2991,11 @@ ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: strin
 
 // ─── Comp Revision Sets (리테이크 세트) ───
 ipcMain.handle('supabase:read-revision-sets', wrapIpc(async () => {
-  return sbReadRevisionSets();
+  const actor = await retakeNotificationService.captureActor();
+  const isCurrent = () => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch;
+  const sets = await sbReadRevisionSets(isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  return sets;
 }));
 ipcMain.handle('supabase:add-revision-set', wrapIpc(async (_e: unknown, input: AddRevisionSetInput) => {
   return sbAddRevisionSet(input);
@@ -4880,6 +4884,24 @@ let deepLinkSequence = 0;
 let deepLinkDocumentId: string | null = null;
 let deepLinkSubscription: DeepLinkSubscription | null = null;
 let deepLinkInFlight: DeepLinkReceipt | null = null;
+// One Windows launch can arrive through both second-instance and the file fallback.
+// Keep transport identities through ACK/reload; a deliberate re-click gets a new launch ID.
+const seenDeepLinkLaunchIds = new Set<string>();
+const MAX_SEEN_DEEP_LINK_LAUNCHES = 256;
+
+function normalizeDeepLinkLaunchId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : undefined;
+}
+
+function parseDeepLinkFile(content: string): { url: string; launchId?: string } | null {
+  const text = content.trim();
+  if (parseBflowDeepLink(text)) return { url: text }; // Legacy URL-only fallback.
+  try {
+    const value = JSON.parse(text) as { url?: unknown; launchId?: unknown } | null;
+    if (!value || typeof value.url !== 'string' || !parseBflowDeepLink(value.url)) return null;
+    return { url: value.url, launchId: normalizeDeepLinkLaunchId(value.launchId) };
+  } catch { return null; }
+}
 
 function resetDeepLinkRenderer(): void {
   deepLinkDocumentId = null;
@@ -4955,27 +4977,35 @@ ipcMain.on('deep-link:ack', (event, receipt: DeepLinkReceipt) => {
   deepLinkInFlight = null;
 });
 
-function queueDeepLink(url: string): boolean {
+function queueDeepLink(url: string, launchId?: string): boolean {
   const data = parseBflowDeepLink(url);
   if (!data) return false;
+  const identity = normalizeDeepLinkLaunchId(launchId);
+  if (identity) {
+    if (seenDeepLinkLaunchIds.has(identity)) return false;
+    seenDeepLinkLaunchIds.add(identity);
+    if (seenDeepLinkLaunchIds.size > MAX_SEEN_DEEP_LINK_LAUNCHES) {
+      seenDeepLinkLaunchIds.delete(seenDeepLinkLaunchIds.values().next().value!);
+    }
+  }
   // 화면 준비를 기다리는 동안 여러 요청이 오면 마지막 유효한 링크를 연다.
   pendingDeepLink = { data, deliveryId: ++deepLinkSequence };
   flushPendingDeepLink();
   return true;
 }
 
-function sendDeepLinkToRenderer(url: string): void {
-  if (!queueDeepLink(url)) return;
+function sendDeepLinkToRenderer(url: string, launchId?: string): void {
+  if (!queueDeepLink(url, launchId)) return;
   if (app.isReady()) showMainWindow();
 }
 // ─── 딥링크 전달 준비 계약 끝 ───────────────────────────
 
 /** 딥링크 파일에 URL 기록 (두 번째 인스턴스 → 첫 번째 인스턴스 전달용) */
-function writeDeepLinkFile(url: string): void {
+function writeDeepLinkFile(url: string, launchId: string): void {
   try {
     const dir = path.dirname(DEEPLINK_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DEEPLINK_FILE, url, 'utf-8');
+    fs.writeFileSync(DEEPLINK_FILE, JSON.stringify({ url, launchId }), 'utf-8');
   } catch (err) {
     console.error('[DeepLink] 파일 쓰기 실패:', err);
   }
@@ -4990,31 +5020,32 @@ function watchDeepLinkFile(): void {
   setInterval(() => {
     try {
       if (!fs.existsSync(DEEPLINK_FILE)) return;
-      const url = fs.readFileSync(DEEPLINK_FILE, 'utf-8').trim();
+      const request = parseDeepLinkFile(fs.readFileSync(DEEPLINK_FILE, 'utf-8'));
       fs.unlinkSync(DEEPLINK_FILE);
-      if (url) {
-        console.log('[DeepLink] 파일에서 URL 감지:', url);
-        sendDeepLinkToRenderer(url);
+      if (request) {
+        console.log('[DeepLink] 파일에서 URL 감지:', request.url);
+        sendDeepLinkToRenderer(request.url, request.launchId);
       }
     } catch { /* 파일 경합 무시 */ }
   }, 500);
 }
 
 // 싱글 인스턴스 + 딥링크 전달
-const gotTheLock = app.requestSingleInstanceLock();
+const deepLinkLaunchId = randomUUID();
+const gotTheLock = app.requestSingleInstanceLock({ bflowDeepLinkLaunchId: deepLinkLaunchId });
 if (!gotTheLock) {
   // 두 번째 인스턴스: 딥링크 파일만 기록하고 조용히 종료
   // requestSingleInstanceLock()이 false를 반환하면 argv는 이미 첫 번째 인스턴스로 전달됨
   // 파일 기록은 second-instance IPC가 유실될 경우의 폴백
   const deepLinkUrl = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
-  if (deepLinkUrl) writeDeepLinkFile(deepLinkUrl);
+  if (deepLinkUrl) writeDeepLinkFile(deepLinkUrl, deepLinkLaunchId);
   // ★ ready 이전에 quit/exit하면 Windows가 "프로그램 실패"로 인식 → 비프음 재생
   // ready까지 기다린 후 조용히 종료해야 비프음 방지
   app.on('ready', () => setTimeout(() => app.exit(0), 50));
 } else {
   // 최초 argv는 한 번만 보관한다. 로드 완료 때 다시 읽으면 이후 요청을 덮어쓴다.
   const initialDeepLink = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
-  if (initialDeepLink) queueDeepLink(initialDeepLink);
+  if (initialDeepLink) queueDeepLink(initialDeepLink, deepLinkLaunchId);
 
   // ★ 프로토콜 등록은 첫 번째 인스턴스에서만!
   // 두 번째 인스턴스에서 호출하면 cwd가 system32일 때 레지스트리가 깨짐
@@ -5028,12 +5059,15 @@ if (!gotTheLock) {
   }
 
   // 첫 번째 인스턴스: second-instance 이벤트 + 파일 감시
-  app.on('second-instance', (_event, argv) => {
+  app.on('second-instance', (_event, argv, _workingDirectory, additionalData) => {
     console.log('[DeepLink] second-instance argv:', argv);
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     console.log('[DeepLink] 추출된 URL:', deepLinkUrl ?? '(없음)');
     if (deepLinkUrl) {
-      sendDeepLinkToRenderer(deepLinkUrl);
+      const launchId = additionalData && typeof additionalData === 'object'
+        ? normalizeDeepLinkLaunchId((additionalData as { bflowDeepLinkLaunchId?: unknown }).bflowDeepLinkLaunchId)
+        : undefined;
+      sendDeepLinkToRenderer(deepLinkUrl, launchId);
     } else {
       // URL 없는 경우에도 창 활성화 (showMainWindow가 필요 시 재생성까지 책임짐)
       showMainWindow();

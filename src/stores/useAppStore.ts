@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useAuthStore } from './useAuthStore';
 import type { CompRevision, WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter, UpdateInfo } from '@/types';
 import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
@@ -273,10 +274,20 @@ interface AppState {
   toggleSidebarExpanded: () => void;
 }
 
+function restartPendingRetakeNavigation(state: AppState): Partial<AppState> | null {
+  const revisionId = state.retakeNavigationRequest?.revisionId
+    ?? state.pendingRetakeTarget?.revision.id ?? state.pendingRetakeId;
+  if (!revisionId) return null;
+  const id = state.nextRetakeNavigationRequestId + 1;
+  return { nextRetakeNavigationRequestId: id, retakeNavigationRequest: { id, revisionId },
+    pendingRetakeId: null, pendingRetakeTarget: null };
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   dataConnected: false,
   gasConfig: null,
-  setDataConnected: (v) => set({ dataConnected: v }),
+  setDataConnected: (v) => set((state) => state.dataConnected === v ? state
+    : { dataConnected: v, ...restartPendingRetakeNavigation(state) }),
   setGasConfig: (config) => set({ gasConfig: config }),
 
   activeDataSource: null,
@@ -558,3 +569,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
   toggleSidebarExpanded: () => set((s) => ({ sidebarExpanded: !s.sidebarExpanded })),
 }));
+
+// Invalidate before React effects run, including logout -> login with the same user ID.
+// Keep only the requested ID while login is pending; the next session verifies it again.
+useAuthStore.subscribe((state, previous) => {
+  if (state.currentUser?.id === previous.currentUser?.id && state.authReady === previous.authReady) return;
+  const restart = restartPendingRetakeNavigation(useAppStore.getState());
+  if (restart) useAppStore.setState(restart);
+});

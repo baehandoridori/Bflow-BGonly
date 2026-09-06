@@ -16,6 +16,7 @@ export function useRetakeNotifications(): void {
   const dataConnected = useAppStore((s) => s.dataConnected);
   const retakeRequest = useAppStore((s) => s.retakeNavigationRequest);
   const localRevisions = useRevisionStore((s) => s.revisions);
+  const revisionsLoading = useRevisionStore((s) => s.isLoading);
   const seenReminders = useRef(new Set<string>());
   const [retryAttempt, setRetryAttempt] = useState(0);
 
@@ -99,7 +100,9 @@ export function useRetakeNotifications(): void {
     let cancelled = false;
     const userId = currentUser.id;
     const stillCurrent = () => !cancelled && useAppStore.getState().retakeNavigationRequest?.id === retakeRequest.id
-      && useAuthStore.getState().currentUser?.id === userId;
+      && useAppStore.getState().dataConnected === dataConnected
+      && useAuthStore.getState().authReady && useAuthStore.getState().currentUser?.id === userId;
+    if (!stillCurrent()) return;
     void getCanonicalRevision(retakeRequest.revisionId).then((revision) => {
       const app = useAppStore.getState();
       if (!stillCurrent()) return;
@@ -121,7 +124,10 @@ export function useRetakeNotifications(): void {
 
   useEffect(() => {
     if (!retakeRequest || !authReady || !currentUser || dataConnected) return;
+    if (useAppStore.getState().retakeNavigationRequest?.id !== retakeRequest.id
+      || useAppStore.getState().dataConnected || useRevisionStore.getState().isLoading
+      || !useAuthStore.getState().authReady || useAuthStore.getState().currentUser?.id !== currentUser.id) return;
     const revision = localRevisions.find((item) => item.id === retakeRequest.revisionId);
     if (revision) useAppStore.getState().finishRetakeNavigation(retakeRequest.id, revision);
-  }, [retakeRequest, localRevisions, authReady, currentUser?.id, dataConnected]);
+  }, [retakeRequest, localRevisions, revisionsLoading, authReady, currentUser?.id, dataConnected]);
 }

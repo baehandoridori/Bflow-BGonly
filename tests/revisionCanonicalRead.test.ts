@@ -4,6 +4,28 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { selectMyRetakes } from '../src/utils/myRetakes.ts';
+import { revisionSetReadHarness, revisionSetRows } from './helpers/revisionSetReadHarness.ts';
+
+test('revision sets pass both the default and lower server caps and keep creation-time ordering', async () => {
+  for (const cap of [1000, 200]) {
+    const rows = revisionSetRows(); rows[0].created_at = '2026-10-01T00:00:00Z';
+    const h = revisionSetReadHarness(rows, { cap });
+    const result = await h.ipcRead();
+    assert.equal(result.length, 1101); assert.equal(new Set(result.map((row: any) => row.id)).size, 1101);
+    assert.equal(result[0].id, 'set-00001'); assert.equal(result.at(-1).id, 'set-00000');
+    assert.ok(result.some((row: any) => row.id === 'set-01100' && row.aggregatorId === 'me' && row.episodeNumber === 1));
+    assert.ok(h.calls.every(call => call.order === 'id' && call.limit === 500));
+    assert.equal(h.calls.length, cap === 200 ? 7 : 4, 'even a short page must be followed by an empty page');
+  }
+});
+
+test('revision set later-page failures and A-B-A session changes reject partial results through the real IPC', async () => {
+  const failed = revisionSetReadHarness(undefined, { cap: 200, failAt: 3 });
+  await assert.rejects(failed.ipcRead(), /set page unavailable/); assert.equal(failed.calls.length, 3);
+  const stale = revisionSetReadHarness(undefined, { cap: 200, afterQuery: call => { if (call === 2) stale.switchAwayAndBack(); } });
+  await assert.rejects(stale.ipcRead(), /로그인이 변경/); assert.equal(stale.calls.length, 2);
+  stale.logout(); await assert.rejects(stale.ipcRead(), /로그인이 필요/); assert.equal(stale.calls.length, 2);
+});
 
 function compile(source: string) {
   return ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
@@ -180,26 +202,31 @@ test('assignee transitions read the target state directly even when it is beyond
   assert.equal(database.calls.length, 1); assert.equal(database.calls[0].id, 'revision-01100');
 });
 
-test('preview single lookup uses its canonical login and returns full-list tail targets without a row cap', async () => {
+test('preview revision and set reads use canonical login and return full-list tail targets without a row cap', async () => {
   const source = fs.readFileSync(new URL('../src/mocks/devElectronAPI.ts', import.meta.url), 'utf8');
   const ast = ts.createSourceFile('preview.ts', source, ts.ScriptTarget.Latest, true);
   const properties = new Map<string, ts.PropertyAssignment>();
   const visit = (node: ts.Node) => {
-    if (ts.isPropertyAssignment(node) && ['supabaseReadRevisions', 'supabaseReadRevisionById'].includes(node.name.getText(ast))) properties.set(node.name.getText(ast), node);
+    if (ts.isPropertyAssignment(node) && ['supabaseReadRevisions', 'supabaseReadRevisionById', 'supabaseReadRevisionSets'].includes(node.name.getText(ast))) properties.set(node.name.getText(ast), node);
     ts.forEachChild(node, visit);
   };
-  visit(ast); assert.equal(properties.size, 2);
+  visit(ast); assert.equal(properties.size, 3);
   let loggedIn = true;
   const rows = makeRows();
-  const context = vm.createContext({ getMockRevisionRows: () => rows,
+  const sets = revisionSetRows().map(row => ({ id: row.id, createdAt: row.created_at })).reverse();
+  const context = vm.createContext({ getMockRevisionRows: () => rows, getMockRevisionSets: () => sets,
     requireMockCalendarUser: () => { if (!loggedIn) throw new Error('로그인이 필요해요.'); return { id: 'me' }; },
   });
   for (const [name, node] of properties) vm.runInContext(compile(`globalThis.${name} = ${node.initializer.getText(ast)};`), context);
   assert.equal((await context.supabaseReadRevisions()).length, 1101);
+  const previewSets = await context.supabaseReadRevisionSets();
+  assert.equal(previewSets.length, 1101); assert.equal(previewSets.at(-1).id, 'set-01100');
+  assert.equal(sets[0].id, 'set-01100', 'read ordering does not mutate preview storage');
   assert.equal((await context.supabaseReadRevisionById('revision-01100')).id, 'revision-01100');
   assert.equal(await context.supabaseReadRevisionById('deleted'), null);
   await assert.rejects(context.supabaseReadRevisionById(undefined), /ID/);
   loggedIn = false;
   await assert.rejects(context.supabaseReadRevisions(), /로그인이 필요/);
+  await assert.rejects(context.supabaseReadRevisionSets(), /로그인이 필요/);
   await assert.rejects(context.supabaseReadRevisionById('revision-01100'), /로그인이 필요/);
 });

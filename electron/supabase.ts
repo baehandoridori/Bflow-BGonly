@@ -2518,13 +2518,29 @@ function mapRevisionSet(r: Record<string, unknown>): SupabaseRevisionSet {
 }
 
 /** 모든 리테이크 세트 읽기 */
-export async function readAllRevisionSets(): Promise<SupabaseRevisionSet[]> {
-  const { data, error } = await supabase
-    .from('comp_revision_sets')
-    .select('*')
-    .order('created_at');
-  throwIfError(error);
-  return (data || []).map(mapRevisionSet);
+export async function readAllRevisionSets(isCurrent: () => boolean = () => true): Promise<SupabaseRevisionSet[]> {
+  const rows: Record<string, unknown>[] = [];
+  let afterId: string | null = null;
+  while (true) {
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    let query = supabase.from('comp_revision_sets').select('*').order('id', { ascending: true }).limit(500);
+    if (afterId) query = query.gt('id', afterId);
+    const { data, error } = await query;
+    throwIfError(error);
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    if (!Array.isArray(data)) throw new Error('리테이크 세트 목록을 끝까지 확인하지 못했어요.');
+    // 서버 row cap이 요청 크기보다 작아도 계속 읽고, 빈 페이지에서만 종료한다.
+    if (data.length === 0) break;
+    const nextId = data[data.length - 1].id;
+    if (typeof nextId !== 'string' || (afterId !== null && nextId <= afterId)) throw new Error('리테이크 세트 목록을 끝까지 확인하지 못했어요.');
+    rows.push(...data);
+    afterId = nextId;
+  }
+  // ID는 페이지 커서로만 사용하고 기존 화면의 생성 시간 순서는 유지한다.
+  return rows.map(mapRevisionSet).sort((a, b) => {
+    const time = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    return (Number.isFinite(time) && time !== 0) ? time : a.id.localeCompare(b.id);
+  });
 }
 
 /** 리테이크 세트 추가 — id 는 DB default(gen_random_uuid), 저장 후 단건 조회해 map. */

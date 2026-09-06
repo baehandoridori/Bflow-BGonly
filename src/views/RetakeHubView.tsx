@@ -276,6 +276,8 @@ export default function RetakeHubView() {
   useEffect(() => {
     // The mount's load effect may already have started after this render.
     if (!pendingRetakeId || useRevisionStore.getState().isLoading) return;
+    const live = useAppStore.getState();
+    if (live.pendingRetakeId !== pendingRetakeId || live.pendingRetakeTarget !== pendingRetakeTarget) return;
     const verified = pendingRetakeTarget?.revision.id === pendingRetakeId ? pendingRetakeTarget.revision : undefined;
     // Keep complete-list guards for set mutations, while allowing this verified row after a list failure.
     if (!verified && !revisionsLoaded) return;

@@ -4,6 +4,7 @@ import { build, transformSync } from 'esbuild';
 import { readFileSync } from 'node:fs';
 import { createStore } from 'zustand/vanilla';
 import { selectMyRetakes, summarizeMyRetakes } from '../src/utils/myRetakes.ts';
+import { revisionSetReadHarness } from './helpers/revisionSetReadHarness.ts';
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 const store = (state: any) => Object.assign((select: (s: any) => any) => select(state), { getState: () => state });
@@ -27,9 +28,14 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
   const toasts: any[] = [];
   const deliveryFailures: Array<{ delivery: any; expectsAppNotification: boolean }> = [];
   const lookups: Array<{ revisionId?: string; resolve: (rows: any) => void; reject: (error: Error) => void }> = [];
-  const auth = { currentUser: { id: 'me', name: 'Me' }, authReady: true };
+  const authStore = createStore(() => ({ currentUser: { id: 'me', name: 'Me' } as any, authReady: true }));
+  const auth = new Proxy({} as any, {
+    get: (_target, property) => (authStore.getState() as any)[property],
+    set: (_target, property, value) => { authStore.setState({ [property]: value }); return true; },
+  });
   const { useAppStore: appStore } = await loadSource('src/stores/useAppStore.ts', {
     zustand: { create: createStore },
+    './useAuthStore': { useAuthStore: authStore },
     '@/utils/starNestSettings': { DEFAULT_BACKGROUND_ART: 'none', DEFAULT_BFLOW_STAR_NEST_SETTINGS: {},
       DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX: 0, DEFAULT_DASHBOARD_STAR_NEST_OPACITY: 0, DEFAULT_STAR_NEST_SETTINGS: {} },
     '@/utils/navigationBackStack': { appendNavigationBackSnapshot: () => [], createNavigationBackSnapshot: () => ({}) },
@@ -38,7 +44,11 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
   if (pendingRetakeId) appStore.getState().requestRetakeNavigation(pendingRetakeId);
   const app = new Proxy({} as any, {
     get: (_target, property) => appStore.getState()[property],
-    set: (_target, property, value) => { appStore.setState({ [property]: value }); return true; },
+    set: (_target, property, value) => {
+      if (property === 'dataConnected') appStore.getState().setDataConnected(value);
+      else appStore.setState({ [property]: value });
+      return true;
+    },
   });
   const notifications = { activeUserId: 'me', addNotification: (value: any) => {
     notices.push(value); return `notice-${notices.length}`;
@@ -310,6 +320,7 @@ test('both cached and uncached connected navigation keep views from consuming un
     '@/stores/useAppStore': { useAppStore: store(h.app) },
     '@/stores/useRevisionStore': { useRevisionStore: store(h.revisions) },
     '@/stores/useRevisionSetStore': { useRevisionSetStore: store({ select: (id: string) => selected.push(id) }) },
+    '@/stores/useAuthStore': { useAuthStore: store(h.auth) },
   });
   openRetakeInApp('uncached');
   assert.equal(h.app.currentView, 'dashboard'); assert.equal(h.app.retakeNavigationRequest.revisionId, 'uncached');
@@ -349,8 +360,9 @@ function destinationHarness(h: Awaited<ReturnType<typeof hookHarness>>, initialS
   const revisionStore = bindings.revisionStore ?? store(h.revisions);
   return { focused, selected, warnings, refreshes: () => refreshes,
     nextSets: (ids: string[]) => { nextSets = ids.map(id => ({ id })); },
-    consume: (view: 'hub' | 'standalone', revisionsLoaded = true, renderedLoading = revisionStore.getState().isLoading ?? false) => viewConsumer(view)({
-      pendingRetakeId: h.app.pendingRetakeId, pendingRetakeTarget: h.app.pendingRetakeTarget,
+    consume: (view: 'hub' | 'standalone', revisionsLoaded = true, renderedLoading = revisionStore.getState().isLoading ?? false,
+      captured = { pendingRetakeId: h.app.pendingRetakeId, pendingRetakeTarget: h.app.pendingRetakeTarget }) => viewConsumer(view)({
+      ...captured,
       revisionsLoaded, isLoading: renderedLoading,
       loadingSets: bindings.setStore?.getState().loading ?? false,
       revisions: revisionStore.getState().revisions, sets: bindings.setStore?.getState().sets ?? sets,
@@ -468,6 +480,35 @@ test('a cold verified hub target survives a failed real set load and opens after
   } finally { cleanup?.(); console.error = originalError; (globalThis as any).window = oldWindow; }
 });
 
+test('an already-open hub retries a failed later set page and selects the verified set beyond row 1000', async () => {
+  const h = await hookHarness('r1'); h.app.currentView = 'retake-hub';
+  const revisions = await revisionLoadHarness();
+  const { useRevisionSetStore: setStore } = await loadSource('src/stores/useRevisionSetStore.ts', { zustand: { create: createStore } });
+  const retainedSet = { id: 'set-00000', title: 'Previously loaded set', status: 'open' };
+  setStore.setState({ sets: [retainedSet] });
+  const { loadRevisionSets } = await loadSource('src/services/revisionSetService.ts', {
+    '../stores/useRevisionSetStore': { useRevisionSetStore: setStore }, '../stores/useRevisionStore': { useRevisionStore: revisions.store },
+    './revisionService': { setRevisionSet: () => {} },
+  });
+  const backend = revisionSetReadHarness(undefined, { cap: 200, failAt: 3 });
+  const oldWindow = (globalThis as any).window; const originalError = console.error; console.error = () => {};
+  (globalThis as any).window = { electronAPI: { supabaseReadRevisionSets: backend.ipcRead } };
+  const destination = destinationHarness(h, [], { revisionStore: revisions.store, setStore, loadSets: loadRevisionSets });
+  const cleanup = h.effects[1]();
+  try {
+    h.lookups[0].resolve({ ...revision, setId: 'set-01100' }); await flush();
+    destination.consume('hub', false); await flush();
+    assert.equal(backend.calls.length, 3); assert.deepEqual(setStore.getState().sets, [retainedSet], 'partial pages never replace the store');
+    assert.equal(setStore.getState().loading, false); assert.equal(destination.warnings.length, 1);
+    assert.deepEqual(destination.focused, []); assert.equal(h.app.pendingRetakeId, 'r1');
+    destination.consume('hub', false); assert.equal(backend.calls.length, 3, 'failure waits for the user retry');
+    backend.clearFailure(); destination.warnings[0][1].action.onClick(); await flush(); destination.consume('hub', false);
+    assert.equal(setStore.getState().sets.length, 1101); assert.equal(setStore.getState().selectedSetId, 'set-01100');
+    assert.deepEqual(destination.focused, ['r1']); assert.equal(h.app.pendingRetakeId, null);
+    assert.equal(revisions.store.getState().lastLoadTime, null);
+  } finally { cleanup?.(); console.error = originalError; (globalThis as any).window = oldWindow; }
+});
+
 test('cached deletion while already in the hub reports absence without consuming a target or cancelling unrelated startup loading', async () => {
   const h = await hookHarness('r1');
   h.app.currentView = 'retake-hub'; h.revisions.revisions.push({ ...revision, setId: 'set-a' });
@@ -487,6 +528,103 @@ test('cached deletion while already in the hub reports absence without consuming
     assert.equal(h.revisions.revisions[0].id, 'other-valid');
     assert.equal(h.app.currentView, 'retake-hub');
   } finally { cleanup?.(); cleanupWarmup?.(); (globalThis as any).window = previousWindow; }
+});
+
+test('logout and login synchronously discard verified snapshots before either destination or the hook can consume them', async () => {
+  for (const view of ['hub', 'standalone'] as const) for (const nextUser of ['me', 'second']) {
+    const h = await hookHarness('r1');
+    const cleanup = h.effects[1]();
+    h.lookups[0].resolve({ ...revision, setId: view === 'hub' ? 'set-a' : null, description: 'previous account snapshot' }); await flush();
+    const captured = { pendingRetakeId: h.app.pendingRetakeId, pendingRetakeTarget: h.app.pendingRetakeTarget };
+    const destination = destinationHarness(h);
+    h.auth.currentUser = null;
+    assert.equal(h.app.pendingRetakeTarget, null, 'auth subscription clears the snapshot before any React effect');
+    assert.equal(h.app.retakeNavigationRequest.revisionId, 'r1', 'only the requested ID waits for login');
+    const logoutRequest = h.app.retakeNavigationRequest.id;
+    // Both changes happen without rendering: the same-user ABA still gets a new generation.
+    h.auth.currentUser = { id: nextUser, name: nextUser };
+    assert.ok(h.app.retakeNavigationRequest.id > logoutRequest);
+    destination.consume(view, false, false, captured);
+    assert.deepEqual(destination.focused, []); assert.deepEqual(h.revisions.revisions, []);
+    h.render(); const cleanupNext = h.effects[1]();
+    try {
+      assert.equal(h.lookups.length, 2, 'the new login performs its own canonical lookup');
+      h.lookups[1].resolve({ ...revision, setId: view === 'hub' ? 'set-b' : null, description: 'fresh account snapshot' }); await flush();
+      destination.consume(view, false);
+      assert.deepEqual(destination.focused, ['r1']);
+      assert.equal(h.revisions.revisions[0].description, 'fresh account snapshot');
+      assert.equal(h.app.pendingRetakeId, null);
+    } finally { cleanup?.(); cleanupNext?.(); }
+  }
+});
+
+test('batched logout-login fences an old lookup and never replaces a newer user navigation request', async () => {
+  for (const failed of [true, false]) {
+    const h = await hookHarness('r1'); const staleEffect = h.effects[1]; const cleanup = staleEffect();
+    const oldId = h.app.retakeNavigationRequest.id;
+    h.app.requestRetakeNavigation('newer');
+    h.auth.currentUser = null; h.auth.currentUser = { id: 'me', name: 'Me' };
+    assert.ok(h.app.retakeNavigationRequest.id > oldId);
+    assert.equal(h.app.retakeNavigationRequest.revisionId, 'newer');
+    staleEffect(); assert.equal(h.lookups.length, 1, 'a previously rendered effect cannot start another stale lookup');
+    if (failed) h.lookups[0].reject(new Error('old session failed'));
+    else h.lookups[0].resolve({ ...revision, setId: 'set-a' });
+    await flush();
+    assert.equal(h.app.pendingRetakeTarget, null); assert.equal(h.toasts.length, 0);
+    h.render(); const cleanupNext = h.effects[1]();
+    try {
+      assert.equal(h.lookups[1].revisionId, 'newer');
+      h.lookups[1].resolve({ ...revision, id: 'newer', setId: 'set-b' }); await flush();
+      assert.equal(h.app.pendingRetakeTarget.revision.id, 'newer');
+    } finally { cleanup?.(); cleanupNext?.(); }
+  }
+});
+
+test('connection and auth-readiness changes invalidate snapshots atomically and wait for the selected local source', async () => {
+  const h = await hookHarness('r1'); const cleanup = h.effects[1]();
+  h.lookups[0].resolve({ ...revision, setId: 'set-a', description: 'remote snapshot' }); await flush();
+  const captured = { pendingRetakeId: h.app.pendingRetakeId, pendingRetakeTarget: h.app.pendingRetakeTarget };
+  const destination = destinationHarness(h);
+  h.app.setDataConnected(false);
+  assert.equal(h.app.pendingRetakeTarget, null);
+  const localId = h.app.retakeNavigationRequest.id;
+  h.app.setDataConnected(false); assert.equal(h.app.retakeNavigationRequest.id, localId, 'unchanged source does not restart');
+  destination.consume('hub', false, false, captured); assert.deepEqual(destination.focused, []);
+  h.revisions.revisions = [{ ...revision, setId: 'set-a', description: 'stale cached remote list' }];
+  (h.revisions as any).isLoading = true; h.render(); h.effects[2]();
+  assert.equal(h.app.pendingRetakeTarget, null, 'source switch cannot verify old rows before the local load finishes');
+  h.revisions.revisions = [{ ...revision, setId: null, description: 'local source' }];
+  (h.revisions as any).isLoading = false; h.render(); h.effects[2]();
+  assert.equal(h.app.pendingRetakeTarget.revision.description, 'local source');
+  h.app.setDataConnected(true); assert.equal(h.app.pendingRetakeTarget, null);
+  h.render(); const cleanupNext = h.effects[1]();
+  h.auth.authReady = false;
+  h.lookups[1].resolve({ ...revision, setId: 'set-a', description: 'before auth reset' }); await flush();
+  assert.equal(h.app.pendingRetakeTarget, null);
+  const waitingId = h.app.retakeNavigationRequest.id;
+  h.auth.authReady = true; assert.ok(h.app.retakeNavigationRequest.id > waitingId);
+  h.render(); const cleanupReady = h.effects[1]();
+  try {
+    h.lookups[2].resolve({ ...revision, setId: 'set-b', description: 'current source and session' }); await flush();
+    destination.consume('hub', false);
+    assert.equal(h.revisions.revisions.find((item: any) => item.id === 'r1').description, 'current source and session');
+  } finally { cleanup?.(); cleanupNext?.(); cleanupReady?.(); }
+});
+
+test('a local cached shortcut keeps only its ID before login and cannot install a verified snapshot early', async () => {
+  const h = await hookHarness(null, false); h.auth.currentUser = null;
+  h.revisions.revisions = [{ ...revision, setId: 'set-a' }];
+  const { openRetakeInApp } = await loadSource('src/utils/retakeNavigation.ts', {
+    '@/stores/useAppStore': { useAppStore: store(h.app) }, '@/stores/useRevisionStore': { useRevisionStore: store(h.revisions) },
+    '@/stores/useAuthStore': { useAuthStore: store(h.auth) },
+  });
+  openRetakeInApp('r1');
+  assert.equal(h.app.pendingRetakeTarget, null); assert.equal(h.app.retakeNavigationRequest.revisionId, 'r1');
+  const waitingId = h.app.retakeNavigationRequest.id;
+  h.auth.currentUser = { id: 'me', name: 'Me' };
+  assert.ok(h.app.retakeNavigationRequest.id > waitingId);
+  h.render(); h.effects[2]();
+  assert.equal(h.lookups.length, 0); assert.equal(h.app.pendingRetakeTarget.revision.id, 'r1');
 });
 
 test('same-ID repeated requests accept only the latest canonical reply', async () => {
@@ -518,6 +656,7 @@ test('local cached widget navigation stays immediate and popup forwarding stays 
   const h = await hookHarness(null, false); h.revisions.revisions.push({ ...revision, setId: 'set-a' });
   const { openRetakeInApp } = await loadSource('src/utils/retakeNavigation.ts', {
     '@/stores/useAppStore': { useAppStore: store(h.app) }, '@/stores/useRevisionStore': { useRevisionStore: store(h.revisions) },
+    '@/stores/useAuthStore': { useAuthStore: store(h.auth) },
   });
   openRetakeInApp('r1'); assert.equal(h.app.currentView, 'retake-hub'); assert.equal(h.lookups.length, 0);
   const destination = destinationHarness(h); destination.consume('hub');
