@@ -311,6 +311,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:read-comments', partUuid),
   supabaseReadCommentsForCharacter: (characterId: string) =>
     ipcRenderer.invoke('supabase:read-comments-for-character', characterId),
+  getCharacterCommentSummaries: (characterIds: string[]) =>
+    ipcRenderer.invoke('supabase:character-comment-summaries', characterIds),
   supabaseReadCommentReadStates: (userId: string) =>
     ipcRenderer.invoke('supabase:read-comment-read-states', userId),
   supabaseUpsertCommentReadState: (userId: string, sceneThreadKey: string, lastReadAt: string) =>

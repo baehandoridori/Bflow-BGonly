@@ -7,6 +7,7 @@ import {
 } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
 import { createRetryManager } from './retry-utils';
+import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds, type CharacterCommentSummaries } from '../src/shared/characterCommentSummary';
 import type {
   PersonalTodoLabelColorKey,
   PersonalTodoLabelRecord,
@@ -1572,6 +1573,41 @@ export async function readCommentsForCharacter(characterId: string): Promise<Sup
     revisionId: c.revision_id ?? null,
     parentCommentId: c.parent_comment_id ?? null,
   }));
+}
+
+/** Card summaries only: no comment bodies, images, names, or mentions cross this query boundary. */
+export async function readCharacterCommentSummaries(characterIds: string[], currentUserId: string, isCurrent: () => boolean = () => true): Promise<CharacterCommentSummaries> {
+  const ids = validateCharacterCommentIds(characterIds);
+  const summaries = createCharacterCommentSummaries(ids);
+  const pageSize = 500;
+  // Bound URL length independently from the renderer's 200-character batch.
+  for (let start = 0; start < ids.length; start += 100) {
+    const batch = ids.slice(start, start + 100);
+    let afterId: string | null = null;
+    while (true) {
+      if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+      let query = supabase.from('comments')
+        .select('id,character_id,user_id,created_at')
+        .in('character_id', batch)
+        .order('id', { ascending: true })
+        .limit(pageSize);
+      if (afterId) query = query.gt('id', afterId);
+      const { data, error } = await query;
+      throwIfError(error);
+      if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+      const rows = (data ?? []) as { id: string; character_id: string; user_id: string | null; created_at: string | null }[];
+      addCharacterCommentSummaryRows(summaries, rows.map((row) => ({
+        characterId: row.character_id, userId: row.user_id, createdAt: row.created_at,
+      })), currentUserId);
+      if (rows.length < pageSize) break;
+      const nextId = rows[rows.length - 1].id;
+      if (typeof nextId !== 'string' || (afterId !== null && nextId <= afterId)) {
+        throw new Error('캐릭터 댓글 요약 페이지를 확인하지 못했어요.');
+      }
+      afterId = nextId;
+    }
+  }
+  return summaries;
 }
 
 export async function readCommentReadStates(userId: string): Promise<CommentReadStateRow[]> {

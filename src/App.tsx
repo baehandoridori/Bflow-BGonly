@@ -1621,6 +1621,12 @@ export default function App() {
       //   hasUserCommentedOnScene 가 캐시 비어진 상태에서 호출되어 false 반환 → 답글-자동멘션·스레드 참여자
       //   알림이 silent skip. invalidate 는 분기 평가 *후* 로 옮기고, 호출 시점도 try/finally 로 보장.
       if (table === 'comments') {
+        const characterId = (payload?.new as { character_id?: string } | undefined)?.character_id
+          ?? (payload?.old as { character_id?: string } | undefined)?.character_id;
+        if (characterId) {
+          window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { characterId } }));
+          return;
+        }
         // INSERT 이벤트: 다른 사용자가 내 씬에 댓글 / @멘션 시 알림
         if (payload?.eventType === 'INSERT' && payload?.new) {
           // comments 테이블 컬럼: scene_id 는 사실 scene.no(sort_order, 예: '1', '2'...).
@@ -2583,8 +2589,9 @@ export default function App() {
         // 캐릭터 댓글 broadcast(sceneId='char:{id}') 는 씬 알림 네비게이션이 없음 → 멘션/답글 알림 스킵, 캐시만 무효화.
         //   (캐릭터 현황판 상세에서 직접 확인. 씬 알림으로 잘못 흘러가 깨진 이동 링크가 뜨던 문제 차단.)
         if (typeof commentSceneNumber === 'string' && commentSceneNumber.startsWith('char:')) {
-          invalidatePartCache();
-          window.dispatchEvent(new Event('bflow:comments-invalidated'));
+          window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', {
+            detail: { characterId: commentSceneNumber.slice('char:'.length) },
+          }));
           return;
         }
         if (commentRevisionId) {

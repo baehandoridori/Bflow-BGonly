@@ -1,6 +1,7 @@
 import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from '../features/playground/market/types';
 import type { BflowDeepLink } from '../shared/bflowDeepLink';
 import type { RetakeDeliveryResult } from '../shared/retakeNotifications';
+import type { CharacterCommentSummaries } from '../shared/characterCommentSummary';
 import type {
   ArcadeExecuteCommand,
   ArcadeExecuteResult,
@@ -1343,6 +1344,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
   supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
   /** 캐릭터 현황판 상세 스레드 — 캐릭터별 댓글 일괄 조회. */
   supabaseReadCommentsForCharacter?: (characterId: string) => Promise<unknown[]>;
+  getCharacterCommentSummaries: (characterIds: string[]) => Promise<CharacterCommentSummaries>;
   supabaseReadCommentReadStates?: (userId: string) => Promise<CommentReadStateRow[]>;
   supabaseUpsertCommentReadState?: (userId: string, sceneThreadKey: string, lastReadAt: string) => Promise<void>;
   /** 한솔 결정 (v1.15.5): 로그인 catch-up — last seen 이후 받은 멘션 댓글 일괄 조회 */

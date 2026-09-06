@@ -5,6 +5,7 @@
 
 import type { ElectronAPI, AppUser, Episode, Scene, CompRevisionSet, SceneWorkLink } from '@/types';
 import { RetakeNotificationService } from '../../electron/retakeNotificationService';
+import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -2587,6 +2588,15 @@ export function installDevElectronAPI(): void {
     supabaseDeleteUser: async () => {},
     supabaseReadComments: async (partUuid) => getMockCommentRows().filter((comment) => comment.partId === partUuid && !comment.characterId),
     supabaseReadCommentsForCharacter: async (characterId) => getMockCommentRows().filter((comment) => comment.characterId === characterId),
+    getCharacterCommentSummaries: async (characterIds) => {
+      const ids = validateCharacterCommentIds(characterIds);
+      const actor = requireMockCalendarUser();
+      const epoch = previewCanonicalEpoch;
+      const summaries = createCharacterCommentSummaries(ids);
+      addCharacterCommentSummaryRows(summaries, getMockCommentRows(), actor.id);
+      if (previewCanonicalUserId !== actor.id || previewCanonicalEpoch !== epoch) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+      return summaries;
+    },
     supabaseReadCommentReadStates: async (userId) => getMockCommentReadStates(userId),
     supabaseUpsertCommentReadState: async (userId, sceneThreadKey, lastReadAt) => {
       const stateRows = getMockCommentReadStates(userId);

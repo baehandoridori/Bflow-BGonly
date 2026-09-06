@@ -52,6 +52,7 @@ import { ArcadeService, arcadeExecutePayload } from './arcadeService';
 import { RetakeNotificationService } from './retakeNotificationService';
 import { SlackWorkflowTransport } from './slackWorkflowTransport';
 import { parseBflowDeepLink, type BflowDeepLink } from '../src/shared/bflowDeepLink';
+import { validateCharacterCommentIds } from '../src/shared/characterCommentSummary';
 import type { RetakeNotificationActor, RetakeNotificationRecord } from '../src/shared/retakeNotifications';
 import type { ArcadeExecuteCommand, ArcadeSlackRecord } from './arcadeService';
 import { getCanonicalMarketQuoteWon } from '../shared/playgroundMarketPrice.mjs';
@@ -1358,6 +1359,7 @@ import {
   deleteUserAuthorized as sbDeleteUserAuthorized,
   readCommentsForPart as sbReadComments,
   readCommentsForCharacter as sbReadCommentsForCharacter,
+  readCharacterCommentSummaries as sbReadCharacterCommentSummaries,
   readCommentReadStates as sbReadCommentReadStates,
   upsertCommentReadState as sbUpsertCommentReadState,
   fetchMissedMentions as sbFetchMissedMentions,
@@ -2337,6 +2339,20 @@ ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: s
 // 캐릭터 현황판 상세 스레드 — 캐릭터별 댓글 읽기.
 ipcMain.handle('supabase:read-comments-for-character', wrapIpc(async (_e: unknown, characterId: string) => {
   return sbReadCommentsForCharacter(characterId);
+}));
+
+ipcMain.handle('supabase:character-comment-summaries', wrapIpc(async (_e: unknown, characterIds: unknown) => {
+  const ids = validateCharacterCommentIds(characterIds);
+  const ensured = await sessionManager.ensure();
+  const userId = sessionManager.getCanonicalUserId();
+  const epoch = sessionManager.getEpoch();
+  if (!ensured.ok || !userId || ensured.payload.user?.id !== userId || ensured.payload.epoch !== epoch) {
+    throw new Error('로그인이 필요합니다.');
+  }
+  const isCurrent = () => sessionManager.getCanonicalUserId() === userId && sessionManager.getEpoch() === epoch;
+  const summaries = await sbReadCharacterCommentSummaries(ids, userId, isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+  return summaries;
 }));
 
 ipcMain.handle('supabase:read-comment-read-states', wrapIpc(async (_e: unknown, userId: string) => {
