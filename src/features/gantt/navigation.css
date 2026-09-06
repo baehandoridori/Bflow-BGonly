@@ -1,13 +1,13 @@
-.gantt-caption.gantt-navigation{display:flex;flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:6px;padding:6px 14px 9px;flex:none;min-width:0}
-.gantt-navigation-primary,.gantt-navigation-secondary{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px 10px;min-width:0}
+.gantt-caption.gantt-navigation{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;gap:4px 10px;padding:5px 12px 6px;flex:none;min-width:0}
 .gantt-month-navigation,.gantt-zoom-navigation{display:flex;align-items:center;gap:2px;flex:none;white-space:nowrap}
 .gantt-month-navigation strong{min-width:88px;text-align:center;font-size:12px;font-weight:600;white-space:nowrap}
 .gantt-navigation .gantt-month-navigation button{min-height:27px;padding:4px 5px}
 .gantt-navigation .gantt-zoom-navigation button{min-height:27px;padding:4px 5px}
 .gantt-zoom-navigation>span{min-width:37px;text-align:center;font-size:10px;color:var(--g-muted)}
-.gantt-navigation-secondary .gantt-pointer-tools{border-radius:6px;padding:1px;flex:none}
-.gantt-navigation-secondary .gantt-name-layout{margin-left:auto}
-.gantt-navigation-secondary>small{flex-basis:100%;margin:0;font-size:9px;white-space:normal}
+.gantt-navigation .gantt-pointer-tools{border-radius:6px;padding:1px;flex:none}
+.gantt-navigation .gantt-pointer-tools button{min-height:26px;padding:3px 6px}
+.gantt-navigation .gantt-zoom-navigation{margin-left:auto}
+.gantt-navigation .gantt-name-layout{font-size:10px;padding:4px;flex:none}
 .gantt-ruler.gantt-date-ruler{height:var(--gantt-ruler-height);min-height:var(--gantt-ruler-height);border:0;flex:none}
 .gantt-date-ruler .gantt-axis-corner{height:var(--gantt-ruler-height);flex-direction:column;align-items:flex-start;justify-content:center;gap:5px;border-bottom:1px solid var(--g-border);z-index:7}
 .gantt-axis-corner strong{font-size:11px;font-weight:500;color:var(--g-text)}
@@ -22,4 +22,4 @@
 .gantt-date-ruler .gantt-date.weekend{color:var(--g-muted);background:rgb(var(--color-bg-border)/.1)}
 .gantt-date-ruler .gantt-date.today{color:rgb(var(--color-accent));background:rgb(var(--color-accent)/.12);font-weight:600;box-shadow:inset 0 -2px rgb(var(--color-accent))}
 .gantt-today-line{position:absolute;bottom:0;width:1px;background:rgb(var(--color-accent)/.48);z-index:1;pointer-events:none}
-@media(max-width:1250px){.gantt-caption.gantt-navigation{padding:5px 10px 7px;gap:4px}.gantt-navigation-primary,.gantt-navigation-secondary{gap:4px 7px}}
+@media(max-width:1250px){.gantt-caption.gantt-navigation{padding:4px 10px 5px;gap:4px 7px}}

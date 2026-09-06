@@ -8,6 +8,7 @@ import { rowDrop, type RowDrop, type RowDropPosition } from './rowDrag';
 import { GanttTooltip, type GanttHover } from './GanttTooltip';
 import type { GanttProject, GanttTask } from './types';
 import './navigation.css';
+import './canvas.css';
 
 const DAY = 86400000, ROW = 40;
 const dateMs = (d: string) => Date.parse(d + 'T00:00:00Z');
@@ -162,7 +163,7 @@ export function GanttCanvas(props: Props) {
       if (event.key === 'Escape' && dragRef.current) { event.preventDefault(); cancelGesture(); clearSpace(); return; }
       if (event.code !== 'Space' || event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="textbox"], dialog')) return;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="textbox"], [role="tooltip"], dialog')) return;
       if (target?.closest('button, summary, [role="button"], [role="menuitem"]') && !target.closest('.gantt-bar')) return;
       if (!pointerOver.current && !chart.current?.contains(document.activeElement)) return;
       event.preventDefault(); spaceRef.current = true; setSpaceHeld(true); setHover(null);
@@ -192,10 +193,15 @@ export function GanttCanvas(props: Props) {
   };
   const moveMonth = (offset: number) => navigate(monthStart(moveDate(base,Math.floor((chart.current?.scrollLeft||0)/widthRef.current)),offset));
   const showHover = (r: ChartRow, x: number, y: number) => {
-    if (dragRef.current || !r.bounds) return;
-    const task=r.task || ({id:r.id,title:r.project.name,memo:r.project.memo,workers:[],...r.bounds} as unknown as GanttTask);
-    const conflict = conflicts.get(r.id);
-    setHover({task:{...task,...r.bounds,memo:[conflict,task.memo].filter(Boolean).join('\n')},x,y,workers:task.workers.map(id=>names[id]||id).join(', ')});
+    if (dragRef.current) return;
+    const task=r.task || ({id:r.id,title:r.project.name,memo:r.project.memo,workers:[],allDay:true,...r.bounds} as unknown as GanttTask);
+    const parent=r.task?.parentId?r.project.tasks.find(t=>t.id===r.task!.parentId):null;
+    setHover({task:{...task,...r.bounds},x,y,workers:task.workers.map(id=>names[id]||id).join(', '),
+      typeLabel:!r.task?'프로젝트':task.kind==='group'?'그룹':task.kind==='milestone'?'마일스톤':'작업',
+      context:r.task?[r.project.name,parent?.title].filter(Boolean).join(' › '):'',
+      duration:r.bounds?durationLabel({...task,...r.bounds,kind:task.kind||'group'}):'',
+      hasDates:!!r.bounds,progress:r.task?taskProgress(r.project,r.task):projectProgress(r.project),
+      completed:r.completed,conflict:conflicts.get(r.id)});
   };
   function startDrag(e: React.PointerEvent, row: ChartRow, edge?: string, create=false) {
     if(e.button!==0||dragRef.current||spaceRef.current||!props.canEdit(row.project)||row.project.completed||row.completed||statusFilter==='completed')return;
@@ -282,28 +288,23 @@ export function GanttCanvas(props: Props) {
   const today=localDate(),todayIndex=dayDiff(base,today);
   return <div className="gantt-canvas-wrap">
     <div className="gantt-caption gantt-navigation">
-      <div className="gantt-navigation-primary">
         <div className="gantt-month-navigation" role="group" aria-label="표시 월 이동">
           <button aria-label="이전 달" title="이전 달 1일로 이동" onClick={()=>moveMonth(-1)}><ChevronLeft size={15}/></button>
           <strong aria-label="현재 표시 월" title="날짜 영역 왼쪽에 표시되는 월">{visibleDate.slice(0,4)}년 {Number(visibleDate.slice(5,7))}월</strong>
           <button aria-label="다음 달" title="다음 달 1일로 이동" onClick={()=>moveMonth(1)}><ChevronRight size={15}/></button>
           <button aria-label="오늘로 이동" title="오늘 날짜를 화면 가운데에 표시" onClick={()=>navigate(localDate(),'center')}>오늘</button>
         </div>
+        <div className="gantt-pointer-tools" role="group" aria-label="차트 조작">
+          <button aria-label="화면 이동" aria-pressed={mode==='pan'} title="빈 곳을 잡고 화면 이동 · Space를 누르는 동안에도 이동" onClick={()=>setMode('pan')}><Hand size={14}/> 이동</button>
+          <button aria-label="작업 만들기" aria-pressed={mode==='create'} title="빈 날짜 영역을 드래그해 작업 만들기 · 막대를 잡으면 날짜 이동" onClick={()=>setMode('create')}><Plus size={14}/> 만들기</button>
+        </div>
         <div className="gantt-zoom-navigation" role="group" aria-label="날짜 확대 및 축소">
           <button aria-label="축소" onClick={()=>zoomTo(width*.8,leftWidth+(Math.max(1,(chart.current?.clientWidth||800)-leftWidth))/2)}><Minus size={14}/></button>
           <span aria-label="확대 비율">{Math.round(width/48*100)}%</span>
           <button aria-label="확대" onClick={()=>zoomTo(width*1.25,leftWidth+(Math.max(1,(chart.current?.clientWidth||800)-leftWidth))/2)}><Plus size={14}/></button>
-          <button aria-label="전체 일정 맞춤" onClick={fit}><Scan size={14}/> 전체 맞춤</button>
+          <button aria-label="전체 일정 맞춤" title="전체 일정 맞춤" onClick={fit}><Scan size={14}/></button>
         </div>
-      </div>
-      <div className="gantt-navigation-secondary">
-        <div className="gantt-pointer-tools" role="group" aria-label="차트 조작">
-          <button aria-label="화면 이동" aria-pressed={mode==='pan'} title="빈 곳을 잡고 화면 이동 · 작업 막대는 날짜 이동" onClick={()=>setMode('pan')}><Hand size={14}/> 화면 이동</button>
-          <button aria-label="작업 만들기" aria-pressed={mode==='create'} title="빈 날짜 영역을 드래그해 작업 만들기" onClick={()=>setMode('create')}><Plus size={14}/> 작업 만들기</button>
-        </div>
-        <button className="gantt-name-layout" onClick={()=>setLayout(v=>{const n=v==='beside'?'list':'beside';localStorage.setItem('bflow-gantt-name-layout',n);return n;})}>작업명 · {layout==='beside'?'막대 옆':'목록'}</button>
-        <small>이름: 소속·순서 · 막대: 날짜 · Space: 화면 이동</small>
-      </div>
+        <button className="gantt-name-layout" title="작업 이름을 목록 또는 막대 옆에 표시 · 이름을 잡아 소속과 순서 변경" onClick={()=>setLayout(v=>{const n=v==='beside'?'list':'beside';localStorage.setItem('bflow-gantt-name-layout',n);return n;})}>작업명 · {layout==='beside'?'막대 옆':'목록'}</button>
     </div>
     <div ref={chart} className={`gantt-canvas ${layout} mode-${mode} ${spaceHeld?'space-pan':''} ${panning?'panning':''} ${rowDragging?'moving-row':''}`} tabIndex={0} aria-label="프로젝트 간트" style={{'--gantt-day':`${width}px`,'--gantt-label':`${leftWidth}px`,'--gantt-ruler-height':`${RULER}px`} as React.CSSProperties}
       onScroll={e=>{setHover(null);syncVisibleDate();if(rows.length)savedScroll.current={left:e.currentTarget.scrollLeft,top:e.currentTarget.scrollTop};const d=dragRef.current;if(d?.kind==='row'&&d.moved){d.drop=findRowDrop(d,d.lastX,d.lastY);setRowDragging({row:d.row,drop:d.drop,x:d.lastX,y:d.lastY});}}}
@@ -313,7 +314,7 @@ export function GanttCanvas(props: Props) {
       onClickCapture={suppressPointerClick} onDoubleClickCapture={suppressPointerClick}>
       {!rows.length?<div className="gantt-empty"><strong>{statusFilter==='completed'?'완료한 일정이 없습니다':statusFilter==='active'?'진행 중인 일정이 없습니다':'표시 중인 프로젝트가 없습니다'}</strong><p>{statusFilter==='completed'?'완료한 작업과 프로젝트를 삭제하지 않고 모아 봅니다.':'전체 보기에서 완료한 작업도 함께 보거나 새 프로젝트를 만드세요.'}</p></div>:<div className="gantt-grid" style={{width:leftWidth+days*width}}>
         <div className="gantt-ruler gantt-date-ruler">
-          {layout==='list'&&<div className="gantt-list-label gantt-axis-corner"><strong>프로젝트 / 작업</strong><small title="ISO 8601: 월요일 시작, 첫 목요일을 포함하는 주가 1주">월요일 시작 · ISO 주차</small></div>}
+          {layout==='list'&&<div className="gantt-list-label gantt-axis-corner"><strong>이름</strong></div>}
           <div className="gantt-date-axis">
             <div className="gantt-weeks" aria-label="ISO 주차">{weeks.map(band=><div key={band.start} className="gantt-week" data-week={`${band.year}-W${String(band.week).padStart(2,'0')}`} style={{width:band.days*width}} title={`ISO ${band.year}년 ${band.week}주 · ${band.start} ~ ${band.end}`}><span>{band.year}년 {band.week}주</span></div>)}</div>
             <div className="gantt-dates">{Array.from({length:days},(_,i)=>{const date=moveDate(base,i),week=new Date(dateMs(date)).getUTCDay();return <div key={date} data-date={date} aria-current={date===today?'date':undefined} className={`gantt-date ${week===0||week===6?'weekend':''} ${date===today?'today':''}`} style={{width}} title={`${date} (${'일월화수목금토'[week]})${date===today?' · 오늘':''}`}>{width>26||i%Math.ceil(38/width)===0?date.slice(5).replace('-','/'):''}{width>38&&<small>{'일월화수목금토'[week]}</small>}{width>=240&&<div className="gantt-hours">00　06　12　18</div>}</div>;})}</div>
@@ -326,34 +327,51 @@ export function GanttCanvas(props: Props) {
           const relocatable=!!t&&!r.project.completed&&props.canEdit(r.project)&&!!props.onRelocate;
           const creatable=!r.completed&&!r.project.completed&&statusFilter!=='completed'&&props.canEdit(r.project);
           const progress=t?taskProgress(r.project,t):projectProgress(r.project);
-          const parent=t?.parentId?r.project.tasks.find(task=>task.id===t.parentId):null;
-          const parentContext=t?parent?.title??'프로젝트 바로 아래':'프로젝트 전체';
           const returning=!!t&&rowIndex>0&&rows[rowIndex-1].project.id===r.project.id&&rows[rowIndex-1].depth>r.depth;
           const geometry=b?barGeometry(b,t?.kind||'project',base,width):{left:0,width:0};
           let x=geometry.left,barWidth=geometry.width;
           if(drag?.id===r.id){if(drag.edge==='start'){x+=drag.delta*width;barWidth-=drag.delta*width}else if(drag.edge==='end')barWidth+=drag.delta*width;else x+=drag.delta*width;}
           const color=t?resolveTaskColor(r.project,t):r.project.color;
           const title=t?.title||r.project.name;
-          const typeLabel=!t?'프로젝트':t.kind==='group'?'그룹':t.kind==='milestone'?'마일스톤':'작업';
-          const label=<>{relocatable&&<GripVertical size={12} className="gantt-row-grip" aria-hidden="true"/>}<small className="gantt-row-kind">{typeLabel}</small><span className="gantt-name-copy"><span className="gantt-row-title">{title}</span><small className="gantt-parent-context" title={parentContext}>{parentContext}</small></span><span className="gantt-row-progress" role="progressbar" aria-label={`${title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><strong>{progress}%</strong><span className="gantt-row-progress-track"><span style={{width:`${progress}%`}}/></span></span>{r.completed&&<small className="gantt-completed-badge"><Check size={11}/> 완료</small>}{group&&<button aria-label={`${title} ${collapsed.includes(r.id)?'펼치기':'접기'}`} onClick={e=>{e.stopPropagation();onCollapse(r.id);}}>{collapsed.includes(r.id)?<ChevronRight size={13}/>:<ChevronDown size={13}/>}</button>}<button className="gantt-row-menu" aria-label={`${title} 메뉴`} title="상세 · 완료 · 삭제" onClick={e=>{e.stopPropagation();const bounds=e.currentTarget.getBoundingClientRect();setHover(null);props.onMenu(r.project,t,bounds.left,bounds.bottom);}}><MoreHorizontal size={15}/></button></>;
+          const hoverEvents = {
+            onPointerMove:(e:React.PointerEvent<HTMLElement>)=>showHover(r,e.clientX,e.clientY),
+            onPointerLeave:()=>setHover(null),
+            onFocus:(e:React.FocusEvent<HTMLElement>)=>{const rect=e.currentTarget.getBoundingClientRect();showHover(r,(rect.left+rect.right)/2,rect.top);},
+            onBlur:()=>setHover(null),
+            'aria-describedby':hover?.task.id===r.id?'gantt-hover':undefined,
+          };
+          const nameKeys = (e:React.KeyboardEvent<HTMLElement>) => {
+            if(e.target!==e.currentTarget)return;
+            if(e.key==='Enter'){e.preventDefault();props.onSelect(r.project.id,t?.id||null);}
+            if(e.key==='F2'&&hover?.task.id===r.id){e.preventDefault();document.getElementById('gantt-hover')?.focus();}
+            if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10'){e.preventDefault();const rect=e.currentTarget.getBoundingClientRect();setHover(null);props.onMenu(r.project,t,rect.left,rect.bottom);}
+          };
+          const label=<>
+            {group?<button className="gantt-row-collapse" aria-label={`${title} ${collapsed.includes(r.id)?'펼치기':'접기'}`} aria-expanded={!collapsed.includes(r.id)} title={collapsed.includes(r.id)?'하위 일정 펼치기':'하위 일정 접기'} onClick={e=>{e.stopPropagation();setHover(null);onCollapse(r.id);}}>{collapsed.includes(r.id)?<ChevronRight size={16}/>:<ChevronDown size={16}/>}</button>:<span className="gantt-row-collapse-spacer" aria-hidden="true"/>}
+            {relocatable&&<GripVertical size={12} className="gantt-row-grip" aria-hidden="true"/>}
+            <span className="gantt-name-copy"><span className="gantt-row-title">{title}</span></span>
+            <span className="gantt-row-progress" role="progressbar" aria-label={`${title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><strong>{progress}%</strong><span className="gantt-row-progress-track"><span style={{width:`${progress}%`}}/></span></span>
+            {r.completed&&<small className="gantt-completed-badge" aria-label="완료" title="완료"><Check size={12}/></small>}
+            <button className="gantt-row-menu" aria-label={`${title} 메뉴`} title="상세 · 완료 · 삭제" onClick={e=>{e.stopPropagation();const bounds=e.currentTarget.getBoundingClientRect();setHover(null);props.onMenu(r.project,t,bounds.left,bounds.bottom);}}><MoreHorizontal size={15}/></button>
+          </>;
           return <div key={r.id} data-row-id={r.id} data-project-id={r.project.id} data-parent-id={t?.parentId??''} className={`gantt-row ${!t?'project':t.kind==='group'?'group-row':''} ${returning?'returns-to-parent':''} ${r.completed?'completed':''} ${selected.includes(r.id)?'selected':''} ${rowDragging?.row.id===r.id?'row-drag-source':''} ${dropIndicatorId===r.id?`drop-${drop?.position}`:''}`} style={{'--gantt-color':color,'--gantt-depth':r.depth} as React.CSSProperties} onClick={e=>props.onSelect(r.project.id,t?.id||null,e.ctrlKey||e.metaKey)} onContextMenu={e=>{e.preventDefault();setHover(null);props.onMenu(r.project,t,e.clientX,e.clientY);}}>
-            {layout==='list'&&<div className={`gantt-list-label gantt-name ${relocatable?'relocatable':''}`} style={{paddingLeft:10+r.depth*16}} title={relocatable?'이름을 잡고 순서나 소속을 바꾸세요':undefined} onPointerDown={e=>startRowDrag(e,r)} onPointerMove={e=>showHover(r,e.clientX,e.clientY)} onPointerLeave={()=>setHover(null)}><span className="gantt-tree-guides" aria-hidden="true">{Array.from({length:r.depth},(_,level)=><i key={level} style={{left:10+level*16}}/>)}</span>{label}</div>}
+            {layout==='list'&&<div className={`gantt-list-label gantt-name ${relocatable?'relocatable':''}`} style={{paddingLeft:10+r.depth*16}} tabIndex={0} data-gantt-hover-anchor={r.id} aria-keyshortcuts="F2" onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)} {...hoverEvents}><span className="gantt-tree-guides" aria-hidden="true">{Array.from({length:r.depth},(_,level)=><i key={level} style={{left:10+level*16}}/>)}</span>{label}</div>}
             <div className={`gantt-track ${creatable?'creatable':''}`} onPointerDown={e=>{if(e.target===e.currentTarget)startDrag(e,r,undefined,true);}} onDoubleClick={e=>{if(e.target!==e.currentTarget||!creatable||mode!=='create'||spaceRef.current)return;const day=Math.floor((e.clientX-e.currentTarget.getBoundingClientRect().left)/width);const date=moveDate(base,day);props.onAdd(r.project,t?.kind==='group'?t.id:t?.parentId||null,date,date);}}>
               {b&&<div className={`gantt-bar-position ${conflicts.has(r.id)?'conflict':''}`} style={{left:x,width:Math.max(6,barWidth)}}>
-                {layout==='beside'&&<div className={`gantt-inline-name gantt-name ${relocatable?'relocatable':''} ${x<Math.min(420,title.length*8+210+(r.completed?45:0))?'after':''}`} title={relocatable?'이름을 잡고 순서나 소속을 바꾸세요':undefined} onPointerDown={e=>startRowDrag(e,r)} onPointerMove={e=>showHover(r,e.clientX,e.clientY)} onPointerLeave={()=>setHover(null)}>{label}</div>}
-                <button className={`gantt-bar ${group?'group':t?.kind||''} ${movable?'movable':''}`} aria-label={`${title}, ${durationLabel({...t,...b,kind:t?.kind||'group'} as GanttTask)}${r.completed?', 완료':''}`} aria-describedby={hover?.task.id===r.id?'gantt-hover':undefined} onPointerDown={e=>startDrag(e,r,(e.target as HTMLElement).dataset.edge)} onPointerMove={e=>showHover(r,e.clientX,e.clientY)} onPointerLeave={()=>setHover(null)} onFocus={e=>{const rect=e.currentTarget.getBoundingClientRect();showHover(r,(rect.left+rect.right)/2,rect.top);}} onBlur={()=>setHover(null)} onKeyDown={e=>{if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10'){e.preventDefault();const q=e.currentTarget.getBoundingClientRect();props.onMenu(r.project,t,q.left,q.bottom);}if(e.key==='Enter')props.onSelect(r.project.id,t?.id||null);}}>
+                {layout==='beside'&&<div className={`gantt-inline-name gantt-name ${relocatable?'relocatable':''} ${x<Math.min(420,title.length*8+130+(r.completed?20:0))?'after':''}`} tabIndex={0} data-gantt-hover-anchor={r.id} aria-keyshortcuts="F2" onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)} {...hoverEvents}>{label}</div>}
+                <button className={`gantt-bar ${group?'group':t?.kind||''} ${movable?'movable':''}`} aria-label={`${title}, ${durationLabel({...t,...b,kind:t?.kind||'group'} as GanttTask)}${r.completed?', 완료':''}`} aria-keyshortcuts="F2" onPointerDown={e=>startDrag(e,r,(e.target as HTMLElement).dataset.edge)} {...hoverEvents} onKeyDown={nameKeys}>
                   {t?.kind!=='milestone'&&<><span className="gantt-progress" style={{width:`${progress}%`}}/>{movable&&<><span data-edge="start" className="gantt-resize start"/><span data-edge="end" className="gantt-resize end"/></>}</>}
                 </button>
-                <span className="gantt-duration">{durationLabel({...t,...b,kind:t?.kind||'group'} as GanttTask)}{conflicts.has(r.id)&&<span aria-label={conflicts.get(r.id)}> · !</span>}</span>
+                {conflicts.has(r.id)&&<span className="gantt-conflict-marker" aria-label={conflicts.get(r.id)} title={conflicts.get(r.id)}>!</span>}
               </div>}
-              {!b&&layout==='beside'&&<div className={`gantt-empty-project gantt-name ${relocatable?'relocatable':''}`} onPointerDown={e=>startRowDrag(e,r)}>{label}{!r.completed&&<small>{t?.kind==='group'?'하위 작업을 추가하세요':'작업 만들기를 선택해 첫 일정을 그리세요'}</small>}</div>}
+              {!b&&layout==='beside'&&<div className={`gantt-empty-project gantt-name ${relocatable?'relocatable':''}`} tabIndex={0} data-gantt-hover-anchor={r.id} aria-keyshortcuts="F2" onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)} {...hoverEvents}>{label}</div>}
               {creating?.id===r.id&&<div className="gantt-creation" style={{left:Math.min(creating.first,creating.last)*width,width:(Math.abs(creating.last-creating.first)+1)*width}}/>}
             </div>
           </div>;
         })}
         <svg className="gantt-dependencies" width="100%" height={RULER+rows.length*ROW} aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1">{rows.flatMap((r,i)=>{if(!r.task?.predecessorId||!index.has(r.task.predecessorId)||!r.bounds)return[];const p=rows[index.get(r.task.predecessorId)!];if(!p.bounds)return[];const source=barGeometry(p.bounds,p.task?.kind||'project',base,width),target=barGeometry(r.bounds,r.task.kind,base,width);const x1=leftWidth+source.left+source.width,x2=leftWidth+target.left,y1=RULER+index.get(p.id)!*ROW+20,y2=RULER+i*ROW+20;return <path key={r.id} d={`M${x1},${y1} H${x1+9} V${y2} H${x2}`}/>;})}</g></svg>
       </div>}
-    </div><GanttTooltip hover={hover}/>
+    </div><GanttTooltip hover={hover} resetKey={`${gestureRevision}|${visibleRowOrder}|${statusFilter}|${worker}|${mode}|${layout}`}/>
     {rowDragging&&createPortal(<div className={`gantt-row-drag-preview ${rowDragging.drop?.allowed?'allowed':'unavailable'}`} role="status" style={{left:Math.max(8,Math.min(rowDragging.x+16,(window.innerWidth||1200)-300)),top:Math.max(8,Math.min(rowDragging.y+16,(window.innerHeight||800)-110))}}><strong><GripVertical size={14}/>{rowDragging.row.task?.title}</strong>{rowDragging.row.task?.kind==='group'&&<small>하위 작업과 함께 이동</small>}<p>{rowDragging.drop?.label??'옮길 작업이나 프로젝트 행 위로 드래그하세요.'}</p></div>,document.body)}
   </div>;
 }

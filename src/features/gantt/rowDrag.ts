@@ -16,7 +16,7 @@ export function rowDrop(source: GanttProject, task: GanttTask, target: GanttProj
   if (!anchor) position = 'inside';
   const parentId = position === 'inside' ? anchor?.id ?? null : anchor?.parentId ?? null;
   const parent = target.tasks.find(t => t.id === parentId);
-  const destination = `${target.name} › ${parent?.title ?? '프로젝트 바로 아래'}`;
+  const destination = parent ? `${target.name} › ${parent.title}` : target.name;
   const suffix = position === 'inside' ? '마지막에 넣기' : `‘${anchor?.title}’ ${position === 'before' ? '앞' : '뒤'}로 이동`;
   const result: RowDrop = {project: target, taskId: anchor?.id ?? null, position, parentId, allowed: true, label: `${destination} · ${suffix}`};
   const reject = (label: string): RowDrop => ({...result, allowed: false, label});
