@@ -34,7 +34,7 @@ function fixture(): GanttSnapshot {
 }
 type Props = {children?: ReactNode; value?: string; label?:string; options?:unknown[]; disabled?: boolean; 'aria-label'?: string; onClick?: () => void; onChange?: (event: {target: {value: string}}) => void};
 type Element = ReactElement<Props>;
-type CanvasProps = {selected: string[]; statusFilter: string; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void; onAdd(project: GanttProject, parentId: string|null, start: string, end: string): void; onMenu(project:GanttProject,task:GanttTask|null,x:number,y:number):void};
+type CanvasProps = {selected: string[]; statusFilter: string; projects:GanttProject[]; collapsed:string[]; onCollapse(id:string):void; onSelect(projectId: string, taskId: string | null, multiple?: boolean): void; onAdd(project: GanttProject, parentId: string|null, start: string, end: string): void; onMenu(project:GanttProject,task:GanttTask|null,x:number,y:number):void};
 type InspectorProps = {displayProgress?:number;onAddChild(): void; onDelete(): void; onComplete():void; onSaveTask(patch: Partial<GanttTask>, expectedRevision?:number): Promise<GanttProject|void>;onDraftProgress(projectId:string,taskId:string,progress:number|null):void;onRegisterCloseGuard(guard:(()=>Promise<boolean>)|null):void};
 const bundle = build({
   entryPoints: ['src/features/gantt/GanttView.tsx'], bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false,
@@ -64,8 +64,10 @@ const settle = () => new Promise<void>(resolve => setImmediate(resolve));
 
 // As in the calendar UI tests, run real view handlers and state transitions.
 // Storage is a boundary adapter; domain validation and project permissions stay real.
-async function harness() {
+async function harness(storage = new Map<string,string>()) {
+  const listeners=new Map<string,Set<(event:any)=>void>>();
   const states: unknown[] = [], refs: unknown[] = [], effectDeps: Array<readonly unknown[] | undefined> = [];
+  const effectCleanups:Array<undefined|(()=>void)>=[];
   let stateCursor = 0, refCursor = 0, effectCursor = 0, changed = false;
   let effects: Array<() => unknown> = [];
   const commands: GanttCommand[] = [];
@@ -96,7 +98,7 @@ async function harness() {
         useMemo(factory: () => unknown) {return factory();}, useCallback(fn: unknown) {return fn;},
         useEffect(effect: () => unknown, deps?: readonly unknown[]) {
           const slot = effectCursor++, previous = effectDeps[slot];
-          if (!deps || !previous || deps.length !== previous.length || deps.some((value, index) => !Object.is(value, previous[index]))) effects.push(effect);
+          if (!deps || !previous || deps.length !== previous.length || deps.some((value, index) => !Object.is(value, previous[index]))) effects.push(()=>{effectCleanups[slot]?.();const cleanup=effect();effectCleanups[slot]=typeof cleanup==='function'?cleanup as ()=>void:undefined;});
           effectDeps[slot] = deps;
         },
       };
@@ -113,10 +115,12 @@ async function harness() {
       if (name === './gantt.css') return {};
       if (name === 'lucide-react') return new Proxy({}, {get: () => Empty});
       return nodeRequire(name);
-    }, module, module.exports, {addEventListener() {}, removeEventListener() {}}, {getItem: () => null, setItem() {}}, () => 0, () => {},
+    }, module, module.exports, {addEventListener(type:string,callback:(event:any)=>void) {if(!listeners.has(type))listeners.set(type,new Set());listeners.get(type)!.add(callback);}, removeEventListener(type:string,callback:(event:any)=>void) {listeners.get(type)?.delete(callback);}}, {getItem: (key:string) => storage.get(key)??null, setItem(key:string,value:string) {storage.set(key,value);}}, () => 0, () => {},
   );
   return {
     commands,
+    storage,
+    keydown(event:any){listeners.get('keydown')?.forEach(listener=>listener(event));},
     delayNextWrite(){let release!:()=>void;writeDelay=new Promise<void>(resolve=>{release=resolve;});return release;},
     setPending(value: boolean) {state.pending = value;},
     setActor(value: string) {state.actorId = value;},
@@ -142,6 +146,73 @@ function addedTask(h: Awaited<ReturnType<typeof harness>>, beforeIds: Set<string
   const added = h.latestProject(projectId).tasks.filter(task => !beforeIds.has(task.id));
   assert.equal(added.length, 1, 'exactly one task is created in the requested project');return added[0];
 }
+
+test('navigation branch and folder folds never change chart folds or visibility',async()=>{
+  const h=await harness();let tree=h.render();
+  for(const branch of [GROUP,B]){
+    h.navigation(tree).onToggleBranch(branch);tree=h.render();
+    assert.ok(h.navigation(tree).collapsed.includes(branch));assert.deepEqual(h.canvas(tree).collapsed,[]);
+  }
+  h.navigation(tree).onToggleFolder(id(20));tree=h.render();
+  assert.deepEqual(h.navigation(tree).closedSpaces,[id(20)]);assert.deepEqual(h.canvas(tree).collapsed,[]);
+  assert.equal(h.canvas(tree).projects.length,3);
+  h.canvas(tree).onCollapse(OUTER);tree=h.render();
+  assert.deepEqual(h.canvas(tree).collapsed,[OUTER]);assert.deepEqual(h.navigation(tree).collapsed,[GROUP,B]);
+  h.navigation(tree).onToggleVisibility(B);tree=h.render();
+  assert.ok(!h.canvas(tree).projects.some(project=>project.id===B),'only the eye control changes chart visibility');
+  assert.equal(h.commands.length,0,'folds are local view preferences, never project mutations');
+});
+
+test('legacy folds migrate once and both surfaces restore their own preferences',async()=>{
+  const storage=new Map([['bflow-gantt-view:me',JSON.stringify({collapsed:[B,GROUP],closedSpaces:[id(20)],hidden:[READ_ONLY]})]]);
+  const first=await harness(storage);let tree=first.render();
+  assert.deepEqual(first.canvas(tree).collapsed,[B,GROUP]);assert.deepEqual(first.navigation(tree).collapsed,[B,GROUP]);
+  first.navigation(tree).onToggleBranch(B);tree=first.render();first.canvas(tree).onCollapse(GROUP);tree=first.render();
+  const second=await harness(storage);tree=second.render();
+  assert.deepEqual(second.canvas(tree).collapsed,[B]);assert.deepEqual(second.navigation(tree).collapsed,[GROUP]);
+  assert.deepEqual(second.navigation(tree).closedSpaces,[id(20)]);assert.ok(!second.canvas(tree).projects.some(project=>project.id===READ_ONLY));
+});
+
+test('broken local preferences safely default to open branches',async()=>{
+  for(const raw of ['null','{','[]',JSON.stringify({collapsed:'wrong',treeCollapsed:[null,42,GROUP],hidden:{}})]){
+    const h=await harness(new Map([['bflow-gantt-view:me',raw]])),tree=h.render();
+    assert.deepEqual(h.canvas(tree).collapsed,[]);assert.equal(h.canvas(tree).projects.length,3);
+    assert.ok(h.navigation(tree).collapsed.every((value:unknown)=>typeof value==='string'));
+  }
+});
+
+test('creating and moving work reveals the destination without unfolding navigation',async()=>{
+  const h=await harness();let tree=h.render();
+  h.navigation(tree).onToggleBranch(B);tree=h.render();h.navigation(tree).onToggleFolder(id(20));tree=h.render();
+  h.canvas(tree).onSelect(B,GROUP);tree=h.render();
+  for(const branch of [B,OUTER,GROUP]){h.canvas(tree).onCollapse(branch);tree=h.render();}
+  button(tree,'+ 작업').props.onClick!();await settle();tree=h.render();
+  assert.deepEqual(h.canvas(tree).collapsed,[]);assert.deepEqual(h.navigation(tree).collapsed,[B]);assert.deepEqual(h.navigation(tree).closedSpaces,[id(20)]);
+  h.navigation(tree).onToggleBranch(A);tree=h.render();h.canvas(tree).onCollapse(A);tree=h.render();
+  const source=h.latestProject(B),target=h.latestProject(A);
+  (h.canvas(tree) as any).onRelocate(source,source.tasks.find(t=>t.id===TASK),target,null,'inside');await settle();tree=h.render();
+  assert.ok(!h.canvas(tree).collapsed.includes(A));assert.deepEqual(h.navigation(tree).collapsed,[B,A]);assert.deepEqual(h.navigation(tree).closedSpaces,[id(20)]);
+  assert.doesNotMatch(text(tree),/새 작업 위치|저장했습니다|작업 위치를 변경했습니다|작업 순서를 변경했습니다/);
+});
+
+test('quiet successful edits still display a failed move as an actionable error',async()=>{
+  const h=await harness();let tree=h.render();const source=h.latestProject(B),target=structuredClone(h.latestProject(A));h.latestProject(A).revision++;
+  (h.canvas(tree) as any).onRelocate(source,source.tasks.find(t=>t.id===TASK),target,null,'inside');await settle();tree=h.render();
+  assert.match(text(tree),/다른 변경이 반영되었습니다/);
+  const dismiss=elements(tree,'button').find(node=>node.props['aria-label']==='오류 안내 닫기');assert.ok(dismiss);
+  dismiss.props.onClick!();tree=h.render();assert.doesNotMatch(text(tree),/다른 변경이 반영되었습니다/);
+  assert.equal(h.commands.length,0);
+});
+
+test('tooltip keys and consumed Escape never dismiss the selected inspector',async()=>{
+  const h=await harness();let tree=h.render();h.canvas(tree).onSelect(B,TASK);tree=h.render();
+  h.keydown({key:'Escape',target:{closest:(selector:string)=>selector.includes('[role=tooltip]')?{}:null}});tree=h.render();
+  assert.deepEqual(h.canvas(tree).selected,[TASK]);assert.ok(h.inspector(tree));
+  h.keydown({key:'Escape',defaultPrevented:true,target:{closest:()=>null}});tree=h.render();
+  assert.deepEqual(h.canvas(tree).selected,[TASK]);assert.ok(h.inspector(tree));
+  h.keydown({key:'Escape',target:{closest:()=>null}});tree=h.render();
+  assert.deepEqual(h.canvas(tree).selected,[],'an unconsumed chart Escape retains its normal behavior');
+});
 
 test('selecting a group changes the creation project and adds a child in that group', async () => {
   const h = await harness();let tree = h.render();

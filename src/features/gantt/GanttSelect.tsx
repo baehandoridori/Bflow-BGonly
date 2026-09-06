@@ -10,15 +10,16 @@ export interface GanttSelectProps {
   label: string;
   disabled?: boolean;
   name?: string;
+  portalOwner?: string;
 }
 
 /** The same dropdown as the rest of B flow, with native form submission support. */
-export function GanttSelect({value, defaultValue, onChange, options, label, disabled, name}: GanttSelectProps) {
+export function GanttSelect({value, defaultValue, onChange, options, label, disabled, name, portalOwner}: GanttSelectProps) {
   const [selected, setSelected] = useState(defaultValue ?? options[0]?.value ?? '');
   const current = value ?? selected;
   return <div className="gantt-select">
     {name && <input type="hidden" name={name} value={current} disabled={disabled}/>}
-    <GlassDropdown options={options} value={current} label={label} disabled={disabled} portal minWidth={150}
+    <GlassDropdown options={options} value={current} label={label} disabled={disabled} portal portalOwner={portalOwner} minWidth={150}
       onChange={next => {setSelected(next);onChange?.(next);}}/>
   </div>;
 }

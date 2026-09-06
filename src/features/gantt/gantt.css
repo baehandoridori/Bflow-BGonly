@@ -29,3 +29,20 @@
 .gantt-selection-bar{flex-wrap:wrap;gap:8px}
 .gantt-heading,.gantt-toolbar,.gantt-caption,.gantt-footer{flex-shrink:0}
 @media(max-height:650px){.gantt-heading{padding-top:12px;padding-bottom:8px}.gantt-footer{padding-top:5px;padding-bottom:5px}.gantt-nav{padding-top:12px}}
+
+/* Keep the workspace controls compact; details belong to the inspector or hover card. */
+.gantt-main>.gantt-heading{padding:8px 14px 2px;min-height:38px;gap:10px}
+.gantt-main>.gantt-heading h1{font-size:calc(17px * var(--text-scale,1) * var(--text-heading-scale,1));line-height:1.4;letter-spacing:-.3px}
+.gantt-main>.gantt-heading>div{gap:4px;min-width:0}
+.gantt-main>.gantt-heading button{padding:5px;min-width:28px;min-height:28px}
+.gantt-save-indicator{font-size:calc(11px * var(--text-scale,1) * var(--text-body-scale,1));color:var(--g-muted);white-space:nowrap;margin-right:6px}
+.gantt-main>.gantt-toolbar{padding:4px 14px 6px;gap:5px 8px}
+.gantt-main>.gantt-toolbar>div{gap:4px;min-width:0}
+.gantt-main>.gantt-toolbar button{padding:5px 8px;min-height:30px;font-size:calc(12px * var(--text-scale,1) * var(--text-body-scale,1));line-height:1.4;white-space:nowrap}
+.gantt-main>.gantt-toolbar label{font-size:calc(11px * var(--text-scale,1) * var(--text-body-scale,1));gap:5px;margin-left:auto}
+.gantt-main>.gantt-toolbar .gantt-select{min-width:92px;max-width:150px}
+.gantt-main>.gantt-toolbar .gantt-select>div>button[role=combobox]{padding:5px 8px;min-height:30px;font-size:calc(12px * var(--text-scale,1) * var(--text-body-scale,1))!important;line-height:1.4}
+.gantt-main>.gantt-error{display:flex;align-items:center;gap:8px;flex:none;padding:7px 14px;max-height:100px;overflow:auto}
+.gantt-main>.gantt-error>span{flex:1;min-width:0}
+.gantt-main>.gantt-error button{flex:none;margin:0}
+.gantt-main>.gantt-selection-bar{padding:6px 14px;gap:8px}
