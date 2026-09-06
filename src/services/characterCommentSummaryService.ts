@@ -22,6 +22,8 @@ export class CharacterCommentSummaryCache {
   private readDirty = true;
   private readVersion = 0;
   private reading = false;
+  private readRetryAttempt = 0;
+  private readRetryTimer: ReturnType<typeof setTimeout> | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private events: EventTarget | null = null;
 
@@ -63,6 +65,7 @@ export class CharacterCommentSummaryCache {
 
   private reset(): void {
     ++this.generation;
+    this.clearReadRetry();
     if (this.timer) clearTimeout(this.timer);
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear(); this.retries.clear();
@@ -92,6 +95,25 @@ export class CharacterCommentSummaryCache {
   private schedule(delay: number): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.timer = undefined; this.flush(); }, delay);
+  }
+
+  private clearReadRetry(): void {
+    if (this.readRetryTimer) clearTimeout(this.readRetryTimer);
+    this.readRetryTimer = undefined;
+    this.readRetryAttempt = 0;
+  }
+
+  private retryReadState(generation: number, version: number): void {
+    if (generation !== this.generation || version !== this.readVersion || !this.listeners.size) return;
+    const delay = this.retryDelaysMs[this.readRetryAttempt++];
+    if (delay === undefined) return;
+    const timer = setTimeout(() => {
+      if (this.readRetryTimer !== timer || generation !== this.generation || version !== this.readVersion) return;
+      this.readRetryTimer = undefined;
+      this.readDirty = true;
+      this.schedule(0);
+    }, delay);
+    this.readRetryTimer = timer;
   }
 
   private retryFailedBatch(batch: string[], versions: number[], generation: number): void {
@@ -129,8 +151,13 @@ export class CharacterCommentSummaryCache {
       this.readDirty = false; this.reading = true;
       void this.readStates(this.userId).then((state) => {
         if (generation !== this.generation || version !== this.readVersion) return;
+        this.clearReadRetry();
         this.readState = state; this.readReady = true; this.emit();
-      }).catch((error) => console.warn('[캐릭터 댓글 배지] 읽음 조회 실패', error)).finally(() => {
+      }).catch((error) => {
+        if (generation !== this.generation || version !== this.readVersion) return;
+        console.warn('[캐릭터 댓글 배지] 읽음 조회 실패', error);
+        this.retryReadState(generation, version);
+      }).finally(() => {
         if (generation !== this.generation) return;
         this.reading = false;
         if (this.readDirty) this.schedule(0);
@@ -177,6 +204,7 @@ export class CharacterCommentSummaryCache {
   private onReadStateChanged = (event: Event): void => {
     const userId = (event as CustomEvent<{ userId?: string }>).detail?.userId;
     if (userId && userId !== this.userId) return;
+    this.clearReadRetry();
     ++this.readVersion; this.readDirty = true;
     this.schedule(0);
   };
@@ -188,7 +216,7 @@ const sharedCache = new CharacterCommentSummaryCache(
     if (!read) throw new Error('캐릭터 댓글 요약을 불러올 수 없습니다.');
     return read(ids);
   },
-  getCommentReadStateForUser,
+  (userId) => getCommentReadStateForUser(userId, { throwOnReadError: true }),
 );
 
 export function subscribeCharacterCommentSummary(characterId: string, userId: string, connected: boolean, listener: Listener): () => void {

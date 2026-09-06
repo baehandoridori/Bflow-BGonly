@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
-import { isCommentKeyUnread } from '../src/services/commentReadStateService.ts';
+import {
+  __resetCommentReadStateServiceForTests, __setCommentReadStatePersistenceForTests,
+  getCommentReadStateForUser, isCommentKeyUnread, primeCommentReadStateForUser,
+} from '../src/services/commentReadStateService.ts';
 
 type Summary = { count: number; latestOtherCreatedAt: string | null };
 type Badge = { count: number; seen: boolean } | null;
@@ -260,6 +263,178 @@ test('account, source, and final unmount cancel scheduled summary retries', asyn
         await refresh(); await settle();
         assert.equal(calls, change === 'unmount' ? 1 : 2, change);
       } finally { stopNext?.(); stop(); }
+    }
+  } finally { console.warn = originalWarn; }
+});
+
+test('the shared badge retries a real read-state failure without accepting an earlier fallback or refetching summaries', async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const originalWarn = console.warn; console.warn = () => {};
+  __resetCommentReadStateServiceForTests();
+  let readCalls = 0; let summaryCalls = 0;
+  const values: Badge[] = []; const otherValues: Badge[] = [];
+  const cleanup: Array<() => void> = [];
+  __setCommentReadStatePersistenceForTests({
+    read: async () => {
+      if (++readCalls <= 2) throw new Error('temporary IPC read failure');
+      return [
+        { sceneThreadKey: 'char:a', lastReadAt: unreadAt },
+        { sceneThreadKey: 'char:b', lastReadAt: '2026-09-07T00:00:00Z' },
+      ];
+    },
+    upsert: async () => {},
+  });
+  const events = Object.assign(new EventTarget(), { electronAPI: {
+    getCharacterCommentSummaries: async (ids: string[]) => {
+      ++summaryCalls;
+      return Object.fromEntries(ids.map(id => [id, { count: 2, latestOtherCreatedAt: unreadAt }]));
+    },
+  } });
+  Object.defineProperty(globalThis, 'window', { value: events, configurable: true, writable: true });
+  try {
+    assert.deepEqual(await getCommentReadStateForUser('me'), {}, 'ordinary callers retain their existing error fallback');
+    primeCommentReadStateForUser('me', { 'char:b': unreadAt });
+    const { subscribeCharacterCommentSummary } = await load('src/services/characterCommentSummaryService.ts', {
+      './commentReadStateService': { ...dependencies['./commentReadStateService'], getCommentReadStateForUser },
+    });
+    cleanup.push(subscribeCharacterCommentSummary('a', 'me', true, (value: Badge) => values.push(value)));
+    cleanup.push(subscribeCharacterCommentSummary('b', 'me', true, (value: Badge) => otherValues.push(value)));
+    await settle();
+    assert.equal(readCalls, 2); assert.equal(summaryCalls, 1);
+    assert.equal(values.at(-1), null, 'a failed strict read must not treat an earlier fallback as a successful empty state');
+    await new Promise(resolve => setTimeout(resolve, 1_100));
+    assert.equal(readCalls, 3); assert.equal(summaryCalls, 1);
+    assert.deepEqual(values.at(-1), { count: 2, seen: true });
+    assert.deepEqual(otherValues.at(-1), { count: 2, seen: true }, 'remote retry preserves newer optimistic read timestamps');
+  } finally {
+    cleanup.forEach(stop => stop()); __resetCommentReadStateServiceForTests(); console.warn = originalWarn;
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+test('strict badge reads preserve the missing-schema cache fallback without scheduling retries', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const originalWarn = console.warn; console.warn = () => {};
+  __resetCommentReadStateServiceForTests();
+  let readCalls = 0; const values: Badge[] = [];
+  primeCommentReadStateForUser('me', { 'char:a': unreadAt });
+  __setCommentReadStatePersistenceForTests({
+    read: async () => { ++readCalls; throw new Error("Could not find the table 'public.comment_read_states' in the schema cache"); },
+    upsert: async () => {},
+  });
+  const cache = new CharacterCommentSummaryCache(async () => ({ a: { count: 1, latestOtherCreatedAt: unreadAt } }),
+    (userId: string) => getCommentReadStateForUser(userId, { throwOnReadError: true }), Date.now, [30, 50]);
+  const stop = cache.subscribe('a', 'me', true, (value: Badge) => values.push(value), new EventTarget());
+  try {
+    await refresh(); assert.equal(readCalls, 1);
+    assert.deepEqual(values.at(-1), { count: 1, seen: true });
+  } finally { stop(); __resetCommentReadStateServiceForTests(); console.warn = originalWarn; }
+});
+
+test('permanent read-state failures stop after two retries and unrelated subscriptions do not restart them', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const originalWarn = console.warn; console.warn = () => {};
+  __resetCommentReadStateServiceForTests();
+  const events = new EventTarget(); let reads = 0; let summaries = 0; const values: Badge[] = [];
+  __setCommentReadStatePersistenceForTests({
+    read: async () => { ++reads; throw new Error('IPC unavailable'); }, upsert: async () => {},
+  });
+  const cache = new CharacterCommentSummaryCache(async () => { ++summaries; return { a: { count: 2, latestOtherCreatedAt: unreadAt } }; },
+    (userId: string) => getCommentReadStateForUser(userId, { throwOnReadError: true }), Date.now, [30, 50]);
+  const stop = cache.subscribe('a', 'me', true, (value: Badge) => values.push(value), events);
+  let stopDuplicate: (() => void) | undefined;
+  try {
+    await settle(); assert.equal(reads, 1, 'read retries respect backoff');
+    await refresh(); assert.equal(reads, 3); assert.equal(summaries, 1); assert.equal(values.at(-1), null);
+    stopDuplicate = cache.subscribe('a', 'me', true, () => {}, events);
+    dispatch(events, 'bflow:comment-read-state-changed', { userId: 'someone-else' });
+    dispatch(events, 'bflow:comments-invalidated', { characterId: 'a' });
+    await refresh(); await settle();
+    assert.equal(reads, 3, 'summary invalidation cannot restart exhausted read retries');
+    assert.equal(summaries, 2);
+  } finally { stopDuplicate?.(); stop(); __resetCommentReadStateServiceForTests(); console.warn = originalWarn; }
+});
+
+test('simultaneous summary and read failures have independent budgets and later read recovery preserves the badge', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const originalWarn = console.warn; console.warn = () => {};
+  const events = new EventTarget(); let reads = 0; let summaries = 0; const values: Badge[] = [];
+  const cache = new CharacterCommentSummaryCache(async () => {
+    if (++summaries === 1) throw new Error('summary temporarily unavailable');
+    return { a: { count: 2, latestOtherCreatedAt: unreadAt } };
+  }, async () => {
+    ++reads;
+    if ([1, 2, 4].includes(reads)) throw new Error('read state temporarily unavailable');
+    return reads === 3 ? {} : { 'char:a': unreadAt };
+  }, Date.now, [30, 50]);
+  const stop = cache.subscribe('a', 'me', true, (value: Badge) => values.push(value), events);
+  try {
+    await settle(); assert.equal(reads, 1); assert.equal(summaries, 1); assert.equal(values.at(-1), null);
+    await refresh(); assert.equal(reads, 3); assert.equal(summaries, 2);
+    assert.deepEqual(values.at(-1), { count: 2, seen: false });
+    dispatch(events, 'bflow:comment-read-state-changed', { userId: 'me' });
+    await settle(); assert.equal(reads, 4);
+    assert.deepEqual(values.at(-1), { count: 2, seen: false }, 'a later read failure keeps the previous usable badge');
+    await refresh(); assert.equal(reads, 5); assert.equal(summaries, 2, 'read recovery does not reload a successful summary');
+    assert.deepEqual(values.at(-1), { count: 2, seen: true });
+  } finally { stop(); console.warn = originalWarn; }
+});
+
+test('a read-state change supersedes both an in-flight failure and an already scheduled retry', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const originalWarn = console.warn; console.warn = () => {};
+  try {
+    for (const pending of [true, false]) {
+      const events = new EventTarget(); let reads = 0; let summaries = 0; const values: Badge[] = [];
+      let rejectFirst: (error: Error) => void = () => {};
+      const cache = new CharacterCommentSummaryCache(async () => { ++summaries; return { a: { count: 1, latestOtherCreatedAt: unreadAt } }; },
+        () => {
+          ++reads;
+          if (reads > 1) return Promise.resolve({ 'char:a': unreadAt });
+          return pending ? new Promise((_resolve, reject) => { rejectFirst = reject; }) : Promise.reject(new Error('initial failure'));
+        }, Date.now, [80, 120]);
+      const stop = cache.subscribe('a', 'me', true, (value: Badge) => values.push(value), events);
+      try {
+        await settle();
+        dispatch(events, 'bflow:comment-read-state-changed', { userId: 'me' });
+        if (pending) rejectFirst(new Error('superseded request failed'));
+        await settle(); await refresh();
+        assert.equal(reads, 2, pending ? 'stale failure does not consume the new request budget' : 'new event cancels the old retry timer');
+        assert.equal(summaries, 1); assert.deepEqual(values.at(-1), { count: 1, seen: true });
+      } finally { stop(); }
+    }
+  } finally { console.warn = originalWarn; }
+});
+
+test('account, source, and final unmount fence real read-state failures and scheduled retries', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const originalWarn = console.warn; console.warn = () => {};
+  try {
+    for (const pending of [true, false]) for (const change of ['account', 'source', 'unmount']) {
+      __resetCommentReadStateServiceForTests();
+      const events = new EventTarget(); const readUsers: string[] = []; const values: Badge[] = [];
+      let rejectFirst: (error: Error) => void = () => {};
+      __setCommentReadStatePersistenceForTests({
+        read: (userId: string) => {
+          readUsers.push(userId);
+          if (readUsers.length > 1) return Promise.resolve([{ sceneThreadKey: 'char:a', lastReadAt: unreadAt }]);
+          return pending ? new Promise((_resolve, reject) => { rejectFirst = reject; }) : Promise.reject(new Error('initial IPC failure'));
+        }, upsert: async () => {},
+      });
+      const cache = new CharacterCommentSummaryCache(async () => ({ a: { count: 1, latestOtherCreatedAt: unreadAt } }),
+        (userId: string) => getCommentReadStateForUser(userId, { throwOnReadError: true }), Date.now, [80, 120]);
+      const stop = cache.subscribe('a', 'first', true, () => {}, events);
+      let stopNext: (() => void) | undefined;
+      try {
+        await settle();
+        if (change === 'unmount') stop();
+        else stopNext = cache.subscribe('a', change === 'account' ? 'second' : 'first', change !== 'source', (value: Badge) => values.push(value), events);
+        if (pending) rejectFirst(new Error('old session IPC failed'));
+        await refresh(); await settle();
+        assert.deepEqual(readUsers, change === 'unmount' ? ['first'] : ['first', change === 'account' ? 'second' : 'first'], `${change}, pending=${pending}`);
+        if (change !== 'unmount') assert.deepEqual(values.at(-1), { count: 1, seen: true });
+      } finally { stopNext?.(); stop(); __resetCommentReadStateServiceForTests(); }
     }
   } finally { console.warn = originalWarn; }
 });

@@ -1599,7 +1599,8 @@ export async function readCharacterCommentSummaries(characterIds: string[], curr
       addCharacterCommentSummaryRows(summaries, rows.map((row) => ({
         characterId: row.character_id, userId: row.user_id, createdAt: row.created_at,
       })), currentUserId);
-      if (rows.length < pageSize) break;
+      // PostgREST may enforce a lower row cap than our requested page size.
+      if (rows.length === 0) break;
       const nextId = rows[rows.length - 1].id;
       if (typeof nextId !== 'string' || (afterId !== null && nextId <= afterId)) {
         throw new Error('캐릭터 댓글 요약 페이지를 확인하지 못했어요.');
@@ -1610,24 +1611,39 @@ export async function readCharacterCommentSummaries(characterIds: string[], curr
   return summaries;
 }
 
-export async function readCommentReadStates(userId: string): Promise<CommentReadStateRow[]> {
+export async function readCommentReadStates(userId: string, isCurrent: () => boolean = () => true): Promise<CommentReadStateRow[]> {
   const safeUserId = userId.trim();
   if (!safeUserId) return [];
 
-  const { data, error } = await supabase
-    .from('comment_read_states')
-    .select('user_id, scene_thread_key, last_read_at, updated_at')
-    .eq('user_id', safeUserId)
-    .order('updated_at', { ascending: false });
-
-  throwIfError(error);
-
-  return (data ?? []).map((row: any) => ({
-    userId: String(row.user_id ?? ''),
-    sceneThreadKey: String(row.scene_thread_key ?? ''),
-    lastReadAt: String(row.last_read_at ?? ''),
-    updatedAt: String(row.updated_at ?? ''),
-  })).filter((row) => row.userId && row.sceneThreadKey && row.lastReadAt);
+  const states: CommentReadStateRow[] = [];
+  let afterKey: string | null = null;
+  while (true) {
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+    let query = supabase.from('comment_read_states')
+      .select('user_id, scene_thread_key, last_read_at, updated_at')
+      .eq('user_id', safeUserId)
+      .order('scene_thread_key', { ascending: true })
+      .limit(500);
+    if (afterKey !== null) query = query.gt('scene_thread_key', afterKey);
+    const { data, error } = await query;
+    throwIfError(error);
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+    if (!data?.length) break;
+    // (user_id, scene_thread_key) is the primary key; DB ordering and cursor comparisons use the same collation.
+    const nextKey = data[data.length - 1].scene_thread_key;
+    if (typeof nextKey !== 'string' || nextKey === afterKey) throw new Error('댓글 읽음 기록 페이지를 확인하지 못했어요.');
+    states.push(...data.map((row: any) => ({
+      userId: String(row.user_id ?? ''),
+      sceneThreadKey: String(row.scene_thread_key ?? ''),
+      lastReadAt: String(row.last_read_at ?? ''),
+      updatedAt: String(row.updated_at ?? ''),
+    })).filter((row) => row.userId === safeUserId && row.sceneThreadKey && row.lastReadAt));
+    afterKey = nextKey;
+  }
+  return states.sort((a, b) => {
+    const time = Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+    return (Number.isFinite(time) && time !== 0) ? time : a.sceneThreadKey.localeCompare(b.sceneThreadKey);
+  });
 }
 
 export async function upsertCommentReadState(

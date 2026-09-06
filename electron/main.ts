@@ -2356,7 +2356,17 @@ ipcMain.handle('supabase:character-comment-summaries', wrapIpc(async (_e: unknow
 }));
 
 ipcMain.handle('supabase:read-comment-read-states', wrapIpc(async (_e: unknown, userId: string) => {
-  return sbReadCommentReadStates(userId);
+  const ensured = await sessionManager.ensure();
+  const actorId = sessionManager.getCanonicalUserId();
+  const epoch = sessionManager.getEpoch();
+  if (!ensured.ok || !actorId || ensured.payload.user?.id !== actorId || ensured.payload.epoch !== epoch) {
+    throw new Error('로그인이 필요합니다.');
+  }
+  if (typeof userId !== 'string' || userId.trim() !== actorId) throw new Error('현재 로그인한 사용자의 읽음 기록만 조회할 수 있어요.');
+  const isCurrent = () => sessionManager.getCanonicalUserId() === actorId && sessionManager.getEpoch() === epoch;
+  const states = await sbReadCommentReadStates(actorId, isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+  return states;
 }));
 
 ipcMain.handle('supabase:upsert-comment-read-state', wrapIpc(async (

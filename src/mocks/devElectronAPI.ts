@@ -2597,7 +2597,11 @@ export function installDevElectronAPI(): void {
       if (previewCanonicalUserId !== actor.id || previewCanonicalEpoch !== epoch) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
       return summaries;
     },
-    supabaseReadCommentReadStates: async (userId) => getMockCommentReadStates(userId),
+    supabaseReadCommentReadStates: async (userId) => {
+      const actor = requireMockCalendarUser();
+      if (typeof userId !== 'string' || userId.trim() !== actor.id) throw new Error('현재 로그인한 사용자의 읽음 기록만 조회할 수 있어요.');
+      return getMockCommentReadStates(actor.id);
+    },
     supabaseUpsertCommentReadState: async (userId, sceneThreadKey, lastReadAt) => {
       const stateRows = getMockCommentReadStates(userId);
       const existing = stateRows.find((row) => row.sceneThreadKey === sceneThreadKey);
