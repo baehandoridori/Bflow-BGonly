@@ -2,6 +2,7 @@ import { memo, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'r
 import { ChevronLeft, ChevronRight, Image as ImageIcon } from 'lucide-react';
 import type { Character, CharacterCostume } from '@/types';
 import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
+import { CharacterCommentBadge } from '@/components/characters/CharacterCommentBadge';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META, characterStageColor } from '@/constants/characterStages';
 import { applyDragGhost } from '@/utils/dragGhost';
 import { cn } from '@/utils/cn';
@@ -163,7 +164,10 @@ export const CharacterCard = memo(function CharacterCard({
         </div>
       )}
       <div className="p-3 flex flex-col gap-2">
-        <div className="font-semibold text-text-primary truncate">{character.name}</div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="min-w-0 font-semibold text-text-primary truncate">{character.name}</div>
+          <CharacterCommentBadge characterId={character.id} />
+        </div>
         <div className="flex items-center gap-2 text-xs text-text-secondary">
           <span>복장 {costumes.length}</span>
           {character.episodeIds.length > 0 && (

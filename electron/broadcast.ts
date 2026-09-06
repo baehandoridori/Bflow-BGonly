@@ -2,6 +2,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { createRetryManager } from './retry-utils';
 import type { CalendarCommittedReplacementDeleteMarker } from '../src/shared/calendarApiContract';
+import type { RetakeReminderPayload } from '../src/shared/retakeNotifications';
 
 // ─── Supabase Broadcast 채널 ────────────────────
 // postgres_changes와 달리 Publication 설정이 필요 없음.
@@ -41,7 +42,7 @@ export function setCalendarChangedLocalListener(
 
 function createChannel(onReceive: BroadcastListener): RealtimeChannel {
   return supabase
-    .channel('bflow-broadcast')
+    .channel('bflow-broadcast', { config: { broadcast: { ack: true } } })
     .on('broadcast', { event: 'scene-update' }, ({ payload }) => {
       onReceive('scene-update', payload as Record<string, unknown>);
     })
@@ -56,6 +57,9 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
     })
     .on('broadcast', { event: 'retake-assignee-completion' }, ({ payload }) => {
       onReceive('retake-assignee-completion', payload as Record<string, unknown>);
+    })
+    .on('broadcast', { event: 'retake-reminder' }, ({ payload }) => {
+      onReceive('retake-reminder', payload as Record<string, unknown>);
     })
     .on('broadcast', { event: 'scene-assignment-notification' }, ({ payload }) => {
       onReceive('scene-assignment-notification', payload as Record<string, unknown>);
@@ -247,6 +251,17 @@ export function broadcastRetakeAssigneeCompletion(
   payload: Omit<RetakeAssigneeCompletionBroadcastPayload, 'ts'>,
 ): void {
   safeSend('retake-assignee-completion', { ...payload, ts: Date.now() });
+}
+
+export async function broadcastRetakeReminder(payload: RetakeReminderPayload): Promise<boolean> {
+  const channel = broadcastChannel;
+  if (!channel || !broadcastConnected) return false;
+  try {
+    // ack:true waits for server receipt; it does not claim that an offline recipient read the message.
+    return await channel.send({ type: 'broadcast', event: 'retake-reminder', payload: { ...payload } }, { timeout: 8_000 }) === 'ok';
+  } catch {
+    return false;
+  }
 }
 
 /** v1.25.8 씬 담당자 배정 알림 broadcast.

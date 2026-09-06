@@ -34,7 +34,7 @@ export function hasNotificationActionTarget(
   metadata?: Record<string, unknown> | null,
 ): boolean {
   return hasSceneTargetHint(metadata) ||
-    (type === 'revision' && Boolean(metadataString(metadata, 'retakeHubSetId')));
+    (type === 'revision' && Boolean(metadataString(metadata, 'retakeHubSetId') || metadataString(metadata, 'revisionId')));
 }
 
 /**

@@ -4,6 +4,8 @@
  */
 
 import type { ElectronAPI, AppUser, Episode, Scene, CompRevisionSet, SceneWorkLink } from '@/types';
+import { RetakeNotificationService } from '../../electron/retakeNotificationService';
+import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -1264,6 +1266,23 @@ function emitMockSupabaseBroadcast(event: unknown): void {
     }
   }
 }
+
+// Same delivery selection, permission, and cooldown contract; preview never calls a remote webhook.
+const previewRetakeNotifications = new RetakeNotificationService({
+  getActor: async () => ({ ...requireMockCalendarUser(), epoch: previewCanonicalEpoch }),
+  isActorCurrent: (actor) => previewCanonicalUserId === actor.id && previewCanonicalEpoch === actor.epoch,
+  readRevision: async (id) => getMockRevisionRows().find((revision) => revision.id === id) ?? null,
+  readUsers: async () => getMockUsers(),
+  sendSlack: async (_payload, isCurrent) => {
+    if (isCurrent && !isCurrent()) throw new Error('로그인이 변경됐어요.');
+  },
+  broadcast: (payload) => { emitMockSupabaseBroadcast({ event: 'retake-reminder', payload }); return true; },
+  onDeliveryResult: (payload) => {
+    if (previewCanonicalUserId !== payload.userId || previewCanonicalEpoch !== payload.epoch) return;
+    emitMockSupabaseBroadcast({ event: 'retake-delivery-result', payload: { ...payload, delivery: { ...payload.delivery, simulated: true } } });
+  },
+  createEventId: createUuid,
+});
 
 function normalizeMockCalendarEventTagId(tagId: unknown): string | null {
   if (tagId === undefined || tagId === null) return null;
@@ -2569,7 +2588,20 @@ export function installDevElectronAPI(): void {
     supabaseDeleteUser: async () => {},
     supabaseReadComments: async (partUuid) => getMockCommentRows().filter((comment) => comment.partId === partUuid && !comment.characterId),
     supabaseReadCommentsForCharacter: async (characterId) => getMockCommentRows().filter((comment) => comment.characterId === characterId),
-    supabaseReadCommentReadStates: async (userId) => getMockCommentReadStates(userId),
+    getCharacterCommentSummaries: async (characterIds) => {
+      const ids = validateCharacterCommentIds(characterIds);
+      const actor = requireMockCalendarUser();
+      const epoch = previewCanonicalEpoch;
+      const summaries = createCharacterCommentSummaries(ids);
+      addCharacterCommentSummaryRows(summaries, getMockCommentRows(), actor.id);
+      if (previewCanonicalUserId !== actor.id || previewCanonicalEpoch !== epoch) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+      return summaries;
+    },
+    supabaseReadCommentReadStates: async (userId) => {
+      const actor = requireMockCalendarUser();
+      if (typeof userId !== 'string' || userId.trim() !== actor.id) throw new Error('현재 로그인한 사용자의 읽음 기록만 조회할 수 있어요.');
+      return getMockCommentReadStates(actor.id);
+    },
     supabaseUpsertCommentReadState: async (userId, sceneThreadKey, lastReadAt) => {
       const stateRows = getMockCommentReadStates(userId);
       const existing = stateRows.find((row) => row.sceneThreadKey === sceneThreadKey);
@@ -3027,7 +3059,16 @@ export function installDevElectronAPI(): void {
         });
       }
     },
-    supabaseReadRevisions: async () => getMockRevisionRows(),
+    supabaseReadRevisions: async () => {
+      requireMockCalendarUser();
+      return getMockRevisionRows();
+    },
+    supabaseReadRevisionById: async (revisionId: string) => {
+      requireMockCalendarUser();
+      if (typeof revisionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(revisionId)) throw new Error('리테이크 ID가 올바르지 않아요.');
+      return getMockRevisionRows().find((revision) => revision.id === revisionId) ?? null;
+    },
+    remindRetake: async (revisionId) => ({ ...await previewRetakeNotifications.remind(revisionId), simulated: true }),
     supabaseAddRevision: async (
       id: string,
       _partUuid: string,
@@ -3048,6 +3089,7 @@ export function installDevElectronAPI(): void {
       assigneeIdsJson?: string,
       setId?: string,
     ) => {
+      const notificationActor = await previewRetakeNotifications.captureActor();
       const revisions = getMockRevisionRows();
       const mockAssigneeIds = parseJsonStringArray(assigneeIdsJson);
       revisions.push({
@@ -3090,11 +3132,15 @@ export function installDevElectronAPI(): void {
       });
       getMockActivityRows().unshift(activity);
       emitMockActivityRealtime(activity);
+      previewRetakeNotifications.startAssignmentDelivery(id, notificationActor);
     },
     supabaseUpdateRevision: async (id: string, updates: Record<string, string>) => {
+      const reassignmentNotification = typeof updates.assigneeIds === 'string'
+        ? await previewRetakeNotifications.captureReassignment(id, updates.assigneeIds)
+        : null;
       const revisions = getMockRevisionRows();
       const target = revisions.find((revision) => revision.id === id);
-      if (!target) return;
+      if (!target) return { affected: false };
       const previousStatus = target.status;
       // 프로덕션 main.ts 와 동일: __op 는 활동기록 분기 전용 신호라 행에 저장하지 않는다.
       const { __op: _op, ...rest } = updates;
@@ -3143,12 +3189,22 @@ export function installDevElectronAPI(): void {
           emitMockActivityRealtime(activity);
         }
       }
+      if (reassignmentNotification) {
+        previewRetakeNotifications.startReassignmentDelivery(id, reassignmentNotification);
+      }
+      return { affected: true };
     },
     supabaseDeleteRevision: async (id: string) => {
       localStore.__revisionRows = getMockRevisionRows().filter((revision) => revision.id !== id);
       window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
     },
-    supabaseReadRevisionSets: async () => getMockRevisionSets(),
+    supabaseReadRevisionSets: async () => {
+      requireMockCalendarUser();
+      return [...getMockRevisionSets()].sort((a, b) => {
+        const time = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+        return (Number.isFinite(time) && time !== 0) ? time : a.id.localeCompare(b.id);
+      });
+    },
     supabaseAddRevisionSet: async (input) => {
       const now = new Date().toISOString();
       const set = {

@@ -332,7 +332,10 @@ export function primeCommentReadStateForUser(userId: string, state: Record<strin
   cacheByUser.set(userId, userState);
 }
 
-export async function getCommentReadStateForUser(userId: string): Promise<Record<string, string>> {
+export async function getCommentReadStateForUser(
+  userId: string,
+  options: { throwOnReadError?: boolean } = {},
+): Promise<Record<string, string>> {
   if (!userId) return {};
 
   if (!persistenceDisabledForSession) {
@@ -358,6 +361,8 @@ export async function getCommentReadStateForUser(userId: string): Promise<Record
       if (isCommentReadStateSchemaUnavailableError(err)) {
         disablePersistenceForSession(err);
       } else {
+        // 배지의 제한 재시도만 실패를 전달받는다. 기존 화면은 캐시 폴백을 유지한다.
+        if (options.throwOnReadError) throw err;
         console.warn('[댓글 읽음] Supabase 상태 로드 실패, 캐시를 사용합니다:', err);
       }
     }

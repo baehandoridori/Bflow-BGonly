@@ -10,6 +10,7 @@ import {
   resolveNotificationSceneTarget,
 } from '@/utils/notificationSceneNavigation';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { openRetakeInApp } from '@/utils/retakeNavigation';
 
 export { markNotificationDomainRead } from '@/utils/notificationDomainRead';
 
@@ -33,7 +34,7 @@ export function getNotificationSceneActionLabel(
 ): string {
   if (type === 'comment' || type === 'mention' || type === 'comment_reaction') return '댓글 보기';
   if (type === 'revision' && asString(metadataValue(metadata, 'revisionAction')) === 'comment') return '리테이크 댓글';
-  if (type === 'revision') return '리테이크 보기';
+  if (type === 'revision') return '리테이크 확인하기';
   return '씬 보기';
 }
 
@@ -43,6 +44,12 @@ export function navigateNotificationToScene(
   metadata?: Record<string, unknown> | null,
 ): NotificationSceneActionResult {
   markNotificationDomainRead(type, metadata);
+
+  const revisionId = asString(metadataValue(metadata, 'revisionId'));
+  if (type === 'revision' && revisionId && metadataValue(metadata, 'revisionAction') !== 'comment') {
+    openRetakeInApp(revisionId);
+    return { attempted: true, matched: true, openedModal: false };
+  }
 
   // '전반' 리테이크 알림 — 씬 컨텍스트가 없으므로 리테이크 허브로 보낸다(코덱스 P2).
   const retakeHubSetId = asString(metadataValue(metadata, 'retakeHubSetId'));

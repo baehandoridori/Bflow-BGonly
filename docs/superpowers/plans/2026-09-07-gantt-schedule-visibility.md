@@ -57,6 +57,6 @@ Files: `GanttCanvas.tsx`, `GanttTooltip.tsx`, `canvas.css`, `navigation.css`, `t
 
 - [x] Run related node tests and independent local reviews; fix actionable findings and repeat the affected checks.
 - [x] Login to preview as 배한솔, verify 1280×720/1024×640, dark/light, group drag, duration labels, progress and bar F2. Deep nesting, pointer hover events and calendar parity covered by automated behavior tests; distinguish these from native production interaction.
-- [ ] Incorporate retake release's final main, set the next minor version and retain all update notes. Run `npm run typecheck` and `npm run build:vite` with `BFLOW_PGLITE_MODULE` configured.
+- [x] Incorporate retake release's final main, set the next minor version and retain all update notes. Run `npm run typecheck` and `npm run build:vite` with `BFLOW_PGLITE_MODULE` configured. v1.117.0 / 2,512 pass, 0 fail, 0 skipped.
 - [ ] PR/merge, then build from exact merge in a clean release worktree via `npm run build`.
 - [ ] After the retake deployment is explicitly complete, back up live release, verify candidate, copy non-manifest files, confirm full parity with old manifest preserved, publish manifest last and verify every hash.

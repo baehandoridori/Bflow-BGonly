@@ -86,7 +86,7 @@ test('dev preview revision alarm has a real revision card and revision comment t
 
   const mockApi = readFileSync('src/mocks/devElectronAPI.ts', 'utf8');
   assert.match(mockApi, /buildDevPreviewRevisionRows/);
-  assert.match(mockApi, /supabaseReadRevisions:\s*async \(\) => getMockRevisionRows\(\)/);
+  assert.match(mockApi, /supabaseReadRevisions:\s*async \(\) => \{\s*requireMockCalendarUser\(\);\s*return getMockRevisionRows\(\);/);
 });
 
 test('dev preview also seeds local comments fallback for disconnected browser preview', () => {

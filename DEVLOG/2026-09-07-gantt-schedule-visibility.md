@@ -36,3 +36,11 @@
 - 전체 개발 빌드 첫 실행: `npm run build:vite` 통과, 2,370 pass / 0 fail / 0 skipped. `BFLOW_PGLITE_MODULE`을 지정해 PostgreSQL 격리 시험을 포함했다. 이후 이름 배치 보정에는 추가 회귀 시험을 실행했다.
 - 최종 기능 수정·버전 반영 후 `typecheck`, 간트 313개 시험, `build:vite` 재통과: 전체 **2,371 pass / 0 fail / 0 skipped**, v1.117.0 개발 산출물 확인. 재로그인 후 제목·완료·남은 일수 설정 유지와 브라우저 error 0개를 확인했다.
 - 전체 개발 빌드, 수정 후 최종 리뷰, 리테이크 v1.116.0 배포 완료 확인, 최신 main 통합, 정확한 merge 커밋의 정식 빌드와 manifest-last 배포 검증을 진행한다. 완료 증거는 PR에 기록한다.
+
+## 리테이크 배포 이후 통합 확인
+
+- PR #275의 merge `cad51dbd070f0d67479fb6cf4649283b4caa5898`와 v1.116.0 배포 증거(7,333 files / 923,216,862 bytes / mismatch 0)를 확인한 뒤 통합했다. 실제 G드라이브 manifest·latest·installer도 다시 대조했다. 이전 manifest SHA-256은 `438c175e68140f47e8c41a9bd063a742b71f36ec1ca4d7578035dd6311cba14d`이다.
+- 충돌한 package·lockfile·업데이트 기록·교훈은 양쪽 내용을 보존했다. 독립 통합 리뷰에서 간트 21개 파일은 검증된 feature 커밋과, 리테이크 60개 파일은 main과 Git blob이 일치함을 확인했다. 기존 183개 릴리스 기록에 이번 기록만 추가해 총 184개를 유지한다.
+- 통합 preview에서 배한솔로 로그인 후 간트 진입, 완료 상세와 2026-09-09 날짜, 진행률 100%, 남은 일수의 저장 상태를 재확인했다. 브라우저 error 0개.
+- 최신 main 통합 후 `npm run build:vite` 완료: **2,512 pass / 0 fail / 0 skipped**, typecheck·실제 PGlite 시험과 v1.117.0 renderer/main/preload 빌드 통과.
+- 이번 실행 시 설치된 로컬 앱은 아직 1.115.1이다. 아래 배포 산출물 검증을 설치된 앱의 자동 업데이트 적용 결과로 표현하지 않는다.

@@ -15,6 +15,14 @@ import { formatDateTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle } from '@/utils/glassStyles';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useRevisionStore } from '@/stores/useRevisionStore';
+import { canActAsAssignee, canFinalResolveRevision } from '@/utils/revisionWorkflow';
+import { collectAssigneeNotes, summarizeAssignees } from '@/utils/revisionCardView';
+import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
+import { AssigneeChipRow } from '@/components/scenes/revision/AssigneeChipRow';
+import { CompletionNoteInput } from '@/components/scenes/revision/CompletionNoteInput';
+import { FinalResolveBar } from '@/components/scenes/revision/FinalResolveBar';
+import { RemindRetakeButton } from '@/components/scenes/revision/RemindRetakeButton';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { Avatar } from './sharedComponents';
 import { parsePathsFromText, parseSceneKey } from './utils';
@@ -42,8 +50,22 @@ export function DetailPanel({
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { description: descText, paths: detailPaths } = parsePathsFromText(revision.description);
   const allUsers = useAuthStore((s) => s.users);
-  // 담당자 있는 항목은 상세 패널에서 legacy 상태변경(시작/완료/되돌리기) 차단 — 씬 모달 담당 워크플로우 사용 (Codex P2).
-  const hasAssignees = (revision.assigneeIds?.length ?? 0) > 0;
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const { startAssignee, completeAssignee, revertAssignee, finalResolve, revertFinalResolve } = useRevisionStore();
+  const [noteEditingFor, setNoteEditingFor] = useState<string | null>(null);
+  const assigneeIds = revision.assigneeIds ?? [];
+  const assigneeStates = revision.assigneeStates ?? {};
+  const hasAssignees = assigneeIds.length > 0;
+  const summary = summarizeAssignees(assigneeIds, assigneeStates);
+  const canAct = canActAsAssignee(currentUser, revision);
+  const canFinal = canFinalResolveRevision(currentUser, revision);
+  const doneNotes = collectAssigneeNotes(assigneeIds, assigneeStates);
+  const nameOf = (id: string) => allUsers.find((user) => user.id === id)?.name ?? id;
+  const completionNotifyDefaults = buildRevisionAssigneeCompletionNotifyUserIds({
+    notifyUserIds: revision.notifyUserIds,
+    requesterId: revision.requesterId,
+    completerId: noteEditingFor ?? currentUser?.id,
+  });
   // v1.19.4: notifyUserIds 를 사용자 객체로 변환 (이름 + 컴포지터 라벨 표시)
   const notifyUsers = (revision.notifyUserIds ?? [])
     .map((uid) => allUsers.find((u) => u.id === uid))
@@ -137,6 +159,7 @@ export function DetailPanel({
               episodeNumber={sceneInfo?.episodeNumber}
               partId={sceneInfo?.partId}
               sceneUuid={sceneInfo?.sceneUuid}
+              focusRevisionId={revision.id}
             />
           </div>
 
@@ -250,7 +273,7 @@ export function DetailPanel({
           </div>
 
           {/* 해결 정보 */}
-          {revision.status === 'resolved' && (
+          {revision.status === 'resolved' && !hasAssignees && (
             <div
               className="rounded-xl p-4 mb-5 border"
               style={{
@@ -324,7 +347,55 @@ export function DetailPanel({
             )}
           </AnimatePresence>
 
-          {/* 상태 변경 버튼 — 워크플로우 순서: 진행 시작(위) → 해결 완료(아래). 담당자 있으면 숨김(씬 모달에서 처리) */}
+          {/* 담당 진행과 최종 확인은 씬 상세창과 같은 워크플로우로 저장한다. */}
+          <RemindRetakeButton revision={revision} />
+          {hasAssignees && (
+            <div className="mb-5 space-y-2" data-retake-assignee-workflow>
+              <div className="text-[11px] font-semibold text-text-secondary">담당 진행 · {summary.doneCount}/{summary.total}명 완료</div>
+              <AssigneeChipRow
+                assignees={assigneeIds.map((id) => ({ id, name: nameOf(id), state: assigneeStates[id]?.state ?? 'pending' }))}
+                currentUserId={currentUser?.id ?? null}
+                canAct={canAct}
+                finalResolved={revision.status === 'resolved' || !!revision.finalResolvedAt}
+                onStart={(id) => { void startAssignee(revision, id); }}
+                onComplete={setNoteEditingFor}
+                onRevert={(id) => { void revertAssignee(revision, id); }}
+              />
+              {noteEditingFor && (
+                <CompletionNoteInput
+                  key={noteEditingFor}
+                  initialValue={assigneeStates[noteEditingFor]?.note ?? ''}
+                  notifyDefaultIds={completionNotifyDefaults}
+                  onConfirm={(note, notifyIds) => {
+                    if (!currentUser || noteEditingFor !== currentUser.id || !canAct || revision.finalResolvedAt) return;
+                    void completeAssignee(revision, noteEditingFor, note, notifyIds, currentUser.name);
+                    setNoteEditingFor(null);
+                  }}
+                  onCancel={() => setNoteEditingFor(null)}
+                />
+              )}
+              {doneNotes.map(({ userId, note }) => (
+                <p key={userId} className="rounded-lg bg-accent/10 p-2 text-xs text-text-secondary whitespace-pre-wrap">
+                  <span className="font-semibold text-accent-sub">{nameOf(userId)} 완료:</span> {note}
+                </p>
+              ))}
+              <FinalResolveBar
+                resolved={revision.status === 'resolved'}
+                enabled={summary.allDone}
+                canFinalResolve={canFinal}
+                finalResolvedBy={revision.finalResolvedBy}
+                onResolve={() => {
+                  if (currentUser && canFinal && summary.allDone) void finalResolve(revision, currentUser.name);
+                }}
+                onRevert={() => { if (canFinal) void revertFinalResolve(revision); }}
+              />
+              {summary.allDone && !canFinal && revision.status !== 'resolved' && (
+                <p className="text-xs text-text-secondary">담당 작업 완료 · 요청자 또는 컴포지터의 최종 확인을 기다리고 있어요.</p>
+              )}
+            </div>
+          )}
+
+          {/* 담당자가 없는 이전 항목만 기존 상태 변경을 사용한다. */}
           {revision.status === 'open' && !showResolveNote && !hasAssignees && (
             <button
               onClick={() => handleStatusSelect('in_progress')}

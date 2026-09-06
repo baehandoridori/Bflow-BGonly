@@ -7,6 +7,7 @@ import {
 } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
 import { createRetryManager } from './retry-utils';
+import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds, type CharacterCommentSummaries } from '../src/shared/characterCommentSummary';
 import type {
   PersonalTodoLabelColorKey,
   PersonalTodoLabelRecord,
@@ -1574,24 +1575,75 @@ export async function readCommentsForCharacter(characterId: string): Promise<Sup
   }));
 }
 
-export async function readCommentReadStates(userId: string): Promise<CommentReadStateRow[]> {
+/** Card summaries only: no comment bodies, images, names, or mentions cross this query boundary. */
+export async function readCharacterCommentSummaries(characterIds: string[], currentUserId: string, isCurrent: () => boolean = () => true): Promise<CharacterCommentSummaries> {
+  const ids = validateCharacterCommentIds(characterIds);
+  const summaries = createCharacterCommentSummaries(ids);
+  const pageSize = 500;
+  // Bound URL length independently from the renderer's 200-character batch.
+  for (let start = 0; start < ids.length; start += 100) {
+    const batch = ids.slice(start, start + 100);
+    let afterId: string | null = null;
+    while (true) {
+      if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+      let query = supabase.from('comments')
+        .select('id,character_id,user_id,created_at')
+        .in('character_id', batch)
+        .order('id', { ascending: true })
+        .limit(pageSize);
+      if (afterId) query = query.gt('id', afterId);
+      const { data, error } = await query;
+      throwIfError(error);
+      if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+      const rows = (data ?? []) as { id: string; character_id: string; user_id: string | null; created_at: string | null }[];
+      addCharacterCommentSummaryRows(summaries, rows.map((row) => ({
+        characterId: row.character_id, userId: row.user_id, createdAt: row.created_at,
+      })), currentUserId);
+      // PostgREST may enforce a lower row cap than our requested page size.
+      if (rows.length === 0) break;
+      const nextId = rows[rows.length - 1].id;
+      if (typeof nextId !== 'string' || (afterId !== null && nextId <= afterId)) {
+        throw new Error('캐릭터 댓글 요약 페이지를 확인하지 못했어요.');
+      }
+      afterId = nextId;
+    }
+  }
+  return summaries;
+}
+
+export async function readCommentReadStates(userId: string, isCurrent: () => boolean = () => true): Promise<CommentReadStateRow[]> {
   const safeUserId = userId.trim();
   if (!safeUserId) return [];
 
-  const { data, error } = await supabase
-    .from('comment_read_states')
-    .select('user_id, scene_thread_key, last_read_at, updated_at')
-    .eq('user_id', safeUserId)
-    .order('updated_at', { ascending: false });
-
-  throwIfError(error);
-
-  return (data ?? []).map((row: any) => ({
-    userId: String(row.user_id ?? ''),
-    sceneThreadKey: String(row.scene_thread_key ?? ''),
-    lastReadAt: String(row.last_read_at ?? ''),
-    updatedAt: String(row.updated_at ?? ''),
-  })).filter((row) => row.userId && row.sceneThreadKey && row.lastReadAt);
+  const states: CommentReadStateRow[] = [];
+  let afterKey: string | null = null;
+  while (true) {
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+    let query = supabase.from('comment_read_states')
+      .select('user_id, scene_thread_key, last_read_at, updated_at')
+      .eq('user_id', safeUserId)
+      .order('scene_thread_key', { ascending: true })
+      .limit(500);
+    if (afterKey !== null) query = query.gt('scene_thread_key', afterKey);
+    const { data, error } = await query;
+    throwIfError(error);
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+    if (!data?.length) break;
+    // (user_id, scene_thread_key) is the primary key; DB ordering and cursor comparisons use the same collation.
+    const nextKey = data[data.length - 1].scene_thread_key;
+    if (typeof nextKey !== 'string' || nextKey === afterKey) throw new Error('댓글 읽음 기록 페이지를 확인하지 못했어요.');
+    states.push(...data.map((row: any) => ({
+      userId: String(row.user_id ?? ''),
+      sceneThreadKey: String(row.scene_thread_key ?? ''),
+      lastReadAt: String(row.last_read_at ?? ''),
+      updatedAt: String(row.updated_at ?? ''),
+    })).filter((row) => row.userId === safeUserId && row.sceneThreadKey && row.lastReadAt));
+    afterKey = nextKey;
+  }
+  return states.sort((a, b) => {
+    const time = Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+    return (Number.isFinite(time) && time !== 0) ? time : a.sceneThreadKey.localeCompare(b.sceneThreadKey);
+  });
 }
 
 export async function upsertCommentReadState(
@@ -2123,14 +2175,38 @@ export async function deleteRevision(id: string, requesterUserId: string): Promi
   broadcastDataChange('comp_revisions', 'DELETE');
 }
 
-/** 모든 리비전 읽기 */
-export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string; notifyUserIds: string[] })[]> {
-  const { data, error } = await supabase
-    .from('comp_revisions')
-    .select('*')
-    .order('created_at');
+/** ID 단건 조회: 서버 오류와 실제 삭제(null)를 구분한다. */
+export async function readRevisionById(id: string, isCurrent: () => boolean = () => true): Promise<ReturnType<typeof mapRevision> | null> {
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('리테이크 ID가 올바르지 않아요.');
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  const { data, error } = await supabase.from('comp_revisions').select('*').eq('id', id).maybeSingle();
   throwIfError(error);
-  return (data || []).map(mapRevision);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  return data ? mapRevision(data) : null;
+}
+
+/** 모든 리비전 읽기: PostgREST 행 제한을 넘겨도 고유 ID 커서로 끝까지 읽는다. */
+export async function readAllRevisions(isCurrent: () => boolean = () => true): Promise<(SupabaseRevision & { sceneKey: string; notifyUserIds: string[] })[]> {
+  const rows: Record<string, unknown>[] = [];
+  let afterId: string | null = null;
+  while (true) {
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    let query = supabase.from('comp_revisions').select('*').order('id', { ascending: true }).limit(500);
+    if (afterId) query = query.gt('id', afterId);
+    const { data, error } = await query;
+    throwIfError(error);
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    if (!data?.length) break;
+    const nextId = data[data.length - 1].id;
+    if (typeof nextId !== 'string' || (afterId !== null && nextId <= afterId)) throw new Error('리테이크 목록을 끝까지 확인하지 못했어요.');
+    rows.push(...data);
+    afterId = nextId;
+  }
+  // 기존 호출자는 생성 시간 순서를 사용하므로 조회 커서 순서를 노출하지 않는다.
+  return rows.map(mapRevision).sort((a, b) => {
+    const time = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    return (Number.isFinite(time) && time !== 0) ? time : a.id.localeCompare(b.id);
+  });
 }
 
 /** sceneKey (EP01:A:a001) → part UUID 역조회 */
@@ -2305,11 +2381,12 @@ export async function updateRevision(
   // 실제 바뀐 행을 결과로 받아 affected 를 판정한다 — 삭제된 리비전에 대한 오적립(retake-done)을 막기 위함.
   const { data: rows, error } = await supabase.from('comp_revisions').update(dbUpdates).eq('id', id).select('id');
   throwIfError(error);
-  broadcastDataChange('comp_revisions', 'UPDATE');
-  return { affected: Array.isArray(rows) && rows.length > 0 };
+  const affected = Array.isArray(rows) && rows.length > 0;
+  if (affected) broadcastDataChange('comp_revisions', 'UPDATE');
+  return { affected };
 }
 
-function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string; notifyUserIds: string[] } {
+export function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string; notifyUserIds: string[] } {
   const rawNotify = r.notify_user_ids;
   const notifyUserIds: string[] = Array.isArray(rawNotify)
     ? (rawNotify.filter((x) => typeof x === 'string') as string[])
@@ -2441,13 +2518,29 @@ function mapRevisionSet(r: Record<string, unknown>): SupabaseRevisionSet {
 }
 
 /** 모든 리테이크 세트 읽기 */
-export async function readAllRevisionSets(): Promise<SupabaseRevisionSet[]> {
-  const { data, error } = await supabase
-    .from('comp_revision_sets')
-    .select('*')
-    .order('created_at');
-  throwIfError(error);
-  return (data || []).map(mapRevisionSet);
+export async function readAllRevisionSets(isCurrent: () => boolean = () => true): Promise<SupabaseRevisionSet[]> {
+  const rows: Record<string, unknown>[] = [];
+  let afterId: string | null = null;
+  while (true) {
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    let query = supabase.from('comp_revision_sets').select('*').order('id', { ascending: true }).limit(500);
+    if (afterId) query = query.gt('id', afterId);
+    const { data, error } = await query;
+    throwIfError(error);
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    if (!Array.isArray(data)) throw new Error('리테이크 세트 목록을 끝까지 확인하지 못했어요.');
+    // 서버 row cap이 요청 크기보다 작아도 계속 읽고, 빈 페이지에서만 종료한다.
+    if (data.length === 0) break;
+    const nextId = data[data.length - 1].id;
+    if (typeof nextId !== 'string' || (afterId !== null && nextId <= afterId)) throw new Error('리테이크 세트 목록을 끝까지 확인하지 못했어요.');
+    rows.push(...data);
+    afterId = nextId;
+  }
+  // ID는 페이지 커서로만 사용하고 기존 화면의 생성 시간 순서는 유지한다.
+  return rows.map(mapRevisionSet).sort((a, b) => {
+    const time = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    return (Number.isFinite(time) && time !== 0) ? time : a.id.localeCompare(b.id);
+  });
 }
 
 /** 리테이크 세트 추가 — id 는 DB default(gen_random_uuid), 저장 후 단건 조회해 map. */

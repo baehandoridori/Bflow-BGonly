@@ -209,7 +209,7 @@ export function RevisionItem({
           >
             <CompactIconLabel icon={<Bell size={10} strokeWidth={2.2} />} label={statusCfg.label} />
           </span>
-          {isInProgress && (
+          {isInProgress && !hasAssignees && (
             <button
               onClick={(e) => { e.stopPropagation(); onStatusChange('open'); }}
               className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 text-text-secondary/70 bg-bg-primary/45 border border-bg-border/35 hover:text-accent-sub hover:border-accent/35 hover:bg-accent/10 transition-colors cursor-pointer"

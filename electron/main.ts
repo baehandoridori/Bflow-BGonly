@@ -49,6 +49,11 @@ import type { PersonalTodoCreateInput, PersonalTodoOrderMutation, PersonalTodoPa
 import { MarketAccountService } from './marketAccountService';
 import type { MarketAdminEventInput, MarketCommand } from './marketAccountService';
 import { ArcadeService, arcadeExecutePayload } from './arcadeService';
+import { RetakeNotificationService } from './retakeNotificationService';
+import { SlackWorkflowTransport } from './slackWorkflowTransport';
+import { parseBflowDeepLink, type BflowDeepLink } from '../src/shared/bflowDeepLink';
+import { validateCharacterCommentIds } from '../src/shared/characterCommentSummary';
+import type { RetakeNotificationActor } from '../src/shared/retakeNotifications';
 import type { ArcadeExecuteCommand, ArcadeSlackRecord } from './arcadeService';
 import { getCanonicalMarketQuoteWon } from '../shared/playgroundMarketPrice.mjs';
 import { PersonalTodoRecoveryJournal } from './personalTodoRecoveryJournal';
@@ -855,6 +860,7 @@ function createWindow(): void {
   mainWindow.on('enter-full-screen', scheduleSaveMainWindowBounds);
   mainWindow.on('leave-full-screen', scheduleSaveMainWindowBounds);
 
+  bindDeepLinkWindow(mainWindow);
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     mainWindow.webContents.openDevTools();
@@ -874,13 +880,6 @@ function createWindow(): void {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show();
       mainWindow.focus();
-    }
-    // 재생성 경로 복구: 창 크래시 후 복구된 경우 보류 중인 딥링크 전달
-    // (최초 시작 시엔 app.whenReady의 .once 리스너와 중복이지만, pendingDeepLink를
-    //  null로 세팅하므로 멱등하게 동작)
-    if (pendingDeepLink) {
-      sendDeepLinkToRenderer(pendingDeepLink);
-      pendingDeepLink = null;
     }
     try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
 
@@ -1322,7 +1321,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion, broadcastCalendarCommittedDelete, setCalendarChangedLocalListener } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification, broadcastRetakeAssigneeCompletion, broadcastRetakeReminder, broadcastCalendarCommittedDelete, setCalendarChangedLocalListener } from './broadcast';
 import type { FeedbackBroadcastPayload, RetakeAssigneeCompletionBroadcastPayload } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
@@ -1360,6 +1359,7 @@ import {
   deleteUserAuthorized as sbDeleteUserAuthorized,
   readCommentsForPart as sbReadComments,
   readCommentsForCharacter as sbReadCommentsForCharacter,
+  readCharacterCommentSummaries as sbReadCharacterCommentSummaries,
   readCommentReadStates as sbReadCommentReadStates,
   upsertCommentReadState as sbUpsertCommentReadState,
   fetchMissedMentions as sbFetchMissedMentions,
@@ -1367,6 +1367,7 @@ import {
   editComment as sbEditComment,
   deleteComment as sbDeleteComment,
   readAllRevisions as sbReadRevisions,
+  readRevisionById as sbReadRevisionById,
   addRevision as sbAddRevision,
   updateRevision as sbUpdateRevision,
   deleteRevision as sbDeleteRevision,
@@ -2340,8 +2341,32 @@ ipcMain.handle('supabase:read-comments-for-character', wrapIpc(async (_e: unknow
   return sbReadCommentsForCharacter(characterId);
 }));
 
+ipcMain.handle('supabase:character-comment-summaries', wrapIpc(async (_e: unknown, characterIds: unknown) => {
+  const ids = validateCharacterCommentIds(characterIds);
+  const ensured = await sessionManager.ensure();
+  const userId = sessionManager.getCanonicalUserId();
+  const epoch = sessionManager.getEpoch();
+  if (!ensured.ok || !userId || ensured.payload.user?.id !== userId || ensured.payload.epoch !== epoch) {
+    throw new Error('로그인이 필요합니다.');
+  }
+  const isCurrent = () => sessionManager.getCanonicalUserId() === userId && sessionManager.getEpoch() === epoch;
+  const summaries = await sbReadCharacterCommentSummaries(ids, userId, isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+  return summaries;
+}));
+
 ipcMain.handle('supabase:read-comment-read-states', wrapIpc(async (_e: unknown, userId: string) => {
-  return sbReadCommentReadStates(userId);
+  const ensured = await sessionManager.ensure();
+  const actorId = sessionManager.getCanonicalUserId();
+  const epoch = sessionManager.getEpoch();
+  if (!ensured.ok || !actorId || ensured.payload.user?.id !== actorId || ensured.payload.epoch !== epoch) {
+    throw new Error('로그인이 필요합니다.');
+  }
+  if (typeof userId !== 'string' || userId.trim() !== actorId) throw new Error('현재 로그인한 사용자의 읽음 기록만 조회할 수 있어요.');
+  const isCurrent = () => sessionManager.getCanonicalUserId() === actorId && sessionManager.getEpoch() === epoch;
+  const states = await sbReadCommentReadStates(actorId, isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 조회해주세요.');
+  return states;
 }));
 
 ipcMain.handle('supabase:upsert-comment-read-state', wrapIpc(async (
@@ -2622,14 +2647,59 @@ const icsSubscriptionIpc = registerIcsSubscriptionIpc({
 void icsSubscriptionIpc.primeOnStartup();
 
 // ─── Revisions ───
+const retakeNotificationService = new RetakeNotificationService({
+  getActor: async (): Promise<RetakeNotificationActor> => {
+    const ensured = await sessionManager.ensure();
+    const userId = sessionManager.getCanonicalUserId();
+    const epoch = sessionManager.getEpoch();
+    if (!ensured.ok || !userId || ensured.payload.user?.id !== userId || ensured.payload.epoch !== epoch) {
+      throw new Error('로그인이 필요합니다.');
+    }
+    // Capture the authenticated session before persistence; Slack directory availability is not a save precondition.
+    const user = ensured.payload.user;
+    return {
+      id: user.id, name: user.name, epoch,
+      role: typeof user.role === 'string' ? user.role : 'user',
+      isCompositor: user.isCompositor === true,
+      slackId: typeof user.slackId === 'string' ? user.slackId : undefined,
+    };
+  },
+  isActorCurrent: (actor) => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch,
+  readRevision: sbReadRevisionById,
+  readUsers: sbReadUsers,
+  sendSlack: (payload, isCurrent) => postSlackWebhook(SLACK_WEBHOOK_URL, payload, 'Retake Slack', 8_000, isCurrent),
+  broadcast: broadcastRetakeReminder,
+  onDeliveryResult: (payload) => {
+    if (sessionManager.getCanonicalUserId() !== payload.userId || sessionManager.getEpoch() !== payload.epoch) return;
+    broadcastToAllWindows('supabase:broadcast-event', { event: 'retake-delivery-result', payload });
+  },
+  createEventId: randomUUID,
+});
+ipcMain.handle('supabase:remind-retake', wrapIpc(async (_e: unknown, revisionId: string) => {
+  return retakeNotificationService.remind(revisionId);
+}));
 ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
-  return sbReadRevisions();
+  const actor = await retakeNotificationService.captureActor();
+  const isCurrent = () => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch;
+  const revisions = await sbReadRevisions(isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  return revisions;
+}));
+
+ipcMain.handle('supabase:read-revision-by-id', wrapIpc(async (_event, revisionId: string) => {
+  const actor = await retakeNotificationService.captureActor();
+  const isCurrent = () => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch;
+  const revision = await sbReadRevisionById(revisionId, isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  return revision;
 }));
 ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, partUuid: string, sceneId: string,
     revisionNo: number, status: string, priority: string, description: string, frameNo: string,
     imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
     notifyUserIdsJson?: string, assigneeIdsJson?: string, setId?: string) => {
+    const notificationActor = await retakeNotificationService.captureActor();
     await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt, notifyUserIdsJson, assigneeIdsJson, setId);
+    retakeNotificationService.startAssignmentDelivery(id, notificationActor);
     if (currentActivityUser) {
       try {
         // sceneId 가 sceneKey 형식 (예: 'EP02:A:35') 일 수 있으므로 파싱 + raw- prefix 디코드 (Codex P2)
@@ -2711,7 +2781,14 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
   // 별도 확인하는 비대칭은 삭제의 감사 귀속(Codex #8) 목적이며 실수가 아니다.
   // 리테이크 허브 2단계: __op 는 활동기록 분기 전용 신호 — DB 로는 보내지 않는다(fieldMap 미등록이라 분리).
   const { __op, ...dbUpdates } = updates;
+  const reassignmentNotification = typeof dbUpdates.assigneeIds === 'string'
+    ? await retakeNotificationService.captureReassignment(id, dbUpdates.assigneeIds)
+    : null;
   const { affected: revisionAffected } = await sbUpdateRevision(id, dbUpdates);
+  if (!revisionAffected) return { affected: false };
+  if (reassignmentNotification) {
+    retakeNotificationService.startReassignmentDelivery(id, reassignmentNotification);
+  }
   // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
   // 우선순위: 최종완료 > 재배정(동반 status 전이보다 우선, 한솔 §7.3 '재배정 포함') > 담당완료 > 진행중 > 해결.
   // 주의: finalResolvedAt 이 빈 문자열('')이면(최종완료 되돌리기) truthy 아님 → 분기 제외(의도된 조용한 스킵).
@@ -2806,6 +2883,7 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
       });
     } catch { /* 무시 */ }
   }
+  return { affected: true };
 }));
 // Codex 리뷰 #8 P1: 리비전 삭제는 renderer-provided userId 를 신뢰하면 안 됨.
 // 신뢰된 출처(메모리 session + auth.json 파일)에서 직접 해석.
@@ -2913,7 +2991,11 @@ ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: strin
 
 // ─── Comp Revision Sets (리테이크 세트) ───
 ipcMain.handle('supabase:read-revision-sets', wrapIpc(async () => {
-  return sbReadRevisionSets();
+  const actor = await retakeNotificationService.captureActor();
+  const isCurrent = () => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch;
+  const sets = await sbReadRevisionSets(isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  return sets;
 }));
 ipcMain.handle('supabase:add-revision-set', wrapIpc(async (_e: unknown, input: AddRevisionSetInput) => {
   return sbAddRevisionSet(input);
@@ -3202,17 +3284,15 @@ const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/triggers/T03HKE9MNCV/10736370
 // 리깅 완성 작업공지용 워크플로 트리거(멘션용과 별개 워크플로). 변수: CH_name / Path / bigo / image.
 const SLACK_RIGGING_WEBHOOK_URL = 'https://hooks.slack.com/triggers/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';
 
-async function postSlackWebhook(url: string, payload: Record<string, string>, tag: string): Promise<{ ok: boolean }> {
-  console.log(`[${tag}] 요청 페이로드:`, JSON.stringify(payload));
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+const slackWorkflowTransport = new SlackWorkflowTransport();
+
+async function postSlackWebhook(url: string, payload: Record<string, string>, tag: string, timeoutMs?: number, isCurrent?: () => boolean): Promise<{ ok: boolean }> {
+  const userId = sessionManager.getCanonicalUserId();
+  const epoch = sessionManager.getEpoch();
+  return slackWorkflowTransport.send(url, payload, {
+    tag, timeoutMs,
+    isCurrent: isCurrent ?? (() => sessionManager.getCanonicalUserId() === userId && sessionManager.getEpoch() === epoch),
   });
-  const body = await res.text();
-  console.log(`[${tag}] 응답:`, res.status, body);
-  if (!res.ok) throw new Error(`Slack webhook failed: ${res.status} — ${body}`);
-  return { ok: true };
 }
 
 ipcMain.handle('slack:send-webhook', wrapIpc(async (_e: unknown, payload: Record<string, string>) => {
@@ -4580,7 +4660,7 @@ ipcMain.handle('widget:resize', (_event, widgetId: string, width: number, height
 // 위젯 팝업의 씬 행 → 본체 윈도우 포커스 + 해당 씬 상세 열기 (feedback:jump-to-scene 패턴 미러링)
 ipcMain.handle('widget:navigate-main', (_e, payload: {
   sheetName: string; sceneId: string; sceneUuid: string;
-  episodeNumber?: number; partId?: string;
+  episodeNumber?: number; partId?: string; revisionId?: string;
 }) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -4796,44 +4876,136 @@ ipcMain.handle('widget:get-saved-state', (_event, widgetId: string) => {
 const PROTOCOL = 'bflow';
 const DEEPLINK_FILE = path.join(app.getPath('userData'), 'deeplink.txt');
 
-let pendingDeepLink: string | null = null;
+// ─── 딥링크 전달 준비 계약 ──────────────────────────────
+type DeepLinkSubscription = { documentId: string; subscriptionId: number };
+type DeepLinkReceipt = DeepLinkSubscription & { deliveryId: number };
+let pendingDeepLink: { data: BflowDeepLink; deliveryId: number } | null = null;
+let deepLinkSequence = 0;
+let deepLinkDocumentId: string | null = null;
+let deepLinkSubscription: DeepLinkSubscription | null = null;
+let deepLinkInFlight: DeepLinkReceipt | null = null;
+// One Windows launch can arrive through both second-instance and the file fallback.
+// Keep transport identities through ACK/reload; a deliberate re-click gets a new launch ID.
+const seenDeepLinkLaunchIds = new Set<string>();
+const MAX_SEEN_DEEP_LINK_LAUNCHES = 256;
 
-function parseDeepLink(url: string): { sheetName: string; sceneId: string } | null {
+function normalizeDeepLinkLaunchId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : undefined;
+}
+
+function parseDeepLinkFile(content: string): { url: string; launchId?: string } | null {
+  const text = content.trim();
+  if (parseBflowDeepLink(text)) return { url: text }; // Legacy URL-only fallback.
   try {
-    const u = new URL(url);
-    if (u.protocol !== `${PROTOCOL}:`) return null;
-    if (u.host !== 'scene') return null;
-    const segments = u.pathname.replace(/^\/+/, '').split('/');
-    if (segments.length < 2) return null;
-    return { sheetName: decodeURIComponent(segments[0]), sceneId: decodeURIComponent(segments[1]) };
+    const value = JSON.parse(text) as { url?: unknown; launchId?: unknown } | null;
+    if (!value || typeof value.url !== 'string' || !parseBflowDeepLink(value.url)) return null;
+    return { url: value.url, launchId: normalizeDeepLinkLaunchId(value.launchId) };
+  } catch { return null; }
+}
+
+function resetDeepLinkRenderer(): void {
+  deepLinkDocumentId = null;
+  deepLinkSubscription = null;
+  deepLinkInFlight = null;
+}
+
+function flushPendingDeepLink(): void {
+  if (!pendingDeepLink || !deepLinkSubscription || !mainWindow || mainWindow.isDestroyed()) return;
+  const receipt = { ...deepLinkSubscription, deliveryId: pendingDeepLink.deliveryId };
+  if (deepLinkInFlight?.deliveryId === receipt.deliveryId
+    && deepLinkInFlight.subscriptionId === receipt.subscriptionId) return;
+  deepLinkInFlight = receipt;
+  try {
+    mainWindow.webContents.send('deep-link', pendingDeepLink.data, receipt);
   } catch {
-    return null;
+    // 파괴/재로드 중이면 다음 document-ready + 구독 응답까지 요청을 보관한다.
+    resetDeepLinkRenderer();
   }
 }
 
-function sendDeepLinkToRenderer(url: string): void {
-  const parsed = parseDeepLink(url);
-  if (!parsed) return;
-  console.log('[DeepLink] 전달:', parsed);
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('deep-link', parsed);
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-  } else {
-    // 메인 창이 파괴된 상태 (렌더러 크래시 등) → pendingDeepLink로 저장하고
-    // showMainWindow()로 창 복구 트리거. 새 창의 did-finish-load 시점에 처리됨.
-    pendingDeepLink = url;
-    showMainWindow();
-  }
+function bindDeepLinkWindow(win: BrowserWindow): void {
+  resetDeepLinkRenderer();
+  const contents = win.webContents;
+  contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (mainWindow === win && isMainFrame && !isInPlace) resetDeepLinkRenderer();
+  });
+  contents.on('dom-ready', () => {
+    if (mainWindow !== win || win.isDestroyed()) return;
+    resetDeepLinkRenderer();
+    deepLinkDocumentId = randomUUID();
+    // preload는 DOM 로드 전부터 이 메시지를 받는다. React 구독 준비는 별도 응답이다.
+    contents.send('deep-link:document-ready', deepLinkDocumentId);
+  });
+  contents.on('render-process-gone', () => {
+    if (mainWindow === win) resetDeepLinkRenderer();
+  });
+  win.on('closed', () => {
+    if (mainWindow === win) resetDeepLinkRenderer();
+  });
 }
+
+function isCurrentDeepLinkSubscription(
+  event: Electron.IpcMainEvent,
+  value: unknown,
+): value is DeepLinkSubscription {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
+  const frame = event.senderFrame;
+  const mainFrame = mainWindow.webContents.mainFrame;
+  if (!frame || frame.processId !== mainFrame.processId || frame.routingId !== mainFrame.routingId) return false;
+  const subscription = value as DeepLinkSubscription | null;
+  return !!subscription && !!deepLinkDocumentId && subscription.documentId === deepLinkDocumentId
+    && Number.isSafeInteger(subscription.subscriptionId) && subscription.subscriptionId > 0;
+}
+
+ipcMain.on('deep-link:ready', (event, subscription: unknown) => {
+  if (!isCurrentDeepLinkSubscription(event, subscription)) return;
+  deepLinkSubscription = subscription;
+  flushPendingDeepLink();
+});
+ipcMain.on('deep-link:not-ready', (event, subscription: unknown) => {
+  if (!isCurrentDeepLinkSubscription(event, subscription)
+    || subscription.subscriptionId !== deepLinkSubscription?.subscriptionId) return;
+  deepLinkSubscription = null;
+  deepLinkInFlight = null;
+});
+ipcMain.on('deep-link:ack', (event, receipt: DeepLinkReceipt) => {
+  if (!isCurrentDeepLinkSubscription(event, receipt)
+    || receipt.subscriptionId !== deepLinkSubscription?.subscriptionId
+    || receipt.deliveryId !== deepLinkInFlight?.deliveryId
+    || receipt.deliveryId !== pendingDeepLink?.deliveryId) return;
+  pendingDeepLink = null;
+  deepLinkInFlight = null;
+});
+
+function queueDeepLink(url: string, launchId?: string): boolean {
+  const data = parseBflowDeepLink(url);
+  if (!data) return false;
+  const identity = normalizeDeepLinkLaunchId(launchId);
+  if (identity) {
+    if (seenDeepLinkLaunchIds.has(identity)) return false;
+    seenDeepLinkLaunchIds.add(identity);
+    if (seenDeepLinkLaunchIds.size > MAX_SEEN_DEEP_LINK_LAUNCHES) {
+      seenDeepLinkLaunchIds.delete(seenDeepLinkLaunchIds.values().next().value!);
+    }
+  }
+  // 화면 준비를 기다리는 동안 여러 요청이 오면 마지막 유효한 링크를 연다.
+  pendingDeepLink = { data, deliveryId: ++deepLinkSequence };
+  flushPendingDeepLink();
+  return true;
+}
+
+function sendDeepLinkToRenderer(url: string, launchId?: string): void {
+  if (!queueDeepLink(url, launchId)) return;
+  if (app.isReady()) showMainWindow();
+}
+// ─── 딥링크 전달 준비 계약 끝 ───────────────────────────
 
 /** 딥링크 파일에 URL 기록 (두 번째 인스턴스 → 첫 번째 인스턴스 전달용) */
-function writeDeepLinkFile(url: string): void {
+function writeDeepLinkFile(url: string, launchId: string): void {
   try {
     const dir = path.dirname(DEEPLINK_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DEEPLINK_FILE, url, 'utf-8');
+    fs.writeFileSync(DEEPLINK_FILE, JSON.stringify({ url, launchId }), 'utf-8');
   } catch (err) {
     console.error('[DeepLink] 파일 쓰기 실패:', err);
   }
@@ -4848,28 +5020,33 @@ function watchDeepLinkFile(): void {
   setInterval(() => {
     try {
       if (!fs.existsSync(DEEPLINK_FILE)) return;
-      const url = fs.readFileSync(DEEPLINK_FILE, 'utf-8').trim();
+      const request = parseDeepLinkFile(fs.readFileSync(DEEPLINK_FILE, 'utf-8'));
       fs.unlinkSync(DEEPLINK_FILE);
-      if (url) {
-        console.log('[DeepLink] 파일에서 URL 감지:', url);
-        sendDeepLinkToRenderer(url);
+      if (request) {
+        console.log('[DeepLink] 파일에서 URL 감지:', request.url);
+        sendDeepLinkToRenderer(request.url, request.launchId);
       }
     } catch { /* 파일 경합 무시 */ }
   }, 500);
 }
 
 // 싱글 인스턴스 + 딥링크 전달
-const gotTheLock = app.requestSingleInstanceLock();
+const deepLinkLaunchId = randomUUID();
+const gotTheLock = app.requestSingleInstanceLock({ bflowDeepLinkLaunchId: deepLinkLaunchId });
 if (!gotTheLock) {
   // 두 번째 인스턴스: 딥링크 파일만 기록하고 조용히 종료
   // requestSingleInstanceLock()이 false를 반환하면 argv는 이미 첫 번째 인스턴스로 전달됨
   // 파일 기록은 second-instance IPC가 유실될 경우의 폴백
   const deepLinkUrl = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
-  if (deepLinkUrl) writeDeepLinkFile(deepLinkUrl);
+  if (deepLinkUrl) writeDeepLinkFile(deepLinkUrl, deepLinkLaunchId);
   // ★ ready 이전에 quit/exit하면 Windows가 "프로그램 실패"로 인식 → 비프음 재생
   // ready까지 기다린 후 조용히 종료해야 비프음 방지
   app.on('ready', () => setTimeout(() => app.exit(0), 50));
 } else {
+  // 최초 argv는 한 번만 보관한다. 로드 완료 때 다시 읽으면 이후 요청을 덮어쓴다.
+  const initialDeepLink = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+  if (initialDeepLink) queueDeepLink(initialDeepLink, deepLinkLaunchId);
+
   // ★ 프로토콜 등록은 첫 번째 인스턴스에서만!
   // 두 번째 인스턴스에서 호출하면 cwd가 system32일 때 레지스트리가 깨짐
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -4882,12 +5059,15 @@ if (!gotTheLock) {
   }
 
   // 첫 번째 인스턴스: second-instance 이벤트 + 파일 감시
-  app.on('second-instance', (_event, argv) => {
+  app.on('second-instance', (_event, argv, _workingDirectory, additionalData) => {
     console.log('[DeepLink] second-instance argv:', argv);
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     console.log('[DeepLink] 추출된 URL:', deepLinkUrl ?? '(없음)');
     if (deepLinkUrl) {
-      sendDeepLinkToRenderer(deepLinkUrl);
+      const launchId = additionalData && typeof additionalData === 'object'
+        ? normalizeDeepLinkLaunchId((additionalData as { bflowDeepLinkLaunchId?: unknown }).bflowDeepLinkLaunchId)
+        : undefined;
+      sendDeepLinkToRenderer(deepLinkUrl, launchId);
     } else {
       // URL 없는 경우에도 창 활성화 (showMainWindow가 필요 시 재생성까지 책임짐)
       showMainWindow();
@@ -5204,8 +5384,8 @@ app.whenReady().then(async () => {
   // Supabase Realtime 구독 시작
   startSupabaseRealtime();
 
-  // 저장된 위젯 자동 복원 (Phase 0-6) + 보류 딥링크 전달
-  // .once: 렌더러 재로드(Ctrl+Shift+R, 크래시 복구) 시 재실행 방지 — 사용자가 닫은 위젯 재등장/딥링크 재실행 차단
+  // 저장된 위젯 자동 복원 (Phase 0-6)
+  // .once: 렌더러 재로드(Ctrl+Shift+R, 크래시 복구) 시 사용자가 닫은 위젯 재등장 방지
   if (mainWindow) {
     mainWindow.webContents.once('did-finish-load', () => {
       if (widgetPositionCache.size > 0) {
@@ -5223,14 +5403,6 @@ app.whenReady().then(async () => {
           }
         }
       }
-      // 앱 시작 시 보류된 딥링크 전달
-      if (pendingDeepLink) {
-        sendDeepLinkToRenderer(pendingDeepLink);
-        pendingDeepLink = null;
-      }
-      // Windows: 프로세스 argv에서 딥링크 확인 (프로토콜 핸들러로 앱이 시작된 경우)
-      const argDeepLink = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
-      if (argDeepLink) sendDeepLinkToRenderer(argDeepLink);
     });
   }
 
