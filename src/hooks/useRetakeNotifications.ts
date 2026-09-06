@@ -14,7 +14,8 @@ export function useRetakeNotifications(): void {
   const authReady = useAuthStore((s) => s.authReady);
   const activeNotificationUser = useNotificationStore((s) => s.activeUserId);
   const dataConnected = useAppStore((s) => s.dataConnected);
-  const pendingRetakeId = useAppStore((s) => s.pendingRetakeId);
+  const retakeRequest = useAppStore((s) => s.retakeNavigationRequest);
+  const localRevisions = useRevisionStore((s) => s.revisions);
   const seenReminders = useRef(new Set<string>());
   const [retryAttempt, setRetryAttempt] = useState(0);
 
@@ -94,25 +95,22 @@ export function useRetakeNotifications(): void {
   }, [authReady, currentUser?.id, activeNotificationUser, dataConnected]);
 
   useEffect(() => {
-    if (!pendingRetakeId || !authReady || !currentUser || !dataConnected) return;
+    if (!retakeRequest || !authReady || !currentUser || !dataConnected) return;
     let cancelled = false;
     const userId = currentUser.id;
-    const stillCurrent = () => !cancelled && useAppStore.getState().pendingRetakeId === pendingRetakeId
+    const stillCurrent = () => !cancelled && useAppStore.getState().retakeNavigationRequest?.id === retakeRequest.id
       && useAuthStore.getState().currentUser?.id === userId;
     void getCanonicalRevisions().then((revisions) => {
       const app = useAppStore.getState();
       if (!stillCurrent()) return;
-      const revision = revisions.find((item) => item.id === pendingRetakeId);
+      const revision = revisions.find((item) => item.id === retakeRequest.revisionId);
       if (!revision) {
-        app.setPendingRetakeId(null);
+        app.finishRetakeNavigation(retakeRequest.id, null);
         toast.error('리테이크를 찾지 못했습니다. 삭제된 항목인지 확인해주세요.');
         return;
       }
-      const store = useRevisionStore.getState();
-      const existing = store.revisions.find((item) => item.id === revision.id);
-      if (existing) store.updateRevisionOptimistic(revision.id, existing.sceneKey, revision);
-      else store.addRevisionOptimistic(revision);
-      app.setView(revision.setId ? 'retake-hub' : 'compositing-revisions');
+      // The destination applies this verified snapshot after its ordinary list load, then consumes it.
+      app.finishRetakeNavigation(retakeRequest.id, revision);
     }).catch(() => {
       if (!stillCurrent()) return;
       toast.error('리테이크를 불러오지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.', {
@@ -120,5 +118,11 @@ export function useRetakeNotifications(): void {
       });
     });
     return () => { cancelled = true; };
-  }, [pendingRetakeId, authReady, currentUser?.id, dataConnected, retryAttempt]);
+  }, [retakeRequest, authReady, currentUser?.id, dataConnected, retryAttempt]);
+
+  useEffect(() => {
+    if (!retakeRequest || !authReady || !currentUser || dataConnected) return;
+    const revision = localRevisions.find((item) => item.id === retakeRequest.revisionId);
+    if (revision) useAppStore.getState().finishRetakeNavigation(retakeRequest.id, revision);
+  }, [retakeRequest, localRevisions, authReady, currentUser?.id, dataConnected]);
 }

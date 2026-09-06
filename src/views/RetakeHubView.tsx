@@ -16,7 +16,7 @@
  * spec: docs/superpowers/specs/2026-06-17-retake-hub-redesign-design.md §9
  */
 
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ListChecks, Plus, Trash2, Users as UsersIcon, ChevronRight, FolderInput } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -244,6 +244,8 @@ export default function RetakeHubView() {
   const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
   const dataConnected = useAppStore((s) => s.dataConnected);
   const pendingRetakeId = useAppStore((s) => s.pendingRetakeId);
+  const pendingRetakeTarget = useAppStore((s) => s.pendingRetakeTarget);
+  const refreshedRetakeRequest = useRef<number | null>(null);
   const [focusedRevisionId, setFocusedRevisionId] = useState<string | null>(null);
   const [focusToken, setFocusToken] = useState(0);
 
@@ -272,14 +274,35 @@ export default function RetakeHubView() {
 
   useEffect(() => {
     if (!pendingRetakeId || !revisionsLoaded || loadingSets) return;
-    const revision = revisions.find((item) => item.id === pendingRetakeId);
-    if (!revision?.setId || !sets.some((set) => set.id === revision.setId)) return;
+    const verified = pendingRetakeTarget?.revision;
+    const revision = verified?.id === pendingRetakeId ? verified : revisions.find((item) => item.id === pendingRetakeId);
+    if (!revision?.setId) return;
+    if (!sets.some((set) => set.id === revision.setId)) {
+      if (pendingRetakeTarget && refreshedRetakeRequest.current !== pendingRetakeTarget.requestId) {
+        const requestId = pendingRetakeTarget.requestId;
+        refreshedRetakeRequest.current = requestId;
+        const refresh = () => {
+          const app = useAppStore.getState();
+          if (app.pendingRetakeTarget?.requestId !== requestId || app.currentView !== 'retake-hub') return;
+          void loadRevisionSets().then((nextSets) => {
+            if (useAppStore.getState().pendingRetakeTarget?.requestId !== requestId
+              || nextSets.some((set) => set.id === revision.setId)) return;
+            sonnerToast.error('리테이크 세트를 불러오지 못했어요. 연결 상태를 확인해주세요.', {
+              action: { label: '다시 시도', onClick: refresh },
+            });
+          });
+        };
+        refresh();
+      }
+      return;
+    }
+    if (verified) useRevisionStore.getState().applyNavigationRevision(revision.id, revision);
     select(revision.setId);
     setTab('part');
     setFocusedRevisionId(revision.id);
     setFocusToken((value) => value + 1);
     useAppStore.getState().setPendingRetakeId(null);
-  }, [pendingRetakeId, revisionsLoaded, loadingSets, revisions, sets, select]);
+  }, [pendingRetakeId, pendingRetakeTarget, revisionsLoaded, loadingSets, revisions, sets, select]);
 
   const userNameOf = useMemo(() => {
     const map = new Map(allUsers.map((u) => [u.id, u.name]));

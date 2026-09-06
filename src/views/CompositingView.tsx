@@ -59,6 +59,7 @@ export default function CompositingView({
   const { revisions, loadRevisions, updateStatus, isLoading } = useRevisionStore();
   const notifications = useNotificationStore((s) => s.notifications);
   const pendingRetakeId = useAppStore((s) => s.pendingRetakeId);
+  const pendingRetakeTarget = useAppStore((s) => s.pendingRetakeTarget);
   const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
 
   const [selectedEp, setSelectedEp] = useState<number | null>(null);
@@ -209,8 +210,10 @@ export default function CompositingView({
 
   useEffect(() => {
     if (!pendingRetakeId || (!previewMode && !revisionsLoaded)) return;
-    const revision = revisions.find((item) => item.id === pendingRetakeId);
+    const verified = pendingRetakeTarget?.revision;
+    const revision = verified?.id === pendingRetakeId ? verified : revisions.find((item) => item.id === pendingRetakeId);
     if (!revision || revision.setId) return;
+    if (verified) useRevisionStore.getState().applyNavigationRevision(revision.id, revision);
     const info = sceneInfoMap.get(revision.sceneKey);
     setSelectedEp(null);
     setStatusFilter('all');
@@ -224,7 +227,7 @@ export default function CompositingView({
     }
     setSelectedRevisionId(revision.id);
     useAppStore.getState().setPendingRetakeId(null);
-  }, [pendingRetakeId, revisions, revisionsLoaded, previewMode, sceneInfoMap]);
+  }, [pendingRetakeId, pendingRetakeTarget, revisions, revisionsLoaded, previewMode, sceneInfoMap]);
 
   // v1.19.0: 검색 + 정렬 적용된 리테이크. 그룹핑 단계 입력으로 사용.
   // 코덱스 P2 fix (5차, 2026-05-05): "댓글 많은순" 정렬 시 commentCountByRev 전달.

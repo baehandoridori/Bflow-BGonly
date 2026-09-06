@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter, UpdateInfo } from '@/types';
+import type { CompRevision, WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter, UpdateInfo } from '@/types';
 import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
 import {
@@ -256,7 +256,12 @@ interface AppState {
   pendingDeepLink: { sheetName: string; sceneId: string } | null;
   setPendingDeepLink: (link: { sheetName: string; sceneId: string } | null) => void;
   pendingRetakeId: string | null;
+  pendingRetakeTarget: { requestId: number; revision: CompRevision } | null;
   setPendingRetakeId: (id: string | null) => void;
+  retakeNavigationRequest: { id: number; revisionId: string } | null;
+  nextRetakeNavigationRequestId: number;
+  requestRetakeNavigation: (revisionId: string) => number;
+  finishRetakeNavigation: (requestId: number, revision: CompRevision | null) => boolean;
 
   // 설정 탭 (외부에서 특정 탭으로 이동 시 사용)
   settingsTab: string | null;
@@ -526,7 +531,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingDeepLink: null,
   setPendingDeepLink: (link) => set({ pendingDeepLink: link }),
   pendingRetakeId: null,
-  setPendingRetakeId: (id) => set({ pendingRetakeId: id }),
+  pendingRetakeTarget: null,
+  setPendingRetakeId: (id) => set((s) => ({ pendingRetakeId: id,
+    pendingRetakeTarget: s.pendingRetakeTarget?.revision.id === id ? s.pendingRetakeTarget : null })),
+  retakeNavigationRequest: null,
+  nextRetakeNavigationRequestId: 0,
+  requestRetakeNavigation: (revisionId) => {
+    const id = get().nextRetakeNavigationRequestId + 1;
+    // 검증 중인 요청은 이미 열린 화면에도 아직 소비시키지 않는다.
+    set({ nextRetakeNavigationRequestId: id, retakeNavigationRequest: { id, revisionId },
+      pendingRetakeId: null, pendingRetakeTarget: null });
+    return id;
+  },
+  finishRetakeNavigation: (requestId, revision) => {
+    if (get().retakeNavigationRequest?.id !== requestId) return false;
+    set({ retakeNavigationRequest: null, pendingRetakeId: revision?.id ?? null,
+      pendingRetakeTarget: revision ? { requestId, revision } : null });
+    if (revision) get().setView(revision.setId ? 'retake-hub' : 'compositing-revisions');
+    return true;
+  },
 
   settingsTab: null,
   setSettingsTab: (tab) => set({ settingsTab: tab }),

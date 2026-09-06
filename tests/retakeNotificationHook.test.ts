@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { build } from 'esbuild';
+import { build, transformSync } from 'esbuild';
+import { readFileSync } from 'node:fs';
 import { createStore } from 'zustand/vanilla';
 import { selectMyRetakes, summarizeMyRetakes } from '../src/utils/myRetakes.ts';
 
@@ -27,9 +28,18 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
   const deliveryFailures: Array<{ delivery: any; expectsAppNotification: boolean }> = [];
   const lookups: Array<{ resolve: (rows: any[]) => void; reject: (error: Error) => void }> = [];
   const auth = { currentUser: { id: 'me', name: 'Me' }, authReady: true };
-  const app = { dataConnected, pendingRetakeId, currentView: 'dashboard',
-    setPendingRetakeId: (value: string | null) => { app.pendingRetakeId = value; },
-    setView: (value: string) => { app.currentView = value; } };
+  const { useAppStore: appStore } = await loadSource('src/stores/useAppStore.ts', {
+    zustand: { create: createStore },
+    '@/utils/starNestSettings': { DEFAULT_BACKGROUND_ART: 'none', DEFAULT_BFLOW_STAR_NEST_SETTINGS: {},
+      DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX: 0, DEFAULT_DASHBOARD_STAR_NEST_OPACITY: 0, DEFAULT_STAR_NEST_SETTINGS: {} },
+    '@/utils/navigationBackStack': { appendNavigationBackSnapshot: () => [], createNavigationBackSnapshot: () => ({}) },
+  });
+  appStore.setState({ dataConnected });
+  if (pendingRetakeId) appStore.getState().requestRetakeNavigation(pendingRetakeId);
+  const app = new Proxy({} as any, {
+    get: (_target, property) => appStore.getState()[property],
+    set: (_target, property, value) => { appStore.setState({ [property]: value }); return true; },
+  });
   const notifications = { activeUserId: 'me', addNotification: (value: any) => {
     notices.push(value); return `notice-${notices.length}`;
   }, markAsRead: (id: string) => read.push(id) };
@@ -41,6 +51,10 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
     loadModes.push(connectedRevisionMode);
     if (!connectedRevisionMode) revisions.revisions = [...savedLocalRevisions];
   },
+    applyNavigationRevision: (id: string, value: any) => {
+      revisions.revisions = revisions.revisions.filter(item => item.id !== id);
+      if (value) revisions.revisions.push(value);
+    },
     addRevisionOptimistic: (value: any) => revisions.revisions.push(value),
     updateRevisionOptimistic: (id: string, _key: string, value: any) => {
       revisions.revisions = revisions.revisions.map((item) => item.id === id ? { ...item, ...value } : item);
@@ -63,6 +77,7 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
   });
   module.useRetakeNotifications();
   return { effects, notices, read, navigated, toasts, lookups, auth, app, notifications, revisions, api, loadModes, deliveryFailures,
+    render: () => { effects.length = 0; module.useRetakeNotifications(); },
     broadcast: (value: unknown) => onBroadcast(value), retryUpdates: () => retryUpdates, storeLoads: () => storeLoads };
 }
 
@@ -234,7 +249,7 @@ test('new assignee broadcasts show assignment text, dedupe each event, and keep 
   } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
 });
 
-test('cold hub link waits for canonical data and adds only the requested target before choosing the hub', async () => {
+test('cold hub link publishes only its verified target after canonical data chooses the hub', async () => {
   const h = await hookHarness('new-retake');
   h.revisions.revisions.push({ ...revision, id: 'existing' });
   const cleanup = h.effects[1]();
@@ -242,17 +257,18 @@ test('cold hub link waits for canonical data and adds only the requested target 
   h.lookups[0].resolve([{ ...revision, id: 'new-retake', setId: 'set-new' }, { ...revision, id: 'unrelated-server-item' }]);
   await flush();
   assert.equal(h.app.currentView, 'retake-hub'); assert.equal(h.app.pendingRetakeId, 'new-retake');
-  assert.deepEqual(h.revisions.revisions.map((item) => item.id), ['existing', 'new-retake']);
+  assert.equal(h.app.pendingRetakeTarget.revision.id, 'new-retake');
+  assert.deepEqual(h.revisions.revisions.map((item) => item.id), ['existing'], 'destination applies the verified target after its normal list load');
   cleanup?.();
 });
 
 test('pending link survives disconnected startup and canonical network failure, with an explicit retry', async () => {
   const disconnected = await hookHarness('new-retake', false);
   disconnected.effects[1]();
-  assert.equal(disconnected.lookups.length, 0); assert.equal(disconnected.app.pendingRetakeId, 'new-retake');
+  assert.equal(disconnected.lookups.length, 0); assert.equal(disconnected.app.retakeNavigationRequest.revisionId, 'new-retake');
   const h = await hookHarness('new-retake'); const cleanup = h.effects[1]();
   h.lookups[0].reject(new Error('offline')); await flush();
-  assert.equal(h.app.pendingRetakeId, 'new-retake'); assert.equal(h.app.currentView, 'dashboard');
+  assert.equal(h.app.retakeNavigationRequest.revisionId, 'new-retake'); assert.equal(h.app.currentView, 'dashboard');
   h.toasts[0][1].action.onClick(); assert.equal(h.retryUpdates(), 1);
   cleanup?.();
 });
@@ -263,13 +279,13 @@ test('positive absence clears pending while superseded and stale-user lookups do
   assert.equal(absent.app.pendingRetakeId, null); cleanupAbsent?.();
   for (const change of ['request', 'user']) {
     const h = await hookHarness('old'); const cleanup = h.effects[1]();
-    if (change === 'request') h.app.pendingRetakeId = 'new'; else h.auth.currentUser = { id: 'second', name: 'Second' };
+    if (change === 'request') h.app.requestRetakeNavigation('new'); else h.auth.currentUser = { id: 'second', name: 'Second' };
     h.lookups[0].resolve([{ ...revision, id: 'old' }]); await flush();
     assert.equal(h.revisions.revisions.length, 0); assert.equal(h.app.currentView, 'dashboard'); cleanup?.();
   }
 });
 
-test('uncached navigation preserves current screen until its canonical hub context is known', async () => {
+test('both cached and uncached connected navigation keep views from consuming unverified targets', async () => {
   const h = await hookHarness(); const selected: string[] = [];
   Object.assign(h.app, { pushNavigationBackTarget: () => {} });
   const { openRetakeInApp } = await loadSource('src/utils/retakeNavigation.ts', {
@@ -278,9 +294,147 @@ test('uncached navigation preserves current screen until its canonical hub conte
     '@/stores/useRevisionSetStore': { useRevisionSetStore: store({ select: (id: string) => selected.push(id) }) },
   });
   openRetakeInApp('uncached');
-  assert.equal(h.app.currentView, 'dashboard'); assert.equal(h.app.pendingRetakeId, 'uncached');
+  assert.equal(h.app.currentView, 'dashboard'); assert.equal(h.app.retakeNavigationRequest.revisionId, 'uncached');
+  assert.equal(h.app.pendingRetakeId, null);
   h.revisions.revisions.push({ ...revision, setId: 'set-1' }); openRetakeInApp('r1');
-  assert.equal(h.app.currentView, 'retake-hub'); assert.deepEqual(selected, ['set-1']);
+  assert.equal(h.app.currentView, 'dashboard'); assert.deepEqual(selected, []);
+  assert.equal(h.app.pendingRetakeId, null); assert.equal(h.app.retakeNavigationRequest.revisionId, 'r1');
+});
+
+function viewConsumer(view: 'hub' | 'standalone') {
+  const source = readFileSync(new URL(view === 'hub' ? '../src/views/RetakeHubView.tsx' : '../src/views/CompositingView.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const start = source.indexOf('  useEffect(() => {\n    if (!pendingRetakeId');
+  const end = source.indexOf('\n  }, [pendingRetakeId', start);
+  assert.ok(start >= 0 && end > start);
+  const body = source.slice(start + '  useEffect(() => {'.length, end);
+  const { code } = transformSync(`module.exports = (env: any) => { const {
+    pendingRetakeId, pendingRetakeTarget, revisionsLoaded, loadingSets, revisions, sets, select,
+    refreshedRetakeRequest, loadRevisionSets, sonnerToast, useAppStore, useRevisionStore,
+    setTab, setFocusedRevisionId, setFocusToken, previewMode, sceneInfoMap, setSelectedEp,
+    setStatusFilter, setMyTasksOnly, setSearchQuery, setGroupMode, setExpandedScenes,
+    setExpandedFeedbackEpisodes, setExpandedFeedbackParts, buildFeedbackHubPartCollapseKey,
+    setSelectedRevisionId,
+  } = env; ${body} }`, { loader: 'ts', format: 'cjs' });
+  const module = { exports: undefined as any };
+  new Function('module', code)(module);
+  return module.exports as (env: any) => void;
+}
+
+function destinationHarness(h: Awaited<ReturnType<typeof hookHarness>>, initialSets = ['set-a', 'set-b']) {
+  const focused: string[] = []; const selected: string[] = []; const warnings: any[] = [];
+  let sets = initialSets.map(id => ({ id })); let refreshes = 0;
+  let nextSets = sets;
+  const refreshedRetakeRequest = { current: null };
+  const noop = () => {};
+  return { focused, selected, warnings, refreshes: () => refreshes,
+    nextSets: (ids: string[]) => { nextSets = ids.map(id => ({ id })); },
+    consume: (view: 'hub' | 'standalone', revisionsLoaded = true) => viewConsumer(view)({
+      pendingRetakeId: h.app.pendingRetakeId, pendingRetakeTarget: h.app.pendingRetakeTarget,
+      revisionsLoaded, loadingSets: false, revisions: h.revisions.revisions, sets,
+      select: (id: string) => selected.push(id), refreshedRetakeRequest,
+      loadRevisionSets: async () => { ++refreshes; sets = nextSets; return sets; },
+      sonnerToast: { error: (...args: any[]) => warnings.push(args) },
+      useAppStore: store(h.app), useRevisionStore: store(h.revisions),
+      setFocusedRevisionId: (id: string) => focused.push(id), setSelectedRevisionId: (id: string) => focused.push(id),
+      setTab: noop, setFocusToken: noop, previewMode: false, sceneInfoMap: new Map(),
+      setSelectedEp: noop, setStatusFilter: noop, setMyTasksOnly: noop, setSearchQuery: noop,
+      setGroupMode: noop, setExpandedScenes: noop, setExpandedFeedbackEpisodes: noop,
+      setExpandedFeedbackParts: noop, buildFeedbackHubPartCollapseKey: noop,
+    }),
+  };
+}
+
+test('already mounted destinations wait for canonical moves in either direction and apply the verified snapshot after stale list loading', async () => {
+  for (const [oldSet, newSet] of [['set-a', 'set-b'], ['set-a', null], [null, 'set-b']]) {
+    const h = await hookHarness('r1');
+    h.app.currentView = oldSet ? 'retake-hub' : 'compositing-revisions';
+    h.revisions.revisions.push({ ...revision, setId: oldSet });
+    const destination = destinationHarness(h);
+    const cleanup = h.effects[1]();
+    destination.consume(oldSet ? 'hub' : 'standalone');
+    assert.equal(h.app.pendingRetakeId, null);
+    assert.deepEqual(destination.focused, []);
+    h.lookups[0].resolve([{ ...revision, setId: newSet }]); await flush();
+    assert.equal(h.app.currentView, newSet ? 'retake-hub' : 'compositing-revisions');
+    // Simulate the ordinary cached list read completing after the canonical lookup.
+    h.revisions.revisions = [{ ...revision, setId: oldSet }];
+    destination.consume(newSet ? 'hub' : 'standalone', false);
+    assert.deepEqual(destination.focused, []);
+    destination.consume(newSet ? 'hub' : 'standalone');
+    assert.deepEqual(destination.focused, ['r1']);
+    assert.equal(h.revisions.revisions[0].setId, newSet);
+    assert.deepEqual(destination.selected, newSet ? [newSet] : []);
+    assert.equal(h.app.pendingRetakeId, null); cleanup?.();
+  }
+});
+
+test('cached deletion while already in the hub reports absence without consuming a target or cancelling unrelated startup loading', async () => {
+  const h = await hookHarness('r1');
+  h.app.currentView = 'retake-hub'; h.revisions.revisions.push({ ...revision, setId: 'set-a' });
+  const destination = destinationHarness(h);
+  let finishWarmup: () => void = () => {};
+  h.revisions.loadRevisions = () => new Promise<void>(resolve => { finishWarmup = () => {
+    h.revisions.revisions = [{ ...revision, id: 'other-valid' }]; resolve();
+  }; });
+  const previousWindow = (globalThis as any).window;
+  (globalThis as any).window = { electronAPI: h.api };
+  const cleanupWarmup = h.effects[0](); const cleanup = h.effects[1]();
+  try {
+    destination.consume('hub'); h.lookups[1].resolve([]); await flush();
+    assert.equal(h.app.retakeNavigationRequest, null); assert.equal(h.app.pendingRetakeId, null);
+    assert.deepEqual(destination.focused, []); assert.match(h.toasts[0][0], /찾지 못했습니다/);
+    finishWarmup(); await flush();
+    assert.equal(h.revisions.revisions[0].id, 'other-valid');
+    assert.equal(h.app.currentView, 'retake-hub');
+  } finally { cleanup?.(); cleanupWarmup?.(); (globalThis as any).window = previousWindow; }
+});
+
+test('same-ID repeated requests accept only the latest canonical reply', async () => {
+  const h = await hookHarness('r1'); const oldCleanup = h.effects[1]();
+  const oldId = h.app.retakeNavigationRequest.id;
+  h.app.requestRetakeNavigation('r1'); h.render(); const cleanup = h.effects[1]();
+  assert.ok(h.app.retakeNavigationRequest.id > oldId);
+  h.lookups[1].resolve([{ ...revision, setId: 'set-b' }]); await flush();
+  h.lookups[0].resolve([{ ...revision, setId: 'set-a' }]); await flush();
+  assert.equal(h.app.pendingRetakeTarget.revision.setId, 'set-b');
+  oldCleanup?.(); cleanup?.();
+});
+
+test('already mounted hub refreshes a missing verified set once and can retry a failed metadata read', async () => {
+  const h = await hookHarness('r1'); h.app.currentView = 'retake-hub';
+  const cleanup = h.effects[1]();
+  h.lookups[0].resolve([{ ...revision, setId: 'set-b' }]); await flush();
+  const destination = destinationHarness(h, ['set-a']);
+  destination.consume('hub'); await flush(); destination.consume('hub');
+  assert.equal(destination.refreshes(), 1); assert.equal(destination.focused.length, 0);
+  assert.equal(destination.warnings.length, 1);
+  destination.nextSets(['set-a', 'set-b']); destination.warnings[0][1].action.onClick(); await flush();
+  destination.consume('hub');
+  assert.equal(destination.refreshes(), 2); assert.deepEqual(destination.selected, ['set-b']);
+  assert.deepEqual(destination.focused, ['r1']); cleanup?.();
+});
+
+test('local cached widget navigation stays immediate and popup forwarding stays in the main window', async () => {
+  const h = await hookHarness(null, false); h.revisions.revisions.push({ ...revision, setId: 'set-a' });
+  const { openRetakeInApp } = await loadSource('src/utils/retakeNavigation.ts', {
+    '@/stores/useAppStore': { useAppStore: store(h.app) }, '@/stores/useRevisionStore': { useRevisionStore: store(h.revisions) },
+  });
+  openRetakeInApp('r1'); assert.equal(h.app.currentView, 'retake-hub'); assert.equal(h.lookups.length, 0);
+  const destination = destinationHarness(h); destination.consume('hub');
+  assert.deepEqual(destination.focused, ['r1']);
+  const previousWindow = (globalThis as any).window; const forwarded: any[] = [];
+  (globalThis as any).window = { electronAPI: { widgetNavigateMain: (payload: any) => forwarded.push(payload) } };
+  try { openRetakeInApp('r1', { fromPopup: true }); assert.equal(forwarded[0].revisionId, 'r1'); }
+  finally { (globalThis as any).window = previousWindow; }
+});
+
+test('a verified navigation snapshot prevents older in-flight list responses from replacing the target', async () => {
+  const h = await revisionLoadHarness();
+  h.store.setState({ revisions: [{ ...revision, setId: 'set-a' }] });
+  const oldRead = h.store.getState().loadRevisions();
+  h.store.getState().applyNavigationRevision('r1', { ...revision, setId: 'set-b' });
+  h.requests[0]([{ ...revision, setId: 'set-a' }]); await oldRead;
+  assert.equal(h.store.getState().revisions[0].setId, 'set-b');
 });
 
 test('reminder results from a previous item cannot set the next item cooldown or messages', async () => {

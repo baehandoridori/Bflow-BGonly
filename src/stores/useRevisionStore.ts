@@ -49,6 +49,7 @@ interface RevisionState {
   lastLoadTime: number | null;
 
   loadRevisions: () => Promise<void>;
+  applyNavigationRevision: (id: string, revision: CompRevision | null) => void;
   addRevisionOptimistic: (revision: CompRevision) => void;
   updateRevisionOptimistic: (id: string, sceneKey: string, updates: Partial<CompRevision>) => void;
   deleteRevisionOptimistic: (id: string) => void;
@@ -142,6 +143,17 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     } finally {
       if (loadId === revisionLoadSequence) set({ isLoading: false });
     }
+  },
+
+  applyNavigationRevision: (id, revision) => {
+    // 정확 이동에서 확인한 대상은 먼저 시작한 캐시 조회가 다시 덮지 못한다.
+    ++revisionLoadSequence;
+    set((state) => {
+      const revisions = state.revisions.filter((item) => item.id !== id);
+      if (revision) revisions.push(revision);
+      return { revisions, revisionCountByScene: buildCountMap(revisions),
+        totalOpenRevisionCount: countOpenRevisions(revisions), isLoading: false };
+    });
   },
 
   addRevisionOptimistic: (revision) => {
