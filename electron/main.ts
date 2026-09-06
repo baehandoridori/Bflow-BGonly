@@ -2775,7 +2775,8 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
     ? await retakeNotificationService.captureReassignment(id, dbUpdates.assigneeIds)
     : null;
   const { affected: revisionAffected } = await sbUpdateRevision(id, dbUpdates);
-  if (revisionAffected && reassignmentNotification) {
+  if (!revisionAffected) return { affected: false };
+  if (reassignmentNotification) {
     retakeNotificationService.startReassignmentDelivery(id, reassignmentNotification);
   }
   // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
@@ -2872,6 +2873,7 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
       });
     } catch { /* 무시 */ }
   }
+  return { affected: true };
 }));
 // Codex 리뷰 #8 P1: 리비전 삭제는 renderer-provided userId 를 신뢰하면 안 됨.
 // 신뢰된 출처(메모리 session + auth.json 파일)에서 직접 해석.

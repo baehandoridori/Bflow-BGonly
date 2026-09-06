@@ -255,6 +255,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
       console.error('[리테이크 스토어] 상태 업데이트 실패:', err);
       // 롤백: 다시 로드
       await get().loadRevisions();
+      return;
     }
     syncSetForRevision(setId); // resolved 진입/이탈이 세트 진행률을 바꾸므로 세트 자동완료 재계산
   },
@@ -343,7 +344,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: now, finalResolvedBy: byName, status: 'resolved', updatedAt: now });
     markSelfRevisionAction(rev.id, 'resolve');
     try { await revisionService.finalResolveRevision(rev, byName); }
-    catch { await get().loadRevisions(); }
+    catch { await get().loadRevisions(); return; }
     syncSetForRevision(rev.setId); // 세트 소속이면 최종완료가 세트 자동완료(done)에 반영되게
   },
 
@@ -353,7 +354,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     get().updateRevisionOptimistic(rev.id, rev.sceneKey, { finalResolvedAt: undefined, finalResolvedBy: undefined, status, updatedAt: now });
     markSelfFromStatus(rev.id, status);
     try { await revisionService.revertFinalResolve(rev); }
-    catch { await get().loadRevisions(); }
+    catch { await get().loadRevisions(); return; }
     syncSetForRevision(rev.setId); // 최종완료 되돌리면 세트가 done→open 으로 복귀해야 함
   },
 

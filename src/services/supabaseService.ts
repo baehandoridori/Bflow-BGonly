@@ -3,6 +3,7 @@
  * window.electronAPI → IPC → 메인 프로세스
  */
 
+import { assertRevisionUpdated } from '../shared/revisionPersistence';
 import type {
   Episode, Stage, ScenePhaseState, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult,
   Activity, ActionGroup,
@@ -286,7 +287,7 @@ export async function addRevisionToSupabase(
 }
 
 export async function updateRevisionInSupabase(id: string, updates: Record<string, string>): Promise<void> {
-  await window.electronAPI.supabaseUpdateRevision(id, updates);
+  assertRevisionUpdated(await window.electronAPI.supabaseUpdateRevision(id, updates));
 }
 
 // ─── Metadata ───────────────────────────────────

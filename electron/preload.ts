@@ -14,6 +14,7 @@ import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from './
 import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeWalletUpdate } from './arcadeService';
 import type { RealtimeStatusMetadata } from './realtime';
 import type { BflowDeepLink } from '../src/shared/bflowDeepLink';
+import type { RevisionUpdateResult } from '../src/shared/revisionPersistence';
 
 // ─── 딥링크 구독 준비 계약 ──────────────────────────────
 type DeepLinkReceipt = { documentId: string; subscriptionId: number; deliveryId: number };
@@ -409,7 +410,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('supabase:add-revision', id, partUuid, sceneId, revisionNo, status,
         priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt,
         notifyUserIdsJson, assigneeIdsJson, setId),
-  supabaseUpdateRevision: (id: string, updates: Record<string, string>) =>
+  supabaseUpdateRevision: (id: string, updates: Record<string, string>): Promise<RevisionUpdateResult> =>
     ipcRenderer.invoke('supabase:update-revision', id, updates),
   supabaseDeleteRevision: (id: string) =>
     ipcRenderer.invoke('supabase:delete-revision', id),

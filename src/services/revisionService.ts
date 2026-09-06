@@ -33,6 +33,7 @@ import { nextGeneralRevisionNo } from '../utils/revisionGeneral';
 import { createUuid } from '../utils/createUuid';
 import { toast } from 'sonner';
 import type { RetakeDeliveryResult } from '../shared/retakeNotifications';
+import { assertRevisionUpdated } from '../shared/revisionPersistence';
 
 export function reportRetakeDeliveryFailure(delivery: RetakeDeliveryResult | void, expectsAppNotification = false): void {
   if (!delivery || (delivery.status !== 'partial' && delivery.status !== 'failed')) return;
@@ -581,6 +582,16 @@ export async function createRevision(input: CreateRevisionServiceInput): Promise
   return revision;
 }
 
+async function updateCanonicalRevision(id: string, updates: Record<string, string>): Promise<void> {
+  try {
+    assertRevisionUpdated(await window.electronAPI.supabaseUpdateRevision(id, updates));
+  } catch (error) {
+    // Rollback must read the server again rather than restoring a deleted row from this cache.
+    invalidateRevisionsCache();
+    throw error;
+  }
+}
+
 export async function updateRevisionStatus(
   id: string,
   sceneKey: string,
@@ -597,7 +608,7 @@ export async function updateRevisionStatus(
   }
 
   if (sheetsMode) {
-    await window.electronAPI.supabaseUpdateRevision(id, updates);
+    await updateCanonicalRevision(id, updates);
     // 캐시 업데이트
     if (sheetsCache) {
       for (const lookupSceneKey of lookupSceneKeys) {
@@ -623,12 +634,14 @@ export async function updateRevisionStatus(
 
   // 로컬 모드
   const all = await loadLocalAll();
+  let affected = false;
   for (const lookupSceneKey of lookupSceneKeys) {
     const list = all[lookupSceneKey];
     if (!list) continue;
 
     const idx = list.findIndex(r => r.id === id);
     if (idx >= 0) {
+      affected = true;
       list[idx] = {
         ...list[idx],
         status,
@@ -640,6 +653,8 @@ export async function updateRevisionStatus(
       break;
     }
   }
+  if (!affected) localCache = null;
+  assertRevisionUpdated({ affected });
   await saveLocal(all);
 }
 
@@ -682,8 +697,7 @@ async function persistRevisionWorkflow(
 ): Promise<void> {
   const lookupSceneKeys = getRevisionLookupSceneKeys(rev.sceneKey);
   if (sheetsMode) {
-    const delivery = await window.electronAPI.supabaseUpdateRevision(rev.id, supabaseUpdates);
-    reportRetakeDeliveryFailure(delivery, typeof supabaseUpdates.assigneeIds === 'string');
+    await updateCanonicalRevision(rev.id, supabaseUpdates);
     if (sheetsCache) {
       for (const key of lookupSceneKeys) {
         const list = sheetsCache[key];
@@ -696,12 +710,15 @@ async function persistRevisionWorkflow(
   }
   // 로컬 모드 (preview/test fallback)
   const all = await loadLocalAll();
+  let affected = false;
   for (const key of lookupSceneKeys) {
     const list = all[key];
     if (!list) continue;
     const idx = list.findIndex((r) => r.id === rev.id);
-    if (idx >= 0) { list[idx] = { ...list[idx], ...localPatch }; break; }
+    if (idx >= 0) { list[idx] = { ...list[idx], ...localPatch }; affected = true; break; }
   }
+  if (!affected) localCache = null;
+  assertRevisionUpdated({ affected });
   await saveLocal(all);
 }
 

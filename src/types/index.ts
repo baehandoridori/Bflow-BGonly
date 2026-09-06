@@ -1,6 +1,7 @@
 import type { MarketAdminEventInput, MarketCommand, MarketRemoteState } from '../features/playground/market/types';
 import type { BflowDeepLink } from '../shared/bflowDeepLink';
 import type { RetakeDeliveryResult } from '../shared/retakeNotifications';
+import type { RevisionUpdateResult } from '../shared/revisionPersistence';
 import type { CharacterCommentSummaries } from '../shared/characterCommentSummary';
 import type {
   ArcadeExecuteCommand,
@@ -1571,7 +1572,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
   supabaseReadRevisionById: (revisionId: string) => Promise<unknown | null>;
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string, setId?: string) => Promise<RetakeDeliveryResult | void>;
   remindRetake: (revisionId: string) => Promise<RetakeDeliveryResult>;
-  supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<RetakeDeliveryResult | void>;
+  supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<RevisionUpdateResult>;
   supabaseDeleteRevision: (id: string) => Promise<void>;
   supabaseReadRevisionSets: () => Promise<CompRevisionSet[]>;
   supabaseAddRevisionSet: (input: Omit<CompRevisionSet, 'id' | 'status' | 'createdAt' | 'updatedAt'>) => Promise<CompRevisionSet>;

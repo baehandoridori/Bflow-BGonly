@@ -344,7 +344,7 @@ test('main update handler never emits reassignment notifications when persistenc
   assert.equal(h.sent.length, 0); assert.equal(h.broadcasts.length, 0);
 });
 
-function mainPersistenceHarness(options: { directoryFails?: boolean; sendSlack?: () => Promise<void> } = {}) {
+function mainPersistenceHarness(options: { directoryFails?: boolean; sendSlack?: () => Promise<void>; updateAffected?: boolean } = {}) {
   const main = fs.readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
   const ast = ts.createSourceFile('main.ts', main, ts.ScriptTarget.Latest, true);
   const statements = ast.statements.filter((node) => {
@@ -385,7 +385,9 @@ function mainPersistenceHarness(options: { directoryFails?: boolean; sendSlack?:
     sbReadRevisionById: async () => { events.push('read-revision'); return revision; },
     sbAddRevision: async () => { events.push('insert'); },
     sbUpdateRevision: async (_id: string, updates: Record<string, string>) => {
-      events.push('update'); revision.assigneeIds = JSON.parse(updates.assigneeIds); return { affected: true };
+      events.push('update');
+      if (options.updateAffected === false) return { affected: false };
+      revision.assigneeIds = JSON.parse(updates.assigneeIds); return { affected: true };
     },
     postSlackWebhook: async () => { events.push('slack'); await options.sendSlack?.(); },
     SLACK_WEBHOOK_URL: 'https://example.invalid/workflow',
@@ -420,7 +422,7 @@ test('valid canonical session still INSERTs when the notification directory fail
 test('canonical reassignment persists before notification directory failure and retains the assigned users', async () => {
   const h = mainPersistenceHarness();
   const result = await h.reassign();
-  assert.equal(result, undefined);
+  assert.equal(result.affected, true);
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(h.deliveryEvents[0].event.payload.delivery.status, 'failed');
   assert.match(h.deliveryEvents[0].event.payload.delivery.error!, /변경됐지만/);
@@ -434,7 +436,10 @@ test('INSERT and reassignment return before slow Slack finishes and later report
     const slowSlack = new Promise<void>((_resolve, reject) => { rejectSlack = reject; });
     const h = mainPersistenceHarness({ directoryFails: false, sendSlack: () => slowSlack });
     let returned = false;
-    const save = h[action]().then((result) => { assert.equal(result, undefined); returned = true; });
+    const save = h[action]().then((result) => {
+      if (action === 'create') assert.equal(result, undefined); else assert.equal(result.affected, true);
+      returned = true;
+    });
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(returned, true, 'a pending Slack timeout must not keep the save dialog open');
     assert.ok(h.events.includes(action === 'create' ? 'insert' : 'update'));
@@ -453,6 +458,16 @@ test('INSERT and reassignment return before slow Slack finishes and later report
     assert.equal(event.event.payload.delivery.status, action === 'create' ? 'failed' : 'partial');
     assert.equal(event.event.payload.delivery.slackFailedUserIds.length, 1);
   }
+});
+
+test('concurrent deletion during reassignment returns affected false without assignment Slack or app notifications', async () => {
+  const h = mainPersistenceHarness({ directoryFails: false, updateAffected: false });
+  const result = await h.reassign();
+  assert.equal(result.affected, false);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(h.events, ['read-revision', 'update']);
+  assert.deepEqual(h.revision.assigneeIds, ['pending']);
+  assert.equal(h.deliveryEvents.length, 0);
 });
 
 test('late background delivery results are discarded after the sender leaves and returns with a new epoch', async () => {

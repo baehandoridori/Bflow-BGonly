@@ -3136,7 +3136,7 @@ export function installDevElectronAPI(): void {
         : null;
       const revisions = getMockRevisionRows();
       const target = revisions.find((revision) => revision.id === id);
-      if (!target) return;
+      if (!target) return { affected: false };
       const previousStatus = target.status;
       // 프로덕션 main.ts 와 동일: __op 는 활동기록 분기 전용 신호라 행에 저장하지 않는다.
       const { __op: _op, ...rest } = updates;
@@ -3188,6 +3188,7 @@ export function installDevElectronAPI(): void {
       if (reassignmentNotification) {
         previewRetakeNotifications.startReassignmentDelivery(id, reassignmentNotification);
       }
+      return { affected: true };
     },
     supabaseDeleteRevision: async (id: string) => {
       localStore.__revisionRows = getMockRevisionRows().filter((revision) => revision.id !== id);
