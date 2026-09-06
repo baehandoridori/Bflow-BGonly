@@ -239,6 +239,7 @@ export default function RetakeHubView() {
 
   const revisions = useRevisionStore((s) => s.revisions);
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+  const isLoading = useRevisionStore((s) => s.isLoading);
   const deleteRevision = useRevisionStore((s) => s.deleteRevision);
   // 리비전 로드 완료 여부 — 자동완료 판정 가드(로드 전 빈 목록으로 done→open 오작동 방지).
   const revisionsLoaded = useRevisionStore((s) => s.lastLoadTime !== null && !s.isLoading);
@@ -273,12 +274,16 @@ export default function RetakeHubView() {
   }, [sets, selectedSetId, select]);
 
   useEffect(() => {
-    if (!pendingRetakeId || !revisionsLoaded || loadingSets) return;
-    const verified = pendingRetakeTarget?.revision;
-    const revision = verified?.id === pendingRetakeId ? verified : revisions.find((item) => item.id === pendingRetakeId);
+    // The mount's load effect may already have started after this render.
+    if (!pendingRetakeId || useRevisionStore.getState().isLoading) return;
+    const verified = pendingRetakeTarget?.revision.id === pendingRetakeId ? pendingRetakeTarget.revision : undefined;
+    // Keep complete-list guards for set mutations, while allowing this verified row after a list failure.
+    if (!verified && !revisionsLoaded) return;
+    const revision = verified ?? revisions.find((item) => item.id === pendingRetakeId);
     if (!revision?.setId) return;
     if (!sets.some((set) => set.id === revision.setId)) {
-      if (pendingRetakeTarget && refreshedRetakeRequest.current !== pendingRetakeTarget.requestId) {
+      if (loadingSets) return;
+      if (verified && pendingRetakeTarget && refreshedRetakeRequest.current !== pendingRetakeTarget.requestId) {
         const requestId = pendingRetakeTarget.requestId;
         refreshedRetakeRequest.current = requestId;
         const refresh = () => {
@@ -302,7 +307,7 @@ export default function RetakeHubView() {
     setFocusedRevisionId(revision.id);
     setFocusToken((value) => value + 1);
     useAppStore.getState().setPendingRetakeId(null);
-  }, [pendingRetakeId, pendingRetakeTarget, revisionsLoaded, loadingSets, revisions, sets, select]);
+  }, [pendingRetakeId, pendingRetakeTarget, revisionsLoaded, isLoading, loadingSets, revisions, sets, select]);
 
   const userNameOf = useMemo(() => {
     const map = new Map(allUsers.map((u) => [u.id, u.name]));

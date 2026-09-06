@@ -12,7 +12,7 @@ const revision = { id: 'r1', sceneKey: 'EP01:A:1', status: 'open', description: 
 
 async function loadSource(entry: string, dependencies: Record<string, any>) {
   const bundled = await build({ entryPoints: [entry], bundle: true, write: false, platform: 'node', format: 'cjs',
-    external: ['react', 'react/jsx-runtime', 'zustand', 'sonner', 'lucide-react', '@/stores/*', '@/services/*', '@/utils/*'] });
+    external: ['react', 'react/jsx-runtime', 'zustand', 'sonner', 'lucide-react', '@/stores/*', '@/services/*', '@/utils/*', ...Object.keys(dependencies)] });
   const module = { exports: {} as any };
   new Function('require', 'module', 'exports', bundled.outputFiles[0].text)(
     (id: string) => { assert.ok(id in dependencies, id); return dependencies[id]; }, module, module.exports);
@@ -109,11 +109,12 @@ test('local startup loads saved assignments for the dashboard without canonical 
 
 async function revisionLoadHarness() {
   const requests: Array<(rows: any[]) => void> = [];
+  const failures: Array<(error: Error) => void> = [];
   const { useRevisionStore } = await loadSource('src/stores/useRevisionStore.ts', {
     zustand: { create: createStore },
     '@/stores/useDataStore': { useDataStore: Object.assign(store({ episodes: [] }), { subscribe: () => () => {} }) },
     '@/services/revisionService': {
-      getAllRevisions: () => new Promise<any[]>(resolve => requests.push(resolve)),
+      getAllRevisions: () => new Promise<any[]>((resolve, reject) => { requests.push(resolve); failures.push(reject); }),
       buildOpenRevisionCountMap: () => ({}),
       getRevisionLookupSceneKeys: (key: string) => [key],
     },
@@ -121,7 +122,7 @@ async function revisionLoadHarness() {
     '@/utils/revisionNotificationRecipients': {},
     '@/utils/notificationSceneNavigation': {},
   });
-  return { store: useRevisionStore, requests };
+  return { store: useRevisionStore, requests, failures };
 }
 
 test('a late local startup read cannot overwrite the newer connected result or subsequent optimistic changes', async () => {
@@ -320,12 +321,12 @@ test('both cached and uncached connected navigation keep views from consuming un
 
 function viewConsumer(view: 'hub' | 'standalone') {
   const source = readFileSync(new URL(view === 'hub' ? '../src/views/RetakeHubView.tsx' : '../src/views/CompositingView.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-  const start = source.indexOf('  useEffect(() => {\n    if (!pendingRetakeId');
+  const start = source.lastIndexOf('  useEffect(() => {', source.indexOf('if (!pendingRetakeId'));
   const end = source.indexOf('\n  }, [pendingRetakeId', start);
   assert.ok(start >= 0 && end > start);
   const body = source.slice(start + '  useEffect(() => {'.length, end);
   const { code } = transformSync(`module.exports = (env: any) => { const {
-    pendingRetakeId, pendingRetakeTarget, revisionsLoaded, loadingSets, revisions, sets, select,
+    pendingRetakeId, pendingRetakeTarget, revisionsLoaded, isLoading, loadingSets, revisions, sets, select,
     refreshedRetakeRequest, loadRevisionSets, sonnerToast, useAppStore, useRevisionStore,
     setTab, setFocusedRevisionId, setFocusToken, previewMode, sceneInfoMap, setSelectedEp,
     setStatusFilter, setMyTasksOnly, setSearchQuery, setGroupMode, setExpandedScenes,
@@ -337,21 +338,26 @@ function viewConsumer(view: 'hub' | 'standalone') {
   return module.exports as (env: any) => void;
 }
 
-function destinationHarness(h: Awaited<ReturnType<typeof hookHarness>>, initialSets = ['set-a', 'set-b']) {
+function destinationHarness(h: Awaited<ReturnType<typeof hookHarness>>, initialSets = ['set-a', 'set-b'], bindings: {
+  revisionStore?: any; setStore?: any; loadSets?: () => Promise<any[]>;
+} = {}) {
   const focused: string[] = []; const selected: string[] = []; const warnings: any[] = [];
   let sets = initialSets.map(id => ({ id })); let refreshes = 0;
   let nextSets = sets;
   const refreshedRetakeRequest = { current: null };
   const noop = () => {};
+  const revisionStore = bindings.revisionStore ?? store(h.revisions);
   return { focused, selected, warnings, refreshes: () => refreshes,
     nextSets: (ids: string[]) => { nextSets = ids.map(id => ({ id })); },
-    consume: (view: 'hub' | 'standalone', revisionsLoaded = true) => viewConsumer(view)({
+    consume: (view: 'hub' | 'standalone', revisionsLoaded = true, renderedLoading = revisionStore.getState().isLoading ?? false) => viewConsumer(view)({
       pendingRetakeId: h.app.pendingRetakeId, pendingRetakeTarget: h.app.pendingRetakeTarget,
-      revisionsLoaded, loadingSets: false, revisions: h.revisions.revisions, sets,
-      select: (id: string) => selected.push(id), refreshedRetakeRequest,
-      loadRevisionSets: async () => { ++refreshes; sets = nextSets; return sets; },
+      revisionsLoaded, isLoading: renderedLoading,
+      loadingSets: bindings.setStore?.getState().loading ?? false,
+      revisions: revisionStore.getState().revisions, sets: bindings.setStore?.getState().sets ?? sets,
+      select: (id: string) => { selected.push(id); bindings.setStore?.getState().select(id); }, refreshedRetakeRequest,
+      loadRevisionSets: bindings.loadSets ?? (async () => { ++refreshes; sets = nextSets; return sets; }),
       sonnerToast: { error: (...args: any[]) => warnings.push(args) },
-      useAppStore: store(h.app), useRevisionStore: store(h.revisions),
+      useAppStore: store(h.app), useRevisionStore: revisionStore,
       setFocusedRevisionId: (id: string) => focused.push(id), setSelectedRevisionId: (id: string) => focused.push(id),
       setTab: noop, setFocusToken: noop, previewMode: false, sceneInfoMap: new Map(),
       setSelectedEp: noop, setStatusFilter: noop, setMyTasksOnly: noop, setSearchQuery: noop,
@@ -361,7 +367,7 @@ function destinationHarness(h: Awaited<ReturnType<typeof hookHarness>>, initialS
   };
 }
 
-test('already mounted destinations wait for canonical moves in either direction and apply the verified snapshot after stale list loading', async () => {
+test('already mounted destinations wait for canonical moves but open verified snapshots without a successful list load', async () => {
   for (const [oldSet, newSet] of [['set-a', 'set-b'], ['set-a', null], [null, 'set-b']]) {
     const h = await hookHarness('r1');
     h.app.currentView = oldSet ? 'retake-hub' : 'compositing-revisions';
@@ -376,13 +382,90 @@ test('already mounted destinations wait for canonical moves in either direction 
     // Simulate the ordinary cached list read completing after the canonical lookup.
     h.revisions.revisions = [{ ...revision, setId: oldSet }];
     destination.consume(newSet ? 'hub' : 'standalone', false);
-    assert.deepEqual(destination.focused, []);
-    destination.consume(newSet ? 'hub' : 'standalone');
     assert.deepEqual(destination.focused, ['r1']);
     assert.equal(h.revisions.revisions[0].setId, newSet);
     assert.deepEqual(destination.selected, newSet ? [newSet] : []);
     assert.equal(h.app.pendingRetakeId, null); cleanup?.();
   }
+});
+
+test('both cold destinations open a verified target when the initial list fails before or after verification', async () => {
+  const originalError = console.error; console.error = () => {};
+  try {
+    for (const view of ['hub', 'standalone'] as const) for (const failureFirst of [true, false]) {
+      const h = await hookHarness('r1');
+      const revisions = await revisionLoadHarness();
+      const destination = destinationHarness(h, ['set-b'], { revisionStore: revisions.store });
+      const listLoad = revisions.store.getState().loadRevisions();
+      const cleanup = h.effects[1]();
+      try {
+        if (failureFirst) { revisions.failures[0](new Error('later list page failed')); await listLoad; }
+        const verified = { ...revision, setId: view === 'hub' ? 'set-b' : null };
+        h.lookups[0].resolve(verified); await flush();
+        if (!failureFirst) {
+          destination.consume(view, false);
+          assert.deepEqual(destination.focused, [], 'an unfinished list may still supply the other revisions');
+          revisions.failures[0](new Error('late page failed')); await listLoad;
+        }
+        destination.consume(view, revisions.store.getState().lastLoadTime !== null && !revisions.store.getState().isLoading);
+        assert.deepEqual(destination.focused, ['r1'], `${view}, list failed first=${failureFirst}`);
+        assert.equal(h.app.pendingRetakeId, null);
+        assert.equal(revisions.store.getState().lastLoadTime, null, 'a single verified row is not a complete list');
+        assert.equal(revisions.store.getState().isLoading, false);
+        assert.deepEqual(revisions.store.getState().revisions, [verified]);
+      } finally { cleanup?.(); }
+    }
+  } finally { console.error = originalError; }
+});
+
+test('both destinations retain the other rows from a delayed full list and then replace only the verified target', async () => {
+  for (const view of ['hub', 'standalone'] as const) {
+    const h = await hookHarness('r1'); const revisions = await revisionLoadHarness();
+    const destination = destinationHarness(h, ['set-b'], { revisionStore: revisions.store });
+    const listLoad = revisions.store.getState().loadRevisions(); const cleanup = h.effects[1]();
+    try {
+      const verified = { ...revision, setId: view === 'hub' ? 'set-b' : null };
+      h.lookups[0].resolve(verified); await flush();
+      // The mount's load effect can start after render, before the pending-target effect runs.
+      destination.consume(view, false, false);
+      assert.deepEqual(destination.focused, []);
+      const other = { ...revision, id: 'other', description: 'another valid revision' };
+      revisions.requests[0]([{ ...revision, setId: 'old-set', description: 'stale' }, other]); await listLoad;
+      destination.consume(view, true);
+      assert.deepEqual(destination.focused, ['r1']);
+      assert.deepEqual(revisions.store.getState().revisions, [other, verified]);
+      assert.notEqual(revisions.store.getState().lastLoadTime, null);
+    } finally { cleanup?.(); }
+  }
+});
+
+test('a cold verified hub target survives a failed real set load and opens after retry while the list remains unavailable', async () => {
+  const h = await hookHarness('r1'); const revisions = await revisionLoadHarness();
+  const { useRevisionSetStore: setStore } = await loadSource('src/stores/useRevisionSetStore.ts', { zustand: { create: createStore } });
+  const { loadRevisionSets } = await loadSource('src/services/revisionSetService.ts', {
+    '../stores/useRevisionSetStore': { useRevisionSetStore: setStore }, '../stores/useRevisionStore': { useRevisionStore: revisions.store },
+    './revisionService': { setRevisionSet: () => {} },
+  });
+  const oldWindow = (globalThis as any).window; const originalError = console.error; console.error = () => {};
+  let setReads = 0;
+  (globalThis as any).window = { electronAPI: { supabaseReadRevisionSets: async () => {
+    if (++setReads === 1) throw new Error('set list unavailable');
+    return [{ id: 'set-b', title: 'Verified set', status: 'open' }];
+  } } };
+  const destination = destinationHarness(h, [], { revisionStore: revisions.store, setStore, loadSets: loadRevisionSets });
+  const cleanup = h.effects[1]();
+  try {
+    const listLoad = revisions.store.getState().loadRevisions(); revisions.failures[0](new Error('revision list unavailable')); await listLoad;
+    h.lookups[0].resolve({ ...revision, setId: 'set-b' }); await flush();
+    destination.consume('hub', false); await flush();
+    assert.equal(setReads, 1); assert.equal(setStore.getState().loading, false);
+    assert.equal(destination.warnings.length, 1); assert.equal(h.app.pendingRetakeId, 'r1');
+    destination.consume('hub', false); assert.equal(setReads, 1, 'failed metadata does not retry in a render loop');
+    destination.warnings[0][1].action.onClick(); await flush(); destination.consume('hub', false);
+    assert.equal(setReads, 2); assert.deepEqual(destination.focused, ['r1']);
+    assert.equal(setStore.getState().selectedSetId, 'set-b'); assert.equal(h.app.pendingRetakeId, null);
+    assert.equal(revisions.store.getState().lastLoadTime, null);
+  } finally { cleanup?.(); console.error = originalError; (globalThis as any).window = oldWindow; }
 });
 
 test('cached deletion while already in the hub reports absence without consuming a target or cancelling unrelated startup loading', async () => {
