@@ -1,6 +1,6 @@
 import {
   canRemindRetake, emptyRetakeDelivery, unfinishedRetakeAssigneeIds, RETAKE_REMINDER_COOLDOWN_MS,
-  type RetakeDeliveryResult, type RetakeNotificationActor, type RetakeNotificationRecord, type RetakeReminderPayload,
+  type RetakeDeliveryEvent, type RetakeDeliveryResult, type RetakeNotificationActor, type RetakeNotificationRecord, type RetakeReminderPayload,
 } from '../src/shared/retakeNotifications';
 import { buildRetakeDeepLink } from '../src/shared/bflowDeepLink';
 
@@ -11,6 +11,7 @@ export interface RetakeNotificationDependencies {
   readUsers(): Promise<Array<{ id: string; name?: string; role?: string; isCompositor?: boolean; slackId?: string }>>;
   sendSlack(payload: Record<string, string>, isCurrent?: () => boolean): Promise<unknown>;
   broadcast(payload: RetakeReminderPayload): Promise<boolean> | boolean;
+  onDeliveryResult?(event: RetakeDeliveryEvent): Promise<void> | void;
   now?(): number;
   createEventId(): string;
 }
@@ -43,6 +44,27 @@ export class RetakeNotificationService {
   private readonly lastReminderAt = new Map<string, number>();
 
   constructor(deps: RetakeNotificationDependencies) { this.deps = deps; }
+
+  /** Saving ends at persistence. Slack waits and delivery failures are reported independently. */
+  startAssignmentDelivery(revisionId: string, actor: RetakeNotificationActor): void {
+    this.startDelivery(revisionId, actor, 'assignment', () => this.notifyAssignment(revisionId, actor));
+  }
+
+  startReassignmentDelivery(revisionId: string, context: RetakeReassignmentContext): void {
+    this.startDelivery(revisionId, context.actor, 'reassignment', () => this.notifyReassignment(revisionId, context));
+  }
+
+  private startDelivery(revisionId: string, actor: RetakeNotificationActor, kind: RetakeDeliveryEvent['kind'], deliver: () => Promise<RetakeDeliveryResult>): void {
+    void Promise.resolve().then(deliver).catch(() => ({
+      ...emptyRetakeDelivery(revisionId, 'failed'), error: '리테이크는 저장됐지만 알림을 보내지 못했어요. 다시 알림을 보내주세요.',
+    })).then(async (delivery) => {
+      if (!this.deps.isActorCurrent(actor)) return;
+      await this.deps.onDeliveryResult?.({ eventId: this.deps.createEventId(), userId: actor.id, epoch: actor.epoch, kind, delivery });
+    }).catch((error) => {
+      // A closed renderer must not turn completed persistence into a rejected IPC or an unhandled promise.
+      console.warn('[retake delivery] 결과 알림 전달 실패', error);
+    });
+  }
 
   /** Capture ownership before persistence; never adopt a later login when sending its notification. */
   async captureActor(): Promise<RetakeNotificationActor> {

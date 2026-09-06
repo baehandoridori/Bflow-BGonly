@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
+import { createStore } from 'zustand/vanilla';
+import { selectMyRetakes, summarizeMyRetakes } from '../src/utils/myRetakes.ts';
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 const store = (state: any) => Object.assign((select: (s: any) => any) => select(state), { getState: () => state });
@@ -9,19 +11,20 @@ const revision = { id: 'r1', sceneKey: 'EP01:A:1', status: 'open', description: 
 
 async function loadSource(entry: string, dependencies: Record<string, any>) {
   const bundled = await build({ entryPoints: [entry], bundle: true, write: false, platform: 'node', format: 'cjs',
-    external: ['react', 'react/jsx-runtime', 'sonner', 'lucide-react', '@/stores/*', '@/services/*', '@/utils/*'] });
+    external: ['react', 'react/jsx-runtime', 'zustand', 'sonner', 'lucide-react', '@/stores/*', '@/services/*', '@/utils/*'] });
   const module = { exports: {} as any };
   new Function('require', 'module', 'exports', bundled.outputFiles[0].text)(
     (id: string) => { assert.ok(id in dependencies, id); return dependencies[id]; }, module, module.exports);
   return module.exports;
 }
 
-async function hookHarness(pendingRetakeId: string | null = null, dataConnected = true) {
+async function hookHarness(pendingRetakeId: string | null = null, dataConnected = true, savedLocalRevisions: any[] = []) {
   const effects: Array<() => (() => void) | undefined> = [];
   const notices: any[] = [];
   const read: string[] = [];
   const navigated: string[] = [];
   const toasts: any[] = [];
+  const deliveryFailures: Array<{ delivery: any; expectsAppNotification: boolean }> = [];
   const lookups: Array<{ resolve: (rows: any[]) => void; reject: (error: Error) => void }> = [];
   const auth = { currentUser: { id: 'me', name: 'Me' }, authReady: true };
   const app = { dataConnected, pendingRetakeId, currentView: 'dashboard',
@@ -31,7 +34,13 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
     notices.push(value); return `notice-${notices.length}`;
   }, markAsRead: (id: string) => read.push(id) };
   let storeLoads = 0;
-  const revisions = { revisions: [] as any[], loadRevisions: async () => { storeLoads += 1; },
+  let connectedRevisionMode = true;
+  const loadModes: boolean[] = [];
+  const revisions = { revisions: [] as any[], loadRevisions: async () => {
+    storeLoads += 1;
+    loadModes.push(connectedRevisionMode);
+    if (!connectedRevisionMode) revisions.revisions = [...savedLocalRevisions];
+  },
     addRevisionOptimistic: (value: any) => revisions.revisions.push(value),
     updateRevisionOptimistic: (id: string, _key: string, value: any) => {
       revisions.revisions = revisions.revisions.map((item) => item.id === id ? { ...item, ...value } : item);
@@ -47,14 +56,126 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
     '@/stores/useAppStore': { useAppStore: store(app) },
     '@/stores/useRevisionStore': { useRevisionStore: store(revisions) },
     '@/stores/useNotificationStore': { useNotificationStore: store(notifications) },
-    '@/services/revisionService': { setRevisionsSheetsMode: () => {},
+    '@/services/revisionService': { setRevisionsSheetsMode: (connected: boolean) => { connectedRevisionMode = connected; },
+      reportRetakeDeliveryFailure: (delivery: any, expectsAppNotification: boolean) => deliveryFailures.push({ delivery, expectsAppNotification }),
       getCanonicalRevisions: () => new Promise<any[]>((resolve, reject) => lookups.push({ resolve, reject })) },
     '@/utils/retakeNavigation': { openRetakeInApp: (id: string) => navigated.push(id) },
   });
   module.useRetakeNotifications();
-  return { effects, notices, read, navigated, toasts, lookups, auth, app, notifications, revisions, api,
+  return { effects, notices, read, navigated, toasts, lookups, auth, app, notifications, revisions, api, loadModes, deliveryFailures,
     broadcast: (value: unknown) => onBroadcast(value), retryUpdates: () => retryUpdates, storeLoads: () => storeLoads };
 }
+
+test('local startup loads saved assignments for the dashboard without canonical notification catch-up', async () => {
+  const previousWindow = (globalThis as any).window;
+  const h = await hookHarness(null, false, [
+    revision,
+    { ...revision, id: 'working', assigneeStates: { me: { state: 'in_progress' } } },
+    { ...revision, id: 'done', assigneeStates: { me: { state: 'done' } } },
+    { ...revision, id: 'theirs', assigneeIds: ['other'] },
+  ]);
+  (globalThis as any).window = { electronAPI: h.api };
+  let cleanup: (() => void) | undefined;
+  try {
+    assert.deepEqual(h.revisions.revisions, [], 'fresh app starts without visiting the retake screen');
+    cleanup = h.effects[0]();
+    await flush();
+    assert.deepEqual(h.loadModes, [false], 'select the local source before loading, even after an earlier connected mode');
+    const items = selectMyRetakes(h.revisions.revisions, h.auth.currentUser.id);
+    assert.deepEqual(items.map(item => item.id), ['r1', 'working']);
+    assert.deepEqual(summarizeMyRetakes(items, h.auth.currentUser.id), { pending: 1, inProgress: 1, total: 2 });
+    assert.equal(h.app.currentView, 'dashboard');
+    assert.equal(h.lookups.length, 0, 'local startup does not query canonical notification data');
+    assert.equal(h.notices.length, 0);
+    assert.equal(h.toasts.length, 0);
+  } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
+});
+
+async function revisionLoadHarness() {
+  const requests: Array<(rows: any[]) => void> = [];
+  const { useRevisionStore } = await loadSource('src/stores/useRevisionStore.ts', {
+    zustand: { create: createStore },
+    '@/stores/useDataStore': { useDataStore: Object.assign(store({ episodes: [] }), { subscribe: () => () => {} }) },
+    '@/services/revisionService': {
+      getAllRevisions: () => new Promise<any[]>(resolve => requests.push(resolve)),
+      buildOpenRevisionCountMap: () => ({}),
+      getRevisionLookupSceneKeys: (key: string) => [key],
+    },
+    '@/utils/revisionWorkflow': {},
+    '@/utils/revisionNotificationRecipients': {},
+    '@/utils/notificationSceneNavigation': {},
+  });
+  return { store: useRevisionStore, requests };
+}
+
+test('a late local startup read cannot overwrite the newer connected result or subsequent optimistic changes', async () => {
+  const h = await revisionLoadHarness();
+  const localLoad = h.store.getState().loadRevisions();
+  const connectedLoad = h.store.getState().loadRevisions();
+  h.requests[1]([{ ...revision, id: 'remote' }]);
+  await connectedLoad;
+  h.store.getState().updateRevisionOptimistic('remote', revision.sceneKey, { description: 'edited after connection' });
+  h.requests[0]([{ ...revision, id: 'old-local' }]);
+  await localLoad;
+  assert.deepEqual(h.store.getState().revisions.map((item: any) => [item.id, item.description]),
+    [['remote', 'edited after connection']]);
+  assert.equal(h.store.getState().isLoading, false);
+});
+
+test('completion of a superseded read keeps the newer read loading until its own completion', async () => {
+  const h = await revisionLoadHarness();
+  const localLoad = h.store.getState().loadRevisions();
+  const connectedLoad = h.store.getState().loadRevisions();
+  h.requests[0]([{ ...revision, id: 'old-local' }]);
+  await localLoad;
+  assert.deepEqual(h.store.getState().revisions, []);
+  assert.equal(h.store.getState().isLoading, true);
+  h.requests[1]([{ ...revision, id: 'remote' }]);
+  await connectedLoad;
+  assert.deepEqual(h.store.getState().revisions.map((item: any) => item.id), ['remote']);
+  assert.equal(h.store.getState().isLoading, false);
+});
+
+test('background delivery failures warn once and initial assignment does not require a second app broadcast', async () => {
+  const previousWindow = (globalThis as any).window;
+  const h = await hookHarness(null, false);
+  (globalThis as any).window = { electronAPI: h.api };
+  const cleanup = h.effects[0]();
+  try {
+    const delivery = { revisionId: 'r1', status: 'partial', recipients: ['other'],
+      slackSentUserIds: [], slackFailedUserIds: ['other'], slackMissingUserIds: [], inAppBroadcast: false };
+    const event = { event: 'retake-delivery-result', payload: {
+      eventId: 'delivery-1', userId: 'me', kind: 'assignment', delivery,
+    } };
+    h.broadcast(event); h.broadcast(event);
+    assert.deepEqual(h.deliveryFailures, [{ delivery, expectsAppNotification: false }],
+      'initial assignment uses the INSERT notification, so broadcast=false is not an app delivery failure');
+    h.broadcast({ ...event, payload: { ...event.payload, eventId: 'delivery-2', kind: 'reassignment' } });
+    assert.deepEqual(h.deliveryFailures[1], { delivery, expectsAppNotification: true });
+    h.broadcast({ ...event, payload: { ...event.payload, eventId: 'sent', delivery: { ...delivery, status: 'sent' } } });
+    assert.equal(h.deliveryFailures.length, 2, 'successful background delivery remains quiet');
+    assert.equal(h.notices.length, 0, 'delivery results do not create duplicate recipient notifications');
+  } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
+});
+
+test('background delivery failures cannot warn another user, an unready notification scope, or an unmounted hook', async () => {
+  const previousWindow = (globalThis as any).window;
+  const h = await hookHarness(null, false);
+  (globalThis as any).window = { electronAPI: h.api };
+  const cleanup = h.effects[0]();
+  try {
+    const event = { event: 'retake-delivery-result', payload: { eventId: 'failed', userId: 'other', kind: 'assignment',
+      delivery: { revisionId: 'r1', status: 'failed', recipients: ['recipient'], slackSentUserIds: [],
+        slackFailedUserIds: ['recipient'], slackMissingUserIds: [], inAppBroadcast: false } } };
+    h.broadcast(event);
+    event.payload.userId = 'me';
+    h.notifications.activeUserId = 'other'; h.broadcast(event);
+    h.notifications.activeUserId = 'me'; h.auth.currentUser = { id: 'other', name: 'Other' }; h.broadcast(event);
+    h.auth.currentUser = { id: 'me', name: 'Me' }; cleanup?.(); h.broadcast(event);
+    assert.deepEqual(h.deliveryFailures, []);
+    assert.deepEqual(h.notices, []);
+  } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
+});
 
 test('retake catch-up and reminders respect current recipient, dedupe, read action, and login changes', async () => {
   const previousWindow = (globalThis as any).window;

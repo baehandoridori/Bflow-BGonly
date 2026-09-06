@@ -1276,6 +1276,10 @@ const previewRetakeNotifications = new RetakeNotificationService({
     if (isCurrent && !isCurrent()) throw new Error('로그인이 변경됐어요.');
   },
   broadcast: (payload) => { emitMockSupabaseBroadcast({ event: 'retake-reminder', payload }); return true; },
+  onDeliveryResult: (payload) => {
+    if (previewCanonicalUserId !== payload.userId || previewCanonicalEpoch !== payload.epoch) return;
+    emitMockSupabaseBroadcast({ event: 'retake-delivery-result', payload: { ...payload, delivery: { ...payload.delivery, simulated: true } } });
+  },
   createEventId: createUuid,
 });
 
@@ -3106,7 +3110,7 @@ export function installDevElectronAPI(): void {
       });
       getMockActivityRows().unshift(activity);
       emitMockActivityRealtime(activity);
-      return { ...await previewRetakeNotifications.notifyAssignment(id, notificationActor), simulated: true };
+      previewRetakeNotifications.startAssignmentDelivery(id, notificationActor);
     },
     supabaseUpdateRevision: async (id: string, updates: Record<string, string>) => {
       const reassignmentNotification = typeof updates.assigneeIds === 'string'
@@ -3164,7 +3168,7 @@ export function installDevElectronAPI(): void {
         }
       }
       if (reassignmentNotification) {
-        return { ...await previewRetakeNotifications.notifyReassignment(id, reassignmentNotification), simulated: true };
+        previewRetakeNotifications.startReassignmentDelivery(id, reassignmentNotification);
       }
     },
     supabaseDeleteRevision: async (id: string) => {

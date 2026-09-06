@@ -12,6 +12,15 @@ export interface RetakeDeliveryResult {
   error?: string;
 }
 
+/** Local IPC result for the sender's current session, never a team-wide realtime event. */
+export interface RetakeDeliveryEvent {
+  eventId: string;
+  userId: string;
+  epoch?: number;
+  kind: 'assignment' | 'reassignment';
+  delivery: RetakeDeliveryResult;
+}
+
 export interface RetakeReminderPayload {
   /** Missing kind is an older manual reminder. Initial creation uses its existing INSERT notification. */
   kind?: 'assignment' | 'reminder';

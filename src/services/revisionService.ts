@@ -34,7 +34,7 @@ import { createUuid } from '../utils/createUuid';
 import { toast } from 'sonner';
 import type { RetakeDeliveryResult } from '../shared/retakeNotifications';
 
-function reportRetakeDeliveryFailure(delivery: RetakeDeliveryResult | void, expectsAppNotification = false): void {
+export function reportRetakeDeliveryFailure(delivery: RetakeDeliveryResult | void, expectsAppNotification = false): void {
   if (!delivery || (delivery.status !== 'partial' && delivery.status !== 'failed')) return;
   const failures = [
     expectsAppNotification && !delivery.inAppBroadcast ? '앱 알림 전송 실패' : '',

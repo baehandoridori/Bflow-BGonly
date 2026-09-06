@@ -6,7 +6,7 @@ import ts from 'typescript';
 import * as contracts from '../src/shared/retakeNotifications.ts';
 import * as deepLinks from '../src/shared/bflowDeepLink.ts';
 import type { RetakeNotificationDependencies } from '../electron/retakeNotificationService.ts';
-import type { RetakeNotificationActor, RetakeNotificationRecord, RetakeReminderPayload } from '../src/shared/retakeNotifications.ts';
+import type { RetakeDeliveryEvent, RetakeNotificationActor, RetakeNotificationRecord, RetakeReminderPayload } from '../src/shared/retakeNotifications.ts';
 
 // Electron's bundler resolves extensionless imports. Load the same source with two explicit shared dependencies.
 const source = fs.readFileSync(new URL('../electron/retakeNotificationService.ts', import.meta.url), 'utf8');
@@ -345,7 +345,7 @@ test('main update handler never emits reassignment notifications when persistenc
   assert.equal(h.sent.length, 0); assert.equal(h.broadcasts.length, 0);
 });
 
-function mainPersistenceHarness() {
+function mainPersistenceHarness(options: { directoryFails?: boolean; sendSlack?: () => Promise<void> } = {}) {
   const main = fs.readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
   const ast = ts.createSourceFile('main.ts', main, ts.ScriptTarget.Latest, true);
   const statements = ast.statements.filter((node) => {
@@ -362,6 +362,7 @@ function mainPersistenceHarness() {
   let epoch = 1;
   let changeDuringEnsure = false;
   const events: string[] = [];
+  const deliveryEvents: Array<{ channel: string; event: { event: string; payload: RetakeDeliveryEvent } }> = [];
   const revision: RetakeNotificationRecord = {
     id: 'retake-main', requesterId: user.id, sceneKey: 'EP01:A:1', revisionNo: 1,
     description: '수정 요청', assigneeIds: ['pending'], assigneeStates: {},
@@ -380,16 +381,21 @@ function mainPersistenceHarness() {
       },
       getCanonicalUserId: () => user.id, getEpoch: () => epoch,
     },
-    sbReadUsers: async () => { events.push('directory'); throw new Error('directory unavailable'); },
+    sbReadUsers: async () => {
+      events.push('directory');
+      if (options.directoryFails !== false) throw new Error('directory unavailable');
+      return [{ ...user }, { id: 'pending', slackId: 'U_PENDING' }, { id: 'working', slackId: 'U_WORKING' }];
+    },
     supabaseClient: { from: () => query },
     mapCanonicalRevision: (row: RetakeNotificationRecord) => row,
     sbAddRevision: async () => { events.push('insert'); },
     sbUpdateRevision: async (_id: string, updates: Record<string, string>) => {
       events.push('update'); revision.assigneeIds = JSON.parse(updates.assigneeIds); return { affected: true };
     },
-    postSlackWebhook: async () => { events.push('slack'); },
+    postSlackWebhook: async () => { events.push('slack'); await options.sendSlack?.(); },
     SLACK_WEBHOOK_URL: 'https://example.invalid/workflow',
     broadcastRetakeReminder: async () => { events.push('broadcast'); return true; },
+    broadcastToAllWindows: (channel: string, event: { event: string; payload: RetakeDeliveryEvent }) => { deliveryEvents.push({ channel, event }); },
     randomUUID: () => 'event-main',
     ipcMain: { handle: (name: string, callback: (...args: any[]) => Promise<any>) => handlers.set(name, callback) },
     wrapIpc: (callback: unknown) => callback,
@@ -397,29 +403,117 @@ function mainPersistenceHarness() {
   });
   vm.runInContext(javascript, context);
   return {
-    events, revision,
+    events, revision, deliveryEvents,
     changeSessionDuringEnsure: () => { changeDuringEnsure = true; },
+    changeSessionAwayAndBack: () => { epoch += 2; },
     create: () => handlers.get('supabase:add-revision')!({}, revision.id, 'part-id', revision.sceneKey, 1, 'open', 'normal',
       revision.description, '', '', 'bg', 'bg', 'requester', '요청자', '', '2026-09-07T00:00:00Z', '["pending"]', '["pending"]'),
     reassign: () => handlers.get('supabase:update-revision')!({}, revision.id, { assigneeIds: '["pending","working"]', __op: 'reassign' }),
   };
 }
 
-test('valid canonical session still INSERTs when the notification directory fails, returning delivery failure without rollback', async () => {
+test('valid canonical session still INSERTs when the notification directory fails, reporting failure separately without rollback', async () => {
   const h = mainPersistenceHarness();
   const result = await h.create();
-  assert.equal(result.status, 'failed');
-  assert.match(result.error, /저장됐지만/);
+  assert.equal(result, undefined);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(h.deliveryEvents[0].event.payload.delivery.status, 'failed');
+  assert.match(h.deliveryEvents[0].event.payload.delivery.error!, /저장됐지만/);
   assert.deepEqual(h.events, ['insert', 'read-revision', 'directory']);
 });
 
 test('canonical reassignment persists before notification directory failure and retains the assigned users', async () => {
   const h = mainPersistenceHarness();
   const result = await h.reassign();
-  assert.equal(result.status, 'failed');
-  assert.match(result.error, /변경됐지만/);
+  assert.equal(result, undefined);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(h.deliveryEvents[0].event.payload.delivery.status, 'failed');
+  assert.match(h.deliveryEvents[0].event.payload.delivery.error!, /변경됐지만/);
   assert.deepEqual(h.events, ['read-revision', 'update', 'read-revision', 'directory']);
   assert.deepEqual(h.revision.assigneeIds, ['pending', 'working']);
+});
+
+test('INSERT and reassignment return before slow Slack finishes and later report the failure to the sender', async () => {
+  for (const action of ['create', 'reassign'] as const) {
+    let rejectSlack!: (error: Error) => void;
+    const slowSlack = new Promise<void>((_resolve, reject) => { rejectSlack = reject; });
+    const h = mainPersistenceHarness({ directoryFails: false, sendSlack: () => slowSlack });
+    let returned = false;
+    const save = h[action]().then((result) => { assert.equal(result, undefined); returned = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(returned, true, 'a pending Slack timeout must not keep the save dialog open');
+    assert.ok(h.events.includes(action === 'create' ? 'insert' : 'update'));
+    assert.ok(h.events.includes('slack'));
+    assert.equal(h.deliveryEvents.length, 0);
+    rejectSlack(new Error('slow Slack failed'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await save;
+    assert.equal(h.deliveryEvents.length, 1);
+    const event = h.deliveryEvents[0];
+    assert.equal(event.channel, 'supabase:broadcast-event');
+    assert.equal(event.event.event, 'retake-delivery-result');
+    assert.equal(event.event.payload.userId, 'requester');
+    assert.equal(event.event.payload.epoch, 1);
+    assert.equal(event.event.payload.kind, action === 'create' ? 'assignment' : 'reassignment');
+    assert.equal(event.event.payload.delivery.status, action === 'create' ? 'failed' : 'partial');
+    assert.equal(event.event.payload.delivery.slackFailedUserIds.length, 1);
+  }
+});
+
+test('late background delivery results are discarded after the sender leaves and returns with a new epoch', async () => {
+  let rejectSlack!: (error: Error) => void;
+  const slowSlack = new Promise<void>((_resolve, reject) => { rejectSlack = reject; });
+  const h = mainPersistenceHarness({ directoryFails: false, sendSlack: () => slowSlack });
+  await h.create();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  h.changeSessionAwayAndBack();
+  rejectSlack(new Error('old request failed'));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(h.deliveryEvents.length, 0);
+  assert.equal(h.events.filter((event) => event === 'insert').length, 1);
+});
+
+test('closed result listeners cannot produce an unhandled rejection or undo background persistence', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const h = harness({ onDeliveryResult: async () => { throw new Error('renderer closed'); } });
+  const actor = await h.service.captureActor();
+  assert.equal(h.service.startAssignmentDelivery(h.revision.id, actor), undefined);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(warn.mock.callCount(), 1);
+  assert.equal(h.sent.length, 2);
+});
+
+test('preload filters queued delivery results using the current canonical epoch and preserves other broadcasts', () => {
+  const preload = fs.readFileSync(new URL('../electron/preload.ts', import.meta.url), 'utf8');
+  const ast = ts.createSourceFile('preload.ts', preload, ts.ScriptTarget.Latest, true);
+  let subscription: ts.PropertyAssignment | undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isPropertyAssignment(node) && node.name.getText(ast) === 'onSupabaseBroadcast') subscription = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  assert.ok(subscription);
+  const javascript = ts.transpileModule(`const subscribe = ${subscription.initializer.getText(ast)}; globalThis.subscribe = subscribe;`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  let listener: ((_event: unknown, data: unknown) => void) | undefined;
+  const context = vm.createContext({ canonicalSessionEpoch: 1, ipcRenderer: {
+    on: (_channel: string, handler: typeof listener) => { listener = handler; },
+    removeListener: () => { listener = undefined; },
+  } });
+  vm.runInContext(javascript, context);
+  const received: unknown[] = [];
+  const unsubscribe = context.subscribe((event: unknown) => received.push(event));
+  listener!({}, { event: 'retake-delivery-result', payload: { userId: 'requester', epoch: 1 } });
+  assert.equal(received.length, 1);
+  context.canonicalSessionEpoch = 3;
+  listener!({}, { event: 'retake-delivery-result', payload: { userId: 'requester', epoch: 1 } });
+  assert.equal(received.length, 1, 'same-user results from a previous login must not reach React');
+  listener!({}, { event: 'retake-delivery-result', payload: { userId: 'requester', epoch: 3 } });
+  listener!({}, { event: 'retake-reminder', payload: { recipients: ['requester'] } });
+  assert.equal(received.length, 3);
+  unsubscribe();
+  assert.equal(listener, undefined);
 });
 
 test('canonical session changes still block INSERT and reassignment before any persistence or notification', async () => {

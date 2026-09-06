@@ -115,6 +115,8 @@ function getRevisionLookupKeys(sceneKey: string): Set<string> {
   return new Set(revisionService.getRevisionLookupSceneKeys(sceneKey));
 }
 
+let revisionLoadSequence = 0;
+
 export const useRevisionStore = create<RevisionState>((set, get) => ({
   revisions: [],
   revisionCountByScene: {},
@@ -123,9 +125,12 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   lastLoadTime: null,
 
   loadRevisions: async () => {
+    const loadId = ++revisionLoadSequence;
     set({ isLoading: true });
     try {
       const all = await revisionService.getAllRevisions();
+      // 로컬 시작 → 연결 복구 시 먼저 시작한 느린 조회가 최신 목록을 덮지 않게 한다.
+      if (loadId !== revisionLoadSequence) return;
       set({
         revisions: all,
         revisionCountByScene: buildCountMap(all),
@@ -135,7 +140,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     } catch (err) {
       console.error('[리테이크 스토어] 로드 실패:', err);
     } finally {
-      set({ isLoading: false });
+      if (loadId === revisionLoadSequence) set({ isLoading: false });
     }
   },
 

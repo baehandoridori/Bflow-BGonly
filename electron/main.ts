@@ -2650,6 +2650,10 @@ const retakeNotificationService = new RetakeNotificationService({
   readUsers: sbReadUsers,
   sendSlack: (payload, isCurrent) => postSlackWebhook(SLACK_WEBHOOK_URL, payload, 'Retake Slack', 8_000, isCurrent),
   broadcast: broadcastRetakeReminder,
+  onDeliveryResult: (payload) => {
+    if (sessionManager.getCanonicalUserId() !== payload.userId || sessionManager.getEpoch() !== payload.epoch) return;
+    broadcastToAllWindows('supabase:broadcast-event', { event: 'retake-delivery-result', payload });
+  },
   createEventId: randomUUID,
 });
 ipcMain.handle('supabase:remind-retake', wrapIpc(async (_e: unknown, revisionId: string) => {
@@ -2664,6 +2668,7 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
     notifyUserIdsJson?: string, assigneeIdsJson?: string, setId?: string) => {
     const notificationActor = await retakeNotificationService.captureActor();
     await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt, notifyUserIdsJson, assigneeIdsJson, setId);
+    retakeNotificationService.startAssignmentDelivery(id, notificationActor);
     if (currentActivityUser) {
       try {
         // sceneId 가 sceneKey 형식 (예: 'EP02:A:35') 일 수 있으므로 파싱 + raw- prefix 디코드 (Codex P2)
@@ -2738,7 +2743,6 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
         });
       } catch { /* 무시 */ }
     }
-    return retakeNotificationService.notifyAssignment(id, notificationActor);
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   // 권한 검증은 클라이언트 가드(revisionWorkflow canActAsAssignee/canReassignRevision/canFinalResolveRevision)에
@@ -2750,6 +2754,9 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
     ? await retakeNotificationService.captureReassignment(id, dbUpdates.assigneeIds)
     : null;
   const { affected: revisionAffected } = await sbUpdateRevision(id, dbUpdates);
+  if (revisionAffected && reassignmentNotification) {
+    retakeNotificationService.startReassignmentDelivery(id, reassignmentNotification);
+  }
   // status 전이/담당 워크플로우 활동 기록. 한솔 결정 (2026-05-02): 진행중도 audit.
   // 우선순위: 최종완료 > 재배정(동반 status 전이보다 우선, 한솔 §7.3 '재배정 포함') > 담당완료 > 진행중 > 해결.
   // 주의: finalResolvedAt 이 빈 문자열('')이면(최종완료 되돌리기) truthy 아님 → 분기 제외(의도된 조용한 스킵).
@@ -2843,9 +2850,6 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
         },
       });
     } catch { /* 무시 */ }
-  }
-  if (revisionAffected && reassignmentNotification) {
-    return retakeNotificationService.notifyReassignment(id, reassignmentNotification);
   }
 }));
 // Codex 리뷰 #8 P1: 리비전 삭제는 renderer-provided userId 를 신뢰하면 안 됨.

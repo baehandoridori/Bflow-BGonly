@@ -568,7 +568,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // Broadcast 이벤트 수신 (즉시 동기화용)
   onSupabaseBroadcast: (callback: (event: unknown) => void) => {
-    const handler = (_event: unknown, data: unknown) => callback(data);
+    const handler = (_event: unknown, data: unknown) => {
+      const event = data as { event?: string; payload?: { epoch?: unknown } } | null;
+      if (event?.event === 'retake-delivery-result' && event.payload?.epoch !== canonicalSessionEpoch) return;
+      callback(data);
+    };
     ipcRenderer.on('supabase:broadcast-event', handler);
     return () => ipcRenderer.removeListener('supabase:broadcast-event', handler);
   },
