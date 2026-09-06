@@ -8,7 +8,7 @@ export interface RetakeNotificationDependencies {
   getActor(): Promise<RetakeNotificationActor>;
   isActorCurrent(actor: RetakeNotificationActor): boolean;
   readRevision(id: string): Promise<RetakeNotificationRecord | null>;
-  readUsers(): Promise<Array<{ id: string; slackId?: string }>>;
+  readUsers(): Promise<Array<{ id: string; name?: string; role?: string; isCompositor?: boolean; slackId?: string }>>;
   sendSlack(payload: Record<string, string>, isCurrent?: () => boolean): Promise<unknown>;
   broadcast(payload: RetakeReminderPayload): Promise<boolean> | boolean;
   now?(): number;
@@ -113,6 +113,14 @@ export class RetakeNotificationService {
     if (!recipients.length) return result;
     const users = await this.deps.readUsers();
     if (!this.deps.isActorCurrent(actor)) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    // Notification metadata is read after persistence. Recheck current privileges before any external delivery.
+    const directoryActor = users.find((user) => user.id === actor.id);
+    if (!directoryActor) throw new Error('사용자 정보를 찾을 수 없어요.');
+    const deliveryActor: RetakeNotificationActor = {
+      ...actor, name: directoryActor.name ?? actor.name, role: directoryActor.role ?? 'user',
+      isCompositor: directoryActor.isCompositor === true, slackId: directoryActor.slackId,
+    };
+    if (!canRemindRetake(deliveryActor, revision)) throw new Error('등록자 또는 컴포지터만 알림을 보낼 수 있어요.');
     // A different authorized requester may have finished preparing a send during the directory read.
     const latest = this.lastReminderAt.get(revisionId);
     if (reminder && latest !== undefined && now - latest < RETAKE_REMINDER_COOLDOWN_MS) {
@@ -128,7 +136,7 @@ export class RetakeNotificationService {
         result.inAppBroadcast = await this.deps.broadcast({
           eventId: this.deps.createEventId(), revisionId, sceneKey: revision.sceneKey,
           revisionNo: revision.revisionNo, description: revision.description, setId: revision.setId,
-          senderId: actor.id, senderName: actor.name, recipients, createdAt: new Date(now).toISOString(),
+          senderId: actor.id, senderName: deliveryActor.name, recipients, createdAt: new Date(now).toISOString(),
           kind: reminder ? 'reminder' : 'assignment',
         });
       } catch { /* Slack can still deliver while the realtime channel is unavailable. */ }
@@ -143,7 +151,7 @@ export class RetakeNotificationService {
       const slackId = users.find((user) => user.id === userId)?.slackId?.trim();
       if (!slackId) { result.slackMissingUserIds.push(userId); return; }
       try {
-        await this.deps.sendSlack(buildRetakeWorkflowPayload(revision, actor, slackId, reminder, now), () => this.deps.isActorCurrent(actor));
+        await this.deps.sendSlack(buildRetakeWorkflowPayload(revision, deliveryActor, slackId, reminder, now), () => this.deps.isActorCurrent(actor));
         result.slackSentUserIds.push(userId);
       } catch { result.slackFailedUserIds.push(userId); }
     });

@@ -15,6 +15,45 @@ import type { ArcadeExecuteCommand, ArcadeExecuteResult, ArcadeWalletUpdate } fr
 import type { RealtimeStatusMetadata } from './realtime';
 import type { BflowDeepLink } from '../src/shared/bflowDeepLink';
 
+// ─── 딥링크 구독 준비 계약 ──────────────────────────────
+type DeepLinkReceipt = { documentId: string; subscriptionId: number; deliveryId: number };
+let deepLinkDocumentId: string | null = null;
+let deepLinkSubscriptionSequence = 0;
+let activeDeepLinkSubscription: { id: number; callback: (data: BflowDeepLink) => void } | null = null;
+
+function announceDeepLinkReady(): void {
+  if (!deepLinkDocumentId || !activeDeepLinkSubscription) return;
+  ipcRenderer.send('deep-link:ready', {
+    documentId: deepLinkDocumentId,
+    subscriptionId: activeDeepLinkSubscription.id,
+  });
+}
+
+// React보다 먼저 설치하여 DOM 준비 응답을 놓치지 않는다.
+ipcRenderer.on('deep-link:document-ready', (_event, documentId: string) => {
+  deepLinkDocumentId = documentId;
+  announceDeepLinkReady();
+});
+ipcRenderer.on('deep-link', (_event, data: BflowDeepLink, receipt: DeepLinkReceipt) => {
+  const subscription = activeDeepLinkSubscription;
+  if (!subscription || receipt?.documentId !== deepLinkDocumentId || receipt.subscriptionId !== subscription.id) return;
+  subscription.callback(data);
+  // 구독 교체 중 무시한 전송은 확인하지 않아 새 구독에서 다시 받을 수 있다.
+  ipcRenderer.send('deep-link:ack', receipt);
+});
+
+function subscribeDeepLink(callback: (data: BflowDeepLink) => void): () => void {
+  const id = ++deepLinkSubscriptionSequence;
+  activeDeepLinkSubscription = { id, callback };
+  announceDeepLinkReady();
+  return () => {
+    if (activeDeepLinkSubscription?.id !== id) return;
+    activeDeepLinkSubscription = null;
+    if (deepLinkDocumentId) ipcRenderer.send('deep-link:not-ready', { documentId: deepLinkDocumentId, subscriptionId: id });
+  };
+}
+// ─── 딥링크 구독 준비 계약 끝 ───────────────────────────
+
 let canonicalSessionEpoch = 0;
 function rememberSessionEpoch(result: SessionActionResult): SessionActionResult {
   if (result?.payload && typeof result.payload.epoch === 'number') canonicalSessionEpoch = result.payload.epoch;
@@ -505,12 +544,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendRiggingWebhook: (payload: Record<string, string>) =>
     ipcRenderer.invoke('slack:send-rigging-webhook', payload),
 
-  // 딥링크 수신 (bflow://scene/...)
-  onDeepLink: (callback: (data: BflowDeepLink) => void) => {
-    const handler = (_event: unknown, data: BflowDeepLink) => callback(data);
-    ipcRenderer.on('deep-link', handler);
-    return () => ipcRenderer.removeListener('deep-link', handler);
-  },
+  // 씬/리테이크 딥링크: 실제 구독 설치 후 준비를 알린다.
+  onDeepLink: subscribeDeepLink,
 
   // Realtime 이벤트 수신 (메인 프로세스 → 렌더러)
   onSupabaseRealtime: (callback: (event: unknown) => void) => {

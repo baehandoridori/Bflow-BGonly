@@ -859,6 +859,7 @@ function createWindow(): void {
   mainWindow.on('enter-full-screen', scheduleSaveMainWindowBounds);
   mainWindow.on('leave-full-screen', scheduleSaveMainWindowBounds);
 
+  bindDeepLinkWindow(mainWindow);
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     mainWindow.webContents.openDevTools();
@@ -878,13 +879,6 @@ function createWindow(): void {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show();
       mainWindow.focus();
-    }
-    // 재생성 경로 복구: 창 크래시 후 복구된 경우 보류 중인 딥링크 전달
-    // (최초 시작 시엔 app.whenReady의 .once 리스너와 중복이지만, pendingDeepLink를
-    //  null로 세팅하므로 멱등하게 동작)
-    if (pendingDeepLink) {
-      sendDeepLinkToRenderer(pendingDeepLink);
-      pendingDeepLink = null;
     }
     try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
 
@@ -2635,10 +2629,14 @@ const retakeNotificationService = new RetakeNotificationService({
     if (!ensured.ok || !userId || ensured.payload.user?.id !== userId || ensured.payload.epoch !== epoch) {
       throw new Error('로그인이 필요합니다.');
     }
-    // Read current role and Slack identity from the authoritative user directory.
-    const user = (await sbReadUsers()).find((candidate) => candidate.id === userId);
-    if (!user) throw new Error('사용자 정보를 찾을 수 없어요.');
-    return { id: user.id, name: user.name, role: user.role, isCompositor: user.isCompositor, slackId: user.slackId, epoch };
+    // Capture the authenticated session before persistence; Slack directory availability is not a save precondition.
+    const user = ensured.payload.user;
+    return {
+      id: user.id, name: user.name, epoch,
+      role: typeof user.role === 'string' ? user.role : 'user',
+      isCompositor: user.isCompositor === true,
+      slackId: typeof user.slackId === 'string' ? user.slackId : undefined,
+    };
   },
   isActorCurrent: (actor) => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch,
   readRevision: async (id): Promise<RetakeNotificationRecord | null> => {
@@ -4837,28 +4835,103 @@ ipcMain.handle('widget:get-saved-state', (_event, widgetId: string) => {
 const PROTOCOL = 'bflow';
 const DEEPLINK_FILE = path.join(app.getPath('userData'), 'deeplink.txt');
 
-let pendingDeepLink: string | null = null;
+// ─── 딥링크 전달 준비 계약 ──────────────────────────────
+type DeepLinkSubscription = { documentId: string; subscriptionId: number };
+type DeepLinkReceipt = DeepLinkSubscription & { deliveryId: number };
+let pendingDeepLink: { data: BflowDeepLink; deliveryId: number } | null = null;
+let deepLinkSequence = 0;
+let deepLinkDocumentId: string | null = null;
+let deepLinkSubscription: DeepLinkSubscription | null = null;
+let deepLinkInFlight: DeepLinkReceipt | null = null;
 
-function parseDeepLink(url: string): BflowDeepLink | null {
-  return parseBflowDeepLink(url);
+function resetDeepLinkRenderer(): void {
+  deepLinkDocumentId = null;
+  deepLinkSubscription = null;
+  deepLinkInFlight = null;
+}
+
+function flushPendingDeepLink(): void {
+  if (!pendingDeepLink || !deepLinkSubscription || !mainWindow || mainWindow.isDestroyed()) return;
+  const receipt = { ...deepLinkSubscription, deliveryId: pendingDeepLink.deliveryId };
+  if (deepLinkInFlight?.deliveryId === receipt.deliveryId
+    && deepLinkInFlight.subscriptionId === receipt.subscriptionId) return;
+  deepLinkInFlight = receipt;
+  try {
+    mainWindow.webContents.send('deep-link', pendingDeepLink.data, receipt);
+  } catch {
+    // 파괴/재로드 중이면 다음 document-ready + 구독 응답까지 요청을 보관한다.
+    resetDeepLinkRenderer();
+  }
+}
+
+function bindDeepLinkWindow(win: BrowserWindow): void {
+  resetDeepLinkRenderer();
+  const contents = win.webContents;
+  contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (mainWindow === win && isMainFrame && !isInPlace) resetDeepLinkRenderer();
+  });
+  contents.on('dom-ready', () => {
+    if (mainWindow !== win || win.isDestroyed()) return;
+    resetDeepLinkRenderer();
+    deepLinkDocumentId = randomUUID();
+    // preload는 DOM 로드 전부터 이 메시지를 받는다. React 구독 준비는 별도 응답이다.
+    contents.send('deep-link:document-ready', deepLinkDocumentId);
+  });
+  contents.on('render-process-gone', () => {
+    if (mainWindow === win) resetDeepLinkRenderer();
+  });
+  win.on('closed', () => {
+    if (mainWindow === win) resetDeepLinkRenderer();
+  });
+}
+
+function isCurrentDeepLinkSubscription(
+  event: Electron.IpcMainEvent,
+  value: unknown,
+): value is DeepLinkSubscription {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
+  const frame = event.senderFrame;
+  const mainFrame = mainWindow.webContents.mainFrame;
+  if (!frame || frame.processId !== mainFrame.processId || frame.routingId !== mainFrame.routingId) return false;
+  const subscription = value as DeepLinkSubscription | null;
+  return !!subscription && !!deepLinkDocumentId && subscription.documentId === deepLinkDocumentId
+    && Number.isSafeInteger(subscription.subscriptionId) && subscription.subscriptionId > 0;
+}
+
+ipcMain.on('deep-link:ready', (event, subscription: unknown) => {
+  if (!isCurrentDeepLinkSubscription(event, subscription)) return;
+  deepLinkSubscription = subscription;
+  flushPendingDeepLink();
+});
+ipcMain.on('deep-link:not-ready', (event, subscription: unknown) => {
+  if (!isCurrentDeepLinkSubscription(event, subscription)
+    || subscription.subscriptionId !== deepLinkSubscription?.subscriptionId) return;
+  deepLinkSubscription = null;
+  deepLinkInFlight = null;
+});
+ipcMain.on('deep-link:ack', (event, receipt: DeepLinkReceipt) => {
+  if (!isCurrentDeepLinkSubscription(event, receipt)
+    || receipt.subscriptionId !== deepLinkSubscription?.subscriptionId
+    || receipt.deliveryId !== deepLinkInFlight?.deliveryId
+    || receipt.deliveryId !== pendingDeepLink?.deliveryId) return;
+  pendingDeepLink = null;
+  deepLinkInFlight = null;
+});
+
+function queueDeepLink(url: string): boolean {
+  const data = parseBflowDeepLink(url);
+  if (!data) return false;
+  // 화면 준비를 기다리는 동안 여러 요청이 오면 마지막 유효한 링크를 연다.
+  pendingDeepLink = { data, deliveryId: ++deepLinkSequence };
+  flushPendingDeepLink();
+  return true;
 }
 
 function sendDeepLinkToRenderer(url: string): void {
-  const parsed = parseDeepLink(url);
-  if (!parsed) return;
-  console.log('[DeepLink] 전달:', parsed);
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('deep-link', parsed);
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-  } else {
-    // 메인 창이 파괴된 상태 (렌더러 크래시 등) → pendingDeepLink로 저장하고
-    // showMainWindow()로 창 복구 트리거. 새 창의 did-finish-load 시점에 처리됨.
-    pendingDeepLink = url;
-    showMainWindow();
-  }
+  if (!queueDeepLink(url)) return;
+  if (app.isReady()) showMainWindow();
 }
+// ─── 딥링크 전달 준비 계약 끝 ───────────────────────────
 
 /** 딥링크 파일에 URL 기록 (두 번째 인스턴스 → 첫 번째 인스턴스 전달용) */
 function writeDeepLinkFile(url: string): void {
@@ -4902,6 +4975,10 @@ if (!gotTheLock) {
   // ready까지 기다린 후 조용히 종료해야 비프음 방지
   app.on('ready', () => setTimeout(() => app.exit(0), 50));
 } else {
+  // 최초 argv는 한 번만 보관한다. 로드 완료 때 다시 읽으면 이후 요청을 덮어쓴다.
+  const initialDeepLink = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+  if (initialDeepLink) queueDeepLink(initialDeepLink);
+
   // ★ 프로토콜 등록은 첫 번째 인스턴스에서만!
   // 두 번째 인스턴스에서 호출하면 cwd가 system32일 때 레지스트리가 깨짐
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -5236,8 +5313,8 @@ app.whenReady().then(async () => {
   // Supabase Realtime 구독 시작
   startSupabaseRealtime();
 
-  // 저장된 위젯 자동 복원 (Phase 0-6) + 보류 딥링크 전달
-  // .once: 렌더러 재로드(Ctrl+Shift+R, 크래시 복구) 시 재실행 방지 — 사용자가 닫은 위젯 재등장/딥링크 재실행 차단
+  // 저장된 위젯 자동 복원 (Phase 0-6)
+  // .once: 렌더러 재로드(Ctrl+Shift+R, 크래시 복구) 시 사용자가 닫은 위젯 재등장 방지
   if (mainWindow) {
     mainWindow.webContents.once('did-finish-load', () => {
       if (widgetPositionCache.size > 0) {
@@ -5255,14 +5332,6 @@ app.whenReady().then(async () => {
           }
         }
       }
-      // 앱 시작 시 보류된 딥링크 전달
-      if (pendingDeepLink) {
-        sendDeepLinkToRenderer(pendingDeepLink);
-        pendingDeepLink = null;
-      }
-      // Windows: 프로세스 argv에서 딥링크 확인 (프로토콜 핸들러로 앱이 시작된 경우)
-      const argDeepLink = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
-      if (argDeepLink) sendDeepLinkToRenderer(argDeepLink);
     });
   }
 

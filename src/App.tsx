@@ -3032,10 +3032,10 @@ export default function App() {
 
   useRetakeNotifications();
 
-  // 씬/리테이크 바로가기 수신. 로그인 전 요청은 대상 ID를 보관한다.
+  // 로그인/기본 화면 복원이 끝난 뒤 구독한다. 그 전 요청은 main이 보관한다.
   const { setPendingDeepLink } = useAppStore();
   useEffect(() => {
-    if (!window.electronAPI?.onDeepLink) return;
+    if (!authReady || !currentUser || !window.electronAPI?.onDeepLink) return;
     const cleanup = window.electronAPI.onDeepLink((data) => {
       console.log('[DeepLink] 수신:', data);
       if ('revisionId' in data) {
@@ -3048,7 +3048,7 @@ export default function App() {
       app.setView('scenes');
     });
     return cleanup;
-  }, [setPendingDeepLink]);
+  }, [authReady, currentUser?.id, setPendingDeepLink]);
 
   const setView = useAppStore((state) => state.setView);
   const safeCurrentView = resolveAllowedView(currentView, currentUser);

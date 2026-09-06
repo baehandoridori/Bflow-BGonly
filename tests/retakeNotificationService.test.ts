@@ -33,7 +33,7 @@ function harness(overrides: Partial<RetakeNotificationDependencies> = {}) {
     getActor: async () => ({ ...actor }),
     isActorCurrent: (captured) => captured.id === actor.id && captured.epoch === actor.epoch,
     readRevision: async () => revision,
-    readUsers: async () => [{ id: 'pending', slackId: 'U_PENDING' }, { id: 'working', slackId: 'U_WORKING' }],
+    readUsers: async () => [{ ...actor }, { id: 'pending', slackId: 'U_PENDING' }, { id: 'working', slackId: 'U_WORKING' }],
     sendSlack: async (payload) => { sent.push(payload); },
     broadcast: (payload) => { broadcasts.push(payload); return true; },
     now: () => now,
@@ -343,4 +343,109 @@ test('main update handler never emits reassignment notifications when persistenc
   );
   await assert.rejects(handler({}, h.revision.id, { assigneeIds: '["pending","working"]', __op: 'reassign' }), /write refused/);
   assert.equal(h.sent.length, 0); assert.equal(h.broadcasts.length, 0);
+});
+
+function mainPersistenceHarness() {
+  const main = fs.readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
+  const ast = ts.createSourceFile('main.ts', main, ts.ScriptTarget.Latest, true);
+  const statements = ast.statements.filter((node) => {
+    const text = node.getText(ast);
+    return text.startsWith('const retakeNotificationService =')
+      || text.startsWith("ipcMain.handle('supabase:add-revision'")
+      || text.startsWith("ipcMain.handle('supabase:update-revision'");
+  });
+  assert.equal(statements.length, 3, 'exercise the actual main service wiring and both persistence handlers');
+  const javascript = ts.transpileModule(statements.map((node) => node.getText(ast)).join('\n'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  let user = { id: 'requester', name: '요청자', role: 'user', isCompositor: true, slackId: 'U_REQUESTER' };
+  let epoch = 1;
+  let changeDuringEnsure = false;
+  const events: string[] = [];
+  const revision: RetakeNotificationRecord = {
+    id: 'retake-main', requesterId: user.id, sceneKey: 'EP01:A:1', revisionNo: 1,
+    description: '수정 요청', assigneeIds: ['pending'], assigneeStates: {},
+  };
+  const handlers = new Map<string, (...args: any[]) => Promise<any>>();
+  const query = { select: () => query, eq: () => query, maybeSingle: async () => {
+    events.push('read-revision'); return { data: revision, error: null };
+  } };
+  const context = vm.createContext({
+    RetakeNotificationService,
+    sessionManager: {
+      ensure: async () => {
+        const result = { ok: true, payload: { user: { ...user }, epoch } };
+        if (changeDuringEnsure) { user = { ...user, id: 'another-user' }; epoch += 1; }
+        return result;
+      },
+      getCanonicalUserId: () => user.id, getEpoch: () => epoch,
+    },
+    sbReadUsers: async () => { events.push('directory'); throw new Error('directory unavailable'); },
+    supabaseClient: { from: () => query },
+    mapCanonicalRevision: (row: RetakeNotificationRecord) => row,
+    sbAddRevision: async () => { events.push('insert'); },
+    sbUpdateRevision: async (_id: string, updates: Record<string, string>) => {
+      events.push('update'); revision.assigneeIds = JSON.parse(updates.assigneeIds); return { affected: true };
+    },
+    postSlackWebhook: async () => { events.push('slack'); },
+    SLACK_WEBHOOK_URL: 'https://example.invalid/workflow',
+    broadcastRetakeReminder: async () => { events.push('broadcast'); return true; },
+    randomUUID: () => 'event-main',
+    ipcMain: { handle: (name: string, callback: (...args: any[]) => Promise<any>) => handlers.set(name, callback) },
+    wrapIpc: (callback: unknown) => callback,
+    currentActivityUser: null,
+  });
+  vm.runInContext(javascript, context);
+  return {
+    events, revision,
+    changeSessionDuringEnsure: () => { changeDuringEnsure = true; },
+    create: () => handlers.get('supabase:add-revision')!({}, revision.id, 'part-id', revision.sceneKey, 1, 'open', 'normal',
+      revision.description, '', '', 'bg', 'bg', 'requester', '요청자', '', '2026-09-07T00:00:00Z', '["pending"]', '["pending"]'),
+    reassign: () => handlers.get('supabase:update-revision')!({}, revision.id, { assigneeIds: '["pending","working"]', __op: 'reassign' }),
+  };
+}
+
+test('valid canonical session still INSERTs when the notification directory fails, returning delivery failure without rollback', async () => {
+  const h = mainPersistenceHarness();
+  const result = await h.create();
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /저장됐지만/);
+  assert.deepEqual(h.events, ['insert', 'read-revision', 'directory']);
+});
+
+test('canonical reassignment persists before notification directory failure and retains the assigned users', async () => {
+  const h = mainPersistenceHarness();
+  const result = await h.reassign();
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /변경됐지만/);
+  assert.deepEqual(h.events, ['read-revision', 'update', 'read-revision', 'directory']);
+  assert.deepEqual(h.revision.assigneeIds, ['pending', 'working']);
+});
+
+test('canonical session changes still block INSERT and reassignment before any persistence or notification', async () => {
+  for (const action of ['create', 'reassign'] as const) {
+    const h = mainPersistenceHarness();
+    h.changeSessionDuringEnsure();
+    await assert.rejects(h[action](), /로그인이 필요/);
+    assert.deepEqual(h.events, []);
+  }
+});
+
+test('post-save directory enrichment uses fresh Slack metadata and rejects newly revoked send privileges', async () => {
+  const h = harness({ readUsers: async () => [
+    { id: 'requester', name: '새 이름', role: 'user', slackId: 'U_FRESH' },
+    { id: 'pending', slackId: 'U_PENDING' },
+  ] });
+  h.revision.assigneeIds = ['pending'];
+  assert.equal((await h.service.notifyAssignment(h.revision.id)).status, 'sent');
+  assert.equal(h.sent[0].name_my, 'U_FRESH');
+  const demoted = harness({ readUsers: async () => [
+    { id: 'reviewer', name: '검수자', role: 'user', isCompositor: false, slackId: 'U_REVIEWER' },
+    { id: 'pending', slackId: 'U_PENDING' },
+  ] });
+  demoted.setActor({ id: 'reviewer', name: '검수자', role: 'admin', isCompositor: true, epoch: 1 });
+  demoted.revision.assigneeIds = ['pending'];
+  assert.equal((await demoted.service.notifyAssignment(demoted.revision.id)).status, 'failed');
+  await assert.rejects(demoted.service.remind(demoted.revision.id), /등록자 또는 컴포지터/);
+  assert.equal(demoted.sent.length, 0); assert.equal(demoted.broadcasts.length, 0);
 });
