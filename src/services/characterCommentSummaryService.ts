@@ -15,6 +15,8 @@ export class CharacterCommentSummaryCache {
   private versions = new Map<string, number>();
   private dirty = new Set<string>();
   private inFlight = new Set<string>();
+  private retries = new Map<string, { attempt: number; version: number }>();
+  private retryTimers = new Set<ReturnType<typeof setTimeout>>();
   private readState: Record<string, string> = {};
   private readReady = false;
   private readDirty = true;
@@ -27,6 +29,7 @@ export class CharacterCommentSummaryCache {
     private readonly readSummaries: (ids: string[]) => Promise<CharacterCommentSummaries>,
     private readonly readStates: (userId: string) => Promise<Record<string, string>>,
     private readonly now: () => number = Date.now,
+    private readonly retryDelaysMs: readonly number[] = [1_000, 3_000],
   ) {}
 
   subscribe(characterId: string, userId: string, connected: boolean, listener: Listener, events: EventTarget = window): () => void {
@@ -43,13 +46,17 @@ export class CharacterCommentSummaryCache {
     const listeners = this.listeners.get(characterId) ?? new Set<Listener>();
     listeners.add(listener); this.listeners.set(characterId, listeners);
     const entry = this.entries.get(characterId);
-    if ((!entry || this.now() - entry.at >= CACHE_TTL_MS) && !this.inFlight.has(characterId)) this.dirty.add(characterId);
+    if ((!entry || this.now() - entry.at >= CACHE_TTL_MS) && !this.inFlight.has(characterId)
+      && !this.retries.has(characterId)) this.dirty.add(characterId);
     listener(this.value(characterId));
     this.schedule(0);
     return () => {
       if (generation !== this.generation) return;
       listeners.delete(listener);
-      if (!listeners.size) this.listeners.delete(characterId);
+      if (!listeners.size) {
+        this.listeners.delete(characterId);
+        this.retries.delete(characterId);
+      }
       if (!this.listeners.size) this.reset();
     };
   }
@@ -57,6 +64,8 @@ export class CharacterCommentSummaryCache {
   private reset(): void {
     ++this.generation;
     if (this.timer) clearTimeout(this.timer);
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear(); this.retries.clear();
     this.timer = undefined;
     this.events?.removeEventListener('bflow:comments-invalidated', this.onCommentsChanged);
     this.events?.removeEventListener(COMMENT_READ_STATE_EVENT, this.onReadStateChanged);
@@ -85,6 +94,34 @@ export class CharacterCommentSummaryCache {
     this.timer = setTimeout(() => { this.timer = undefined; this.flush(); }, delay);
   }
 
+  private retryFailedBatch(batch: string[], versions: number[], generation: number): void {
+    if (generation !== this.generation) return;
+    const byAttempt = new Map<number, Array<{ id: string; state: { attempt: number; version: number } }>>();
+    batch.forEach((id, index) => {
+      if (!this.listeners.has(id) || versions[index] !== (this.versions.get(id) ?? 0)) return;
+      const state = { attempt: (this.retries.get(id)?.attempt ?? 0) + 1, version: versions[index] };
+      this.retries.set(id, state);
+      if (state.attempt > this.retryDelaysMs.length) return;
+      const group = byAttempt.get(state.attempt) ?? [];
+      group.push({ id, state }); byAttempt.set(state.attempt, group);
+    });
+    for (const [attempt, group] of byAttempt) {
+      const timer = setTimeout(() => {
+        this.retryTimers.delete(timer);
+        if (generation !== this.generation) return;
+        let pending = false;
+        for (const { id, state } of group) {
+          if (this.listeners.has(id) && this.retries.get(id) === state
+            && state.version === (this.versions.get(id) ?? 0)) {
+            this.dirty.add(id); pending = true;
+          }
+        }
+        if (pending) this.schedule(0);
+      }, this.retryDelaysMs[attempt - 1]);
+      this.retryTimers.add(timer);
+    }
+  }
+
   private flush(): void {
     const generation = this.generation;
     if (this.readDirty && !this.reading) {
@@ -108,10 +145,15 @@ export class CharacterCommentSummaryCache {
         if (generation !== this.generation) return;
         batch.forEach((id, index) => {
           if (versions[index] !== (this.versions.get(id) ?? 0)) return;
+          this.retries.delete(id);
           this.entries.set(id, { summary: summaries[id] ?? { count: 0, latestOtherCreatedAt: null }, at: this.now() });
           this.emit(id);
         });
-      }).catch((error) => console.warn('[캐릭터 댓글 배지] 요약 조회 실패', error)).finally(() => {
+      }).catch((error) => {
+        if (generation !== this.generation) return;
+        console.warn('[캐릭터 댓글 배지] 요약 조회 실패', error);
+        this.retryFailedBatch(batch, versions, generation);
+      }).finally(() => {
         if (generation !== this.generation) return;
         for (const id of batch) this.inFlight.delete(id);
         if ([...this.dirty].some(id => this.listeners.has(id))) this.schedule(0);
@@ -125,6 +167,7 @@ export class CharacterCommentSummaryCache {
     const ids = detail?.characterId ? [detail.characterId] : [...new Set([...this.entries.keys(), ...this.listeners.keys(), ...this.inFlight])];
     for (const id of ids) {
       this.versions.set(id, (this.versions.get(id) ?? 0) + 1);
+      this.retries.delete(id);
       this.entries.delete(id);
       if (this.listeners.has(id)) this.dirty.add(id);
     }

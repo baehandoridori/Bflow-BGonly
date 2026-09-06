@@ -397,6 +397,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('calendar:notifications:mark-read', ids),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),
+  supabaseReadRevisionById: (revisionId: string) =>
+    ipcRenderer.invoke('supabase:read-revision-by-id', revisionId),
   remindRetake: (revisionId: string) => ipcRenderer.invoke('supabase:remind-retake', revisionId),
     supabaseAddRevision: (
       id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,

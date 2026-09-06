@@ -53,7 +53,7 @@ import { RetakeNotificationService } from './retakeNotificationService';
 import { SlackWorkflowTransport } from './slackWorkflowTransport';
 import { parseBflowDeepLink, type BflowDeepLink } from '../src/shared/bflowDeepLink';
 import { validateCharacterCommentIds } from '../src/shared/characterCommentSummary';
-import type { RetakeNotificationActor, RetakeNotificationRecord } from '../src/shared/retakeNotifications';
+import type { RetakeNotificationActor } from '../src/shared/retakeNotifications';
 import type { ArcadeExecuteCommand, ArcadeSlackRecord } from './arcadeService';
 import { getCanonicalMarketQuoteWon } from '../shared/playgroundMarketPrice.mjs';
 import { PersonalTodoRecoveryJournal } from './personalTodoRecoveryJournal';
@@ -1367,7 +1367,7 @@ import {
   editComment as sbEditComment,
   deleteComment as sbDeleteComment,
   readAllRevisions as sbReadRevisions,
-  mapRevision as mapCanonicalRevision,
+  readRevisionById as sbReadRevisionById,
   addRevision as sbAddRevision,
   updateRevision as sbUpdateRevision,
   deleteRevision as sbDeleteRevision,
@@ -2655,14 +2655,7 @@ const retakeNotificationService = new RetakeNotificationService({
     };
   },
   isActorCurrent: (actor) => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch,
-  readRevision: async (id): Promise<RetakeNotificationRecord | null> => {
-    const { data, error } = await supabaseClient.from('comp_revisions')
-      .select('id,requester_id,scene_id,revision_no,description,set_id,notify_user_ids,assignee_ids,assignee_states,final_resolved_at,status')
-      .eq('id', id).maybeSingle();
-    if (error) throw error;
-    if (!data) return null;
-    return mapCanonicalRevision(data);
-  },
+  readRevision: sbReadRevisionById,
   readUsers: sbReadUsers,
   sendSlack: (payload, isCurrent) => postSlackWebhook(SLACK_WEBHOOK_URL, payload, 'Retake Slack', 8_000, isCurrent),
   broadcast: broadcastRetakeReminder,
@@ -2676,7 +2669,19 @@ ipcMain.handle('supabase:remind-retake', wrapIpc(async (_e: unknown, revisionId:
   return retakeNotificationService.remind(revisionId);
 }));
 ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
-  return sbReadRevisions();
+  const actor = await retakeNotificationService.captureActor();
+  const isCurrent = () => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch;
+  const revisions = await sbReadRevisions(isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  return revisions;
+}));
+
+ipcMain.handle('supabase:read-revision-by-id', wrapIpc(async (_event, revisionId: string) => {
+  const actor = await retakeNotificationService.captureActor();
+  const isCurrent = () => sessionManager.getCanonicalUserId() === actor.id && sessionManager.getEpoch() === actor.epoch;
+  const revision = await sbReadRevisionById(revisionId, isCurrent);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  return revision;
 }));
 ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, partUuid: string, sceneId: string,
     revisionNo: number, status: string, priority: string, description: string, frameNo: string,

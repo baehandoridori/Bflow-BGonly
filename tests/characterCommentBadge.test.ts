@@ -159,6 +159,111 @@ test('generic invalidation also fences an unmounted in-flight character before a
   } finally { stopNewA?.(); stopB(); stopA(); }
 });
 
+test('a transient summary failure retries as one batch, recovers, and resets its retry budget after success', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const events = new EventTarget(); const batches: string[][] = []; const values: Badge[] = [];
+  const originalWarn = console.warn; console.warn = () => {};
+  const cache = new CharacterCommentSummaryCache(async (ids: string[]) => {
+    batches.push(ids);
+    if (batches.length === 1 || batches.length === 3) throw new Error('temporary network failure');
+    return Object.fromEntries(ids.map(id => [id, { count: 2, latestOtherCreatedAt: unreadAt }]));
+  }, async () => ({}), Date.now, [80, 120]);
+  const stopA = cache.subscribe('a', 'me', true, (value: Badge) => values.push(value), events);
+  const stopB = cache.subscribe('b', 'me', true, () => {}, events);
+  try {
+    await settle();
+    dispatch(events, 'bflow:comment-read-state-changed', { userId: 'me' }); await settle();
+    assert.equal(batches.length, 1, 'a read-state refresh does not bypass summary backoff');
+    await refresh();
+    assert.deepEqual(batches, [['a', 'b'], ['a', 'b']]);
+    assert.deepEqual(values.at(-1), { count: 2, seen: false });
+    dispatch(events, 'bflow:comments-invalidated', { characterId: 'a' });
+    await refresh(); await refresh();
+    assert.deepEqual(batches.slice(2), [['a'], ['a']], 'a later invalidation has its own bounded recovery budget');
+  } finally { stopA(); stopB(); console.warn = originalWarn; }
+});
+
+test('permanent summary failures stop after two retries without a tight loop or read-state-triggered restart', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const events = new EventTarget(); let calls = 0;
+  const originalWarn = console.warn; console.warn = () => {};
+  const cache = new CharacterCommentSummaryCache(async () => { ++calls; throw new Error('unavailable'); },
+    async () => ({}), Date.now, [30, 50]);
+  const stop = cache.subscribe('a', 'me', true, () => {}, events);
+  try {
+    await refresh(); await settle();
+    assert.equal(calls, 3, 'one initial request and two delayed retries');
+    dispatch(events, 'bflow:comment-read-state-changed', { userId: 'me' });
+    await refresh(); assert.equal(calls, 3);
+    const stopDuplicate = cache.subscribe('a', 'me', true, () => {}, events);
+    await settle(); assert.equal(calls, 3, 'another copy of the same visible card does not reset exhausted retries');
+    stopDuplicate();
+  } finally { stop(); console.warn = originalWarn; }
+});
+
+test('unmounting one failed character cancels only its retry and remounting does not inherit the old timer', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const events = new EventTarget(); const batches: string[][] = [];
+  const originalWarn = console.warn; console.warn = () => {};
+  const cache = new CharacterCommentSummaryCache(async (ids: string[]) => {
+    batches.push(ids);
+    if (batches.length === 1) throw new Error('first failure');
+    return Object.fromEntries(ids.map(id => [id, { count: 0, latestOtherCreatedAt: null }]));
+  }, async () => ({}), Date.now, [80, 120]);
+  const stopA = cache.subscribe('a', 'me', true, () => {}, events);
+  const stopB = cache.subscribe('b', 'me', true, () => {}, events);
+  let stopNewA: (() => void) | undefined;
+  try {
+    await settle(); stopA();
+    stopNewA = cache.subscribe('a', 'me', true, () => {}, events);
+    await settle(); await refresh();
+    assert.deepEqual(batches, [['a', 'b'], ['a'], ['b']], 'old batch retries only its still-visible, unchanged subscriber');
+  } finally { stopNewA?.(); stopA(); stopB(); console.warn = originalWarn; }
+});
+
+test('invalidation supersedes a failed in-flight request without inheriting its retry timer', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const events = new EventTarget(); let calls = 0;
+  let rejectFirst: (error: Error) => void = () => {};
+  const originalWarn = console.warn; console.warn = () => {};
+  const cache = new CharacterCommentSummaryCache(() => {
+    ++calls;
+    return calls === 1 ? new Promise((_resolve, reject) => { rejectFirst = reject; })
+      : Promise.resolve({ a: { count: 1, latestOtherCreatedAt: null } });
+  }, async () => ({}), Date.now, [30, 50]);
+  const values: Badge[] = []; const stop = cache.subscribe('a', 'me', true, (value: Badge) => values.push(value), events);
+  try {
+    await settle(); dispatch(events, 'bflow:comments-invalidated', { characterId: 'a' }); await refresh();
+    rejectFirst(new Error('old request failed')); await settle(); await refresh();
+    assert.equal(calls, 2, 'fresh invalidation reads once; old failure does not schedule a further retry');
+    assert.deepEqual(values.at(-1), { count: 1, seen: true });
+  } finally { stop(); console.warn = originalWarn; }
+});
+
+test('account, source, and final unmount cancel scheduled summary retries', async () => {
+  const { CharacterCommentSummaryCache } = await load('src/services/characterCommentSummaryService.ts');
+  const originalWarn = console.warn; console.warn = () => {};
+  try {
+    for (const change of ['account', 'source', 'unmount']) {
+      const events = new EventTarget(); let calls = 0;
+      const cache = new CharacterCommentSummaryCache(async () => {
+        ++calls;
+        if (calls === 1) throw new Error('initial failure');
+        return { a: { count: 1, latestOtherCreatedAt: null } };
+      }, async () => ({}), Date.now, [80, 120]);
+      const stop = cache.subscribe('a', 'first', true, () => {}, events);
+      let stopNext: (() => void) | undefined;
+      try {
+        await settle();
+        if (change === 'unmount') stop();
+        else stopNext = cache.subscribe('a', change === 'account' ? 'second' : 'first', change !== 'source', () => {}, events);
+        await refresh(); await settle();
+        assert.equal(calls, change === 'unmount' ? 1 : 2, change);
+      } finally { stopNext?.(); stop(); }
+    }
+  } finally { console.warn = originalWarn; }
+});
+
 test('badge keeps the existing compact marker and hides a previous user or source snapshot immediately', async () => {
   let currentUserId = 'me'; let connected = true; let state: any = null; let mounted = false;
   let callback: (value: Badge) => void = () => {}; let effect: (() => () => void) | undefined;

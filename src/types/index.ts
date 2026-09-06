@@ -1568,6 +1568,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     ids: Parameters<CalendarApiInputContract['calendarNotificationsMarkRead']>[0],
   ) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
+  supabaseReadRevisionById: (revisionId: string) => Promise<unknown | null>;
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string, assigneeIdsJson?: string, setId?: string) => Promise<RetakeDeliveryResult | void>;
   remindRetake: (revisionId: string) => Promise<RetakeDeliveryResult>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<RetakeDeliveryResult | void>;

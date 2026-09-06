@@ -26,7 +26,7 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
   const navigated: string[] = [];
   const toasts: any[] = [];
   const deliveryFailures: Array<{ delivery: any; expectsAppNotification: boolean }> = [];
-  const lookups: Array<{ resolve: (rows: any[]) => void; reject: (error: Error) => void }> = [];
+  const lookups: Array<{ revisionId?: string; resolve: (rows: any) => void; reject: (error: Error) => void }> = [];
   const auth = { currentUser: { id: 'me', name: 'Me' }, authReady: true };
   const { useAppStore: appStore } = await loadSource('src/stores/useAppStore.ts', {
     zustand: { create: createStore },
@@ -72,7 +72,8 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
     '@/stores/useNotificationStore': { useNotificationStore: store(notifications) },
     '@/services/revisionService': { setRevisionsSheetsMode: (connected: boolean) => { connectedRevisionMode = connected; },
       reportRetakeDeliveryFailure: (delivery: any, expectsAppNotification: boolean) => deliveryFailures.push({ delivery, expectsAppNotification }),
-      getCanonicalRevisions: () => new Promise<any[]>((resolve, reject) => lookups.push({ resolve, reject })) },
+      getCanonicalRevisions: () => new Promise<any[]>((resolve, reject) => lookups.push({ resolve, reject })),
+      getCanonicalRevision: (revisionId: string) => new Promise<any>((resolve, reject) => lookups.push({ revisionId, resolve, reject })) },
     '@/utils/retakeNavigation': { openRetakeInApp: (id: string) => navigated.push(id) },
   });
   module.useRetakeNotifications();
@@ -249,12 +250,28 @@ test('new assignee broadcasts show assignment text, dedupe each event, and keep 
   } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
 });
 
+test('catch-up includes assignments beyond 1000 older revisions', async () => {
+  const previousWindow = (globalThis as any).window;
+  const h = await hookHarness();
+  (globalThis as any).window = { electronAPI: h.api };
+  const cleanup = h.effects[0]();
+  try {
+    const rows = Array.from({ length: 1101 }, (_, i) => ({ ...revision, id: `revision-${i}`,
+      createdAt: new Date(Date.parse(revision.createdAt) + i * 1000).toISOString() }));
+    assert.equal(h.lookups[0].revisionId, undefined, 'catch-up uses the complete canonical list');
+    h.lookups[0].resolve(rows); await flush();
+    assert.equal(h.notices.length, 50);
+    assert.equal(h.notices.at(-1).metadata.revisionId, 'revision-1100');
+  } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
+});
+
 test('cold hub link publishes only its verified target after canonical data chooses the hub', async () => {
   const h = await hookHarness('new-retake');
   h.revisions.revisions.push({ ...revision, id: 'existing' });
   const cleanup = h.effects[1]();
   assert.equal(h.app.currentView, 'dashboard');
-  h.lookups[0].resolve([{ ...revision, id: 'new-retake', setId: 'set-new' }, { ...revision, id: 'unrelated-server-item' }]);
+  assert.equal(h.lookups[0].revisionId, 'new-retake', 'navigation directly asks for this ID instead of scanning a capped list');
+  h.lookups[0].resolve({ ...revision, id: 'new-retake', setId: 'set-new' });
   await flush();
   assert.equal(h.app.currentView, 'retake-hub'); assert.equal(h.app.pendingRetakeId, 'new-retake');
   assert.equal(h.app.pendingRetakeTarget.revision.id, 'new-retake');
@@ -275,12 +292,12 @@ test('pending link survives disconnected startup and canonical network failure, 
 
 test('positive absence clears pending while superseded and stale-user lookups do not mutate the store', async () => {
   const absent = await hookHarness('deleted'); const cleanupAbsent = absent.effects[1]();
-  absent.lookups[0].resolve([]); await flush();
+  absent.lookups[0].resolve(null); await flush();
   assert.equal(absent.app.pendingRetakeId, null); cleanupAbsent?.();
   for (const change of ['request', 'user']) {
     const h = await hookHarness('old'); const cleanup = h.effects[1]();
     if (change === 'request') h.app.requestRetakeNavigation('new'); else h.auth.currentUser = { id: 'second', name: 'Second' };
-    h.lookups[0].resolve([{ ...revision, id: 'old' }]); await flush();
+    h.lookups[0].resolve({ ...revision, id: 'old' }); await flush();
     assert.equal(h.revisions.revisions.length, 0); assert.equal(h.app.currentView, 'dashboard'); cleanup?.();
   }
 });
@@ -354,7 +371,7 @@ test('already mounted destinations wait for canonical moves in either direction 
     destination.consume(oldSet ? 'hub' : 'standalone');
     assert.equal(h.app.pendingRetakeId, null);
     assert.deepEqual(destination.focused, []);
-    h.lookups[0].resolve([{ ...revision, setId: newSet }]); await flush();
+    h.lookups[0].resolve({ ...revision, setId: newSet }); await flush();
     assert.equal(h.app.currentView, newSet ? 'retake-hub' : 'compositing-revisions');
     // Simulate the ordinary cached list read completing after the canonical lookup.
     h.revisions.revisions = [{ ...revision, setId: oldSet }];
@@ -380,7 +397,7 @@ test('cached deletion while already in the hub reports absence without consuming
   (globalThis as any).window = { electronAPI: h.api };
   const cleanupWarmup = h.effects[0](); const cleanup = h.effects[1]();
   try {
-    destination.consume('hub'); h.lookups[1].resolve([]); await flush();
+    destination.consume('hub'); h.lookups[1].resolve(null); await flush();
     assert.equal(h.app.retakeNavigationRequest, null); assert.equal(h.app.pendingRetakeId, null);
     assert.deepEqual(destination.focused, []); assert.match(h.toasts[0][0], /찾지 못했습니다/);
     finishWarmup(); await flush();
@@ -394,8 +411,8 @@ test('same-ID repeated requests accept only the latest canonical reply', async (
   const oldId = h.app.retakeNavigationRequest.id;
   h.app.requestRetakeNavigation('r1'); h.render(); const cleanup = h.effects[1]();
   assert.ok(h.app.retakeNavigationRequest.id > oldId);
-  h.lookups[1].resolve([{ ...revision, setId: 'set-b' }]); await flush();
-  h.lookups[0].resolve([{ ...revision, setId: 'set-a' }]); await flush();
+  h.lookups[1].resolve({ ...revision, setId: 'set-b' }); await flush();
+  h.lookups[0].resolve({ ...revision, setId: 'set-a' }); await flush();
   assert.equal(h.app.pendingRetakeTarget.revision.setId, 'set-b');
   oldCleanup?.(); cleanup?.();
 });
@@ -403,7 +420,7 @@ test('same-ID repeated requests accept only the latest canonical reply', async (
 test('already mounted hub refreshes a missing verified set once and can retry a failed metadata read', async () => {
   const h = await hookHarness('r1'); h.app.currentView = 'retake-hub';
   const cleanup = h.effects[1]();
-  h.lookups[0].resolve([{ ...revision, setId: 'set-b' }]); await flush();
+  h.lookups[0].resolve({ ...revision, setId: 'set-b' }); await flush();
   const destination = destinationHarness(h, ['set-a']);
   destination.consume('hub'); await flush(); destination.consume('hub');
   assert.equal(destination.refreshes(), 1); assert.equal(destination.focused.length, 0);

@@ -363,6 +363,16 @@ export async function getCanonicalRevisions(): Promise<CompRevision[]> {
   return (rows as Parameters<typeof rowToRevision>[0][]).map(rowToRevision);
 }
 
+/** Canonical navigation never depends on a cached or capped list. */
+export async function getCanonicalRevision(revisionId: string): Promise<CompRevision | null> {
+  const row = await window.electronAPI.supabaseReadRevisionById(revisionId);
+  if (row === null) return null;
+  if (!row || typeof row !== 'object' || Array.isArray(row) || (row as { id?: unknown }).id !== revisionId) {
+    throw new Error('리테이크 응답을 확인하지 못했어요.');
+  }
+  return rowToRevision(row as Parameters<typeof rowToRevision>[0]);
+}
+
 export async function loadAllRevisions(): Promise<RevisionsStore> {
   syncRevisionContextSignature();
   if (sheetsCache) return sheetsCache;
@@ -719,10 +729,8 @@ export async function updateRevisionDetails(
 async function freshAssigneeStates(rev: CompRevision): Promise<Record<string, RevisionAssigneeState>> {
   if (!sheetsMode) return rev.assigneeStates ?? {};
   try {
-    const rawData = await window.electronAPI.supabaseReadRevisions();
-    const rows = (rawData as Array<Parameters<typeof rowToRevision>[0]>) ?? [];
-    const fresh = rows.find((r) => r.id === rev.id);
-    return fresh ? (rowToRevision(fresh).assigneeStates ?? {}) : (rev.assigneeStates ?? {});
+    const fresh = await getCanonicalRevision(rev.id);
+    return fresh ? (fresh.assigneeStates ?? {}) : (rev.assigneeStates ?? {});
   } catch {
     return rev.assigneeStates ?? {};
   }

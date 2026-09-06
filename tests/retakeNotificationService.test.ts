@@ -242,8 +242,7 @@ test('notification canonical mapping derives assigned state, removes ghost assig
   assert.equal(legacy.finalResolvedAt, undefined);
   assert.deepEqual(Array.from(contracts.unfinishedRetakeAssigneeIds(legacy)), []);
   const main = fs.readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /return mapCanonicalRevision\(data\)/);
-  assert.match(main, /notify_user_ids,assignee_ids,assignee_states/);
+  assert.match(main, /readRevision: sbReadRevisionById/);
 });
 
 test('broadcast adapter waits for server acknowledgement and treats error or timeout as failure', async () => {
@@ -368,9 +367,6 @@ function mainPersistenceHarness(options: { directoryFails?: boolean; sendSlack?:
     description: '수정 요청', assigneeIds: ['pending'], assigneeStates: {},
   };
   const handlers = new Map<string, (...args: any[]) => Promise<any>>();
-  const query = { select: () => query, eq: () => query, maybeSingle: async () => {
-    events.push('read-revision'); return { data: revision, error: null };
-  } };
   const context = vm.createContext({
     RetakeNotificationService,
     sessionManager: {
@@ -386,8 +382,7 @@ function mainPersistenceHarness(options: { directoryFails?: boolean; sendSlack?:
       if (options.directoryFails !== false) throw new Error('directory unavailable');
       return [{ ...user }, { id: 'pending', slackId: 'U_PENDING' }, { id: 'working', slackId: 'U_WORKING' }];
     },
-    supabaseClient: { from: () => query },
-    mapCanonicalRevision: (row: RetakeNotificationRecord) => row,
+    sbReadRevisionById: async () => { events.push('read-revision'); return revision; },
     sbAddRevision: async () => { events.push('insert'); },
     sbUpdateRevision: async (_id: string, updates: Record<string, string>) => {
       events.push('update'); revision.assigneeIds = JSON.parse(updates.assigneeIds); return { affected: true };

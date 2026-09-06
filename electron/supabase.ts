@@ -2159,14 +2159,38 @@ export async function deleteRevision(id: string, requesterUserId: string): Promi
   broadcastDataChange('comp_revisions', 'DELETE');
 }
 
-/** 모든 리비전 읽기 */
-export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string; notifyUserIds: string[] })[]> {
-  const { data, error } = await supabase
-    .from('comp_revisions')
-    .select('*')
-    .order('created_at');
+/** ID 단건 조회: 서버 오류와 실제 삭제(null)를 구분한다. */
+export async function readRevisionById(id: string, isCurrent: () => boolean = () => true): Promise<ReturnType<typeof mapRevision> | null> {
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('리테이크 ID가 올바르지 않아요.');
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  const { data, error } = await supabase.from('comp_revisions').select('*').eq('id', id).maybeSingle();
   throwIfError(error);
-  return (data || []).map(mapRevision);
+  if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+  return data ? mapRevision(data) : null;
+}
+
+/** 모든 리비전 읽기: PostgREST 행 제한을 넘겨도 고유 ID 커서로 끝까지 읽는다. */
+export async function readAllRevisions(isCurrent: () => boolean = () => true): Promise<(SupabaseRevision & { sceneKey: string; notifyUserIds: string[] })[]> {
+  const rows: Record<string, unknown>[] = [];
+  let afterId: string | null = null;
+  while (true) {
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    let query = supabase.from('comp_revisions').select('*').order('id', { ascending: true }).limit(500);
+    if (afterId) query = query.gt('id', afterId);
+    const { data, error } = await query;
+    throwIfError(error);
+    if (!isCurrent()) throw new Error('로그인이 변경됐어요. 다시 시도해주세요.');
+    if (!data?.length) break;
+    const nextId = data[data.length - 1].id;
+    if (typeof nextId !== 'string' || (afterId !== null && nextId <= afterId)) throw new Error('리테이크 목록을 끝까지 확인하지 못했어요.');
+    rows.push(...data);
+    afterId = nextId;
+  }
+  // 기존 호출자는 생성 시간 순서를 사용하므로 조회 커서 순서를 노출하지 않는다.
+  return rows.map(mapRevision).sort((a, b) => {
+    const time = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    return (Number.isFinite(time) && time !== 0) ? time : a.id.localeCompare(b.id);
+  });
 }
 
 /** sceneKey (EP01:A:a001) → part UUID 역조회 */

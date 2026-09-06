@@ -3,7 +3,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useNotificationStore } from '@/stores/useNotificationStore';
-import { getCanonicalRevisions, reportRetakeDeliveryFailure, setRevisionsSheetsMode } from '@/services/revisionService';
+import { getCanonicalRevision, getCanonicalRevisions, reportRetakeDeliveryFailure, setRevisionsSheetsMode } from '@/services/revisionService';
 import { openRetakeInApp } from '@/utils/retakeNavigation';
 import { toast } from 'sonner';
 import type { RetakeDeliveryEvent, RetakeReminderPayload } from '@/shared/retakeNotifications';
@@ -100,10 +100,9 @@ export function useRetakeNotifications(): void {
     const userId = currentUser.id;
     const stillCurrent = () => !cancelled && useAppStore.getState().retakeNavigationRequest?.id === retakeRequest.id
       && useAuthStore.getState().currentUser?.id === userId;
-    void getCanonicalRevisions().then((revisions) => {
+    void getCanonicalRevision(retakeRequest.revisionId).then((revision) => {
       const app = useAppStore.getState();
       if (!stillCurrent()) return;
-      const revision = revisions.find((item) => item.id === retakeRequest.revisionId);
       if (!revision) {
         app.finishRetakeNavigation(retakeRequest.id, null);
         toast.error('리테이크를 찾지 못했습니다. 삭제된 항목인지 확인해주세요.');

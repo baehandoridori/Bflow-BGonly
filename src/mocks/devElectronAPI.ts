@@ -3055,7 +3055,15 @@ export function installDevElectronAPI(): void {
         });
       }
     },
-    supabaseReadRevisions: async () => getMockRevisionRows(),
+    supabaseReadRevisions: async () => {
+      requireMockCalendarUser();
+      return getMockRevisionRows();
+    },
+    supabaseReadRevisionById: async (revisionId: string) => {
+      requireMockCalendarUser();
+      if (typeof revisionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(revisionId)) throw new Error('리테이크 ID가 올바르지 않아요.');
+      return getMockRevisionRows().find((revision) => revision.id === revisionId) ?? null;
+    },
     remindRetake: async (revisionId) => ({ ...await previewRetakeNotifications.remind(revisionId), simulated: true }),
     supabaseAddRevision: async (
       id: string,
