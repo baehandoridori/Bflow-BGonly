@@ -36,9 +36,9 @@ async function harness(initial: Props = {hover:item}) {
   const listeners = new Map<string, Set<(event: unknown) => void>>();
   const captureModes=new Map<string,boolean>();
   const anchor = {getBoundingClientRect: () => ({left: 700, right: 780, top: 500, bottom: 520, width: 80, height: 20}), contains: (target: unknown) => target === anchor};
-  const box = {getBoundingClientRect: () => ({width: 220, height: 180}), contains: (target: unknown) => target === box};
+  let memoFocuses=0;const box = {focus(){memoFocuses++;},getBoundingClientRect: () => ({width: 220, height: 180}), contains: (target: unknown) => target === box};
   const body = {}, portals: unknown[] = [];let activeElement:unknown=null,focusReturns=0;
-  const document={body,get activeElement(){return activeElement;},querySelector(){return {focus(){focusReturns++;activeElement=anchor;}};}};
+  let focusSelector='';const document={body,get activeElement(){return activeElement;},querySelector(selector:string){focusSelector=selector;return {focus(){focusReturns++;activeElement=anchor;}};}};
   const nodeRequire = createRequire(import.meta.url), react = nodeRequire('react');
   const changed = (before?: readonly unknown[], after?: readonly unknown[]) => !before || !after || before.length !== after.length || before.some((value, index) => !Object.is(value, after[index]));
   const effect = (queue: Array<() => void>, callback: () => void | (() => void), deps?: readonly unknown[]) => {
@@ -71,7 +71,7 @@ async function harness(initial: Props = {hover:item}) {
     document, (callback: () => void, delay: number) => {const id = ++nextTimer;timers.set(id, {at: time + delay, callback});return id;}, (id: number) => timers.delete(id),
   );
   return {
-    anchor, box, portals, body, captureModes, focusPopup(){activeElement=box;},focusReturns:()=>focusReturns,
+    anchor, box, portals, body, captureModes,memoFocuses:()=>memoFocuses,focusSelector:()=>focusSelector, focusPopup(){activeElement=box;},focusReturns:()=>focusReturns,
     update(next: Props) {props = next;},
     render() {
       for (let pass = 0; pass < 10; pass++) {
@@ -119,12 +119,12 @@ test('Escape stays dismissed while the same row remains hovered and a fresh entr
   }finally{h.cleanup();}
 });
 
-test('keyboard memo focus supports scrolling and Escape returns focus to the originating row',async()=>{
+test('keyboard memo focus supports scrolling and Escape returns focus to the originating bar',async()=>{
   const h=await harness();try{
     h.render();h.advance(120);const popup=tooltip(h.render())!;h.update({hover:null});h.render();
     h.focusPopup();popup.props.onFocus!({currentTarget:h.box});h.advance(200);assert.ok(tooltip(h.render()));
     h.dispatch('wheel',{target:h.box});assert.ok(tooltip(h.render()));h.dispatch('keydown',{key:'Escape'});
-    assert.equal(tooltip(h.render()),undefined);assert.equal(h.focusReturns(),1);
+    assert.equal(tooltip(h.render()),undefined);assert.equal(h.focusReturns(),1);assert.equal(h.focusSelector(),`button.gantt-bar[data-gantt-hover-anchor="${item.task.id}"]`);
   }finally{h.cleanup();}
 });
 
@@ -160,4 +160,9 @@ test('only a visible memo consumes Escape in capture before the workspace handle
     const open=h.dispatch('keydown',{key:'Escape'});assert.equal(open.defaultPrevented,true);assert.equal(open.propagationStopped,true);assert.equal(tooltip(h.render()),undefined);
     const closed=h.dispatch('keydown',{key:'Escape'});assert.equal(closed.defaultPrevented,false);assert.equal(closed.propagationStopped,false);
   }finally{h.cleanup();}
+});
+
+
+test('F2 opens and focuses the full memo immediately without waiting for pointer hover delay',async()=>{
+  const h=await harness({hover:{...item,focusMemo:true}});try{assert.ok(tooltip(h.render()));assert.equal(h.memoFocuses(),1);h.advance(500);h.render();assert.equal(h.memoFocuses(),1);}finally{h.cleanup();}
 });

@@ -147,6 +147,29 @@ export function updateTask(project:GanttProject,taskId:string,patch:Partial<Gant
   if(patch.progress!==undefined&&task.progressMode==='manual')task.completed=task.progress===100;
   return scheduleProject(next);
 }
+/** Explicit group movement shifts its complete canonical subtree in one save. */
+export function shiftTaskSubtree(project:GanttProject,groupId:string,days:number):GanttProject {
+  if(!Number.isSafeInteger(days)) fail('이동 일수는 안전한 정수로 입력해 주세요.');
+  const group=project.tasks.find(task=>task.id===groupId);
+  if(!group) fail('그룹을 찾을 수 없습니다.');
+  if(group.kind!=='group') fail('그룹만 하위 일정과 함께 이동할 수 있습니다.');
+  validateProject(project);
+  if(days===0) return project;
+  const selected=descendantIds(project,groupId),next=structuredClone(project);
+  const earliest=dateStamp('0000-01-01'),latest=dateStamp('9999-12-31');
+  const shifted=(date:string):string=>{
+    const stamp=dateStamp(date)+days*DAY;
+    if(!Number.isSafeInteger(stamp)||stamp<earliest||stamp>latest) fail('이동한 날짜가 지원 범위를 벗어납니다.');
+    return shiftDate(date,days);
+  };
+  for(const task of next.tasks) if(selected.has(task.id)) {
+    task.startDate=shifted(task.startDate);task.endDate=shifted(task.endDate);
+    // The View confirms this once before the explicit date move. Keep dependency
+    // links for conflict hints, but do not let scheduling undo the chosen dates.
+    if(task.mode==='auto') task.mode='manual';
+  }
+  return scheduleProject(next);
+}
 /** Structural changes can change group bounds just as a date edit can. */
 export function scheduleProject(project:GanttProject):GanttProject {
   const next=structuredClone(project);

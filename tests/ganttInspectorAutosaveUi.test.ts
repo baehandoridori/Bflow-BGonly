@@ -57,6 +57,46 @@ test('progress has numeric entry near the title and saves on field exit',async()
  assert.equal(h.writes[0].patch.progress,67);assert.ok(text(h.render()).includes('저장 완료'));h.dispose();
 });
 
+test('progress increases pulse once without replacing the input or saving each keystroke',async()=>{
+ const h=await harness();let tree=h.render();tree=h.render();
+ const ring=elements(tree,'span').find(e=>e.props.className==='gantt-progress-pulse');assert.ok(ring);
+ const animations:Array<{frames:any;options:any;cancelled:boolean}>=[];
+ ring.ref.current={ownerDocument:{defaultView:{matchMedia:()=>({matches:false})}},animate(frames:any,options:any){const record={frames,options,cancelled:false};animations.push(record);return {cancel(){record.cancelled=true;}};}};
+ const editor=()=>elements(tree,'input').find(e=>e.props.type==='number');
+ const editorKey=editor().key;
+ editor().props.onChange({target:{value:'6'}});tree=h.render();
+ assert.equal(animations.length,1);assert.equal(editor().key,editorKey);assert.equal(h.writes.length,0);
+ editor().props.onChange({target:{value:'67'}});tree=h.render();
+ assert.equal(animations.length,2);assert.equal(animations[0].cancelled,true);assert.equal(editor().props.value,67);assert.equal(editor().key,editorKey);
+ assert.ok(animations[1].options.duration>0&&animations[1].options.duration<=600);
+ assert.equal(animations[1].options.iterations??1,1);
+ assert.equal(animations[1].frames.at(-1).opacity,0);
+ editor().props.onChange({target:{value:'20'}});tree=h.render();
+ assert.equal(animations.length,2,'decreasing progress must not start another pulse');assert.equal(animations[1].cancelled,true);
+ editor().props.onBlur();await h.flush();assert.equal(h.writes.length,1);assert.equal(h.writes[0].patch.progress,20);h.dispose();
+});
+
+test('progress pulses respect reduced motion and do not play when switching tasks',async()=>{
+ const h=await harness();let tree=h.render();tree=h.render();
+ const ring=elements(tree,'span').find(e=>e.props.className==='gantt-progress-pulse');assert.ok(ring);
+ let calls=0,reduced=true;
+ ring.ref.current={ownerDocument:{defaultView:{matchMedia:()=>({matches:reduced})}},animate(){calls++;return {cancel(){}};}};
+ elements(tree,'input').find(e=>e.props.type==='number').props.onChange({target:{value:'30'}});tree=h.render();assert.equal(calls,0);
+ await h.flush();reduced=false;
+ h.props.task={...createTask('다른 작업','2026-09-06'),progress:90};h.props.project={...h.props.project,tasks:[h.props.task]};tree=h.render();tree=h.render();
+ assert.equal(calls,0,'a newly selected task is not a progress increase');h.dispose();
+});
+
+test('completion button exposes its saved state and keeps completion and reopen actions',async()=>{
+ const h=await harness();let calls=0;h.props.onComplete=()=>calls++;let tree=h.render();tree=h.render();
+ const completion=()=>elements(tree,'button').find(e=>e.props.className?.includes('gantt-inspector-complete'));
+ assert.ok(completion());assert.equal(completion().props['aria-pressed'],false);assert.equal(text(completion()),'완료 표시');
+ completion().props.onClick();assert.equal(calls,1);
+ h.props.completed=true;tree=h.render();assert.equal(completion().props['aria-pressed'],true);assert.ok(text(completion()).includes('완료됨'));assert.ok(text(completion()).includes('다시 열기'));
+ completion().props.onClick();assert.equal(calls,2);
+ h.props.pending=true;tree=h.render();assert.equal(completion().props.disabled,true);h.dispose();
+});
+
 test('calendar selection stays local until its actual sharing confirmation is checked',async()=>{
  const h=await harness(),calendarId=crypto.randomUUID();h.props.calendars=[{id:calendarId,name:'공유 확인 캘린더',ownerId:'owner',visibility:'private',members:[],canEdit:true}];
  let tree=h.render();tree=h.render();elements(tree,'GanttSelect').find(e=>e.props.label==='표시할 캘린더').props.onChange(calendarId);tree=h.render();

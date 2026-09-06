@@ -160,6 +160,17 @@ export function GanttInspector(props: GanttInspectorProps) {
     title: `${part.department === 'bg' ? 'BG' : '액팅'} · ${part.partId} · ${scene.sceneId}`, worker: scene.assignee,
   })))).filter(scene => !sceneSearch.trim() || `${scene.title} ${scene.worker}`.toLowerCase().includes(sceneSearch.trim().toLowerCase())), [episodes, sceneEpisode, sceneSearch]);
   const progress = Math.max(0, Math.min(100, group ? props.displayProgress ?? taskProgress(project, taskDraft!) : taskDraft?.progressMode === 'scenes' ? props.displayProgress ?? taskDraft.progress : Number(taskDraft?.progress) || 0));
+  const progressPulseRef = useRef<HTMLSpanElement>(null);
+  const previousProgress = useRef({ key, progress });
+  useEffect(() => {
+    const previous = previousProgress.current;
+    previousProgress.current = { key, progress };
+    const ring = progressPulseRef.current;
+    if (previous.key !== key || progress <= previous.progress || !ring?.animate || ring.ownerDocument.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const animation = ring.animate([{ opacity: 0.75, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.015)' }], { duration: 420, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+    return () => animation.cancel();
+  }, [key, progress]);
+  const completed = props.completed ?? (task ? task.completed || task.progress === 100 : project.completed);
   const actionDisabled = disabled || dirty || saving || pending || externalChange;
   const stateText = !canEdit ? '보기 전용' : saved.status === 'saving' ? '저장 중…' : saved.status === 'saved' ? '저장 완료' : saved.status === 'error' ? '저장 실패 · 입력은 보관했습니다' : saved.status === 'conflict' ? '다른 변경 확인 필요' : saved.status === 'blocked' ? '입력 확인 후 자동 저장' : dirty ? pending ? '앞선 변경 저장 후 자동 저장' : '자동 저장 대기…' : '변경하면 자동 저장합니다';
   const select = (label: string, value: string, options: Array<{value: string;label: string;disabled?: boolean}>, onChange: (value: string) => void, locked = false) => <GanttSelect label={label} value={value} options={options} onChange={onChange} disabled={disabled || locked} portalOwner="gantt-inspector" />;
@@ -176,6 +187,7 @@ export function GanttInspector(props: GanttInspectorProps) {
       <fieldset disabled={disabled} className="gantt-inspector-fields">
         {taskDraft ? <>
           <section className="gantt-progress-editor" style={{'--task-progress':`${progress}%`,'--task-progress-glow':progress/100} as CSSProperties}>
+            <span ref={progressPulseRef} className="gantt-progress-pulse" aria-hidden="true" />
             <div className="gantt-progress-heading"><h3>진행률</h3>{!group&&taskDraft.progressMode==='manual'?<label><input type="number" aria-label="진행률" min={0} max={100} step={1} value={taskDraft.progress} onChange={event=>changeTask({progress:(event.target.value===''?'':Number(event.target.value)) as unknown as number},false)} onBlur={flush}/><span>%</span></label>:<strong>{progress}%</strong>}</div>
             <div className="gantt-progress-meter" aria-hidden="true"><span/></div>
             {!group&&taskDraft.progressMode==='manual'&&<input className="gantt-progress-slider" type="range" aria-label="진행률 슬라이더" min={0} max={100} step={1} value={progress} onChange={event=>changeTask({progress:Number(event.target.value)},false)} onPointerUp={flush} onKeyUp={flush} onBlur={flush}/>}
@@ -208,7 +220,7 @@ export function GanttInspector(props: GanttInspectorProps) {
         {([['up','위로',ArrowUp],['down','아래로',ArrowDown],['indent','하위로',ArrowRight],['outdent','상위로',ArrowLeft]] as const).map(([direction,label,Icon])=><button key={direction} type="button" className="gantt-button" aria-label={label} title={label} disabled={actionDisabled} onClick={()=>onMove(direction)}><Icon size={14}/></button>)}
         {group&&<button className="gantt-button gantt-inspector-add-child" type="button" disabled={actionDisabled||props.canAddChild===false} onClick={onAddChild}><Plus size={14}/>하위 작업</button>}
       </div>}
-      <div className="gantt-inspector-primary-actions"><button className="gantt-button" type="button" disabled={actionDisabled} onClick={onComplete}><Check size={14}/>{(props.completed??(task?task.completed||task.progress===100:project.completed))?'다시 열기':'완료 표시'}</button><button className="gantt-button gantt-inspector-delete" type="button" disabled={actionDisabled} onClick={onDelete}><Trash2 size={14}/>삭제</button></div>
+      <div className="gantt-inspector-primary-actions"><button className="gantt-button gantt-inspector-complete" type="button" aria-pressed={completed} disabled={actionDisabled} onClick={onComplete}>{completed?<RotateCcw size={14}/>:<Check size={14}/>}<span>{completed?'완료됨 · 다시 열기':'완료 표시'}</span></button><button className="gantt-button gantt-inspector-delete" type="button" disabled={actionDisabled} onClick={onDelete}><Trash2 size={14}/>삭제</button></div>
     </div>
   </aside>;
 }

@@ -23,3 +23,13 @@
 .gantt-date-ruler .gantt-date.today{color:rgb(var(--color-accent));background:rgb(var(--color-accent)/.12);font-weight:600;box-shadow:inset 0 -2px rgb(var(--color-accent))}
 .gantt-today-line{position:absolute;bottom:0;width:1px;background:rgb(var(--color-accent)/.48);z-index:1;pointer-events:none}
 @media(max-width:1250px){.gantt-caption.gantt-navigation{padding:4px 10px 5px;gap:4px 7px}}
+
+.gantt-display-options{position:relative;flex:none;color:var(--g-text)}
+.gantt-display-options>summary{display:flex;align-items:center;gap:4px;min-height:27px;padding:4px 6px;border:1px solid var(--g-border);border-radius:6px;cursor:pointer;list-style:none;font-size:11px;white-space:nowrap}
+.gantt-display-options>summary::-webkit-details-marker{display:none}
+.gantt-display-options>summary:hover,.gantt-display-options[open]>summary{background:rgb(var(--color-accent)/.12);border-color:rgb(var(--color-accent)/.4)}
+.gantt-display-options>summary:focus-visible{outline:2px solid rgb(var(--color-accent));outline-offset:2px}
+.gantt-display-popover{position:absolute;right:0;top:calc(100% + 5px);z-index:30;min-width:158px;padding:5px;border-radius:10px}
+.gantt-display-popover>label{display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;font-size:calc(12px * var(--text-scale,1) * var(--text-body-scale,1));white-space:nowrap;cursor:pointer}
+.gantt-display-popover>label:hover{background:rgb(var(--color-accent)/.12)}
+.gantt-display-popover input{width:14px;height:14px;accent-color:rgb(var(--color-accent));cursor:pointer}
