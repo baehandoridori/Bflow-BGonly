@@ -143,15 +143,16 @@ export class SessionManager {
       : { status: 'unavailable' as const };
     if (remote.status === 'rejected') return { ok: false, error: remote.error };
     if (remote.status === 'ok') return { ok: true, user: remote.user, token: remote.token };
-    const { users } = await this.dependencies.readUsers();
+    const { users, status } = await this.dependencies.readUsers();
     const user = users.find((candidate) => candidate.name === name);
-    if (!user) return { ok: false, error: '등록되지 않은 사용자입니다.' };
-    if (typeof user.password !== 'string') {
+    // 로컬 목록은 일부 계정만 담을 수 있다. 서버 정본 확인 없이 미등록으로 단정하지 않는다.
+    if (!user && status === 'authoritative') {
+      return { ok: false, error: '등록되지 않은 사용자입니다.' };
+    }
+    if (!user || typeof user.password !== 'string') {
       return {
         ok: false,
-        error: remote.error
-          ? `로그인 서버에 연결하지 못했습니다: ${remote.error}`
-          : '로그인 서버에 연결하지 못해 비밀번호를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+        error: '로그인 서버에 연결하지 못해 계정을 확인할 수 없습니다. 인터넷 연결과 앱 업데이트를 확인한 뒤 다시 시도해 주세요.',
       };
     }
     if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다.' };
