@@ -25,6 +25,26 @@ type NotificationItemProps = {
   onNavigate: () => void;
 };
 
+type RevisionDetailPanelProps = {
+  revision: {
+    id: string;
+    sceneKey: string;
+    revisionNo: number;
+    status: 'assignee_done';
+    priority: 'normal';
+    description: string;
+    requesterId: string;
+    requesterName: string;
+    createdAt: string;
+    updatedAt: string;
+    assigneeIds: string[];
+    assigneeStates: Record<string, { state: 'done'; note: string }>;
+  };
+  sceneInfo: null;
+  onClose: () => void;
+  onStatusChange: () => void;
+};
+
 async function loadNotificationItem(): Promise<ComponentType<NotificationItemProps>> {
   const result = await build({
     entryPoints: ['src/components/NotificationPanel.tsx'],
@@ -58,6 +78,24 @@ async function loadNotificationItem(): Promise<ComponentType<NotificationItemPro
     return nodeRequire(id);
   }, module, module.exports);
   return module.exports.NotificationItem as ComponentType<NotificationItemProps>;
+}
+
+async function loadRevisionDetailPanel(): Promise<ComponentType<RevisionDetailPanelProps>> {
+  const result = await build({
+    entryPoints: ['src/views/compositing/RevisionDetailPanel.tsx'],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    target: 'node22',
+    write: false,
+    loader: { '.css': 'empty' },
+    external: ['react', 'react/jsx-runtime'],
+  });
+  const module = { exports: {} as Record<string, unknown> };
+  const nodeRequire = createRequire(import.meta.url);
+  const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
+  evaluate(nodeRequire, module, module.exports);
+  return module.exports.DetailPanel as ComponentType<RevisionDetailPanelProps>;
 }
 
 test('assignee completion notification defaults include requester and notify users but exclude completer', async () => {
@@ -133,6 +171,36 @@ test('retake completion notification renders a G drive path as the existing path
 
   assert.match(markup, /<button[^>]+title="G:\\공유 드라이브\\JBBJ 자료실\\EP01\\A001\\최종 파일\.psd/);
   assert.match(markup, />최종 파일\.psd<\/span>/);
+});
+
+test('retake detail completion note renders a G drive path as the existing path button', async () => {
+  const DetailPanel = await loadRevisionDetailPanel();
+  const path = 'G:\\공유 드라이브\\사우스 코리안 파크\\1237_친모6 마지막화\\배경\\B파트\\b002.021.042.079.091\\b002_png_re';
+  const markup = renderToStaticMarkup(createElement(DetailPanel, {
+    revision: {
+      id: 'revision-1',
+      sceneKey: 'EP01:B:2',
+      revisionNo: 1,
+      status: 'assignee_done',
+      priority: 'normal',
+      description: '리테이크 확인',
+      requesterId: 'requester-1',
+      requesterName: '요청자',
+      createdAt: '2026-09-07T00:00:00.000Z',
+      updatedAt: '2026-09-07T00:00:00.000Z',
+      assigneeIds: ['assignee-1'],
+      assigneeStates: {
+        'assignee-1': { state: 'done', note: path },
+      },
+    },
+    sceneInfo: null,
+    onClose() {},
+    onStatusChange() {},
+  }));
+
+  assert.match(markup, /담당 진행 · 1\/1명 완료/);
+  assert.match(markup, /<button[^>]+title="G:\\공유 드라이브\\사우스 코리안 파크/);
+  assert.match(markup, />b002_png_re<\/span>/);
 });
 
 test('retake completion notifications use a selected-recipient broadcast path', () => {

@@ -24,6 +24,7 @@ import { CompletionNoteInput } from '@/components/scenes/revision/CompletionNote
 import { FinalResolveBar } from '@/components/scenes/revision/FinalResolveBar';
 import { RemindRetakeButton } from '@/components/scenes/revision/RemindRetakeButton';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { Avatar } from './sharedComponents';
 import { parsePathsFromText, parseSceneKey } from './utils';
 import type { SceneInfo } from './utils';
@@ -376,7 +377,8 @@ export function DetailPanel({
               )}
               {doneNotes.map(({ userId, note }) => (
                 <p key={userId} className="rounded-lg bg-accent/10 p-2 text-xs text-text-secondary whitespace-pre-wrap">
-                  <span className="font-semibold text-accent-sub">{nameOf(userId)} 완료:</span> {note}
+                  <span className="font-semibold text-accent-sub">{nameOf(userId)} 완료:</span>{' '}
+                  <PathLinkifiedText text={note} />
                 </p>
               ))}
               <FinalResolveBar
