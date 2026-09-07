@@ -9,6 +9,12 @@ interface RevisionAssigneeCompletionRecipientInput extends RevisionNotificationR
   completerId?: string | null;
 }
 
+interface RetakeAssigneeCompletionBodyInput {
+  senderName: string;
+  revisionLabel?: string;
+  note?: string | null;
+}
+
 function appendUserId(targets: Set<string>, userId?: string | null): void {
   const normalized = typeof userId === 'string' ? userId.trim() : '';
   if (normalized) targets.add(normalized);
@@ -47,4 +53,16 @@ export function buildRevisionAssigneeCompletionNotifyUserIds({
   });
 
   return Array.from(targets);
+}
+
+/** 완료 메모의 경로가 알림 패널에서 온전한 버튼이 되도록 원문을 자르지 않는다. */
+export function buildRetakeAssigneeCompletionBody({
+  senderName,
+  revisionLabel,
+  note,
+}: RetakeAssigneeCompletionBodyInput): string {
+  const normalizedNote = note?.trim();
+  const target = revisionLabel?.trim() ? `${revisionLabel.trim()} ` : '';
+  const base = `${senderName}님이 ${target}담당을 완료했습니다.`;
+  return normalizedNote ? `${base} ${normalizedNote}` : base;
 }

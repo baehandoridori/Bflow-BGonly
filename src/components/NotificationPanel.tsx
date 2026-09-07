@@ -25,6 +25,8 @@ import {
   buildNotificationDisplayGroups,
   type NotificationDisplayItem,
 } from '@/utils/notificationGrouping';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import { tokenizeGPaths } from '@/utils/pathLink';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
@@ -117,6 +119,7 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
   // v1.25.8: scene_assignment 도 동일 — 담당자 배정은 즉시 인지 필요.
   const isMention = n.type === 'mention' || n.type === 'acting_feedback' || n.type === 'scene_assignment';
   const actionVisibilityClass = getSceneShortcutVisibilityClass();
+  const bodyHasPath = n.body ? tokenizeGPaths(n.body).some((token) => token.type === 'path') : false;
 
   const handleItemClick = () => {
     if (!n.isRead) markAsRead(n.id);
@@ -183,7 +186,15 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
           )}
         </div>
         {n.body && (
-          <p title={n.body} className="text-[11px] text-text-secondary/65 mt-0.5 truncate">{n.body}</p>
+          <p
+            title={n.body}
+            className={cn(
+              'text-[11px] text-text-secondary/65 mt-0.5',
+              bodyHasPath ? 'whitespace-normal leading-relaxed' : 'truncate',
+            )}
+          >
+            <PathLinkifiedText text={n.body} />
+          </p>
         )}
         <span className="text-[10px] text-text-secondary/50 mt-1 block">{timeAgo(n.createdAt)}</span>
       </div>
