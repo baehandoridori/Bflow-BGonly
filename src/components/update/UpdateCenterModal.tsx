@@ -234,6 +234,7 @@ export function UpdateCenterModal() {
 
   const visibleUpdateInfo = isRefreshing ? frozenUpdateInfoRef.current ?? updateInfo : updateInfo;
   const displayInfo = visibleUpdateInfo ?? createFallbackUpdateInfo();
+  const isPreview = displayInfo.preview === true;
   const hasCheckedUpdate = visibleUpdateInfo != null;
   const hasRemoteUpdate = displayInfo.latestVersion !== displayInfo.currentVersion
     && displayInfo.status !== 'suppressed'
@@ -262,8 +263,13 @@ export function UpdateCenterModal() {
               : isSuppressed
                 ? '자동 중단'
                 : '최신 상태';
-  const latestLabel = hasRemoteUpdate ? '준비된 최신 버전' : '업데이트 상태';
-  const statusDescription = isRefreshing
+  const latestLabel = hasRemoteUpdate ? (isPreview ? '프리뷰용 가상 버전' : '준비된 최신 버전') : '업데이트 상태';
+  const applyLabel = isPreview ? '모의 업데이트' : '즉시 업데이트';
+  const statusDescription = isPreview
+    ? isRefreshing
+      ? '프리뷰 전용 가상 업데이트를 준비하고 있습니다. 실제 파일은 다운로드하지 않습니다.'
+      : displayInfo.message
+    : isRefreshing
     ? 'G드라이브 배포 정보를 다시 확인하고 있습니다.'
     : !hasCheckedUpdate
       ? '새로고침을 누를 때만 G드라이브 배포 정보를 확인합니다.'
@@ -305,7 +311,9 @@ export function UpdateCenterModal() {
     setUpdateInfo({
       ...displayInfo,
       status: 'applying',
-      message: '업데이트 설치 창을 여는 중입니다. 앱이 잠시 후 닫힙니다.',
+      message: isPreview
+        ? '프리뷰 전용 모의 업데이트를 적용하고 있습니다. 실제 앱은 종료되지 않습니다.'
+        : '업데이트 설치 창을 여는 중입니다. 앱이 잠시 후 닫힙니다.',
     });
     window.electronAPI?.applyUpdateNow?.();
   };
@@ -326,6 +334,9 @@ export function UpdateCenterModal() {
           <div>
             <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">Version Center</p>
             <h2 id="update-center-title" className="mt-2 text-xl font-bold text-text-primary tracking-tight">업데이트 내역</h2>
+            {isPreview && (
+              <p className="mt-1 text-xs font-semibold text-accent-sub">프리뷰 전용 · 가상 업데이트 · 실제 설치 없음</p>
+            )}
             <p className="mt-1 text-sm text-text-secondary leading-relaxed">
               현재 버전, 최신 버전, 버전별 변경 내역을 확인합니다.
             </p>
@@ -400,7 +411,7 @@ export function UpdateCenterModal() {
                   type="button"
                   disabled={!canApply}
                   onClick={handleApply}
-                  aria-label={canApply ? '즉시 업데이트' : statusText}
+                  aria-label={canApply ? applyLabel : statusText}
                   className={cn(
                     'group relative overflow-hidden rounded-full border px-3 py-1.5 text-xs font-semibold transition-all duration-300',
                     canApply && 'bflow-update-apply-chip',
@@ -418,7 +429,7 @@ export function UpdateCenterModal() {
                             {statusText}
                           </span>
                           <span className="absolute inset-0 translate-y-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
-                            즉시 업데이트
+                            {applyLabel}
                           </span>
                         </>
                       ) : (
@@ -610,7 +621,7 @@ export function UpdateCenterModal() {
                     : 'border-bg-border bg-bg-border/20 text-text-secondary cursor-default',
                 )}
               >
-                지금 업데이트
+                {isPreview ? '모의 업데이트' : '지금 업데이트'}
               </button>
             )}
           </div>

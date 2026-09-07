@@ -383,6 +383,9 @@ export default function App() {
       .catch(() => { /* update state is best effort */ });
     const cleanup = window.electronAPI?.onUpdateState?.((state) => {
       setUpdateInfo(state);
+      if (state?.preview && state.status !== 'ready') {
+        sonnerToast.dismiss('bflow-preview-update-ready');
+      }
     });
     return () => { cleanup?.(); };
   }, [setUpdateInfo]);
@@ -401,20 +404,33 @@ export default function App() {
         releaseNotes: [],
       };
       setUpdateInfo(updateState);
-      sonnerToast.success(`새 버전 v${version} 사용 가능`, {
-        description: '설치 파일 준비 완료. 적용 중에는 별도 진행 창이 표시됩니다',
+      const isPreview = updateState.preview === true;
+      sonnerToast.success(isPreview ? `프리뷰 가상 버전 v${version} 준비됨` : `새 버전 v${version} 사용 가능`, {
+        id: isPreview ? 'bflow-preview-update-ready' : undefined,
+        description: isPreview
+          ? '모의 업데이트 준비 완료. 실제 설치나 앱 종료는 없습니다'
+          : '설치 파일 준비 완료. 적용 중에는 별도 진행 창이 표시됩니다',
         duration: Infinity,  // 사용자가 직접 닫을 때까지
         action: {
-          label: '지금 업데이트',
+          label: isPreview ? '모의 업데이트' : '지금 업데이트',
           onClick: () => {
+            if (isPreview) {
+              const current = useAppStore.getState().updateInfo;
+              if (!current?.preview || !current.ready || current.status !== 'ready' || current.latestVersion !== version) return;
+            }
             setUpdateInfo({
               ...updateState,
               status: 'applying',
-              message: '업데이트 설치 창을 여는 중입니다. 앱이 잠시 후 닫힙니다.',
+              message: isPreview
+                ? '프리뷰 전용 모의 업데이트를 적용하고 있습니다. 실제 앱은 종료되지 않습니다.'
+                : '업데이트 설치 창을 여는 중입니다. 앱이 잠시 후 닫힙니다.',
             });
-            sonnerToast.loading('업데이트 적용 중', {
-              description: '잠시 후 앱이 닫히고 설치 진행 창이 표시됩니다',
-              duration: Infinity,
+            const showApplyToast = isPreview ? sonnerToast.info : sonnerToast.loading;
+            showApplyToast(isPreview ? '프리뷰 모의 업데이트' : '업데이트 적용 중', {
+              description: isPreview
+                ? '화면만 모의 적용하며 실제 앱은 종료되지 않습니다'
+                : '잠시 후 앱이 닫히고 설치 진행 창이 표시됩니다',
+              duration: isPreview ? 3000 : Infinity,
             });
             window.electronAPI?.applyUpdateNow?.();
           },

@@ -4,6 +4,7 @@
  */
 
 import type { ElectronAPI, AppUser, Episode, Scene, CompRevisionSet, SceneWorkLink } from '@/types';
+import { version as appVersion } from '../../package.json';
 import { RetakeNotificationService } from '../../electron/retakeNotificationService';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
@@ -26,6 +27,7 @@ import { createArcadeLocalStorageGateway } from '@/features/playground/arcade/lo
 import type { ArcadePreviewGateway } from '@/features/playground/arcade/previewGateway';
 import { useArcadeStore } from '@/features/playground/arcade/useArcadeStore';
 import { createDevCalendarSeed } from './devCalendarSeed';
+import { createDevPreviewUpdater } from './devPreviewUpdater';
 import type {
   IcsEventDto,
   IcsSubscription,
@@ -2315,6 +2317,7 @@ function filterMockActivities(opts: {
 export function installDevElectronAPI(): void {
   if (hasUsableElectronAPI(window.electronAPI)) return; // 이미 Electron 환경이면 무시
 
+  const previewUpdater = createDevPreviewUpdater(appVersion);
   localStore[COMMENTS_FILE] ??= buildDevPreviewLocalCommentStore(MOCK_EPISODES);
   console.log('[DEV] 브라우저 mock electronAPI 설치됨');
   if (!previewGanttCalendarSubscribed) {
@@ -2385,11 +2388,7 @@ export function installDevElectronAPI(): void {
     onSheetChanged: noop,
     onRetryNotify: noop,
     onSavingBeforeQuit: noop,
-    getUpdateState: async () => null,
-    retryUpdate: async () => null,
-    onUpdateState: noop,
-    onUpdateReady: noop,
-    applyUpdateNow: async () => {},
+    ...previewUpdater,
 
     showNativeNotification: async (title: string, body: string) => {
       console.log(`[DEV 알림] ${title}: ${body}`);

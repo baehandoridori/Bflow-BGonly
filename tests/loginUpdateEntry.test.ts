@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { build } from 'esbuild';
+import { build, transformSync } from 'esbuild';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
-import type { UpdateInfo } from '../src/types/index.ts';
+import type { ElectronAPI, UpdateInfo } from '../src/types/index.ts';
 
 type Props = {
   children?: ReactNode;
@@ -15,6 +15,7 @@ type Props = {
   onKeyDown?: (event: { key: string; stopPropagation(): void }) => void;
 };
 type Element = ReactElement<Props>;
+const appVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version as string;
 const bundle = build({
   stdin: {
     contents: "export { LoginScreen } from './src/components/auth/LoginScreen.tsx'; export { UpdateCenterModal } from './src/components/update/UpdateCenterModal.tsx';",
@@ -22,9 +23,36 @@ const bundle = build({
     loader: 'ts',
   },
   bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false,
-  define: { __APP_VERSION__: JSON.stringify('1.117.1') },
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   external: ['react', 'react/jsx-runtime', 'framer-motion', 'lucide-react', '@/services/*', '@/stores/*', '@/themes', '@/hooks/*', '@/components/effects/*'],
 });
+const previewBundle = build({
+  stdin: {
+    contents: "export { installDevElectronAPI } from './src/mocks/devElectronAPI.ts';",
+    resolveDir: process.cwd(),
+  },
+  bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', write: false,
+});
+
+/** Install the same complete browser API as main.tsx, without replacing updater methods. */
+async function installPreviewApi() {
+  const values = new Map<string, string>();
+  const localStorage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+  const window = { localStorage, electronAPI: undefined as ElectronAPI | undefined };
+  const document = { documentElement: { dataset: {} } };
+  const module = { exports: {} as { installDevElectronAPI(): void } };
+  new Function('module', 'exports', 'window', 'document', 'navigator', 'BroadcastChannel', 'fetch', (await previewBundle).outputFiles[0].text)(
+    module, module.exports, window, document, {}, undefined,
+    () => { throw new Error('The preview updater must not make external requests'); },
+  );
+  module.exports.installDevElectronAPI();
+  assert.ok(window.electronAPI, 'installDevElectronAPI installs the real browser API');
+  return window.electronAPI;
+}
 
 function elements(node: ReactNode): Element[] {
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -51,16 +79,24 @@ async function harness(preview = true) {
   let currentSlots: unknown[] = [], cursor = 0;
   let effects: Array<() => void> = [];
   const calls = { login: 0, check: 0, apply: 0 };
-  const ready: UpdateInfo = {
-    currentVersion: '1.117.1', latestVersion: '1.117.2', status: 'ready', ready: true,
-    buildAt: '2026-09-07T00:00:00.000Z', releaseNotes: [],
-  };
+  const api = await installPreviewApi();
+  let pendingApply = Promise.resolve();
+  // Observe calls without replacing the installed updater's responses or behavior.
+  if (api.checkForUpdates) {
+    const check = api.checkForUpdates;
+    api.checkForUpdates = () => { calls.check++; return check(); };
+  }
+  if (api.applyUpdateNow) {
+    const apply = api.applyUpdateNow;
+    api.applyUpdateNow = () => { calls.apply++; return pendingApply = apply(); };
+  }
   const state = {
-    updateInfo: null as UpdateInfo | null,
+    updateInfo: await api.getUpdateState?.() ?? null,
     updateCenterOpen: false,
     setUpdateCenterOpen(open: boolean) { state.updateCenterOpen = open; },
     setUpdateInfo(info: UpdateInfo | null) { state.updateInfo = info; },
   };
+  api.onUpdateState?.((info) => state.setUpdateInfo(info));
   const store = Object.assign((selector: (value: typeof state) => unknown) => selector(state), { getState: () => state });
   const module = { exports: {} as {
     LoginScreen(props: { mode?: 'login' | 'splash' }): ReactNode;
@@ -94,10 +130,7 @@ async function harness(preview = true) {
     }, module, module.exports,
     {
       location: { search: '' }, setTimeout() { return 0; }, clearTimeout() {},
-      electronAPI: {
-        async checkForUpdates() { calls.check++; return ready; },
-        applyUpdateNow() { calls.apply++; },
-      },
+      electronAPI: api,
     }, document, class HTMLElement {},
   );
   function render(name: 'login' | 'modal', mode: 'login' | 'splash' = 'login') {
@@ -107,14 +140,14 @@ async function harness(preview = true) {
     const pending = effects; effects = []; pending.forEach((effect) => effect());
     return tree;
   }
-  return { state, calls, ready, render };
+  return { state, calls, api, render, waitForApply: () => pendingApply };
 }
 
 test('signed-out screen exposes its current version and opens the existing update center without logging in or checking automatically', async () => {
   const h = await harness();
   assert.equal(h.render('modal'), null);
   const entry = findButton(h.render('login'), '업데이트 내역');
-  assert.match(text(entry), /v1\.117\.1/);
+  assert.ok(text(entry).includes(`v${appVersion}`));
   let stopped = false;
   await entry.props.onClick!({ stopPropagation() { stopped = true; } });
   assert.equal(stopped, true, 'the click must not advance the background landing screen');
@@ -128,12 +161,101 @@ test('signed-out user can explicitly refresh and apply a prepared update through
   await findButton(h.render('login'), '업데이트 내역').props.onClick!({ stopPropagation() {} });
   await findButton(h.render('modal'), '새로고침').props.onClick!({ stopPropagation() {} });
   assert.equal(h.calls.check, 1);
-  assert.equal(h.state.updateInfo?.latestVersion, '1.117.2');
-  const apply = findButton(h.render('modal'), '즉시 업데이트');
+  assert.match(h.state.updateInfo?.latestVersion ?? '', /-preview$/);
+  assert.notEqual(h.state.updateInfo?.latestVersion, appVersion);
+  assert.equal(h.state.updateInfo?.preview, true);
+  const readyTree = h.render('modal');
+  assert.match(text(readyTree), /프리뷰 전용/);
+  assert.doesNotMatch(text(readyTree), /설치 파일이 로컬에 준비되었습니다/);
+  const apply = findButton(readyTree, '모의 업데이트');
   assert.equal(apply.props.disabled, false);
   await apply.props.onClick!({ stopPropagation() {} });
   assert.equal(h.state.updateInfo?.status, 'applying');
+  assert.doesNotMatch(text(h.render('modal')), /업데이트 설치 창을 여는 중입니다/);
+  await h.waitForApply();
+  assert.equal(h.state.updateInfo?.status, 'up-to-date');
+  assert.equal(h.state.updateInfo?.currentVersion, appVersion, 'preview never changes the actual running app version');
+  assert.match(text(h.render('modal')), /프리뷰 적용 완료/);
   assert.deepEqual(h.calls, { login: 0, check: 1, apply: 1 });
+});
+
+test('installed preview API supports explicit prepare, ready subscriptions, apply, retry, and unsubscribe without a session', async () => {
+  const api = await installPreviewApi();
+  assert.equal(typeof api.checkForUpdates, 'function', 'the installed browser API must implement the update read path');
+  assert.equal((await api.ensureCanonicalSession()).payload?.user, null);
+  const states: string[] = [], readyVersions: string[] = [];
+  const unsubscribeState = api.onUpdateState!((info) => { if (info) states.push(info.status); });
+  const unsubscribeReady = api.onUpdateReady!((version, info) => {
+    readyVersions.push(version);
+    assert.equal(info?.preview, true);
+    assert.equal(info?.ready, true);
+  });
+  assert.equal((await api.getUpdateState!())?.ready, false);
+  await api.applyUpdateNow!();
+  assert.equal(states.length, 0, 'apply before prepare must not invent an update');
+  const ready = await api.checkForUpdates!();
+  assert.equal(ready?.status, 'ready');
+  assert.match(ready?.latestVersion ?? '', /-preview$/);
+  assert.notEqual(ready?.latestVersion, appVersion);
+  assert.deepEqual(readyVersions, [ready?.latestVersion]);
+  assert.equal(ready?.preview, true);
+  const applying = api.applyUpdateNow!();
+  assert.equal((await api.getUpdateState!())?.status, 'applying');
+  await api.checkForUpdates!();
+  assert.equal((await api.getUpdateState!())?.status, 'applying', 'refresh cannot reopen ready state during apply');
+  await applying;
+  assert.equal((await api.getUpdateState!())?.status, 'up-to-date');
+  assert.ok(states.includes('ready') && states.includes('applying') && states.includes('up-to-date'));
+  unsubscribeState(); unsubscribeReady();
+  const before = { stateCount: states.length, readyCount: readyVersions.length };
+  assert.equal((await api.retryUpdate!())?.status, 'ready');
+  assert.deepEqual({ stateCount: states.length, readyCount: readyVersions.length }, before, 'unsubscribed listeners receive no later updates');
+});
+
+test('App preview toast describes simulation and refuses a stale apply action after completion', async () => {
+  const api = await installPreviewApi();
+  const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const start = source.indexOf('    const cleanup = window.electronAPI?.onUpdateReady?.(');
+  const end = source.indexOf('\n    return () => { cleanup?.(); };', start);
+  assert.ok(start >= 0 && end > start, 'the App ready subscription is present');
+  const subscription = transformSync(source.slice(start, end), {
+    loader: 'ts', target: 'es2022', define: { __APP_VERSION__: JSON.stringify(appVersion) },
+  }).code;
+  const notifications: Array<{ kind: string; title: string; description: string; duration: number; action?: { label: string; onClick(): void } }> = [];
+  const toast = (kind: string) => (title: string, options: { description: string; duration: number; action?: { label: string; onClick(): void } }) => {
+    notifications.push({ kind, title, ...options });
+  };
+  let visibleUpdate: UpdateInfo | null = null;
+  const observeState = api.onUpdateState!((info) => { visibleUpdate = info; });
+  const visible = () => visibleUpdate as UpdateInfo | null;
+  const unsubscribe = new Function('window', 'setUpdateInfo', 'sonnerToast', 'useAppStore', `${subscription}\nreturn cleanup;`)(
+    { electronAPI: api }, (info: UpdateInfo) => { visibleUpdate = info; },
+    { success: toast('success'), loading: toast('loading'), info: toast('info') },
+    { getState: () => ({ updateInfo: visibleUpdate }) },
+  ) as () => void;
+  try {
+    await api.checkForUpdates!();
+    assert.match(notifications[0].title, /프리뷰/);
+    assert.match(notifications[0].description, /실제 설치.*없/);
+    assert.equal(notifications[0].action?.label, '모의 업데이트');
+    const completed = new Promise<void>((resolve) => {
+      const unsubscribeState = api.onUpdateState!((info) => {
+        if (info?.status === 'up-to-date') { unsubscribeState(); resolve(); }
+      });
+    });
+    notifications[0].action!.onClick();
+    assert.match(notifications[1].description, /실제 앱.*종료되지 않/);
+    await completed;
+    assert.notEqual(notifications[1].kind, 'loading', 'preview must not leave an indefinite installer loading toast after its simulated completion');
+    assert.ok(Number.isFinite(notifications[1].duration));
+    assert.equal(visible()?.status, 'up-to-date');
+    notifications[0].action!.onClick();
+    assert.equal(visible()?.status, 'up-to-date', 'an obsolete ready action must not restore a completed preview to applying');
+    assert.equal(notifications.length, 2, 'an obsolete ready action must not announce another apply');
+  } finally {
+    unsubscribe();
+    observeState();
+  }
 });
 
 test('version entry is also reachable during the signed-out landing animation and isolates keyboard activation', async () => {

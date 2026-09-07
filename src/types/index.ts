@@ -1035,6 +1035,8 @@ export interface UpdateReleaseNote {
 
 export interface UpdateInfo {
   status: 'available' | 'downloading' | 'ready' | 'applying' | 'up-to-date' | 'failed' | 'suppressed';
+  /** Browser preview only: virtual update state, never a real installation. */
+  preview?: boolean;
   currentVersion: string;
   latestVersion: string;
   buildAt: string;
