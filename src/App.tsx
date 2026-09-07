@@ -94,7 +94,10 @@ import {
   isCommentByUser,
   hasUserCommentedOnScene,
 } from '@/utils/sceneNotificationRecipients';
-import { buildRevisionNotificationUserIds } from '@/utils/revisionNotificationRecipients';
+import {
+  buildRetakeAssigneeCompletionBody,
+  buildRevisionNotificationUserIds,
+} from '@/utils/revisionNotificationRecipients';
 import {
   buildNotificationSceneDisplayLabel,
   buildNotificationSceneDisplayLabelFromSceneKey,
@@ -1945,12 +1948,10 @@ export default function App() {
             if (!dedupeNotification(dedupeKey)) return true;
 
             const sceneKey = newRow.scene_id || '';
-            const notePreview = completion.note?.trim()
-              ? (completion.note.trim().length > 60 ? completion.note.trim().slice(0, 60) + '...' : completion.note.trim())
-              : undefined;
-            const body = notePreview
-              ? `${completion.senderName}님이 담당을 완료했습니다. ${notePreview}`
-              : `${completion.senderName}님이 담당을 완료했습니다.`;
+            const body = buildRetakeAssigneeCompletionBody({
+              senderName: completion.senderName,
+              note: completion.note,
+            });
             const revisionEventId = `${completion.userId}:${completionStamp}`;
 
             if (!sceneKey || isGeneralRevisionSceneKey(sceneKey)) {
@@ -2064,16 +2065,14 @@ export default function App() {
             const setTitle = newRow.set_id
               ? useRevisionSetStore.getState().sets.find((s) => s.id === newRow.set_id)?.title
               : undefined;
-            const notePreview = fallbackCompletion?.note?.trim()
-              ? (fallbackCompletion.note.trim().length > 60 ? fallbackCompletion.note.trim().slice(0, 60) + '...' : fallbackCompletion.note.trim())
-              : undefined;
             dispatchNotification({
               type: 'revision',
               title: `${titlePrefix} — ${setTitle || '전반 항목'}`,
               body: fallbackCompletion
-                ? notePreview
-                  ? `${fallbackCompletion.senderName}님이 담당을 완료했습니다. ${notePreview}`
-                  : `${fallbackCompletion.senderName}님이 담당을 완료했습니다.`
+                ? buildRetakeAssigneeCompletionBody({
+                    senderName: fallbackCompletion.senderName,
+                    note: fallbackCompletion.note,
+                  })
                 : undefined,
               metadata: {
                 revisionId: newRow.id,
@@ -2099,16 +2098,14 @@ export default function App() {
           ) || sceneTarget?.sceneName || sceneKey.split(':').pop() || sceneKey;
           // 코덱스 P1 fix (2026-05-05): INSERT 분기와 동일 — sceneId(UUID) 우선,
           // sceneName 은 sceneKey 전체 보존 (last-token reuse 충돌 방지).
-          const notePreview = fallbackCompletion?.note?.trim()
-            ? (fallbackCompletion.note.trim().length > 60 ? fallbackCompletion.note.trim().slice(0, 60) + '...' : fallbackCompletion.note.trim())
-            : undefined;
           dispatchNotification({
             type: 'revision',
             title: `${titlePrefix} — ${sceneNameForLabel}`,
             body: fallbackCompletion
-              ? notePreview
-                ? `${fallbackCompletion.senderName}님이 담당을 완료했습니다. ${notePreview}`
-                : `${fallbackCompletion.senderName}님이 담당을 완료했습니다.`
+              ? buildRetakeAssigneeCompletionBody({
+                  senderName: fallbackCompletion.senderName,
+                  note: fallbackCompletion.note,
+                })
               : undefined,
             metadata: {
               sceneId: sceneTarget?.sceneUuid ?? newRow.scene_uuid,
@@ -2302,18 +2299,17 @@ export default function App() {
             ds.episodes,
           ) || sceneKey.split(':').pop() || sceneKey)
           : '전반 항목';
-        const notePreview = p.note?.trim()
-          ? (p.note.trim().length > 60 ? p.note.trim().slice(0, 60) + '...' : p.note.trim())
-          : undefined;
         const revisionLabel = Number.isFinite(p.revisionNo) ? `re#${p.revisionNo}` : '리테이크';
         const revisionEventId = [p.senderId, p.updatedAt].filter(Boolean).join(':') || undefined;
 
         dispatchNotification({
           type: 'revision',
           title: `리테이크 담당 완료 — ${sceneLabel}`,
-          body: notePreview
-            ? `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다. ${notePreview}`
-            : `${p.senderName || '담당자'}님이 ${revisionLabel} 담당을 완료했습니다.`,
+          body: buildRetakeAssigneeCompletionBody({
+            senderName: p.senderName || '담당자',
+            revisionLabel,
+            note: p.note,
+          }),
           metadata: !isGeneralRetakeCompletion
             ? {
                 sceneId: sceneTarget?.sceneUuid ?? p.sceneUuid,
