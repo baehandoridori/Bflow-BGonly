@@ -3189,7 +3189,8 @@ export default function App() {
     return (
       <>
         <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-          <LoginScreen restoreError={sessionRestoreError} />
+        <LoginScreen restoreError={sessionRestoreError} />
+        <UpdateCenterModal />
       </>
     );
   }

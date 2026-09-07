@@ -93,6 +93,48 @@ test('a directory without passwords cannot approve a login while the server is u
   assert.equal(manager.getCanonicalUserId(), null);
 });
 
+for (const status of ['fallback', 'remote-unavailable'] as const) {
+  test(`an incomplete ${status} directory cannot label a missing login as unregistered`, async () => {
+    const { manager, written, published } = harness({
+      users: status === 'fallback' ? [{ id: 'another-user', name: 'B' }] : [],
+      status,
+      remoteLogin: async () => ({ status: 'unavailable', error: 'internal connection details' }),
+    });
+    const result = await manager.login({ name: 'A', password: 'test-only' });
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? '', /로그인 서버/);
+    assert.match(result.error ?? '', /업데이트/);
+    assert.doesNotMatch(result.error ?? '', /등록되지 않은|internal connection details/);
+    assert.equal(manager.getCanonicalUserId(), null);
+    assert.equal(manager.getSessionToken(), null);
+    assert.deepEqual(written, []);
+    assert.deepEqual(published, []);
+  });
+}
+
+test('an authoritative directory can still confirm an unregistered name', async () => {
+  const { manager } = harness({
+    users: [],
+    status: 'authoritative',
+    remoteLogin: async () => ({ status: 'unavailable' }),
+  });
+  const result = await manager.login({ name: 'A', password: 'test-only' });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, '등록되지 않은 사용자입니다.');
+});
+
+test('a passwordless directory reports a safe recovery message, not raw server details', async () => {
+  const { manager } = harness({
+    users: [{ id: 'user-a', name: 'A' }],
+    remoteLogin: async () => ({ status: 'unavailable', error: 'internal connection details' }),
+  });
+  const result = await manager.login({ name: 'A', password: 'test-only' });
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /로그인 서버/);
+  assert.match(result.error ?? '', /업데이트/);
+  assert.doesNotMatch(result.error ?? '', /internal connection details/);
+});
+
 test('without a remoteLogin dependency the legacy directory check still works (existing tests)', async () => {
   const { manager } = harness({ users: [{ id: 'user-a', name: 'A', password: 'a' }] });
   assert.equal((await manager.login({ name: 'A', password: 'a' })).ok, true);

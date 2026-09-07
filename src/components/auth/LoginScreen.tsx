@@ -778,6 +778,15 @@ function isCodexBrowserPreview(): boolean {
 
 export function LoginScreen({ mode = 'login', onComplete, restoreError }: LoginScreenProps) {
   const { setCurrentUser } = useAuthStore();
+  const updateInfo = useAppStore((s) => s.updateInfo);
+  const setUpdateCenterOpen = useAppStore((s) => s.setUpdateCenterOpen);
+  const hasRemoteUpdate = Boolean(
+    updateInfo
+    && updateInfo.latestVersion !== updateInfo.currentVersion
+    && updateInfo.status !== 'suppressed'
+    && updateInfo.status !== 'up-to-date',
+  );
+  const hasUpdateIssue = updateInfo?.status === 'failed' || updateInfo?.status === 'suppressed';
   const [phase, setPhase] = useState<Phase>(() => (
     mode === 'login' && isLocalBrowserPreview() ? 'login' : 'landing'
   ));
@@ -874,6 +883,32 @@ export function LoginScreen({ mode = 'login', onComplete, restoreError }: LoginS
       <AnimatePresence>
         {phase === 'ready' && <ClickPrompt />}
       </AnimatePresence>
+
+      {mode === 'login' && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setUpdateCenterOpen(true);
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          className={cn(
+            'absolute bottom-6 left-6 z-20 inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 text-[11px] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
+            hasUpdateIssue
+              ? 'text-[#FDCB6E] bg-[#FDCB6E]/10 border-[#FDCB6E]/25 hover:bg-[#FDCB6E]/15'
+              : hasRemoteUpdate
+                ? 'text-accent-sub bg-accent/10 border-accent/25 hover:bg-accent/18 hover:border-accent/40'
+                : 'text-text-secondary/70 border-bg-border/40 hover:text-text-primary hover:bg-bg-border/35',
+          )}
+          aria-label={`현재 버전 v${__APP_VERSION__} · 업데이트 내역 열기`}
+        >
+          <span className="font-mono tabular-nums">v{__APP_VERSION__}</span>
+          <span>업데이트 내역</span>
+          {hasRemoteUpdate && (
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-[#FDCB6E]" />
+          )}
+        </button>
+      )}
 
       <Footer />
     </div>
