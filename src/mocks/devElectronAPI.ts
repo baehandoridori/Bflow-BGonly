@@ -3,7 +3,7 @@
  * Electron 없이 Vite dev server에서 앱을 테스트할 수 있게 함
  */
 
-import type { ElectronAPI, AppUser, Episode, Scene, CompRevisionSet, SceneWorkLink } from '@/types';
+import type { ElectronAPI, AppUser, CanonicalSessionPayload, Episode, Scene, CompRevisionSet, SceneWorkLink } from '@/types';
 import { version as appVersion } from '../../package.json';
 import { RetakeNotificationService } from '../../electron/retakeNotificationService';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
@@ -86,6 +86,7 @@ function getMockUsers(): PreviewUser[] {
 
 let previewCanonicalUserId: string | null = null;
 let previewCanonicalEpoch = 0;
+let previewCanonicalSnapshot: CanonicalSessionPayload = { user: null, session: null, epoch: 0 };
 let previewRememberedUserId: string | null = null;
 let previewTodoStore: PersonalTodoPreviewStore | null = null;
 let previewMarketGateway: MarketPreviewGateway | null = null;
@@ -161,6 +162,7 @@ type MockCalendarSyncEnvelope = {
 };
 type DevPreviewWindow = Window & typeof globalThis & {
   __bflowMockCalendarNotify?: (overrides?: MockCalendarNotificationOverrides) => void;
+  __bflowMockSetLoginServerAvailable?: (available: boolean) => void;
 };
 const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MOCK_CALENDAR_CHANGE_CHANNEL = 'bflow-dev-calendar-change-v1';
@@ -1795,14 +1797,25 @@ function previewNoSession<T>(data: T): { ok: false; kind: 'rejected'; code: stri
   return { ok: false, kind: 'rejected', code: 'AUTH_REQUIRED', message: '로그인이 필요합니다.', retryable: false };
 }
 
-function previewCanonicalPayload() {
-  const source = previewCanonicalUserId ? getMockUsers().find((user) => user.id === previewCanonicalUserId) : null;
-  if (!source) return { user: null, session: null, epoch: previewCanonicalEpoch };
-  const { password: _password, ...user } = source;
+function previewCanonicalPayload(refreshFromDirectory = true): CanonicalSessionPayload {
+  if (refreshFromDirectory) {
+    const source = previewCanonicalUserId ? getMockUsers().find((user) => user.id === previewCanonicalUserId) : null;
+    if (source) {
+      const { password: _password, ...user } = source;
+      previewCanonicalSnapshot = {
+        user,
+        session: { userId: user.id, userName: user.name, loggedInAt: new Date().toISOString() },
+        epoch: previewCanonicalEpoch,
+      };
+    } else {
+      previewCanonicalSnapshot = { user: null, session: null, epoch: previewCanonicalEpoch };
+    }
+  }
+  // 인증 실패는 마지막 확정 상태만 복사한다. 반환 객체를 수정해도 세션에는 영향이 없다.
   return {
-    user,
-    session: { userId: user.id, userName: user.name, loggedInAt: new Date().toISOString() },
-    epoch: previewCanonicalEpoch,
+    ...previewCanonicalSnapshot,
+    user: previewCanonicalSnapshot.user ? { ...previewCanonicalSnapshot.user } : null,
+    session: previewCanonicalSnapshot.session ? { ...previewCanonicalSnapshot.session } : null,
   };
 }
 
@@ -2315,8 +2328,10 @@ function filterMockActivities(opts: {
 }
 
 export function installDevElectronAPI(): void {
+  if (window.location?.protocol === 'file:') return; // 설치 앱의 IPC 실패를 mock 로그인으로 우회하지 않음
   if (hasUsableElectronAPI(window.electronAPI)) return; // 이미 Electron 환경이면 무시
 
+  let previewLoginServerAvailable = true;
   const previewUpdater = createDevPreviewUpdater(appVersion);
   localStore[COMMENTS_FILE] ??= buildDevPreviewLocalCommentStore(MOCK_EPISODES);
   console.log('[DEV] 브라우저 mock electronAPI 설치됨');
@@ -3288,6 +3303,14 @@ export function installDevElectronAPI(): void {
       return { ok: true, payload: previewCanonicalPayload() };
     },
     loginCanonicalSession: async (input) => {
+      if (!previewLoginServerAvailable) {
+        // 새 사용자 조회·인증 전에 실패하며 현재 세션과 기억된 로그인은 변경하지 않는다.
+        return {
+          ok: false,
+          payload: previewCanonicalPayload(false),
+          error: '[프리뷰 모의 오류] 로그인 서버에 연결하지 못했습니다. 연결을 복구한 뒤 다시 로그인해 주세요. 운영 앱에서는 인터넷 연결과 왼쪽 아래 업데이트 내역을 확인해 주세요.',
+        };
+      }
       const user = getMockUsers().find((candidate) => candidate.name === input.name);
       if (!user || user.password !== input.password) {
         return { ok: false, payload: previewCanonicalPayload(), error: '이름 또는 비밀번호가 일치하지 않습니다.' };
@@ -3744,6 +3767,10 @@ export function installDevElectronAPI(): void {
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;
   const previewWindow = window as DevPreviewWindow;
+  // 브라우저에서 명시적으로 서버 장애/복구를 확인하는 훅. 운영 API와 저장 데이터에는 영향 없음.
+  previewWindow.__bflowMockSetLoginServerAvailable = (available) => {
+    previewLoginServerAvailable = available;
+  };
   previewWindow.__bflowMockCalendarNotify = (overrides = {}) => {
     const template = mockCalendarNotifications[0];
     if (!template) return;

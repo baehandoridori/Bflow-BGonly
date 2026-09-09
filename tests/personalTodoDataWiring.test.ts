@@ -381,6 +381,11 @@ test('transient remote user outage cannot clear a verified canonical session', a
   const broadcasts: Array<{ user: { id: string } | null }> = [];
   const manager = new SessionManager({
     readUsers: async () => userRead,
+    remoteLogin: async (name, password) => {
+      assert.equal(name, alice.name);
+      assert.equal(password, alice.password);
+      return { status: 'ok', token: 'test-session-alice', user: alice };
+    },
     readRememberedSession: async () => null,
     writeRememberedSession: async (session) => { rememberedWrites.push(session); },
     beginPersonalDataTransition: () => undefined,

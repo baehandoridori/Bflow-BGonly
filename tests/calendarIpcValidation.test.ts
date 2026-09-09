@@ -3089,6 +3089,12 @@ test('session transition does not publish user B when privacy replacement drain 
   const begun: Array<{ userId: string; epoch: number }> = [];
   const manager = new SessionManager({
     readUsers: async () => ({ users, status: 'authoritative' as const }),
+    remoteLogin: async (name, password) => {
+      const user = users.find((candidate) => candidate.name === name);
+      assert.ok(user, `Unexpected test login name: ${name}`);
+      assert.equal(password, user.password);
+      return { status: 'ok', token: `test-session-${user.id}`, user };
+    },
     readRememberedSession: async () => null,
     writeRememberedSession: async () => undefined,
     beginPersonalDataTransition: () => undefined,
@@ -3124,6 +3130,12 @@ test('session transition closes personal work and leaves B unpublished when quit
   const ended: Array<{ userId: string; epoch: number }> = [];
   const manager = new SessionManager({
     readUsers: async () => ({ users, status: 'authoritative' as const }),
+    remoteLogin: async (name, password) => {
+      const user = users.find((candidate) => candidate.name === name);
+      assert.ok(user, `Unexpected test login name: ${name}`);
+      assert.equal(password, user.password);
+      return { status: 'ok', token: `test-session-${user.id}`, user };
+    },
     readRememberedSession: async () => null,
     writeRememberedSession: async () => undefined,
     beginPersonalDataTransition: () => undefined,
