@@ -22,7 +22,42 @@
 - 인증·기억된 세션·캘린더·개인 할 일 관련 묶음 215/215 통과. preview 관련 회귀 묶음 158/158 통과. 서로 겹치는 테스트이므로 합산하지 않는다.
 - 독립 최종 코드 리뷰: Critical 0 / Important 0 / Minor 0. 이전 preview payload P2 해결 확인.
 - 로컬 브라우저에서 로그인 전 v1.117.4 업데이트 내역 진입과 preview 테스트 계정 로그인 후 전체 현황 대시보드 표시 확인. 최종 snapshot 수정 반영 후 다시 로그인 확인.
-- 최종 `npm run build:vite` exit 0: 타입 검사와 전체 테스트 2,519개 중 2,491개 통과, 실패 0개, 기존 DB 환경 필요 28개 건너뜀. renderer/main/preload 빌드 통과. 정식 설치 빌드·배포 결과는 릴리스 기록에서 별도 확인한다.
+- 최종 `npm run build:vite` exit 0: 타입 검사와 전체 테스트 2,519개 중 2,491개 통과, 실패 0개, 기존 DB 환경 필요 28개 건너뜀. renderer/main/preload 빌드 통과.
+
+## 릴리스 빌드
+
+- 구현 PR: [#281](https://github.com/baehandoridori/Bflow-BGonly/pull/281), 2026-09-09 병합 완료.
+- GitHub Codex가 검토 커밋 `4a05c2514e86b1c6cec6ed9b85732e4d964676d9`에 `Didn't find any major issues`를 명시했다. issue comments, line comments, reviews, trigger reactions 네 곳을 확인했고 미해결 지적은 없었다.
+- 정식 빌드 커밋: `0eb57259e00e3f877cf4a34fb8ea37ba37519f69`. 검토한 커밋과 파일 내용이 동일하며, 원래 dirty 개발 폴더는 보존하고 별도 clean checkout에서 빌드했다.
+- `npm run build` exit 0. 타입 검사·전체 테스트 2,491 통과 / 0 실패 / 기존 DB 28 건너뜀을 다시 확인했다.
+- 버전: package / manifest / latest 모두 `1.117.4`. `BFLOW-Setup.exe`는 201,397,341 bytes. manifest 생성 시각은 `2026-09-09T13:57:01.844Z`.
+- manifest의 win-unpacked 기록: 7,203 files / 695,425,729 bytes. 업데이트 내역 188개를 보존했다.
+- 독립 설치 산출물 검증: Critical 0 / Important 0 / Minor 0. installer의 latest SHA-512 두 항목이 실측과 일치했다. renderer·main·preload·splash 127개 파일의 빌드 결과와 패키지 내부 SHA-256 불일치 0, 패키지 내부 최신 로그인 코드 포함을 확인했다. 설치 파일 자체를 실행한 PC E2E는 아니다.
+
+| 필수 배포 파일 | 빌드 SHA-256 |
+|---|---|
+| BFLOW-Setup.exe | `9812101740447ac75b635820a70d5b246c09650ae81041b2ce32ba61f66dca47` |
+| latest.yml | `3b2ecf3061056c947eaccc198b2371fbad20c99690b9670db9f84192b9961b3b` |
+| manifest.json | `1706705e784283447c261502088e57a1f5dd72660e1aeae92c3ca185c760ccd7` |
+
+## 공유 드라이브 백업 지연과 복구 검증
+
+- 최초 G드라이브 내부 전체 백업에서 일부 `lucide-react` 파일 복사가 `ERROR 121 / semaphore timeout`으로 지연됐다. 해당 배포 작업을 중단했으며, 이 시점에는 live payload 복사와 manifest 갱신을 시작하지 않았다.
+- 중간 백업 폴더는 삭제하지 않았다. 이 미완료 폴더를 완전한 백업이라고 표시하지 않는다.
+- 현재 공개된 v1.117.3의 installer·latest·manifest SHA-256이 로컬 이전 정식 빌드와 모두 같음을 재확인했다. 그 공식 배포본 전체를 단일 TAR로 묶었다.
+- TAR를 새 로컬 폴더에 실제 추출한 뒤 원본 7,333개 / 923,259,444 bytes 전체를 다시 해시 대조했다. 불일치 0. TAR는 929,496,064 bytes이며 SHA-256은 `f93298f4632e926a7865cb85ff245015df95176873098621eaa9881da8cd4b07`이다.
+- 이 TAR는 이전 **공식 배포 payload**의 검증된 복구본이다. 공유 드라이브에 남아 있는 오래된 여분 파일까지 동일 시점으로 복제한 스냅샷은 아니다. 여분 파일은 배포 중 삭제하지 않고 live에 보존한다.
+
+## 실제 공유 드라이브 게시
+
+- 게시·핵심 재검증 완료: **2026-09-09 23:35:56 KST**, v1.117.4. 설치 파일·manifest·latest·패키지 내부 버전 모두 일치한다.
+- 위 표의 필수 3파일 SHA-256은 G드라이브에서도 각각 일치했다. `manifest.json`은 payload 검증을 마친 뒤 마지막에 게시했다.
+- 독립 원격 재검증: `2026-09-09T14:37:37Z`, 핵심 설치 배포 범위 Critical 0 / Important 0 / Minor 0. 필수 3파일 SHA-256, installer SHA-512·크기, manifest/latest/패키지 버전, 패키지 main/preload/index.html SHA-256을 직접 재확인했다.
+- 검증 방식은 **정식 installer 전체 + 모든 변경 파일 내용 + 전체 파일 목록·크기**다. 대상은 7,333파일 / 923,262,063 bytes. 이전 공식 빌드와 내용이 다른 payload 121개 및 마지막 manifest를 합한 122개 파일의 원격 SHA-256이 일치했다.
+- 미변경 7,211개 파일은 이전 공식 로컬 빌드와 현재 로컬 빌드의 SHA-256이 같고 G드라이브에 같은 크기로 존재함을 확인했다. 이 파일들의 **이번 원격 전체 SHA-256 검사는 미완료**이며, 7,333개 전체 내용이 이번에 원격에서 검증됐다고 표현하지 않는다. 설치형 자동 업데이트는 전체 해시가 일치한 `BFLOW-Setup.exe`를 사용한다.
+- 파일 내용이 같아도 새 빌드의 수정시각 차이 때문에 대량 재복사가 일어났다. 실제 예로 `align-justify.js.map`의 이전/현재 로컬 SHA-256은 같지만 수정시각은 달랐다. 재복사를 중단하고 내용 기준으로 검사한 뒤, 중단 시 미완료된 `panel-left-open` / `panel-left-inactive`의 JS와 map 4개만 보완해 각 해시를 재확인했다.
+- 로컬 증거: `output/deploy-delta-pre-manifest.json`, `output/deploy-final.json`, `output/recovery-archive-verification.json`, `output/recovery-archive-remote.json` (작업 폴더의 생성 보고서, Git 미포함).
+- 원격 복구 TAR: `release-backups/v1.117.3-verified-payload-before-v1.117.4-20260909.tar`. 원격 SHA-256도 위 복구 검증값과 일치했다. 부분 백업과 기존 여분 파일은 삭제하지 않았다.
 
 ## 배포와 실제 PC 확인의 경계
 
@@ -30,4 +65,4 @@
 
 기존 앱도 로그인 전에 시작 업데이트를 확인하지만, X 버튼은 창 숨김이다. 트레이의 **종료** 후 다시 실행해야 시작 업데이트 적용 기회가 생긴다. 오래된 앱의 자동 업데이트가 억제된 상태라면 공식 설치 파일로 업데이트가 필요할 수 있다. 계정이나 `%APPDATA%` 데이터를 지우는 절차는 사용하지 않는다.
 
-새 배포는 병합 커밋에서 설치 파일을 만들고, 이전 배포 전체 백업 → payload 복사·SHA-256 대조 → manifest 마지막 게시 → 전체 파일 재대조 순서로 진행한다. 오래된 여분 파일은 보존한다. 문제 PC의 실제 업데이트·로그인은 별도 확인 항목이다.
+이번 배포는 병합 커밋 설치 빌드 → 이전 공식 payload 복구 TAR의 추출·원격 해시 검증 → 전체 목록·크기 및 모든 변경 파일 내용 대조 → manifest 마지막 게시 → 필수 배포 파일 재대조 순서로 완료했다. 오래된 여분 파일은 보존했다. 미변경 보조파일의 원격 전체 해시 검사와 문제 PC의 실제 업데이트·로그인은 별도 미확인 항목이다.
