@@ -14,15 +14,20 @@ type HarnessOptions = {
   remembered?: RememberedAuthSession | null;
   remoteLogin?: (name: string, password: string) => Promise<RemoteLoginResult>;
   remoteLogout?: (token: string) => Promise<void>;
+  readUsers?: SessionManagerDependencies['readUsers'];
 };
 
 function harness(options: HarnessOptions = {}) {
   const written: Array<RememberedAuthSession | null> = [];
   const published: Array<{ user: { id: string } | null; session: RememberedAuthSession | null }> = [];
   const revoked: string[] = [];
+  const directoryReads: number[] = [];
   const users = options.users ?? [{ id: 'user-a', name: 'A' }];
   const dependencies: SessionManagerDependencies = {
-    readUsers: async () => ({ users, status: options.status ?? 'authoritative' }),
+    readUsers: async () => {
+      directoryReads.push(1);
+      return options.readUsers ? options.readUsers() : { users, status: options.status ?? 'authoritative' };
+    },
     readRememberedSession: async () => options.remembered ?? null,
     writeRememberedSession: async (session) => { written.push(session ? { ...session } : null); },
     beginPersonalDataTransition: () => undefined,
@@ -36,7 +41,7 @@ function harness(options: HarnessOptions = {}) {
     remoteLogout: options.remoteLogout ?? (async (token) => { revoked.push(token); }),
   };
   if (options.remoteLogin) dependencies.remoteLogin = options.remoteLogin;
-  return { manager: new SessionManager(dependencies), written, published, revoked };
+  return { manager: new SessionManager(dependencies), written, published, revoked, directoryReads };
 }
 
 const serverUser: SessionUserRecord = { id: 'user-a', name: 'A', role: 'user' };
@@ -56,31 +61,41 @@ test('server login keeps the token in main only: remembered file has it, publish
   assert.equal('sessionToken' in (manager.getCurrentPayload().session ?? {}), false);
 });
 
-test('a server rejection is final even when a local directory would have matched the password', async () => {
-  const { manager } = harness({
-    users: [{ id: 'user-a', name: 'A', password: 'a' }],
-    remoteLogin: async () => ({ status: 'rejected', error: '비밀번호가 일치하지 않습니다.' }),
+for (const error of ['비밀번호가 일치하지 않습니다.', '등록되지 않은 사용자입니다.', '로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.']) {
+  test(`server rejection is final despite matching local credentials: ${error}`, async () => {
+    const { manager, directoryReads, written, published } = harness({
+      users: [{ id: 'user-a', name: 'A', password: 'a' }],
+      remoteLogin: async () => ({ status: 'rejected', error }),
+    });
+    const result = await manager.login({ name: 'A', password: 'a' });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, error);
+    assert.equal(manager.getCanonicalUserId(), null);
+    assert.equal(manager.getSessionToken(), null);
+    assert.deepEqual(directoryReads, []);
+    assert.deepEqual(written, []);
+    assert.deepEqual(published, []);
   });
-  const result = await manager.login({ name: 'A', password: 'a' });
-  assert.equal(result.ok, false);
-  assert.match(result.error ?? '', /비밀번호/);
-  assert.equal(manager.getCanonicalUserId(), null);
-  assert.equal(manager.getSessionToken(), null);
-});
+}
 
-test('offline fallback verifies against a directory that carries passwords and leaves no server token', async () => {
-  const { manager, written } = harness({
-    users: [{ id: 'user-a', name: 'A', password: 'a' }],
-    status: 'fallback',
-    remoteLogin: async () => ({ status: 'unavailable', error: 'fetch failed' }),
+for (const password of ['cached-password', 'new-server-password']) {
+  test(`an unavailable login server never authenticates or judges a cached password (${password})`, async () => {
+    const { manager, written, published, directoryReads } = harness({
+      users: [{ id: 'user-a', name: 'A', password: 'cached-password' }],
+      status: 'fallback',
+      remoteLogin: async () => ({ status: 'unavailable', error: 'private connection details' }),
+    });
+    const result = await manager.login({ name: 'A', password });
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? '', /로그인 서버/);
+    assert.doesNotMatch(result.error ?? '', /비밀번호가 일치하지|등록되지 않은|private connection details/);
+    assert.equal(manager.getCanonicalUserId(), null);
+    assert.equal(manager.getSessionToken(), null);
+    assert.deepEqual(written, []);
+    assert.deepEqual(published, []);
+    assert.deepEqual(directoryReads, [], 'new login must not depend on a cached user directory');
   });
-  assert.equal((await manager.login({ name: 'A', password: 'wrong' })).ok, false);
-  const result = await manager.login({ name: 'A', password: 'a' });
-  assert.equal(result.ok, true);
-  assert.equal(manager.getSessionToken(), null);
-  assert.equal(written.at(-1)?.sessionToken, null);
-  assert.throws(() => manager.getSessionTokenFor('user-a'), /로그인 세션이 필요/);
-});
+}
 
 test('a directory without passwords cannot approve a login while the server is unreachable', async () => {
   const { manager } = harness({
@@ -112,15 +127,17 @@ for (const status of ['fallback', 'remote-unavailable'] as const) {
   });
 }
 
-test('an authoritative directory can still confirm an unregistered name', async () => {
-  const { manager } = harness({
+test('a directory cannot declare a name unregistered when the login server is unavailable', async () => {
+  const { manager, directoryReads } = harness({
     users: [],
     status: 'authoritative',
     remoteLogin: async () => ({ status: 'unavailable' }),
   });
   const result = await manager.login({ name: 'A', password: 'test-only' });
   assert.equal(result.ok, false);
-  assert.equal(result.error, '등록되지 않은 사용자입니다.');
+  assert.match(result.error ?? '', /로그인 서버/);
+  assert.doesNotMatch(result.error ?? '', /등록되지 않은/);
+  assert.deepEqual(directoryReads, []);
 });
 
 test('a passwordless directory reports a safe recovery message, not raw server details', async () => {
@@ -135,10 +152,82 @@ test('a passwordless directory reports a safe recovery message, not raw server d
   assert.doesNotMatch(result.error ?? '', /internal connection details/);
 });
 
-test('without a remoteLogin dependency the legacy directory check still works (existing tests)', async () => {
-  const { manager } = harness({ users: [{ id: 'user-a', name: 'A', password: 'a' }] });
-  assert.equal((await manager.login({ name: 'A', password: 'a' })).ok, true);
+test('a missing login provider fails closed without falling back to local credentials', async () => {
+  const { manager, written, published, directoryReads } = harness({ users: [{ id: 'user-a', name: 'A', password: 'a' }] });
+  const result = await manager.login({ name: 'A', password: 'a' });
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /로그인 서버/);
   assert.equal(manager.getSessionToken(), null);
+  assert.deepEqual(written, []);
+  assert.deepEqual(published, []);
+  assert.deepEqual(directoryReads, []);
+});
+
+test('a thrown login transport error is safe and never triggers directory fallback', async () => {
+  const { manager, written, published, directoryReads } = harness({
+    remoteLogin: async () => { throw new Error('private transport details'); },
+    readUsers: async () => { throw new Error('damaged local directory'); },
+  });
+  const result = await manager.login({ name: 'A', password: 'test-only' });
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /로그인 서버/);
+  assert.doesNotMatch(result.error ?? '', /private transport details|damaged local directory/);
+  assert.deepEqual(directoryReads, []);
+  assert.deepEqual(written, []);
+  assert.deepEqual(published, []);
+});
+
+test('successful server authentication ignores a missing or damaged local directory', async () => {
+  const { manager, directoryReads } = harness({
+    remoteLogin: async (name, password) => {
+      assert.equal(name, 'A');
+      assert.equal(password, 'current-server-password');
+      return okLogin('server-only-token');
+    },
+    readUsers: async () => { throw new Error('damaged local directory'); },
+  });
+  assert.equal((await manager.login({ name: 'A', password: 'current-server-password' })).ok, true);
+  assert.equal(manager.getSessionTokenFor('user-a'), 'server-only-token');
+  assert.deepEqual(directoryReads, []);
+});
+
+test('a user can retry after connection recovery without changing saved account data', async () => {
+  let available = false;
+  let calls = 0;
+  const { manager, written, published, directoryReads } = harness({
+    users: [],
+    remoteLogin: async () => {
+      calls += 1;
+      return available ? okLogin('recovered-token') : { status: 'unavailable' };
+    },
+  });
+  const input = { name: 'A', password: 'test-only' };
+  assert.equal((await manager.login(input)).ok, false);
+  assert.equal(calls, 1, 'do not automatically repeat a password submission');
+  assert.deepEqual(written, []);
+  assert.deepEqual(published, []);
+  available = true;
+  assert.equal((await manager.login(input)).ok, true);
+  assert.equal(calls, 2);
+  assert.equal(manager.getSessionTokenFor('user-a'), 'recovered-token');
+  assert.deepEqual(directoryReads, []);
+});
+
+test('a failed new login preserves the existing verified session and remembered record', async () => {
+  let available = true;
+  const { manager, written, published, revoked } = harness({
+    remoteLogin: async () => available ? okLogin('existing-token') : { status: 'unavailable' },
+  });
+  assert.equal((await manager.login({ name: 'A', password: 'test-only' })).ok, true);
+  const originalPayload = manager.getCurrentPayload();
+  const originalWrites = [...written];
+  available = false;
+  assert.equal((await manager.login({ name: 'B', password: 'test-only', rememberMe: false })).ok, false);
+  assert.deepEqual(manager.getCurrentPayload(), originalPayload);
+  assert.equal(manager.getSessionTokenFor('user-a'), 'existing-token');
+  assert.deepEqual(written, originalWrites);
+  assert.equal(published.length, 1);
+  assert.deepEqual(revoked, []);
 });
 
 test('restore reloads the remembered token, and logout revokes it on the server', async () => {

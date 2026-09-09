@@ -31,6 +31,8 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 
 ### 간트 데이터 경계 (v1.111.0)
 
+- v1.117.4부터 새 로그인은 `SessionManager` → `app_login` 서버 결과만 사용한다. 로컬 `users.dat`나 사용자 디렉터리를 새 로그인 인증·미등록·비밀번호 불일치 판정의 근거로 사용하지 않는다. 서버 불가 시 연결·업데이트 안내 후 보류하며 자격 증명을 자동 재전송하지 않는다. 기존 토큰 복원·데이터 파일은 이 변경으로 삭제하지 않는다.
+
 - 타임라인은 `src/features/gantt/GanttView.tsx`를 사용한다. `domain.ts`는 계층·선행 일정·기간·권한의 공용 계산이며, 프로젝트 하나의 작업을 revision CAS로 함께 저장한다.
 - 프로젝트 간 작업·그룹 이동은 `saveProjectPair`로 양쪽 프로젝트와 폴더 revision을 함께 검사하고 원자 저장·실행 취소한다. `20260905193555_gantt_project_pair.sql`이 필요하며 기존 세션 인증·ACL을 유지한다. 차트의 계산된 진행률·입력 초안은 정본 저장 객체로 사용하지 않는다.
 - 삭제·복원에도 revision은 증가한다. 비공개 `gantt_entity_revisions`와 preview의 revision 기록을 유지하며, 과거 삭제 기록에서 최종 revision을 복구할 수 없는 ID는 재사용을 거부한다. 새 DB에는 `20260905173804_gantt_revision_ledger.sql`까지 적용한다.

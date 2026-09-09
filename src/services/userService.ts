@@ -121,11 +121,20 @@ export async function login(
   password: string,
   rememberMe: boolean = true,
 ): Promise<{ ok: boolean; user?: AppUser; error?: string }> {
-  const result = await window.electronAPI.loginCanonicalSession({ name, password, rememberMe });
-  const user = result.payload.user;
-  return result.ok && user
-    ? { ok: true, user }
-    : { ok: false, error: result.error ?? '로그인에 실패했습니다.' };
+  try {
+    const result = await window.electronAPI.loginCanonicalSession({ name, password, rememberMe });
+    const user = result.payload.user;
+    return result.ok && user
+      ? { ok: true, user }
+      : { ok: false, error: result.error ?? '로그인에 실패했습니다.' };
+  } catch {
+    // IPC 누락·연결 예외도 로그인 화면이 다시 시도할 수 있는 실패 결과로 끝낸다.
+    // 사용자 목록이나 로컬 비밀번호로 새 로그인을 대신 판정하지 않는다.
+    return {
+      ok: false,
+      error: '로그인 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요. 문제가 계속되면 앱을 완전히 종료한 뒤 다시 열거나, 왼쪽 아래 업데이트 내역에서 앱 업데이트를 확인해 주세요.',
+    };
+  }
 }
 
 export async function logout(): Promise<void> {

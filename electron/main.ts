@@ -1774,8 +1774,8 @@ sessionManager = new SessionManager({
       status: fallbackUsers.length > 0 ? 'fallback' as const : 'remote-unavailable' as const,
     };
   },
-  // 비밀번호 대조와 세션 토큰 발급은 서버(app_login)가 한다. 서버에 닿지 못하면 'unavailable' 로
-  // 돌려 SessionManager 가 로컬 사용자 저장소(비밀번호 보유)로만 대조하게 한다.
+  // 새 로그인과 토큰 발급은 서버(app_login)만 담당한다. 서버에 닿지 못하면 'unavailable' 로
+  // 돌려 로그인을 보류하며, 로컬 사용자 저장소는 인증 우회에 사용하지 않는다.
   remoteLogin: async (name, password) => {
     try {
       const result = await sbLoginSession(name, password);
@@ -1784,7 +1784,7 @@ sessionManager = new SessionManager({
       }
       return result;
     } catch (error) {
-      console.warn('[auth] 서버 로그인 확인 실패 — 로컬 사용자 저장소 확인:', error);
+      console.warn('[auth] 서버 로그인 확인 실패 — 새 로그인 보류:', error);
       return { status: 'unavailable' as const, error: error instanceof Error ? error.message : String(error) };
     }
   },

@@ -17,7 +17,7 @@ export interface RememberedAuthSession {
    * 서버(app_login)가 발급한 로그인 세션 토큰. main 메모리에서만 평문으로 사용하고,
    * auth.json 에는 rememberedAuthStorage가 OS 암호화로 저장한다.
    * renderer 로 나가는 payload 에는 절대 포함하지 않는다(publish 가 벗겨낸다).
-   * 서버 로그인 없이 로컬 저장소로만 대조한 세션은 null 이다.
+   * 과거 로컬 대조 세션에는 null 이 남아 있을 수 있지만 새 로그인은 서버 토큰이 필수다.
    */
   sessionToken?: string | null;
 }
@@ -49,7 +49,7 @@ export interface SessionManagerDependencies {
   readUsers(): Promise<SessionUserDirectoryResult>;
   /**
    * 서버 로그인(app_login RPC). 비밀번호 대조와 세션 토큰 발급을 서버가 담당한다.
-   * 없거나 'unavailable' 이면(오프라인·함수 미적용) 비밀번호를 가진 디렉터리(로컬 저장소)로만 대조한다.
+   * 없거나 'unavailable' 이면 새 로그인을 보류한다. 로컬 사용자 정보로 인증을 대신하지 않는다.
    */
   remoteLogin?(name: string, password: string): Promise<RemoteLoginResult>;
   /** 세션 토큰 폐기(app_logout RPC). 실패해도 로그아웃은 진행한다(서버 쪽은 만료로 정리). */
@@ -130,33 +130,24 @@ export class SessionManager {
   }
 
   /**
-   * 서버 로그인이 우선이다. 서버가 거절하면 그대로 실패하고, 서버에 닿을 수 없을 때만
-   * 비밀번호를 가진 디렉터리(로컬 사용자 저장소)로 대조한다. Supabase 디렉터리는 비밀번호를
-   * 돌려주지 않으므로 이 경로에서는 절대 통과할 수 없다.
+   * 새 로그인은 서버만 판정한다. 사용자 디렉터리는 복원·표시 정보용이며 인증 근거가 아니다.
+   * 연결 실패 시 로컬 명단의 누락이나 오래된 비밀번호를 계정 오류로 오판하지 않는다.
    */
   private async verifyCredentials(
     name: string,
     password: string,
-  ): Promise<{ ok: true; user: SessionUserRecord; token: string | null } | { ok: false; error: string }> {
-    const remote = this.dependencies.remoteLogin
-      ? await this.dependencies.remoteLogin(name, password)
-      : { status: 'unavailable' as const };
-    if (remote.status === 'rejected') return { ok: false, error: remote.error };
-    if (remote.status === 'ok') return { ok: true, user: remote.user, token: remote.token };
-    const { users, status } = await this.dependencies.readUsers();
-    const user = users.find((candidate) => candidate.name === name);
-    // 로컬 목록은 일부 계정만 담을 수 있다. 서버 정본 확인 없이 미등록으로 단정하지 않는다.
-    if (!user && status === 'authoritative') {
-      return { ok: false, error: '등록되지 않은 사용자입니다.' };
+  ): Promise<{ ok: true; user: SessionUserRecord; token: string } | { ok: false; error: string }> {
+    try {
+      const remote = await this.dependencies.remoteLogin?.(name, password);
+      if (remote?.status === 'rejected') return { ok: false, error: remote.error };
+      if (remote?.status === 'ok') return { ok: true, user: remote.user, token: remote.token };
+    } catch {
+      // transport 예외에도 같은 안전한 복구 안내를 사용하고 자격 증명을 재전송하지 않는다.
     }
-    if (!user || typeof user.password !== 'string') {
-      return {
-        ok: false,
-        error: '로그인 서버에 연결하지 못해 계정을 확인할 수 없습니다. 인터넷 연결과 앱 업데이트를 확인한 뒤 다시 시도해 주세요.',
-      };
-    }
-    if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다.' };
-    return { ok: true, user, token: null };
+    return {
+      ok: false,
+      error: '로그인 서버에 연결하지 못해 계정을 확인할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 로그인해 주세요. 문제가 계속되면 왼쪽 아래 업데이트 내역에서 앱 업데이트를 확인해 주세요.',
+    };
   }
 
   getCurrentPayload(): CanonicalSessionPayload {
