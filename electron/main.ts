@@ -24,6 +24,8 @@ import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
 import { registerGanttIpc } from './ganttIpc';
 import { setGanttSessionTokenResolver } from './ganttStore';
+import { registerThreadTodoIpc } from './threadTodoIpc';
+import { setThreadTodoSessionTokenResolver } from './threadTodoStore';
 import {
   createIcsSubscriptionStore,
   createIcsTextFetcher,
@@ -2538,6 +2540,10 @@ registerGanttIpc({
   },
 });
 
+// 팀 할 일(피드백 58)도 간트와 같은 세션 토큰 경계. 토큰은 store 안에서만 소비되고 응답에 실리지 않는다.
+setThreadTodoSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
+registerThreadTodoIpc({ getSessionOriginOrThrow, onChanged: () => broadcastToAllWindows('thread-todos:changed', {}) });
+
 registerLegacyPrivateEventIpc(ipcMain, {
   getSessionUserIdOrThrow,
   assertLiveUser: async (userId) => {
@@ -3319,6 +3325,7 @@ function startSupabaseRealtime() {
       broadcastToAllWindows('gantt:changed', {});
       broadcastToAllWindows('calendar:changed', { action: 'UPDATE' });
     },
+    onThreadTodosChange: () => broadcastToAllWindows('thread-todos:changed', {}),
     onCalendarNotificationInsert: (payload) => broadcastSupabaseCalendarNotification(payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);

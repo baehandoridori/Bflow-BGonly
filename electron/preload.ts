@@ -478,6 +478,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('gantt:changed', listener);
     return () => ipcRenderer.removeListener('gantt:changed', listener);
   },
+  // 팀 할 일 (피드백 58) — 간트처럼 요청 epoch 를 붙이고, 호출자 신원은 main 이 세션에서 확정한다.
+  threadTodoList: (threadKey: string) => ipcRenderer.invoke('thread-todo:list', threadKey, canonicalSessionEpoch),
+  threadTodoAdd: (threadKey: string, text: string) => ipcRenderer.invoke('thread-todo:add', threadKey, text, canonicalSessionEpoch),
+  threadTodoSetDone: (id: string, done: boolean) => ipcRenderer.invoke('thread-todo:set-done', id, done, canonicalSessionEpoch),
+  threadTodoDelete: (id: string) => ipcRenderer.invoke('thread-todo:delete', id, canonicalSessionEpoch),
+  onThreadTodosChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('thread-todos:changed', listener);
+    return () => ipcRenderer.removeListener('thread-todos:changed', listener);
+  },
   readPersonalTodoLabels: () => ipcRenderer.invoke('personal-todo:read-labels', canonicalSessionEpoch),
   createPersonalTodo: (input: PersonalTodoCreateInput) => ipcRenderer.invoke('personal-todo:create', input, canonicalSessionEpoch),
   patchPersonalTodo: (todoId: string, patch: PersonalTodoPatch) => ipcRenderer.invoke('personal-todo:patch', todoId, patch, canonicalSessionEpoch),

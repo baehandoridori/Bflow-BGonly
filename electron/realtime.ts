@@ -30,6 +30,7 @@ const SHARED_CALENDAR_REALTIME_TABLES: readonly SharedCalendarRealtimeTable[] = 
 
 export interface RealtimeCallbacks {
   onGanttChange?: () => void;
+  onThreadTodosChange?: () => void;
   onSceneChange: (payload: ChangePayload) => void;
   onCommentChange: (payload: ChangePayload) => void;
   onRevisionChange: (payload: ChangePayload) => void;
@@ -176,6 +177,8 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
   // 간트 테이블은 publication 에 없다(행 내용이 anon 구독자에게 흘러가지 않게). DB 트리거가
   // realtime.send 로 같은 공개 채널에 '변경됐다' 신호만 보내고, 앱은 RPC 로 다시 읽는다.
   built.on('broadcast', { event: 'gantt-changed' }, () => callbacks.onGanttChange?.());
+  // 팀 할 일(comment_thread_todos)도 같은 방식 — 트리거가 내용 없는 신호만 보내고 앱이 래퍼로 다시 읽는다 (피드백 58).
+  built.on('broadcast', { event: 'thread-todos-changed' }, () => callbacks.onThreadTodosChange?.());
   const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
   built
     .on('presence', { event: 'sync' }, emitPresence)
