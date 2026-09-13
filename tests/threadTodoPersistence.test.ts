@@ -211,3 +211,57 @@ test('ipc: 네 핸들러는 렌더러 인자를 순서 그대로 store 에 넘�
   await assert.rejects(handlers.get('thread-todo:delete')!({}, ID), /화면을 다시 열어/);
   assert.deepEqual(calls, []);
 });
+
+// ── 코덱스 1차 리뷰 반영: 재연결 뒤 놓친 팀 할 일 변경 따라잡기 ──
+test('realtime: 재연결에 성공한 첫 join 에서만 팀 할 일 재조회 신호를 한 번 보낸다 (끊긴 동안의 broadcast 는 다시 오지 않는다)', async () => {
+  const statusCallbacks: Array<(status: string) => void> = [];
+  const broadcastHandlers = new Map<string, () => void>();
+  const key = `__threadTodoRealtime${nonce++}`;
+  (globalThis as Record<string, unknown>)[key] = {
+    channel: () => ({
+      on(type: string, filter: { event?: string }, handler: () => void) {
+        if (type === 'broadcast' && filter.event) broadcastHandlers.set(filter.event, handler);
+        return this;
+      },
+      subscribe(callback?: (status: string) => void) { if (callback) statusCallbacks.push(callback); return this; },
+      presenceState: () => ({}),
+      track: async () => 'ok',
+    }),
+    removeChannel: () => {},
+  };
+  try {
+    const result = await build({
+      stdin: { contents: "export * from './electron/realtime.ts';", resolveDir: process.cwd() },
+      bundle: true, format: 'esm', platform: 'node', write: false,
+      plugins: [{ name: 'realtime-stubs', setup(builder) {
+        builder.onResolve({ filter: /^\.\/supabase$/ }, () => ({ path: 'db', namespace: 'rt-stub' }));
+        builder.onResolve({ filter: /^\.\/retry-utils$/ }, () => ({ path: 'retry', namespace: 'rt-stub' }));
+        builder.onLoad({ filter: /./, namespace: 'rt-stub' }, ({ path }) => ({ contents: path === 'db'
+          ? `export const supabase = globalThis.${key};`
+          : 'export const createRetryManager = () => ({ schedule: () => true, reset() {}, clear() {} });' }));
+      } }],
+    });
+    const mod = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}#${nonce++}`);
+    const events: string[] = [];
+    const noOp = () => {};
+    const cleanup = mod.setupRealtimeSubscription({
+      onSceneChange: noOp, onCommentChange: noOp, onRevisionChange: noOp, onEpisodeChange: noOp, onPartChange: noOp,
+      onCalendarChange: noOp, onActivityInsert: noOp,
+      onStatusChange: (status: string, metadata: { reconnected: boolean }) => { events.push(`${status}:${metadata.reconnected}`); },
+      onThreadTodosChange: () => { events.push('todos'); },
+    });
+    const status = statusCallbacks[0];
+    status('SUBSCRIBED');
+    assert.deepEqual(events, ['SUBSCRIBED:false'], '첫 연결에서는 보내지 않는다 (섹션이 마운트 때 이미 읽는다)');
+    status('CHANNEL_ERROR');
+    status('SUBSCRIBED');
+    assert.deepEqual(events.slice(1), ['CHANNEL_ERROR:false', 'SUBSCRIBED:true', 'todos'], '끊겼다 다시 붙은 첫 join 에서 한 번');
+    status('SUBSCRIBED');
+    assert.deepEqual(events.slice(4), ['SUBSCRIBED:false'], '같은 연결의 중복 SUBSCRIBED 통지로는 다시 보내지 않는다');
+    broadcastHandlers.get('thread-todos-changed')!();
+    assert.equal(events.at(-1), 'todos', 'DB 트리거 신호도 같은 콜백으로 간다');
+    cleanup();
+  } finally {
+    delete (globalThis as Record<string, unknown>)[key];
+  }
+});
