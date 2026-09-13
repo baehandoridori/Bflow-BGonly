@@ -137,3 +137,21 @@ test('저장소 읽기는 되는데 쓰기가 실패하면, 이후엔 이 창 �
   assert.deepEqual((await store.list(KEY)).map((r) => r.text), ['첫 항목']);
   assert.equal(writes, 1, '실패한 뒤로는 저장소에 다시 쓰지 않는다');
 });
+
+// ── 코덱스 8차 ──
+test('읽던 저장소가 도중에 막혀도 마지막으로 읽은 목록을 이 창 메모리로 유지한다', async () => {
+  const storage = memoryStorage();
+  const seeded = createThreadTodoPreviewStore({ storage, locks: null, openChannel: null, newId: ids });
+  const kept = await seeded.add(HANSOL, KEY, '저장돼 있던 항목');
+  let blocked = false;
+  const flaky = {
+    getItem(key: string) { if (blocked) throw new Error('SecurityError'); return storage.getItem(key); },
+    setItem(key: string, value: string) { if (blocked) throw new Error('SecurityError'); storage.setItem(key, value); },
+  };
+  const store = createThreadTodoPreviewStore({ storage: flaky, locks: null, openChannel: null, newId: ids });
+  assert.deepEqual((await store.list(KEY)).map((r) => r.id), [kept.id], '처음엔 저장소에서 읽는다');
+  blocked = true;
+  assert.deepEqual((await store.list(KEY)).map((r) => r.id), [kept.id], '막힌 뒤에도 마지막으로 읽은 목록이 남는다');
+  const added = await store.add(HANSOL, KEY, '막힌 뒤 추가');
+  assert.deepEqual((await store.list(KEY)).map((r) => r.id), [kept.id, added.id]);
+});

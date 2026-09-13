@@ -64,13 +64,18 @@ export function createThreadTodoPreviewStore(options: ThreadTodoPreviewOptions =
     if (memoryOnly || !storage) return memoryRows.map((row) => ({ ...row }));
     let raw: string | null = null;
     try { raw = storage.getItem(THREAD_TODO_PREVIEW_STORAGE_KEY); } catch { memoryOnly = true; return memoryRows.map((row) => ({ ...row })); }
-    if (!raw) return [];
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter(isThreadTodoRow).map((row) => ({ ...row })) : [];
-    } catch {
-      return []; // 깨진 미리보기 데이터는 빈 목록으로 시작한다(다음 쓰기가 덮어쓴다)
+    let rows: ThreadTodoRow[] = [];
+    if (raw) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        rows = Array.isArray(parsed) ? parsed.filter(isThreadTodoRow).map((row) => ({ ...row })) : [];
+      } catch {
+        rows = []; // 깨진 미리보기 데이터는 빈 목록으로 시작한다(다음 쓰기가 덮어쓴다)
+      }
     }
+    // 코덱스 8차: 성공한 읽기도 메모리에 남겨, 나중에 저장소 접근이 막혀도 마지막으로 본 목록을 유지한다.
+    memoryRows = rows.map((row) => ({ ...row }));
+    return rows;
   }
   function writeRows(rows: ThreadTodoRow[]): void {
     memoryRows = rows.map((row) => ({ ...row }));
