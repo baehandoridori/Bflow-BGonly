@@ -7,6 +7,7 @@ import type { ElectronAPI, AppUser, CanonicalSessionPayload, Episode, Scene, Com
 import { version as appVersion } from '../../package.json';
 import { RetakeNotificationService } from '../../electron/retakeNotificationService';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
+import { createThreadTodoPreviewStore, type ThreadTodoPreviewStore } from './threadTodoPreviewStore';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -87,6 +88,13 @@ function getMockUsers(): PreviewUser[] {
 let previewCanonicalUserId: string | null = null;
 let previewCanonicalEpoch = 0;
 let previewCanonicalSnapshot: CanonicalSessionPayload = { user: null, session: null, epoch: 0 };
+
+// 팀 할 일 (피드백 58) — 실서버처럼 새로고침·다른 창에서도 같은 목록이 보이게 localStorage 저장소를 쓴다(코덱스 2차).
+let previewThreadTodoStore: ThreadTodoPreviewStore | null = null;
+function threadTodoPreviewStore(): ThreadTodoPreviewStore {
+  previewThreadTodoStore ??= createThreadTodoPreviewStore();
+  return previewThreadTodoStore;
+}
 let previewRememberedUserId: string | null = null;
 let previewTodoStore: PersonalTodoPreviewStore | null = null;
 let previewMarketGateway: MarketPreviewGateway | null = null;
@@ -3371,6 +3379,30 @@ export function installDevElectronAPI(): void {
       const result = await gateway.execute(request); options.assertCurrent?.(); return result;
     },
     onGanttChanged: (callback) => subscribePreviewGantt(() => callback()),
+    // ─── 팀 할 일 (mock, 피드백 58) — 서버 래퍼와 같은 규칙·문구. 호출자는 로그인 사용자. ───
+    threadTodoList: async (threadKey) => {
+      requireMockCalendarUser();
+      return threadTodoPreviewStore().list(threadKey);
+    },
+    threadTodoAdd: async (threadKey, text) => threadTodoPreviewStore().add(requireMockCalendarUser(), threadKey, text),
+    threadTodoSetDone: async (id, done) => threadTodoPreviewStore().setDone(requireMockCalendarUser(), id, done),
+    threadTodoDelete: async (id) => threadTodoPreviewStore().remove(requireMockCalendarUser(), id),
+    onThreadTodosChanged: (callback) => threadTodoPreviewStore().subscribe(callback),
+    // 미리보기 새 창 — Electron main 과 같은 #widget-popup/{widgetId} 해시로 같은 앱을 브라우저 창에 연다(코덱스 4차).
+    //   팝업 창도 main.tsx 가 mock 을 설치하고 저장된 로그인 세션을 복원한다. 창을 못 열면(차단) ok:false.
+    widgetOpenPopup: async (widgetId, title, extra) => {
+      let hash = `#widget-popup/${encodeURIComponent(widgetId)}`;
+      if (extra && Object.keys(extra).length > 0) hash += `?${new URLSearchParams(extra).toString()}`;
+      if (typeof window === 'undefined' || typeof window.open !== 'function' || !window.location) {
+        console.info('[preview] widgetOpenPopup', widgetId, title, 'no window');
+        return { ok: false };
+      }
+      const size = widgetId === 'character-board' ? 'width=1160,height=780' : 'width=480,height=600';
+      const url = `${window.location.origin}${window.location.pathname}${window.location.search}${hash}`;
+      const opened = window.open(url, `bflow-widget-${widgetId}`, `popup,${size}`);
+      console.info('[preview] widgetOpenPopup', widgetId, title, opened ? 'opened' : 'blocked');
+      return { ok: Boolean(opened) };
+    },
     readPersonalTodoLabels: async () => {
       const store = getPreviewTodoStore();
       return store ? { ok: true as const, data: store.readLabels().map((label) => ({ ...label, updatedAt: label.createdAt })) } : previewNoSession([]);

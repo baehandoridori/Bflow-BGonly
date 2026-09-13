@@ -1058,6 +1058,12 @@ export interface ElectronAPI extends CalendarApiInputContract {
   ganttRead: () => Promise<import('../features/gantt/types').GanttSnapshot>;
   ganttExecute: (request: import('../features/gantt/types').GanttRequest) => Promise<import('../features/gantt/types').GanttSnapshot>;
   onGanttChanged: (callback: () => void) => () => void;
+  // 팀 할 일 (피드백 58) — 행 타입은 src/shared/threadTodo.ts 한 벌(서버 to_jsonb 그대로).
+  threadTodoList: (threadKey: string) => Promise<import('../shared/threadTodo').ThreadTodoRow[]>;
+  threadTodoAdd: (threadKey: string, text: string) => Promise<import('../shared/threadTodo').ThreadTodoRow>;
+  threadTodoSetDone: (id: string, done: boolean) => Promise<import('../shared/threadTodo').ThreadTodoRow>;
+  threadTodoDelete: (id: string) => Promise<{ ok: boolean; deleted: boolean }>;
+  onThreadTodosChanged: (callback: () => void) => () => void;
   getDataPath: () => Promise<string>;
   shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   shellOpenPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;

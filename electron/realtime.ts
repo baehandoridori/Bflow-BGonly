@@ -30,6 +30,7 @@ const SHARED_CALENDAR_REALTIME_TABLES: readonly SharedCalendarRealtimeTable[] = 
 
 export interface RealtimeCallbacks {
   onGanttChange?: () => void;
+  onThreadTodosChange?: () => void;
   onSceneChange: (payload: ChangePayload) => void;
   onCommentChange: (payload: ChangePayload) => void;
   onRevisionChange: (payload: ChangePayload) => void;
@@ -176,6 +177,8 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
   // 간트 테이블은 publication 에 없다(행 내용이 anon 구독자에게 흘러가지 않게). DB 트리거가
   // realtime.send 로 같은 공개 채널에 '변경됐다' 신호만 보내고, 앱은 RPC 로 다시 읽는다.
   built.on('broadcast', { event: 'gantt-changed' }, () => callbacks.onGanttChange?.());
+  // 팀 할 일(comment_thread_todos)도 같은 방식 — 트리거가 내용 없는 신호만 보내고 앱이 래퍼로 다시 읽는다 (피드백 58).
+  built.on('broadcast', { event: 'thread-todos-changed' }, () => callbacks.onThreadTodosChange?.());
   const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
   built
     .on('presence', { event: 'sync' }, emitPresence)
@@ -224,6 +227,9 @@ function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
     const reconnected = status === 'SUBSCRIBED' && reconnectCatchUpPending;
     if (status === 'SUBSCRIBED') reconnectCatchUpPending = false;
     callbacks.onStatusChange(status, { reconnected });
+    // 팀 할 일 신호는 내용 없는 broadcast 라 연결이 끊긴 동안 온 것은 다시 오지 않는다(피드백 58, 코덱스 1차).
+    //   재연결에 성공한 첫 join 에서 '바뀌었을 수 있다' 고 한 번 알려 열린 섹션이 다시 읽게 한다(섹션 300ms 디바운스 그대로).
+    if (reconnected) callbacks.onThreadTodosChange?.();
 
     if (status === 'SUBSCRIBED') {
       // 연결 성공 — 재시도 카운터 초기화
