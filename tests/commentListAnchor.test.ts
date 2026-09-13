@@ -1,0 +1,41 @@
+/**
+ * 피드백 58 후속(구현 후 리뷰): 팀 할 일 섹션이 커질 때 댓글 목록 스크롤 보정 판단(src/utils/commentListAnchor.ts).
+ * 섹션이 목록을 늦게 받아 커지면 바로 아래 댓글 목록이 아래에서 잘려 최신 댓글이 가려지던 회귀를 막는다.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { COMMENT_LIST_BOTTOM_SLACK_PX, commentListScrollAfterSectionGrow } from '../src/utils/commentListAnchor.ts';
+
+// 미리보기 재현 수치: 댓글 내용 1285px, 할 일 6개가 늦게 들어와 섹션이 192px 커지며 목록 높이가 552 → 360 으로 줄었다.
+const grown = { scrollHeight: 1285, clientHeight: 360, grewBy: 192 };
+const BOTTOM_BEFORE_GROW = 1285 - 552; // 커지기 전 맨 아래 scrollTop
+
+test('맨 아래를 보던 중 섹션이 커지면 곧바로 다시 맨 아래에 붙인다', () => {
+  assert.equal(COMMENT_LIST_BOTTOM_SLACK_PX, 8);
+  assert.equal(commentListScrollAfterSectionGrow({ ...grown, scrollTop: BOTTOM_BEFORE_GROW, firstLoad: false, jumpingToComment: false }), 'auto');
+  assert.equal(commentListScrollAfterSectionGrow({ ...grown, scrollTop: BOTTOM_BEFORE_GROW - COMMENT_LIST_BOTTOM_SLACK_PX, firstLoad: false, jumpingToComment: false }), 'auto');
+  // 이미 바닥이던 화면은 댓글 이동 중이어도 바닥을 유지한다
+  assert.equal(commentListScrollAfterSectionGrow({ ...grown, scrollTop: BOTTOM_BEFORE_GROW, firstLoad: true, jumpingToComment: true }), 'auto');
+});
+
+test('위쪽 댓글을 읽는 중이면 건드리지 않는다', () => {
+  assert.equal(commentListScrollAfterSectionGrow({ ...grown, scrollTop: 0, firstLoad: false, jumpingToComment: false }), null);
+  assert.equal(commentListScrollAfterSectionGrow({ ...grown, scrollTop: BOTTOM_BEFORE_GROW - COMMENT_LIST_BOTTOM_SLACK_PX - 1, firstLoad: false, jumpingToComment: false }), null);
+});
+
+test('패널을 막 열어 첫 목록이 들어오면 맨 아래로 가는 부드러운 스크롤을 다시 건다 — 안 읽은 댓글·특정 댓글로 이동 중이면 제외', () => {
+  assert.equal(commentListScrollAfterSectionGrow({ ...grown, scrollTop: 120, firstLoad: true, jumpingToComment: false }), 'smooth');
+  assert.equal(commentListScrollAfterSectionGrow({ ...grown, scrollTop: 120, firstLoad: true, jumpingToComment: true }), null);
+});
+
+test('줄었거나 그대로거나 값이 이상하면 아무것도 하지 않는다', () => {
+  for (const grewBy of [0, -37, Number.NaN]) {
+    assert.equal(commentListScrollAfterSectionGrow({ scrollHeight: 1285, clientHeight: 552, scrollTop: BOTTOM_BEFORE_GROW, grewBy, firstLoad: true, jumpingToComment: false }), null);
+  }
+});
+
+test('판단 파일은 런타임 import 가 없다 (node --test 가 직접 불러 쓴다)', () => {
+  const src = readFileSync('src/utils/commentListAnchor.ts', 'utf8');
+  assert.doesNotMatch(src, /^import /m);
+});

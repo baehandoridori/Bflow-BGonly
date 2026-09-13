@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, ListTodo, Plus, Trash2 } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
@@ -44,9 +44,11 @@ function isDiscardedResponse(err: unknown): boolean {
 interface ThreadTodoSectionProps {
   threadKey: string;
   currentUser: AppUser;
+  /** 섹션 높이가 커졌을 때(커진 px, 첫 목록 조회가 끝난 렌더인지). 바로 아래 댓글 목록의 스크롤 보정용. */
+  onHeightGrow?: (grewBy: number, firstLoad: boolean) => void;
 }
 
-export function ThreadTodoSection({ threadKey, currentUser }: ThreadTodoSectionProps) {
+export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: ThreadTodoSectionProps) {
   const [items, setItems] = useState<ThreadTodoRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
@@ -57,11 +59,27 @@ export function ThreadTodoSection({ threadKey, currentUser }: ThreadTodoSectionP
   const loadSeqRef = useRef(0);      // 더 새 load 나 뮤테이션이 시작되면 이전 load 응답은 버린다
   const loadPendingRef = useRef(false);
   const inFlightRef = useRef(0);     // 진행 중 뮤테이션 수
+  const sectionRef = useRef<HTMLElement>(null);
+  const heightRef = useRef<number | null>(null);
+  const firstLoadSeenRef = useRef(false);
+  const onHeightGrowRef = useRef(onHeightGrow);
+  onHeightGrowRef.current = onHeightGrow;
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+
+  // 구현 후 리뷰: 목록이 늦게 채워지거나 펼치면 섹션이 커지고, 바로 아래 댓글 목록은 그만큼 아래에서 잘린다.
+  //   스크롤 의도(맨 아래 유지·안 읽은 댓글 이동)는 댓글 패널이 알므로, 여기서는 커진 높이만 그리기 전에 알린다.
+  useLayoutEffect(() => {
+    const height = sectionRef.current?.offsetHeight ?? 0;
+    const prev = heightRef.current;
+    heightRef.current = height;
+    const firstLoad = !loading && !firstLoadSeenRef.current;
+    if (firstLoad) firstLoadSeenRef.current = true;
+    if (prev !== null && height > prev) onHeightGrowRef.current?.(height - prev, firstLoad);
+  });
 
   const load = useCallback(async () => {
     if (inFlightRef.current > 0) return; // 뮤테이션 중엔 그 finally 가 대신 읽는다 — 낙관 상태를 중간에 덮지 않는다
@@ -191,7 +209,7 @@ export function ThreadTodoSection({ threadKey, currentUser }: ThreadTodoSectionP
   const draftValid = isValidThreadTodoText(sanitizeThreadTodoText(draft));
 
   return (
-    <section aria-label="팀 할 일" className="shrink-0 border-b border-bg-border px-3 pb-2">
+    <section ref={sectionRef} aria-label="팀 할 일" className="shrink-0 border-b border-bg-border px-3 pb-2">
       <button
         type="button"
         onClick={toggleCollapsed}

@@ -137,7 +137,7 @@ test('댓글 패널: 섹션은 툴바 바로 아래·댓글 목록 바로 위, �
   assert.match(commentPanel, /import \{ ThreadTodoSection \} from '\.\/ThreadTodoSection';/);
   assert.match(
     commentPanel,
-    /re만\s*<\/button>\s*<\/div>\s*\{\/\* 피드백 58[\s\S]{0,300}\{effectiveSceneThreadKey && currentUser \? \(\s*<ThreadTodoSection key=\{effectiveSceneThreadKey\} threadKey=\{effectiveSceneThreadKey\} currentUser=\{currentUser\} \/>\s*\) : null\}\s*\{\/\* 댓글 목록/,
+    /re만\s*<\/button>\s*<\/div>\s*\{\/\* 피드백 58[\s\S]{0,300}\{effectiveSceneThreadKey && currentUser \? \(\s*<ThreadTodoSection\s+key=\{effectiveSceneThreadKey\}\s+threadKey=\{effectiveSceneThreadKey\}\s+currentUser=\{currentUser\}\s+onHeightGrow=\{\(grewBy, firstLoad\) => \{[\s\S]{0,900}?\}\}\s*\/>\s*\) : null\}\s*\{\/\* 댓글 목록/,
   );
   assert.ok(commentPanel.indexOf('<ThreadTodoSection') < commentPanel.indexOf('ref={scrollRef}'));
   assert.equal((commentPanel.match(/<ThreadTodoSection/g) ?? []).length, 1);
@@ -171,4 +171,13 @@ test('섹션: IPC 직접 호출·변경 신호 구독·재로그인 재조회·�
 test('게이트 등록: 59 테스트가 test:ui 에 나열돼 있다', () => {
   const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
   assert.ok(pkg.scripts['test:ui'].includes('./tests/sidebarCharacterPopout.test.ts'), 'sidebarCharacterPopout.test.ts 가 test:ui 에 등록돼야 한다');
+});
+
+// ── 구현 후 리뷰 반영: 섹션이 늦게 커져도 댓글 목록의 최신 댓글이 가려지지 않게 ──
+test('섹션 높이 증가 알림 → 댓글 패널이 스크롤 의도(맨 아래·댓글 이동)에 맞춰 보정', () => {
+  assert.match(section, /<section ref=\{sectionRef\} aria-label="팀 할 일"/);
+  assert.match(section, /useLayoutEffect\(\(\) => \{\s*const height = sectionRef\.current\?\.offsetHeight \?\? 0;\s*const prev = heightRef\.current;\s*heightRef\.current = height;\s*const firstLoad = !loading && !firstLoadSeenRef\.current;\s*if \(firstLoad\) firstLoadSeenRef\.current = true;\s*if \(prev !== null && height > prev\) onHeightGrowRef\.current\?\.\(height - prev, firstLoad\);\s*\}\);/);
+  assert.match(section, /onHeightGrowRef\.current = onHeightGrow;/);
+  assert.match(commentPanel, /import \{ commentListScrollAfterSectionGrow \} from '@\/utils\/commentListAnchor';/);
+  assert.match(commentPanel, /const el = scrollRef\.current;\s*if \(!el\) return;\s*const behavior = commentListScrollAfterSectionGrow\(\{\s*scrollHeight: el\.scrollHeight,\s*clientHeight: el\.clientHeight,\s*scrollTop: el\.scrollTop,\s*grewBy,\s*firstLoad,\s*jumpingToComment: !!firstUnreadCommentId \|\| !!focusCommentId,\s*\}\);\s*if \(behavior\) el\.scrollTo\(\{ top: el\.scrollHeight, behavior \}\);/);
 });

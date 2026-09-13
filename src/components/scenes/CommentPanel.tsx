@@ -61,6 +61,7 @@ import {
 import { createUuid } from '@/utils/createUuid';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { ThreadTodoSection } from './ThreadTodoSection';
+import { commentListScrollAfterSectionGrow } from '@/utils/commentListAnchor';
 import { toast as sonnerToast } from 'sonner';
 import '@/styles/comment-panel.css';
 
@@ -1879,7 +1880,25 @@ export function CommentPanel({
       {/* 피드백 58: 팀 공유 할 일 — 툴바 아래·댓글 목록 위 고정. 스레드 키가 비면(통합 모달의 예외 경우) 숨긴다.
           key 로 스레드 키가 바뀌면 리마운트해 이전 스레드의 항목·진행 중 조회가 새 스레드에 섞이지 않게 한다. */}
       {effectiveSceneThreadKey && currentUser ? (
-        <ThreadTodoSection key={effectiveSceneThreadKey} threadKey={effectiveSceneThreadKey} currentUser={currentUser} />
+        <ThreadTodoSection
+          key={effectiveSceneThreadKey}
+          threadKey={effectiveSceneThreadKey}
+          currentUser={currentUser}
+          onHeightGrow={(grewBy, firstLoad) => {
+            // 섹션이 늦게 커져도 맨 아래(최신 댓글)를 보던 화면이 밀리지 않게 — 판단은 commentListScrollAfterSectionGrow.
+            const el = scrollRef.current;
+            if (!el) return;
+            const behavior = commentListScrollAfterSectionGrow({
+              scrollHeight: el.scrollHeight,
+              clientHeight: el.clientHeight,
+              scrollTop: el.scrollTop,
+              grewBy,
+              firstLoad,
+              jumpingToComment: !!firstUnreadCommentId || !!focusCommentId,
+            });
+            if (behavior) el.scrollTo({ top: el.scrollHeight, behavior });
+          }}
+        />
       ) : null}
 
       {/* 댓글 목록 — 시스템 이벤트(inlineEvents)와 시간순 머지 + 새 항목 슬라이드 인 */}

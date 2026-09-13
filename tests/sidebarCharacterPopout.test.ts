@@ -58,7 +58,7 @@ test('미리보기 mock 에 widgetOpenPopup 스텁이 있어 사이드바 버튼
 
 test('게이트 등록: 58 테스트 4개가 test:entity 에 나열돼 있다', () => {
   const entity = pkg.scripts['test:entity'];
-  for (const f of ['threadTodo.test.ts', 'threadTodoPersistence.test.ts', 'threadTodoWiring.test.ts', 'threadTodoMockWiring.test.ts']) {
+  for (const f of ['threadTodo.test.ts', 'threadTodoPersistence.test.ts', 'threadTodoWiring.test.ts', 'threadTodoMockWiring.test.ts', 'commentListAnchor.test.ts']) {
     assert.ok(entity.includes(`./tests/${f}`), `${f} 가 test:entity 에 등록돼야 한다`);
   }
   // 교차 가드의 최후 방어: 두 스위트가 빌드 게이트에서 함께 빠지면 서로의 감시도 사라진다.
