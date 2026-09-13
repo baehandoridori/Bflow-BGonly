@@ -725,3 +725,9 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - UI 테스트의 별도 성공 stub은 실제 preview API의 누락을 가릴 수 있다. 실제 설치된 mock을 통해 준비·적용·완료까지 검증하며, 앱 종료가 없는 preview에서 무한 loading 알림이 남지 않게 한다.
 - 알림 본문에 사용자가 입력한 `G:\\...` 경로를 포함할 때는 평문 `<p>`로 렌더하지 말고 공용 `PathLinkifiedText`/`PathBadge` 경로를 사용한다. 클릭 가능한 경로는 미리보기 길이로 자르면 잘린 주소가 열리므로 원문을 보존하고 CSS로만 표시 길이를 제어한다.
 - 같은 리테이크 완료 메모도 알림 목록, 씬 상세 카드, 리테이크 허브, 컴포지팅 우측 상세처럼 렌더링 표면이 여러 개다. 한 화면만 고치고 완료하지 말고 동일 데이터가 보이는 실제 신고 화면을 렌더 테스트에 포함한다.
+
+### 2026-09-14: 워크트리 안의 node_modules junction 은 지우기 전에 링크부터 끊는다
+
+- `git worktree remove --force`·`rm -rf`·`Remove-Item -Recurse` 는 Windows junction 을 실제 디렉터리처럼 따라 들어가 **대상(다른 워크트리의 node_modules) 내용을 지운다**. 검증 에이전트 워크트리를 지우다 공유 node_modules 의 `.bin`·`@`-scoped 패키지가 사라져 다른 워크트리의 `tsc` 가 통째로 실패했다. 반드시 `cmd /c rmdir "<워크트리>\node_modules"` 로 링크를 먼저 끊은 뒤 워크트리를 지운다(`cmd /c "dir /AL"` 로 junction 유무 확인).
+- 워크트리에 node_modules 를 연결해 쓸 때는 `npm install`/`npm ci` 를 그 워크트리에서 실행하지 않는다(연결 대상이 지워진다). 손상되면 대상 워크트리에서 `npm ci` 로 복구한다.
+- 서브에이전트에게 워크트리 격리 작업을 시킬 때는 "워크트리는 지우지 마라" 를 지시하고, 정리는 메인 세션이 위 순서로 한다.
