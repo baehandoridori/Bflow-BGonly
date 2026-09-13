@@ -217,3 +217,11 @@ test('섹션: 완료 방향·체크 표시·뮤테이션 마무리·조회 순�
   assert.match(section, /const SIGNAL_DEBOUNCE_MS = 300;/);
   assert.match(section, /if \(inFlightRef\.current === 0\) void load\(\);\s*\}, SIGNAL_DEBOUNCE_MS\);/);
 });
+
+// ── 코덱스 3차: 휴지통은 보이기 전에는 눌리지 않게 (투명한 채 클릭을 받아 확인 없이 지워지던 구간 제거) ──
+test('섹션: 휴지통 버튼은 visibility 로 숨기고, 행 hover·키보드 포커스에서만 드러난다', () => {
+  const trashClass = section.match(/aria-label="팀 할 일 지우기"\s*className="([^"]*)"/)?.[1] ?? '';
+  assert.ok(trashClass.length > 0);
+  assert.match(trashClass, /\binvisible group-hover\/todo:visible group-focus-within\/todo:visible\b/);
+  assert.doesNotMatch(trashClass, /opacity-0|transition-opacity|delay-\d+/);
+});

@@ -54,13 +54,16 @@ export function createThreadTodoPreviewStore(options: ThreadTodoPreviewOptions =
   const newId = options.newId ?? (() => createUuid());
   const sourceId = newId(); // 이 창이 보낸 방송을 되받았을 때 두 번 알리지 않기 위한 표시
   let memoryRows: ThreadTodoRow[] = [];
+  // 저장소를 못 쓰게 되면(읽기·쓰기 예외) 이후엔 이 창 메모리만 기준으로 삼는다 — 읽기만 되는 저장소의 옛 값이
+  //   방금 성공한 변경을 되돌리지 않게(코덱스 3차).
+  let memoryOnly = !storage;
   let localTail: Promise<unknown> = Promise.resolve();
   const listeners = new Set<() => void>();
 
   function readRows(): ThreadTodoRow[] {
-    if (!storage) return memoryRows.map((row) => ({ ...row }));
+    if (memoryOnly || !storage) return memoryRows.map((row) => ({ ...row }));
     let raw: string | null = null;
-    try { raw = storage.getItem(THREAD_TODO_PREVIEW_STORAGE_KEY); } catch { return memoryRows.map((row) => ({ ...row })); }
+    try { raw = storage.getItem(THREAD_TODO_PREVIEW_STORAGE_KEY); } catch { memoryOnly = true; return memoryRows.map((row) => ({ ...row })); }
     if (!raw) return [];
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -71,8 +74,8 @@ export function createThreadTodoPreviewStore(options: ThreadTodoPreviewOptions =
   }
   function writeRows(rows: ThreadTodoRow[]): void {
     memoryRows = rows.map((row) => ({ ...row }));
-    if (!storage) return;
-    try { storage.setItem(THREAD_TODO_PREVIEW_STORAGE_KEY, JSON.stringify(rows)); } catch { /* 용량·권한 문제면 이 창 메모리만 쓴다 */ }
+    if (memoryOnly || !storage) return;
+    try { storage.setItem(THREAD_TODO_PREVIEW_STORAGE_KEY, JSON.stringify(rows)); } catch { memoryOnly = true; /* 용량·권한 문제 — 이후 이 창 메모리만 쓴다 */ }
   }
   function withLock<T>(run: () => T): Promise<T> {
     if (locks) return locks.request(THREAD_TODO_PREVIEW_LOCK, async () => run());

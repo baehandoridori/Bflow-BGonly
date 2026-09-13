@@ -121,3 +121,19 @@ test('깨진 미리보기 데이터·잘못된 행은 무시하고, 저장소를
   await blocked.add(HANSOL, KEY, '막힌 저장소');
   assert.equal((await blocked.list(KEY)).length, 1);
 });
+
+// ── 코덱스 3차 ──
+test('저장소 읽기는 되는데 쓰기가 실패하면, 이후엔 이 창 메모리를 기준으로 읽어 방금 한 변경이 되돌아가지 않는다', async () => {
+  const persisted = JSON.stringify([]);
+  let writes = 0;
+  const readOnly = { getItem: () => persisted, setItem() { writes += 1; throw new Error('QuotaExceededError'); } };
+  const store = createThreadTodoPreviewStore({ storage: readOnly, locks: null, openChannel: null, newId: ids });
+  const first = await store.add(HANSOL, KEY, '첫 항목');
+  assert.deepEqual((await store.list(KEY)).map((r) => r.id), [first.id], '쓰기 실패 직후 조회에도 남아 있다');
+  const second = await store.add(HANSOL, KEY, '둘째 항목');
+  await store.setDone(HANSOL, first.id, true);
+  assert.deepEqual((await store.list(KEY)).map((r) => [r.text, r.done_by_name]), [['첫 항목', '배한솔'], ['둘째 항목', null]]);
+  assert.deepEqual(await store.remove(HANSOL, second.id), { ok: true, deleted: true });
+  assert.deepEqual((await store.list(KEY)).map((r) => r.text), ['첫 항목']);
+  assert.equal(writes, 1, '실패한 뒤로는 저장소에 다시 쓰지 않는다');
+});

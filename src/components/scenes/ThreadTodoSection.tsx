@@ -258,7 +258,7 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
                       onClick={() => void removeItem(item)}
                       title="팀 할 일 지우기"
                       aria-label="팀 할 일 지우기"
-                      className="shrink-0 rounded p-0.5 text-text-secondary/40 opacity-0 transition-opacity group-hover/todo:opacity-100 focus-visible:opacity-100 hover:text-text-primary cursor-pointer"
+                      className="shrink-0 rounded p-0.5 text-text-secondary/40 invisible group-hover/todo:visible group-focus-within/todo:visible hover:text-text-primary cursor-pointer"
                     >
                       <Trash2 size={12} />
                     </button>
