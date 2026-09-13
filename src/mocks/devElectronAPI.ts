@@ -7,7 +7,7 @@ import type { ElectronAPI, AppUser, CanonicalSessionPayload, Episode, Scene, Com
 import { version as appVersion } from '../../package.json';
 import { RetakeNotificationService } from '../../electron/retakeNotificationService';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
-import { canDeleteThreadTodo, isValidThreadKey, isValidThreadTodoText, sanitizeThreadTodoText, type ThreadTodoRow } from '../shared/threadTodo';
+import { createThreadTodoPreviewStore, type ThreadTodoPreviewStore } from './threadTodoPreviewStore';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -89,13 +89,11 @@ let previewCanonicalUserId: string | null = null;
 let previewCanonicalEpoch = 0;
 let previewCanonicalSnapshot: CanonicalSessionPayload = { user: null, session: null, epoch: 0 };
 
-// 팀 할 일 (피드백 58) — in-memory. 새로고침 시 초기화되는 것이 의도(미리보기 전용). 변경 시 리스너에 신호.
-const previewThreadTodos: ThreadTodoRow[] = [];
-const previewThreadTodoListeners = new Set<() => void>();
-function notifyPreviewThreadTodos(): void {
-  for (const listener of previewThreadTodoListeners) {
-    try { listener(); } catch { /* ignore */ }
-  }
+// 팀 할 일 (피드백 58) — 실서버처럼 새로고침·다른 창에서도 같은 목록이 보이게 localStorage 저장소를 쓴다(코덱스 2차).
+let previewThreadTodoStore: ThreadTodoPreviewStore | null = null;
+function threadTodoPreviewStore(): ThreadTodoPreviewStore {
+  previewThreadTodoStore ??= createThreadTodoPreviewStore();
+  return previewThreadTodoStore;
 }
 let previewRememberedUserId: string | null = null;
 let previewTodoStore: PersonalTodoPreviewStore | null = null;
@@ -3384,50 +3382,12 @@ export function installDevElectronAPI(): void {
     // ─── 팀 할 일 (mock, 피드백 58) — 서버 래퍼와 같은 규칙·문구. 호출자는 로그인 사용자. ───
     threadTodoList: async (threadKey) => {
       requireMockCalendarUser();
-      if (!isValidThreadKey(threadKey)) throw new Error('할 일 대상이 올바르지 않습니다.');
-      return previewThreadTodos.filter((r) => r.thread_key === threadKey).map((r) => ({ ...r }));
+      return threadTodoPreviewStore().list(threadKey);
     },
-    threadTodoAdd: async (threadKey, text) => {
-      const actor = requireMockCalendarUser();
-      const clean = sanitizeThreadTodoText(text);
-      if (!isValidThreadKey(threadKey)) throw new Error('할 일 대상이 올바르지 않습니다.');
-      if (!isValidThreadTodoText(clean)) throw new Error('할 일은 1~200자로 적어 주세요.');
-      const row: ThreadTodoRow = {
-        id: createUuid(), thread_key: threadKey, text: clean,
-        created_by: actor.id, created_by_name: actor.name, created_at: new Date().toISOString(),
-        done_at: null, done_by: null, done_by_name: null,
-      };
-      previewThreadTodos.push(row);
-      notifyPreviewThreadTodos();
-      return { ...row };
-    },
-    threadTodoSetDone: async (id, done) => {
-      const actor = requireMockCalendarUser();
-      const row = previewThreadTodos.find((r) => r.id === id);
-      if (!row) throw new Error('이미 지워진 할 일이에요.');
-      if (done) {
-        row.done_at ??= new Date().toISOString();
-        row.done_by ??= actor.id;
-        row.done_by_name ??= actor.name;
-      } else {
-        row.done_at = null; row.done_by = null; row.done_by_name = null;
-      }
-      notifyPreviewThreadTodos();
-      return { ...row };
-    },
-    threadTodoDelete: async (id) => {
-      const actor = requireMockCalendarUser();
-      const idx = previewThreadTodos.findIndex((r) => r.id === id);
-      if (idx < 0) return { ok: true, deleted: false };
-      if (!canDeleteThreadTodo(previewThreadTodos[idx], actor)) throw new Error('내가 추가한 할 일만 지울 수 있어요.');
-      previewThreadTodos.splice(idx, 1);
-      notifyPreviewThreadTodos();
-      return { ok: true, deleted: true };
-    },
-    onThreadTodosChanged: (callback) => {
-      previewThreadTodoListeners.add(callback);
-      return () => { previewThreadTodoListeners.delete(callback); };
-    },
+    threadTodoAdd: async (threadKey, text) => threadTodoPreviewStore().add(requireMockCalendarUser(), threadKey, text),
+    threadTodoSetDone: async (id, done) => threadTodoPreviewStore().setDone(requireMockCalendarUser(), id, done),
+    threadTodoDelete: async (id) => threadTodoPreviewStore().remove(requireMockCalendarUser(), id),
+    onThreadTodosChanged: (callback) => threadTodoPreviewStore().subscribe(callback),
     // 59 미리보기 확인용 — 실제 창은 못 띄우고 로그만 남긴다 (사이드바 버튼 노출 가드 통과).
     widgetOpenPopup: async (widgetId, title) => {
       console.info('[preview] widgetOpenPopup', widgetId, title);

@@ -127,10 +127,12 @@ test('미리보기 mock: 5 메서드 + 공유 검증기·삭제 권한 재사용
   for (const name of ['threadTodoList', 'threadTodoAdd', 'threadTodoSetDone', 'threadTodoDelete']) {
     assert.match(mock, new RegExp(`${name}: async \\(`));
   }
-  assert.match(mock, /onThreadTodosChanged: \(callback\) => \{/);
-  assert.match(mock, /from '\.\.\/shared\/threadTodo';/);
-  assert.match(mock, /canDeleteThreadTodo\(previewThreadTodos\[idx\], actor\)/);
-  assert.match(mock, /notifyPreviewThreadTodos\(\);/);
+  // 코덱스 2차: 새로고침·다른 창 공유를 위해 localStorage 저장소로 위임 (규칙은 tests/threadTodoPreviewStore.test.ts)
+  assert.match(mock, /import \{ createThreadTodoPreviewStore, type ThreadTodoPreviewStore \} from '\.\/threadTodoPreviewStore';/);
+  assert.match(mock, /threadTodoAdd: async \(threadKey, text\) => threadTodoPreviewStore\(\)\.add\(requireMockCalendarUser\(\), threadKey, text\),/);
+  assert.match(mock, /threadTodoDelete: async \(id\) => threadTodoPreviewStore\(\)\.remove\(requireMockCalendarUser\(\), id\),/);
+  assert.match(mock, /onThreadTodosChanged: \(callback\) => threadTodoPreviewStore\(\)\.subscribe\(callback\),/);
+  assert.doesNotMatch(mock, /previewThreadTodos\b/);
 });
 
 test('댓글 패널: 섹션은 툴바 바로 아래·댓글 목록 바로 위, 스레드 키로 리마운트, 스레드 키가 비면 숨긴다', () => {

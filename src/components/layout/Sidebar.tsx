@@ -230,6 +230,17 @@ export function Sidebar() {
 
   const isExpanded = sidebarExpanded;
   const isVisuallyExpanded = isExpanded || isHovered;
+  // 피드백 59(코덱스 2차): '캐릭터' 새 창 버튼은 사이드바 폭 전환(350ms)이 끝난 뒤에만 그린다 —
+  //   펼쳐지는 동안 좁은 행에서 아이콘 위에 겹쳐 클릭을 가로채지 않게.
+  const [boardPopoutReady, setBoardPopoutReady] = useState(false);
+  useEffect(() => {
+    if (!isVisuallyExpanded) {
+      setBoardPopoutReady(false);
+      return;
+    }
+    const timer = setTimeout(() => setBoardPopoutReady(true), 350);
+    return () => clearTimeout(timer);
+  }, [isVisuallyExpanded]);
   const hasRemoteUpdate = Boolean(
     updateInfo
     && updateInfo.latestVersion !== updateInfo.currentVersion
@@ -423,7 +434,7 @@ export function Sidebar() {
           // 피드백 59: '캐릭터' 항목은 펼침 상태에서 우측에 '새 창으로' 버튼을 띄운다 — 현재 화면을 떠나지 않고
           //   캐릭터 현황판을 별도 창으로 연다. 버튼 안에 버튼을 두지 않기 위해 nav 버튼의 형제로 absolute 배치.
           //   (래퍼가 자리(mx-2·shrink-0)를 맡고, nav 버튼은 w-full 로 그 안을 채운다.)
-          const showBoardPopout = item.id === 'character-board' && isVisuallyExpanded
+          const showBoardPopout = item.id === 'character-board' && isVisuallyExpanded && boardPopoutReady
             && typeof window.electronAPI?.widgetOpenPopup === 'function';
           return (
             <div key={item.id} className="group/nav relative shrink-0 mx-2">
@@ -434,7 +445,7 @@ export function Sidebar() {
                   onClick={() => { void window.electronAPI?.widgetOpenPopup?.('character-board', '캐릭터 현황판'); }}
                   title="캐릭터 현황판을 새 창으로 열어요"
                   aria-label="캐릭터 현황판을 새 창으로 열기"
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-md text-text-secondary/60 opacity-0 transition-opacity duration-200 delay-300 group-hover/nav:opacity-100 focus-visible:opacity-100 hover:bg-bg-border/60 hover:text-text-primary cursor-pointer"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-md text-text-secondary/60 invisible group-hover/nav:visible group-focus-within/nav:visible hover:bg-bg-border/60 hover:text-text-primary cursor-pointer"
                 >
                   <ExternalLink size={14} />
                 </button>
