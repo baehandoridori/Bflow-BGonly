@@ -76,7 +76,16 @@ test('mock: 팀 할 일 추가·완료·해제·삭제 권한이 서버 래퍼 �
     const before = signals;
     await api.threadTodoAdd(KEY, '구독 해제 뒤');
     assert.equal(signals, before, '구독 해제 뒤에는 신호가 오지 않는다');
+    // 코덱스 4차: 미리보기 새 창은 Electron 과 같은 #widget-popup 해시로 같은 앱을 브라우저 창에 연다
+    const opened: Array<{ url: string; name: string; features: string }> = [];
+    Object.assign(win, {
+      location: { origin: 'http://localhost:5190', pathname: '/', search: '?preview=1' },
+      open: (url: string, name: string, features: string) => { opened.push({ url, name, features }); return {}; },
+    });
     assert.deepEqual(await api.widgetOpenPopup('character-board', '캐릭터 현황판'), { ok: true });
+    assert.deepEqual(opened, [{ url: 'http://localhost:5190/?preview=1#widget-popup/character-board', name: 'bflow-widget-character-board', features: 'popup,width=1160,height=780' }]);
+    Object.assign(win, { open: () => null });
+    assert.deepEqual(await api.widgetOpenPopup('character-board', '캐릭터 현황판'), { ok: false }, '팝업이 막히면 ok:false');
   } finally {
     for (const key of keys) {
       const descriptor = descriptors.get(key);

@@ -59,7 +59,8 @@ test('기존 앵커 보존: 사이드바 상수·현황판 헤더의 새 창 버
 });
 
 test('미리보기 mock 에 widgetOpenPopup 스텁이 있어 사이드바 버튼을 눈으로 확인할 수 있다', () => {
-  assert.match(mock, /widgetOpenPopup: async \(widgetId, title\) => \{/);
+  assert.match(mock, /widgetOpenPopup: async \(widgetId, title, extra\) => \{/);
+  assert.match(mock, /let hash = `#widget-popup\/\$\{encodeURIComponent\(widgetId\)\}`;/);
 });
 
 test('게이트 등록: 58 테스트 4개가 test:entity 에 나열돼 있다', () => {

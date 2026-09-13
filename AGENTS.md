@@ -43,6 +43,15 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - preview는 공용 명령·권한을 사용하되 localStorage를 Web Locks로 직렬화한다. 기존 캘린더 authority 전체를 덮어쓰지 않는다. Realtime/BroadcastChannel은 재조회 신호만 전송한다.
 - 새 DB에는 간트 기본 스키마, containment, app-sessions 인증, password-lockdown 및 후속 간트 릴리스 migration을 순서대로 적용한다. 운영 적용 기록을 먼저 확인해 이전 권한을 다시 열지 않는다. `app_login`이 확인한 세션 토큰과 DB ACL을 함께 사용하며, 호출자가 보낸 actor 인자를 본인 인증으로 해석하지 않는다.
 
+### 팀 할 일 경계 (v1.118.0)
+
+- 씬·캐릭터 댓글 패널 위 '팀 할 일'의 정본은 `comment_thread_todos` 테이블이다. 스레드 키는 `CommentPanel`의 `effectiveSceneThreadKey`(씬 `EP05:A:a001` — BG/ACT 공통, 캐릭터 `char:{uuid}`)이고, 키가 비면 섹션을 그리지 않는다. 개인용 '나의 할일'과는 별개다.
+- 테이블은 RLS on·정책 0개·anon/authenticated 권한 회수 상태로 둔다. 앱은 `app_login` 세션 토큰을 받는 SECURITY DEFINER 래퍼 `comment_thread_todos_session_list/add/set_done/delete`만 호출하고, 호출자·작성자 이름·관리자 판정은 서버가 `app_session_user_id`와 `users` 명시 컬럼으로 확정한다. renderer → preload(요청 epoch) → `electron/threadTodoIpc.ts` → `electron/threadTodoStore.ts` 경로만 쓰며 토큰은 main 밖으로 내보내지 않는다. `users` FK는 두지 않는다(사용자 삭제 경로 회귀 방지).
+- 규칙: 공백 정제·1~200자, 완료는 최초 완료자 유지(해제 시 세 칸 모두 비움), 삭제는 작성자 또는 admin(남의 항목 42501, 없는 항목 `deleted:false`). 커밋 뒤 세션이 바뀌면 IPC가 다른 창에 먼저 알린 뒤 `THREAD_TODO_RESPONSE_DISCARDED`로 응답만 폐기하고, 섹션은 롤백·오류 토스트 없이 다시 읽는다.
+- 동기화: 테이블을 publication에 넣지 않는다. statement 트리거가 `realtime.send`로 내용 없는 `thread-todos-changed` 신호만 보내고, main은 그 신호·자기 창 IPC 변경·Realtime 재연결 성공 때 모든 창에 `thread-todos:changed`를 보낸다. 섹션은 300ms 디바운스 후 래퍼로 다시 읽는다. 섹션 높이가 늦게 커져도 댓글 패널이 최신 댓글 위치를 보정한다(`src/utils/commentListAnchor.ts`).
+- preview: `src/mocks/threadTodoPreviewStore.ts`가 같은 규칙·문구로 localStorage에 저장하고 Web Locks로 쓰기를 직렬화하며, BroadcastChannel로 다른 창에 재조회 신호만 보낸다. 저장소 읽기·쓰기가 실패하면 그 창 메모리로 전환한다. preview의 `widgetOpenPopup`은 Electron과 같은 `#widget-popup/{widgetId}` 경로를 브라우저 새 창으로 연다.
+- 새 DB에는 `DEVLOG/migrations/2026-09-14-comment-thread-todos.sql`을 적용하고 `DEVLOG/verification/2026-09-14-comment-thread-todos-smoke.sql`(BEGIN…ROLLBACK)로 확인한다.
+
 ### 리테이크 알림·바로가기 경계 (v1.116.0)
 
 - `bflow://retake/<revisionId>`는 공용 파서 → renderer 리스너 준비 확인 → 로그인/데이터 연결 대기 → ID로 최신 리테이크 단건 조회를 거쳐 소속 세트와 해당 항목을 연다. 창 로딩 중에는 main이 링크를 보관하며 조회 실패를 삭제된 항목으로 처리하지 않는다. 전체 리테이크 목록도 DB 행 제한에 잘리지 않도록 페이지 단위로 끝까지 조회한다.

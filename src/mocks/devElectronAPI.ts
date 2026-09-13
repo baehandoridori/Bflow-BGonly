@@ -3388,10 +3388,20 @@ export function installDevElectronAPI(): void {
     threadTodoSetDone: async (id, done) => threadTodoPreviewStore().setDone(requireMockCalendarUser(), id, done),
     threadTodoDelete: async (id) => threadTodoPreviewStore().remove(requireMockCalendarUser(), id),
     onThreadTodosChanged: (callback) => threadTodoPreviewStore().subscribe(callback),
-    // 59 미리보기 확인용 — 실제 창은 못 띄우고 로그만 남긴다 (사이드바 버튼 노출 가드 통과).
-    widgetOpenPopup: async (widgetId, title) => {
-      console.info('[preview] widgetOpenPopup', widgetId, title);
-      return { ok: true };
+    // 미리보기 새 창 — Electron main 과 같은 #widget-popup/{widgetId} 해시로 같은 앱을 브라우저 창에 연다(코덱스 4차).
+    //   팝업 창도 main.tsx 가 mock 을 설치하고 저장된 로그인 세션을 복원한다. 창을 못 열면(차단) ok:false.
+    widgetOpenPopup: async (widgetId, title, extra) => {
+      let hash = `#widget-popup/${encodeURIComponent(widgetId)}`;
+      if (extra && Object.keys(extra).length > 0) hash += `?${new URLSearchParams(extra).toString()}`;
+      if (typeof window === 'undefined' || typeof window.open !== 'function' || !window.location) {
+        console.info('[preview] widgetOpenPopup', widgetId, title, 'no window');
+        return { ok: false };
+      }
+      const size = widgetId === 'character-board' ? 'width=1160,height=780' : 'width=480,height=600';
+      const url = `${window.location.origin}${window.location.pathname}${window.location.search}${hash}`;
+      const opened = window.open(url, `bflow-widget-${widgetId}`, `popup,${size}`);
+      console.info('[preview] widgetOpenPopup', widgetId, title, opened ? 'opened' : 'blocked');
+      return { ok: Boolean(opened) };
     },
     readPersonalTodoLabels: async () => {
       const store = getPreviewTodoStore();

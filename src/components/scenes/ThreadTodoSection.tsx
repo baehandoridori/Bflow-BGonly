@@ -44,8 +44,8 @@ function isDiscardedResponse(err: unknown): boolean {
 interface ThreadTodoSectionProps {
   threadKey: string;
   currentUser: AppUser;
-  /** 섹션 높이가 커졌을 때(커진 px, 첫 목록 조회가 끝난 렌더인지). 바로 아래 댓글 목록의 스크롤 보정용. */
-  onHeightGrow?: (grewBy: number, firstLoad: boolean) => void;
+  /** 섹션 높이가 커졌을 때(커진 px, 첫 목록 조회가 끝난 렌더면 마운트부터 걸린 ms 아니면 null). 댓글 목록 스크롤 보정용. */
+  onHeightGrow?: (grewBy: number, firstLoadAfterMs: number | null) => void;
 }
 
 export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: ThreadTodoSectionProps) {
@@ -62,8 +62,13 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
   const sectionRef = useRef<HTMLElement>(null);
   const heightRef = useRef<number | null>(null);
   const firstLoadSeenRef = useRef(false);
+  const mountedAtRef = useRef(performance.now());
   const onHeightGrowRef = useRef(onHeightGrow);
   onHeightGrowRef.current = onHeightGrow;
+  // 코덱스 4차: 추가가 실패한 문구 — 입력창이 비어 있으면 바로 되돌리고, 새로 치는 중이면 줄 세워 두었다가 다음 추가 뒤 채운다.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const failedDraftsRef = useRef<string[]>([]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -78,7 +83,8 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
     heightRef.current = height;
     const firstLoad = !loading && !firstLoadSeenRef.current;
     if (firstLoad) firstLoadSeenRef.current = true;
-    if (prev !== null && height > prev) onHeightGrowRef.current?.(height - prev, firstLoad);
+    const firstLoadAfterMs = firstLoad ? performance.now() - mountedAtRef.current : null;
+    if (prev !== null && height > prev) onHeightGrowRef.current?.(height - prev, firstLoadAfterMs);
   });
 
   const load = useCallback(async () => {
@@ -150,8 +156,9 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
       created_by: currentUser.id, created_by_name: currentUser.name,
       created_at: new Date().toISOString(), done_at: null, done_by: null, done_by_name: null,
     };
+    const submitted = draft;
     setItems((prev) => [...prev, optimistic]);
-    setDraft('');
+    setDraft(failedDraftsRef.current.shift() ?? ''); // 줄 서 있던 실패 문구가 있으면 이어서 채운다
     await runMutation(tempId, async () => {
       try {
         const saved = await window.electronAPI.threadTodoAdd(threadKey, text);
@@ -159,7 +166,9 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
       } catch (err) {
         if (isDiscardedResponse(err)) return; // 서버엔 저장됨 — finally 의 재조회가 임시 항목을 실제 행으로 바꾼다
         setItems((prev) => prev.filter((r) => r.id !== tempId));
-        setDraft((cur) => (cur.trim() === '' ? draft : cur)); // 새로 치기 시작하지 않았다면 원문 복구
+        // 입력창이 비어 있으면 원문을 바로 되돌리고, 새로 치는 중이면 지우지 않고 줄 세운다(연달아 실패해도 문구를 잃지 않게)
+        if (mountedRef.current && draftRef.current.trim() === '') setDraft(submitted);
+        else failedDraftsRef.current.push(submitted);
         sonnerToast.error(cleanIpcErrorMessage(err, '팀 할 일을 추가하지 못했어요'));
       }
     });

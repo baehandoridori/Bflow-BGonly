@@ -139,7 +139,7 @@ test('댓글 패널: 섹션은 툴바 바로 아래·댓글 목록 바로 위, �
   assert.match(commentPanel, /import \{ ThreadTodoSection \} from '\.\/ThreadTodoSection';/);
   assert.match(
     commentPanel,
-    /re만\s*<\/button>\s*<\/div>\s*\{\/\* 피드백 58[\s\S]{0,300}\{effectiveSceneThreadKey && currentUser \? \(\s*<ThreadTodoSection\s+key=\{effectiveSceneThreadKey\}\s+threadKey=\{effectiveSceneThreadKey\}\s+currentUser=\{currentUser\}\s+onHeightGrow=\{\(grewBy, firstLoad\) => \{[\s\S]{0,900}?\}\}\s*\/>\s*\) : null\}\s*\{\/\* 댓글 목록/,
+    /re만\s*<\/button>\s*<\/div>\s*\{\/\* 피드백 58[\s\S]{0,300}\{effectiveSceneThreadKey && currentUser \? \(\s*<ThreadTodoSection\s+key=\{effectiveSceneThreadKey\}\s+threadKey=\{effectiveSceneThreadKey\}\s+currentUser=\{currentUser\}\s+onHeightGrow=\{\(grewBy, firstLoadAfterMs\) => \{[\s\S]{0,900}?\}\}\s*\/>\s*\) : null\}\s*\{\/\* 댓글 목록/,
   );
   assert.ok(commentPanel.indexOf('<ThreadTodoSection') < commentPanel.indexOf('ref={scrollRef}'));
   assert.equal((commentPanel.match(/<ThreadTodoSection/g) ?? []).length, 1);
@@ -178,10 +178,10 @@ test('게이트 등록: 59 테스트가 test:ui 에 나열돼 있다', () => {
 // ── 구현 후 리뷰 반영: 섹션이 늦게 커져도 댓글 목록의 최신 댓글이 가려지지 않게 ──
 test('섹션 높이 증가 알림 → 댓글 패널이 스크롤 의도(맨 아래·댓글 이동)에 맞춰 보정', () => {
   assert.match(section, /<section ref=\{sectionRef\} aria-label="팀 할 일"/);
-  assert.match(section, /useLayoutEffect\(\(\) => \{\s*const height = sectionRef\.current\?\.offsetHeight \?\? 0;\s*const prev = heightRef\.current;\s*heightRef\.current = height;\s*const firstLoad = !loading && !firstLoadSeenRef\.current;\s*if \(firstLoad\) firstLoadSeenRef\.current = true;\s*if \(prev !== null && height > prev\) onHeightGrowRef\.current\?\.\(height - prev, firstLoad\);\s*\}\);/);
+  assert.match(section, /useLayoutEffect\(\(\) => \{\s*const height = sectionRef\.current\?\.offsetHeight \?\? 0;\s*const prev = heightRef\.current;\s*heightRef\.current = height;\s*const firstLoad = !loading && !firstLoadSeenRef\.current;\s*if \(firstLoad\) firstLoadSeenRef\.current = true;\s*const firstLoadAfterMs = firstLoad \? performance\.now\(\) - mountedAtRef\.current : null;\s*if \(prev !== null && height > prev\) onHeightGrowRef\.current\?\.\(height - prev, firstLoadAfterMs\);\s*\}\);/);
   assert.match(section, /onHeightGrowRef\.current = onHeightGrow;/);
   assert.match(commentPanel, /import \{ commentListScrollAfterSectionGrow \} from '@\/utils\/commentListAnchor';/);
-  assert.match(commentPanel, /const el = scrollRef\.current;\s*if \(!el\) return;\s*const behavior = commentListScrollAfterSectionGrow\(\{\s*scrollHeight: el\.scrollHeight,\s*clientHeight: el\.clientHeight,\s*scrollTop: el\.scrollTop,\s*grewBy,\s*firstLoad,\s*jumpingToComment: !!firstUnreadCommentId \|\| !!focusCommentId,\s*\}\);\s*if \(behavior\) el\.scrollTo\(\{ top: el\.scrollHeight, behavior \}\);/);
+  assert.match(commentPanel, /const el = scrollRef\.current;\s*if \(!el\) return;\s*const behavior = commentListScrollAfterSectionGrow\(\{\s*scrollHeight: el\.scrollHeight,\s*clientHeight: el\.clientHeight,\s*scrollTop: el\.scrollTop,\s*grewBy,\s*firstLoadAfterMs,\s*jumpingToComment: !!firstUnreadCommentId \|\| !!focusCommentId,\s*\}\);\s*if \(behavior\) el\.scrollTo\(\{ top: el\.scrollHeight, behavior \}\);/);
 });
 
 // ── 구현 후 리뷰(뮤테이션 테스트) 보강: 기존 앵커를 피해 가던 결함 중 동작 테스트로 잡을 수 없는 SQL·preload·섹션 줄 ──
@@ -208,8 +208,10 @@ test('섹션: 완료 방향·체크 표시·뮤테이션 마무리·조회 순�
   assert.match(section, /const seq = \+\+loadSeqRef\.current;/);
   assert.match(section, /if \(loadPendingRef\.current\) \{\s*loadSeqRef\.current \+= 1;\s*loadPendingRef\.current = false;\s*\}\s*inFlightRef\.current \+= 1;/);
   assert.match(section, /setItems\(rows\.filter\(isThreadTodoRow\)\);\s*setNotice\(null\);/);
-  assert.match(section, /setItems\(\(prev\) => \[\.\.\.prev, optimistic\]\);\s*setDraft\(''\);/);
-  assert.match(section, /setDraft\(\(cur\) => \(cur\.trim\(\) === '' \? draft : cur\)\);/);
+  assert.match(section, /const submitted = draft;\s*setItems\(\(prev\) => \[\.\.\.prev, optimistic\]\);\s*setDraft\(failedDraftsRef\.current\.shift\(\) \?\? ''\);/);
+  // 코덱스 4차: 실패 문구는 입력창이 비었으면 되돌리고, 새로 치는 중이면 줄 세워 다음 추가 뒤 채운다(연달아 실패해도 잃지 않음)
+  assert.match(section, /if \(mountedRef\.current && draftRef\.current\.trim\(\) === ''\) setDraft\(submitted\);\s*else failedDraftsRef\.current\.push\(submitted\);/);
+  assert.match(section, /const draftRef = useRef\(draft\);\s*draftRef\.current = draft;\s*const failedDraftsRef = useRef<string\[\]>\(\[\]\);/);
   assert.match(section, /function isDiscardedResponse\(err: unknown\): boolean \{\s*return cleanIpcErrorMessage\(err, ''\) === THREAD_TODO_RESPONSE_DISCARDED;\s*\}/);
   assert.match(section, /const text = sanitizeThreadTodoText\(draft\);\s*if \(!isValidThreadTodoText\(text\)\) return;/);
   assert.match(section, /setItems\(\(prev\) => \(prev\.some\(\(r\) => r\.id === item\.id\) \? prev : \[\.\.\.prev, item\]\.sort\(byCreated\)\)\);/);
@@ -224,4 +226,16 @@ test('섹션: 휴지통 버튼은 visibility 로 숨기고, 행 hover·키보드
   assert.ok(trashClass.length > 0);
   assert.match(trashClass, /\binvisible group-hover\/todo:visible group-focus-within\/todo:visible\b/);
   assert.doesNotMatch(trashClass, /opacity-0|transition-opacity|delay-\d+/);
+});
+
+// ── 코덱스 4차: 아키텍처 경계 문서 ──
+test('문서: AGENTS.md·CLAUDE.md 에 팀 할 일 경계(세션 래퍼·내용 없는 신호·preview 저장소)가 적혀 있다', () => {
+  const agents = readFileSync('AGENTS.md', 'utf8');
+  const claude = readFileSync('CLAUDE.md', 'utf8');
+  const sectionDoc = agents.match(/### 팀 할 일 경계 \(v1\.118\.0\)[\s\S]*?(?=\n### )/)?.[0] ?? '';
+  assert.ok(sectionDoc.length > 0);
+  for (const phrase of ['comment_thread_todos_session_list/add/set_done/delete', 'thread-todos-changed', 'threadTodoPreviewStore.ts', '2026-09-14-comment-thread-todos.sql', '#widget-popup/{widgetId}']) {
+    assert.ok(sectionDoc.includes(phrase), `AGENTS.md 팀 할 일 경계에 ${phrase}`);
+  }
+  assert.match(claude, /팀 할 일은 세션 토큰 래퍼 \+ 내용 없는 신호/);
 });

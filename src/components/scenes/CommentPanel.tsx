@@ -1884,7 +1884,7 @@ export function CommentPanel({
           key={effectiveSceneThreadKey}
           threadKey={effectiveSceneThreadKey}
           currentUser={currentUser}
-          onHeightGrow={(grewBy, firstLoad) => {
+          onHeightGrow={(grewBy, firstLoadAfterMs) => {
             // 섹션이 늦게 커져도 맨 아래(최신 댓글)를 보던 화면이 밀리지 않게 — 판단은 commentListScrollAfterSectionGrow.
             const el = scrollRef.current;
             if (!el) return;
@@ -1893,7 +1893,7 @@ export function CommentPanel({
               clientHeight: el.clientHeight,
               scrollTop: el.scrollTop,
               grewBy,
-              firstLoad,
+              firstLoadAfterMs,
               jumpingToComment: !!firstUnreadCommentId || !!focusCommentId,
             });
             if (behavior) el.scrollTo({ top: el.scrollHeight, behavior });
