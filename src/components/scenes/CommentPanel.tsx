@@ -60,6 +60,7 @@ import {
 } from '@/utils/commentThreading';
 import { createUuid } from '@/utils/createUuid';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
+import { ThreadTodoSection } from './ThreadTodoSection';
 import { toast as sonnerToast } from 'sonner';
 import '@/styles/comment-panel.css';
 
@@ -1874,6 +1875,12 @@ export function CommentPanel({
           re만
         </button>
       </div>
+
+      {/* 피드백 58: 팀 공유 할 일 — 툴바 아래·댓글 목록 위 고정. 스레드 키가 비면(통합 모달의 예외 경우) 숨긴다.
+          key 로 스레드 키가 바뀌면 리마운트해 이전 스레드의 항목·진행 중 조회가 새 스레드에 섞이지 않게 한다. */}
+      {effectiveSceneThreadKey && currentUser ? (
+        <ThreadTodoSection key={effectiveSceneThreadKey} threadKey={effectiveSceneThreadKey} currentUser={currentUser} />
+      ) : null}
 
       {/* 댓글 목록 — 시스템 이벤트(inlineEvents)와 시간순 머지 + 새 항목 슬라이드 인 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
