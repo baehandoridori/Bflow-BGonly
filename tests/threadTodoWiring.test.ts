@@ -181,3 +181,37 @@ test('섹션 높이 증가 알림 → 댓글 패널이 스크롤 의도(맨 아�
   assert.match(commentPanel, /import \{ commentListScrollAfterSectionGrow \} from '@\/utils\/commentListAnchor';/);
   assert.match(commentPanel, /const el = scrollRef\.current;\s*if \(!el\) return;\s*const behavior = commentListScrollAfterSectionGrow\(\{\s*scrollHeight: el\.scrollHeight,\s*clientHeight: el\.clientHeight,\s*scrollTop: el\.scrollTop,\s*grewBy,\s*firstLoad,\s*jumpingToComment: !!firstUnreadCommentId \|\| !!focusCommentId,\s*\}\);\s*if \(behavior\) el\.scrollTo\(\{ top: el\.scrollHeight, behavior \}\);/);
 });
+
+// ── 구현 후 리뷰(뮤테이션 테스트) 보강: 기존 앵커를 피해 가던 결함 중 동작 테스트로 잡을 수 없는 SQL·preload·섹션 줄 ──
+test('마이그레이션: 권한 대상·목록 필터와 순서·완료 해제·삭제 판정 순서·작성자 이름·신호 실패 흡수', () => {
+  // 래퍼 EXECUTE 는 앱이 쓰는 anon 에도 준다(빠지면 배포 후 전원 권한 오류) / 테이블 직접 권한 회수 대상은 anon·authenticated
+  assert.match(migration, /FOREACH role_name IN ARRAY ARRAY\['anon','authenticated','service_role'\] LOOP[\s\S]{0,200}?GRANT EXECUTE ON FUNCTION/);
+  assert.match(migration, /FOREACH role_name IN ARRAY ARRAY\['anon','authenticated'\] LOOP\s*IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = role_name\) THEN\s*EXECUTE format\('REVOKE ALL PRIVILEGES ON TABLE public\.comment_thread_todos FROM %I', role_name\);/);
+  assert.match(functionBody(migration, 'comment_thread_todos_session_list'), /jsonb_agg\(to_jsonb\(t\) ORDER BY t\.created_at, t\.id\)\s*FROM public\.comment_thread_todos t WHERE t\.thread_key = p_thread_key\)/);
+  assert.match(functionBody(migration, 'comment_thread_todos_session_add'), /VALUES \(p_thread_key, v_text, v_user, v_name\)/);
+  assert.match(functionBody(migration, 'comment_thread_todos_session_set_done'), /done_at\s*= CASE WHEN p_done THEN COALESCE\(done_at, now\(\)\) ELSE NULL END,\s*done_by\s*= CASE WHEN p_done THEN COALESCE\(done_by, v_user\) ELSE NULL END,\s*done_by_name = CASE WHEN p_done THEN COALESCE\(done_by_name, v_name\) ELSE NULL END/);
+  assert.match(functionBody(migration, 'comment_thread_todos_session_delete'), /IF v_deleted IS NOT NULL THEN RETURN jsonb_build_object\('ok', true, 'deleted', true\); END IF;\s*IF EXISTS \(SELECT 1 FROM public\.comment_thread_todos WHERE id = p_id\) THEN\s*RAISE EXCEPTION '내가 추가한 할 일만 지울 수 있어요\.' USING ERRCODE = '42501';\s*END IF;\s*RETURN jsonb_build_object\('ok', true, 'deleted', false\);/);
+  assert.match(functionBody(migration, 'comment_thread_todos_notify_change'), /EXCEPTION WHEN OTHERS THEN\s*RAISE WARNING '\[thread-todos\] realtime 변경 신호 전송 실패: %', SQLERRM;/);
+});
+
+test('preload: 변경 신호 구독 해제는 같은 채널에서 같은 리스너를 뗀다', () => {
+  assert.match(preload, /ipcRenderer\.on\('thread-todos:changed', listener\);\s*return \(\) => ipcRenderer\.removeListener\('thread-todos:changed', listener\);/);
+});
+
+test('섹션: 완료 방향·체크 표시·뮤테이션 마무리·조회 순번·안내 해제·입력 비우기/복구·폐기 판정·빈 입력·삭제 롤백·구독 해제·디바운스', () => {
+  assert.match(section, /const done = item\.done_at == null;/);
+  assert.match(section, /checked=\{item\.done_at != null\}/);
+  assert.match(section, /className=\{cn\('block text-xs break-words', item\.done_at \? 'line-through text-text-secondary\/60' : 'text-text-primary'\)\}/);
+  assert.match(section, /\} finally \{\s*inFlightRef\.current -= 1;\s*if \(mountedRef\.current\) \{\s*setBusyIds\(\(prev\) => \{ const next = new Set\(prev\); next\.delete\(id\); return next; \}\);/);
+  assert.match(section, /const seq = \+\+loadSeqRef\.current;/);
+  assert.match(section, /if \(loadPendingRef\.current\) \{\s*loadSeqRef\.current \+= 1;\s*loadPendingRef\.current = false;\s*\}\s*inFlightRef\.current \+= 1;/);
+  assert.match(section, /setItems\(rows\.filter\(isThreadTodoRow\)\);\s*setNotice\(null\);/);
+  assert.match(section, /setItems\(\(prev\) => \[\.\.\.prev, optimistic\]\);\s*setDraft\(''\);/);
+  assert.match(section, /setDraft\(\(cur\) => \(cur\.trim\(\) === '' \? draft : cur\)\);/);
+  assert.match(section, /function isDiscardedResponse\(err: unknown\): boolean \{\s*return cleanIpcErrorMessage\(err, ''\) === THREAD_TODO_RESPONSE_DISCARDED;\s*\}/);
+  assert.match(section, /const text = sanitizeThreadTodoText\(draft\);\s*if \(!isValidThreadTodoText\(text\)\) return;/);
+  assert.match(section, /setItems\(\(prev\) => \(prev\.some\(\(r\) => r\.id === item\.id\) \? prev : \[\.\.\.prev, item\]\.sort\(byCreated\)\)\);/);
+  assert.match(section, /return \(\) => \{\s*unsubscribe\(\);\s*if \(timer\) clearTimeout\(timer\);\s*\};/);
+  assert.match(section, /const SIGNAL_DEBOUNCE_MS = 300;/);
+  assert.match(section, /if \(inFlightRef\.current === 0\) void load\(\);\s*\}, SIGNAL_DEBOUNCE_MS\);/);
+});

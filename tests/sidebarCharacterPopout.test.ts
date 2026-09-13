@@ -36,11 +36,14 @@ test('nav 블록: 버튼 중첩 없음 — 래퍼는 실제 박스(relative), na
   // 접힌 사이드바가 펼쳐지는 350ms 동안 버튼이 아이콘 위를 지나가는 것을 가린다
   assert.match(block, /transition-opacity duration-200 delay-300 group-hover\/nav:opacity-100/);
   assert.match(block, /absolute right-1\.5 top-1\/2 -translate-y-1\/2[^"]*group-hover\/nav:opacity-100/);
+  // 행에 마우스가 없을 땐 투명 — 라벨 오른쪽을 가리지 않는다
+  assert.match(block, /aria-label="캐릭터 현황판을 새 창으로 열기"\s*className="[^"]*\bopacity-0 transition-opacity/);
 });
 
 test('팝아웃 클릭은 현재 화면을 바꾸지 않는다 (setView 미호출) + 기존 nav 클릭 분기 유지', () => {
-  const popout = block.slice(block.indexOf('{showBoardPopout && ('));
-  assert.ok(popout.length > 0);
+  const popoutStart = block.indexOf('{showBoardPopout && (');
+  assert.ok(popoutStart > -1, '팝아웃 버튼은 showBoardPopout 이 참일 때만 렌더해야 한다');
+  const popout = block.slice(popoutStart);
   assert.doesNotMatch(popout, /setView\(/);
   assert.match(block, /\} else \{\s*setView\(item\.id\);\s*\}/);
 });

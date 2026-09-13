@@ -154,3 +154,60 @@ test('ipc: 세션이 아예 없으면 main 의 원래 문구 대신 다시 로�
   });
   await assert.rejects(handlers.get('thread-todo:list')!({}, KEY, 0), (err: Error) => /다시 로그인/.test(err.message) && !/비공개/.test(err.message));
 });
+
+// ── 구현 후 리뷰(뮤테이션 테스트) 보강 ──
+test('store 기본 인스턴스: main 이 리졸버를 넣기 전엔 RPC 없이 거부하고, 넣은 뒤엔 호출 시점의 리졸버 토큰으로 보낸다', async () => {
+  const calls: Call[] = [];
+  const client = { rpc: async (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); return { data: [row()], error: null }; } };
+  const mod = await load('electron/threadTodoStore.ts', client);
+  await assert.rejects(mod.listThreadTodos('alice', KEY), /다시 로그인/);
+  assert.equal(calls.length, 0);
+  mod.setThreadTodoSessionTokenResolver({ tokenFor: (actorId: string) => `live-${actorId}` });
+  assert.deepEqual(await mod.listThreadTodos('alice', KEY), [row()]);
+  assert.deepEqual(calls, [{ name: 'comment_thread_todos_session_list', args: { p_session_token: 'live-alice', p_thread_key: KEY } }]);
+});
+
+test('store: 삭제·완료 RPC 오류는 성공으로 삼키지 않고, 완료 값은 true 일 때만 true 로 보낸다', async () => {
+  const { createThreadTodoStore } = await load('electron/threadTodoStore.ts');
+  const denied = createThreadTodoStore({ rpc: async () => ({ data: null, error: { code: '42501', message: '내가 추가한 할 일만 지울 수 있어요.' } }) }, sessions);
+  await assert.rejects(denied.remove('alice', ID), (err: Error & { code?: string }) => err.code === '42501' && /내가 추가한/.test(err.message));
+  const gone = createThreadTodoStore({ rpc: async () => ({ data: null, error: { code: 'P0002', message: '이미 지워진 할 일이에요.' } }) }, sessions);
+  await assert.rejects(gone.setDone('alice', ID, true), /이미 지워진/);
+  const notDeleted = createThreadTodoStore({ rpc: async () => ({ data: { ok: true, deleted: false }, error: null }) }, sessions);
+  assert.deepEqual(await notDeleted.remove('alice', ID), { ok: true, deleted: false });
+  const calls: Call[] = [];
+  const store = createThreadTodoStore({ rpc: async (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); return { data: row(), error: null }; } }, sessions);
+  await store.setDone('alice', ID, false);
+  await store.setDone('alice', ID, 'true');
+  assert.deepEqual(calls.map((c) => c.args.p_done), [false, false]);
+});
+
+test('ipc: 네 핸들러는 렌더러 인자를 순서 그대로 store 에 넘기고, 오래된 요청 epoch 는 채널마다 store 호출 전에 거절한다', async () => {
+  const { registerThreadTodoIpc } = await load('electron/threadTodoIpc.ts');
+  const { handlers, ipc } = fakeIpc();
+  const calls: unknown[][] = [];
+  const store = {
+    list: async (...args: unknown[]) => { calls.push(['list', ...args]); return [row()]; },
+    add: async (...args: unknown[]) => { calls.push(['add', ...args]); return row(); },
+    setDone: async (...args: unknown[]) => { calls.push(['setDone', ...args]); return row(); },
+    remove: async (...args: unknown[]) => { calls.push(['remove', ...args]); return { ok: true, deleted: true }; },
+  };
+  registerThreadTodoIpc({ getSessionOriginOrThrow: () => ({ userId: 'alice', epoch: 7 }), onChanged: () => {}, ipc, store });
+  await handlers.get('thread-todo:list')!({}, KEY, 7);
+  await handlers.get('thread-todo:add')!({}, KEY, '할 일 본문', 7);
+  await handlers.get('thread-todo:set-done')!({}, ID, false, 7);
+  await handlers.get('thread-todo:delete')!({}, ID, 7);
+  assert.deepEqual(calls, [
+    ['list', 'alice', KEY],
+    ['add', 'alice', KEY, '할 일 본문'],
+    ['setDone', 'alice', ID, false],
+    ['remove', 'alice', ID],
+  ]);
+  calls.length = 0;
+  await assert.rejects(handlers.get('thread-todo:list')!({}, KEY, 6), /화면을 다시 열어/);
+  await assert.rejects(handlers.get('thread-todo:add')!({}, KEY, '할 일', 6), /화면을 다시 열어/);
+  await assert.rejects(handlers.get('thread-todo:set-done')!({}, ID, true, 6), /화면을 다시 열어/);
+  await assert.rejects(handlers.get('thread-todo:delete')!({}, ID, 6), /화면을 다시 열어/);
+  await assert.rejects(handlers.get('thread-todo:delete')!({}, ID), /화면을 다시 열어/);
+  assert.deepEqual(calls, []);
+});

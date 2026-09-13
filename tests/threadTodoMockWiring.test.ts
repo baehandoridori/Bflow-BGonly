@@ -43,11 +43,16 @@ test('mock: 팀 할 일 추가·완료·해제·삭제 권한이 서버 래퍼 �
     await assert.rejects(api.threadTodoAdd('', '할 일'), /대상이 올바르지/);
 
     // 완료: 최초 완료자 유지 → 해제: 세 칸 비움.
+    const signalsBeforeDone = signals;
     const done1 = await api.threadTodoSetDone(added.id, true);
+    assert.equal(signals, signalsBeforeDone + 1, '완료도 변경 신호를 보낸다');
     assert.equal(done1.done_by_name, '배한솔');
     assert.ok(done1.done_at);
     await api.loginCanonicalSession({ name: '장삐쭈', password: '1234' });
+    await new Promise((resolve) => setTimeout(resolve, 5)); // 두 번째 체크가 다른 시각에 일어나도록
     const done2 = await api.threadTodoSetDone(added.id, true);
+    assert.equal(done2.done_at, done1.done_at, '먼저 체크한 시각이 남는다');
+    assert.equal(done2.done_by, '1', '먼저 체크한 사람의 id 가 남는다');
     assert.equal(done2.done_by_name, '배한솔', '먼저 체크한 사람이 남는다');
     const undone = await api.threadTodoSetDone(added.id, false);
     assert.equal(undone.done_at, null); assert.equal(undone.done_by, null); assert.equal(undone.done_by_name, null);
@@ -55,7 +60,9 @@ test('mock: 팀 할 일 추가·완료·해제·삭제 권한이 서버 래퍼 �
     // 삭제 권한: 장삐쭈(user)는 배한솔 항목을 못 지운다, 자기 항목은 지운다.
     await assert.rejects(api.threadTodoDelete(added.id), /내가 추가한/);
     const mine = await api.threadTodoAdd(KEY, '장삐쭈 항목');
+    const signalsBeforeDelete = signals;
     assert.deepEqual(await api.threadTodoDelete(mine.id), { ok: true, deleted: true });
+    assert.equal(signals, signalsBeforeDelete + 1, '삭제도 변경 신호를 보낸다');
     assert.deepEqual(await api.threadTodoDelete(mine.id), { ok: true, deleted: false });
     await assert.rejects(api.threadTodoSetDone(mine.id, true), /이미 지워진/);
 
