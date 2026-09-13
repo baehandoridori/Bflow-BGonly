@@ -155,3 +155,11 @@ test('읽던 저장소가 도중에 막혀도 마지막으로 읽은 목록을 �
   const added = await store.add(HANSOL, KEY, '막힌 뒤 추가');
   assert.deepEqual((await store.list(KEY)).map((r) => r.id), [kept.id, added.id]);
 });
+
+// ── 코덱스 9차 ──
+test('미리보기도 이모지 200자 할 일을 받는다', async () => {
+  const store = createThreadTodoPreviewStore({ storage: memoryStorage(), locks: null, openChannel: null, newId: ids });
+  const row = await store.add(HANSOL, KEY, '😀'.repeat(200));
+  assert.equal(Array.from(row.text).length, 200);
+  await assert.rejects(store.add(HANSOL, KEY, '😀'.repeat(201)), /1~200자/);
+});

@@ -30,12 +30,18 @@ export function sanitizeThreadTodoText(raw: unknown): string {
   return typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
 }
 
+/** 서버 PostgreSQL length() 와 같이 문자(코드 포인트) 단위로 센다 — 이모지 1개도 1자(코덱스 9차). */
+export function threadTodoCharCount(text: string): number {
+  return Array.from(text).length;
+}
+
 export function isValidThreadTodoText(text: string): boolean {
-  return text.length > 0 && text.length <= THREAD_TODO_TEXT_MAX;
+  const count = threadTodoCharCount(text);
+  return count > 0 && count <= THREAD_TODO_TEXT_MAX;
 }
 
 export function isValidThreadKey(key: unknown): key is string {
-  return typeof key === 'string' && key.trim() !== '' && key.length <= THREAD_TODO_KEY_MAX;
+  return typeof key === 'string' && key.trim() !== '' && threadTodoCharCount(key) <= THREAD_TODO_KEY_MAX;
 }
 
 export function isThreadTodoRow(value: unknown): value is ThreadTodoRow {

@@ -241,3 +241,11 @@ test('문서: AGENTS.md·CLAUDE.md 에 팀 할 일 경계(세션 래퍼·내용 
   }
   assert.match(claude, /팀 할 일은 세션 토큰 래퍼 \+ 내용 없는 신호/);
 });
+
+// ── 코덱스 9차: 입력창 제한은 UTF-16 단위라 두 배, 초과하면 안내 ──
+test('섹션: 입력 maxLength 는 200자×2, 정제 뒤 200자를 넘으면 안내 문구', () => {
+  assert.match(section, /maxLength=\{THREAD_TODO_TEXT_MAX \* 2\}/);
+  assert.doesNotMatch(section, /maxLength=\{THREAD_TODO_TEXT_MAX\}/);
+  assert.match(section, /const draftTooLong = threadTodoCharCount\(sanitizeThreadTodoText\(draft\)\) > THREAD_TODO_TEXT_MAX;/);
+  assert.match(section, /\{draftTooLong && \(\s*<p aria-live="polite"[^>]*>할 일은 \{THREAD_TODO_TEXT_MAX\}자까지 적을 수 있어요<\/p>\s*\)\}/);
+});

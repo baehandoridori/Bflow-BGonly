@@ -265,3 +265,15 @@ test('realtime: 재연결에 성공한 첫 join 에서만 팀 할 일 재조회 
     delete (globalThis as Record<string, unknown>)[key];
   }
 });
+
+// ── 코덱스 9차 ──
+test('store: 이모지 200자 할 일은 서버처럼 받아 RPC 로 보낸다 (201자는 RPC 전에 거부)', async () => {
+  const { createThreadTodoStore } = await load('electron/threadTodoStore.ts');
+  const calls: Call[] = [];
+  const store = createThreadTodoStore({ rpc: async (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); return { data: row({ text: args.p_text }), error: null }; } }, sessions);
+  await store.add('alice', KEY, '😀'.repeat(200));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args.p_text, '😀'.repeat(200));
+  await assert.rejects(store.add('alice', KEY, '😀'.repeat(201)), /1~200자/);
+  assert.equal(calls.length, 1);
+});

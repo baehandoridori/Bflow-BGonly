@@ -11,6 +11,7 @@ import {
   isThreadTodoRow,
   isValidThreadTodoText,
   sanitizeThreadTodoText,
+  threadTodoCharCount,
   type ThreadTodoRow,
 } from '@/shared/threadTodo';
 import type { AppUser } from '@/types';
@@ -221,6 +222,7 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
 
   const openCount = items.filter((r) => r.done_at == null).length;
   const draftValid = isValidThreadTodoText(sanitizeThreadTodoText(draft));
+  const draftTooLong = threadTodoCharCount(sanitizeThreadTodoText(draft)) > THREAD_TODO_TEXT_MAX;
 
   return (
     <section ref={sectionRef} aria-label="팀 할 일" className="shrink-0 border-b border-bg-border px-3 pb-2">
@@ -284,11 +286,12 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
               <li className="py-2 text-center text-[11px] text-text-secondary/40">아직 팀 할 일이 없어요</li>
             )}
           </ul>
+          {/* 브라우저 maxLength 는 UTF-16 단위라 이모지 200자(400단위)를 막지 않게 두 배로 두고, 정확한 200자 검사는 검증기가 한다(코덱스 9차). */}
           <form onSubmit={(e) => { e.preventDefault(); void submitDraft(); }} className="flex items-center gap-1">
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              maxLength={THREAD_TODO_TEXT_MAX}
+              maxLength={THREAD_TODO_TEXT_MAX * 2}
               placeholder="팀 할 일 추가 (Enter)"
               aria-label="새 팀 할 일"
               className="min-w-0 flex-1 rounded bg-bg-primary/60 px-2 py-1 text-xs text-text-primary placeholder:text-text-secondary/40 outline-none focus:ring-1 focus:ring-accent"
@@ -302,6 +305,9 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
               <Plus size={14} />
             </button>
           </form>
+          {draftTooLong && (
+            <p aria-live="polite" className="text-[10px] text-text-secondary">할 일은 {THREAD_TODO_TEXT_MAX}자까지 적을 수 있어요</p>
+          )}
         </div>
       )}
     </section>

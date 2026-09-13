@@ -14,6 +14,7 @@ import {
   isValidThreadKey,
   isValidThreadTodoText,
   sanitizeThreadTodoText,
+  threadTodoCharCount,
   type ThreadTodoRow,
 } from '../src/shared/threadTodo.ts';
 
@@ -86,4 +87,14 @@ test('canDeleteThreadTodo: 작성자 본인 또는 admin 만 (표시용 판정)'
   assert.equal(canDeleteThreadTodo(row, { id: 'bob' }), false);
   assert.equal(canDeleteThreadTodo(row, null), false);
   assert.equal(canDeleteThreadTodo(row, undefined), false);
+});
+
+// ── 코덱스 9차: 서버 length() 처럼 문자(코드 포인트) 단위로 센다 ──
+test('길이는 문자 단위: 이모지 200자는 통과, 201자는 거부, 키도 같은 기준', () => {
+  assert.equal(threadTodoCharCount('😀가a'), 3);
+  assert.equal(isValidThreadTodoText('😀'.repeat(200)), true);
+  assert.equal(isValidThreadTodoText('😀'.repeat(201)), false);
+  assert.equal(isValidThreadTodoText('가'.repeat(200)), true);
+  assert.equal(isValidThreadKey('😀'.repeat(200)), true);
+  assert.equal(isValidThreadKey('😀'.repeat(201)), false);
 });
