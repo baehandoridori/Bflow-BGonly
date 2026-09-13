@@ -65,10 +65,15 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
   const mountedAtRef = useRef(performance.now());
   const onHeightGrowRef = useRef(onHeightGrow);
   onHeightGrowRef.current = onHeightGrow;
-  // 코덱스 4차: 추가가 실패한 문구 — 입력창이 비어 있으면 바로 되돌리고, 새로 치는 중이면 줄 세워 두었다가 다음 추가 뒤 채운다.
+  // 코덱스 4·5차: 추가가 실패한 문구 — 입력창이 비어 있으면 바로 되돌리고, 새로 치는 중이면 줄 세운다.
+  //   줄 선 문구는 입력창이 비는 순간(추가 직후·사용자가 지웠을 때) 하나씩 다시 채운다 → 연달아 실패해도 잃지 않는다.
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const failedDraftsRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (draft.trim() !== '' || failedDraftsRef.current.length === 0) return;
+    setDraft(failedDraftsRef.current.shift() ?? '');
+  }, [draft]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -158,7 +163,7 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
     };
     const submitted = draft;
     setItems((prev) => [...prev, optimistic]);
-    setDraft(failedDraftsRef.current.shift() ?? ''); // 줄 서 있던 실패 문구가 있으면 이어서 채운다
+    setDraft(''); // 줄 서 있던 실패 문구가 있으면 위 effect 가 이어서 채운다
     await runMutation(tempId, async () => {
       try {
         const saved = await window.electronAPI.threadTodoAdd(threadKey, text);

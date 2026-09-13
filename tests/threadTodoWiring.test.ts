@@ -208,7 +208,9 @@ test('섹션: 완료 방향·체크 표시·뮤테이션 마무리·조회 순�
   assert.match(section, /const seq = \+\+loadSeqRef\.current;/);
   assert.match(section, /if \(loadPendingRef\.current\) \{\s*loadSeqRef\.current \+= 1;\s*loadPendingRef\.current = false;\s*\}\s*inFlightRef\.current \+= 1;/);
   assert.match(section, /setItems\(rows\.filter\(isThreadTodoRow\)\);\s*setNotice\(null\);/);
-  assert.match(section, /const submitted = draft;\s*setItems\(\(prev\) => \[\.\.\.prev, optimistic\]\);\s*setDraft\(failedDraftsRef\.current\.shift\(\) \?\? ''\);/);
+  assert.match(section, /const submitted = draft;\s*setItems\(\(prev\) => \[\.\.\.prev, optimistic\]\);\s*setDraft\(''\);/);
+  // 코덱스 5차: 줄 선 실패 문구는 다음 추가를 기다리지 않고 입력창이 비는 순간 채운다(사용자가 새 문구를 지워도 돌아온다)
+  assert.match(section, /useEffect\(\(\) => \{\s*if \(draft\.trim\(\) !== '' \|\| failedDraftsRef\.current\.length === 0\) return;\s*setDraft\(failedDraftsRef\.current\.shift\(\) \?\? ''\);\s*\}, \[draft\]\);/);
   // 코덱스 4차: 실패 문구는 입력창이 비었으면 되돌리고, 새로 치는 중이면 줄 세워 다음 추가 뒤 채운다(연달아 실패해도 잃지 않음)
   assert.match(section, /if \(mountedRef\.current && draftRef\.current\.trim\(\) === ''\) setDraft\(submitted\);\s*else failedDraftsRef\.current\.push\(submitted\);/);
   assert.match(section, /const draftRef = useRef\(draft\);\s*draftRef\.current = draft;\s*const failedDraftsRef = useRef<string\[\]>\(\[\]\);/);
