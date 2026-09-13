@@ -166,3 +166,9 @@ test('섹션: IPC 직접 호출·변경 신호 구독·재로그인 재조회·�
   assert.doesNotMatch(section, /리비전|피드백 허브/);
   assert.doesNotMatch(section, /from '@\/services\/supabaseService'/);
 });
+
+// ── 작업 4 에서 append — 59 테스트 자신의 test:ui 등록은 자기 파일에서 감시하면 죽은 가드라 여기서 본다 ──
+test('게이트 등록: 59 테스트가 test:ui 에 나열돼 있다', () => {
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+  assert.ok(pkg.scripts['test:ui'].includes('./tests/sidebarCharacterPopout.test.ts'), 'sidebarCharacterPopout.test.ts 가 test:ui 에 등록돼야 한다');
+});

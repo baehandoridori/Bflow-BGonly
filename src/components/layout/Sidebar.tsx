@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Gamepad2, Settings, PanelLeft } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Gamepad2, Settings, PanelLeft, ExternalLink } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -359,11 +359,11 @@ export function Sidebar() {
             }}
             title={isVisuallyExpanded ? undefined : item.label}
             className={cn(
-              'flex items-center cursor-pointer shrink-0 h-10 mx-2 rounded-lg',
+              'flex items-center cursor-pointer w-full h-10 rounded-lg',
               'transition-colors duration-200',
               currentView === item.id
                 ? 'bg-accent/20 text-accent'
-                : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50',
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50 group-hover/nav:text-text-primary group-hover/nav:bg-bg-border/50',
             )}
           >
             {/* 아이콘: 항상 w-12 내 중앙 → 펼침/접힘 무관 동일 위치 */}
@@ -420,7 +420,27 @@ export function Sidebar() {
             </span>
           </button>
           );
-          return <div key={item.id} className="contents">{navButton}</div>;
+          // 피드백 59: '캐릭터' 항목은 펼침 상태에서 우측에 '새 창으로' 버튼을 띄운다 — 현재 화면을 떠나지 않고
+          //   캐릭터 현황판을 별도 창으로 연다. 버튼 안에 버튼을 두지 않기 위해 nav 버튼의 형제로 absolute 배치.
+          //   (래퍼가 자리(mx-2·shrink-0)를 맡고, nav 버튼은 w-full 로 그 안을 채운다.)
+          const showBoardPopout = item.id === 'character-board' && isVisuallyExpanded
+            && typeof window.electronAPI?.widgetOpenPopup === 'function';
+          return (
+            <div key={item.id} className="group/nav relative shrink-0 mx-2">
+              {navButton}
+              {showBoardPopout && (
+                <button
+                  type="button"
+                  onClick={() => { void window.electronAPI?.widgetOpenPopup?.('character-board', '캐릭터 현황판'); }}
+                  title="캐릭터 현황판을 새 창으로 열어요"
+                  aria-label="캐릭터 현황판을 새 창으로 열기"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-md text-text-secondary/60 opacity-0 transition-opacity duration-200 delay-300 group-hover/nav:opacity-100 focus-visible:opacity-100 hover:bg-bg-border/60 hover:text-text-primary cursor-pointer"
+                >
+                  <ExternalLink size={14} />
+                </button>
+              )}
+            </div>
+          );
         })}
 
         {/* 하단: 토글 + 버전 (항상 같은 위치)
