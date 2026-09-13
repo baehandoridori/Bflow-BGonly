@@ -61,7 +61,7 @@ import {
 import { createUuid } from '@/utils/createUuid';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { ThreadTodoSection } from './ThreadTodoSection';
-import { commentListScrollAfterSectionGrow } from '@/utils/commentListAnchor';
+import { COMMENT_LIST_FOLLOW_CHECK_MS, commentListScrollAfterSectionGrow, shouldFollowCommentListToBottom } from '@/utils/commentListAnchor';
 import { toast as sonnerToast } from 'sonner';
 import '@/styles/comment-panel.css';
 
@@ -1888,7 +1888,7 @@ export function CommentPanel({
             // 섹션이 늦게 커져도 맨 아래(최신 댓글)를 보던 화면이 밀리지 않게 — 판단은 commentListScrollAfterSectionGrow.
             const el = scrollRef.current;
             if (!el) return;
-            const behavior = commentListScrollAfterSectionGrow({
+            const decision = commentListScrollAfterSectionGrow({
               scrollHeight: el.scrollHeight,
               clientHeight: el.clientHeight,
               scrollTop: el.scrollTop,
@@ -1896,7 +1896,15 @@ export function CommentPanel({
               firstLoadAfterMs,
               jumpingToComment: !!firstUnreadCommentId || !!focusCommentId,
             });
-            if (behavior) el.scrollTo({ top: el.scrollHeight, behavior });
+            if (decision === 'auto') el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
+            if (decision === 'follow') {
+              const startTop = el.scrollTop;
+              window.setTimeout(() => {
+                if (shouldFollowCommentListToBottom({ startTop, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, grewBy })) {
+                  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                }
+              }, COMMENT_LIST_FOLLOW_CHECK_MS);
+            }
           }}
         />
       ) : null}

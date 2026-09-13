@@ -173,8 +173,13 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
         if (isDiscardedResponse(err)) return; // 서버엔 저장됨 — finally 의 재조회가 임시 항목을 실제 행으로 바꾼다
         setItems((prev) => prev.filter((r) => r.id !== tempId));
         // 입력창이 비어 있으면 원문을 바로 되돌리고, 새로 치는 중이면 지우지 않고 줄 세운다(연달아 실패해도 문구를 잃지 않게)
-        if (mountedRef.current && draftRef.current.trim() === '') setDraft(submitted);
-        else failedDraftsRef.current.push(submitted);
+        // 코덱스 10차: 두 실패가 같은 렌더 전에 오면 둘 다 빈 입력창을 볼 수 있다 → 첫 실패가 ref 로 입력창을 곧바로 예약한다.
+        if (mountedRef.current && draftRef.current.trim() === '') {
+          draftRef.current = submitted;
+          setDraft(submitted);
+        } else {
+          failedDraftsRef.current.push(submitted);
+        }
         sonnerToast.error(cleanIpcErrorMessage(err, '팀 할 일을 추가하지 못했어요'));
       }
     });

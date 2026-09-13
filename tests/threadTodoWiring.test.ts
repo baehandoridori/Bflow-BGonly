@@ -139,7 +139,7 @@ test('댓글 패널: 섹션은 툴바 바로 아래·댓글 목록 바로 위, �
   assert.match(commentPanel, /import \{ ThreadTodoSection \} from '\.\/ThreadTodoSection';/);
   assert.match(
     commentPanel,
-    /re만\s*<\/button>\s*<\/div>\s*\{\/\* 피드백 58[\s\S]{0,300}\{effectiveSceneThreadKey && currentUser \? \(\s*<ThreadTodoSection\s+key=\{effectiveSceneThreadKey\}\s+threadKey=\{effectiveSceneThreadKey\}\s+currentUser=\{currentUser\}\s+onHeightGrow=\{\(grewBy, firstLoadAfterMs\) => \{[\s\S]{0,900}?\}\}\s*\/>\s*\) : null\}\s*\{\/\* 댓글 목록/,
+    /re만\s*<\/button>\s*<\/div>\s*\{\/\* 피드백 58[\s\S]{0,300}\{effectiveSceneThreadKey && currentUser \? \(\s*<ThreadTodoSection\s+key=\{effectiveSceneThreadKey\}\s+threadKey=\{effectiveSceneThreadKey\}\s+currentUser=\{currentUser\}\s+onHeightGrow=\{\(grewBy, firstLoadAfterMs\) => \{[\s\S]{0,2000}?\}\}\s*\/>\s*\) : null\}\s*\{\/\* 댓글 목록/,
   );
   assert.ok(commentPanel.indexOf('<ThreadTodoSection') < commentPanel.indexOf('ref={scrollRef}'));
   assert.equal((commentPanel.match(/<ThreadTodoSection/g) ?? []).length, 1);
@@ -180,8 +180,8 @@ test('섹션 높이 증가 알림 → 댓글 패널이 스크롤 의도(맨 아�
   assert.match(section, /<section ref=\{sectionRef\} aria-label="팀 할 일"/);
   assert.match(section, /useLayoutEffect\(\(\) => \{\s*const height = sectionRef\.current\?\.offsetHeight \?\? 0;\s*const prev = heightRef\.current;\s*heightRef\.current = height;\s*const firstLoad = !loading && !firstLoadSeenRef\.current;\s*if \(firstLoad\) firstLoadSeenRef\.current = true;\s*const firstLoadAfterMs = firstLoad \? performance\.now\(\) - mountedAtRef\.current : null;\s*if \(prev !== null && height > prev\) onHeightGrowRef\.current\?\.\(height - prev, firstLoadAfterMs\);\s*\}\);/);
   assert.match(section, /onHeightGrowRef\.current = onHeightGrow;/);
-  assert.match(commentPanel, /import \{ commentListScrollAfterSectionGrow \} from '@\/utils\/commentListAnchor';/);
-  assert.match(commentPanel, /const el = scrollRef\.current;\s*if \(!el\) return;\s*const behavior = commentListScrollAfterSectionGrow\(\{\s*scrollHeight: el\.scrollHeight,\s*clientHeight: el\.clientHeight,\s*scrollTop: el\.scrollTop,\s*grewBy,\s*firstLoadAfterMs,\s*jumpingToComment: !!firstUnreadCommentId \|\| !!focusCommentId,\s*\}\);\s*if \(behavior\) el\.scrollTo\(\{ top: el\.scrollHeight, behavior \}\);/);
+  assert.match(commentPanel, /import \{ COMMENT_LIST_FOLLOW_CHECK_MS, commentListScrollAfterSectionGrow, shouldFollowCommentListToBottom \} from '@\/utils\/commentListAnchor';/);
+  assert.match(commentPanel, /const el = scrollRef\.current;\s*if \(!el\) return;\s*const decision = commentListScrollAfterSectionGrow\(\{\s*scrollHeight: el\.scrollHeight,\s*clientHeight: el\.clientHeight,\s*scrollTop: el\.scrollTop,\s*grewBy,\s*firstLoadAfterMs,\s*jumpingToComment: !!firstUnreadCommentId \|\| !!focusCommentId,\s*\}\);\s*if \(decision === 'auto'\) el\.scrollTo\(\{ top: el\.scrollHeight, behavior: 'auto' \}\);\s*if \(decision === 'follow'\) \{\s*const startTop = el\.scrollTop;\s*window\.setTimeout\(\(\) => \{\s*if \(shouldFollowCommentListToBottom\(\{ startTop, scrollTop: el\.scrollTop, scrollHeight: el\.scrollHeight, clientHeight: el\.clientHeight, grewBy \}\)\) \{\s*el\.scrollTo\(\{ top: el\.scrollHeight, behavior: 'smooth' \}\);\s*\}\s*\}, COMMENT_LIST_FOLLOW_CHECK_MS\);\s*\}/);
 });
 
 // ── 구현 후 리뷰(뮤테이션 테스트) 보강: 기존 앵커를 피해 가던 결함 중 동작 테스트로 잡을 수 없는 SQL·preload·섹션 줄 ──
@@ -212,7 +212,7 @@ test('섹션: 완료 방향·체크 표시·뮤테이션 마무리·조회 순�
   // 코덱스 5차: 줄 선 실패 문구는 다음 추가를 기다리지 않고 입력창이 비는 순간 채운다(사용자가 새 문구를 지워도 돌아온다)
   assert.match(section, /useEffect\(\(\) => \{\s*if \(draft\.trim\(\) !== '' \|\| failedDraftsRef\.current\.length === 0\) return;\s*setDraft\(failedDraftsRef\.current\.shift\(\) \?\? ''\);\s*\}, \[draft\]\);/);
   // 코덱스 4차: 실패 문구는 입력창이 비었으면 되돌리고, 새로 치는 중이면 줄 세워 다음 추가 뒤 채운다(연달아 실패해도 잃지 않음)
-  assert.match(section, /if \(mountedRef\.current && draftRef\.current\.trim\(\) === ''\) setDraft\(submitted\);\s*else failedDraftsRef\.current\.push\(submitted\);/);
+  assert.match(section, /if \(mountedRef\.current && draftRef\.current\.trim\(\) === ''\) \{\s*draftRef\.current = submitted;\s*setDraft\(submitted\);\s*\} else \{\s*failedDraftsRef\.current\.push\(submitted\);\s*\}/);
   assert.match(section, /const draftRef = useRef\(draft\);\s*draftRef\.current = draft;\s*const failedDraftsRef = useRef<string\[\]>\(\[\]\);/);
   assert.match(section, /function isDiscardedResponse\(err: unknown\): boolean \{\s*return cleanIpcErrorMessage\(err, ''\) === THREAD_TODO_RESPONSE_DISCARDED;\s*\}/);
   assert.match(section, /const text = sanitizeThreadTodoText\(draft\);\s*if \(!isValidThreadTodoText\(text\)\) return;/);
