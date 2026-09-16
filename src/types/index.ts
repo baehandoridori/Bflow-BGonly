@@ -1136,6 +1136,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
   sheetsReadAllMetadata?: () => Promise<{ ok: boolean; data: MetadataEntry[]; error?: string }>;
   // 휴가 관리 (vacation-repo WebApi)
   vacationConnect: (webAppUrl: string, apiToken?: string) => Promise<{ ok: boolean; error: string | null }>;
+  onVacationChanged: (callback: () => void) => () => void;
   vacationIsConnected: () => Promise<boolean>;
   vacationReadStatus: (name: string) => Promise<{ ok: boolean; data: import('./vacation').VacationStatus; error?: string }>;
   vacationReadLog: (name: string, year?: number, limit?: number) => Promise<{ ok: boolean; data: import('./vacation').VacationLogEntry[]; error?: string }>;

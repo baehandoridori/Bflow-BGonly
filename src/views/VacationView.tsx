@@ -11,6 +11,7 @@ import {
   cancelVacationRequest,
 } from '@/services/vacationService';
 import { VacationRegisterModal } from '@/components/vacation/VacationRegisterModal';
+import { useOnVacationChange } from '@/hooks/useOnVacationChange';
 import { DahyuGrantModal } from '@/components/vacation/DahyuGrantModal';
 import { DahyuDeleteModal } from '@/components/vacation/DahyuDeleteModal';
 import { VACATION_COLOR } from '@/types/vacation';
@@ -449,6 +450,12 @@ export function VacationView() {
 
   useEffect(() => { loadMyData(); }, [loadMyData]);
   useEffect(() => { loadEvents(); }, [loadEvents]);
+  // 이 창 밖(슬랙·다른 사람·관리자)에서 휴가가 바뀌면 캐시를 건너뛰고 다시 읽는다.
+  // 방금 이 창에서 등록·취소했다면 loadMyData 의 30초 낙관 가드가 그대로 지켜진다.
+  useOnVacationChange(() => {
+    void loadMyData(true);
+    void loadEvents();
+  });
 
   // ── 이벤트 바 레이아웃 (주별) ──
   const weeklyBars = useMemo(() => {

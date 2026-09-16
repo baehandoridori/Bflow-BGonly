@@ -652,6 +652,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 휴가 관리 (vacation-repo WebApi)
   vacationConnect: (webAppUrl: string, apiToken?: string) =>
     ipcRenderer.invoke('vacation:connect', webAppUrl, apiToken),
+  // 휴가 데이터가 어디선가 바뀌었다는 신호(내용 없음) — 받은 화면이 휴가 API 로 다시 읽는다
+  onVacationChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('vacation:changed', listener);
+    return () => ipcRenderer.removeListener('vacation:changed', listener);
+  },
   vacationIsConnected: () =>
     ipcRenderer.invoke('vacation:is-connected'),
   vacationReadStatus: (name: string) =>

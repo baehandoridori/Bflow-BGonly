@@ -3327,6 +3327,7 @@ function startSupabaseRealtime() {
       broadcastToAllWindows('calendar:changed', { action: 'UPDATE' });
     },
     onThreadTodosChange: () => broadcastToAllWindows('thread-todos:changed', {}),
+    onVacationChange: () => broadcastToAllWindows('vacation:changed', {}),
     onCalendarNotificationInsert: (payload) => broadcastSupabaseCalendarNotification(payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);
