@@ -1,4 +1,25 @@
-import type { GanttCommand, GanttProject, GanttSnapshot, GanttSpace, GanttTask } from './types.ts';
+import type { GanttCalendarImportSource, GanttCommand, GanttProject, GanttSnapshot, GanttSpace, GanttTask } from './types.ts';
+
+/** Provenance is a duplicate-detection hint, never an authorization claim. */
+export function calendarImportSourceKey(source: GanttCalendarImportSource): string {
+  return JSON.stringify([
+    source.source,
+    source.source === 'bflow' && source.calendarId.startsWith('bflow:') ? '' : source.calendarId,
+    source.eventId,
+  ]);
+}
+
+export function validateCalendarImportSource(value: unknown): asserts value is GanttCalendarImportSource {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('캘린더 가져오기 정보를 확인해 주세요.');
+  const source = value as Record<string, unknown>;
+  if (!['bflow', 'google', 'ics', 'vacation'].includes(source.source as string)
+    || Object.keys(source).some((key) => !['source', 'calendarId', 'eventId'].includes(key))
+    || typeof source.calendarId !== 'string' || !source.calendarId.trim() || source.calendarId.length > 2048
+    || typeof source.eventId !== 'string' || !source.eventId.trim() || source.eventId.length > 2048
+    || source.eventId.startsWith('gantt:')) {
+    throw new Error('캘린더 가져오기 정보를 확인해 주세요.');
+  }
+}
 
 const DAY = 86400000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -111,7 +132,14 @@ export function validateProject(project: GanttProject): void {
   if(project.linkedEpisode!==null&&(!Number.isSafeInteger(project.linkedEpisode)||project.linkedEpisode<0)) fail('에피소드를 확인해 주세요.');
   if(!Array.isArray(project.tasks)||project.tasks.length>3000) fail('작업 목록을 확인해 주세요.');
   const map=new Map(project.tasks.map(t=>[t.id,t]));if(map.size!==project.tasks.length) fail('작업 ID가 중복됩니다.');
+  const importedSources = new Set<string>();
   for(const t of project.tasks) {
+    if (t.importedCalendarEvent !== undefined) {
+      validateCalendarImportSource(t.importedCalendarEvent);
+      const sourceKey = calendarImportSourceKey(t.importedCalendarEvent);
+      if (importedSources.has(sourceKey)) fail('같은 캘린더 일정을 중복으로 가져올 수 없습니다.');
+      importedSources.add(sourceKey);
+    }
     id(t.id);text(t.title,'작업 제목');if(typeof t.memo!=='string'||t.memo.length>20000) fail('메모가 너무 깁니다.');
     if(!['task','group','milestone'].includes(t.kind)||!['auto','manual'].includes(t.mode)||!['manual','scenes'].includes(t.progressMode)) fail('작업 유형을 확인해 주세요.');
     if(typeof t.allDay!=='boolean'||typeof t.completed!=='boolean'||!Number.isFinite(t.progress)||t.progress<0||t.progress>100||!Number.isFinite(t.sortOrder)) fail('작업 상태를 확인해 주세요.');

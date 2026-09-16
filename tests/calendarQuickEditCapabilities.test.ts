@@ -29,6 +29,7 @@ type QuickEditEvent = {
   canEdit?: boolean;
   isReadOnly?: boolean;
   tagId?: string;
+  tagIds?: string[];
   allDay?: boolean;
   startTime?: string;
   endTime?: string;
@@ -126,6 +127,7 @@ function textContent(node: ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(textContent).join('');
   if (!isValidElement(node)) return '';
+  if (typeof node.type === 'function' && node.type.name === 'EventTagBadges') return textContent((node.type as (props: unknown) => ReactNode)(node.props));
   return textContent((node.props as { children?: ReactNode }).children);
 }
 
@@ -189,7 +191,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', '@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'react-dom',
@@ -207,6 +209,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
     const nodeRequire = createRequire(import.meta.url);
     const react = nodeRequire('react') as Record<string, unknown>;
     const runtimeRequire = (id: string): unknown => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === 'react') {
         return {
           ...react,
@@ -324,7 +327,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', '@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'framer-motion',
@@ -345,6 +348,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
     const nodeRequire = createRequire(import.meta.url);
     const react = nodeRequire('react') as Record<string, unknown>;
     const runtimeRequire = (id: string): unknown => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === 'react') {
         return {
           ...react,
@@ -367,7 +371,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
             ] as const;
             const draftKey = draftKeys[slot - 1];
             if (draftKey && Object.hasOwn(forcedSidePanelDraft, draftKey)) {
-              return [forcedSidePanelDraft[draftKey], () => {}];
+              return [draftKey === 'tagId' ? (forcedSidePanelDraft.tagId ? [forcedSidePanelDraft.tagId] : []) : forcedSidePanelDraft[draftKey], () => {}];
             }
             return [value, () => {}];
           },
@@ -674,15 +678,17 @@ test('canonical B flow quick edit replaces event colors with immediate tag and c
   assert.match(textContent(tree), /검수/);
   assert.doesNotMatch(textContent(findFormElementByLabel(tree, '캘린더')), /보기 캘린더/);
 
-  findButtonByText(tree, '회의').props.onClick?.();
+  await findButtonByText(tree, '회의').props.onClick?.();
+  assert.deepEqual(updates, [{ id: target.id, patch: { tagIds: [], tagId: undefined } }], 'clicking a selected tag removes only that tag');
+  updates.length = 0;
   findFormElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'calendar-1', checked: false } });
-  assert.deepEqual(updates, [], 're-selecting the current tag or calendar is a no-op');
+  assert.deepEqual(updates, [], 're-selecting the current calendar is a no-op');
 
   findButtonByText(tree, '없음').props.onClick?.();
   findFormElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'calendar-2', checked: false } });
 
   assert.deepEqual(updates, [
-    { id: target.id, patch: { tagId: undefined } },
+    { id: target.id, patch: { tagId: undefined, tagIds: [] } },
     { id: target.id, patch: { calendarId: 'calendar-2' } },
   ]);
   assert.equal(Object.hasOwn(updates[0].patch, 'tagId'), true, 'tag clearing remains an own key');
@@ -775,7 +781,7 @@ test('canonical B flow quick edit keeps pending calendar and tag selections visi
   findButtonByText(tree, '검수').props.onClick?.();
   assert.deepEqual(
     writes.map(({ patch }) => patch),
-    [{ calendarId: 'calendar-2' }, { tagId: 'tag-review' }],
+    [{ calendarId: 'calendar-2' }, { tagId: 'tag-meeting', tagIds: ['tag-meeting', 'tag-review'] }],
     're-selecting or replacing either pending value is a no-op',
   );
 
@@ -1434,4 +1440,30 @@ test('vacation and writable events keep their existing side-panel actions', asyn
   findButtonByText(writableTree, '삭제').props.onClick?.();
   assert.deepEqual(deleted, [writable.id]);
   assert.equal(writableCloseCount, 1);
+});
+
+test('quick edit removes a deleted tag from a stale event before adding another tag', async () => {
+  const target = event({ source: 'bflow', sourceCalendarId: 'bflow:calendar-1', calendarId: 'calendar-1', tagId: 'deleted-tag', tagIds: ['deleted-tag', 'tag-meeting'], canEdit: true });
+  const updates: Partial<QuickEditEvent>[] = [];
+  calendarOptimisticDeletedTagIdsOverride = ['deleted-tag'];
+  try {
+    const tree = await renderQuickEdit(target, 'calendar', { onUpdate: (_id, patch) => { updates.push(patch); } });
+    await findButtonByText(tree, '검수').props.onClick?.();
+    assert.deepEqual(updates, [{ tagIds: ['tag-meeting', 'tag-review'], tagId: 'tag-meeting' }]);
+  } finally {
+    calendarOptimisticDeletedTagIdsOverride = [];
+  }
+});
+
+test('quick edit preserves unknown existing selections during unavailable tag metadata', async () => {
+  const target = event({ source: 'bflow', sourceCalendarId: 'bflow:calendar-1', calendarId: 'calendar-1', tagId: 'not-yet-loaded', tagIds: ['not-yet-loaded'], canEdit: true });
+  const updates: Partial<QuickEditEvent>[] = [];
+  calendarTagCanonicalSnapshotOverride = null;
+  try {
+    const tree = await renderQuickEdit(target, 'calendar', { onUpdate: (_id, patch) => { updates.push(patch); } });
+    await findButtonByText(tree, '검수').props.onClick?.();
+    assert.deepEqual(updates, [{ tagIds: ['not-yet-loaded', 'tag-review'], tagId: 'not-yet-loaded' }]);
+  } finally {
+    calendarTagCanonicalSnapshotOverride = undefined;
+  }
 });

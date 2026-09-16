@@ -1,3 +1,6 @@
+import { EventTagManagerButton } from './EventTagManagerButton';
+import { EventTagBadges } from './EventTagBadges';
+import { getEventTagIds, toggleEventTag } from './eventTagPresentation';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -127,7 +130,7 @@ export function EventSidePanel({
   const [draftEnd, setDraftEnd] = useState(event.endDate);
   const [draftMemo, setDraftMemo] = useState(event.memo);
   const [draftCalendarId, setDraftCalendarId] = useState(event.calendarId ?? '');
-  const [draftTagId, setDraftTagId] = useState<string | undefined>(event.tagId);
+  const [draftTagIds, setDraftTagIds] = useState<string[]>(getEventTagIds(event));
   const [draftAllDay, setDraftAllDay] = useState(event.allDay ?? true);
   const [draftStartTime, setDraftStartTime] = useState(event.startTime ?? '');
   const [draftEndTime, setDraftEndTime] = useState(event.endTime ?? '');
@@ -163,7 +166,7 @@ export function EventSidePanel({
     setDraftEnd(nextEvent.endDate);
     setDraftMemo(nextEvent.memo);
     setDraftCalendarId(nextEvent.calendarId ?? '');
-    setDraftTagId(nextEvent.tagId);
+    setDraftTagIds(getEventTagIds(nextEvent));
     setDraftAllDay(nextEvent.allDay ?? true);
     setDraftStartTime(nextEvent.startTime ?? '');
     setDraftEndTime(nextEvent.endTime ?? '');
@@ -199,20 +202,28 @@ export function EventSidePanel({
     rehydrateFromEvent(event);
   }, [event, eventIdentityKey, eventSnapshot]);
 
-  const selectedTagUnavailable = Boolean(draftTagId && (
-    isOptimisticCalendarTagId(draftTagId)
-    || deletedTagIds.has(draftTagId)
-    || (!selectableTagIds.has(draftTagId) && canonicalTagIds !== null && !canonicalTagIds.has(draftTagId))
+  const unavailableTagIds = draftTagIds.filter((tagId) => (
+    isOptimisticCalendarTagId(tagId)
+    || deletedTagIds.has(tagId)
+    || (!selectableTagIds.has(tagId) && canonicalTagIds !== null && !canonicalTagIds.has(tagId))
   ));
-
+  // Pending catalog deletion must not destroy the unsaved selection: a rejected
+  // tag operation restores the catalog and should restore these chips as well.
+  const visibleTagIds = draftTagIds.filter((id) => !unavailableTagIds.includes(id));
+  const confirmedUnavailableTagIds = unavailableTagIds.filter((id) => (
+    isOptimisticCalendarTagId(id)
+    || (canonicalTagIds !== null && !canonicalTagIds.has(id) && !selectableTagIds.has(id))
+  ));
+  const confirmedUnavailableTagKey = confirmedUnavailableTagIds.join(',');
   useEffect(() => {
-    if (selectedTagUnavailable) setDraftTagId(undefined);
-  }, [draftTagId, selectedTagUnavailable]);
+    if (confirmedUnavailableTagKey) setDraftTagIds((current) => current.filter((id) => !confirmedUnavailableTagIds.includes(id)));
+  }, [confirmedUnavailableTagKey]);
 
   // ESC 닫기
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (document.querySelector('[data-calendar-tag-manager]')) return;
         if (editing) abandonEdit();
         else onClose();
       }
@@ -231,7 +242,6 @@ export function EventSidePanel({
   const effectiveEnd = milestone ? draftStart : draftEnd;
   const effectiveEndTime = milestone ? draftStartTime : draftEndTime;
   const currentCalendar = calendars.find((calendar) => calendar.id === event.calendarId);
-  const currentTag = tags.find((tag) => tag.id === event.tagId);
   const hasLinkedScene = event.type !== 'custom' && event.type !== 'vacation';
   const linkedTodoId = calendarEventLinkedTodoId(event);
   const hasLinkedTodo = Boolean(linkedTodoId);
@@ -319,11 +329,12 @@ export function EventSidePanel({
       }
     }
     if (isCanonicalBflow && !ganttProjection) {
-      const persistedTagId = draftTagId && !selectedTagUnavailable
-        ? draftTagId
-        : undefined;
+      const persistedTagIds = draftTagIds.filter((id) => !unavailableTagIds.includes(id));
       if (draftCalendarId !== event.calendarId) updates.calendarId = draftCalendarId;
-      if (persistedTagId !== event.tagId) updates.tagId = persistedTagId;
+      if (JSON.stringify(persistedTagIds) !== JSON.stringify(getEventTagIds(event))) {
+        updates.tagIds = persistedTagIds;
+        updates.tagId = persistedTagIds[0];
+      }
     }
     if (Object.keys(updates).length === 0) {
       setEditing(false);
@@ -592,26 +603,26 @@ export function EventSidePanel({
                 />
               </div>
               <div>
-                <label className={labelClassName}>태그</label>
+                <div className="flex items-center justify-between"><label className={labelClassName}>태그 · 여러 개 선택</label><EventTagManagerButton disabled={isMutating} /></div>
                 <div className="mt-1 flex flex-wrap gap-1">
                   <button
                     type="button"
-                    aria-pressed={draftTagId === undefined}
+                    aria-pressed={visibleTagIds.length === 0}
                     disabled={isMutating}
-                    onClick={() => setDraftTagId(undefined)}
-                    className={`rounded-full px-2 py-1 text-[10px] disabled:opacity-45 ${draftTagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/70 text-text-secondary'}`}
+                    onClick={() => setDraftTagIds([])}
+                    className={`rounded-full px-2 py-1 text-[10px] disabled:opacity-45 ${visibleTagIds.length === 0 ? 'bg-accent/20 text-accent' : 'bg-bg-primary/70 text-text-secondary'}`}
                   >
                     없음
                   </button>
                   {sortedTags.map((tag) => {
-                    const selected = draftTagId === tag.id;
+                    const selected = visibleTagIds.includes(tag.id);
                     return (
                       <button
                         type="button"
                         key={tag.id}
                         aria-pressed={selected}
                         disabled={isMutating}
-                        onClick={() => setDraftTagId(tag.id)}
+                        onClick={() => setDraftTagIds((current) => toggleEventTag(current, tag.id))}
                         className="rounded-full border px-2 py-1 text-[10px] disabled:opacity-45"
                         style={{
                           color: selected ? 'rgb(var(--color-text-primary))' : 'rgb(var(--color-text-secondary))',
@@ -619,7 +630,7 @@ export function EventSidePanel({
                           background: selected ? `color-mix(in srgb, ${tag.color} 18%, transparent)` : 'transparent',
                         }}
                       >
-                        {tag.name}
+                        <span className="inline-block h-1.5 w-1.5 rounded-full mr-1" style={{ backgroundColor: tag.color }} />{tag.name}
                       </button>
                     );
                   })}
@@ -636,14 +647,7 @@ export function EventSidePanel({
                     : event.source === 'google' ? '내 구글 캘린더' : isVacation ? '휴가' : '이전 일정'
                 )}
               </span>
-              {currentTag && (
-                <span
-                  className="rounded-full border px-2 py-1 font-medium"
-                  style={{ color: 'rgb(var(--color-text-primary))', borderColor: currentTag.color, background: `color-mix(in srgb, ${currentTag.color} 16%, transparent)` }}
-                >
-                  {currentTag.name}
-                </span>
-              )}
+              <EventTagBadges event={event} />
             </div>
           )}
 

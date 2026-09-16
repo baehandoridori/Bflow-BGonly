@@ -28,6 +28,12 @@ test('변경 없음 → added/changed 모두 빈 배열', () => {
   assert.deepEqual(diffEventSnapshots(a, b), { added: [], changed: [] });
 });
 
+test('두 번째 태그만 바뀌어도 일정 변경을 감지한다', () => {
+  const before = buildEventSnapshot([ev('tagged', { tagId: 'one', tagIds: ['one', 'two'] })] as never);
+  const after = buildEventSnapshot([ev('tagged', { tagId: 'one', tagIds: ['one', 'three'] })] as never);
+  assert.equal(diffEventSnapshots(before, after).changed.length, 1);
+});
+
 test('시각 변경 → changed에 identity 키', () => {
   const a = buildEventSnapshot([ev('e1')] as never);
   const b = buildEventSnapshot([ev('e1', { startTime: '15:00', endTime: '16:00' })] as never);

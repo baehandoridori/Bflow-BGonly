@@ -1446,6 +1446,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     members: Array<{ user_id: string; can_edit: boolean }>;
     can_edit: boolean;
     can_manage: boolean;
+    is_admin_overview?: boolean;
   }>>;
   calendarCreate: (
     input: Parameters<CalendarApiInputContract['calendarCreate']>[0],
@@ -1481,6 +1482,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     title: string;
     memo: string | null;
     tag_id: string | null;
+    tag_ids?: string[];
     all_day: boolean;
     start_date: string;
     end_date: string;
@@ -1504,6 +1506,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     title: string;
     memo: string | null;
     tag_id: string | null;
+    tag_ids?: string[];
     all_day: boolean;
     start_date: string;
     end_date: string;
@@ -1531,6 +1534,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     title: string;
     memo: string | null;
     tag_id: string | null;
+    tag_ids?: string[];
     all_day: boolean;
     start_date: string;
     end_date: string;

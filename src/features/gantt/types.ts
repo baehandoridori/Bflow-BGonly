@@ -6,6 +6,11 @@ export interface GanttSpace {
 export interface GanttSceneLink {
   episodeNumber: number; sheetName: string; sceneId: string; department: 'bg' | 'acting';
 }
+export interface GanttCalendarImportSource {
+  source: 'bflow' | 'google' | 'ics' | 'vacation';
+  calendarId: string;
+  eventId: string;
+}
 export interface GanttTask {
   id: string; parentId: string | null; kind: 'task' | 'group' | 'milestone';
   title: string; memo: string; startDate: string; endDate: string;
@@ -14,6 +19,8 @@ export interface GanttTask {
   progress: number; progressMode: 'manual' | 'scenes'; sceneLinks: GanttSceneLink[];
   workers: string[]; attendees: string[]; color: string | null;
   calendarId: string | null; calendarEventId: string | null;
+  /** Copy provenance only; does not create a calendar projection or grant access. */
+  importedCalendarEvent?: GanttCalendarImportSource;
   completed: boolean; sortOrder: number;
 }
 export interface GanttProject {

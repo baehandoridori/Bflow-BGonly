@@ -26,6 +26,7 @@ type CalendarEventRow = {
   title: string;
   memo: string | null;
   tag_id: string | null;
+  tag_ids?: string[];
   all_day: boolean;
   start_date: string;
   end_date: string;
@@ -1889,7 +1890,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: [
+    external: ['./EventTagManagerButton',
       '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
@@ -1920,6 +1921,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
       if (id === '@/components/common/GlassDropdown') return {GlassDropdown:(props:{value:string;ariaLabel?:string;disabled?:boolean;options:Array<{value:string;label:string;disabled?:boolean}>;onChange(value:string):void})=>jsxRuntime.jsx('select',{'aria-label':props.ariaLabel,value:props.value,disabled:props.disabled,onChange:(event:{target:{value:string}})=>props.onChange(event.target.value),children:props.options.map(option=>jsxRuntime.jsx('option',{value:option.value,disabled:option.disabled,children:option.label},option.value))})};
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === 'react') {
         return {
           ...react,
@@ -2086,4 +2088,46 @@ test('preview ICS subscribe rejects the same addresses as the real app and norma
   } finally {
     harness.restore();
   }
+});
+
+
+test('preview multiple tags roundtrip, validation rollback, and deletion preserve other associations', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api, '배한솔');
+    const calendar = (await harness.api.calendarList()).find(({can_edit}) => can_edit)!;
+    const tags = await harness.api.calendarTagsList();
+    const [first, second] = tags;
+    const event = await harness.api.calendarEventCreate({
+      ...previewEventInput(calendar.id, '여러 태그'), tag_id: first.id, tag_ids: [first.id, second.id, first.id],
+    });
+    assert.deepEqual(event.tag_ids, [first.id, second.id]);
+    const modified = await harness.api.calendarEventUpdate(event.id, {tag_ids:[second.id,first.id]});
+    assert.deepEqual(modified.tag_ids,[second.id,first.id]);
+    assert.equal(modified.tag_id,second.id);
+    await assert.rejects(harness.api.calendarEventUpdate(event.id,{tag_ids:[UNKNOWN_TAG_UUID]}),/tag|태그/i);
+    assert.deepEqual((await harness.api.calendarEventsList()).find(row=>row.id===event.id)?.tag_ids,[second.id,first.id]);
+    await harness.api.calendarTagsSave(tags.filter(tag=>tag.id!==second.id));
+    assert.deepEqual((await harness.api.calendarEventsList()).find(row=>row.id===event.id)?.tag_ids,[first.id]);
+    assert.equal((await harness.api.calendarEventsList()).find(row=>row.id===event.id)?.tag_id,first.id);
+    const cleared = await harness.api.calendarEventUpdate(event.id,{tag_ids:[]});
+    assert.deepEqual(cleared.tag_ids,[]);
+    assert.equal(cleared.tag_id,null);
+  } finally { harness.restore(); }
+});
+
+test('preview overview uses the current canonical role and is revoked immediately on demotion', async () => {
+  const harness = await createPreviewCalendarHarness();
+  try {
+    await previewLogin(harness.api,'장삐쭈');
+    const hidden = await harness.api.calendarCreate({name:'공유하지 않은 캘린더',color:'#123456',visibility:'private'});
+    await previewLogin(harness.api,'배한솔');
+    const overview = (await harness.api.calendarList()).find(row=>row.id===hidden.id) as (CalendarRow & {is_admin_overview?:boolean}) | undefined;
+    assert.equal(overview?.is_admin_overview,true);
+    assert.equal(overview?.can_edit,false);
+    const api = harness.api as typeof harness.api & {supabaseUpdateUser(id:string,updates:{role:string}):Promise<void>};
+    await api.supabaseUpdateUser('1',{role:'user'});
+    assert.equal((await harness.api.calendarList()).some(row=>row.id===hidden.id),false);
+    await assert.rejects(harness.api.calendarTagsSave([]),/관리자/);
+  } finally { harness.restore(); }
 });

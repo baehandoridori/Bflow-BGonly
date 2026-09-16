@@ -13,6 +13,7 @@ import {
 import { build } from 'esbuild';
 
 type BflowCalendar = {
+  isAdminOverview?: boolean;
   id: string;
   name: string;
   color: string;
@@ -945,7 +946,7 @@ async function loadRail(): Promise<CalendarRailComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'lucide-react',
@@ -961,6 +962,8 @@ async function loadRail(): Promise<CalendarRailComponent> {
     const react = nodeRequire('react') as Record<string, unknown>;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -985,7 +988,7 @@ async function loadRail(): Promise<CalendarRailComponent> {
       if (id === 'lucide-react') {
         const Icon = () => null;
         return {
-          AlertTriangle: Icon, BellOff: Icon, Check: Icon, ChevronDown: Icon, Info: Icon,
+          AlertTriangle: Icon, BellOff: Icon, Check: Icon, ChevronDown: Icon, ChevronRight: Icon, Info: Icon,
           MoreHorizontal: Icon, Plus: Icon, RefreshCw: Icon, Settings: Icon, Trash2: Icon,
         };
       }
@@ -1025,7 +1028,7 @@ async function loadTagBar(): Promise<TagBarComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/hooks/useMotionPref', '@/stores/useCalendarStore',
     ],
@@ -1035,6 +1038,8 @@ async function loadTagBar(): Promise<TagBarComponent> {
     const react = nodeRequire('react') as Record<string, unknown>;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') return { ...react, useMemo: (factory: () => unknown) => factory() };
       if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
       if (id === 'framer-motion') return { motion: { button: 'button' } };
@@ -1058,7 +1063,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'react-dom', 'lucide-react', 'sonner',
       '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
       '@/services/calendarService',
@@ -1100,6 +1105,8 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
     );
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -1284,7 +1291,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         }));
       },
     }],
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useDataStore', '@/stores/useAppStore', '@/services/calendarService',
       '@/services/vacationService', '@/hooks/useCalendarDnD', '@/utils/vacationEvents',
@@ -1308,6 +1315,8 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -1610,7 +1619,7 @@ async function loadShortcutHelpOverlay(): Promise<ShortcutHelpOverlayComponent> 
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown', 'react', 'react/jsx-runtime', '@/utils/cn', '@/hooks/useMotionPref'],
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown', 'react', 'react/jsx-runtime', '@/utils/cn', '@/hooks/useMotionPref'],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
     const nodeRequire = createRequire(import.meta.url);
@@ -1619,6 +1628,8 @@ async function loadShortcutHelpOverlay(): Promise<ShortcutHelpOverlayComponent> 
     let refCursor = 0;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -1650,8 +1661,8 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
-      'react', 'react/jsx-runtime', 'react-dom', 'framer-motion', 'lucide-react',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+      '@/stores/useCalendarStore', 'react', 'react/jsx-runtime', 'react-dom', 'framer-motion', 'lucide-react',
       '@/utils/cn',
     ],
   }).then((result) => {
@@ -1662,6 +1673,8 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -1681,6 +1694,7 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
           useEffect: (effect: () => void | (() => void)) => { pendingCalendarGridEffects.push(effect); },
         };
       }
+      if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
       if (id === 'react/jsx-runtime') return jsxRuntime;
       if (id === 'react-dom') return { createPortal: (children: ReactNode) => children };
       if (id === 'framer-motion') return {
@@ -1708,7 +1722,7 @@ async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useDataStore', '@/stores/useAppStore', '@/stores/useAuthStore',
       '@/stores/useCalendarStore', '@/components/common/EntityAwareInput',
@@ -1723,6 +1737,8 @@ async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -1792,7 +1808,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
       '@/stores/useCalendarStore', '@/types', '@/types/calendar', '@/utils/calendarDate', '@/utils/glassStyles',
@@ -1805,6 +1821,8 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -1876,7 +1894,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react', 'sonner',
       '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
       '@/services/calendarService',
@@ -1981,6 +1999,8 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     };
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -2127,7 +2147,7 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useCalendarStore', '@/hooks/useMotionPref',
     ],
@@ -2138,6 +2158,8 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
     const jsxRuntime = nodeRequire('react/jsx-runtime');
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -2173,7 +2195,7 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['@/components/common/GlassDropdown',
+    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useCalendarStore',
     ],
@@ -2184,6 +2206,8 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
     const jsxRuntime = nodeRequire('react/jsx-runtime');
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+      if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
         return {
           ...react,
@@ -2527,11 +2551,12 @@ function assertCalendarListCards(
     return candidates[0] ? textContent(candidates[0]) : null;
   });
   assert.deepEqual(subtitles, [
-    '회의',
+    null,
     null,
     '09:00 – 10:00 · 회의',
     '14:00 – 15:00 · 회의',
   ]);
+  assert.equal(findElements(cards[0], (element) => element.props['data-calendar-tag'] === 'tag-meeting').length, 1, 'the all-day tag is a colored badge');
   assert.doesNotMatch(textContent(scrollLists[0]), /scene|종일 ·|8\/25|→/);
   return cards;
 }
@@ -3479,7 +3504,7 @@ test('TagManagerPopover confirms deletion and reloads after both successful and 
     assert.deepEqual(tagManagerApiCalls, []);
     await buttonByLabel(tree, '회의 태그 삭제').props.onClick?.();
 
-    assert.equal(tagManagerConfirmMessages[0], "이 태그를 쓰는 일정은 '태그 없음'으로 바뀌어요");
+    assert.equal(tagManagerConfirmMessages[0], '모든 일정에서 이 태그가 제거돼요. 함께 선택한 다른 태그는 유지돼요.');
     assert.deepEqual(tagManagerApiCalls.map((call) => call.name), ['calendarTagsSave', 'loadBflowEvents']);
     assert.deepEqual(tagManagerApiCalls[0].args, [[
       { id: 'tag-review', name: '검수', color: '#00B894', sort_order: 0 },
@@ -6145,7 +6170,7 @@ test('ScheduleView ignores malformed remembered calendar view data', async () =>
   assert.equal(scheduleTimeGridProps.length, 0);
 });
 
-test('CalendarGrid renders tag-aware chip text while keeping each event color as the tint and border source', async () => {
+test('CalendarGrid renders colored tag badges and uses the first tag for tint while untagged events retain calendar color', async () => {
   resetHarness();
   const events = [
     calendarListEvent({
@@ -6180,14 +6205,15 @@ test('CalendarGrid renders tag-aware chip text while keeping each event color as
     return element;
   };
 
-  assert.equal(textContent(chip('tagged-all-day')), '회의 · EP05 업로드');
+  assert.equal(textContent(chip('tagged-all-day')), 'EP05 업로드회의');
+  assert.equal(findElements(chip('tagged-all-day'), (element) => element.props['data-calendar-tag'] === 'tag-meeting').length, 1);
   assert.equal(textContent(chip('calendar-all-day')), '스튜디오 공지 · 전체 회식');
   assert.equal(textContent(chip('timed-event')), '14:00 리드 회의');
 
   const tintedChipBody = directElementChildren(chip('tagged-all-day'))[0];
   const tintStyle = tintedChipBody.props.style as { background?: string; borderLeft?: string };
-  assert.match(tintStyle.background ?? '', /#74B9FF/, 'the chip tint still comes from event.color');
-  assert.equal(tintStyle.borderLeft, '3px solid #74B9FF', 'the chip border still comes from event.color');
+  assert.match(tintStyle.background ?? '', /#FDCB6E/, 'the chip tint comes from the first selected tag');
+  assert.equal(tintStyle.borderLeft, '3px solid #FDCB6E', 'the chip border comes from the first selected tag');
 });
 
 test('the weekly header names the month and week, and today pulses in every view', async () => {
@@ -6545,7 +6571,7 @@ test('the rail lists ICS subscriptions with their own toggle, refresh, rename an
     stateSlots = [];
     stateCursor = 0;
     let tree = await renderRail(false, { resetState: true });
-    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    stateSlots[2] = subscriptions.map((row) => ({ ...row }));
     tree = await renderRail(false);
 
     assert.match(textContent(tree), /구독/, '레일에 구독 섹션이 있다');
@@ -6573,7 +6599,7 @@ test('the rail lists ICS subscriptions with their own toggle, refresh, rename an
 
     // 실패한 구독은 경고 아이콘과 마지막 확인 시각을 함께 보여 준다.
     subscriptions[0].lastError = '네트워크가 불안정합니다';
-    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    stateSlots[2] = subscriptions.map((row) => ({ ...row }));
     tree = await renderRail(false);
     const warning = findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 불러오기 실패')[0];
     assert.ok(warning, '실패하면 경고 아이콘이 뜬다');
@@ -6587,7 +6613,7 @@ test('the rail lists ICS subscriptions with their own toggle, refresh, rename an
       '잘리지 않았으면 안내 아이콘도 없다',
     );
     subscriptions[0].lastFetchTruncated = true;
-    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    stateSlots[2] = subscriptions.map((row) => ({ ...row }));
     tree = await renderRail(false);
     const truncatedHint = findElements(tree, (node) => node.props['aria-label'] === '외부 팀 캘린더 일부만 표시')[0];
     assert.ok(truncatedHint, '잘렸으면 안내 아이콘이 뜬다');
@@ -6627,7 +6653,7 @@ test('the rename form appears once, right under its subscription row', async () 
     stateSlots = [];
     stateCursor = 0;
     let tree = await renderRail(false, { resetState: true });
-    stateSlots[1] = subscriptions.map((row) => ({ ...row }));
+    stateSlots[2] = subscriptions.map((row) => ({ ...row }));
     tree = await renderRail(false);
 
     buttonByLabel(tree, '외부 팀 캘린더 메뉴 열기').props.onClick?.({ stopPropagation() {} });
@@ -9141,4 +9167,80 @@ test('EventCreateModal clears and rejects a stale Google destination when authen
   flushEventCreateEffects();
   tree = await renderEventCreateModal(false, (event) => saved.push(event));
   assert.equal(formElementByLabel(tree, '캘린더').props.value, '', 'the stale selection clears when no fallback exists');
+});
+
+test('EventCreateModal saves multiple colored tags in selection order and can clear them together', async () => {
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  const render = () => renderEventCreateModal(false, (event) => { saved.push(event); });
+  let tree = await render();
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '여러 태그 일정', checked: false } });
+  buttonByLabel(tree, '회의 태그').props.onClick?.();
+  tree = await render();
+  buttonByLabel(tree, '검수 태그').props.onClick?.();
+  tree = await render();
+  assert.equal(buttonByLabel(tree, '회의 태그').props['aria-pressed'], true);
+  assert.equal(buttonByLabel(tree, '검수 태그').props['aria-pressed'], true);
+  await buttonByText(tree, '만들기').props.onClick?.();
+  assert.deepEqual(saved[0].tagIds, ['tag-meeting', 'tag-review']);
+  assert.equal(saved[0].tagId, 'tag-meeting');
+
+  tree = await render();
+  buttonByLabel(tree, '회의 태그').props.onClick?.();
+  tree = await render();
+  assert.equal(buttonByLabel(tree, '검수 태그').props['aria-pressed'], true, 'removing one selection preserves the other');
+  await buttonByText(tree, '만들기').props.onClick?.();
+  assert.deepEqual(saved[1].tagIds, ['tag-review']);
+  tree = await render();
+  buttonByLabel(tree, '태그 없음').props.onClick?.();
+  tree = await render();
+  await buttonByText(tree, '만들기').props.onClick?.();
+  assert.deepEqual(saved[2].tagIds, []);
+  assert.equal(saved[2].tagId, undefined);
+});
+
+test('admin overview calendars start collapsed but enabled, and collapsing does not hide their events', async () => {
+  resetHarness();
+  calendarState.calendars.push(calendar({ id: 'admin-private', name: '동료 개인 일정', ownerId: 'another-user', visibility: 'private', isPersonal: false, canEdit: false, canManage: false, isAdminOverview: true }));
+  let tree = await renderRail(false, { resetState: true });
+  const group = () => findElements(tree, (element) => element.props.id === 'calendar-admin-overview')[0];
+  const disclosure = () => findButtons(tree).find((button) => button.props['aria-controls'] === 'calendar-admin-overview')!;
+  assert.equal(group().props.hidden, true);
+  assert.equal(disclosure().props['aria-expanded'], false);
+  assert.equal(buttonByLabel(tree, '동료 개인 일정 표시').props['aria-pressed'], true);
+  disclosure().props.onClick?.();
+  tree = await renderRail(false);
+  assert.equal(group().props.hidden, false);
+  buttonByLabel(tree, '동료 개인 일정 표시').props.onClick?.();
+  assert.equal(calendarState.visibleCalendarIds['admin-private'], false, 'the individual switch can hide this calendar');
+  tree = await renderRail(false);
+  disclosure().props.onClick?.();
+  tree = await renderRail(false);
+  assert.equal(group().props.hidden, true);
+  assert.equal(calendarState.visibleCalendarIds['admin-private'], false, 'folding the group preserves the personal visibility choice');
+});
+
+test('EventCreateModal restores draft tag selection after an optimistic tag deletion rolls back', async () => {
+  resetHarness();
+  const saved: Record<string, unknown>[] = [];
+  const render = () => renderEventCreateModal(false, (event) => { saved.push(event); });
+  let tree = await render();
+  formElementByLabel(tree, '제목').props.onChange?.({ target: { value: '삭제 롤백 후 초안', checked: false } });
+  buttonByLabel(tree, '회의 태그').props.onClick?.();
+  tree = await render();
+  const originalTags = calendarState.tags;
+  calendarState.tags = originalTags.filter(({ id }) => id !== 'tag-meeting');
+  calendarState.optimisticDeletedTagIds = ['tag-meeting'];
+  tree = await render();
+  flushEventCreateEffects();
+  tree = await render();
+  assert.equal(buttonByLabel(tree, '태그 없음').props['aria-pressed'], true, 'pending deletion is hidden from the visible selection');
+  calendarState.tags = originalTags;
+  calendarState.optimisticDeletedTagIds = [];
+  tree = await render();
+  flushEventCreateEffects();
+  tree = await render();
+  assert.equal(buttonByLabel(tree, '회의 태그').props['aria-pressed'], true, 'a rejected tag deletion restores the still-unsaved event selection');
+  await buttonByText(tree, '만들기').props.onClick?.();
+  assert.deepEqual(saved[0].tagIds, ['tag-meeting']);
 });

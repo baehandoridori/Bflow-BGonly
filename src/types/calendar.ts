@@ -34,6 +34,7 @@ export interface BflowCalendar {
   members: CalendarMember[];
   canEdit: boolean;
   canManage: boolean;
+  isAdminOverview?: boolean;
   createdAt: string;
 }
 
@@ -98,6 +99,7 @@ export interface CalendarEvent {
   // ── B flow 공유 캘린더 확장 (PR2) ──
   calendarId?: string;
   tagId?: string;
+  tagIds?: string[];
   allDay?: boolean;
   startTime?: string;
   endTime?: string;

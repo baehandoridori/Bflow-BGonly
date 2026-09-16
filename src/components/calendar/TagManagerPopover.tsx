@@ -329,7 +329,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
     const eventsFresh = mode === 'events'
       ? await loadBflowEvents({ requireTagsFresh: true })
       : true;
-    if (mode === 'metadata') await useCalendarStore.getState().loadAll();
+    if (mode === 'metadata') await useCalendarStore.getState().loadAll({ waitForLatest: true });
     const canonical = getTagCanonicalSnapshot(operationActorId);
     return {
       tagsFresh: eventsFresh && canonical !== null && canonical.revision > revisionBeforeRefresh,
@@ -639,7 +639,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
     const confirmedDrafts = cloneDrafts(drafts);
     const confirmedIdentity = { id: tag.id, key: tag.key, name: tag.name, color: tag.color };
     const confirmed = await ConfirmDialog.show({
-      message: "이 태그를 쓰는 일정은 '태그 없음'으로 바뀌어요",
+      message: '모든 일정에서 이 태그가 제거돼요. 함께 선택한 다른 태그는 유지돼요.',
       confirmLabel: '삭제',
       tone: 'danger',
     });
@@ -669,6 +669,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   return createPortal(
     <div
       ref={popoverRef}
+      data-calendar-tag-manager="true"
       role="dialog"
       aria-label="태그 관리 팝오버"
       className="fixed z-[1000] max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl border border-bg-border/70 p-3 text-text-primary"
@@ -794,7 +795,7 @@ function TagEditor({ editing, saving, onChange, onConfirm, onCancel }: TagEditor
         autoFocus
         onChange={(event) => onChange({ ...editing, name: event.target.value })}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') void onConfirm();
+          if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void onConfirm(); }
           if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();

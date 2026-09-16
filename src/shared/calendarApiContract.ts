@@ -26,6 +26,7 @@ export interface CalendarEventCreateInput {
   title: string;
   memo: string | null;
   tag_id: string | null;
+  tag_ids?: string[];
   all_day: boolean;
   start_date: string;
   end_date: string;

@@ -1,3 +1,7 @@
+import { EventTagBadges } from './EventTagBadges';
+import { useEventTagTooltip } from './useEventTagTooltip';
+import { resolveEventTags } from './eventTagPresentation';
+import { useCalendarStore } from '@/stores/useCalendarStore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { CalendarEvent } from '@/types/calendar';
@@ -369,6 +373,8 @@ export function WeekTimeGridView({
   pulseDate,
   showWeekends = true,
 }: WeekTimeGridViewProps) {
+  const tags = useCalendarStore((state) => state.tags);
+  const hover = useEventTagTooltip();
   const { reduce } = useMotionPref();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showAllDay, setShowAllDay] = useState(false);
@@ -568,15 +574,16 @@ export function WeekTimeGridView({
           </div>
           <div className="absolute inset-y-0 right-0" style={{ left: TIME_GUTTER_PX }}>
             {allDayBars.filter((bar) => bar.row < visibleAllDayRows).map((bar) => {
-              const label = getAllDayBarLabel(bar, tagNameById, calendarNameById);
+              const label = getAllDayBarLabel({ ...bar, event: { ...bar.event, tagIds: [], tagId: undefined } }, tagNameById, resolveEventTags(bar.event, tags).length ? {} : calendarNameById);
+              const accent = resolveEventTags(bar.event, tags)[0]?.color ?? bar.event.color;
               const identityKey = calendarEventIdentityKey(bar.event);
               const isRealtimeHighlighted = highlightedEventIdentities?.has(identityKey) === true;
               return (
                 <button
                   key={`${identityKey}-${bar.startCol}`}
                   type="button"
-                  title={label}
-                  aria-label={`${label}, 종일 일정`}
+                  {...hover.bind(bar.event)}
+                  aria-label={`${getAllDayBarLabel(bar, tagNameById, calendarNameById)}, 종일 일정`}
                   data-event-identity={identityKey}
                   data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
                   className={`absolute z-10 truncate rounded px-1.5 text-left text-[10px] font-semibold text-text-primary shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
@@ -585,7 +592,7 @@ export function WeekTimeGridView({
                     left: `calc(${bar.startCol * (100 / columnCount)}% + 2px)`,
                     width: `calc(${bar.span * (100 / columnCount)}% - 4px)`,
                     height: 22,
-                    ...getAllDayBarStyle(bar.event.color),
+                    ...getAllDayBarStyle(accent),
                     ...(isRealtimeHighlighted ? {
                       outline: `2px solid ${bar.event.color}`,
                       outlineOffset: 2,
@@ -604,7 +611,7 @@ export function WeekTimeGridView({
                     onEventContextMenu(bar.event, event);
                   } : undefined}
                 >
-                  {label}
+                  <span className="flex items-center gap-1"><span className="min-w-[20px] truncate">{label}</span><EventTagBadges event={bar.event} compact /></span>
                 </button>
               );
             })}
@@ -709,6 +716,7 @@ export function WeekTimeGridView({
           highlightedEventIdentities={highlightedEventIdentities}
         />
       </div>
+      {hover.tooltip}
     </div>
   );
 }
@@ -756,6 +764,8 @@ function TimeBand({
   dragGhostEvent: CalendarEvent | null;
   highlightedEventIdentities?: ReadonlySet<string>;
 }) {
+  const tags = useCalendarStore((state) => state.tags);
+  const hover = useEventTagTooltip();
   if (!visible) {
     return (
       <button
@@ -878,8 +888,9 @@ function TimeBand({
                 const duration = block.endMin - block.startMin;
                 const visibleHeight = block.milestone ? MIN_TIMED_TEXT_HEIGHT_PX : ((bandBlock.endMin - bandBlock.startMin) / 60) * HOUR_PX;
                 const canShowText = visibleHeight >= MIN_TIMED_TEXT_HEIGHT_PX;
-                const visualStyle = getTimedBlockVisualStyle(block.event.color);
-                const stateStyle = getTimedBlockStateStyle(block.event.color, isCurrent);
+                const accent = resolveEventTags(block.event, tags)[0]?.color ?? block.event.color;
+                const visualStyle = getTimedBlockVisualStyle(accent);
+                const stateStyle = getTimedBlockStateStyle(accent, isCurrent);
                 const opacity = getTimedBlockOpacity(isPast);
                 const timeLabel = formatEventTimeRange(block.event, tagNameById)
                   ?? `${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`;
@@ -919,7 +930,7 @@ function TimeBand({
                   <motion.button
                     key={layout.id}
                     type="button"
-                    title={block.milestone ? `${block.event.title} · ${minutesToTime(block.startMin)} 마일스톤` : `${block.event.title} · ${minutesToTime(block.startMin)}–${minutesToTime(block.endMin)}`}
+                    {...hover.bind(block.event)}
                     aria-label={block.milestone ? `${block.event.title}, ${date} ${minutesToTime(block.startMin)} 마일스톤` : `${block.event.title}, ${date} ${minutesToTime(block.startMin)}부터 ${minutesToTime(block.endMin)}까지`}
                     data-time-grid-event="true"
                     data-time-grid-milestone={block.milestone ? 'true' : undefined}
@@ -962,6 +973,7 @@ function TimeBand({
                   >
                     {canShowText && duration >= 30 && <span data-time-grid-time="true" data-time-grid-live-label={isPreviewed ? 'true' : undefined} className="block truncate" style={{ color: visualStyle.timeColor, fontSize: 9 }}>{timeLabel}</span>}
                     {canShowText && <span data-time-grid-title="true" className="block truncate" style={{ color: visualStyle.titleColor, fontSize: visualStyle.titleFontSize }}>{block.milestone ? `◇ ${minutesToTime(block.startMin)} · ${block.event.title}` : block.event.title}</span>}
+                    {canShowText && visibleHeight >= 52 && <EventTagBadges event={block.event} compact />}
                     {/* 길이 조절 구간(하단 8px)에 커서로 어포던스를 준다(D11).
                         자식이라 mousedown은 블록 핸들러로 그대로 버블한다. */}
                     {!isReadOnly && !isPersisting && canResizeEnd && (
@@ -994,6 +1006,7 @@ function TimeBand({
           </div>
         </div>
       )}
+      {hover.tooltip}
     </section>
   );
 }

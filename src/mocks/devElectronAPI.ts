@@ -1,3 +1,4 @@
+import { normalizeCalendarTagIds } from '@/shared/calendarTagIds';
 /**
  * 브라우저 개발 환경용 electronAPI 목
  * Electron 없이 Vite dev server에서 앱을 테스트할 수 있게 함
@@ -501,7 +502,12 @@ function replaceMockCalendarTags(tags: MockCalendarTagRow[]): void {
   mockCalendarTags.splice(0, mockCalendarTags.length, ...tags.map((tag) => ({ ...tag })));
   const tagIds = new Set(mockCalendarTags.map((tag) => tag.id));
   for (const event of mockCalendarEvents) {
-    if (event.tag_id && !tagIds.has(event.tag_id)) event.tag_id = null;
+    const current = normalizeCalendarTagIds(event.tag_ids, event.tag_id);
+    const retained = current.filter((id) => tagIds.has(id));
+    if (retained.length !== current.length) {
+      event.tag_ids = retained;
+      event.tag_id = retained[0] ?? null;
+    }
   }
 }
 
@@ -1387,7 +1393,8 @@ function replaceMockCalendarMembers(
 }
 
 function canViewMockCalendar(calendar: MockCalendarRow, userId: string): boolean {
-  return canViewCalendar(
+  const user = getMockUsers().find((candidate) => candidate.id === userId);
+  return (user?.id === '1' && user.name === '배한솔' && user.role === 'admin') || canViewCalendar(
     calendar,
     mockMembersOf(calendar.id).map(({ user_id }) => user_id),
     userId,
@@ -1405,11 +1412,12 @@ function requireMockCalendarEventWrite(calendarId: string, userId: string): Mock
 
 function createMockCalendarEvent(input: MockCalendarEventCreateInput, userId: string): MockCalendarEventRow {
   requireMockCalendarEventWrite(input.calendar_id, userId);
-  const tagId = normalizeMockCalendarEventTagId(input.tag_id);
+  const tagIds = normalizeCalendarTagIds(input.tag_ids, input.tag_id).map((id) => normalizeMockCalendarEventTagId(id)!);
   const now = new Date().toISOString();
   const created: MockCalendarEventRow = {
     ...input,
-    tag_id: tagId,
+    tag_id: tagIds[0] ?? null,
+    tag_ids: tagIds,
     id: createUuid(),
     created_by: userId,
     created_at: now,
@@ -2720,6 +2728,7 @@ export function installDevElectronAPI(): void {
             members: members.map(({ user_id, can_edit }) => ({ user_id, can_edit })),
             can_edit: canEditCalendarEvents(calendar, members, user.id),
             can_manage: canManageCalendar(calendar, mockPermissionUser(user)),
+            is_admin_overview: !canViewCalendar(calendar, members.map((member) => member.user_id), user.id),
           };
         });
     },
@@ -2937,9 +2946,10 @@ export function installDevElectronAPI(): void {
       if (updates.calendar_id !== undefined && updates.calendar_id !== event.calendar_id) {
         targetCalendar = requireMockCalendarEventWrite(updates.calendar_id, actor.id);
       }
-      const normalizedUpdates = updates.tag_id === undefined
-        ? updates
-        : { ...updates, tag_id: normalizeMockCalendarEventTagId(updates.tag_id) };
+      const tagIds = updates.tag_ids === undefined && updates.tag_id === undefined ? undefined
+        : normalizeCalendarTagIds(updates.tag_ids, updates.tag_id).map((id) => normalizeMockCalendarEventTagId(id)!);
+      const normalizedUpdates = tagIds === undefined ? updates
+        : { ...updates, tag_ids: tagIds, tag_id: tagIds[0] ?? null };
       const immutableFields = {
         id: event.id,
         created_by: event.created_by,

@@ -9,7 +9,7 @@ export interface GanttState {
   snapshot:GanttSnapshot; actorId:string|null; loading:boolean; pending:boolean; error:string|null;
   canUndo:boolean; canRedo:boolean;
   initialize(actorId:string|null,gateway?:GanttGateway):Promise<void>;
-  refresh():Promise<void>; execute(command:GanttCommand):Promise<void>; undo():Promise<void>; redo():Promise<void>;
+  refresh():Promise<boolean>; execute(command:GanttCommand):Promise<void>; undo():Promise<void>; redo():Promise<void>;
 }
 const empty=():GanttSnapshot=>({spaces:[],projects:[]});
 const errorText=(error:unknown)=>error instanceof Error?error.message:String(error);
@@ -20,6 +20,13 @@ function defaultGateway():GanttGateway {
   return {read:()=>api.ganttRead(),execute:request=>api.ganttExecute(request),subscribe:listener=>api.onGanttChanged?.(listener)??(()=>{})};
 }
 function entity(snapshot:GanttSnapshot,key:EntityKey):Entity|null {return (key.kind==='project'?snapshot.projects:snapshot.spaces).find(x=>x.id===key.id)??null;}
+function confirmsCreatedEntity(canonical:GanttSnapshot,optimistic:GanttSnapshot,command:GanttCommand):boolean {
+  if((command.type!=='saveSpace'&&command.type!=='saveProject')||command.expectedRevision!==null)return false;
+  const key:EntityKey={kind:command.type==='saveSpace'?'space':'project',id:command.type==='saveSpace'?command.space.id:command.project.id};
+  const predicted=entity(optimistic,key),saved=entity(canonical,key);
+  return Boolean(predicted&&saved&&Number.isSafeInteger(saved.revision)&&saved.revision>=predicted.revision
+    &&stableJson({...saved,revision:predicted.revision})===stableJson(predicted));
+}
 function entities(snapshot:GanttSnapshot,entry:Pick<HistoryEntry,'keys'>):Array<Entity|null>{return entry.keys.map(key=>entity(snapshot,key));}
 function fingerprint(snapshot:GanttSnapshot,entry:Pick<HistoryEntry,'keys'>):string {
   const found=entities(snapshot,entry);
@@ -51,8 +58,22 @@ export function createGanttStore() {
       try{optimistic=applyCommand(before,state.actorId,command);}catch(error){set({error:errorText(error)});throw error;}
       // In-flight refreshes may not overwrite this optimistic command.
       refreshVersion++;set({snapshot:optimistic,pending:true,error:null});
+      let recovery:Promise<GanttSnapshot>|null=null;
       try {
-        const canonical=await activeGateway.execute({requestId:crypto.randomUUID(),command});
+        let canonical:GanttSnapshot;
+        try {
+          canonical=await activeGateway.execute({requestId:crypto.randomUUID(),command});
+        } catch(error) {
+          if((command.type!=='saveSpace'&&command.type!=='saveProject')||command.expectedRevision!==null)throw error;
+          // A response can be lost after creation commits. Keep the write lock and
+          // verify that exact entity before returning success to the create dialog.
+          // Otherwise retrying the unchanged draft would conflict with its own ID.
+          recovery=activeGateway.read();
+          const recovered=await recovery.catch(()=>null);
+          if(currentGeneration!==generation)return;
+          if(!recovered||!confirmsCreatedEntity(recovered,optimistic,command))throw error;
+          canonical=recovered;
+        }
         if(currentGeneration!==generation)return;
         // Restoring a deleted ID gets an authority-owned revision above its tombstone.
         // Accept only that field: concurrent task/ACL edits or sibling changes remain conflicts.
@@ -109,7 +130,7 @@ export function createGanttStore() {
         // Recovery belongs to the failed mutation. Keep its write lock until the
         // canonical read finishes so a later optimistic edit cannot be overwritten.
         set({error:errorText(error)});
-        try{const canonical=await activeGateway.read();if(currentGeneration===generation)set({snapshot:canonical,pending:false,error:errorText(error)});}catch{if(currentGeneration===generation)set({snapshot:before,pending:false,error:`${errorText(error)} 최신 내용을 불러오지 못했습니다. 새로고침해 주세요.`});}
+        try{const canonical=await (recovery??activeGateway.read());if(currentGeneration===generation)set({snapshot:canonical,pending:false,error:errorText(error)});}catch{if(currentGeneration===generation)set({snapshot:before,pending:false,error:`${errorText(error)} 최신 내용을 불러오지 못했습니다. 새로고침해 주세요.`});}
         throw error;
       }
     };
@@ -135,9 +156,16 @@ export function createGanttStore() {
         }catch(error){if(generation===current)set({loading:false,error:errorText(error)});}
       },
       async refresh(){
-        if(!gateway||get().pending)return;const current=generation,version=++refreshVersion,selected=gateway;
-        try{const snapshot=await selected.read();if(generation===current&&version===refreshVersion&&!get().pending)set({snapshot,loading:false,error:null});}
-        catch(error){if(generation===current&&version===refreshVersion)set({loading:false,error:errorText(error)});}
+        if(!gateway||get().pending)return false;const current=generation,version=++refreshVersion,selected=gateway;
+        try{
+          const snapshot=await selected.read();
+          if(generation!==current||version!==refreshVersion||get().pending)return false;
+          set({snapshot,loading:false,error:null});
+          return true;
+        }catch(error){
+          if(generation===current&&version===refreshVersion)set({loading:false,error:errorText(error)});
+          return false;
+        }
       },
       execute:command=>run(command),undo:()=>travel('undo'),redo:()=>travel('redo'),
     };

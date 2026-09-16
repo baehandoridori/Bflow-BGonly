@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BellOff, Check, Info, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
+import { AlertTriangle, BellOff, Check, ChevronRight, Info, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
 import type { BflowCalendar } from '@/types/calendar';
 import type { IcsSubscription } from '@/shared/icsApiContract';
 import { icsCalendarId } from '@/shared/icsApiContract';
@@ -20,6 +20,7 @@ interface CalendarRailProps {
 
 interface CalendarRowProps {
   calendar: BflowCalendar;
+  ownerName?: string;
   showSharePermission: boolean;
   visible: boolean;
   muted: boolean;
@@ -34,6 +35,7 @@ interface CalendarRowProps {
 
 function CalendarRow({
   calendar,
+  ownerName,
   showSharePermission,
   visible,
   muted,
@@ -57,7 +59,8 @@ function CalendarRow({
       >
         {visible && <Check size={10} strokeWidth={3} className="text-white" />}
       </button>
-      <span className="min-w-0 flex-1 truncate text-[11px] text-text-primary" title={calendar.name}>
+      <span className="min-w-0 flex-1 truncate text-[11px] text-text-primary" title={ownerName ? `${ownerName} · ${calendar.name}` : calendar.name}>
+        {ownerName && <span className="text-text-secondary">{ownerName} · </span>}
         {calendar.name}
       </span>
       {showSharePermission && (
@@ -234,8 +237,11 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
   const toggleCalendarVisible = useCalendarStore((state) => state.toggleCalendarVisible);
   const toggleMuted = useCalendarStore((state) => state.toggleMuted);
   const currentUser = useAuthStore((state) => state.currentUser);
+  const users = useAuthStore((state) => state.users);
   const setView = useAppStore((state) => state.setView);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [adminOverviewExpanded, setAdminOverviewExpanded] = useState(false);
+  useEffect(() => { setAdminOverviewExpanded(false); }, [currentUser?.id]);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const groups = useMemo(
@@ -296,6 +302,7 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
             <CalendarRow
               key={calendar.id}
               calendar={calendar}
+              ownerName={calendar.isAdminOverview ? users?.find((user) => user.id === calendar.ownerId)?.name ?? '다른 사용자' : undefined}
               showSharePermission={shared}
               visible={visibleCalendarIds[calendar.id] !== false}
               muted={muted}
@@ -324,6 +331,25 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
       {renderSection('내 캘린더', groups.mine)}
       {renderSection('팀 전체', groups.team)}
       {renderSection('나에게 공유됨', groups.shared, true)}
+      {groups.adminOverview.length > 0 && (
+        <section className="mt-3">
+          <button
+            type="button"
+            aria-expanded={adminOverviewExpanded}
+            aria-controls="calendar-admin-overview"
+            onClick={() => setAdminOverviewExpanded((expanded) => !expanded)}
+            className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[10px] font-semibold text-text-secondary hover:bg-bg-border/25 cursor-pointer"
+          >
+            <ChevronRight size={12} className={adminOverviewExpanded ? 'rotate-90' : ''} />
+            <span className="flex-1">관리자 전용 · 미공유 캘린더</span>
+            <span>{groups.adminOverview.length}</span>
+          </button>
+          <div id="calendar-admin-overview" hidden={!adminOverviewExpanded}>
+            <p className="px-1 pt-1 text-[10px] leading-4 text-text-secondary">배한솔 관리자에게만 보입니다. 체크를 끄면 해당 일정이 숨겨집니다.</p>
+            {renderSection('공유받지 않은 캘린더', groups.adminOverview, true)}
+          </div>
+        </section>
+      )}
       <section className="mt-3">
         <h3 className="mb-1 px-1 text-[10px] font-semibold text-text-secondary">내 구글</h3>
         {isAuthenticated ? (

@@ -1,3 +1,6 @@
+import { EventTagManagerButton } from './EventTagManagerButton';
+import { EventTagBadges } from './EventTagBadges';
+import { getEventTagIds, toggleEventTag } from './eventTagPresentation';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, useIsPresent } from 'framer-motion';
@@ -5,7 +8,7 @@ import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
+import { getTagCanonicalSnapshot, isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { floatingGlassStyle } from '@/utils/glassStyles';
@@ -56,8 +59,11 @@ export function EventQuickEdit({
 }: EventQuickEditProps) {
   const colorMode = useAppStore((state) => state.colorMode);
   const users = useAuthStore((state) => state.users);
+  const currentUser = useAuthStore((state) => state.currentUser);
   const calendars = useCalendarStore((state) => state.calendars);
   const tags = useCalendarStore((state) => state.tags);
+  const deletedTagIds = useCalendarStore((state) => state.optimisticDeletedTagIds);
+  const canonicalTags = getTagCanonicalSnapshot(currentUser?.id)?.tags;
   const editableCalendars = useMemo(() => calendars.filter((calendar) => calendar.canEdit), [calendars]);
   const sortedTags = useMemo(() => tags
     .filter((tag) => !isOptimisticCalendarTagId(tag.id))
@@ -71,7 +77,7 @@ export function EventQuickEdit({
   const [type, setType] = useState<CalendarEventType>(event.type);
   const [memo, setMemo] = useState(event.memo);
   const [pendingCalendar, setPendingCalendar] = useState<PendingSelection<string | undefined> | null>(null);
-  const [pendingTag, setPendingTag] = useState<PendingSelection<string | undefined> | null>(null);
+  const [pendingTag, setPendingTag] = useState<PendingSelection<string[]> | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   // 저장/삭제가 진행 중이면 같은 일정의 다음 요청을 막는다. 두 요청이 겹치면
   // 먼저 보낸 오래된 초안이 나중에 커밋돼 방금 저장한 내용을 되돌릴 수 있다.
@@ -112,15 +118,16 @@ export function EventQuickEdit({
   const displayedCalendarId = pendingCalendar?.eventId === event.id
     ? pendingCalendar.value
     : event.calendarId;
-  const displayedTagId = pendingTag?.eventId === event.id
+  const displayedTagIds = (pendingTag?.eventId === event.id
     ? pendingTag.value
-    : event.tagId;
+    : getEventTagIds(event)).filter((id) => !isOptimisticCalendarTagId(id)
+      && !deletedTagIds.includes(id)
+      && (tags.some((tag) => tag.id === id) || !canonicalTags || canonicalTags.some((tag) => tag.id === id)));
   const calendarSelectionPending = pendingCalendar?.eventId === event.id;
   const tagSelectionPending = pendingTag?.eventId === event.id;
   const derivedFieldsDescriptionId = isCanonicalBflow ? `calendar-derived-fields-${event.id}` : undefined;
   const readOnlyDescriptionId = isWriteProtected || isVacation ? `calendar-read-only-${event.id}` : undefined;
   const currentCalendar = calendars.find((calendar) => calendar.id === event.calendarId);
-  const currentTag = tags.find((tag) => tag.id === event.tagId);
   const fieldStyle = {
     background: 'rgb(var(--color-bg-primary) / 0.82)',
     border: '1px solid rgb(var(--color-bg-border) / 0.56)',
@@ -150,12 +157,12 @@ export function EventQuickEdit({
     const handleClick = (mouseEvent: MouseEvent) => {
       if (shouldIgnore()) return;
       const target = mouseEvent.target as Element | null;
-      if (target?.closest?.('[data-dropdown-owner="calendar-quick-edit"]')) return;
+      if (target?.closest?.('[data-dropdown-owner="calendar-quick-edit"]') || target?.closest?.('[data-calendar-tag-manager]')) return;
       if (ref.current && !ref.current.contains(mouseEvent.target as Node)) onClose();
     };
     const handleKey = (keyboardEvent: KeyboardEvent) => {
       if (shouldIgnore()) return;
-      if (keyboardEvent.key === 'Escape') onClose();
+      if (keyboardEvent.key === 'Escape' && !document.querySelector('[data-calendar-tag-manager]')) onClose();
     };
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
@@ -347,23 +354,25 @@ export function EventQuickEdit({
 
   const handleTagChange = useCallback(async (tagId: string | undefined) => {
     if (pendingMutationRef.current) return;
-    if (!canWrite || !isCanonicalBflow || ganttProjection || tagSelectionPending || tagId === displayedTagId) return;
+    if (!canWrite || !isCanonicalBflow || ganttProjection || tagSelectionPending) return;
+    const tagIds = toggleEventTag(displayedTagIds, tagId);
+    if (JSON.stringify(tagIds) === JSON.stringify(displayedTagIds)) return;
     const requestId = ++tagUpdateRequestRef.current;
     setMutationError(null);
     setPendingTag({
       eventId: event.id,
-      value: tagId,
+      value: tagIds,
       requestId,
     });
     try {
-      await onUpdate(event.id, { tagId });
+      await onUpdate(event.id, { tagIds, tagId: tagIds[0] });
     } catch {
       if (tagUpdateRequestRef.current === requestId && calendarEventIdentityKey(latestEventRef.current) === eventIdentityKey) {
         setMutationError('태그 변경에 실패했어요. 다시 시도해 주세요.');
       }
     }
     setPendingTag((current) => current?.requestId === requestId ? null : current);
-  }, [canWrite, displayedTagId, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate, tagSelectionPending]);
+  }, [canWrite, displayedTagIds, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate, tagSelectionPending]);
 
   // 자체 AnimatePresence 로 감싸면 부모 presence 의 exit 가 전파되지 않아 닫힘 애니가 죽는다
   // (framer-motion 10.x). presence 는 ScheduleView 쪽 조건부 렌더가 소유한다.
@@ -453,19 +462,19 @@ export function EventQuickEdit({
                       </div>
                     </div>
                     <div>
-                      <label className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">태그</label>
+                      <div className="flex items-center justify-between"><label className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">태그 · 여러 개 선택</label><EventTagManagerButton disabled={tagSelectionPending || isMutating} /></div>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         <button
                           type="button"
-                          aria-pressed={displayedTagId === undefined}
+                          aria-pressed={displayedTagIds.length === 0}
                           disabled={tagSelectionPending}
                           onClick={() => handleTagChange(undefined)}
-                          className={`rounded-full px-2 py-1 text-[10px] ${displayedTagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary/80 text-text-secondary'}`}
+                          className={`rounded-full px-2 py-1 text-[10px] ${displayedTagIds.length === 0 ? 'bg-accent/20 text-accent' : 'bg-bg-primary/80 text-text-secondary'}`}
                         >
                           없음
                         </button>
                         {sortedTags.map((tag) => {
-                          const selected = displayedTagId === tag.id;
+                          const selected = displayedTagIds.includes(tag.id);
                           return (
                             <button
                               type="button"
@@ -480,7 +489,7 @@ export function EventQuickEdit({
                                 background: selected ? `color-mix(in srgb, ${tag.color} 18%, transparent)` : 'transparent',
                               }}
                             >
-                              {tag.name}
+                              <span className="inline-block h-1.5 w-1.5 rounded-full mr-1" style={{ backgroundColor: tag.color }} />{tag.name}
                             </button>
                           );
                         })}
@@ -489,7 +498,8 @@ export function EventQuickEdit({
                   </>
                 ) : (
                   <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2 text-[11px] text-text-secondary">
-                    {currentCalendar?.name ?? 'B flow 캘린더'}{currentTag ? ` · ${currentTag.name}` : ' · 태그 없음'}
+                    {currentCalendar?.name ?? 'B flow 캘린더'}
+                    <EventTagBadges event={event} />
                   </div>
                 )
               ) : (
