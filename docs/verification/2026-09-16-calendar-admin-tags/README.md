@@ -61,3 +61,23 @@
 - 최종 `npm run build:vite` 전체 2,661개 테스트 통과(실패 0, 생략 0). 조회 경합과 폐기된 화면 효과의 재시도를 막는 추가 회귀 테스트를 포함하며 최종 타입 검사도 통과했다.
 - 배한솔로 로그인한 프리뷰에서 보기 전용 ‘스튜디오 공지’의 ‘전체 회식’을 ‘검증 프로젝트’에 가져왔다. 차트 반영, 원본 보존, 다시 열었을 때 ‘이미 가져온 1개 제외’, 실행 취소로 제거 및 다시 실행으로 복구를 확인했다.
 - 화면 증거: `gantt-import-select.png`, `gantt-import-result.png`, `gantt-import-deduplicate.png`.
+
+## 운영 적용
+
+- 기능 PR: #288, 머지 `dfb0f84b7a08c174c5f339e3264996e46490bb93`.
+- 위 머지에서 `npm run build` 통과: 2,661개 테스트, 실패·생략 0. 설치 파일과 main/preload/renderer 포장 결과도 검증했다.
+- DB migration: `20260916122358_calendar_admin_overview_multi_tags`. 적용 후 일정 24개, 캘린더 15개, 태그 11개 확인. 첫 태그 불일치 0, 없는 태그 참조 0, 세션 RPC 5개 및 태그 직접 쓰기 차단 확인.
+- 설치 파일 SHA-256: `2d1d3e20b7c49a9cb7b082917ce75a59a2758c162b01553c3421772d9b8de7d0` (201,408,258바이트).
+- 기존 배포본은 배포 감사 폴더의 `previous-dist`에 백업했다. 기존 루트 작업 폴더와 실행 중인 설치 앱은 변경하지 않았다.
+- G드라이브 배포 완료: manifest를 제외한 7,334개 파일 해시 불일치 0 확인 후 manifest를 마지막에 공개했다. 최종 7,335개 파일 / 923,357,157바이트, 해시 불일치 0. 기존 원격 추가 파일은 보존했다.
+- 원격 manifest·latest·설치 앱 패키지 버전은 모두 `1.120.0`. 최종 검증 시각: `2026-09-16T12:27:51.793Z`. 증거: 감사 폴더의 `deploy-final.json`, `before-manifest.json`, `build-release.log`, `database-after.json`.
+- 배포 성공과 실제 사용자 PC 설치 완료는 구분한다. 실행 중 앱을 재시작하지 않았으며, 두 실제 PC 사이의 실시간 전달 및 사용자별 설치 성공까지 검증했다는 뜻은 아니다.
+
+## Supabase에서 확인하는 표
+
+- `public.calendars`: 캘린더 이름과 소유자 `owner_id`.
+- `public.calendar_events`: 일정 제목, 작성자 `created_by`, 소속 캘린더 `calendar_id`, 태그 `tag_ids`.
+- `public.users`: 위 사용자 ID에 대응하는 `id`·`name`.
+- `public.calendar_members`: 누가 어떤 캘린더를 공유받았는지 확인.
+- `public.calendar_tags`: 태그 이름·색상.
+- `public.gantt_spaces` / `public.gantt_projects`: 간트 폴더·프로젝트. 작업은 프로젝트의 `tasks` 안에 저장되고, 간트에서 보낸 캘린더 일정은 `calendar_events`에 중복 행으로 저장하지 않는다.
