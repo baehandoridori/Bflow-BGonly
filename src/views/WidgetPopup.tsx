@@ -56,7 +56,7 @@ import type {
   SupabaseRealtimeStatusMetadata,
 } from '@/types';
 import { getPreset, getLightColors, applyTheme, type ThemeColors } from '@/themes';
-import { DEFAULT_GAS_IMAGE_URL } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_TOKEN } from '@/config';
 
 // 모듈 레벨 쿨다운: dataNotifyChange 호출 시 자체 변경 감지
 let _reloadCooldown = false;
@@ -749,7 +749,10 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         // 휴가 API 자동 연결
         const vacConfig = await loadVacationConfig();
         if (vacConfig?.webAppUrl) {
-          const vacResult = await connectVacation(vacConfig.webAppUrl);
+          const vacResult = await connectVacation(
+            vacConfig.webAppUrl,
+            vacConfig.apiToken || DEFAULT_VACATION_TOKEN
+          );
           if (vacResult.ok) {
             useAppStore.getState().setVacationConnected(true);
           }

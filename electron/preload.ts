@@ -650,8 +650,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('sheets:relay-snapshot', data),
 
   // 휴가 관리 (vacation-repo WebApi)
-  vacationConnect: (webAppUrl: string) =>
-    ipcRenderer.invoke('vacation:connect', webAppUrl),
+  vacationConnect: (webAppUrl: string, apiToken?: string) =>
+    ipcRenderer.invoke('vacation:connect', webAppUrl, apiToken),
   vacationIsConnected: () =>
     ipcRenderer.invoke('vacation:is-connected'),
   vacationReadStatus: (name: string) =>

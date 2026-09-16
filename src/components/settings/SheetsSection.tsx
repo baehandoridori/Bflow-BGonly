@@ -16,7 +16,7 @@ import {
 import * as gcalService from '@/services/googleCalendarService';
 import { getGCalSettings, saveGCalSettings, saveLocalGCalSettings, syncAll } from '@/services/calendarService';
 import type { GCalSettings } from '@/types/calendar';
-import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL, DEFAULT_VACATION_TOKEN } from '@/config';
 import { IntegrationCard, btnStyles } from './IntegrationCard';
 import { IntegrationOverview } from './IntegrationOverview';
 import { SupabaseStatusCard } from './SupabaseStatusCard';
@@ -42,6 +42,8 @@ export function SheetsSection() {
 
   // ─── 휴가 API ─────
   const [vacationUrl, setVacationUrl] = useState(DEFAULT_VACATION_URL || '');
+  // 토큰 입력란은 **폴백**이다 — 빌드에 토큰이 박혀 있으면 비워 둔 채로 연결된다
+  const [vacationToken, setVacationToken] = useState('');
   const [vacationError, setVacationError] = useState<string | null>(null);
   const [isVacationConnecting, setIsVacationConnecting] = useState(false);
   const [vacationSaveMessage, setVacationSaveMessage] = useState<string | null>(null);
@@ -71,7 +73,11 @@ export function SheetsSection() {
       const vacConfig = await loadVacationConfig();
       if (vacConfig) {
         setVacationUrl(vacConfig.webAppUrl);
-        const result = await connectVacation(vacConfig.webAppUrl);
+        setVacationToken(vacConfig.apiToken ?? '');
+        const result = await connectVacation(
+          vacConfig.webAppUrl,
+          vacConfig.apiToken || DEFAULT_VACATION_TOKEN
+        );
         setVacationConnected(result.ok);
       } else {
         const vacConnected = await checkVacationConnection();
@@ -111,10 +117,10 @@ export function SheetsSection() {
   };
 
   const handleVacationConnect = async () => {
-    if (!vacationUrl) { setVacationError('휴가 관리 Apps Script URL을 입력해주세요.'); return; }
+    if (!vacationUrl) { setVacationError('휴가 API URL을 입력해주세요.'); return; }
     setIsVacationConnecting(true); setVacationError(null);
     try {
-      const result = await connectVacation(vacationUrl);
+      const result = await connectVacation(vacationUrl, vacationToken || DEFAULT_VACATION_TOKEN);
       if (result.ok) { setVacationConnected(true); setVacationError(null); }
       else { setVacationConnected(false); setVacationError(result.error ?? '연결 실패'); }
     } catch (err) { setVacationError(String(err)); setVacationConnected(false); }
@@ -122,7 +128,7 @@ export function SheetsSection() {
   };
 
   const handleVacationSave = async () => {
-    const config = { webAppUrl: vacationUrl };
+    const config = { webAppUrl: vacationUrl, ...(vacationToken ? { apiToken: vacationToken } : {}) };
     await saveVacationConfig(config);
     setVacationConfig(config);
     setVacationSaveMessage('저장 완료');
@@ -291,16 +297,26 @@ export function SheetsSection() {
             icon={<Palmtree size={14} />}
             iconColor="rgb(52 211 153)"
             title="휴가 관리 API"
-            subtitle="vacation-repo Apps Script"
+            subtitle="Supabase vacation-api"
             status={vacationConnected ? 'connected' : 'disconnected'}
             defaultCollapsed
           >
-            <label className="block text-[11px] text-text-secondary mb-1.5">Web App URL</label>
+            <label className="block text-[11px] text-text-secondary mb-1.5">API URL</label>
             <input
               type="text"
               value={vacationUrl}
               onChange={(e) => setVacationUrl(e.target.value)}
-              placeholder="https://script.google.com/macros/s/.../exec"
+              placeholder="https://프로젝트.supabase.co/functions/v1/vacation-api"
+              className="w-full bg-bg-primary border border-bg-border rounded-md px-2.5 py-2 text-[12px] font-mono text-text-primary focus:outline-none focus:border-accent mb-3"
+            />
+            <label className="block text-[11px] text-text-secondary mb-1.5">
+              API 토큰 <span className="opacity-60">— 비워 두면 앱에 내장된 토큰을 씁니다</span>
+            </label>
+            <input
+              type="password"
+              value={vacationToken}
+              onChange={(e) => setVacationToken(e.target.value)}
+              placeholder={DEFAULT_VACATION_TOKEN ? '내장 토큰 사용 중' : '앱에 토큰이 없습니다 — 입력해 주세요'}
               className="w-full bg-bg-primary border border-bg-border rounded-md px-2.5 py-2 text-[12px] font-mono text-text-primary focus:outline-none focus:border-accent mb-3"
             />
             {vacationError && (

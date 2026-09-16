@@ -18,7 +18,14 @@ export const SUPABASE_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co';
 // 예시: 'https://script.google.com/macros/s/AKfycb.../exec'
 export const DEFAULT_GAS_IMAGE_URL = 'https://script.google.com/macros/s/AKfycbwse8JuJug4dx8-zVdnoRizlp03lwbSKc9YOH2-40PAEX5tWGKMzC3WJx6zIvNEc9PC/exec';
 
-// ─── 휴가 관리 Apps Script 웹 앱 기본 URL ──────────────────
-export const DEFAULT_VACATION_URL = 'https://script.google.com/macros/s/AKfycbx82kD3CV_0saumS9i1EDfin_GRLNemL5FOeUHgp5diZn6Mt91mduRTBImiwHtutfHI/exec';
+// ─── 휴가 관리 API 기본 URL ────────────────────────────────
+// 2026-09 이관: 구 Apps Script 웹 앱 → Supabase Edge Function(vacation-api).
+// 응답 계약(필드·상태 문자열)은 동결되어 그대로다 — 주소와 인증 헤더만 바뀐다.
+export const DEFAULT_VACATION_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co/functions/v1/vacation-api';
+
+// ─── 휴가 API 토큰 (x-bflow-token) ─────────────────────────
+// 빌드타임 주입: `.env.local` 의 BFLOW_VACATION_TOKEN 을 vite define 이 치환한다(.env* 는 gitignore).
+// **실값을 레포에 커밋하지 않는다.** 비어 있으면 vacation-config.json 의 apiToken(설정 화면 입력란)으로 폴백한다.
+export const DEFAULT_VACATION_TOKEN = __BFLOW_VACATION_TOKEN__;
 
 // URL이 비어있으면 자동 연결을 건너뜁니다.

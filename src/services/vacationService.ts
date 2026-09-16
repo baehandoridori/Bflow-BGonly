@@ -23,8 +23,11 @@ export async function saveVacationConfig(config: VacationConfig): Promise<void> 
 
 // ─── 연결 ─────────────────────────────────────────────────────
 
-export async function connectVacation(url: string): Promise<{ ok: boolean; error: string | null }> {
-  return window.electronAPI.vacationConnect(url);
+export async function connectVacation(
+  url: string,
+  apiToken?: string
+): Promise<{ ok: boolean; error: string | null }> {
+  return window.electronAPI.vacationConnect(url, apiToken);
 }
 
 export async function checkVacationConnection(): Promise<boolean> {

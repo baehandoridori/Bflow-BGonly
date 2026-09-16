@@ -68,7 +68,7 @@ import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { installEditableFocusRecovery } from '@/utils/editableFocus';
-import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL, DEFAULT_VACATION_TOKEN } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { SvgIconDefs } from '@/components/SvgIconDefs';
@@ -951,8 +951,10 @@ export default function App() {
         // 휴가 API 자동 연결 (저장된 URL 또는 기본 URL로 시도)
         const vacConfig = await loadVacationConfig();
         const vacUrlToConnect = vacConfig?.webAppUrl || DEFAULT_VACATION_URL;
+        // 토큰은 빌드에 박힌 값이 기본. 설정 파일에 넣어 둔 값이 있으면 그쪽이 우선한다(폴백·긴급 교체용).
+        const vacTokenToUse = vacConfig?.apiToken || DEFAULT_VACATION_TOKEN;
         if (vacUrlToConnect) {
-          const vacResult = await connectVacation(vacUrlToConnect);
+          const vacResult = await connectVacation(vacUrlToConnect, vacTokenToUse);
           if (vacResult.ok) {
             setVacationConnected(true);
           }
