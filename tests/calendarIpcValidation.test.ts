@@ -4589,7 +4589,7 @@ function calendarStoreTestPlugin(): Plugin {
 async function bundledCalendarStoreSource(): Promise<string> {
   storeBundle ??= build({
     stdin: {
-      contents: "export * from './electron/calendarStore.ts';",
+      contents: "export * from './electron/calendarStore.ts'; import { setCalendarSessionTokenResolver } from './electron/calendarStore.ts'; setCalendarSessionTokenResolver({ tokenFor: id => 'token-' + id });",
       resolveDir: process.cwd(),
       sourcefile: 'calendar-store-strict-read-entry.ts',
     },
@@ -4603,68 +4603,20 @@ async function bundledCalendarStoreSource(): Promise<string> {
   return storeBundle;
 }
 
-test('calendar store deterministically drains every calendar member page past a server row cap', async () => {
+test('calendar store receives all authorized members in one session snapshot, past the row cap', async () => {
   const globalScope = globalThis as Record<string, unknown>;
-  const hadPrior = Object.prototype.hasOwnProperty.call(globalScope, STORE_HARNESS_KEY);
   const prior = globalScope[STORE_HARNESS_KEY];
-  const calendar = calendarRow({ id: 'calendar-shared', visibility: 'members' });
-  const memberPages = [
-    Array.from({ length: 1000 }, (_, index) => ({
-      calendar_id: 'calendar-shared',
-      user_id: `user-${String(index).padStart(4, '0')}`,
-      can_edit: index % 2 === 0,
-    })),
-    [{ calendar_id: 'calendar-shared', user_id: 'user-1000', can_edit: false }],
-  ];
-  const ranges: Array<[number, number]> = [];
-  const memberOrders: string[][] = [];
-  let memberPage = 0;
-
-  const from = (table: string) => {
-    const orders: string[] = [];
-    const query = {
-      select: () => query,
-      order: (column: string) => {
-        orders.push(column);
-        return query;
-      },
-      range: async (start: number, end: number) => {
-        assert.equal(table, 'calendar_members');
-        ranges.push([start, end]);
-        memberOrders.push([...orders]);
-        return { data: memberPages[memberPage++] ?? [], error: null };
-      },
-      then: (
-        resolve: (value: { data: unknown; error: null }) => unknown,
-        reject: (reason?: unknown) => unknown,
-      ) => Promise.resolve(
-        table === 'calendars'
-          ? { data: [calendar], error: null }
-          : { data: memberPages[0], error: null },
-      ).then(resolve, reject),
-    };
-    return query;
-  };
-  globalScope[STORE_HARNESS_KEY] = { from };
+  const members = Array.from({length:1001}, (_, i) => ({user_id: `user-${i}`}));
+  const calls: unknown[] = [];
+  globalScope[STORE_HARNESS_KEY] = { rpc: async (name: string, args: unknown) => {
+    calls.push({name,args}); return {data:{calendars:[calendarRow()], members},error:null};
+  }};
   try {
     const encoded = Buffer.from(await bundledCalendarStoreSource()).toString('base64');
-    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`) as {
-      listCalendarsWithMembers(): Promise<{ calendars: unknown[]; members: Array<{ user_id: string }> }>;
-    };
-
-    const result = await store.listCalendarsWithMembers();
-    assert.equal(result.members.length, 1001);
-    assert.equal(result.members[0]?.user_id, 'user-0000');
-    assert.equal(result.members.at(-1)?.user_id, 'user-1000');
-    assert.deepEqual(ranges, [[0, 999], [1000, 1999]]);
-    assert.deepEqual(memberOrders, [
-      ['calendar_id', 'user_id'],
-      ['calendar_id', 'user_id'],
-    ]);
-  } finally {
-    if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
-    else delete globalScope[STORE_HARNESS_KEY];
-  }
+    const store = await import(`data:text/javascript;base64,${encoded}#calendar-store-${storeNonce++}`);
+    assert.equal((await store.listCalendarsWithMembers('actor')).members.length, 1001);
+    assert.deepEqual(calls,[{name:'calendar_session_list',args:{p_session_token:'token-actor'}}]);
+  } finally { globalScope[STORE_HARNESS_KEY] = prior; }
 });
 
 test('calendar store pages one actor-authorized event RPC without accepting caller-computed calendar ids', async () => {
@@ -4717,14 +4669,14 @@ test('calendar store pages one actor-authorized event RPC without accepting call
     assert.equal(events.at(-1)?.id, 'event-1000');
     assert.deepEqual(calls, [
       {
-        name: 'list_calendar_events_authorized',
-        args: { p_actor_id: 'member-user', p_from: '2026-08-01', p_to: '2026-08-31' },
+        name: 'calendar_session_events',
+        args: { p_session_token: 'token-member-user', p_from: '2026-08-01', p_to: '2026-08-31' },
         orders: ['start_date', 'id'],
         range: [0, 999],
       },
       {
-        name: 'list_calendar_events_authorized',
-        args: { p_actor_id: 'member-user', p_from: '2026-08-01', p_to: '2026-08-31' },
+        name: 'calendar_session_events',
+        args: { p_session_token: 'token-member-user', p_from: '2026-08-01', p_to: '2026-08-31' },
         orders: ['start_date', 'id'],
         range: [1000, 1999],
       },
@@ -4744,14 +4696,14 @@ test('calendar store soft-reads only an exactly missing authorized event RPC bef
     {
       error: {
         code: 'PGRST202',
-        message: 'Could not find the function public.list_calendar_events_authorized in the schema cache',
+        message: 'Could not find the function public.calendar_session_events in the schema cache',
       },
       empty: true,
     },
     {
       error: {
         code: '42883',
-        message: 'function public.list_calendar_events_authorized(text,date,date) does not exist',
+        message: 'function public.calendar_session_events(text,date,date) does not exist',
       },
       empty: true,
     },
@@ -4765,7 +4717,7 @@ test('calendar store soft-reads only an exactly missing authorized event RPC bef
     {
       error: {
         code: '08006',
-        message: 'temporary connection failure while calling list_calendar_events_authorized',
+        message: 'temporary connection failure while calling calendar_session_events',
       },
       empty: false,
     },
@@ -5424,9 +5376,9 @@ test('calendar store sends exact authorized RPC arguments and returns typed even
   const updated = calendarEventRow({ calendar_id: 'calendar-2', title: '이동됨' });
   const deleted = calendarEventRow();
   const harness = calendarStoreRpcHarness((name) => ({
-    data: name === 'create_calendar_event_authorized'
+    data: name === 'calendar_session_event_create'
       ? [created]
-      : name === 'update_calendar_event_authorized'
+      : name === 'calendar_session_event_update'
         ? [updated]
         : [deleted],
     error: null,
@@ -5470,13 +5422,13 @@ test('calendar store sends exact authorized RPC arguments and returns typed even
 
     assert.deepEqual(harness.calls, [
       {
-        name: 'create_calendar_event_authorized',
-        args: { p_actor_id: 'session-user', p_event: createInput },
+        name: 'calendar_session_event_create',
+        args: { p_session_token: 'token-session-user', p_event: createInput },
       },
       {
-        name: 'update_calendar_event_authorized',
+        name: 'calendar_session_event_update',
         args: {
-          p_actor_id: 'session-user',
+          p_session_token: 'token-session-user',
           p_event_id: 'event-1',
           p_expected_calendar_id: 'calendar-1',
           p_updates: { calendar_id: 'calendar-2', title: '이동됨', memo: null },
@@ -5520,8 +5472,8 @@ test('calendar store sends the final tag list and actor only to the authorized r
 
     assert.deepEqual(await store.saveTags(tags, 'session-admin'), tags);
     assert.deepEqual(harness.calls, [{
-      name: 'replace_calendar_tags_authorized',
-      args: { p_actor_id: 'session-admin', p_tags: tags },
+      name: 'calendar_session_tags_save',
+      args: { p_session_token: 'token-session-admin', p_tags: tags },
     }]);
   } finally {
     if (hadPrior) globalScope[STORE_HARNESS_KEY] = prior;
@@ -5958,4 +5910,28 @@ test('popup calendar reconnect subscription skips the first join and catches up 
     cleanup();
     assert.equal(cleanups, 1);
   });
+});
+
+test('canonical overview administrator sees hidden calendars with unchanged event write permissions', async () => {
+  const administrator = 'fcc4b438-2696-4e88-a03f-d6f34e73e08f';
+  const hidden = calendarRow({id:'private-other', owner_id:'other', visibility:'private', is_personal:true});
+  const harness = await createIpcHarness({
+    getUserRole: async () => 'admin',
+    ensurePersonalCalendar: async () => {},
+    listCalendarsWithMembers: async () => ({calendars:[hidden],members:[]}),
+    getCalendarWithMembers: async () => ({calendar:hidden,members:[]}),
+  }, administrator);
+  try {
+    const rows = await harness.invoke('calendar:list') as Array<{is_admin_overview:boolean;can_edit:boolean;can_manage:boolean}>;
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].is_admin_overview,true);
+    assert.equal(rows[0].can_edit,false);
+    assert.equal(rows[0].can_manage,false);
+    await assert.rejects(harness.invoke('calendar:events:create', {
+      calendar_id:hidden.id,title:'금지',memo:null,tag_id:null,all_day:true,start_date:'2026-09-16',end_date:'2026-09-16',
+      start_time:null,end_time:null,linked_episode:null,linked_part:null,linked_sheet_name:null,linked_scene_id:null,linked_department:null,linked_todo_id:null,
+    }), /권한/);
+  } finally { harness.restore(); }
+  const otherAdmin = await createIpcHarness({getUserRole:async()=> 'admin',ensurePersonalCalendar:async()=>{},listCalendarsWithMembers:async()=>({calendars:[hidden],members:[]})}, 'another-admin');
+  try { assert.deepEqual(await otherAdmin.invoke('calendar:list'),[]); } finally { otherAdmin.restore(); }
 });

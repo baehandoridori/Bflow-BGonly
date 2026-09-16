@@ -38,7 +38,7 @@ type CanvasProps = {selected: string[]; statusFilter: string; projects:GanttProj
 type InspectorProps = {displayProgress?:number;onAddChild(): void; onDelete(): void; onComplete():void; onSaveTask(patch: Partial<GanttTask>, expectedRevision?:number): Promise<GanttProject|void>;onDraftProgress(projectId:string,taskId:string,progress:number|null):void;onRegisterCloseGuard(guard:(()=>Promise<boolean>)|null):void};
 const bundle = build({
   entryPoints: ['src/features/gantt/GanttView.tsx'], bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false,
-  external: ['react', 'react/jsx-runtime', 'lucide-react', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useCalendarStore', '@/utils/calcStats', './useGanttStore', './GanttCanvas', './GanttDialogs', './GanttInspector', './GanttSelect', './GanttTree', './gantt.css'],
+  external: ['./CalendarImportDialog', 'react', 'react/jsx-runtime', 'lucide-react', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useCalendarStore', '@/utils/calcStats', './useGanttStore', './GanttCanvas', './GanttDialogs', './GanttInspector', './GanttSelect', './GanttTree', './gantt.css'],
 });
 
 function elements(node: ReactNode, type?: unknown): Element[] {
@@ -112,6 +112,7 @@ async function harness(storage = new Map<string,string>()) {
       if (name === './GanttInspector') return {GanttInspector: Inspector};
       if (name === './GanttSelect') return {GanttSelect:Select};
       if (name === './GanttTree') return {GanttTree:Tree};
+      if (name === './CalendarImportDialog') return {CalendarImportDialog:Empty};
       if (name === './gantt.css') return {};
       if (name === 'lucide-react') return new Proxy({}, {get: () => Empty});
       return nodeRequire(name);

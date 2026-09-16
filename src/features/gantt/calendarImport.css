@@ -1,0 +1,19 @@
+.gantt-modal:has(.calendar-import){width:min(720px,calc(100vw - 32px));max-height:calc(100vh - 32px)}
+.calendar-import{display:flex;flex-direction:column;gap:14px;min-height:0}
+.calendar-import-intro{margin:0;color:var(--g-muted);font-size:12px;line-height:1.65}
+.calendar-import .gantt-field{min-width:0;margin:0}.calendar-import .gantt-field>small{font-weight:400;color:var(--g-muted)}
+.calendar-import .gantt-select{width:100%;max-width:none}.calendar-import .gantt-select>div>button{width:100%}
+.calendar-import-audience{padding:9px 12px;border-radius:8px;background:rgb(var(--color-bg-primary)/.65);font-size:11px;color:var(--g-muted);line-height:1.7}
+.calendar-import-audience p{margin:0;overflow-wrap:anywhere}
+.calendar-import-list-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}.calendar-import-list-heading strong span{font-weight:400;color:var(--g-muted)}
+.calendar-import-list-heading>div{display:flex;gap:4px}.calendar-import-list-heading button{font-size:11px;padding:4px 7px}
+.calendar-import-list{max-height:320px;min-height:96px;overflow:auto;border:1px solid rgb(var(--color-bg-border)/.65);border-radius:8px}
+.calendar-import-list>p{padding:24px 12px;text-align:center;color:var(--g-muted);font-size:12px}
+.calendar-import-event{display:flex;align-items:center;gap:10px;padding:11px 12px;cursor:pointer;border-bottom:1px solid rgb(var(--color-bg-border)/.35)}
+.calendar-import-event:last-child{border-bottom:0}.calendar-import-event:hover{background:rgb(var(--color-accent)/.05)}
+.calendar-import-event input{accent-color:rgb(var(--color-accent));width:15px;height:15px;flex:none}.calendar-import-dot{width:7px;height:7px;border-radius:50%;flex:none}
+.calendar-import-event-info{display:flex;flex:1;flex-direction:column;gap:3px;min-width:0}.calendar-import-event-info strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}.calendar-import-event small{color:var(--g-muted);font-size:10px;font-variant-numeric:tabular-nums}.calendar-import-event.imported{opacity:.55;cursor:default}
+.calendar-import-spacer{flex:1}.calendar-import .gantt-dialog-actions{margin-top:0}.calendar-import .gantt-error{margin:0;padding:0;font-size:12px}
+@media(max-width:650px){.calendar-import .gantt-pair{grid-template-columns:1fr}.calendar-import-list-heading{align-items:flex-start;flex-direction:column}.calendar-import-list{max-height:240px}}
+
+.gantt-import-notice{display:flex;align-items:center;gap:8px;padding:7px 14px;flex:none;color:var(--g-success);font-size:12px}.gantt-import-notice button{display:flex;padding:3px}

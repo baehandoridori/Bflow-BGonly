@@ -38,10 +38,18 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - 삭제·복원에도 revision은 증가한다. 비공개 `gantt_entity_revisions`와 preview의 revision 기록을 유지하며, 과거 삭제 기록에서 최종 revision을 복구할 수 없는 ID는 재사용을 거부한다. 새 DB에는 `20260905173804_gantt_revision_ledger.sql`까지 적용한다.
 - 실제 앱은 preload → 세션 epoch를 확인하는 `ganttIpc.ts` → `ganttStore.ts` → 서버 로그인 토큰을 받는 `gantt_session_read/gantt_session_execute` RPC를 사용한다. 내부 `gantt_read/gantt_execute`와 테이블 직접 접근은 anon에 허용하지 않는다. 폴더와 프로젝트 정본은 `gantt_spaces`/`gantt_projects`이다.
 - 연결 캘린더 일정은 작업의 projection(`gantt:<projectId>:<taskId>`)이다. `calendar_events`에 별도 복제하지 않는다. UUID만 받는 기존 이벤트 RPC/알림 외래키로 이 ID를 보내지 않는다.
+- 캘린더 → 간트 가져오기는 읽을 수 있는 B flow 일정의 독립 복사본을 기존 프로젝트에 `saveProject` revision CAS로 저장한다. 원본은 수정하지 않으며, `tasks[].importedCalendarEvent` 출처 정보로 프로젝트 안 중복을 막는다. 출처는 권한이나 역방향 연결이 아니므로 `calendarId/calendarEventId`를 채우지 않고 간트 projection은 다시 가져오지 않는다.
 - 연결 일정의 `gantt_color`/`ganttColor`는 작업 → 가장 가까운 상위 그룹 → 프로젝트 순서로 상속한 색이다. 일반 일정의 캘린더 색 규칙과 구분하며 `20260905210416_gantt_calendar_color.sql`을 적용한다. 시간표의 마일스톤 표시 높이는 화면용이고 정본 기간은 0분을 유지한다.
 - `linked_gantt_task_kind`가 확인된 마일스톤만 시작·종료가 같은 시각을 허용한다. 캘린더 삭제는 작업을 보존하고 연결만 해제한다. 원격 로그인 사용 시 복원 토큰이 없는 기억된 계정은 재로그인 화면으로 안내한다.
 - preview는 공용 명령·권한을 사용하되 localStorage를 Web Locks로 직렬화한다. 기존 캘린더 authority 전체를 덮어쓰지 않는다. Realtime/BroadcastChannel은 재조회 신호만 전송한다.
 - 새 DB에는 간트 기본 스키마, containment, app-sessions 인증, password-lockdown 및 후속 간트 릴리스 migration을 순서대로 적용한다. 운영 적용 기록을 먼저 확인해 이전 권한을 다시 열지 않는다. `app_login`이 확인한 세션 토큰과 DB ACL을 함께 사용하며, 호출자가 보낸 actor 인자를 본인 인증으로 해석하지 않는다.
+
+### 캘린더 관리자 열람·다중 태그 (v1.120.0)
+
+- `calendar_session_list/events`는 main의 서버 세션 토큰으로 조회한다. 배한솔의 고정 사용자 ID와 `admin` 역할을 모두 확인한 경우에만 다른 사용자의 미공유 캘린더를 읽을 수 있다. `isAdminOverview` 행은 접힌 관리자 목록에 표시하며, 일정 표시 체크는 기본 on이다. 열람 특례는 일정 편집이나 간트 프로젝트 열람 권한을 추가하지 않는다.
+- 일정 태그의 정본은 `calendar_events.tag_ids` 배열이며 `tag_id`는 첫 태그로 동기화해 기존 클라이언트와 호환한다. 빈 배열은 전체 해제, 기존 단일 태그만 있는 행은 한 항목 배열로 읽는다. 여러 태그 중 켜진 태그가 하나라도 있으면 일정을 표시한다.
+- 태그 카탈로그 변경은 `calendar_session_tags_save`가 서버 세션과 관리자 역할을 검증한다. 삭제는 일정 자체를 보존하고 해당 태그 연결만 제거한다. 새 앱 배포 전 `DEVLOG/migrations/2026-09-16-calendar-admin-overview-tags.sql` 적용이 필요하며, 적용 후 구버전 태그 관리 화면은 업데이트가 필요하다.
+- 생성 확인은 `loadAll({ waitForLatest: true })`로 실시간 재조회의 최종 결과를 기다린다. 간트 생성 응답이 유실되면 동일한 생성 ID·내용이 정본에 저장됐는지 확인하며, 확인 없이 쓰기를 재전송하지 않는다.
 
 ### 팀 할 일 경계 (v1.118.0)
 

@@ -23,6 +23,7 @@ function eventChangeKey(event: CalendarEvent): string {
     createdAt: event.createdAt,
     calendarId: event.calendarId,
     tagId: event.tagId,
+    tagIds: event.tagIds ?? (event.tagId ? [event.tagId] : []),
     linkedEpisode: event.linkedEpisode,
     linkedPart: event.linkedPart,
     linkedSheetName: event.linkedSheetName,

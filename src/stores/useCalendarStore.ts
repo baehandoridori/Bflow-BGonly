@@ -9,6 +9,8 @@ const OPTIMISTIC_CALENDAR_ID_PREFIX = 'optimistic-calendar:';
 const OPTIMISTIC_TAG_ID_PREFIX = 'optimistic-tag:';
 let loadAllGeneration = 0;
 let calendarStoreSessionUserId = useAuthStore.getState().currentUser?.id ?? null;
+let calendarStoreSessionGeneration = 0;
+let latestCalendarMetadataLoad: Promise<CalendarMetadataFreshness> | null = null;
 
 export interface CalendarMetadataFreshness {
   calendarsFresh: boolean;
@@ -72,7 +74,7 @@ export interface CalendarState {
   visibleCalendarIds: Record<string, boolean>;
   enabledTagIds: Record<string, boolean>;
   mutedCalendarIds: string[];
-  loadAll(): Promise<CalendarMetadataFreshness>;
+  loadAll(options?: { waitForLatest?: boolean }): Promise<CalendarMetadataFreshness>;
   toggleCalendarVisible(id: string): void;
   toggleTag(id: string): void;
   resetTagsAllOn(): void;
@@ -278,94 +280,115 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   enabledTagIds: loadExplicitFalseRecords(ENABLED_TAGS_KEY),
   mutedCalendarIds: loadMutedCalendarIds(),
 
-  async loadAll() {
+  async loadAll(options = {}) {
     const requestUserId = useAuthStore.getState().currentUser?.id ?? null;
     resetCalendarStoreSession(requestUserId);
+    const requestSessionGeneration = calendarStoreSessionGeneration;
     const requestGeneration = ++loadAllGeneration;
-    const [calendarResult, tagResult] = await Promise.allSettled([
-      window.electronAPI.calendarList(),
-      window.electronAPI.calendarTagsList(),
-    ]);
-    const next: Partial<Pick<
-      CalendarState,
-      'calendars' | 'tags' | 'optimisticDeletedCalendarIds' | 'optimisticDeletedTagIds'
-    >> = {};
-    let canonicalCalendars: BflowCalendar[] | undefined;
-    let canonicalTags: CalendarTag[] | undefined;
+    const readMetadata = async (): Promise<CalendarMetadataFreshness> => {
+      const [calendarResult, tagResult] = await Promise.allSettled([
+        window.electronAPI.calendarList(),
+        window.electronAPI.calendarTagsList(),
+      ]);
+      const next: Partial<Pick<
+        CalendarState,
+        'calendars' | 'tags' | 'optimisticDeletedCalendarIds' | 'optimisticDeletedTagIds'
+      >> = {};
+      let canonicalCalendars: BflowCalendar[] | undefined;
+      let canonicalTags: CalendarTag[] | undefined;
 
-    if (calendarResult.status === 'fulfilled') {
-      canonicalCalendars = calendarResult.value.map((row) => ({
-          id: row.id,
-          name: row.name,
-          color: row.color,
-          visibility: row.visibility,
-          ownerId: row.owner_id,
-          isPersonal: row.is_personal,
-          members: row.members.map((member) => ({
-            userId: member.user_id,
-            canEdit: member.can_edit,
-          })),
-          canEdit: row.can_edit,
-          canManage: row.can_manage,
-          createdAt: row.created_at,
-        }));
-    } else {
-      console.warn('[Calendar] 캘린더 목록 로드 실패:', calendarResult.reason);
-    }
-
-    if (tagResult.status === 'fulfilled') {
-      canonicalTags = tagResult.value.map((row) => ({
-          id: row.id,
-          name: row.name,
-          color: row.color,
-          sortOrder: row.sort_order,
-        }));
-    } else {
-      console.warn('[Calendar] 캘린더 태그 로드 실패:', tagResult.reason);
-    }
-
-    // 독립 요청의 실패는 마지막으로 성공한 다른 메타데이터를 지우지 않는다.
-    if (
-      requestGeneration !== loadAllGeneration
-      || requestUserId !== calendarStoreSessionUserId
-      || requestUserId !== (useAuthStore.getState().currentUser?.id ?? null)
-    ) return { calendarsFresh: false, tagsFresh: false };
-    if (canonicalCalendars) {
-      const canonical = cloneCalendars(canonicalCalendars);
-      if (requestUserId) {
-        calendarCanonicalByActor.set(requestUserId, {
-          revision: ++nextCalendarCanonicalRevision,
-          calendars: cloneCalendars(canonical),
-        });
+      if (calendarResult.status === 'fulfilled') {
+        canonicalCalendars = calendarResult.value.map((row) => ({
+            id: row.id,
+            name: row.name,
+            color: row.color,
+            visibility: row.visibility,
+            ownerId: row.owner_id,
+            isPersonal: row.is_personal,
+            members: row.members.map((member) => ({
+              userId: member.user_id,
+              canEdit: member.can_edit,
+            })),
+            canEdit: row.can_edit,
+            canManage: row.can_manage,
+            ...(row.is_admin_overview ? { isAdminOverview: true } : {}),
+            createdAt: row.created_at,
+          }));
+      } else {
+        console.warn('[Calendar] 캘린더 목록 로드 실패:', calendarResult.reason);
       }
-      const registered = requestUserId ? calendarOptimisticByActor.get(requestUserId) : undefined;
-      next.calendars = registered && requestUserId
-        ? applyCalendarOptimisticOverlay(requestUserId, canonical, registered.overlay, true)
-        : canonical;
-      next.optimisticDeletedCalendarIds = optimisticDeletedCalendarIds(registered);
-    }
-    if (canonicalTags) {
-      const canonical = cloneTags(canonicalTags);
-      if (requestUserId) {
-        tagCanonicalByActor.set(requestUserId, {
-          revision: ++nextTagCanonicalRevision,
-          tags: cloneTags(canonical),
-        });
+
+      if (tagResult.status === 'fulfilled') {
+        canonicalTags = tagResult.value.map((row) => ({
+            id: row.id,
+            name: row.name,
+            color: row.color,
+            sortOrder: row.sort_order,
+          }));
+      } else {
+        console.warn('[Calendar] 캘린더 태그 로드 실패:', tagResult.reason);
       }
-      const registered = requestUserId ? tagOptimisticByActor.get(requestUserId) : undefined;
-      next.tags = registered ? cloneTags(registered.tags) : canonical;
-      next.optimisticDeletedTagIds = registered ? [...registered.deletedTagIds] : [];
-    }
-    set((state) => ({
-      ...next,
-      // loaded는 개인 캘린더 저장 경로를 결정하는 준비 상태다. 태그만 성공한
-      // 최초 요청에서는 true로 올리지 않아 다음 쓰기가 캘린더 목록을 재시도한다.
-      loaded: state.loaded || calendarResult.status === 'fulfilled',
-    }));
-    return {
-      calendarsFresh: calendarResult.status === 'fulfilled',
-      tagsFresh: tagResult.status === 'fulfilled',
+
+      // 독립 요청의 실패는 마지막으로 성공한 다른 메타데이터를 지우지 않는다.
+      if (
+        requestGeneration !== loadAllGeneration
+        || requestUserId !== calendarStoreSessionUserId
+        || requestUserId !== (useAuthStore.getState().currentUser?.id ?? null)
+      ) return { calendarsFresh: false, tagsFresh: false };
+      if (canonicalCalendars) {
+        const canonical = cloneCalendars(canonicalCalendars);
+        if (requestUserId) {
+          calendarCanonicalByActor.set(requestUserId, {
+            revision: ++nextCalendarCanonicalRevision,
+            calendars: cloneCalendars(canonical),
+          });
+        }
+        const registered = requestUserId ? calendarOptimisticByActor.get(requestUserId) : undefined;
+        next.calendars = registered && requestUserId
+          ? applyCalendarOptimisticOverlay(requestUserId, canonical, registered.overlay, true)
+          : canonical;
+        next.optimisticDeletedCalendarIds = optimisticDeletedCalendarIds(registered);
+      }
+      if (canonicalTags) {
+        const canonical = cloneTags(canonicalTags);
+        if (requestUserId) {
+          tagCanonicalByActor.set(requestUserId, {
+            revision: ++nextTagCanonicalRevision,
+            tags: cloneTags(canonical),
+          });
+        }
+        const registered = requestUserId ? tagOptimisticByActor.get(requestUserId) : undefined;
+        next.tags = registered ? cloneTags(registered.tags) : canonical;
+        next.optimisticDeletedTagIds = registered ? [...registered.deletedTagIds] : [];
+      }
+      set((state) => ({
+        ...next,
+        // loaded는 개인 캘린더 저장 경로를 결정하는 준비 상태다. 태그만 성공한
+        // 최초 요청에서는 true로 올리지 않아 다음 쓰기가 캘린더 목록을 재시도한다.
+        loaded: state.loaded || calendarResult.status === 'fulfilled',
+      }));
+      return {
+        calendarsFresh: calendarResult.status === 'fulfilled',
+        tagsFresh: tagResult.status === 'fulfilled',
+      };
     };
+    let pending = readMetadata();
+    latestCalendarMetadataLoad = pending;
+    if (!options.waitForLatest) return pending;
+    // A create/update also emits Realtime invalidations. Its confirmation read
+    // can be superseded by those reads without any network request failing.
+    // Follow the latest read instead of treating an unapplied snapshot as failure.
+    while (true) {
+      const result = await pending;
+      if (requestSessionGeneration !== calendarStoreSessionGeneration) {
+        return { calendarsFresh: false, tagsFresh: false };
+      }
+      if (latestCalendarMetadataLoad && latestCalendarMetadataLoad !== pending) {
+        pending = latestCalendarMetadataLoad;
+        continue;
+      }
+      return result;
+    }
   },
 
   upsertCalendarOptimistically(actorId, calendar) {
@@ -508,6 +531,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 function resetCalendarStoreSession(userId: string | null): void {
   if (userId === calendarStoreSessionUserId) return;
   calendarStoreSessionUserId = userId;
+  calendarStoreSessionGeneration += 1;
+  latestCalendarMetadataLoad = null;
   loadAllGeneration += 1;
   const registered = userId ? calendarOptimisticByActor.get(userId) : undefined;
   const canonical = userId ? calendarCanonicalByActor.get(userId) : undefined;

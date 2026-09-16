@@ -1,3 +1,5 @@
+import { EventTagManagerButton } from './EventTagManagerButton';
+import { toggleEventTag } from './eventTagPresentation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CalendarDays, X } from 'lucide-react';
@@ -74,7 +76,7 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
   const [startTime, setStartTime] = useState(initialStartTime ?? '');
   const [endDate, setEndDate] = useState(initialEndDate ?? initialDate ?? today);
   const [endTime, setEndTime] = useState(initialEndTime ?? '');
-  const [tagId, setTagId] = useState<string | undefined>();
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [evType, setEvType] = useState<CalendarEventType>('custom');
   const [memo, setMemo] = useState('');
   const [linkedEp, setLinkedEp] = useState<number | ''>('');
@@ -132,20 +134,27 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
         : `${episodeLabel} ${part.partId}파트 (${departmentLabel}) — 씬 선택...`);
   }, [episodeTitles, episodes, evType, linkedEp, linkedPart, linkedScene, selectedEpParts]);
 
-  const selectedTagUnavailable = Boolean(tagId && (
+  const unavailableTagIds = tagIds.filter((tagId) => (
     isOptimisticCalendarTagId(tagId)
     || deletedTagIds.has(tagId)
     || (!selectableTagIds.has(tagId) && canonicalTagIds !== null && !canonicalTagIds.has(tagId))
   ));
-
+  // Pending catalog deletion must not destroy the unsaved selection: a rejected
+  // tag operation restores the catalog and should restore these chips as well.
+  const visibleTagIds = tagIds.filter((id) => !unavailableTagIds.includes(id));
+  const confirmedUnavailableTagIds = unavailableTagIds.filter((id) => (
+    isOptimisticCalendarTagId(id)
+    || (canonicalTagIds !== null && !canonicalTagIds.has(id) && !selectableTagIds.has(id))
+  ));
+  const confirmedUnavailableTagKey = confirmedUnavailableTagIds.join(',');
   useEffect(() => {
-    if (selectedTagUnavailable) setTagId(undefined);
-  }, [selectedTagUnavailable, tagId]);
+    if (confirmedUnavailableTagKey) setTagIds((current) => current.filter((id) => !confirmedUnavailableTagIds.includes(id)));
+  }, [confirmedUnavailableTagKey]);
 
   const changeCalendar = (calendarId: string) => {
     userSelectedCalendarRef.current = true;
     setSelectedCalendarId(calendarId);
-    if (calendarId === GOOGLE_CALENDAR_OPTION) setTagId(undefined);
+    if (calendarId === GOOGLE_CALENDAR_OPTION) setTagIds([]);
   };
 
   const changeStartTime = (time: string) => {
@@ -178,7 +187,7 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
 
   const handleSubmit = async () => {
     if (!canSubmit || saving) return;
-    const persistedTagId = tagId && !selectedTagUnavailable ? tagId : undefined;
+    const persistedTagIds = tagIds.filter((id) => !unavailableTagIds.includes(id));
     setSaveError(null);
     setSaving(true);
     try {
@@ -191,7 +200,8 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
         endDate: endDate < startDate ? startDate : endDate,
         createdBy: currentUser?.name ?? '알 수 없음',
         ...(isGoogle ? {} : { calendarId: selectedCalendarId }),
-        tagId: isGoogle ? undefined : persistedTagId,
+        tagId: isGoogle ? undefined : persistedTagIds[0],
+        tagIds: isGoogle ? undefined : persistedTagIds,
         allDay,
         startTime: allDay ? undefined : startTime,
         endTime: allDay ? undefined : endTime,
@@ -283,11 +293,11 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">태그</label>
+            <div className="flex items-center justify-between"><label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">태그 <span className="font-normal normal-case tracking-normal">· 여러 개 선택</span></label><EventTagManagerButton disabled={saving || isGoogle} /></div>
             <div className="flex flex-wrap gap-1.5 mt-1.5">
-              <button type="button" aria-label="태그 없음" aria-pressed={tagId === undefined} disabled={isGoogle} onClick={() => setTagId(undefined)} className={cn('px-2.5 py-1.5 rounded-full text-[11px] transition-colors', tagId === undefined ? 'bg-accent/20 text-accent' : 'bg-bg-primary text-text-secondary', isGoogle ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer')}>없음</button>
+              <button type="button" aria-label="태그 없음" aria-pressed={visibleTagIds.length === 0} disabled={isGoogle} onClick={() => setTagIds([])} className={cn('px-2.5 py-1.5 rounded-full text-[11px] transition-colors', visibleTagIds.length === 0 ? 'bg-accent/20 text-accent' : 'bg-bg-primary text-text-secondary', isGoogle ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer')}>없음</button>
               {sortedTags.map((tag) => {
-                const selected = tagId === tag.id;
+                const selected = visibleTagIds.includes(tag.id);
                 return (
                   <button
                     type="button"
@@ -295,11 +305,11 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
                     aria-label={`${tag.name} 태그`}
                     aria-pressed={selected}
                     disabled={isGoogle}
-                    onClick={() => setTagId(tag.id)}
+                    onClick={() => setTagIds((current) => toggleEventTag(current, tag.id))}
                     className={cn('px-2.5 py-1.5 rounded-full text-[11px] border transition-colors', isGoogle ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer')}
                     style={selected ? { color: 'rgb(var(--color-text-primary))', borderColor: tag.color, background: `color-mix(in srgb, ${tag.color} 18%, transparent)` } : { borderColor: 'rgb(var(--color-bg-border) / 0.7)' }}
                   >
-                    {tag.name}
+                    <span className="inline-block h-1.5 w-1.5 rounded-full mr-1.5" style={{ backgroundColor: tag.color }} />{tag.name}
                   </button>
                 );
               })}

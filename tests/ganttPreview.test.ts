@@ -176,6 +176,69 @@ test('failed mutation retains its pending lock until canonical recovery finishes
  assert.equal(store.getState().pending,false);assert.equal(store.getState().snapshot.spaces[0].name,'정본');assert.match(store.getState().error!,/저장 실패/);
  await store.getState().initialize(null);
 });
+
+test('a committed new folder or project survives a lost save response without prompting a duplicate create', async (t) => {
+ for (const kind of ['space','project'] as const) await t.test(kind,async()=>{
+  const base=createPreviewGateway('u',setup()),store=createGanttStore();
+  const space=createSpace('새 폴더','u'),project=createProject('새 프로젝트',space.id,'u');
+  if(kind==='project')await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space,expectedRevision:null}});
+  let loseResponse=true,executions=0;
+  await store.getState().initialize('u',{read:base.read,execute:async request=>{
+   executions++;const saved=await base.execute(request);
+   if(loseResponse){loseResponse=false;throw new Error('저장 응답 연결 끊김');}return saved;
+  }});
+  try{
+   await assert.doesNotReject(store.getState().execute(kind==='space'
+    ?{type:'saveSpace',space,expectedRevision:null}
+    :{type:'saveProject',project,expectedRevision:null}));
+   assert.equal(executions,1,'recovery verifies the commit without another write');
+   assert.equal(store.getState().error,null);assert.equal(store.getState().canUndo,true);
+   assert.equal(kind==='space'?store.getState().snapshot.spaces.length:store.getState().snapshot.projects.length,1);
+   await store.getState().undo();
+   assert.equal(kind==='space'?store.getState().snapshot.spaces.length:store.getState().snapshot.projects.length,0);
+  }finally{await store.getState().initialize(null);}
+ });
+});
+
+test('new entity recovery does not hide a failed commit, changed entity, or failed authoritative read', async (t) => {
+ for(const failure of ['uncommitted','changed','read-failed'] as const)await t.test(failure,async()=>{
+  const base=createPreviewGateway('u',setup()),store=createGanttStore(),space=createSpace('요청한 이름','u');let reads=0;
+  await store.getState().initialize('u',{
+   read:async()=>{if(reads++>0&&failure==='read-failed')throw new Error('조회 실패');return base.read();},
+   execute:async request=>{
+    if(failure!=='uncommitted')await base.execute(request);
+    if(failure==='changed')await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:{...space,name:'다른 사람이 수정'},expectedRevision:1}});
+    throw new Error('저장 응답 실패');
+   },
+  });
+  try{
+   await assert.rejects(store.getState().execute({type:'saveSpace',space,expectedRevision:null}),/저장 응답 실패/);
+   assert.equal(reads,2,'creation recovery uses one authoritative read');
+   assert.equal(store.getState().canUndo,false);assert.equal(store.getState().pending,false);
+   assert.match(store.getState().error!,/저장 응답 실패/);
+   if(failure==='changed')assert.equal(store.getState().snapshot.spaces[0].name,'다른 사람이 수정');
+  }finally{await store.getState().initialize(null);}
+ });
+});
+
+test('creation recovery keeps its write lock and cannot overwrite a new login session', async () => {
+ const space=createSpace('이전 사용자 폴더','old'),store=createGanttStore();let reads=0;
+ let finish!:(snapshot:{spaces:typeof space[];projects:never[]})=>void,started!:()=>void;
+ const recoveryStarted=new Promise<void>(resolve=>{started=resolve;});
+ await store.getState().initialize('old',{
+  read:async()=>{if(reads++===0)return {spaces:[],projects:[]};started();return new Promise(resolve=>{finish=resolve;});},
+  execute:async()=>{throw new Error('저장 응답 끊김');},
+ });
+ const creation=store.getState().execute({type:'saveSpace',space,expectedRevision:null});
+ await recoveryStarted;
+ assert.equal(store.getState().pending,true);
+ await assert.rejects(store.getState().execute({type:'saveSpace',space:createSpace('중복 시도','old'),expectedRevision:null}),/저장하고/);
+ await store.getState().initialize('new',createPreviewGateway('new',setup()));
+ finish({spaces:[space],projects:[]});await creation;
+ assert.equal(store.getState().actorId,'new');assert.equal(store.getState().pending,false);
+ assert.equal(store.getState().snapshot.spaces.length,0);assert.equal(store.getState().canUndo,false);
+ await store.getState().initialize(null);
+});
 test('successful refresh clears an initial load error',async()=>{
  const store=createGanttStore();let reads=0;
  await store.getState().initialize('u',{read:async()=>{if(reads++===0)throw new Error('초기 연결 실패');return {spaces:[],projects:[]};},execute:async()=>({spaces:[],projects:[]})});
@@ -267,4 +330,29 @@ test('a remote revision is not mistaken for our own undo even when its final fol
  await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:{...s,name:'다른 창 수정'},expectedRevision:1}});await base.execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:s,expectedRevision:2}});await store.getState().refresh();
  const latest=store.getState().snapshot.spaces[0];await store.getState().execute({type:'saveSpace',space:{...latest,name:'내 수정'},expectedRevision:latest.revision});await store.getState().undo();
  await assert.rejects(store.getState().undo(),/다른 변경/);assert.equal((await base.read()).spaces[0].name,'원래 이름');await store.getState().initialize(null);
+});
+
+test('refresh reports true only for the applied latest read and false for superseded reads',async()=>{
+ const store=createGanttStore(), initial={spaces:[],projects:[]}, newest={spaces:[createSpace('최신 공유','u')],projects:[]};
+ const reads:Array<(snapshot:typeof initial)=>void>=[];
+ let initialized=false;
+ const gateway={read:async()=>{if(!initialized){initialized=true;return initial;}return new Promise<typeof initial>(resolve=>reads.push(resolve));},execute:async()=>initial};
+ await store.getState().initialize('u',gateway);
+ const older=store.getState().refresh(),latest=store.getState().refresh();
+ reads[0](initial);assert.equal(await older,false);assert.equal(store.getState().error,null);
+ reads[1](newest);assert.equal(await latest,true);assert.equal(store.getState().snapshot,newest);
+ await store.getState().initialize(null);
+});
+
+test('refresh reports false for session changes, missing gateway, pending mutation and failed reads',async()=>{
+ const store=createGanttStore(), initial={spaces:[],projects:[]};
+ assert.equal(await store.getState().refresh(),false);
+ let release!:(snapshot:typeof initial)=>void,initialized=false;
+ await store.getState().initialize('u',{read:async()=>{if(!initialized){initialized=true;return initial;}return new Promise<typeof initial>(resolve=>{release=resolve;});},execute:async()=>initial});
+ const stale=store.getState().refresh();await store.getState().initialize(null);release(initial);assert.equal(await stale,false);
+ await store.getState().initialize('u',{read:async()=>initial,execute:async()=>initial});
+ store.setState({pending:true});assert.equal(await store.getState().refresh(),false);store.setState({pending:false});
+ let count=0;await store.getState().initialize('u',{read:async()=>{if(count++)throw new Error('offline');return initial;},execute:async()=>initial});
+ assert.equal(await store.getState().refresh(),false);assert.match(store.getState().error!,/offline/);
+ await store.getState().initialize(null);
 });

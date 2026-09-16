@@ -32,7 +32,7 @@ function sourceOf(ev: CalendarEvent): 'bflow' | 'google' | 'vacation' | 'ics' {
   return ev.calendarId ? 'bflow' : 'google';
 }
 
-/** (켜진 캘린더) ∩ (켜진 태그). 태그 없는 일정은 태그 필터를 무시한다. */
+/** (켜진 캘린더) ∩ (켜진 태그 중 하나). 태그 없는 일정은 태그 필터를 무시한다. */
 export function filterCalendarEvents(
   events: readonly CalendarEvent[], state: CalendarFilterState,
 ): CalendarEvent[] {
@@ -50,11 +50,9 @@ export function filterCalendarEvents(
       ?? (isLegacyPrivateBflowEvent(ev) ? state.personalCalendarId : undefined);
     if (ev.calendarId && state.knownCalendarIds && !state.knownCalendarIds.has(ev.calendarId)) return false;
     if (calendarId && state.visibleCalendarIds[calendarId] === false) return false;
-    if (
-      ev.tagId
-      && !state.optimisticDeletedTagIds?.has(ev.tagId)
-      && state.enabledTagIds[ev.tagId] === false
-    ) return false;
+    const tagIds = (ev.tagIds ?? (ev.tagId ? [ev.tagId] : []))
+      .filter((id) => !state.optimisticDeletedTagIds?.has(id));
+    if (tagIds.length > 0 && !tagIds.some((id) => state.enabledTagIds[id] !== false)) return false;
     return true;
   });
 }
@@ -65,7 +63,8 @@ export function formatEventChipText(
 ): string {
   if (ev.allDay === false && ev.startTime) return `${ev.startTime} ${ev.title}`;
   const source = sourceOf(ev);
-  const prefix = (ev.tagId ? tagNameById[ev.tagId] : undefined)
+  const tagNames = (ev.tagIds ?? (ev.tagId ? [ev.tagId] : [])).map((id) => tagNameById[id]).filter(Boolean);
+  const prefix = (tagNames.length ? tagNames.join(' · ') : undefined)
     ?? (source === 'google' ? '구글' : source === 'vacation' ? '휴가'
       // 구독 이름은 캘린더 메타데이터가 아니라 일정 자체에 실려 온다(createdBy).
       : source === 'ics'
@@ -91,7 +90,7 @@ export function formatEventTimeRange(
 ): string | null {
   if (ev.allDay !== false || !ev.startTime) return null;
   const range = ev.endTime && ev.endTime !== ev.startTime ? `${ev.startTime} – ${ev.endTime}` : ev.startTime;
-  const tag = ev.tagId ? tagNameById[ev.tagId] : undefined;
+  const tag = (ev.tagIds ?? (ev.tagId ? [ev.tagId] : [])).map((id) => tagNameById[id]).filter(Boolean).join(' · ');
   return tag ? `${range} · ${tag}` : range;
 }
 
@@ -100,11 +99,13 @@ export function groupCalendarsForRail(calendars: readonly BflowCalendar[], myUse
   const mine: BflowCalendar[] = [];
   const team: BflowCalendar[] = [];
   const shared: BflowCalendar[] = [];
+  const adminOverview: BflowCalendar[] = [];
   for (const calendar of calendars) {
-    if (calendar.visibility === 'team') team.push(calendar);
+    if (calendar.isAdminOverview) adminOverview.push(calendar);
+    else if (calendar.visibility === 'team') team.push(calendar);
     else if (calendar.ownerId === myUserId) mine.push(calendar);
     else shared.push(calendar);
   }
   mine.sort((a, b) => Number(b.isPersonal) - Number(a.isPersonal));
-  return { mine, team, shared };
+  return { mine, team, shared, adminOverview };
 }

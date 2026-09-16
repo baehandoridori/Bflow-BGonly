@@ -2532,6 +2532,7 @@ function getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admi
 
 // 간트 RPC 는 actor id 대신 서버 세션 토큰을 받는다. canonical 사용자와 일치할 때만 토큰이 나간다.
 setGanttSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
+calendarStore.setCalendarSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
 registerGanttIpc({
   getSessionOriginOrThrow,
   onChanged: () => {

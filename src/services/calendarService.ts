@@ -1,3 +1,4 @@
+import { normalizeCalendarTagIds } from '@/shared/calendarTagIds';
 /**
  * 캘린더 서비스 (어댑터)
  * Google Calendar API를 기존 CalendarEvent 인터페이스로 래핑
@@ -167,7 +168,8 @@ function toCalendarEventFromBflowRow(
     ganttColor: row.gantt_color,
     sourceCalendarId: `${BFLOW_CAL_PREFIX}${row.calendar_id}`,
     calendarId: row.calendar_id,
-    tagId: row.tag_id ?? undefined,
+    tagId: normalizeCalendarTagIds(row.tag_ids, row.tag_id)[0],
+    tagIds: normalizeCalendarTagIds(row.tag_ids, row.tag_id),
     allDay: row.all_day,
     startTime: row.start_time ?? undefined,
     endTime: row.end_time ?? undefined,
@@ -1141,7 +1143,7 @@ async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Pr
   bflowLoadsInFlight += 1;
   if (bflowMutationInFlight > 0) bflowReloadRequested = true;
   try {
-    const metadataFreshness = await useCalendarStore.getState().loadAll();
+    const metadataFreshness = await useCalendarStore.getState().loadAll({ waitForLatest: true });
     if (
       requestGeneration !== bflowLoadGeneration
       || requestSessionGeneration !== bflowSessionGeneration
@@ -1682,7 +1684,10 @@ function applyBflowEventUpdates(
   let next = { ...existing };
   if (updates.title !== undefined) next.title = updates.title;
   if (updates.memo !== undefined) next.memo = updates.memo;
-  if (hasOwnEventUpdate(updates, 'tagId')) next.tagId = updates.tagId ?? undefined;
+  if (hasOwnEventUpdate(updates, 'tagIds') || hasOwnEventUpdate(updates, 'tagId')) {
+    next.tagIds = normalizeCalendarTagIds(updates.tagIds, updates.tagId);
+    next.tagId = next.tagIds[0];
+  }
   if (updates.allDay !== undefined) next.allDay = updates.allDay;
   if (updates.startDate !== undefined) next.startDate = updates.startDate;
   if (updates.endDate !== undefined) next.endDate = updates.endDate;
@@ -1710,7 +1715,10 @@ function toBflowEventUpdatePatch(updates: Partial<CalendarEvent>): BflowEventUpd
   if (updates.calendarId !== undefined) patch.calendar_id = updates.calendarId;
   if (updates.title !== undefined) patch.title = updates.title;
   if (updates.memo !== undefined) patch.memo = updates.memo;
-  if (hasOwnEventUpdate(updates, 'tagId')) patch.tag_id = updates.tagId ?? null;
+  if (hasOwnEventUpdate(updates, 'tagIds') || hasOwnEventUpdate(updates, 'tagId')) {
+    patch.tag_ids = normalizeCalendarTagIds(updates.tagIds, updates.tagId);
+    patch.tag_id = patch.tag_ids[0] ?? null;
+  }
   if (updates.allDay !== undefined) patch.all_day = updates.allDay;
   if (updates.startDate !== undefined) patch.start_date = updates.startDate;
   if (updates.endDate !== undefined) patch.end_date = updates.endDate;
@@ -1833,7 +1841,8 @@ async function addBflowEvent(
         calendar_id: calendarId,
         title: event.title,
         memo: event.memo,
-        tag_id: event.tagId ?? null,
+        tag_id: normalizeCalendarTagIds(event.tagIds, event.tagId)[0] ?? null,
+        tag_ids: normalizeCalendarTagIds(event.tagIds, event.tagId),
         all_day: event.allDay ?? true,
         start_date: event.startDate,
         end_date: event.endDate,

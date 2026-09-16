@@ -37,6 +37,7 @@ export interface CalendarEventRow {
   title: string;
   memo: string | null;
   tag_id: string | null;
+  tag_ids?: string[];
   all_day: boolean;
   start_date: string;
   end_date: string;
@@ -119,47 +120,18 @@ function requireCalendarRpcRow(data: unknown, operation: string): CalendarRow {
 
 // ── 캘린더 ──────────────────────────────────────
 
-export async function listCalendarsWithMembers(): Promise<{ calendars: CalendarRow[]; members: CalendarMemberRow[] }> {
-  const { data, error } = await supabase
-    .from('calendars')
-    .select('*')
-    .order('created_at', { ascending: true });
-  if (error) {
-    if (isMissingTable(error)) {
-      warnMissingTable('calendars', '빈 목록');
-      return { calendars: [], members: [] };
-    }
-    throwIfError(error);
-  }
+export function setCalendarSessionTokenResolver(resolver: { tokenFor(actorId: string): string }): void {
+  calendarSessionResolver = resolver;
+}
+let calendarSessionResolver = { tokenFor(_actorId: string): string { throw new Error('로그인 세션이 필요합니다. 다시 로그인해 주세요.'); } };
 
-  const pageSize = 1000;
-  const members: CalendarMemberRow[] = [];
-  let offset = 0;
-  for (;;) {
-    const { data: memberData, error: memberError } = await supabase
-      .from('calendar_members')
-      .select('calendar_id, user_id, can_edit')
-      .order('calendar_id', { ascending: true })
-      .order('user_id', { ascending: true })
-      .range(offset, offset + pageSize - 1);
-    if (memberError) {
-      if (isMissingTable(memberError)) {
-        warnMissingTable('calendar_members', '빈 목록');
-        return { calendars: [], members: [] };
-      }
-      throwIfError(memberError);
-    }
-
-    const rows = (memberData ?? []) as CalendarMemberRow[];
-    members.push(...rows);
-    if (rows.length < pageSize) break;
-    offset += pageSize;
-  }
-
-  return {
-    calendars: (data ?? []) as CalendarRow[],
-    members,
-  };
+export async function listCalendarsWithMembers(actorId: string): Promise<{ calendars: CalendarRow[]; members: CalendarMemberRow[] }> {
+  const { data, error } = await supabase.rpc('calendar_session_list', {
+    p_session_token: calendarSessionResolver.tokenFor(actorId),
+  });
+  throwIfError(error);
+  if (!data || !Array.isArray(data.calendars) || !Array.isArray(data.members)) throw new Error('캘린더 목록 응답이 올바르지 않습니다.');
+  return data;
 }
 
 export async function getCalendarWithMembers(calendarId: string): Promise<{ calendar: CalendarRow | null; members: CalendarMemberRow[] }> {
@@ -253,13 +225,14 @@ export async function listEventsInRange(params: {
   from?: string;
   to?: string;
 }): Promise<CalendarEventRow[]> {
+  const token = calendarSessionResolver.tokenFor(params.actorId);
   const pageSize = 1000;
   const all: CalendarEventRow[] = [];
   let offset = 0;
   for (;;) {
     const query = supabase
-      .rpc('list_calendar_events_authorized', {
-        p_actor_id: params.actorId,
+      .rpc('calendar_session_events', {
+        p_session_token: token,
         p_from: params.from ?? null,
         p_to: params.to ?? null,
       })
@@ -269,7 +242,7 @@ export async function listEventsInRange(params: {
 
     const { data, error } = await query;
     if (error) {
-      if (isMissingTable(error) || isMissingFunction(error, 'list_calendar_events_authorized')) {
+      if (isMissingTable(error) || isMissingFunction(error, 'calendar_session_events')) {
         warnMissingTable('calendar_events', '빈 목록');
         return [];
       }
@@ -323,6 +296,7 @@ export type CalendarEventWriteFields = Pick<
   | 'title'
   | 'memo'
   | 'tag_id'
+  | 'tag_ids'
   | 'all_day'
   | 'start_date'
   | 'end_date'
@@ -340,8 +314,8 @@ export async function createEvent(
   input: CalendarEventWriteFields,
   actorId: string,
 ): Promise<CalendarEventRow> {
-  const { data, error } = await supabase.rpc('create_calendar_event_authorized', {
-    p_actor_id: actorId,
+  const { data, error } = await supabase.rpc('calendar_session_event_create', {
+    p_session_token: calendarSessionResolver.tokenFor(actorId),
     p_event: input,
   });
   throwIfError(error);
@@ -355,8 +329,8 @@ export async function updateEvent(
   actorId: string,
 ): Promise<CalendarEventRow> {
   if (isGanttCalendarEventId(id)) return updateGanttCalendarEvent(actorId, id, updates, expectedCalendarId);
-  const { data, error } = await supabase.rpc('update_calendar_event_authorized', {
-    p_actor_id: actorId,
+  const { data, error } = await supabase.rpc('calendar_session_event_update', {
+    p_session_token: calendarSessionResolver.tokenFor(actorId),
     p_event_id: id,
     p_expected_calendar_id: expectedCalendarId,
     p_updates: updates,
@@ -421,8 +395,8 @@ export async function saveTags(
   tags: Array<{ id?: string; name: string; color: string; sort_order: number }>,
   actorId: string,
 ): Promise<CalendarTagRow[]> {
-  const { data, error } = await supabase.rpc('replace_calendar_tags_authorized', {
-    p_actor_id: actorId,
+  const { data, error } = await supabase.rpc('calendar_session_tags_save', {
+    p_session_token: calendarSessionResolver.tokenFor(actorId),
     p_tags: tags,
   });
   throwIfError(error);

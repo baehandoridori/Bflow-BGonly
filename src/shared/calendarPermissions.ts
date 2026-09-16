@@ -53,3 +53,8 @@ export function canCreateCalendar(
 ): boolean {
   return visibility !== 'team' || user.role === 'admin';
 }
+
+export const CALENDAR_OVERVIEW_ADMIN_ID = 'fcc4b438-2696-4e88-a03f-d6f34e73e08f';
+export function canUseCalendarAdminOverview(user: PermissionUser): boolean {
+  return user.id === CALENDAR_OVERVIEW_ADMIN_ID && user.role === 'admin';
+}

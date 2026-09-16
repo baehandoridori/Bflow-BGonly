@@ -153,7 +153,7 @@ async function loadWeekTimeGridView(reduceMotion = false): Promise<WeekTimeGridM
     target: 'node22',
     write: false,
     external: [
-      'react', 'react/jsx-runtime', 'framer-motion',
+      './useEventTagTooltip', '@/stores/useCalendarStore', 'react', 'react/jsx-runtime', 'framer-motion',
       '@/components/calendar/CalendarGrid', '@/hooks/useMotionPref', '@/hooks/useTimeGridDnD',
     ],
   });
@@ -161,6 +161,8 @@ async function loadWeekTimeGridView(reduceMotion = false): Promise<WeekTimeGridM
   const nodeRequire = createRequire(import.meta.url);
   const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
   evaluate((id: string) => {
+    if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
+    if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: { tags: unknown[] }) => unknown) => selector({ tags: [] }) };
     if (id === 'react') return nodeRequire('react');
     if (id === 'react/jsx-runtime') return nodeRequire('react/jsx-runtime');
     if (id === 'framer-motion') {

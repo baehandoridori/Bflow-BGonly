@@ -1,3 +1,6 @@
+import { EventTagBadges } from './EventTagBadges';
+import { useEventTagTooltip } from './useEventTagTooltip';
+import { resolveEventTags } from './eventTagPresentation';
 // ─── DayScrollView: 휠 스크롤 포커스 일간 뷰 (5일 표시) ──────
 import React, { useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -325,15 +328,19 @@ function DayEventCard({
   onClick: (e: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
+  const tags = useCalendarStore((state) => state.tags);
+  const accent = resolveEventTags(event, tags)[0]?.color ?? event.color;
+  const hover = useEventTagTooltip();
   const dDay = daysBetween(today, event.endDate);
   const dDayLabel =
     dDay === 0 ? 'D-Day' : dDay > 0 ? `D-${dDay}` : `D+${Math.abs(dDay)}`;
   const subtitle = event.allDay === false
     ? formatEventTimeRange(event, tagNameById)
-    : event.tagId ? tagNameById[event.tagId] : null;
+    : null;
 
   return (
     <motion.div
+      {...hover.bind(event)}
       whileHover={{ scale: 1.01 }}
       onClick={onClick}
       onContextMenu={onContextMenu}
@@ -341,8 +348,8 @@ function DayEventCard({
       data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
       className={`flex items-center gap-2 cursor-pointer ${isRealtimeHighlighted ? reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
       style={{
-        background: hexToRgba(event.color, 0.08),
-        borderLeft: `3px solid ${event.color}`,
+        background: hexToRgba(accent, 0.08),
+        borderLeft: `3px solid ${accent}`,
         borderRadius: 8,
         padding: '10px 12px',
       }}
@@ -354,6 +361,7 @@ function DayEventCard({
         >
           {event.title}
         </span>
+        <div className="mt-1"><EventTagBadges event={event} /></div>
         {subtitle && (
           <span style={{ fontSize: 10, color: SECONDARY_TEXT }}>
             {subtitle}
@@ -363,12 +371,13 @@ function DayEventCard({
       <span
         className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
         style={{
-          background: hexToRgba(event.color, 0.18),
+          background: hexToRgba(accent, 0.18),
           color: PRIMARY_TEXT,
         }}
       >
         {dDayLabel}
       </span>
+      {hover.tooltip}
     </motion.div>
   );
 }

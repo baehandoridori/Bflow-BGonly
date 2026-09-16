@@ -18,6 +18,37 @@ const state = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+test('여러 태그 중 켜진 태그가 하나라도 있으면 표시하고 모두 끄면 숨김', () => {
+  const event = ev({ tagId: 'one', tagIds: ['one', 'two'] });
+  assert.equal(filterCalendarEvents([event], state({ enabledTagIds: { one: false } })).length, 1);
+  assert.equal(filterCalendarEvents([event], state({ enabledTagIds: { one: false, two: false } })).length, 0);
+  assert.equal(filterCalendarEvents([event], state({ enabledTagIds: { one: false }, optimisticDeletedTagIds: new Set(['two']) })).length, 0);
+  assert.equal(filterCalendarEvents([event], state({ enabledTagIds: { one: false, two: false }, optimisticDeletedTagIds: new Set(['one', 'two']) })).length, 1);
+});
+
+test('명시적 빈 태그 배열은 이전 단일 태그보다 우선한다', () => {
+  assert.equal(filterCalendarEvents([ev({ tagId: 'old', tagIds: [] })], state({ enabledTagIds: { old: false } })).length, 1);
+});
+
+test('칩과 시간 설명에 모든 태그 이름을 표시한다', () => {
+  const event = ev({ tagId: 'one', tagIds: ['one', 'two'], allDay: true });
+  assert.equal(formatEventChipText(event, { one: '회의', two: '업로드' }, {}), '회의 · 업로드 · 제목');
+  assert.equal(formatEventTimeRange(ev({ tagIds: ['one', 'two'], allDay: false, startTime: '10:00', endTime: '11:00' }), { one: '회의', two: '업로드' }), '10:00 – 11:00 · 회의 · 업로드');
+});
+
+test('관리자 열람 특례 캘린더는 일반 공유 목록과 분리한다', () => {
+  const groups = groupCalendarsForRail([
+    { id: 'private-other', ownerId: 'other', visibility: 'private', isAdminOverview: true },
+    { id: 'shared-other', ownerId: 'other', visibility: 'members' },
+    { id: 'team', ownerId: 'other', visibility: 'team' },
+    { id: 'mine', ownerId: 'me', visibility: 'private', isPersonal: true },
+  ] as never, 'me');
+  assert.deepEqual(groups.adminOverview.map((calendar) => calendar.id), ['private-other']);
+  assert.deepEqual(groups.shared.map((calendar) => calendar.id), ['shared-other']);
+  assert.deepEqual(groups.mine.map((calendar) => calendar.id), ['mine']);
+  assert.deepEqual(groups.team.map((calendar) => calendar.id), ['team']);
+});
+
 test('켜진 캘린더 ∩ 켜진 태그와 명시적 false semantics', () => {
   const events = [
     ev({ id: '1', tagId: 't1' }),

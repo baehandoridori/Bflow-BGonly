@@ -161,3 +161,91 @@ test('partial failures apply successful metadata and preserve the last successfu
     }
   }
 });
+
+test('mutation metadata confirmation waits for the newest same-session refresh', async (t) => {
+  const globalScope = globalThis as Record<string, unknown>;
+  const previousWindow = globalScope.window;
+  const previousStorage = globalScope.localStorage;
+  const values = new Map<string, string>();
+  globalScope.localStorage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+  };
+  const { useAuthStore } = await import('../src/stores/useAuthStore.ts');
+  const previousUser = useAuthStore.getState().currentUser;
+  const user = { id: 'refresh-owner', name: '테스트 사용자', role: 'admin' } as NonNullable<typeof previousUser>;
+  useAuthStore.setState({ currentUser: user });
+  const { useCalendarStore, getCalendarCanonicalSnapshot } = await import('../src/stores/useCalendarStore.ts');
+  type Row = Awaited<ReturnType<typeof window.electronAPI.calendarList>>[number];
+  const row = (name: string): Row => ({
+    id: 'created-calendar', name, color: '#6C5CE7', visibility: 'private', owner_id: user.id,
+    is_personal: false, members: [], can_edit: true, can_manage: true, created_at: '',
+  });
+  let calls: Array<ReturnType<typeof deferred<Row[]>>> = [];
+  globalScope.window = { electronAPI: {
+    calendarList: () => { const call = deferred<Row[]>(); calls.push(call); return call.promise; },
+    calendarTagsList: async () => [],
+  } };
+  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+  try {
+    await t.test('a successful request superseded by Realtime cannot report failure while the newer request is pending', async () => {
+      calls = [];
+      let settled = false;
+      const confirmation = useCalendarStore.getState().loadAll({ waitForLatest: true }).then((result) => { settled = true; return result; });
+      const realtime = useCalendarStore.getState().loadAll();
+      calls[0].resolve([row('created')]);
+      await tick();
+      const premature = settled;
+      calls[1].resolve([row('created')]);
+      const result = await confirmation;
+      await realtime;
+      assert.equal(premature, false, 'saving must await the replacement read, not enter a false reconciliation error');
+      assert.deepEqual(result, { calendarsFresh: true, tagsFresh: true });
+      assert.equal(getCalendarCanonicalSnapshot(user.id)?.calendars[0].name, 'created');
+    });
+    await t.test('multiple supersessions follow the final read, including one completed before its predecessor', async () => {
+      calls = [];
+      const confirmation = useCalendarStore.getState().loadAll({ waitForLatest: true });
+      const middle = useCalendarStore.getState().loadAll();
+      calls[0].resolve([row('older')]);
+      await tick();
+      const latest = useCalendarStore.getState().loadAll();
+      calls[2].resolve([row('latest')]);
+      await latest;
+      calls[1].resolve([row('middle')]);
+      await middle;
+      assert.deepEqual(await confirmation, { calendarsFresh: true, tagsFresh: true });
+      assert.equal(useCalendarStore.getState().calendars[0].name, 'latest');
+    });
+    await t.test('a failed newer read does not turn discarded successful metadata into a confirmed save', async () => {
+      calls = [];
+      const confirmation = useCalendarStore.getState().loadAll({ waitForLatest: true });
+      globalScope.window = { electronAPI: { calendarList: async () => { throw new Error('newer read failed'); }, calendarTagsList: async () => [] } };
+      const latest = useCalendarStore.getState().loadAll();
+      calls[0].resolve([row('discarded')]);
+      await latest;
+      assert.deepEqual(await confirmation, { calendarsFresh: false, tagsFresh: true });
+      assert.equal(useCalendarStore.getState().calendars[0].name, 'latest');
+    });
+    await t.test('changing users and returning to the original user cannot revive an old confirmation', async () => {
+      calls = [];
+      globalScope.window = { electronAPI: {
+        calendarList: () => { const call = deferred<Row[]>(); calls.push(call); return call.promise; },
+        calendarTagsList: async () => [],
+      } };
+      const confirmation = useCalendarStore.getState().loadAll({ waitForLatest: true });
+      useAuthStore.setState({ currentUser: { ...user, id: 'other-user' } });
+      useAuthStore.setState({ currentUser: user });
+      const current = useCalendarStore.getState().loadAll();
+      calls[1].resolve([row('new session')]);
+      await current;
+      calls[0].resolve([row('old session')]);
+      assert.deepEqual(await confirmation, { calendarsFresh: false, tagsFresh: false });
+      assert.equal(useCalendarStore.getState().calendars[0].name, 'new session');
+    });
+  } finally {
+    useAuthStore.setState({ currentUser: previousUser });
+    if (previousWindow === undefined) delete globalScope.window; else globalScope.window = previousWindow;
+    if (previousStorage === undefined) delete globalScope.localStorage; else globalScope.localStorage = previousStorage;
+  }
+});

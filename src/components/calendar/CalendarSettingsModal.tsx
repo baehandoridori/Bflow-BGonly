@@ -471,7 +471,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
     let eventsFresh = false;
     let metadataFreshness: Awaited<ReturnType<ReturnType<typeof useCalendarStore.getState>['loadAll']>> | null = null;
     if (mode === 'events') eventsFresh = await loadBflowEvents();
-    else metadataFreshness = await useCalendarStore.getState().loadAll();
+    else metadataFreshness = await useCalendarStore.getState().loadAll({ waitForLatest: true });
     const canonical = getCalendarCanonicalSnapshot(actorId);
     const calendarsFresh = canonical !== null && canonical.revision > beforeRevision;
     return {

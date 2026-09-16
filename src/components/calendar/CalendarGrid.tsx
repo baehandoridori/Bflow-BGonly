@@ -1,3 +1,6 @@
+import { EventTagBadges } from './EventTagBadges';
+import { useCalendarStore } from '@/stores/useCalendarStore';
+import { resolveEventTags } from './eventTagPresentation';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -48,7 +51,8 @@ function EventBarChip({
   reduceMotion?: boolean;
 }) {
   const ev = bar.event;
-  const hex = ev.color || EVENT_COLORS[0];
+  const tags = useCalendarStore((state) => state.tags);
+  const hex = resolveEventTags(ev, tags)[0]?.color || ev.color || EVENT_COLORS[0];
   const isHovered = hoveredEventIdentity
     ? hasSameCalendarEventIdentity(hoveredEventIdentity, ev)
     : false;
@@ -222,7 +226,8 @@ function EventBarChip({
         {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
         {ev.type === 'vacation' && <Palmtree size={10} className="shrink-0 mr-1 opacity-80" />}
         {calendarEventLinkedTodoId(ev) && <CheckSquare size={9} className="shrink-0 mr-1 opacity-70" />}
-        <span className="truncate">{formatEventChipText(ev, tagNameById, calendarNameById)}</span>
+        <span className="truncate min-w-[20px]">{formatEventChipText({ ...ev, tagIds: [], tagId: undefined }, tagNameById, resolveEventTags(ev, tags).length ? {} : calendarNameById)}</span>
+        <span className="ml-1 max-w-[55%] shrink min-w-0"><EventTagBadges event={ev} compact /></span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
         {bar.isEnd && !isGhost && !ev.isReadOnly && (
@@ -254,6 +259,7 @@ function EventBarChip({
           }}
         >
           <div className="text-[13px] font-semibold truncate">{ev.title}</div>
+          <EventTagBadges event={ev} tooltip />
           <div className="text-[12px] opacity-85 mt-1">{dateLabel}</div>
           {ev.memo && <div className="text-[11px] opacity-85 mt-1 line-clamp-2">{ev.memo}</div>}
         </motion.div>,
@@ -374,6 +380,7 @@ function OverflowPopup({
               <div className="w-2 h-2 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: ev.color }} />
               <div className="flex-1 min-w-0">
                 <span className="text-xs text-text-primary truncate block">{ev.title}</span>
+                <EventTagBadges event={ev} />
                 <span className="text-[11px] text-text-secondary/50 block">{dateRange}</span>
                 {ev.memo && <span className="text-[11px] text-text-secondary/40 truncate block">{ev.memo.length > 40 ? ev.memo.slice(0, 40) + '…' : ev.memo}</span>}
               </div>

@@ -1,3 +1,4 @@
+import { normalizeCalendarTagIds } from '../src/shared/calendarTagIds';
 /** electron/calendarIpc.ts — calendar:* IPC 등록.
  *  세션 검증(getSessionUserIdOrThrow 주입) + 권한 강제(calendarPermissions) + broadcast.
  *  main.ts 비대화 방지를 위해 분리. 렌더러 → 여기 → calendarStore → Supabase 단일 경로. */
@@ -5,6 +6,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { ipcMain } from 'electron';
 import {
   canViewCalendar,
+  canUseCalendarAdminOverview,
   canEditCalendarEvents,
   canManageCalendar,
   canCreateCalendar,
@@ -414,7 +416,8 @@ function safeCalendarEventCreateInput(input: CalendarEventCreateInput): Calendar
     calendar_id: input.calendar_id,
     title: input.title,
     memo: input.memo,
-    tag_id: input.tag_id,
+    tag_id: normalizeCalendarTagIds(input.tag_ids, input.tag_id)[0] ?? null,
+    ...(input.tag_ids === undefined ? {} : { tag_ids: normalizeCalendarTagIds(input.tag_ids, input.tag_id) }),
     all_day: input.all_day,
     start_date: input.start_date,
     end_date: input.end_date,
@@ -965,9 +968,9 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
   ipcMain.handle('calendar:list', wrap(async () => {
     const user = await sessionUser();
     await store.ensurePersonalCalendar(user.id);
-    const { calendars, members } = await store.listCalendarsWithMembers();
+    const { calendars, members } = await store.listCalendarsWithMembers(user.id);
     return calendars
-      .filter((calendar) => canViewCalendar(
+      .filter((calendar) => canUseCalendarAdminOverview(user) || canViewCalendar(
         calendar,
         membersOf(members, calendar.id).map((member) => member.user_id),
         user.id,
@@ -979,6 +982,7 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
           members: calendarMembers.map(({ user_id, can_edit }) => ({ user_id, can_edit })),
           can_edit: canEditCalendarEvents(calendar, calendarMembers, user.id),
           can_manage: canManageCalendar(calendar, user),
+          is_admin_overview: !canViewCalendar(calendar, calendarMembers.map((member) => member.user_id), user.id),
         };
       });
   }));
@@ -1221,7 +1225,10 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
     if (updates.calendar_id !== undefined) safeUpdates.calendar_id = updates.calendar_id;
     if (updates.title !== undefined) safeUpdates.title = updates.title;
     if (updates.memo !== undefined) safeUpdates.memo = updates.memo;
-    if (updates.tag_id !== undefined) safeUpdates.tag_id = updates.tag_id;
+    if (updates.tag_ids !== undefined || updates.tag_id !== undefined) {
+      safeUpdates.tag_ids = normalizeCalendarTagIds(updates.tag_ids, updates.tag_id);
+      safeUpdates.tag_id = safeUpdates.tag_ids[0] ?? null;
+    }
     if (updates.all_day !== undefined) safeUpdates.all_day = updates.all_day;
     if (updates.start_date !== undefined) safeUpdates.start_date = updates.start_date;
     if (updates.end_date !== undefined) safeUpdates.end_date = updates.end_date;

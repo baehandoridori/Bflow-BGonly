@@ -20,11 +20,11 @@ test('saveTags delegates the final tag list and session actor to exactly one aut
 
   assert.match(
     saveTags,
-    /supabase\.rpc\('replace_calendar_tags_authorized', \{\s*p_actor_id: actorId,\s*p_tags: tags,?\s*\}\)/,
+    /supabase\.rpc\('calendar_session_tags_save', \{\s*p_session_token: calendarSessionResolver\.tokenFor\(actorId\),\s*p_tags: tags,?\s*\}\)/,
   );
   assert.match(saveTags, /throwIfError\(error\)/);
   assert.match(saveTags, /return \(data \?\? \[\]\) as CalendarTagRow\[\]/);
-  assert.equal((saveTags.match(/\.rpc\('replace_calendar_tags_authorized'/g) ?? []).length, 1);
+  assert.equal((saveTags.match(/\.rpc\('calendar_session_tags_save'/g) ?? []).length, 1);
   assert.doesNotMatch(saveTags, /\.rpc\('replace_calendar_tags'/);
   assert.doesNotMatch(saveTags, /readTags\(|\.from\('calendar_tags'\)|\.delete\(|\.update\(|\.insert\(/);
 });
