@@ -23,8 +23,8 @@
 - [x] Add multi-select tag chips and administrator tag-management entry points to creation/edit UI. Render colored badges in calendar chips/cards and hover tooltip. Verify preview as 배한솔 and as normal user.
 - [x] Update version/minor release notes/architecture/roadmap. Run `npm run typecheck`, calendar/Gantt tests and `npm run build:vite`; inspect browser preview with login and shared-state interactions. Review final diff and record actual validation limits.
 - [x] Implement calendar-to-Gantt import, durable duplicate prevention, permission/session checks, tests and browser verification.
-- [ ] Review final implementation, update release notes, create/merge PR, and apply the tested database migration.
-- [ ] Build the exact merge, preserve existing deployment files, publish manifest last, and verify full payload hashes plus installer/version metadata.
+- [x] Review final implementation, update release notes, create/merge PR, and apply the tested database migration.
+- [x] Build the exact merge, preserve existing deployment files, publish manifest last, and verify full payload hashes plus installer/version metadata.
 
 ## Ownership
 
