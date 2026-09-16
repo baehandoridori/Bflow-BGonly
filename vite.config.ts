@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
@@ -12,9 +12,13 @@ const realWorkspaceNodeModules = fs.existsSync(workspaceNodeModules)
   ? fs.realpathSync(workspaceNodeModules)
   : workspaceNodeModules;
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+    // 휴가 API 토큰(x-bflow-token) — `.env.local` 의 BFLOW_VACATION_TOKEN 을 번들에 넣는다.
+    // 접두사 '' 라서 VITE_ 가 아닌 이름도 읽고, 셸 환경변수도 함께 본다(CI·릴리스 빌드용).
+    // 비어 있으면 앱이 vacation-config.json 의 apiToken 으로 폴백하므로 빌드는 실패하지 않는다.
+    __BFLOW_VACATION_TOKEN__: JSON.stringify(loadEnv(mode, __dirname, '').BFLOW_VACATION_TOKEN ?? ''),
   },
   plugins: [
     react(),
@@ -76,4 +80,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

@@ -4158,10 +4158,10 @@ ipcMain.handle('vacation:broadcast-pending-changed', (event, payload: unknown) =
 
 // ─── IPC 핸들러: 휴가 관리 (vacation-repo WebApi) ────────────
 
-ipcMain.handle('vacation:connect', async (_event, webAppUrl: string) => {
+ipcMain.handle('vacation:connect', async (_event, webAppUrl: string, apiToken?: string) => {
   try {
-    const ok = await initVacation(webAppUrl);
-    return { ok, error: ok ? null : '연결 실패 — URL을 확인해주세요' };
+    const r = await initVacation(webAppUrl, apiToken);
+    return { ok: r.ok, error: r.ok ? null : (r.error ?? '연결 실패 — URL·토큰을 확인해주세요') };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg };

@@ -1,8 +1,10 @@
 /**
  * Vacation HTTP 통신 모듈
  *
- * vacation-repo의 WebApi.gs 웹 앱과 통신하여
- * 휴가 등록/취소/조회를 처리한다.
+ * 휴가 등록/취소/조회를 처리한다. 2026-09 이관으로 상대는
+ * 구 WebApi.gs 웹 앱에서 **Supabase Edge Function(vacation-api)** 으로 바뀌었다.
+ * 요청·응답 형식(action·봉투·상태 문자열)은 동결 계약이라 그대로이고,
+ * 달라진 것은 주소와 `x-bflow-token` 인증 헤더뿐이다.
  *
  * sheets.ts 패턴을 따르되, 별도 웹 앱 URL을 사용한다.
  */
@@ -10,6 +12,18 @@
 import { gasFetch, gasFetchWithRetry } from './gas-fetch';
 
 let vacationUrl: string | null = null;
+let vacationToken: string | null = null;
+
+/**
+ * 휴가 API 인증 헤더.
+ *
+ * 신 API는 토큰이 없거나 틀리면 모든 action을 거부한다.
+ * 토큰이 비어 있으면 헤더를 아예 붙이지 않는다 — 구 Apps Script는 헤더를 무시하므로
+ * 어느 주소를 가리키든 같은 코드로 동작한다(롤백 시 URL만 되돌리면 된다).
+ */
+function vacHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return vacationToken ? { ...extra, 'x-bflow-token': vacationToken } : extra;
+}
 
 // ─── 진행 중 작업 추적 (종료 시 큐 보장) ─────────────────────
 let vacPendingOps = 0;
@@ -42,27 +56,36 @@ function trackVacPending<T>(op: Promise<T>): Promise<T> {
 
 // ─── 연결 ─────────────────────────────────────────────────────
 
-export async function initVacation(url: string): Promise<boolean> {
+export async function initVacation(
+  url: string,
+  token?: string
+): Promise<{ ok: boolean; error?: string }> {
+  const t = token?.trim() || null;
   try {
-    const res = await gasFetch(`${url}?action=ping`);
+    const res = await gasFetch(`${url}?action=ping`, {
+      headers: t ? { 'x-bflow-token': t } : {},
+    });
     if (!res.ok) {
       console.error('[Vacation] 핑 실패:', res.status);
-      return false;
+      return { ok: false, error: `서버 응답 오류 (HTTP ${res.status})` };
     }
 
     const json = await res.json();
     if (!json.ok) {
+      // 인증 실패도 HTTP 200 봉투로 온다(§7-2) — 문구를 그대로 올려 URL 문제와 구분되게 한다
       console.error('[Vacation] 핑 응답 오류:', json.error);
-      return false;
+      return { ok: false, error: String(json.error ?? '연결 실패') };
     }
 
     vacationUrl = url;
+    vacationToken = t;
     console.log('[Vacation] 연결 성공');
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error('[Vacation] 연결 실패:', err);
     vacationUrl = null;
-    return false;
+    vacationToken = null;
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -142,7 +165,7 @@ export async function readVacationStatus(name: string): Promise<VacationStatusRe
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
   const qs = new URLSearchParams({ action: 'readStatus', name, _t: String(Date.now()) });
-  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
+  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, { headers: vacHeaders() }, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; data?: VacationStatusResponse; error?: string };
@@ -162,7 +185,7 @@ export async function readVacationLog(
   if (limit) params.limit = String(limit);
 
   const qs = new URLSearchParams(params);
-  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
+  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, { headers: vacHeaders() }, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; data?: VacationLogEntry[]; error?: string };
@@ -177,7 +200,7 @@ export async function readAllVacationEvents(year?: number): Promise<VacationEven
   if (year) params.year = String(year);
 
   const qs = new URLSearchParams(params);
-  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
+  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, { headers: vacHeaders() }, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; data?: VacationEvent[]; error?: string };
@@ -205,7 +228,7 @@ export function registerVacation(data: {
     try {
       const res = await gasFetch(vacationUrl!, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: vacHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ action: 'register', ...data }),
         signal: controller.signal,
       });
@@ -233,7 +256,7 @@ export function cancelVacation(
     try {
       const res = await gasFetch(vacationUrl!, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: vacHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ action: 'cancel', name, rowIndex }),
         signal: controller.signal,
       });
@@ -263,7 +286,7 @@ export async function grantDahyu(data: {
   try {
     const res = await gasFetch(vacationUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: vacHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ action: 'grantDahyu', ...data }),
       signal: controller.signal,
     });
@@ -283,7 +306,7 @@ export async function readAllEmployeeNames(): Promise<string[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
   const qs = new URLSearchParams({ action: 'readAllNames', _t: String(Date.now()) });
-  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
+  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, { headers: vacHeaders() }, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; data?: string[]; error?: string };
@@ -297,7 +320,7 @@ export async function readDahyuList(): Promise<DahyuListEntry[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
   const qs = new URLSearchParams({ action: 'readDahyuList', _t: String(Date.now()) });
-  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
+  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, { headers: vacHeaders() }, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; data?: DahyuListEntry[]; error?: string };
@@ -316,7 +339,7 @@ export async function deleteDahyu(rowIndices: number[]): Promise<DahyuDeleteResu
   try {
     const res = await gasFetch(vacationUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: vacHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ action: 'deleteDahyu', rowIndices }),
       signal: controller.signal,
     });

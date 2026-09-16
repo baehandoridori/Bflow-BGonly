@@ -57,6 +57,8 @@ export interface VacationResult {
 
 export interface VacationConfig {
   webAppUrl: string;
+  /** x-bflow-token 폴백 — 빌드에 토큰이 안 들어갔을 때만 쓴다(설정 화면에서 입력) */
+  apiToken?: string;
 }
 
 export interface DahyuGrantRequest {
