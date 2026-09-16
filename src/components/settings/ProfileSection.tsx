@@ -11,6 +11,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { fetchVacationStatus, fetchVacationLog, cancelVacationRequest } from '@/services/vacationService';
+import { useOnVacationChange } from '@/hooks/useOnVacationChange';
 import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { VacationRegisterModal } from '@/components/vacation/VacationRegisterModal';
@@ -188,6 +189,9 @@ export function ProfileSection() {
   useEffect(() => {
     loadVacationData();
   }, [loadVacationData]);
+
+  // 이 창 밖에서 휴가가 바뀌면 5분 캐시를 건너뛰고 다시 읽는다(30초 낙관 가드는 유지).
+  useOnVacationChange(() => { void loadVacationData(true); });
 
   // C3: 연차/대휴 초과 사용 경고 토스트
   const overuseAlerted = useRef(false);

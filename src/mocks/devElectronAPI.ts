@@ -2499,6 +2499,8 @@ export function installDevElectronAPI(): void {
     sheetsReadAllMetadata: async () => ({ ok: true, data: getMockMetadataRows() }),
 
     vacationConnect: async () => ({ ok: false, error: 'DEV mock' }),
+    // 미리보기에는 휴가 시스템이 없으므로 신호도 오지 않는다 — 구독만 받고 해제 함수를 돌려준다.
+    onVacationChanged: () => () => {},
     vacationIsConnected: async () => false,
     vacationReadStatus: async () => ({ ok: false, data: {} as never, error: 'DEV mock' }),
     vacationReadLog: async () => ({ ok: false, data: [], error: 'DEV mock' }),

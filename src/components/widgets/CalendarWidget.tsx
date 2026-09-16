@@ -6,6 +6,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { getEvents, getEventsForDate, loadBflowEvents, syncAll } from '@/services/calendarService';
 import * as gcalService from '@/services/googleCalendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
+import { useOnVacationChange } from '@/hooks/useOnVacationChange';
 import type { CalendarEvent, CalendarFilter } from '@/types/calendar';
 import { mapVacationEvents } from '@/utils/vacationEvents';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
@@ -99,14 +100,20 @@ export function CalendarWidget() {
   }, []);
 
   // 휴가 이벤트 로드
-  useEffect(() => {
+  const loadVacationEvents = useCallback(() => {
     if (!vacationConnected) { setVacationEvts([]); return; }
     fetchAllVacationEvents()
       .then((raw) => {
         setVacationEvts(mapVacationEvents(raw, 'wvac'));
       })
-      .catch(() => setVacationEvts([]));
+      // 목록은 비우지 않는다 — 변경 신호로 다시 읽다가 일시적으로 실패하면 멀쩡하던 휴가가
+      // 사라져 보이기 때문(처음 읽기라면 어차피 빈 목록이다)
+      .catch(() => { /* 비차단 */ });
   }, [vacationConnected]);
+
+  useEffect(() => { loadVacationEvents(); }, [loadVacationEvents]);
+  // 이 창 밖(슬랙·다른 사람)에서 휴가가 바뀌면 다시 읽는다 — 전에는 앱을 다시 켜야 반영됐다
+  useOnVacationChange(loadVacationEvents);
 
   // pending 휴가를 CalendarEvent 형태로 변환
   const pendingEvts = useMemo<CalendarEvent[]>(() => {

@@ -31,6 +31,7 @@ const SHARED_CALENDAR_REALTIME_TABLES: readonly SharedCalendarRealtimeTable[] = 
 export interface RealtimeCallbacks {
   onGanttChange?: () => void;
   onThreadTodosChange?: () => void;
+  onVacationChange?: () => void;
   onSceneChange: (payload: ChangePayload) => void;
   onCommentChange: (payload: ChangePayload) => void;
   onRevisionChange: (payload: ChangePayload) => void;
@@ -179,6 +180,10 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
   built.on('broadcast', { event: 'gantt-changed' }, () => callbacks.onGanttChange?.());
   // 팀 할 일(comment_thread_todos)도 같은 방식 — 트리거가 내용 없는 신호만 보내고 앱이 래퍼로 다시 읽는다 (피드백 58).
   built.on('broadcast', { event: 'thread-todos-changed' }, () => callbacks.onThreadTodosChange?.());
+  // 휴가도 같은 방식 — 휴가 시스템(같은 Supabase 프로젝트의 hr 스키마) DB 트리거가 휴가·대휴가 바뀔 때
+  //   내용 없는 신호만 보내고, 앱은 휴가 API 로 다시 읽는다. 슬랙 워크플로·/휴가나 다른 사람이 등록한 휴가가
+  //   열린 화면에 바로 반영되게 한다(휴가 시스템 레포 §4-3 C27).
+  built.on('broadcast', { event: 'vacation-changed' }, () => callbacks.onVacationChange?.());
   const emitPresence = () => callbacks.onPresenceSync?.(built.presenceState() as Record<string, unknown[]>);
   built
     .on('presence', { event: 'sync' }, emitPresence)
@@ -230,6 +235,8 @@ function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
     // 팀 할 일 신호는 내용 없는 broadcast 라 연결이 끊긴 동안 온 것은 다시 오지 않는다(피드백 58, 코덱스 1차).
     //   재연결에 성공한 첫 join 에서 '바뀌었을 수 있다' 고 한 번 알려 열린 섹션이 다시 읽게 한다(섹션 300ms 디바운스 그대로).
     if (reconnected) callbacks.onThreadTodosChange?.();
+    // 휴가 신호도 내용 없는 broadcast 라 끊긴 동안 온 것은 사라진다 — 같은 경계에서 한 번 다시 읽게 한다.
+    if (reconnected) callbacks.onVacationChange?.();
 
     if (status === 'SUBSCRIBED') {
       // 연결 성공 — 재시도 카운터 초기화

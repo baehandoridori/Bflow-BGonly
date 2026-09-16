@@ -10,6 +10,7 @@ import {
   getEvents, isGoogleCacheReady, loadBflowEvents, addEvent, updateEvent, deleteEvent,
 } from '@/services/calendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
+import { useOnVacationChange } from '@/hooks/useOnVacationChange';
 import { useCalendarDnD } from '@/hooks/useCalendarDnD';
 import type { DragMode } from '@/hooks/useCalendarDnD';
 import type {
@@ -559,12 +560,14 @@ export function ScheduleView() {
       const raw = await fetchAllVacationEvents();
       setVacationEvents(mapVacationEvents(raw, 'vac'));
     } catch {
-      // 비차단 — 실패해도 캘린더는 정상 동작
-      setVacationEvents([]);
+      // 비차단 — 실패해도 캘린더는 정상 동작. 목록은 비우지 않는다: 변경 신호로 다시 읽다가
+      // 일시적으로 실패하면 멀쩡하던 휴가가 사라져 보이기 때문(처음 읽기라면 어차피 빈 목록이다).
     }
   }, [vacationConnected]);
 
   useEffect(() => { loadVacationEvents(); }, [loadVacationEvents]);
+  // 이 창 밖(슬랙·다른 사람)에서 휴가가 바뀌면 다시 읽는다 — 전에는 화면을 다시 열어야 반영됐다
+  useOnVacationChange(loadVacationEvents);
 
   // 통합 이벤트 (B flow + 연결된 휴가)와 캘린더∩태그 필터를 한 경로로 유지한다.
   const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);

@@ -8,6 +8,7 @@ import { DEPARTMENT_CONFIGS, DEPARTMENTS } from '@/types';
 import type { Episode, Department } from '@/types';
 import { getEvents } from '@/services/calendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
+import { useOnVacationChange } from '@/hooks/useOnVacationChange';
 import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import { VACATION_COLOR } from '@/types/vacation';
@@ -319,7 +320,7 @@ function EventGanttChart() {
   }, []);
 
   // 휴가 이벤트 로드 & 머지
-  useEffect(() => {
+  const loadVacationEvents = useCallback(() => {
     if (!vacationConnected) {
       setEvents((prev) => prev.filter((e) => e.source !== 'vacation'));
       return;
@@ -335,6 +336,10 @@ function EventGanttChart() {
       })
       .catch(() => { /* 비차단 */ });
   }, [vacationConnected]);
+
+  useEffect(() => { loadVacationEvents(); }, [loadVacationEvents]);
+  // 이 창 밖(슬랙·다른 사람)에서 휴가가 바뀌면 다시 읽는다 — 전에는 앱을 다시 켜야 반영됐다
+  useOnVacationChange(loadVacationEvents);
 
   const DAY_WIDTH = 32; // 날짜 하나의 픽셀 폭
 

@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { VacationEvent } from '@/types/vacation';
 import { useVacationPendingStore, type PendingVacationEvent } from '@/stores/useVacationPendingStore';
+import { useOnVacationChange } from '@/hooks/useOnVacationChange';
 import { cn } from '@/utils/cn';
 
 type DisplayEvent = VacationEvent | PendingVacationEvent;
@@ -55,6 +56,8 @@ export function VacationWidget() {
   }, [vacationConnected]);
 
   useEffect(() => { load(); }, [load]);
+  // 이 창 밖(슬랙·다른 사람)에서 휴가가 바뀌면 다시 읽는다
+  useOnVacationChange(load);
 
   // pending 스토어 하이드레이트 (팝업/메인 둘 다 안전하게)
   useEffect(() => {
