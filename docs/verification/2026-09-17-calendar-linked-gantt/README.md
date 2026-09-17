@@ -39,7 +39,25 @@
 - 깨끗한 기존 v1.122.0 커밋 `51d945d028cd35633c1b2fd073290c869d8a8d03`에서 해당 두 파일을 다시 실행해 동일하게 19개 중 15개 통과·4개 실패를 재현했다. 해당 구현과 시험 파일은 이번 변경에서 수정하지 않았다.
 - 독립 검토에서 발견한 편집 초안 초기화, 성공한 삭제 후 잘못된 로그인 오류, 팀 전체 공유를 0명으로 표시하는 문제는 회귀 시험을 추가하고 수정했다. 최종 검토에서 이번 변경의 차단 문제는 없었다.
 
-브라우저 확인은 preview이며 여러 실제 사용자 PC의 동시 조작을 의미하지 않는다. 정식 설치 파일 빌드·운영 DB 적용·배포 해시는 릴리스 완료 후 별도 기록한다. 기존 설치 앱은 이 작업에서 강제 재시작하지 않는다.
+브라우저 확인은 preview이며 여러 실제 사용자 PC의 동시 조작을 의미하지 않는다. 기존 설치 앱은 이 작업에서 강제 재시작하지 않는다.
+
+## 운영 DB와 정식 빌드
+
+- 기능 PR: [#292](https://github.com/baehandoridori/Bflow-BGonly/pull/292), exact merge `48cd92e4eb2ba05202a884d60d11de76d4435cc3`.
+- 운영 DB 마이그레이션 `20260917115753_calendar_linked_gantt` 적용 완료. 연결 테이블 RLS 활성, anon 직접 조회·authenticated 직접 삽입 불가, 세션 RPC 호출만 허용, 변경 신호 트리거 6개 확인.
+- 기존 `gantt_read`, `gantt_execute`, `gantt_session_read`, `gantt_session_execute`의 정의 해시가 적용 전후 동일하다.
+- 운영 DB에서 임시 사용자·세션·캘린더를 한 트랜잭션 안에 만들고 anon 세션 RPC로 연결, 원본 소유자·읽기 권한, 중복 연결, 구버전 격리, 원본 수정 반영, 안전한 연결 해제, 공유 회수를 확인했다. 트랜잭션 전체 롤백 후 임시 사용자·캘린더 잔여 0을 확인했다.
+- 머지된 코드의 `npm run build` 통과(2,697개 시험, 실패·건너뛰기 0). 패키지 main/preload와 renderer 파일이 빌드 원본과 일치하고 업데이트 내역 194개가 모두 유지됨을 독립 검토했다.
+- 설치 파일: 201,416,140 bytes, SHA-256 `9323e693f37b35dd353448547a7fc4a98d3271f53e2a0e947358cfad403739d8`. `latest.yml`의 크기·SHA-512와 manifest의 크기·버전도 일치한다.
+- 배포 전 v1.122.0 원격 전체 백업: 7,773개 파일, 953,606,290 bytes, SHA-256 불일치 0.
+
+## 배포 결과
+
+- 2026-09-17 21:07 KST에 G드라이브 `Bflow-BGonly/dist` 공개 완료. 기존 원격 부가 파일은 지우지 않았다.
+- manifest 제외 파일 복사 → 7,334개 해시 일치 확인 → manifest 마지막 복사 → 전체 7,335개 파일·923,411,870 bytes SHA-256 불일치 0 순서로 검증했다.
+- 원격 `manifest.json`, `latest.yml`, 설치 파일 및 패키지 버전은 모두 v1.123.0이다.
+- 배포 시점 이 PC의 실행 중 설치본은 v1.122.0이었다. 강제 종료·재시작하지 않았으며 여러 실제 PC의 설치 적용 성공까지 주장하지 않는다.
+- 원본 증거 폴더: `C:\Bflow-BGonly\output\release-audits\2026-09-17-v1.123.0` (`deploy-final.json`, `before-manifest.json`, `build-release.log`, `database-verification.json`, `backup-full-hashes.json`).
 
 ![선택 인원 공유 캘린더 가져오기](member-calendar-import.png)
 ![연결된 캘린더 요약](linked-calendar-summary.png)
