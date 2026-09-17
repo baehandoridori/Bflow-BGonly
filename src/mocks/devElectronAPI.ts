@@ -1929,6 +1929,10 @@ function getMockMetadataRows(): MockMetadataRow[] {
       { type: 'part-reel-worker', key: 'EP05_C_ACT', value: '강선영', updatedAt: '2026-06-05T00:00:00.000Z' },
       { type: 'part-reel-worker', key: 'EP05_D_BG', value: '박정인', updatedAt: '2026-06-05T00:00:00.000Z' },
       { type: 'part-reel-worker', key: 'EP05_D_ACT', value: '박정인', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-label', key: 'EP05_A_BG', value: 'sc_000~099', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-label', key: 'EP05_A_ACT', value: 'sc_000~099', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-label', key: 'EP05_B_BG', value: '오프닝', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-label', key: 'EP05_B_ACT', value: '오프닝', updatedAt: '2026-06-05T00:00:00.000Z' },
       {
         type: 'character-board',
         key: 'work-folder-root',

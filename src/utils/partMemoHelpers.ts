@@ -32,6 +32,13 @@ export function getCombinedPartReelWorker(
   return getCombinedPartMetadata(partReelWorkers, sheetNames);
 }
 
+export function getCombinedPartLabel(
+  partLabels: Record<string, string>,
+  sheetNames: string[],
+): string {
+  return getCombinedPartMetadata(partLabels, sheetNames);
+}
+
 function getCombinedPartMetadata(
   metadataBySheetName: Record<string, string>,
   sheetNames: string[],
@@ -103,6 +110,14 @@ export function applyPartReelWorkerToSheets(
   return applyPartMetadataToSheets(partReelWorkers, sheetNames, worker);
 }
 
+export function applyPartLabelToSheets(
+  partLabels: Record<string, string>,
+  sheetNames: string[],
+  label: string,
+): Record<string, string> {
+  return applyPartMetadataToSheets(partLabels, sheetNames, label);
+}
+
 function applyPartMetadataToSheets(
   metadataBySheetName: Record<string, string>,
   sheetNames: string[],
@@ -142,6 +157,20 @@ export function rollbackFailedPartReelWorkerSheets(
     previousPartReelWorkers,
     failedSheetNames,
     attemptedWorker,
+  );
+}
+
+export function rollbackFailedPartLabelSheets(
+  currentPartLabels: Record<string, string>,
+  previousPartLabels: Record<string, string>,
+  failedSheetNames: string[],
+  attemptedLabel: string,
+): Record<string, string> {
+  return rollbackFailedPartMetadataSheets(
+    currentPartLabels,
+    previousPartLabels,
+    failedSheetNames,
+    attemptedLabel,
   );
 }
 

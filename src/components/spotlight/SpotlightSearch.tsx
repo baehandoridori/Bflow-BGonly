@@ -6,6 +6,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { sceneProgress } from '@/utils/calcStats';
 import { stripEntityTokens } from '@/utils/entityTokens';
+import { formatPartDisplayName } from '@/utils/partDisplayName';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
@@ -133,11 +134,13 @@ export function SpotlightSearch() {
   const loadCharacterBoard = useCharacterBoardStore((s) => s.load);
   const [partMemos, setPartMemos] = useState<Record<string, string>>({});
   const [partReelWorkers, setPartReelWorkers] = useState<Record<string, string>>({});
-  // 파트 메모/릴 담당 로드
+  const [partLabels, setPartLabels] = useState<Record<string, string>>({});
+  // 파트 메모/릴 담당/표시 이름 로드
   useEffect(() => {
     (async () => {
       const memos: Record<string, string> = {};
       const reelWorkers: Record<string, string> = {};
+      const labels: Record<string, string> = {};
       for (const ep of episodes) {
         for (const part of ep.parts) {
           try {
@@ -148,10 +151,15 @@ export function SpotlightSearch() {
             const data = await readMetadata('part-reel-worker', part.sheetName);
             if (data?.value) reelWorkers[part.sheetName] = data.value;
           } catch { /* 무시 */ }
+          try {
+            const data = await readMetadata('part-label', part.sheetName);
+            if (data?.value) labels[part.sheetName] = data.value;
+          } catch { /* 무시 */ }
         }
       }
       setPartMemos(memos);
       setPartReelWorkers(reelWorkers);
+      setPartLabels(labels);
     })();
   }, [episodes]);
   const {
@@ -315,11 +323,15 @@ export function SpotlightSearch() {
       for (const part of ep.parts) {
         // ── 파트 검색 ──
         const deptLabel = DEPARTMENT_CONFIGS[part.department].shortLabel;
-        const partLabel = `${part.partId}파트`;
+        // 별칭이 있으면 그걸 주 이름으로 쓰되, 'A파트' 로 찾는 사람도 그대로 찾을 수 있게 둘 다 점수에 넣는다.
+        const partAliasText = partLabels[part.sheetName] ?? '';
+        const partLabel = formatPartDisplayName(part.partId, partAliasText);
+        const partOriginLabel = `${part.partId}파트`;
         const partFullLabel = `${epName(ep)} ${partLabel} (${deptLabel})`;
         const partReelWorkerText = partReelWorkers[part.sheetName] ?? '';
         const partScore = Math.max(
           fuzzyScore(q, partLabel),
+          fuzzyScore(q, partOriginLabel),
           fuzzyScore(q, `${part.partId}`),
           fuzzyScore(q, partFullLabel),
           fuzzyScore(q, partReelWorkerText),
@@ -613,6 +625,7 @@ export function SpotlightSearch() {
     episodeMemos,
     partMemos,
     partReelWorkers,
+    partLabels,
     characters,
     characterCostumesByCharacter,
     resetAndNavigate,
