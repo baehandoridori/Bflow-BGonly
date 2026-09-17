@@ -11,6 +11,7 @@ import { updateEpisodeReelPath, updateScenePhaseInSupabase, dispatchActingFeedba
 import { sceneProgress, isFullyDone, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { findPartById, getCanonicalPartIds, partIdMatches } from '@/utils/partId';
+import { formatPartDisplayName, formatPartOriginSuffix } from '@/utils/partDisplayName';
 import {
   buildUnifiedSceneId,
   getMergedCommentBadgeCounts,
@@ -2827,6 +2828,8 @@ export function ScenesView() {
   const [partMemoInput, setPartMemoInput] = useState('');
   const [editingPartReelWorker, setEditingPartReelWorker] = useState<PartContextMenuTarget | null>(null);
   const [partReelWorkerInput, setPartReelWorkerInput] = useState('');
+  const [editingPartLabel, setEditingPartLabel] = useState<PartContextMenuTarget | null>(null);
+  const [partLabelInput, setPartLabelInput] = useState('');
 
   // 에피소드 편집
   const [epEditOpen, setEpEditOpen] = useState(false);
@@ -3047,11 +3050,14 @@ export function ScenesView() {
   const {
     partMemos,
     partReelWorkers,
+    partLabels,
     getPartMemoText,
     getPartReelWorkerText,
+    getPartLabelText,
     buildPartContextMenuTarget,
     savePartMemo,
     savePartReelWorker,
+    savePartLabel,
   } = usePartMemos({
     episodes,
     selectedDepartment,
@@ -3067,6 +3073,10 @@ export function ScenesView() {
     setEditingPartReelWorker(null);
     void savePartReelWorker(target, worker);
   }, [savePartReelWorker]);
+  const handleSaveEditingPartLabel = useCallback((target: PartContextMenuTarget, label: string) => {
+    setEditingPartLabel(null);
+    void savePartLabel(target, label);
+  }, [savePartLabel]);
 
   // 실제 부서: 개별 모드에서만 의미 있음
   const effectiveDept: Department = selectedDepartment === 'all'
@@ -5307,6 +5317,7 @@ export function ScenesView() {
             selectedEpisode={selectedEpisode ?? currentEp?.episodeNumber ?? null}
             selectedPart={selectedPart}
             partMemos={partMemos}
+            partLabels={partLabels}
             partReelWorkers={partReelWorkers}
             episodeTitles={episodeTitles}
             episodeMemos={episodeMemos}
@@ -5484,13 +5495,15 @@ export function ScenesView() {
                         const target = buildPartContextMenuTarget(pid);
                         const memo = target ? getPartMemoText(target.sheetNames) : '';
                         const reelWorker = target ? getPartReelWorkerText(target.sheetNames) : '';
+                        const partLabel = target ? getPartLabelText(target.sheetNames) : '';
                         const meta = [
+                          formatPartOriginSuffix(pid, partLabel),
                           reelWorker ? `릴 담당 ${reelWorker}` : '',
                           memo,
                         ].filter(Boolean).join(' · ');
                         return {
                           value: pid,
-                          label: `${pid}파트${meta ? ` (${meta})` : ''}`,
+                          label: `${formatPartDisplayName(pid, partLabel)}${meta ? ` (${meta})` : ''}`,
                           sublabel: meta || undefined,
                         };
                       });
@@ -5498,13 +5511,15 @@ export function ScenesView() {
                     return parts.map((p) => {
                       const memo = getPartMemoText([p.sheetName]);
                       const reelWorker = getPartReelWorkerText([p.sheetName]);
+                      const partLabel = getPartLabelText([p.sheetName]);
                       const meta = [
+                        formatPartOriginSuffix(p.partId, partLabel),
                         reelWorker ? `릴 담당 ${reelWorker}` : '',
                         memo,
                       ].filter(Boolean).join(' · ');
                       return {
                         value: p.partId,
-                        label: `${p.partId}파트${meta ? ` (${meta})` : ''}`,
+                        label: `${formatPartDisplayName(p.partId, partLabel)}${meta ? ` (${meta})` : ''}`,
                         sublabel: meta || undefined,
                       };
                     });
@@ -5543,10 +5558,17 @@ export function ScenesView() {
               <span className="text-sm font-medium text-text-primary">
                 {episodeTitles[currentEp.episodeNumber] || currentEp.title}
                 {selectedDepartment === 'all' && currentPartId && (
-                  <span className="text-text-secondary ml-1">/ {currentPartId}파트</span>
+                  <span className="text-text-secondary ml-1">
+                    / {formatPartDisplayName(
+                      currentPartId,
+                      getPartLabelText(buildPartContextMenuTarget(currentPartId)?.sheetNames ?? []),
+                    )}
+                  </span>
                 )}
                 {selectedDepartment !== 'all' && currentPart && (
-                  <span className="text-text-secondary ml-1">/ {currentPart.partId}파트</span>
+                  <span className="text-text-secondary ml-1">
+                    / {formatPartDisplayName(currentPart.partId, getPartLabelText([currentPart.sheetName]))}
+                  </span>
                 )}
               </span>
             </>
@@ -6836,7 +6858,12 @@ export function ScenesView() {
             referenceSide={referenceSide}
             bgSheetName={bgPart?.sheetName ?? null}
             actSheetName={actPart?.sheetName ?? null}
-            partLabel={currentPartId ? `${currentPartId}파트` : undefined}
+            partLabel={currentPartId
+              ? formatPartDisplayName(
+                  currentPartId,
+                  getPartLabelText(buildPartContextMenuTarget(currentPartId)?.sheetNames ?? []),
+                )
+              : undefined}
             episodeLabel={selectedEpisode != null ? `EP ${selectedEpisode}` : undefined}
             hasPrev={hasPrev}
             hasNext={hasNext}
@@ -6921,6 +6948,14 @@ export function ScenesView() {
           onClose={() => { closePartMenu(); setPartMenuTarget(null); }}
           items={[
             {
+              label: '이름 편집',
+              icon: <Pencil size={12} />,
+              onClick: () => {
+                setPartLabelInput(getPartLabelText(partMenuTarget.sheetNames));
+                setEditingPartLabel(partMenuTarget);
+              },
+            },
+            {
               label: '릴 담당 편집',
               icon: <UserRound size={12} />,
               onClick: () => {
@@ -6949,6 +6984,51 @@ export function ScenesView() {
             },
           ]}
         />
+      )}
+
+      {/* 파트 이름(별칭) 인라인 편집 */}
+      {editingPartLabel && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 backdrop-blur-sm"
+          onClick={() => setEditingPartLabel(null)}
+        >
+          <div
+            className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-bold text-text-primary">{editingPartLabel.partId}파트 이름</h3>
+            <input
+              autoFocus
+              value={partLabelInput}
+              onChange={(e) => setPartLabelInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveEditingPartLabel(editingPartLabel, partLabelInput);
+                if (e.key === 'Escape') setEditingPartLabel(null);
+              }}
+              placeholder={`예: sc_000~099 (비우면 ${editingPartLabel.partId}파트)`}
+              className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
+            />
+            <p className="text-[11px] text-text-secondary/70 leading-relaxed">
+              화면에 보이는 이름만 바뀝니다. 댓글·리테이크가 쓰는 원래 파트 {editingPartLabel.partId}는 그대로라 기존 기록은 안전합니다.
+              {editingPartLabel.sheetNames.length > 1 && ' 전체 모드에서는 연결된 BG/액팅 파트에 같은 이름이 함께 저장됩니다.'}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setEditingPartLabel(null)}
+                className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => handleSaveEditingPartLabel(editingPartLabel, partLabelInput)}
+                className="px-3 py-1.5 text-xs text-white bg-accent rounded-lg hover:bg-accent/80 transition-colors"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 파트 릴 담당 인라인 편집 */}

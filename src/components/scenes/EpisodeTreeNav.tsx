@@ -3,7 +3,8 @@ import { ChevronRight, Plus, FolderOpen, Folder, MoreVertical, Archive, RotateCc
 import { cn } from '@/utils/cn';
 import type { Episode, Department, ScenesDeptFilter } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
-import { getCombinedPartMemo, getCombinedPartReelWorker, type PartContextMenuTarget } from '@/utils/partMemoHelpers';
+import { getCombinedPartLabel, getCombinedPartMemo, getCombinedPartReelWorker, type PartContextMenuTarget } from '@/utils/partMemoHelpers';
+import { formatPartDisplayName, hasPartLabel } from '@/utils/partDisplayName';
 import { normalizePartIdKey, partIdMatches } from '@/utils/partId';
 
 export interface ArchivedEpisodeInfo {
@@ -22,6 +23,7 @@ interface EpisodeTreeNavProps {
   selectedPart: string | null;
   partMemos: Record<string, string>;
   partReelWorkers: Record<string, string>;
+  partLabels: Record<string, string>;
   episodeTitles: Record<number, string>;   // episodeNumber → custom title
   episodeMemos: Record<number, string>;    // episodeNumber → memo
   archivedEpisodes: ArchivedEpisodeInfo[];
@@ -112,6 +114,7 @@ export function EpisodeTreeNav({
   selectedPart,
   partMemos,
   partReelWorkers,
+  partLabels,
   episodeTitles,
   episodeMemos,
   archivedEpisodes,
@@ -335,6 +338,7 @@ export function EpisodeTreeNav({
                         const partProgress = calcPartProgress(group.scenes);
                         const memo = getCombinedPartMemo(partMemos, group.sheetNames);
                         const reelWorker = getCombinedPartReelWorker(partReelWorkers, group.sheetNames);
+                        const partLabel = getCombinedPartLabel(partLabels, group.sheetNames);
 
                         return (
                           <div
@@ -356,8 +360,19 @@ export function EpisodeTreeNav({
                             }}
                           >
                             <div className="flex flex-col flex-1 min-w-0">
-                              <span className="text-sm font-medium truncate leading-tight">
-                                {group.partId}파트
+                              <span className="flex items-center gap-1 min-w-0">
+                                <span className="min-w-0 truncate text-sm font-medium leading-tight">
+                                  {formatPartDisplayName(group.partId, partLabel)}
+                                </span>
+                                {/* 별칭을 붙여도 원본 파트(A/B)는 곁에 남긴다 — 댓글·리테이크 주소와 눈으로 맞추기 위함 */}
+                                {hasPartLabel(partLabel) && (
+                                  <span
+                                    className="shrink-0 rounded bg-bg-primary/70 px-1 text-[10px] font-semibold leading-[15px] text-text-secondary/60"
+                                    title={`원래 파트 ${group.partId}`}
+                                  >
+                                    {group.partId}
+                                  </span>
+                                )}
                               </span>
                               {reelWorker && (
                                 <span className="text-xs text-accent-sub/80 truncate leading-tight" title={`릴 담당 ${reelWorker}`}>
@@ -397,6 +412,7 @@ export function EpisodeTreeNav({
                         const partProgress = calcPartProgress(part.scenes);
                         const memo = partMemos[part.sheetName];
                         const reelWorker = partReelWorkers[part.sheetName];
+                        const partLabel = partLabels[part.sheetName];
 
                         return (
                           <div
@@ -418,8 +434,18 @@ export function EpisodeTreeNav({
                             }}
                           >
                             <div className="flex flex-col flex-1 min-w-0">
-                              <span className="text-sm font-medium truncate leading-tight">
-                                {part.partId}파트
+                              <span className="flex items-center gap-1 min-w-0">
+                                <span className="min-w-0 truncate text-sm font-medium leading-tight">
+                                  {formatPartDisplayName(part.partId, partLabel)}
+                                </span>
+                                {hasPartLabel(partLabel) && (
+                                  <span
+                                    className="shrink-0 rounded bg-bg-primary/70 px-1 text-[10px] font-semibold leading-[15px] text-text-secondary/60"
+                                    title={`원래 파트 ${part.partId}`}
+                                  >
+                                    {part.partId}
+                                  </span>
+                                )}
                               </span>
                               {reelWorker && (
                                 <span className="text-xs text-accent-sub/80 truncate leading-tight" title={`릴 담당 ${reelWorker}`}>
