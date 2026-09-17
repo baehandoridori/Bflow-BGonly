@@ -9,7 +9,7 @@ export interface GanttState {
   snapshot:GanttSnapshot; actorId:string|null; loading:boolean; pending:boolean; error:string|null;
   canUndo:boolean; canRedo:boolean;
   initialize(actorId:string|null,gateway?:GanttGateway):Promise<void>;
-  refresh():Promise<boolean>; execute(command:GanttCommand):Promise<void>; undo():Promise<void>; redo():Promise<void>;
+  refresh():Promise<boolean>; execute(command:GanttCommand,options?:{optimisticSnapshot?:GanttSnapshot}):Promise<void>; undo():Promise<void>; redo():Promise<void>;
 }
 const empty=():GanttSnapshot=>({spaces:[],projects:[]});
 const errorText=(error:unknown)=>error instanceof Error?error.message:String(error);
@@ -21,6 +21,7 @@ function defaultGateway():GanttGateway {
 }
 function entity(snapshot:GanttSnapshot,key:EntityKey):Entity|null {return (key.kind==='project'?snapshot.projects:snapshot.spaces).find(x=>x.id===key.id)??null;}
 function confirmsCreatedEntity(canonical:GanttSnapshot,optimistic:GanttSnapshot,command:GanttCommand):boolean {
+  if(command.type==='linkCalendar')return canonical.spaces.some(space=>space.calendarLink?.calendarId===command.calendarId&&canonical.projects.some(project=>project.spaceId===space.id&&project.calendarLink?.linkId===space.calendarLink?.linkId));
   if((command.type!=='saveSpace'&&command.type!=='saveProject')||command.expectedRevision!==null)return false;
   const key:EntityKey={kind:command.type==='saveSpace'?'space':'project',id:command.type==='saveSpace'?command.space.id:command.project.id};
   const predicted=entity(optimistic,key),saved=entity(canonical,key);
@@ -51,11 +52,11 @@ export function createGanttStore() {
   let undoStack:HistoryEntry[]=[],redoStack:HistoryEntry[]=[];
   return create<GanttState>((set,get)=>{
     const publishHistory=()=>set({canUndo:undoStack.length>0,canRedo:redoStack.length>0});
-    const run=async(command:GanttCommand,historyMode:'record'|'undo'|'redo'='record',entry?:HistoryEntry)=>{
+    const run=async(command:GanttCommand,historyMode:'record'|'undo'|'redo'='record',entry?:HistoryEntry,options?:{optimisticSnapshot?:GanttSnapshot})=>{
       const state=get();if(!gateway||!state.actorId)throw new Error('로그인이 필요합니다.');if(state.pending)throw new Error('이전 변경을 저장하고 있습니다.');
       const currentGeneration=generation,activeGateway=gateway,before=structuredClone(state.snapshot);
       let optimistic:GanttSnapshot;
-      try{optimistic=applyCommand(before,state.actorId,command);}catch(error){set({error:errorText(error)});throw error;}
+      try{optimistic=applyCommand(before,state.actorId,command);if(command.type==='linkCalendar'&&options?.optimisticSnapshot)optimistic=structuredClone(options.optimisticSnapshot);}catch(error){set({error:errorText(error)});throw error;}
       // In-flight refreshes may not overwrite this optimistic command.
       refreshVersion++;set({snapshot:optimistic,pending:true,error:null});
       let recovery:Promise<GanttSnapshot>|null=null;
@@ -64,7 +65,7 @@ export function createGanttStore() {
         try {
           canonical=await activeGateway.execute({requestId:crypto.randomUUID(),command});
         } catch(error) {
-          if((command.type!=='saveSpace'&&command.type!=='saveProject')||command.expectedRevision!==null)throw error;
+          if(command.type!=='linkCalendar'&&((command.type!=='saveSpace'&&command.type!=='saveProject')||command.expectedRevision!==null))throw error;
           // A response can be lost after creation commits. Keep the write lock and
           // verify that exact entity before returning success to the create dialog.
           // Otherwise retrying the unchanged draft would conflict with its own ID.
@@ -90,7 +91,7 @@ export function createGanttStore() {
           // arriving in the same response must remain a conflict for folder undo.
           for(const item of [...undoStack,...redoStack])if(item.keys[0].kind==='space'&&item.expected===fingerprint(before,item)&&fingerprint(canonical,item)===fingerprint(optimistic,item))item.expected=fingerprint(canonical,item);
         }
-        if(historyMode==='record'){
+        if(command.type==='linkCalendar'||command.type==='unlinkCalendar'){redoStack=[];}else if(historyMode==='record'){
           const keys:EntityKey[]=command.type==='saveProjectPair'?command.projects.map(item=>({kind:'project',id:item.project.id})):[{kind:command.type==='saveProject'||command.type==='deleteProject'?'project':'space',id:command.type==='saveProject'?command.project.id:command.type==='saveSpace'?command.space.id:command.type==='deleteProject'?command.projectId:command.spaceId}];
           const id=keys[0].id,key={keys};
           // Folder deletion and access cleanup have no atomic inverse in the
@@ -167,7 +168,7 @@ export function createGanttStore() {
           return false;
         }
       },
-      execute:command=>run(command),undo:()=>travel('undo'),redo:()=>travel('redo'),
+      execute:(command,options)=>run(command,'record',undefined,options),undo:()=>travel('undo'),redo:()=>travel('redo'),
     };
   });
 }

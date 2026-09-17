@@ -132,3 +132,14 @@ test('the popup remains hoverable and a dismissed popup cannot keep a later hove
   assert.equal(tooltip(h.render()), undefined, 'a prior dismissed popup does not retain hover ownership');
   h.cleanup();
 });
+
+test('linked team calendars show team-wide access and implicit viewers even with no explicit members',async()=>{
+ const team={...space,members:[],calendarLink:{calendarId:'calendar',linkId:'link',actorId:'owner',visibility:'team' as const,canEdit:true,canUnlink:true,isAdminOverview:false}};
+ const h=await harness({space:team,users});let tree=h.render();
+ assert.match(text(badge(tree)),/팀 전체/);assert.doesNotMatch(text(badge(tree)),/0명/);
+ badge(tree).props.onPointerEnter!({clientX:100,clientY:100});h.advance(120);tree=h.render();
+ assert.match(text(tooltip(tree)),/팀 전체/);
+ assert.deepEqual(elements(tooltip(tree)).filter(node=>node.type==='li').map(text),['리드보기','신입보기']);
+ h.update({space:{...team,members:[{userId:'lead',canEdit:true}]},users:[...users,{id:'new',name:'새 팀원'}]});tree=h.render();
+ assert.deepEqual(elements(tooltip(tree)).filter(node=>node.type==='li').map(text),['리드편집','신입보기','새 팀원보기']);h.cleanup();
+});

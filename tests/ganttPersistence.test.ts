@@ -44,7 +44,7 @@ test('store sends the session token (never an actor id) with the original reques
   } }, sessions);
   const request = { requestId: 'request-1', command: { type: 'deleteProject', projectId: 'p', expectedRevision: 2 } };
   await assert.rejects(store.execute('alice', request), /먼저 수정/);
-  assert.deepEqual(calls, [{ name: 'gantt_session_execute', args: { p_session_token: 'token-alice', p_request_id: 'request-1', p_command: request.command } }]);
+  assert.deepEqual(calls, [{ name: 'gantt_session_execute_v2', args: { p_session_token: 'token-alice', p_request_id: 'request-1', p_command: request.command } }]);
   assert.equal(JSON.stringify(calls).includes('p_actor_id'), false);
 });
 
@@ -53,7 +53,7 @@ test('a two-project mutation crosses main as one session RPC and malformed batch
   const store=createGanttStore({rpc:async(name:string,args:unknown)=>{calls.push({name,args});return {data:{spaces:[],projects:[]},error:null};}},sessions);
   const spaceId=crypto.randomUUID(),a=createProject('A',spaceId,'alice'),b=createProject('B',spaceId,'alice');
   const command={type:'saveProjectPair',projects:[{project:a,expectedRevision:1},{project:b,expectedRevision:1}],expectedSpaces:[{spaceId,expectedRevision:1}]};
-  await store.execute('alice',{requestId:'pair',command});assert.deepEqual(calls,[{name:'gantt_session_execute',args:{p_session_token:'token-alice',p_request_id:'pair',p_command:command}}]);
+  await store.execute('alice',{requestId:'pair',command});assert.deepEqual(calls,[{name:'gantt_session_execute_v2',args:{p_session_token:'token-alice',p_request_id:'pair',p_command:command}}]);
   for(const bad of [{...command,projects:[command.projects[0]]},{...command,projects:[command.projects[0],command.projects[0]]},{...command,expectedSpaces:[]},{...command,projects:[command.projects[0],{...command.projects[1],expectedRevision:1.5}]}])await assert.rejects(store.execute('alice',{requestId:'bad',command:bad}));assert.equal(calls.length,1);
 });
 
@@ -212,6 +212,10 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
     await db.exec(sql); await db.exec(sql); await db.exec(sessionsSql); await db.exec(sessionsSql);
     await db.exec(readFileSync(new URL('../DEVLOG/migrations/20260905173804_gantt_revision_ledger.sql', import.meta.url), 'utf8'));
     await db.exec(readFileSync(new URL('../DEVLOG/migrations/20260905210416_gantt_calendar_color.sql', import.meta.url), 'utf8'));
+    await db.exec(`ALTER TABLE calendars ADD COLUMN name TEXT DEFAULT 'Calendar', ADD COLUMN color TEXT DEFAULT '#6C5CE7', ADD COLUMN created_at TIMESTAMPTZ DEFAULT now();
+      CREATE TABLE calendar_tags(id UUID PRIMARY KEY,color TEXT);
+      CREATE TABLE calendar_events(id UUID PRIMARY KEY,calendar_id UUID REFERENCES calendars(id) ON DELETE CASCADE,title TEXT,memo TEXT,start_date DATE,end_date DATE,all_day BOOLEAN,start_time TEXT,end_time TEXT,tag_id UUID,tag_ids UUID[]);`);
+    await db.exec(readFileSync(new URL('../DEVLOG/migrations/2026-09-17-calendar-linked-gantt.sql', import.meta.url), 'utf8'));
     const { createGanttStore } = await load('electron/ganttStore.ts');
     const client = { rpc: async (name: string, args: Record<string, unknown>) => {
       try {
@@ -392,4 +396,16 @@ test('PostgreSQL migration, ACL, CAS, replay, projection, and calendar deletion 
       assert.equal((await store.listCalendarEvents('carol', {})).length, 0);
     });
   } finally { await db.close(); }
+});
+
+
+test('calendar linking accepts only UUID references and invokes the authenticated v2 API',async()=>{
+ const {createGanttStore}=await load('electron/ganttStore.ts');const calls:Array<{name:string;args:unknown}>=[];
+ const store=createGanttStore({rpc:async(name:string,args:unknown)=>{calls.push({name,args});return {data:{spaces:[],projects:[]},error:null};}},sessions);
+ const calendarId=crypto.randomUUID(),linkId=crypto.randomUUID();
+ await store.execute('alice',{requestId:'link',command:{type:'linkCalendar',calendarId}});
+ await store.execute('alice',{requestId:'unlink',command:{type:'unlinkCalendar',calendarId,linkId}});
+ await store.read('alice');assert.deepEqual(calls.map(row=>row.name),['gantt_session_execute_v2','gantt_session_execute_v2','gantt_session_read_v2']);
+ for(const command of [{type:'linkCalendar',calendarId:'wrong'},{type:'linkCalendar',calendarId,ownerId:'alice'},{type:'unlinkCalendar',calendarId},{type:'unlinkCalendar',calendarId,linkId,actorId:'owner'}])await assert.rejects(store.execute('alice',{requestId:'bad',command}));
+ assert.equal(calls.length,3);
 });

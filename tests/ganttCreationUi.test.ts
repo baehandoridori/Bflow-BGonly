@@ -38,7 +38,7 @@ type CanvasProps = {selected: string[]; statusFilter: string; projects:GanttProj
 type InspectorProps = {displayProgress?:number;onAddChild(): void; onDelete(): void; onComplete():void; onSaveTask(patch: Partial<GanttTask>, expectedRevision?:number): Promise<GanttProject|void>;onDraftProgress(projectId:string,taskId:string,progress:number|null):void;onRegisterCloseGuard(guard:(()=>Promise<boolean>)|null):void};
 const bundle = build({
   entryPoints: ['src/features/gantt/GanttView.tsx'], bundle: true, format: 'cjs', platform: 'node', target: 'node22', write: false,
-  external: ['./CalendarImportDialog', 'react', 'react/jsx-runtime', 'lucide-react', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useCalendarStore', '@/utils/calcStats', './useGanttStore', './GanttCanvas', './GanttDialogs', './GanttInspector', './GanttSelect', './GanttTree', './gantt.css'],
+  external: ['./LinkedCalendarPanel', './CalendarImportDialog', 'react', 'react/jsx-runtime', 'lucide-react', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useCalendarStore', '@/utils/calcStats', './useGanttStore', './GanttCanvas', './GanttDialogs', './GanttInspector', './GanttSelect', './GanttTree', './gantt.css'],
 });
 
 function elements(node: ReactNode, type?: unknown): Element[] {
@@ -112,6 +112,7 @@ async function harness(storage = new Map<string,string>()) {
       if (name === './GanttInspector') return {GanttInspector: Inspector};
       if (name === './GanttSelect') return {GanttSelect:Select};
       if (name === './GanttTree') return {GanttTree:Tree};
+      if (name === './LinkedCalendarPanel') return {LinkedCalendarPanel:'LinkedCalendarPanel'};
       if (name === './CalendarImportDialog') return {CalendarImportDialog:Empty};
       if (name === './gantt.css') return {};
       if (name === 'lucide-react') return new Proxy({}, {get: () => Empty});
@@ -140,6 +141,7 @@ async function harness(storage = new Map<string,string>()) {
     context(tree:ReactNode) {const found=elements(tree,Context)[0];assert.ok(found);return found.props as unknown as {onDelete():void;completed:boolean};},
     folder(tree:ReactNode) {const found=elements(tree,SpaceDialog)[0];assert.ok(found);return found.props as unknown as {onDelete():Promise<void>;projectCount:number};},
     navigation(tree:ReactNode) {const found=elements(tree,Tree)[0];assert.ok(found);return found.props as any;},
+    makeLinked(projectId: string) { const project=state.snapshot.projects.find(p=>p.id===projectId)!; const link={calendarId:'source',linkId:'binding',actorId:'me',visibility:'team' as const,canEdit:true,canUnlink:true,isAdminOverview:false};project.calendarLink=link;state.snapshot.spaces.push({...state.snapshot.spaces.find(s=>s.id===project.spaceId)!,id:'linked-space',calendarLink:link});project.spaceId='linked-space';project.tasks.forEach(t=>t.sourceCalendarEventId=t.id); },
     snapshot:()=>state.snapshot,
     latestProject(projectId: string) {const found = state.snapshot.projects.find(project => project.id === projectId);assert.ok(found);return found;},
   };
@@ -555,3 +557,18 @@ for(const operation of ['creation','relocation'] as const) {
     }
   });
 }
+
+
+test('linked calendar rows disable Gantt editing and open the source event panel', async()=>{
+ const h=await harness();h.render();h.makeLinked(B);let tree=h.render();
+ h.canvas(tree).onSelect(B,TASK);tree=h.render();
+ assert.equal(button(tree,'+ 작업').props.disabled,true);
+ assert.equal(button(tree,'+ 그룹').props.disabled,true);
+ const panel=elements(tree,'LinkedCalendarPanel')[0];assert.ok(panel);
+ assert.equal((panel.props as any).taskId,TASK);
+ assert.equal(elements(tree).some(node=>(node.props as any).onSaveTask),false);
+ const nav=h.navigation(tree);nav.onFolderSettings(h.snapshot().spaces.find(s=>s.id==='linked-space'));tree=h.render();
+ assert.ok(elements(tree,'LinkedCalendarPanel')[0]);
+ assert.equal(elements(tree).some(node=>(node.props as any).onSave && (node.props as any).projectCount!==undefined),false);
+ assert.equal(h.commands.length,0);
+});
