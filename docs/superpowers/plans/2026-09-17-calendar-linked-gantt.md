@@ -20,7 +20,7 @@ The user's correction is whole-calendar import, with original team/member sharin
 - [x] Preview equivalent binding, cross-user source updates, revoked access and idempotency tests.
 - [x] Whole-calendar link UI as default, linked folder/project display, source editor and unlink controls.
 - [x] Integration/review, typecheck, relevant tests, full development build, authenticated browser checks.
-- [ ] Version/release notes, PR/merge, exact-merge installer build, DB migration, manifest-last deployment and whole-payload verification.
+- [x] Version/release notes, PR/merge, exact-merge installer build, DB migration, manifest-last deployment and whole-payload verification.
 
 ## Ownership
 
