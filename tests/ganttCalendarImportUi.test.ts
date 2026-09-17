@@ -11,7 +11,7 @@ const sourceEvent = { id: 'calendar-event-1', source: 'bflow', sourceCalendarId:
 function nodes(tree: ReactNode): any[] { if (Array.isArray(tree)) return tree.flatMap(nodes); if (!isValidElement(tree)) return []; return [tree, ...nodes((tree.props as any).children)]; }
 function button(tree: ReactNode, text: string) { return nodes(tree).find((node) => node.type === 'button' && node.props.children === text); }
 
-async function harness() {
+async function harness(mode: 'copy' | 'link' = 'copy') {
   const states: unknown[] = [], refs: Array<{ current: any }> = [], deps: unknown[][] = [];
   const effects: Array<() => void | (() => void)> = [];
   const mountedEffects: Array<{ run: () => void | (() => void); cleanup: void | (() => void) }> = [];
@@ -23,9 +23,10 @@ async function harness() {
   let destinationFresh = true;
   let loadingGate: Promise<void> | undefined;
   let reads = 0;
-  const writes: any[] = [], imported: unknown[][] = [];
+  const writes: any[] = [], imported: unknown[][] = [], linked: unknown[] = [];
+  let writeGate: Promise<void> | undefined;
   const space = createSpace('내 폴더', user.id), project = createProject('대상 프로젝트', space.id, user.id);
-  const gantt = { snapshot: { spaces: [space], projects: [project] }, actorId: user.id, pending: false, error: null, refresh: async () => destinationFresh, execute: async (command: any) => { writes.push(command); } };
+  const gantt = { snapshot: { spaces: [space], projects: [project] }, actorId: user.id, pending: false, error: null, refresh: async () => destinationFresh, execute: async (command: any) => { writes.push(command); await writeGate; if(command.type === 'linkCalendar') gantt.snapshot.projects[0] = { ...project, calendarLink: {calendarId:calendar.id,linkId:'link',actorId:'me',visibility:'members',canEdit:false,canUnlink:false,isAdminOverview:false} } as any; } };
   const calendars = { calendars: [calendar], loadAll: async () => ({ calendarsFresh: true, tagsFresh: true }) };
   const auth = Object.assign((select: (s: any) => unknown) => select({ currentUser: user, users: [{ id: 'me', name: '나' }] }), { getState: () => ({ currentUser: user }), subscribe: (fn: any) => { subscribers.add(fn); return () => subscribers.delete(fn); } });
   const result = await build({ entryPoints: ['src/features/gantt/CalendarImportDialog.tsx'], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react', 'react/jsx-runtime', './GanttDialogs', './GanttSelect', '@/stores/useAuthStore', '@/stores/useCalendarStore', './useGanttStore', '@/services/calendarService', './calendarImport.css'] });
@@ -41,8 +42,9 @@ async function harness() {
     if (id === './calendarImport.css') return {};
     return require(id);
   }, module, module.exports);
-  const render = () => { stateIndex = 0; refIndex = 0; effectIndex = 0; const tree = module.exports.CalendarImportDialog({ actorId: 'me', initialProjectId: project.id, onClose() {}, onImported: (...args: unknown[]) => imported.push(args) }); while (effects.length) { const run = effects.shift()!; mountedEffects.push({ run, cleanup: run() }); } return tree; };
-  return { render, replayEffects: () => { mountedEffects.forEach(effect => { effect.cleanup?.(); effect.cleanup = effect.run(); }); }, writes, imported, project, setFreshResults: (values: boolean[]) => { freshResults = values; }, setDestinationFresh: (value: boolean) => { destinationFresh = value; }, shareDestination: () => { gantt.snapshot = { ...gantt.snapshot, spaces: gantt.snapshot.spaces.map(space => ({ ...space, shared: true, members: [{ userId: 'new-member', canEdit: false }], revision: space.revision + 1 })) }; }, setFresh: (value: boolean) => { fresh = value; }, gate: (value: Promise<void>) => { loadingGate = value; }, reads: () => reads, switchUser: () => { const previous = { currentUser: user }; user = { id: 'other' }; subscribers.forEach(fn => fn({ currentUser: user }, previous)); } };
+  let chooseMode = mode === 'copy';
+  const render = () => { stateIndex = 0; refIndex = 0; effectIndex = 0; const tree = module.exports.CalendarImportDialog({ actorId: 'me', initialProjectId: project.id, onClose() {}, onLinked: (project: unknown) => linked.push(project), onImported: (...args: unknown[]) => imported.push(args) }); while (effects.length) { const run = effects.shift()!; mountedEffects.push({ run, cleanup: run() }); } if (chooseMode) { chooseMode = false; button(tree, '일정만 한 번 복사').props.onClick(); return render(); } return tree; };
+  return { render, replayEffects: () => { mountedEffects.forEach(effect => { effect.cleanup?.(); effect.cleanup = effect.run(); }); }, writes, imported, linked, gateWrite: (gate: Promise<void>) => { writeGate = gate; }, project, setFreshResults: (values: boolean[]) => { freshResults = values; }, setDestinationFresh: (value: boolean) => { destinationFresh = value; }, shareDestination: () => { gantt.snapshot = { ...gantt.snapshot, spaces: gantt.snapshot.spaces.map(space => ({ ...space, shared: true, members: [{ userId: 'new-member', canEdit: false }], revision: space.revision + 1 })) }; }, setFresh: (value: boolean) => { fresh = value; }, gate: (value: Promise<void>) => { loadingGate = value; }, reads: () => reads, switchUser: () => { const previous = { currentUser: user }; user = { id: 'other' }; subscribers.forEach(fn => fn({ currentUser: user }, previous)); } };
 }
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve)); };
 
@@ -119,4 +121,28 @@ test('an obsolete mount cannot retry its superseded event read against the curre
   assert.equal(h.reads(), 2, 'only the active lifecycle may retry');
   assert.equal(nodes(h.render()).filter(node => node.props['data-import-event']).length, 1);
   assert.equal(nodes(h.render()).some(node => node.props.role === 'alert'), false);
+});
+
+
+test('whole calendar linking is the default and needs no destination or per-event selection', async () => {
+  const h = await harness('link'); h.render(); await settle(); const tree = h.render();
+  assert.ok(button(tree, '캘린더 연결'));
+  assert.equal(nodes(tree).some(node => node.props['aria-label'] === '가져오기 시작일'), false);
+  assert.equal(nodes(tree).some(node => node.props.label === '가져올 프로젝트'), false);
+  assert.equal(nodes(tree).some(node => node.props['data-import-event']), false);
+});
+
+
+test('linking a read-only shared calendar creates a binding without copying into a local destination', async () => {
+ const h=await harness('link');h.render();await settle();
+ await nodes(h.render()).find(node=>node.type==='form').props.onSubmit({preventDefault(){}});
+ assert.deepEqual(h.writes,[{type:'linkCalendar',calendarId:calendar.id}]);
+ assert.equal(h.linked.length,1);assert.equal(h.imported.length,0);
+});
+
+test('double submitting the whole-calendar link issues one command while pending', async () => {
+ const h=await harness('link');h.render();await settle();let release!:()=>void;h.gateWrite(new Promise<void>(resolve=>{release=resolve;}));
+ const submit=nodes(h.render()).find(node=>node.type==='form').props.onSubmit;
+ const first=submit({preventDefault(){}});await submit({preventDefault(){}});
+ assert.equal(h.writes.length,1);release();await first;assert.equal(h.linked.length,1);
 });

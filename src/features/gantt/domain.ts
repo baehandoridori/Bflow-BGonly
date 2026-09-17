@@ -232,14 +232,14 @@ export function completeTasks(project:GanttProject,ids:string[],completed:boolea
   normalizeCompletion(next);
   return next;
 }
-export function canManageSpace(space:GanttSpace,actorId:string):boolean {return Boolean(actorId)&&space.ownerId===actorId;}
-export function canViewSpace(space:GanttSpace,actorId:string):boolean {return Boolean(actorId)&&(space.ownerId===actorId||(space.shared&&space.members.some(m=>m.userId===actorId)));}
-export function canEditSpace(space:GanttSpace,actorId:string):boolean {return space.ownerId===actorId||(space.shared&&space.members.some(m=>m.userId===actorId&&m.canEdit));}
+export function canManageSpace(space:GanttSpace,actorId:string):boolean {return !space.calendarLink&&Boolean(actorId)&&space.ownerId===actorId;}
+export function canViewSpace(space:GanttSpace,actorId:string):boolean {return space.calendarLink?Boolean(actorId)&&space.calendarLink.actorId===actorId:Boolean(actorId)&&(space.ownerId===actorId||(space.shared&&space.members.some(m=>m.userId===actorId)));}
+export function canEditSpace(space:GanttSpace,actorId:string):boolean {return !space.calendarLink&&(space.ownerId===actorId||(space.shared&&space.members.some(m=>m.userId===actorId&&m.canEdit)));}
 export function canViewProject(snapshot:GanttSnapshot,actorId:string,project:GanttProject):boolean {
   const space=snapshot.spaces.find(s=>s.id===project.spaceId);return Boolean(space&&canViewSpace(space,actorId)&&(space.ownerId===actorId||project.ownerId===actorId||project.memberIds===null||project.memberIds.includes(actorId)));
 }
 export function canEditProject(snapshot:GanttSnapshot,actorId:string,project:GanttProject):boolean {
-  const space=snapshot.spaces.find(s=>s.id===project.spaceId);return Boolean(space&&canViewProject(snapshot,actorId,project)&&canEditSpace(space,actorId)&&(space.ownerId===actorId||project.ownerId===actorId||project.editorIds===null||project.editorIds.includes(actorId)));
+  const space=snapshot.spaces.find(s=>s.id===project.spaceId);return Boolean(!project.calendarLink&&space&&canViewProject(snapshot,actorId,project)&&canEditSpace(space,actorId)&&(space.ownerId===actorId||project.ownerId===actorId||project.editorIds===null||project.editorIds.includes(actorId)));
 }
 export function visibleSnapshot(snapshot:GanttSnapshot,actorId:string):GanttSnapshot {return structuredClone({spaces:snapshot.spaces.filter(s=>canViewSpace(s,actorId)),projects:snapshot.projects.filter(p=>canViewProject(snapshot,actorId,p))});}
 /** Private authority state. Never include deleted entity IDs in a visible snapshot. */
@@ -250,6 +250,16 @@ export function rememberGanttRevisions(ledger:GanttRevisionLedger,snapshot:Gantt
 }
 export function applyCommand(snapshot:GanttSnapshot,actorId:string,command:GanttCommand,ledger?:GanttRevisionLedger,retiredIds:readonly string[]=[]):GanttSnapshot {
   text(actorId,'로그인 사용자');const next=structuredClone(snapshot);
+  if(command.type==='linkCalendar'){id(command.calendarId);return next;}
+  if(command.type==='unlinkCalendar'){
+    id(command.calendarId);id(command.linkId);
+    const space=next.spaces.find(row=>row.calendarLink?.calendarId===command.calendarId&&row.calendarLink.linkId===command.linkId);
+    if(!space||space.calendarLink?.actorId!==actorId||!space.calendarLink.canUnlink)fail('캘린더 연결 해제 권한이 없거나 연결이 변경되었습니다.');
+    next.spaces=next.spaces.filter(row=>row.id!==space.id);next.projects=next.projects.filter(row=>row.spaceId!==space.id);return next;
+  }
+  const submitted=command.type==='saveSpace'?[command.space]:command.type==='saveProject'?[command.project]:command.type==='saveProjectPair'?command.projects.map(row=>row.project):[];
+  if(submitted.some(row=>Object.prototype.hasOwnProperty.call(row,'calendarLink')||('tasks' in row&&row.tasks.some(task=>Object.prototype.hasOwnProperty.call(task,'sourceCalendarEventId')))))fail('연결된 캘린더는 원본 캘린더에서 수정해 주세요.');
+
   const cas=(current:number|undefined,expected:number|null)=>{if(current===undefined?expected!==null:expected!==current)fail('다른 변경이 있습니다. 최신 내용을 다시 불러와 주세요.');};
   if(command.type==='saveSpace') {
     const s=command.space;id(s.id);text(s.name,'폴더 이름');text(s.ownerId,'소유자');revision(s.revision);

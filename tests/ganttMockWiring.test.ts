@@ -3,6 +3,47 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { createProject, createSpace, createTask } from '../src/features/gantt/domain.ts';
 
+test('linked calendar mock follows source edits, read-only members, unlink, relink and source deletion',async()=>{
+ const keys=['window','document','navigator','BroadcastChannel'],descriptors=new Map(keys.map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));
+ const values=new Map<string,string>();let tail=Promise.resolve();
+ const storage={getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>{values.set(k,v);},removeItem:(k:string)=>{values.delete(k);}};
+ const locks={request<T>(_key:string,callback:()=>Promise<T>):Promise<T>{const result=tail.then(callback);tail=result.then(()=>undefined,()=>undefined);return result;}};
+ const win={localStorage:storage,electronAPI:undefined as any};
+ for(const [key,value] of Object.entries({window:win,document:{documentElement:{dataset:{}}},navigator:{locks},BroadcastChannel:undefined}))Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});
+ try{
+  const bundle=await build({stdin:{contents:"export { installDevElectronAPI } from './src/mocks/devElectronAPI.ts';",resolveDir:process.cwd()},bundle:true,platform:'browser',format:'esm',target:'es2022',write:false});
+  const module=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}#linked-calendar`);module.installDevElectronAPI();const api=win.electronAPI;
+  const login=(name:string)=>api.loginCanonicalSession({name,password:'1234'});
+  const command=(command:any)=>api.ganttExecute({requestId:crypto.randomUUID(),command});
+  await login('배한솔');
+  const calendar=await api.calendarCreate({name:'연결 원본',color:'#5489BB',visibility:'members',members:[{user_id:'2',can_edit:true}]});
+  const input={calendar_id:calendar.id,title:'원본 일정',memo:'원본 메모',tag_id:null,all_day:true,start_date:'2026-09-17',end_date:'2026-09-18',start_time:null,end_time:null,linked_episode:null,linked_part:null,linked_sheet_name:null,linked_scene_id:null,linked_department:null,linked_todo_id:null};
+  const event=await api.calendarEventCreate(input);
+  await login('장삐쭈');
+  const linked=await command({type:'linkCalendar',calendarId:calendar.id});
+  const project=linked.projects.find((p:any)=>p.calendarLink?.calendarId===calendar.id);
+  assert.ok(project);assert.equal(project.ownerId,'1');assert.equal(project.calendarLink.canEdit,true);assert.equal(project.calendarLink.canUnlink,true);
+  await api.calendarEventUpdate(event.id,{title:'멤버가 편집한 일정'});
+  let snapshot=await api.ganttRead();assert.equal(snapshot.projects.find((p:any)=>p.id===project.id).tasks[0].title,'멤버가 편집한 일정');
+  assert.equal((await api.calendarEventsList()).filter((e:any)=>e.calendar_id===calendar.id).length,1,'no derived task is written back as an event');
+  await login('배한솔');await api.calendarSetMembers(calendar.id,[{user_id:'2',can_edit:false}]);
+  await login('장삐쭈');snapshot=await api.ganttRead();assert.equal(snapshot.projects.find((p:any)=>p.id===project.id).calendarLink.canEdit,false);
+  await assert.rejects(api.calendarEventUpdate(event.id,{title:'쓰기 금지'}),/권한/);
+  await command({type:'unlinkCalendar',calendarId:calendar.id,linkId:project.calendarLink.linkId});
+  assert.equal((await api.ganttRead()).projects.some((p:any)=>p.id===project.id),false);
+  assert.ok((await api.calendarEventsList()).some((e:any)=>e.id===event.id));
+  const relinked=(await command({type:'linkCalendar',calendarId:calendar.id})).projects.find((p:any)=>p.calendarLink?.calendarId===calendar.id);
+  assert.notEqual(relinked.calendarLink.linkId,project.calendarLink.linkId);
+  await assert.rejects(command({type:'unlinkCalendar',calendarId:calendar.id,linkId:project.calendarLink.linkId}),/연결.*변경/);
+  await login('배한솔');await api.calendarSetMembers(calendar.id,[]);
+  await login('장삐쭈');assert.equal((await api.ganttRead()).projects.some((p:any)=>p.id===relinked.id),false);
+  await login('배한솔');await api.calendarDelete(calendar.id);
+  assert.equal((await api.ganttRead()).projects.some((p:any)=>p.id===relinked.id),false);
+  const authority=JSON.parse(values.get('bflow-gantt-preview-authority-v1')!);
+  assert.equal(authority.bindings.some((binding:any)=>binding.calendarId===calendar.id),false,'source deletion removes registry entries');
+ }finally{for(const key of keys){const descriptor=descriptors.get(key);if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}}
+});
+
 test('mock API persists gantt, projects calendar edits, rejects privacy replacement and fences queued session writes',async()=>{
   const keys=['window','document','navigator','BroadcastChannel'];const descriptors=new Map(keys.map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));
   const values=new Map<string,string>();let tail=Promise.resolve();let hold:Promise<void>|null=null;

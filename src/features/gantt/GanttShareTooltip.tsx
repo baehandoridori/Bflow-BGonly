@@ -11,12 +11,14 @@ export function GanttShareTooltip({space, users}: {space: GanttSpace; users: Arr
   const anchor = useRef<HTMLButtonElement>(null), box = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const inside = useRef({badge: false, tooltip: false, focus: false});
+  const teamWide = space.calendarLink?.visibility === 'team';
   const members = useMemo(() => {
     const names = new Map(users.map(user => [user.id, user.name]));
-    return space.members.filter(member => member.userId !== space.ownerId).map(member => ({
+    const roster = teamWide ? users.map(user => ({userId:user.id,canEdit:space.members.some(member=>member.userId===user.id&&member.canEdit)})) : space.members;
+    return roster.filter(member => member.userId !== space.ownerId).map(member => ({
       ...member, name: names.get(member.userId)?.trim() || '이름 미등록',
     }));
-  }, [space.members, space.ownerId, users]);
+  }, [space.members, space.ownerId, users, teamWide]);
   const tooltipId = `gantt-share-${space.id}`;
   const hide = useCallback(() => {clearTimeout(timer.current);inside.current.tooltip = false;setShown(false);}, []);
   const showAt = (x: number, y: number) => {
@@ -63,19 +65,19 @@ export function GanttShareTooltip({space, users}: {space: GanttSpace; users: Arr
   }, [shown, point, members]);
   if (!space.shared) return null;
   return <>
-    <button ref={anchor} type="button" className="gantt-share-count" aria-label={`공유된 팀원 ${members.length}명`} aria-describedby={shown ? tooltipId : undefined}
+    <button ref={anchor} type="button" className="gantt-share-count" aria-label={`공유된 팀원 ${teamWide ? '· 팀 전체' : `${members.length}명`}`} aria-describedby={shown ? tooltipId : undefined}
       onPointerEnter={event => {inside.current.badge = true;showAt(event.clientX, event.clientY);}}
       onPointerMove={event => {if (inside.current.badge) setPoint({x: event.clientX, y: event.clientY});}}
       onPointerLeave={() => {inside.current.badge = false;leave();}}
       onFocus={event => {inside.current.focus = true;showAtAnchor(event.currentTarget);}}
       onBlur={() => {inside.current.focus = false;leave();}}
       onClick={event => {event.preventDefault();event.stopPropagation();if (!shown) showAtAnchor(event.currentTarget);}}>
-      <UsersRound size={12} aria-hidden="true"/>공유 {members.length}명
+      <UsersRound size={12} aria-hidden="true"/>{teamWide ? '팀 전체' : `공유 ${members.length}명`}
     </button>
     {shown && createPortal(<div ref={box} role="tooltip" id={tooltipId} className="gantt-share-tooltip" style={{...tooltipGlassStyle, ...position}}
       onPointerEnter={() => {inside.current.tooltip = true;clearTimeout(timer.current);}}
       onPointerLeave={() => {inside.current.tooltip = false;leave();}}>
-      <strong>공유된 팀원 · {members.length}명</strong>
+      <strong>{teamWide ? '팀 전체 공유' : `공유된 팀원 · ${members.length}명`}</strong>
       {members.length ? <ul>{members.map(member => <li key={member.userId}><span>{member.name}</span><small>{member.canEdit ? '편집' : '보기'}</small></li>)}</ul> : <p>아직 공유된 팀원이 없습니다.</p>}
     </div>, document.body)}
   </>;

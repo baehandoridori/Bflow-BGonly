@@ -9,12 +9,14 @@ import { useGanttStore } from './useGanttStore';
 import { canEditProject, canViewProject, scheduleProject } from './domain';
 import { getCalendarImportSourceKey, importCalendarEvents, isCalendarEventImported } from './calendarImport';
 import type { GanttProject, GanttSnapshot } from './types';
+import { CalendarSharingSummary } from './CalendarSharingSummary';
 import './calendarImport.css';
 
 type Props = {
   actorId: string;
   initialProjectId?: string;
   onClose: () => void;
+  onLinked?: (project: GanttProject) => void;
   onImported: (project: GanttProject, importedCount: number, skippedCount: number) => void;
 };
 
@@ -27,12 +29,13 @@ function audienceFingerprint(snapshot: GanttSnapshot, project: GanttProject): st
   return JSON.stringify([project.spaceId, project.ownerId, project.memberIds, space?.ownerId, space?.shared, space?.members]);
 }
 
-export function CalendarImportDialog({ actorId, initialProjectId, onClose, onImported }: Props) {
+export function CalendarImportDialog({ actorId, initialProjectId, onClose, onImported, onLinked }: Props) {
   const calendars = useCalendarStore((state) => state.calendars);
   const users = useAuthStore((state) => state.users);
   const snapshot = useGanttStore((state) => state.snapshot);
   const storePending = useGanttStore((state) => state.pending);
   const editableProjects = useMemo(() => snapshot.projects.filter((project) => !project.completed && canEditProject(snapshot, actorId, project)), [snapshot, actorId]);
+  const [mode, setMode] = useState<'link' | 'copy'>('link');
   const [calendarId, setCalendarId] = useState('');
   const [projectId, setProjectId] = useState(initialProjectId ?? editableProjects[0]?.id ?? '');
   const [startDate, setStartDate] = useState('');
@@ -112,6 +115,25 @@ export function CalendarImportDialog({ actorId, initialProjectId, onClose, onImp
   const audience = project ? users.filter((user) => canViewProject(snapshot, user.id, project)).map((user) => user.name) : [];
   const scope = calendar?.isAdminOverview ? '관리자만 확인할 수 있는 미공유 캘린더' : calendar?.visibility === 'team' ? '팀 전체 공개' : calendar?.visibility === 'members' ? '선택한 멤버에게 공유' : '나만 보기';
   const locked = loading || saving || sessionInvalid;
+  const linkedProject = snapshot.projects.find((item) => item.calendarLink?.calendarId === calendarId);
+  const nativeCount = events.filter((event) => event.calendarId === calendarId).length;
+
+  const link = async () => {
+    if (locked || storePending || !calendar || savingRef.current) return;
+    savingRef.current = true; setSaving(true); setError('');
+    try {
+      assertSession();
+      await useGanttStore.getState().execute({ type: 'linkCalendar', calendarId: calendar.id });
+      assertSession();
+      const linked = useGanttStore.getState().snapshot.projects.find((item) => item.calendarLink?.calendarId === calendar.id);
+      if (!linked) throw new Error('연결된 캘린더를 확인하지 못했어요. 다시 불러와 주세요.');
+      onLinked?.(linked);
+    } catch (cause) {
+      if (active.current) setError((cause as Error).message);
+    } finally {
+      savingRef.current = false; if (active.current) setSaving(false);
+    }
+  };
 
   const submit = async () => {
     if (locked || storePending || !project || !calendar || !selected.length || invalidRange || savingRef.current) return;
@@ -147,12 +169,14 @@ export function CalendarImportDialog({ actorId, initialProjectId, onClose, onImp
   };
 
   return <GanttModal title="캘린더 가져오기" onClose={() => { if (!savingRef.current) onClose(); }}>
-    <form className="calendar-import" onSubmit={(event) => { event.preventDefault(); return submit(); }}>
-      <p className="calendar-import-intro">캘린더 일정을 간트 작업으로 복사합니다. 원본은 유지되며, 이후 변경은 서로 자동 반영되지 않아요.</p>
+    <form className="calendar-import" onSubmit={(event) => { event.preventDefault(); return mode === 'link' ? link() : submit(); }}>
+      <div className="calendar-import-modes" role="group" aria-label="캘린더 가져오기 방식"><button type="button" aria-pressed={mode === 'link'} disabled={saving} onClick={() => setMode('link')}>캘린더 전체 연결</button><button type="button" aria-pressed={mode === 'copy'} disabled={saving} onClick={() => setMode('copy')}>일정만 한 번 복사</button></div>
+      {mode === 'link' ? <p className="calendar-import-intro">캘린더 전체를 폴더와 프로젝트로 연결합니다. 앞으로 추가·수정·삭제되는 일정과 공유 설정도 자동으로 반영돼요.</p> : <p className="calendar-import-intro">캘린더 일정을 간트 작업으로 복사합니다. 원본은 유지되며, 이후 변경은 서로 자동 반영되지 않아요.</p>}
       <div className="gantt-pair">
         <label className="gantt-field">원본 캘린더<GanttSelect label="가져올 캘린더" value={calendarId} disabled={locked} onChange={(value) => { setCalendarId(value); setSelectedKeys([]); }} options={[{ value: '', label: '캘린더 선택' }, ...calendars.map((item) => ({ value: item.id, label: item.name + (item.isAdminOverview ? ` · ${users.find((user) => user.id === item.ownerId)?.name ?? '알 수 없는 소유자'}` : '') + (!item.canEdit ? ' · 보기 전용' : '') }))]} /></label>
-        <label className="gantt-field">가져올 프로젝트<GanttSelect label="가져올 프로젝트" value={projectId} disabled={locked} onChange={(value) => { setProjectId(value); setSelectedKeys([]); }} options={[{ value: '', label: '프로젝트 선택' }, ...editableProjects.map((item) => ({ value: item.id, label: item.name }))]} /></label>
+        {mode === 'copy' && <label className="gantt-field">가져올 프로젝트<GanttSelect label="가져올 프로젝트" value={projectId} disabled={locked} onChange={(value) => { setProjectId(value); setSelectedKeys([]); }} options={[{ value: '', label: '프로젝트 선택' }, ...editableProjects.map((item) => ({ value: item.id, label: item.name }))]} /></label>}
       </div>
+      {mode === 'copy' && <>
       <div className="gantt-pair">
         <label className="gantt-field">시작일 <small>비우면 전체 기간</small><input aria-label="가져오기 시작일" type="date" value={startDate} disabled={locked} onChange={(event) => { setStartDate(event.target.value); setSelectedKeys([]); }} /></label>
         <label className="gantt-field">종료일 <small>비우면 전체 기간</small><input aria-label="가져오기 종료일" type="date" value={endDate} min={startDate || undefined} disabled={locked} onChange={(event) => { setEndDate(event.target.value); setSelectedKeys([]); }} /></label>
@@ -171,8 +195,13 @@ export function CalendarImportDialog({ actorId, initialProjectId, onClose, onImp
           </label>;
         })}
       </div>
+      </>}
+      {mode === 'link' && <>
+        {loading ? <p role="status">최신 캘린더 일정을 불러오는 중…</p> : calendar && <div className="calendar-link-preview"><strong>{calendar.name}</strong><p>폴더 1개 · 프로젝트 1개 · 현재 일정 {nativeCount}개</p><small>새 일정도 계속 추가됩니다. 일정 선택이나 기간 제한 없이 연결돼요.</small>{linkedProject && <p>이미 연결된 캘린더예요. 기존 프로젝트를 열어 드립니다.</p>}</div>}
+        {calendar && <CalendarSharingSummary calendar={calendar} users={users} />}
+      </>}
       {error && <p className="gantt-error" role="alert">{error}</p>}
-      <div className="gantt-dialog-actions"><button type="button" disabled={locked} onClick={() => void reload()}>다시 불러오기</button><span className="calendar-import-spacer" /><button type="button" disabled={saving} onClick={onClose}>취소</button><button className="primary" disabled={locked || storePending || !selected.length || !project || !calendar || invalidRange}>{saving ? '가져오는 중…' : `${selected.length}개 가져오기`}</button></div>
+      <div className="gantt-dialog-actions"><button type="button" disabled={locked} onClick={() => void reload()}>다시 불러오기</button><span className="calendar-import-spacer" /><button type="button" disabled={saving} onClick={onClose}>취소</button><button className="primary" disabled={locked || storePending || !calendar || (mode === 'copy' && (!selected.length || !project || invalidRange))}>{saving ? '가져오는 중…' : mode === 'link' ? linkedProject ? '연결된 프로젝트 열기' : '캘린더 연결' : `${selected.length}개 가져오기`}</button></div>
     </form>
   </GanttModal>;
 }

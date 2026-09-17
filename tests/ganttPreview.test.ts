@@ -9,6 +9,112 @@ function setup() {
  return {storage,locks,seed:false};
 }
 
+function linkedCalendarSetup() {
+ const memory=setup();
+ const calendar={id:crypto.randomUUID(),name:'공유 원본',color:'#5489BB',owner_id:'owner',visibility:'members',members:[{user_id:'editor',can_edit:true},{user_id:'reader',can_edit:false}]};
+ const event={id:crypto.randomUUID(),calendar_id:calendar.id,title:'원본 일정',memo:'원본 메모',all_day:false,start_date:'2026-09-17',end_date:'2026-09-18',start_time:'23:00',end_time:'01:30',created_at:'2026-09-17T00:00:00Z',updated_at:'2026-09-17T00:00:00Z'};
+ const calendars=[calendar],events=[event];
+ const options={...memory,calendars:()=>calendars,calendarEvents:()=>events};
+ const gateway=(actor:string)=>createPreviewGateway(actor,options);
+ const link=(actor:string,requestId=crypto.randomUUID())=>gateway(actor).execute({requestId,command:{type:'linkCalendar',calendarId:calendar.id}} as any);
+ return {memory,calendar,event,calendars,events,options,gateway,link};
+}
+
+test('linked calendar reads current native events and sharing without copying authority or reverse projections',async()=>{
+ const f=linkedCalendarSetup();
+ const initial=await f.link('reader');
+ assert.equal(initial.spaces.length,1);assert.equal(initial.projects.length,1);
+ const project=initial.projects[0],space=initial.spaces[0];
+ assert.equal(project.ownerId,'owner');assert.equal(space.ownerId,'owner');
+ assert.equal(project.calendarLink?.canEdit,false);assert.equal(project.calendarLink?.canUnlink,true);
+ assert.equal(project.tasks[0].id,f.event.id);assert.equal(project.tasks[0].endDate,'2026-09-18');
+ assert.equal(project.tasks[0].endTime,'01:30');assert.equal(project.tasks[0].calendarId,null);
+ assert.equal((await f.gateway('outsider').read()).projects.length,0);
+ const beforeStorage=f.memory.storage.getItem('bflow-gantt-preview-authority-v1')!;
+ assert.equal(beforeStorage.includes('원본 메모'),false,'binding storage does not retain source event payload');
+ f.calendar.name='변경한 이름';f.event.title='다른 사용자가 수정';
+ f.events.push({...f.event,id:crypto.randomUUID(),title:'추가 일정'});
+ let next=(await f.gateway('editor').read()).projects[0];
+ assert.equal(next.id,project.id);assert.equal(next.name,'변경한 이름');assert.equal(next.tasks.length,2);
+ assert.equal(next.tasks.find(t=>t.id===f.event.id)?.title,'다른 사용자가 수정');
+ f.events.splice(0,1);next=(await f.gateway('reader').read()).projects[0];assert.equal(next.tasks.length,1);
+ f.calendar.members=f.calendar.members.filter(m=>m.user_id!=='reader');
+ assert.equal((await f.gateway('reader').read()).projects.length,0);
+ f.calendar.visibility='team';const team=(await f.gateway('new-team-user').read()).projects;
+ assert.equal(team.length,1);assert.equal(team[0].calendarLink?.canEdit,false,'team visibility never grants source edit permission');
+ assert.deepEqual(await listCalendarEvents('owner',f.options),[],'calendar-backed tasks never project themselves back into the source');
+ assert.equal(f.memory.storage.getItem('bflow-gantt-preview-authority-v1'),beforeStorage,'live reads never rewrite source copies');
+});
+
+test('calendar binding is atomic across actors, receipts recheck access, and generic mutations cannot replace derived rows',async()=>{
+ const f=linkedCalendarSetup();
+ const requestId=crypto.randomUUID();
+ const [a,b]=await Promise.all([f.link('reader',requestId),f.link('editor')]);
+ assert.equal(a.projects[0].id,b.projects[0].id);assert.equal(b.projects.length,1);
+ const project=a.projects[0],space=a.spaces[0];
+ const strippedProject=structuredClone(project);delete strippedProject.calendarLink;strippedProject.tasks.forEach(t=>{delete t.sourceCalendarEventId;});
+ const ordinarySpace=createSpace('일반 폴더','owner'),ordinaryProject=createProject('일반 프로젝트',ordinarySpace.id,'owner');
+ await f.gateway('owner').execute({requestId:crypto.randomUUID(),command:{type:'saveSpace',space:ordinarySpace,expectedRevision:null}});
+ await f.gateway('owner').execute({requestId:crypto.randomUUID(),command:{type:'saveProject',project:ordinaryProject,expectedRevision:null}});
+ for(const command of [
+  {type:'saveProject',project:{...project,name:'위조'},expectedRevision:null},
+  {type:'saveProject',project:strippedProject,expectedRevision:null},
+  {type:'saveSpace',space:{...ordinarySpace,id:project.id},expectedRevision:null},
+  {type:'saveProject',project:{...ordinaryProject,id:space.id},expectedRevision:null},
+  {type:'saveProject',project:{...ordinaryProject,spaceId:space.id},expectedRevision:1},
+  {type:'saveSpace',space:{...space,name:'위조'},expectedRevision:null},
+  {type:'saveProjectPair',projects:[{project:strippedProject,expectedRevision:1},{project:ordinaryProject,expectedRevision:1}],expectedSpaces:[{spaceId:space.id,expectedRevision:1},{spaceId:ordinarySpace.id,expectedRevision:1}]},
+  {type:'deleteProject',projectId:project.id,expectedRevision:project.revision},
+  {type:'deleteSpace',spaceId:space.id,expectedRevision:space.revision},
+ ]) await assert.rejects(f.gateway('owner').execute({requestId:crypto.randomUUID(),command} as any),/캘린더|연결/);
+ f.calendar.members=[];
+ const replay=await f.link('reader',requestId);assert.equal(replay.projects.length,0,'receipt response uses current source access');
+ await assert.rejects(f.link('reader'),/권한|캘린더/);
+ await assert.rejects(f.gateway('reader').execute({requestId:crypto.randomUUID(),command:{type:'unlinkCalendar',calendarId:f.calendar.id,linkId:project.calendarLink!.linkId}}),/권한/,'creator cannot unlink after source access is revoked');
+ assert.equal((await f.gateway('owner').read()).projects.length,2);
+});
+
+test('admin overview is actor-scoped and never grants hidden source editing or personal-calendar management',async()=>{
+ const f=linkedCalendarSetup();f.calendar.visibility='private';f.calendar.members=[];Object.assign(f.calendar,{is_personal:true});
+ const options={...f.options,canViewCalendar:(_id:string,actor:string)=>actor==='owner'||actor==='designated-admin',canManageCalendar:()=>false};
+ const owner=createPreviewGateway('owner',options);await owner.execute({requestId:crypto.randomUUID(),command:{type:'linkCalendar',calendarId:f.calendar.id}});
+ const admin=createPreviewGateway('designated-admin',options),snapshot=await admin.read();
+ assert.equal(snapshot.projects.length,1);assert.equal(snapshot.projects[0].calendarLink?.actorId,'designated-admin');
+ assert.equal(snapshot.projects[0].calendarLink?.isAdminOverview,true);assert.equal(snapshot.projects[0].calendarLink?.canEdit,false);assert.equal(snapshot.projects[0].calendarLink?.canUnlink,false);
+ assert.equal((await createPreviewGateway('other-admin',options).read()).projects.length,0);
+ const command={type:'unlinkCalendar',calendarId:f.calendar.id,linkId:snapshot.projects[0].calendarLink!.linkId} as const;
+ await assert.rejects(admin.execute({requestId:crypto.randomUUID(),command}),/권한/);
+ assert.equal(snapshot.spaces[0].ownerId,'owner');assert.deepEqual(snapshot.spaces[0].members,[]);
+});
+
+test('linked projection excludes Gantt exports and follows source tag colors without ordinary task count limits',async()=>{
+ const f=linkedCalendarSetup(),tag={id:crypto.randomUUID(),color:'#DDAA55'};
+ Object.assign(f.event,{tag_ids:[tag.id]});
+ f.events.push({...f.event,id:`gantt:${crypto.randomUUID()}:${crypto.randomUUID()}`,title:'이미 간트에 있는 작업'});
+ for(let index=0;index<3001;index++)f.events.push({...f.event,id:crypto.randomUUID()});
+ const gateway=createPreviewGateway('owner',{...f.options,calendarTags:()=>[tag]});
+ const result=await gateway.execute({requestId:crypto.randomUUID(),command:{type:'linkCalendar',calendarId:f.calendar.id}});
+ assert.equal(result.projects[0].tasks.length,3002);
+ assert.equal(result.projects[0].tasks[0].color,tag.color);
+ assert.equal(result.projects[0].tasks.some(t=>t.id.startsWith('gantt:')),false);
+ tag.color='#BB66AA';assert.equal((await gateway.read()).projects[0].tasks[0].color,tag.color);
+});
+
+test('unlink removes only the binding and queued linking cannot cross a session change',async()=>{
+ const f=linkedCalendarSetup(),snapshot=await f.link('reader');
+ const unlink={type:'unlinkCalendar',calendarId:f.calendar.id,linkId:snapshot.projects[0].calendarLink!.linkId} as const;
+ await assert.rejects(f.gateway('editor').execute({requestId:crypto.randomUUID(),command:unlink}),/권한|소유자/);
+ await f.gateway('owner').execute({requestId:crypto.randomUUID(),command:unlink});
+ assert.equal((await f.gateway('owner').read()).projects.length,0);assert.equal(f.events.length,1);
+ await f.link('owner');f.calendars.splice(0);
+ assert.equal((await f.gateway('owner').read()).projects.length,0,'deleted source calendars are not rendered');
+ let current=true,release!:()=>void;
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ const gateway=createPreviewGateway('owner',{...f.options,assertCurrent:()=>{if(!current)throw new Error('로그인 변경');},locks:{request:async(_key,callback)=>{await gate;return callback();}}});
+ const pending=gateway.execute({requestId:crypto.randomUUID(),command:{type:'linkCalendar',calendarId:f.calendar.id}} as any);
+ current=false;release();await assert.rejects(pending,/로그인 변경/);
+});
+
 test('a full subtree shift is one optimistic save and one undo entry with matching calendar dates', async () => {
  const memory=setup();let writes=0;
  const options={...memory,storage:{...memory.storage,setItem:(key:string,value:string)=>{writes++;memory.storage.setItem(key,value);}},canViewCalendar:()=>true,canEditCalendar:()=>true};

@@ -2,13 +2,21 @@ import type { GanttGateway, GanttProject, GanttRequest, GanttSnapshot, GanttTask
 import { applyCommand, canEditProject, createProject, createSpace, createTask, rememberGanttRevisions, resolveTaskColor, shiftDate, todayDate, updateTask, visibleSnapshot } from './domain.ts';
 import type { GanttRevisionLedger } from './domain.ts';
 
-export interface PreviewCalendar { id:string; owner_id:string; visibility:string; members?:Array<{user_id:string;can_edit:boolean}> }
+export interface PreviewCalendar { id:string; owner_id:string; visibility:string; name?:string; color?:string; is_personal?:boolean; updated_at?:string; members?:Array<{user_id:string;can_edit:boolean}> }
+export interface PreviewNativeCalendarEvent {
+  id:string; calendar_id:string; title:string; memo:string|null; all_day:boolean;
+  start_date:string; end_date:string; start_time:string|null; end_time:string|null; updated_at?:string;
+  tag_id?:string|null; tag_ids?:string[];
+}
 export interface PreviewOptions {
   storage?: { getItem(key:string):string|null; setItem(key:string,value:string):void };
   locks?: { request<T>(name:string,callback:()=>Promise<T>):Promise<T> };
   calendars?:()=>PreviewCalendar[];
+  calendarEvents?:()=>PreviewNativeCalendarEvent[];
+  calendarTags?:()=>Array<{id:string;color:string}>;
   canViewCalendar?:(calendarId:string,actorId:string)=>boolean;
   canEditCalendar?:(calendarId:string,actorId:string)=>boolean;
+  canManageCalendar?:(calendarId:string,actorId:string)=>boolean;
   assertCurrent?:()=>void;
   seed?:boolean;
 }
@@ -20,19 +28,21 @@ export interface GanttCalendarEventRow {
   linked_gantt_project_id:string; linked_gantt_task_id:string; linked_gantt_task_kind:GanttTask['kind']; gantt_can_edit:boolean;
   gantt_color:string;
 }
-interface Authority { snapshot:GanttSnapshot; receipts:Record<string,{actorId:string;command:string}>; seededUsers:string[]; revisions:GanttRevisionLedger; retiredIds:string[] }
+interface CalendarBinding { id:string; calendarId:string; spaceId:string; projectId:string; createdBy:string }
+interface Authority { snapshot:GanttSnapshot; receipts:Record<string,{actorId:string;command:string}>; seededUsers:string[]; revisions:GanttRevisionLedger; retiredIds:string[]; bindings:CalendarBinding[] }
 const KEY='bflow-gantt-preview-authority-v1',LOCK='bflow:gantt:preview:authority',CHANNEL='bflow:gantt:changed';
 const localListeners=new Set<()=>void>();
 function browserStorage():Storage { if(typeof localStorage==='undefined')throw new Error('간트 저장소를 사용할 수 없습니다.');return localStorage; }
 function readAuthority(options:PreviewOptions):Authority {
   const raw=(options.storage??browserStorage()).getItem(KEY);
-  if(!raw)return {snapshot:{spaces:[],projects:[]},receipts:{},seededUsers:[],revisions:{},retiredIds:[]};
+  if(!raw)return {snapshot:{spaces:[],projects:[]},receipts:{},seededUsers:[],revisions:{},retiredIds:[],bindings:[]};
   const value=JSON.parse(raw) as Authority;
   if(!Array.isArray(value.snapshot?.spaces)||!Array.isArray(value.snapshot?.projects)||!value.receipts||!Array.isArray(value.seededUsers))throw new Error('간트 저장 데이터가 올바르지 않습니다.');
   if(!value.revisions){
     value.revisions={};rememberGanttRevisions(value.revisions,value.snapshot);
     for(const receipt of Object.values(value.receipts)){
       const command=JSON.parse(receipt.command) as GanttRequest['command'];
+      if(command.type==='linkCalendar'||command.type==='unlinkCalendar')continue;
       if(command.type==='saveProjectPair'){
         for(const item of command.projects){const key=`project:${item.project.id}`,committed=item.expectedRevision+1;if(Number.isSafeInteger(committed)&&committed>0)value.revisions[key]=Math.max(value.revisions[key]??0,committed);}
         continue;
@@ -49,6 +59,7 @@ function readAuthority(options:PreviewOptions):Authority {
       for(const entity of entities)entity.revision=value.revisions[`${kind}:${entity.id}`]+1;
   }
   value.retiredIds??=[];
+  value.bindings??=[];
   rememberGanttRevisions(value.revisions,value.snapshot);
   return value;
 }
@@ -87,7 +98,7 @@ function calendarAllowed(options:PreviewOptions,calendarId:string,actorId:string
   const calendar=options.calendars?.().find(c=>c.id===calendarId);if(!calendar)return false;
   if(calendar.owner_id===actorId)return true;
   const member=calendar.members?.find(m=>m.user_id===actorId);
-  return edit?Boolean(member?.can_edit):calendar.visibility==='team'||(calendar.visibility==='members'&&Boolean(member));
+  return edit?Boolean(member?.can_edit):calendar.visibility==='team'||Boolean(member);
 }
 function checkLinkedChanges(before:GanttSnapshot,after:GanttSnapshot,actorId:string,options:PreviewOptions):void {
   const fields=(t:GanttTask)=>JSON.stringify([t.calendarId,t.kind,t.title,t.memo,t.startDate,t.endDate,t.startTime,t.endTime,t.allDay]);
@@ -99,23 +110,74 @@ function checkLinkedChanges(before:GanttSnapshot,after:GanttSnapshot,actorId:str
     }
   }
 }
+function canUnlinkCalendar(binding:CalendarBinding,calendar:PreviewCalendar,actorId:string,options:PreviewOptions):boolean {
+  return calendarAllowed(options,calendar.id,actorId,false)
+    && (calendar.owner_id===actorId||binding.createdBy===actorId||Boolean(options.canManageCalendar?.(calendar.id,actorId)));
+}
+/** Bindings persist identities only; every response reads the current source data and ACL. */
+function linkedSnapshot(value:Authority,actorId:string,options:PreviewOptions):GanttSnapshot {
+  const snapshot=visibleSnapshot(value.snapshot,actorId);
+  const calendars=options.calendars?.()??[],events=options.calendarEvents?.()??[],tags=options.calendarTags?.()??[];
+  for(const binding of value.bindings){
+    const calendar=calendars.find(c=>c.id===binding.calendarId);
+    if(!calendar||!calendarAllowed(options,calendar.id,actorId,false))continue;
+    const members=calendar.members??[];
+    const ordinaryViewer=calendar.owner_id===actorId||calendar.visibility==='team'||members.some(m=>m.user_id===actorId);
+    const calendarLink={calendarId:calendar.id,linkId:binding.id,actorId,visibility:calendar.visibility as 'private'|'members'|'team',canEdit:calendarAllowed(options,calendar.id,actorId,true),canUnlink:canUnlinkCalendar(binding,calendar,actorId,options),isAdminOverview:!ordinaryViewer};
+    const name=calendar.name??'캘린더',color=calendar.color??'#6C5CE7';
+    snapshot.spaces.push({id:binding.spaceId,name,ownerId:calendar.owner_id,shared:calendar.visibility!=='private',members:members.map(m=>({userId:m.user_id,canEdit:m.can_edit})),revision:1,calendarLink});
+    const native=events.filter(e=>e.calendar_id===calendar.id&&!e.id.startsWith('gantt:')).sort((a,b)=>a.start_date.localeCompare(b.start_date)||a.id.localeCompare(b.id));
+    snapshot.projects.push({id:binding.projectId,spaceId:binding.spaceId,ownerId:calendar.owner_id,name,memo:'',color,completed:false,revision:1,memberIds:null,editorIds:null,linkedEpisode:null,calendarLink,tasks:native.map((event,index)=>({
+      id:event.id,parentId:null,kind:'task',title:event.title,memo:event.memo??'',startDate:event.start_date,endDate:event.end_date,
+      allDay:event.all_day,startTime:event.all_day?'':(event.start_time??'').slice(0,5),endTime:event.all_day?'':(event.end_time??'').slice(0,5),
+      mode:'manual',predecessorId:null,progress:0,progressMode:'manual',sceneLinks:[],workers:[],attendees:[],color:tags.find(tag=>tag.id===(event.tag_ids?.[0]??event.tag_id))?.color??null,
+      calendarId:null,calendarEventId:null,sourceCalendarEventId:event.id,completed:false,sortOrder:index,
+    }))});
+  }
+  return snapshot;
+}
+function assertNoBindingMutation(value:Authority,command:GanttRequest['command']):void {
+  const reserved=new Set(value.bindings.flatMap(b=>[b.spaceId,b.projectId]));
+  const linkedProject=(project:GanttProject)=>reserved.has(project.id)||reserved.has(project.spaceId)||Object.prototype.hasOwnProperty.call(project,'calendarLink')||project.tasks.some(t=>Object.prototype.hasOwnProperty.call(t,'sourceCalendarEventId'));
+  const blocked=command.type==='saveProject'?linkedProject(command.project)
+    :command.type==='saveProjectPair'?command.projects.some(item=>linkedProject(item.project))||command.expectedSpaces.some(item=>reserved.has(item.spaceId))
+    :command.type==='saveSpace'?reserved.has(command.space.id)||Object.prototype.hasOwnProperty.call(command.space,'calendarLink')
+    :command.type==='deleteProject'?reserved.has(command.projectId)
+    :command.type==='deleteSpace'?reserved.has(command.spaceId):false;
+  if(blocked)throw new Error('연결된 캘린더는 원본 캘린더에서 변경해 주세요.');
+}
 export function createPreviewGateway(actorId:string,options:PreviewOptions={}):GanttGateway {
   if(!actorId)throw new Error('로그인이 필요합니다.');
   return {
     async read(){
       options.assertCurrent?.();
-      if(options.seed===false)return visibleSnapshot(readAuthority(options).snapshot,actorId);
-      return withLock(options,async()=>{options.assertCurrent?.();const authority=readAuthority(options);if(!authority.seededUsers.includes(actorId)){seedInto(authority,actorId);writeAuthority(options,authority);}return visibleSnapshot(authority.snapshot,actorId);});
+      if(options.seed===false)return linkedSnapshot(readAuthority(options),actorId,options);
+      return withLock(options,async()=>{options.assertCurrent?.();const authority=readAuthority(options);if(!authority.seededUsers.includes(actorId)){seedInto(authority,actorId);writeAuthority(options,authority);}return linkedSnapshot(authority,actorId,options);});
     },
     async execute(request:GanttRequest){
       const result=await withLock(options,async()=>{
         options.assertCurrent?.();
         if(!request.requestId||request.requestId.length>200)throw new Error('요청 ID가 필요합니다.');
         const value=readAuthority(options),serialized=JSON.stringify(request.command),receipt=value.receipts[request.requestId];
-        if(receipt){if(receipt.actorId!==actorId||receipt.command!==serialized)throw new Error('이미 사용한 요청 ID입니다.');return visibleSnapshot(value.snapshot,actorId);}
+        if(receipt){if(receipt.actorId!==actorId||receipt.command!==serialized)throw new Error('이미 사용한 요청 ID입니다.');return linkedSnapshot(value,actorId,options);}
+        const command=request.command;
+        if(command.type==='linkCalendar'||command.type==='unlinkCalendar'){
+          const calendar=options.calendars?.().find(c=>c.id===command.calendarId);
+          if(!calendar||!calendarAllowed(options,calendar.id,actorId,false))throw new Error('캘린더를 볼 권한이 없습니다.');
+          const binding=value.bindings.find(b=>b.calendarId===calendar.id);
+          if(command.type==='linkCalendar'){
+            if(!binding)value.bindings.push({id:crypto.randomUUID(),calendarId:calendar.id,spaceId:crypto.randomUUID(),projectId:crypto.randomUUID(),createdBy:actorId});
+          }else{
+            if(!binding||binding.id!==command.linkId)throw new Error('캘린더 연결이 변경되었습니다. 다시 확인해 주세요.');
+            if(!canUnlinkCalendar(binding,calendar,actorId,options))throw new Error('캘린더 연결을 해제할 권한이 없습니다.');
+            value.bindings=value.bindings.filter(b=>b.id!==binding.id);
+          }
+          value.receipts[request.requestId]={actorId,command:serialized};writeAuthority(options,value);return linkedSnapshot(value,actorId,options);
+        }
+        assertNoBindingMutation(value,command);
         const snapshot=applyCommand(value.snapshot,actorId,request.command,value.revisions,value.retiredIds);checkLinkedChanges(value.snapshot,snapshot,actorId,options);
         value.snapshot=snapshot;value.receipts[request.requestId]={actorId,command:serialized};
-        writeAuthority(options,value);return visibleSnapshot(snapshot,actorId);
+        writeAuthority(options,value);return linkedSnapshot(value,actorId,options);
       });notify();return result;
     },
     subscribe:subscribePreviewGantt,
@@ -176,7 +238,8 @@ export async function unlinkDeletedCalendar(calendarId:string,commitDelete:()=>v
   await withLock(options,async()=>{
     options.assertCurrent?.();
     const value=readAuthority(options),before=structuredClone(value);
-    let changed=false;
+    let changed=value.bindings.some(binding=>binding.calendarId===calendarId);
+    value.bindings=value.bindings.filter(binding=>binding.calendarId!==calendarId);
     value.snapshot.projects=value.snapshot.projects.map(project=>{
       if(!project.tasks.some(task=>task.calendarId===calendarId))return project;
       changed=true;

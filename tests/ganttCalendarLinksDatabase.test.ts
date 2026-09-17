@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {readFileSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
+import {createSpace,createProject,createTask} from '../src/features/gantt/domain.ts';
+const runtime=process.env.BFLOW_PGLITE_MODULE;
+const sql=(name:string)=>readFileSync(new URL(`../DEVLOG/migrations/${name}`,import.meta.url),'utf8');
+const migration='2026-09-17-calendar-linked-gantt.sql';
+test('linked calendars remain source-authoritative through real session RPCs and old clients cannot forge derived writes',{skip:!runtime},async()=>{
+ const {PGlite}=await import(pathToFileURL(runtime!).href);const db=new PGlite();
+ try{
+  await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE ROLE service_role;
+  CREATE TABLE users(id TEXT PRIMARY KEY,name TEXT,role TEXT DEFAULT 'user',password TEXT,slack_id TEXT,hire_date TEXT,birthday TEXT,is_initial_password BOOLEAN DEFAULT true,created_at TIMESTAMPTZ DEFAULT now(),is_compositor BOOLEAN DEFAULT false,is_acting_supervisor BOOLEAN DEFAULT false);
+  INSERT INTO users(id,name,password,role) VALUES('owner','owner','pw','user'),('viewer','viewer','pw','user'),('editor','editor','pw','user'),('stranger','stranger','pw','user'),('admin','admin','pw','admin'),('fcc4b438-2696-4e88-a03f-d6f34e73e08f','overview','pw','admin');`);
+  await db.exec(sql('2026-08-24-shared-calendars.sql').split('-- ── 1-1)')[0]);
+  await db.exec('ALTER TABLE calendar_events ADD COLUMN tag_ids UUID[] NOT NULL DEFAULT \'{}\'');
+  for(const file of ['2026-09-05-gantt-workspaces.sql','2026-09-05-gantt-containment.sql','2026-09-05-app-sessions-gantt-auth.sql','20260905151837_gantt_release_acl.sql','20260905173804_gantt_revision_ledger.sql','20260905193555_gantt_project_pair.sql','20260905210416_gantt_calendar_color.sql',migration])await db.exec(sql(file));
+  const cal=crypto.randomUUID(),event=crypto.randomUUID(),tag=crypto.randomUUID();
+  await db.query("INSERT INTO calendars(id,name,owner_id,visibility,color) VALUES($1,'원본','owner','members','#123456')",[cal]);
+  await db.query("INSERT INTO calendar_members(calendar_id,user_id,can_edit) VALUES($1,'viewer',false),($1,'editor',true)",[cal]);
+  await db.query("INSERT INTO calendar_tags(id,name,color) VALUES($1,'태그','#abcdef')",[tag]);
+  await db.query("INSERT INTO calendar_events(id,calendar_id,title,memo,start_date,end_date,all_day,start_time,end_time,tag_ids,created_by) VALUES($1,$2,'원본 일정','긴 메모','2026-09-16','2026-09-18',false,'10:30','18:00',ARRAY[$3::uuid],'owner')",[event,cal,tag]);
+  const tokens:Record<string,string>={};await db.exec('SET ROLE anon');
+  for(const name of ['owner','viewer','editor','stranger','admin','overview'])tokens[name]=(await db.query('SELECT app_login($1,$2) AS result',[name,'pw'])).rows[0].result.token;
+  let sequence=0;const execute=async(actor:string,command:unknown,request=`req-${++sequence}`,legacy=false)=>(await db.query(`SELECT ${legacy?'gantt_session_execute':'gantt_session_execute_v2'}($1,$2,$3) AS result`,[tokens[actor],request,command])).rows[0].result;
+  const read=async(actor:string,legacy=false)=>(await db.query(`SELECT ${legacy?'gantt_session_read':'gantt_session_read_v2'}($1) AS result`,[tokens[actor]])).rows[0].result;
+  const mutate=async(statement:string,args:unknown[]=[])=>{await db.exec('RESET ROLE');await db.query(statement,args);await db.exec('SET ROLE anon');};
+  await assert.rejects(execute('stranger',{type:'linkCalendar',calendarId:cal}),/권한/);
+  await assert.rejects(execute('viewer',{type:'linkCalendar',calendarId:cal,ownerId:'viewer'}),/올바르지/);
+  const linked=await execute('viewer',{type:'linkCalendar',calendarId:cal},'link-request');const space=linked.spaces[0],project=linked.projects[0],link=space.calendarLink;
+  assert.equal(space.ownerId,'owner');assert.equal(project.ownerId,'owner');assert.equal(link.canEdit,false);assert.equal(link.canUnlink,true);assert.equal(project.tasks[0].sourceCalendarEventId,event);assert.equal(project.tasks[0].id,event);assert.equal(project.tasks[0].color,'#abcdef');assert.equal(project.tasks[0].memo,'긴 메모');assert.equal(project.tasks[0].endDate,'2026-09-18');assert.equal(project.tasks[0].calendarId,null);assert.equal(project.tasks[0].calendarEventId,null);
+  assert.equal((await read('editor')).spaces[0].calendarLink.canEdit,true);assert.equal((await read('editor')).spaces[0].calendarLink.canUnlink,false);assert.equal((await read('stranger')).spaces.length,0);assert.equal((await read('admin')).spaces.length,0);assert.equal((await read('overview')).spaces[0].calendarLink.isAdminOverview,true);
+  assert.deepEqual(await read('viewer',true),{spaces:[],projects:[]});assert.deepEqual((await execute('editor',{type:'linkCalendar',calendarId:cal})).projects.map((p:any)=>p.id),[project.id]);assert.equal((await execute('viewer',{type:'linkCalendar',calendarId:cal},'link-request')).spaces[0].id,space.id);
+  await assert.rejects(execute('viewer',{type:'unlinkCalendar',calendarId:cal,linkId:link.linkId},'link-request'),/같은 요청/);
+  for(const legacy of [false,true]){
+    await assert.rejects(execute('owner',{type:'saveSpace',space:{...space,calendarLink:undefined},expectedRevision:null},undefined,legacy),/캘린더/);
+    const forged={...createSpace('위조','owner'),calendarLink:{...link,canEdit:true}};await assert.rejects(execute('owner',{type:'saveSpace',space:forged,expectedRevision:null},undefined,legacy),/캘린더/);
+    await assert.rejects(execute('owner',{type:'deleteProject',projectId:project.id,expectedRevision:1},undefined,legacy));
+  }
+  const ordinarySpace=createSpace('독립','owner');await execute('owner',{type:'saveSpace',space:ordinarySpace,expectedRevision:null});
+  const ordinaryProject=createProject('독립',ordinarySpace.id,'owner');ordinaryProject.tasks=[createTask('독립','2026-09-17')];await execute('owner',{type:'saveProject',project:ordinaryProject,expectedRevision:null});
+  await assert.rejects(execute('owner',{type:'saveProject',project:{...ordinaryProject,id:project.id},expectedRevision:null},undefined,true),/캘린더/);
+  await assert.rejects(execute('owner',{type:'saveProject',project:{...ordinaryProject,tasks:[{...ordinaryProject.tasks[0],sourceCalendarEventId:event}]},expectedRevision:1},undefined,true),/캘린더/);
+  await assert.rejects(execute('owner',{type:'saveProjectPair',projects:[{project:ordinaryProject,expectedRevision:1},{project,expectedRevision:1}],expectedSpaces:[{spaceId:ordinarySpace.id,expectedRevision:1},{spaceId:space.id,expectedRevision:1}]}));
+  assert.deepEqual((await db.query('SELECT gantt_session_calendar_events($1) AS result',[tokens.owner])).rows[0].result,[]);
+  await mutate("UPDATE calendar_events SET title='바뀐 일정',memo='변경 메모',end_date='2026-09-20' WHERE id=$1",[event]);assert.equal((await read('viewer')).projects[0].tasks[0].title,'바뀐 일정');
+  const second=crypto.randomUUID();await mutate("INSERT INTO calendar_events(id,calendar_id,title,start_date,end_date) VALUES($1,$2,'추가','2026-09-19','2026-09-19')",[second,cal]);assert.equal((await read('viewer')).projects[0].tasks.length,2);
+  await mutate('DELETE FROM calendar_events WHERE id=$1',[event]);assert.equal((await read('viewer')).projects[0].tasks[0].id,second);
+  await mutate("DELETE FROM calendar_members WHERE calendar_id=$1 AND user_id='viewer'",[cal]);assert.equal((await read('viewer')).spaces.length,0);await assert.rejects(execute('viewer',{type:'unlinkCalendar',calendarId:cal,linkId:link.linkId}),/권한/);
+  await mutate("UPDATE calendars SET visibility='team',name='팀 변경',owner_id='editor' WHERE id=$1",[cal]);assert.equal((await read('stranger')).spaces[0].ownerId,'editor');assert.equal((await read('stranger')).spaces[0].calendarLink.canEdit,false);assert.equal((await read('stranger')).spaces[0].name,'팀 변경');
+  await mutate("INSERT INTO users(id,name,password) VALUES('new','new','pw')");tokens.new=(await db.query("SELECT app_login('new','pw') AS result")).rows[0].result.token;assert.equal((await read('new')).spaces.length,1);
+  await assert.rejects(execute('stranger',{type:'unlinkCalendar',calendarId:cal,linkId:link.linkId}),/권한/);
+  await execute('viewer',{type:'unlinkCalendar',calendarId:cal,linkId:link.linkId});assert.equal((await read('stranger')).spaces.length,0);
+  const relinked=await execute('editor',{type:'linkCalendar',calendarId:cal});assert.notEqual(relinked.spaces[0].calendarLink.linkId,link.linkId);assert.equal(relinked.projects[0].tasks[0].id,second);await assert.rejects(execute('editor',{type:'unlinkCalendar',calendarId:cal,linkId:link.linkId}),/변경/);
+  await mutate("UPDATE calendars SET visibility='private' WHERE id=$1",[cal]);assert.equal((await read('stranger')).spaces.length,0);await mutate("UPDATE users SET role='user' WHERE name='overview'");assert.equal((await read('overview')).spaces.length,0);
+  await assert.rejects(db.query('SELECT * FROM gantt_calendar_links'),/permission denied/);
+  await assert.rejects(db.query("SELECT gantt_session_read_v2('invalid')"),/로그인/);
+  await mutate('DELETE FROM calendars WHERE id=$1',[cal]);assert.equal((await read('editor')).spaces.length,0);assert.equal((await read('owner')).projects[0].id,ordinaryProject.id);
+  const orphanCreatorCalendar=crypto.randomUUID();await mutate("INSERT INTO calendars(id,name,owner_id,visibility) VALUES($1,'작성자 삭제','owner','team')",[orphanCreatorCalendar]);
+  const orphanLink=(await execute('viewer',{type:'linkCalendar',calendarId:orphanCreatorCalendar})).spaces[0].calendarLink;
+  await mutate("DELETE FROM users WHERE id='viewer'");
+  assert.equal((await read('stranger')).spaces[0].calendarLink.canUnlink,false);
+  await assert.rejects(execute('stranger',{type:'unlinkCalendar',calendarId:orphanCreatorCalendar,linkId:orphanLink.linkId}),/권한/);
+  await db.exec('RESET ROLE');await db.exec(sql(migration));
+ }finally{await db.close();}
+});

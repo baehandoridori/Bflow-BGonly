@@ -38,6 +38,7 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - 삭제·복원에도 revision은 증가한다. 비공개 `gantt_entity_revisions`와 preview의 revision 기록을 유지하며, 과거 삭제 기록에서 최종 revision을 복구할 수 없는 ID는 재사용을 거부한다. 새 DB에는 `20260905173804_gantt_revision_ledger.sql`까지 적용한다.
 - 실제 앱은 preload → 세션 epoch를 확인하는 `ganttIpc.ts` → `ganttStore.ts` → 서버 로그인 토큰을 받는 `gantt_session_read/gantt_session_execute` RPC를 사용한다. 내부 `gantt_read/gantt_execute`와 테이블 직접 접근은 anon에 허용하지 않는다. 폴더와 프로젝트 정본은 `gantt_spaces`/`gantt_projects`이다.
 - 연결 캘린더 일정은 작업의 projection(`gantt:<projectId>:<taskId>`)이다. `calendar_events`에 별도 복제하지 않는다. UUID만 받는 기존 이벤트 RPC/알림 외래키로 이 ID를 보내지 않는다.
+- 캘린더 전체 → 간트 연결은 별도 binding과 원본 일정·공유 권한으로 매번 계산하는 폴더/프로젝트다. 원본 이벤트 UUID를 작업 식별자로 쓰며, 기존 Gantt → 캘린더 projection 필드를 재사용하거나 이벤트·멤버를 복제하지 않는다. 연결 프로젝트의 일반 간트 저장·공유·이동은 차단하고, 일정 수정은 원본 캘린더 편집 경로를 사용한다. 연결 해제는 binding만 제거한다.
 - 캘린더 → 간트 가져오기는 읽을 수 있는 B flow 일정의 독립 복사본을 기존 프로젝트에 `saveProject` revision CAS로 저장한다. 원본은 수정하지 않으며, `tasks[].importedCalendarEvent` 출처 정보로 프로젝트 안 중복을 막는다. 출처는 권한이나 역방향 연결이 아니므로 `calendarId/calendarEventId`를 채우지 않고 간트 projection은 다시 가져오지 않는다.
 - 연결 일정의 `gantt_color`/`ganttColor`는 작업 → 가장 가까운 상위 그룹 → 프로젝트 순서로 상속한 색이다. 일반 일정의 캘린더 색 규칙과 구분하며 `20260905210416_gantt_calendar_color.sql`을 적용한다. 시간표의 마일스톤 표시 높이는 화면용이고 정본 기간은 0분을 유지한다.
 - `linked_gantt_task_kind`가 확인된 마일스톤만 시작·종료가 같은 시각을 허용한다. 캘린더 삭제는 작업을 보존하고 연결만 해제한다. 원격 로그인 사용 시 복원 토큰이 없는 기억된 계정은 재로그인 화면으로 안내한다.

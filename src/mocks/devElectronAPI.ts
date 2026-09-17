@@ -111,11 +111,24 @@ function ganttPreviewOptions(userId: string, epoch: number): GanttPreviewOptions
     assertCurrent: () => {
       if (previewCanonicalUserId !== userId || previewCanonicalEpoch !== epoch) throw new Error('로그인 사용자가 변경되었습니다. 다시 시도해 주세요.');
     },
+    calendars: () => mockCalendars.map((calendar) => ({
+      ...calendar,
+      visibility: sharedMockCalendarVisibility(calendar),
+      members: mockMembersOf(calendar.id).map(({ user_id, can_edit }) => ({ user_id, can_edit })),
+    })),
+    calendarEvents: () => mockCalendarEvents,
+    calendarTags: () => { synchronizeMockCalendarTagsWithAuthority(); return mockCalendarTags; },
     canViewCalendar: (calendarId, actorId) => {
       try { const calendar = requireMockCalendar(calendarId); sharedMockCalendarVisibility(calendar); return canViewMockCalendar(calendar, actorId); } catch { return false; }
     },
     canEditCalendar: (calendarId, actorId) => {
       try { sharedMockCalendarVisibility(requireMockCalendar(calendarId)); requireMockCalendarEventWrite(calendarId, actorId); return true; } catch { return false; }
+    },
+    canManageCalendar: (calendarId, actorId) => {
+      try {
+        const calendar = requireMockCalendar(calendarId), user = getMockUsers().find((candidate) => candidate.id === actorId);
+        return Boolean(user && canManageCalendar(calendar, mockPermissionUser(user)));
+      } catch { return false; }
     },
   };
 }

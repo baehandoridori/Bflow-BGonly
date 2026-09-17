@@ -54,7 +54,16 @@ export function validateGanttRequest(value: unknown): asserts value is GanttRequ
     throw new Error('올바른 간트 요청이 필요합니다.');
   }
   const command = request.command;
-  if (!['saveSpace', 'saveProject', 'saveProjectPair', 'deleteSpace', 'deleteProject'].includes(command.type)) throw new Error('알 수 없는 간트 요청입니다.');
+  if (!['saveSpace', 'saveProject', 'saveProjectPair', 'deleteSpace', 'deleteProject', 'linkCalendar', 'unlinkCalendar'].includes(command.type)) throw new Error('알 수 없는 간트 요청입니다.');
+  if(command.type==='linkCalendar'||command.type==='unlinkCalendar'){
+    const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if(!uuid.test(command.calendarId)||(command.type==='unlinkCalendar'&&!uuid.test(command.linkId)))throw new Error('캘린더 연결 식별자가 올바르지 않습니다.');
+    const allowed=command.type==='linkCalendar'?['type','calendarId']:['type','calendarId','linkId'];
+    if(Object.keys(command).some(key=>!allowed.includes(key)))throw new Error('캘린더 연결 요청이 올바르지 않습니다.');
+    return;
+  }
+  const submitted=command.type==='saveSpace'?[command.space]:command.type==='saveProject'?[command.project]:command.type==='saveProjectPair'?command.projects.map(row=>row.project):[];
+  if(submitted.some(row=>row&&(Object.prototype.hasOwnProperty.call(row,'calendarLink')||('tasks' in row&&Array.isArray(row.tasks)&&row.tasks.some(task=>Object.prototype.hasOwnProperty.call(task,'sourceCalendarEventId'))))))throw new Error('연결된 캘린더는 원본 캘린더에서 수정해 주세요.');
   if(command.type==='saveProjectPair') {
     if(!Array.isArray(command.projects)||command.projects.length!==2||new Set(command.projects.map(item=>item.project?.id)).size!==2)throw new Error('서로 다른 두 프로젝트가 필요합니다.');
     for(const item of command.projects){validateProject(item.project);if(!Number.isSafeInteger(item.expectedRevision)||item.expectedRevision<1)throw new Error('간트 요청의 버전이 올바르지 않습니다.');}
@@ -86,14 +95,14 @@ function projectedRow(project: GanttProject, task: GanttTask): GanttCalendarRow 
 export function createGanttStore(client: GanttRpcClient, session: GanttSessionResolver = { tokenFor: (actorId) => sessionResolver.tokenFor(actorId) }) {
   async function read(actorId: string): Promise<GanttSnapshot> {
     const token = session.tokenFor(actorId);
-    const { data, error } = await client.rpc('gantt_session_read', { p_session_token: token });
+    const { data, error } = await client.rpc('gantt_session_read_v2', { p_session_token: token });
     if (error) fail(error);
     return snapshot(data);
   }
   async function execute(actorId: string, request: GanttRequest): Promise<GanttSnapshot> {
     validateGanttRequest(request);
     const token = session.tokenFor(actorId);
-    const { data, error } = await client.rpc('gantt_session_execute', { p_session_token: token, p_request_id: request.requestId, p_command: request.command });
+    const { data, error } = await client.rpc('gantt_session_execute_v2', { p_session_token: token, p_request_id: request.requestId, p_command: request.command });
     if (error) fail(error);
     return snapshot(data);
   }

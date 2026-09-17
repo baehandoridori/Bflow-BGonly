@@ -3358,6 +3358,10 @@ function startSupabaseRealtime() {
     onStatusChange: (status, metadata) => {
       currentRealtimeStatus = status;
       lastSupabaseStatus = humanizeStatus(status);
+      // Re-read linked calendars and their audience after any missed broadcasts.
+      if (status === 'SUBSCRIBED' && metadata.reconnected) {
+        broadcastToAllWindows('gantt:changed', {});
+      }
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('supabase:status', status, metadata);
       }

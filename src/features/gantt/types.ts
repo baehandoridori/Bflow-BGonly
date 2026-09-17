@@ -1,7 +1,12 @@
+/** Server-derived, actor-scoped source access. Never accepted in ordinary Gantt writes. */
+export interface GanttCalendarLink {
+  calendarId:string; linkId:string; actorId:string;
+  visibility:'private'|'members'|'team'; canEdit:boolean; canUnlink:boolean; isAdminOverview:boolean;
+}
 export interface GanttMember { userId: string; canEdit: boolean }
 export interface GanttSpace {
   id: string; name: string; ownerId: string; shared: boolean;
-  members: GanttMember[]; revision: number;
+  members: GanttMember[]; revision: number; calendarLink?: GanttCalendarLink;
 }
 export interface GanttSceneLink {
   episodeNumber: number; sheetName: string; sceneId: string; department: 'bg' | 'acting';
@@ -21,16 +26,19 @@ export interface GanttTask {
   calendarId: string | null; calendarEventId: string | null;
   /** Copy provenance only; does not create a calendar projection or grant access. */
   importedCalendarEvent?: GanttCalendarImportSource;
+  sourceCalendarEventId?: string;
   completed: boolean; sortOrder: number;
 }
 export interface GanttProject {
   id: string; spaceId: string; ownerId: string; name: string; memo: string;
   color: string; completed: boolean; revision: number;
   memberIds: string[] | null; editorIds: string[] | null;
-  linkedEpisode: number | null; tasks: GanttTask[];
+  linkedEpisode: number | null; tasks: GanttTask[]; calendarLink?: GanttCalendarLink;
 }
 export interface GanttSnapshot { spaces: GanttSpace[]; projects: GanttProject[] }
 export type GanttCommand =
+  | { type: 'linkCalendar'; calendarId: string }
+  | { type: 'unlinkCalendar'; calendarId: string; linkId: string }
   | { type: 'saveSpace'; space: GanttSpace; expectedRevision: number | null }
   | { type: 'saveProject'; project: GanttProject; expectedRevision: number | null }
   | { type: 'saveProjectPair'; projects: [{ project:GanttProject; expectedRevision:number },{ project:GanttProject; expectedRevision:number }]; expectedSpaces:Array<{spaceId:string;expectedRevision:number}> }
