@@ -1,3 +1,4 @@
+import { calendarInputsTestModule, resolveCalendarInputs } from './helpers/calendarInputs.ts';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -1831,6 +1832,7 @@ let eventCreateStateSlots: unknown[] = [];
 let eventCreateStateCursor = 0;
 
 function resolveEventCreateComponents(node: ReactNode): ReactNode {
+  node = resolveCalendarInputs(node);
   if (Array.isArray(node)) return node.map(resolveEventCreateComponents);
   if (!isValidElement(node)) return node;
   if (typeof node.type === 'function') {
@@ -1890,7 +1892,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton',
+    external: ['./inputs', './EventTagManagerButton',
       '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
@@ -1921,6 +1923,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
       if (id === '@/components/common/GlassDropdown') return {GlassDropdown:(props:{value:string;ariaLabel?:string;disabled?:boolean;options:Array<{value:string;label:string;disabled?:boolean}>;onChange(value:string):void})=>jsxRuntime.jsx('select',{'aria-label':props.ariaLabel,value:props.value,disabled:props.disabled,onChange:(event:{target:{value:string}})=>props.onChange(event.target.value),children:props.options.map(option=>jsxRuntime.jsx('option',{value:option.value,disabled:option.disabled,children:option.label},option.value))})};
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === 'react') {
         return {

@@ -2,6 +2,7 @@ import { EventTagManagerButton } from './EventTagManagerButton';
 import { EventTagBadges } from './EventTagBadges';
 import { getEventTagIds, toggleEventTag } from './eventTagPresentation';
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { CalendarDateRangePicker, CalendarTimeInput, CalendarDurationButtons } from './inputs';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -65,14 +66,6 @@ function calcDDay(endDate: string): string {
   return `D+${Math.abs(diff)}`;
 }
 
-function toInputDate(s: string): string {
-  return s; // already YYYY-MM-DD
-}
-
-function fromInputDate(s: string): string {
-  return s; // already YYYY-MM-DD
-}
-
 // ─── 타입 라벨 ─────────────────────────────────────
 
 const TYPE_LABELS: Record<CalendarEventType, string> = {
@@ -121,7 +114,6 @@ export function EventSidePanel({
 }: EventSidePanelProps) {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const setView = useAppStore((s) => s.setView);
-  const colorMode = useAppStore((s) => s.colorMode);
   const [editing, setEditing] = useState(false);
 
   // 편집 드래프트
@@ -138,6 +130,10 @@ export function EventSidePanel({
   // 저장/삭제가 진행 중이면 같은 일정의 다음 요청을 막는다. 두 요청이 겹치면
   // 먼저 보낸 오래된 초안이 나중에 커밋돼 방금 저장한 내용을 되돌릴 수 있다.
   const [isMutating, setIsMutating] = useState(false);
+  const [datesValid, setDatesValid] = useState(true);
+  const [startTimeValid, setStartTimeValid] = useState(true);
+  const [endTimeValid, setEndTimeValid] = useState(true);
+  const [durationVersion, setDurationVersion] = useState(0);
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -223,7 +219,7 @@ export function EventSidePanel({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (document.querySelector('[data-calendar-tag-manager]')) return;
+        if (document.querySelector('[data-calendar-tag-manager]') || document.querySelector('[data-calendar-input-popover]')) return;
         if (editing) abandonEdit();
         else onClose();
       }
@@ -247,16 +243,15 @@ export function EventSidePanel({
   const hasLinkedTodo = Boolean(linkedTodoId);
   const dday = calcDDay(event.endDate);
   const fieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-sm font-semibold text-text-primary outline-none transition-colors';
-  const dateFieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors';
   const labelClassName = 'text-[10px] text-text-secondary font-medium uppercase tracking-wide';
   const hasInvalidTimedInterval = supportsTimeEditing
     && !draftAllDay
     && !milestone
     && Boolean(draftStartTime && effectiveEndTime)
     && `${effectiveEnd}T${effectiveEndTime}` <= `${draftStart}T${draftStartTime}`;
-  const isTimedSaveBlocked = supportsTimeEditing
+  const isTimedSaveBlocked = !datesValid || !draftStart || !effectiveEnd || effectiveEnd < draftStart || (supportsTimeEditing
     && !draftAllDay
-    && (!draftStartTime || !effectiveEndTime || hasInvalidTimedInterval);
+    && (!draftStartTime || !effectiveEndTime || !startTimeValid || (!milestone && !endTimeValid) || hasInvalidTimedInterval));
 
   // 연결 정보 텍스트
   const linkedLabel = (() => {
@@ -307,8 +302,8 @@ export function EventSidePanel({
     }
     if (isTimedSaveBlocked || pendingMutationRef.current) return;
     const updates: Partial<CalendarEvent> = {};
-    const nextStartDate = fromInputDate(draftStart);
-    const nextEndDate = fromInputDate(effectiveEnd);
+    const nextStartDate = draftStart;
+    const nextEndDate = effectiveEnd;
     if (draftTitle !== event.title) updates.title = draftTitle;
     if (nextStartDate !== event.startDate || nextEndDate !== event.endDate) {
       updates.startDate = nextStartDate;
@@ -512,51 +507,15 @@ export function EventSidePanel({
                   />
                 </label>
               )}
-              <label className={labelClassName}>
-                시작일
-              </label>
-              <input
-                type="date"
-                value={toInputDate(draftStart)}
-                disabled={isMutating}
-                onChange={(e) => setDraftStart(fromInputDate(e.target.value))}
-                className={dateFieldClassName}
-                style={{ colorScheme: colorMode }}
-              />
+              <CalendarDateRangePicker key={eventIdentityKey} startDate={draftStart} endDate={effectiveEnd} onChange={(range) => { setDraftStart(range.startDate); setDraftEnd(range.endDate); }} disabled={isMutating} endDisabled={milestone} onValidityChange={setDatesValid} />
               {supportsTimeEditing && !draftAllDay && (
-                <input
-                  aria-label="시작 시각"
-                  type="time"
-                  step={600}
-                  value={draftStartTime}
-                  disabled={isMutating}
-                  onChange={(changeEvent) => setDraftStartTime(changeEvent.target.value)}
-                  className={dateFieldClassName}
-                  style={{ colorScheme: colorMode }}
-                />
-              )}
-              <label className={`${labelClassName} mt-1`}>
-                종료일
-              </label>
-              <input
-                type="date"
-                value={toInputDate(effectiveEnd)}
-                disabled={isMutating || milestone}
-                onChange={(e) => setDraftEnd(fromInputDate(e.target.value))}
-                className={dateFieldClassName}
-                style={{ colorScheme: colorMode }}
-              />
-              {supportsTimeEditing && !draftAllDay && (
-                <input
-                  aria-label="종료 시각"
-                  type="time"
-                  step={600}
-                  value={effectiveEndTime}
-                  disabled={isMutating || milestone}
-                  onChange={(changeEvent) => setDraftEndTime(changeEvent.target.value)}
-                  className={dateFieldClassName}
-                  style={{ colorScheme: colorMode }}
-                />
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <CalendarTimeInput key={`start:${eventIdentityKey}`} label="시작 시각" value={draftStartTime} onChange={setDraftStartTime} disabled={isMutating} onValidityChange={setStartTimeValid} />
+                    <CalendarTimeInput key={`end:${eventIdentityKey}:${durationVersion}`} label="종료 시각" value={effectiveEndTime} onChange={setDraftEndTime} disabled={isMutating || milestone} onValidityChange={setEndTimeValid} />
+                  </div>
+                  {!milestone && <CalendarDurationButtons startDate={draftStart} startTime={draftStartTime} disabled={isMutating || !datesValid || !startTimeValid} onChange={(end) => { setDraftEnd(end.endDate); setDraftEndTime(end.endTime); setDurationVersion((version) => version + 1); }} />}
+                </>
               )}
               {hasInvalidTimedInterval && (
                 <p role="alert" className="text-[11px] font-medium text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))]">

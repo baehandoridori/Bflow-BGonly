@@ -1,9 +1,11 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { resolveCalendarInputs } from './calendarInputs.ts';
 
 // Parent behavior harness: the shared picker owns keyboard/portal tests elsewhere.
 // Keep its string-valued change contract while exposing a form control to existing callers.
 export const glassDropdownTestModule = { GlassDropdown: 'glass-dropdown' };
 export function resolveGlassDropdown(node: ReactNode): ReactNode {
+  node = resolveCalendarInputs(node);
   if (!isValidElement(node) || node.type !== 'glass-dropdown') return node;
   const props = node.props as {
     label?: string; value?: string | number; disabled?: boolean; portalOwner?: string;

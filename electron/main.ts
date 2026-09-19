@@ -23,6 +23,8 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
 import { registerGanttIpc } from './ganttIpc';
+import { registerCalendarSubscriptionIpc } from './calendarSubscriptionIpc';
+import { createCalendarSubscriptionService } from './calendarSubscriptionService';
 import { setGanttSessionTokenResolver } from './ganttStore';
 import { registerThreadTodoIpc } from './threadTodoIpc';
 import { setThreadTodoSessionTokenResolver } from './threadTodoStore';
@@ -2533,6 +2535,14 @@ function getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admi
 // 간트 RPC 는 actor id 대신 서버 세션 토큰을 받는다. canonical 사용자와 일치할 때만 토큰이 나간다.
 setGanttSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
 calendarStore.setCalendarSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
+registerCalendarSubscriptionIpc({
+  getSessionOriginOrThrow,
+  service: createCalendarSubscriptionService({
+    rpc: (name, args) => supabaseClient.rpc(name, args),
+    tokenFor: actorId => sessionManager.getSessionTokenFor(actorId),
+    baseUrl: 'https://mpqifkpxalwxgcrddchv.supabase.co',
+  }),
+});
 registerGanttIpc({
   getSessionOriginOrThrow,
   onChanged: () => {

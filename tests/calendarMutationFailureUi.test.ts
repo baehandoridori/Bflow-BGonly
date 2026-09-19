@@ -1,3 +1,4 @@
+import { calendarInputsTestModule } from './helpers/calendarInputs.ts';
 import { glassDropdownTestModule, resolveGlassDropdown } from './helpers/glassDropdown.ts';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -253,7 +254,8 @@ function runtimeRequireFactory(nodeRequire: NodeRequire): (id: string) => unknow
         isOptimisticCalendarTagId: (idValue: string) => idValue.startsWith('optimistic-tag:'),
       };
     }
-    if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
+    if (id === './inputs') return calendarInputsTestModule;
+      if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
     if (id === '@/components/common/EntityAwareInput') return { EntityAwareInput: () => null };
     if (id === '@/components/common/EntityText') return { EntityText: () => null };
     if (id === '@/types') return { DEPARTMENT_CONFIGS: {} };
@@ -283,7 +285,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', '@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'react-dom',
@@ -316,7 +318,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', '@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'framer-motion',

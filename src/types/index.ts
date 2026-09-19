@@ -1055,6 +1055,8 @@ export interface SupabaseRealtimeStatusMetadata {
 }
 
 export interface ElectronAPI extends CalendarApiInputContract {
+  calendarFeedStatus: (calendarId: string) => Promise<import('../shared/calendarSubscription').CalendarFeedStatus>;
+  calendarFeedManage: (request: import('../shared/calendarSubscription').CalendarFeedRequest) => Promise<import('../shared/calendarSubscription').CalendarFeedResult>;
   ganttRead: () => Promise<import('../features/gantt/types').GanttSnapshot>;
   ganttExecute: (request: import('../features/gantt/types').GanttRequest) => Promise<import('../features/gantt/types').GanttSnapshot>;
   onGanttChanged: (callback: () => void) => () => void;

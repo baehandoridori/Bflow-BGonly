@@ -361,6 +361,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseDeletePrivateEvent: (id: string) =>
     ipcRenderer.invoke('supabase:delete-private-event', id),
   // ─── B flow 공유 캘린더 ───
+  calendarFeedStatus: (calendarId: string) => ipcRenderer.invoke('calendar-feed:status', calendarId, canonicalSessionEpoch),
+  calendarFeedManage: (request: import('../src/shared/calendarSubscription').CalendarFeedRequest) => ipcRenderer.invoke('calendar-feed:manage', request, canonicalSessionEpoch),
   calendarList: () => ipcRenderer.invoke('calendar:list'),
   calendarCreate: (input: Parameters<CalendarApiInputContract['calendarCreate']>[0]) =>
     ipcRenderer.invoke('calendar:create', input),

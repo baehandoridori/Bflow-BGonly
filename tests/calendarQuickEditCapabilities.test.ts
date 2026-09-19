@@ -1,3 +1,4 @@
+import { calendarInputsTestModule } from './helpers/calendarInputs.ts';
 import { glassDropdownTestModule, resolveGlassDropdown } from './helpers/glassDropdown.ts';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -191,7 +192,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', '@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'react-dom',
@@ -209,6 +210,7 @@ async function loadQuickEdit(): Promise<QuickEditComponent> {
     const nodeRequire = createRequire(import.meta.url);
     const react = nodeRequire('react') as Record<string, unknown>;
     const runtimeRequire = (id: string): unknown => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === 'react') {
         return {
@@ -327,7 +329,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', '@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'framer-motion',
@@ -348,6 +350,7 @@ async function loadSidePanel(): Promise<SidePanelComponent> {
     const nodeRequire = createRequire(import.meta.url);
     const react = nodeRequire('react') as Record<string, unknown>;
     const runtimeRequire = (id: string): unknown => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === 'react') {
         return {
@@ -1075,7 +1078,7 @@ test('quick edit title-only save emits no unchanged Google temporal or memo fiel
   assert.deepEqual(updates, [{ id: target.id, patch: { title: '제목만 변경' } }]);
 });
 
-test('quick edit sends a complete date pair when only the start crosses the current end', async () => {
+test('quick edit blocks a stale invalid date pair instead of sending a reversed interval', async () => {
   const target = event({ source: 'google', sourceCalendarId: 'primary' });
   const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
   const tree = await renderQuickEdit(target, 'edit', {
@@ -1084,10 +1087,8 @@ test('quick edit sends a complete date pair when only the start crosses the curr
 
   findButtonByText(tree, '저장').props.onClick?.();
 
-  assert.deepEqual(updates, [{
-    id: target.id,
-    patch: { startDate: '2026-08-26', endDate: '2026-08-25' },
-  }]);
+  assert.equal(findButtonByText(tree, '저장').props.disabled, true);
+  assert.deepEqual(updates, []);
 });
 
 test('side panel title-only save emits no unchanged Google temporal or memo fields', async () => {
@@ -1117,7 +1118,7 @@ test('side panel title-only save emits no unchanged Google temporal or memo fiel
   assert.deepEqual(staleAllDayUpdates, [{ id: target.id, patch: { title: '종일 제목만 변경' } }]);
 });
 
-test('side panel sends a complete date pair when only the start crosses the current end', async () => {
+test('side panel blocks a stale invalid date pair instead of sending a reversed interval', async () => {
   const target = event({
     source: 'bflow',
     sourceCalendarId: 'bflow:calendar-1',
@@ -1130,10 +1131,8 @@ test('side panel sends a complete date pair when only the start crosses the curr
 
   findButtonByText(tree, '저장').props.onClick?.();
 
-  assert.deepEqual(updates, [{
-    id: target.id,
-    patch: { startDate: '2026-08-26', endDate: '2026-08-25' },
-  }]);
+  assert.equal(findButtonByText(tree, '저장').props.disabled, true);
+  assert.deepEqual(updates, []);
 });
 
 test('legacy private side panel keeps date-only editing and emits no unsupported all-day or time keys', async () => {
@@ -1147,7 +1146,7 @@ test('legacy private side panel keeps date-only editing and emits no unsupported
   const updates: Array<{ id: string; patch: Partial<QuickEditEvent> }> = [];
   const tree = await renderSidePanel(target, {
     onUpdate: (id, patch) => updates.push({ id, patch }),
-  }, true, { startDate: '2026-08-26' });
+  }, true, { startDate: '2026-08-23' });
 
   findButtonByText(tree, '저장').props.onClick?.();
   const temporalControlLabels = findFormElements(tree)
@@ -1158,7 +1157,7 @@ test('legacy private side panel keeps date-only editing and emits no unsupported
     temporalControlLabels: [],
     updates: [{
       id: target.id,
-      patch: { startDate: '2026-08-26', endDate: '2026-08-25' },
+      patch: { startDate: '2026-08-23', endDate: '2026-08-25' },
     }],
   });
 });

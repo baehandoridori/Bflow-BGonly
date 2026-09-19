@@ -1,3 +1,4 @@
+import { calendarInputsTestModule } from './helpers/calendarInputs.ts';
 import { glassDropdownTestModule, resolveGlassDropdown } from './helpers/glassDropdown.ts';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -946,7 +947,7 @@ async function loadRail(): Promise<CalendarRailComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react',
       'react/jsx-runtime',
       'lucide-react',
@@ -962,6 +963,7 @@ async function loadRail(): Promise<CalendarRailComponent> {
     const react = nodeRequire('react') as Record<string, unknown>;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -1028,7 +1030,7 @@ async function loadTagBar(): Promise<TagBarComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/hooks/useMotionPref', '@/stores/useCalendarStore',
     ],
@@ -1038,6 +1040,7 @@ async function loadTagBar(): Promise<TagBarComponent> {
     const react = nodeRequire('react') as Record<string, unknown>;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') return { ...react, useMemo: (factory: () => unknown) => factory() };
@@ -1063,7 +1066,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'react-dom', 'lucide-react', 'sonner',
       '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
       '@/services/calendarService',
@@ -1105,6 +1108,7 @@ async function loadTagManagerPopover(): Promise<TagManagerPopoverComponent> {
     );
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -1291,7 +1295,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         }));
       },
     }],
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useDataStore', '@/stores/useAppStore', '@/services/calendarService',
       '@/services/vacationService', '@/hooks/useCalendarDnD', '@/utils/vacationEvents',
@@ -1315,6 +1319,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -1619,7 +1624,7 @@ async function loadShortcutHelpOverlay(): Promise<ShortcutHelpOverlayComponent> 
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown', 'react', 'react/jsx-runtime', '@/utils/cn', '@/hooks/useMotionPref'],
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown', 'react', 'react/jsx-runtime', '@/utils/cn', '@/hooks/useMotionPref'],
   }).then((result) => {
     const module = { exports: {} as Record<string, unknown> };
     const nodeRequire = createRequire(import.meta.url);
@@ -1628,6 +1633,7 @@ async function loadShortcutHelpOverlay(): Promise<ShortcutHelpOverlayComponent> 
     let refCursor = 0;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -1661,7 +1667,7 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       '@/stores/useCalendarStore', 'react', 'react/jsx-runtime', 'react-dom', 'framer-motion', 'lucide-react',
       '@/utils/cn',
     ],
@@ -1673,6 +1679,7 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -1722,7 +1729,7 @@ async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useDataStore', '@/stores/useAppStore', '@/stores/useAuthStore',
       '@/stores/useCalendarStore', '@/components/common/EntityAwareInput',
@@ -1737,6 +1744,7 @@ async function loadEventSidePanel(): Promise<EventSidePanelComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -1808,7 +1816,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useAuthStore', '@/stores/useDataStore', '@/stores/useAppStore',
       '@/stores/useCalendarStore', '@/types', '@/types/calendar', '@/utils/calendarDate', '@/utils/glassStyles',
@@ -1821,6 +1829,7 @@ async function loadEventCreateModal(): Promise<EventCreateModalComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -1894,7 +1903,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./CalendarSubscriptionPanel', './inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react', 'sonner',
       '@/components/common/ConfirmDialog', '@/stores/useAuthStore', '@/stores/useCalendarStore',
       '@/services/calendarService',
@@ -1999,6 +2008,9 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     };
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      // The panel has its own async/session harness; avoid sharing parent hook slots.
+      if (id === './CalendarSubscriptionPanel') return { CalendarSubscriptionPanel: () => null };
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -2147,7 +2159,7 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useCalendarStore', '@/hooks/useMotionPref',
     ],
@@ -2158,6 +2170,7 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
     const jsxRuntime = nodeRequire('react/jsx-runtime');
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -2195,7 +2208,7 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
     platform: 'node',
     target: 'node22',
     write: false,
-    external: ['./EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/stores/useCalendarStore',
     ],
@@ -2206,6 +2219,7 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
     const jsxRuntime = nodeRequire('react/jsx-runtime');
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
       if (id === 'react') {
@@ -9039,9 +9053,9 @@ test('EventCreateModal creates a tagged timed B flow event and rolls an empty en
   formElementByLabel(tree, '종일 일정').props.onChange?.({ target: { checked: false, value: '' } });
   tree = await renderEventCreateModal(false, (event) => saved.push(event), '2026-08-31');
   assert.deepEqual(
-    findFormElements(tree).filter((element) => element.props.type === 'time').map((element) => element.props.step),
-    [600, 600],
-    'both time controls use ten-minute steps',
+    ['시작 시각', '종료 시각'].map((label) => formElementByLabel(tree, label).props.type),
+    ['text', 'text'],
+    'both time controls use the shared numeric input; menu and blur are covered by input integration tests',
   );
 
   formElementByLabel(tree, '시작 시각').props.onChange?.({ target: { value: '14:00', checked: false } });
