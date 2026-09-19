@@ -1,4 +1,5 @@
 import { normalizeCalendarTagIds } from '@/shared/calendarTagIds';
+import { createCalendarSubscriptionPreview } from './calendarSubscriptionPreview';
 /**
  * 브라우저 개발 환경용 electronAPI 목
  * Electron 없이 Vite dev server에서 앱을 테스트할 수 있게 함
@@ -1328,6 +1329,16 @@ function normalizeMockCalendarEventTagId(tagId: unknown): string | null {
   }
   return tagId;
 }
+
+const previewCalendarFeeds = createCalendarSubscriptionPreview({
+  owner: calendarId => requireMockCalendar(calendarId).owner_id,
+  actor: () => ({ id: requireMockCalendarUser().id, epoch: previewCanonicalEpoch }),
+  storage: {
+    getItem: key => window.localStorage.getItem(key),
+    setItem: (key, value) => window.localStorage.setItem(key, value),
+  },
+  lock: async run => await navigator.locks.request('bflow-preview-calendar-feeds-v1', run),
+});
 
 function requireMockCalendarUser(): PreviewUser {
   const user = previewCanonicalUserId
@@ -2735,6 +2746,8 @@ export function installDevElectronAPI(): void {
     supabaseUpdatePrivateEvent: async () => {},
     supabaseDeletePrivateEvent: async () => {},
     // ─── B flow 공유 캘린더 (프리뷰 in-memory) ───
+    calendarFeedStatus: calendarId => previewCalendarFeeds.status(calendarId),
+    calendarFeedManage: request => previewCalendarFeeds.manage(request),
     calendarList: async () => {
       const visibleIds = visibleMockCalendarIds();
       const user = requireMockCalendarUser();
@@ -2861,6 +2874,7 @@ export function installDevElectronAPI(): void {
           console.warn('[DEV] 캘린더 삭제 알림을 보내지 못했습니다:', error);
         }
       }, options);
+      await previewCalendarFeeds.invalidate(id);
     },
     calendarSetMembers: async (calendarId, members) => {
       const user = requireMockCalendarUser();

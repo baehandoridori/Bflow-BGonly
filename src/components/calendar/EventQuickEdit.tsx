@@ -6,7 +6,6 @@ import { createPortal } from 'react-dom';
 import { motion, useIsPresent } from 'framer-motion';
 import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
-import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getTagCanonicalSnapshot, isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
@@ -14,6 +13,7 @@ import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 import { isGanttMilestone, isGanttProjection } from '@/utils/calendarGantt';
+import { CalendarDateRangePicker, CalendarTimeInput, CalendarDurationButtons } from './inputs';
 import {
   directUpdateSnapshot,
   eventContentSnapshot,
@@ -57,7 +57,6 @@ export function EventQuickEdit({
   onDelete,
   onDuplicate,
 }: EventQuickEditProps) {
-  const colorMode = useAppStore((state) => state.colorMode);
   const users = useAuthStore((state) => state.users);
   const currentUser = useAuthStore((state) => state.currentUser);
   const calendars = useCalendarStore((state) => state.calendars);
@@ -85,6 +84,11 @@ export function EventQuickEdit({
   const [allDay, setAllDay] = useState(event.allDay ?? true);
   const [startTime, setStartTime] = useState(event.startTime ?? '');
   const [endTime, setEndTime] = useState(event.endTime ?? '');
+  const [datesValid, setDatesValid] = useState(true);
+  const [startTimeValid, setStartTimeValid] = useState(true);
+  const [endTimeValid, setEndTimeValid] = useState(true);
+  const [durationVersion, setDurationVersion] = useState(0);
+  const [inputResetVersion, setInputResetVersion] = useState(0);
   const calendarUpdateRequestRef = useRef(0);
   const tagUpdateRequestRef = useRef(0);
   const eventIdentityKey = calendarEventIdentityKey(event);
@@ -112,9 +116,9 @@ export function EventQuickEdit({
     && !milestone
     && Boolean(startTime && effectiveEndTime)
     && `${effectiveEndDate}T${effectiveEndTime}` <= `${startDate}T${startTime}`;
-  const isTimedSaveBlocked = supportsTimeEditing
+  const isTimedSaveBlocked = !datesValid || !startDate || !effectiveEndDate || effectiveEndDate < startDate || (supportsTimeEditing
     && !allDay
-    && (!startTime || !effectiveEndTime || hasInvalidTimedInterval);
+    && (!startTime || !effectiveEndTime || !startTimeValid || (!milestone && !endTimeValid) || hasInvalidTimedInterval));
   const displayedCalendarId = pendingCalendar?.eventId === event.id
     ? pendingCalendar.value
     : event.calendarId;
@@ -157,12 +161,12 @@ export function EventQuickEdit({
     const handleClick = (mouseEvent: MouseEvent) => {
       if (shouldIgnore()) return;
       const target = mouseEvent.target as Element | null;
-      if (target?.closest?.('[data-dropdown-owner="calendar-quick-edit"]') || target?.closest?.('[data-calendar-tag-manager]')) return;
+      if (target?.closest?.('[data-dropdown-owner="calendar-quick-edit"]') || target?.closest?.('[data-calendar-tag-manager]') || target?.closest?.('[data-calendar-input-popover]')) return;
       if (ref.current && !ref.current.contains(mouseEvent.target as Node)) onClose();
     };
     const handleKey = (keyboardEvent: KeyboardEvent) => {
       if (shouldIgnore()) return;
-      if (keyboardEvent.key === 'Escape' && !document.querySelector('[data-calendar-tag-manager]')) onClose();
+      if (keyboardEvent.key === 'Escape' && !document.querySelector('[data-calendar-tag-manager]') && !document.querySelector('[data-calendar-input-popover]')) onClose();
     };
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
@@ -190,6 +194,7 @@ export function EventQuickEdit({
     setAllDay(event.allDay ?? true);
     setStartTime(event.startTime ?? '');
     setEndTime(event.endTime ?? '');
+    setInputResetVersion(version => version + 1);
     setMutationError(null);
   }, [event, eventIdentityKey, eventSnapshot]);
 
@@ -222,6 +227,7 @@ export function EventQuickEdit({
       setAllDay(latestEvent.allDay ?? true);
       setStartTime(latestEvent.startTime ?? '');
       setEndTime(latestEvent.endTime ?? '');
+      setInputResetVersion(version => version + 1);
       setMutationError(null);
       return;
     }
@@ -544,10 +550,7 @@ export function EventQuickEdit({
                     className="w-full rounded-lg px-2.5 py-1.5 text-xs outline-none placeholder:text-text-secondary"
                     style={fieldStyle}
                   />
-                  <div className="flex gap-2">
-                    <input type="date" value={startDate} disabled={isMutating} onChange={(changeEvent) => setStartDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
-                    <input type="date" value={effectiveEndDate} disabled={isMutating || milestone} onChange={(changeEvent) => setEndDate(changeEvent.target.value)} className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none" style={{ ...fieldStyle, colorScheme: colorMode }} />
-                  </div>
+                  <CalendarDateRangePicker key={`${eventIdentityKey}:${inputResetVersion}`} startDate={startDate} endDate={effectiveEndDate} onChange={(range) => { setStartDate(range.startDate); setEndDate(range.endDate); }} disabled={isMutating} endDisabled={milestone} onValidityChange={setDatesValid} />
                   {supportsTimeEditing && (
                     <label className="flex items-center justify-between gap-3 text-[11px] font-medium text-text-secondary">
                       <span>종일</span>
@@ -569,28 +572,13 @@ export function EventQuickEdit({
                     </label>
                   )}
                   {supportsTimeEditing && !allDay && (
-                    <div className="flex gap-2">
-                      <input
-                        aria-label="시작 시각"
-                        type="time"
-                        step={600}
-                        value={startTime}
-                        disabled={isMutating}
-                        onChange={(changeEvent) => setStartTime(changeEvent.target.value)}
-                        className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
-                        style={{ ...fieldStyle, colorScheme: colorMode }}
-                      />
-                      <input
-                        aria-label="종료 시각"
-                        type="time"
-                        step={600}
-                        value={effectiveEndTime}
-                        disabled={isMutating || milestone}
-                        onChange={(changeEvent) => setEndTime(changeEvent.target.value)}
-                        className="flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
-                        style={{ ...fieldStyle, colorScheme: colorMode }}
-                      />
-                    </div>
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <CalendarTimeInput key={`start:${eventIdentityKey}:${inputResetVersion}`} label="시작 시각" value={startTime} onChange={setStartTime} disabled={isMutating} onValidityChange={setStartTimeValid} />
+                        <CalendarTimeInput key={`end:${eventIdentityKey}:${inputResetVersion}:${durationVersion}`} label="종료 시각" value={effectiveEndTime} onChange={setEndTime} disabled={isMutating || milestone} onValidityChange={setEndTimeValid} />
+                      </div>
+                      {!milestone && <CalendarDurationButtons startDate={startDate} startTime={startTime} disabled={isMutating || !datesValid || !startTimeValid} onChange={(end) => { setEndDate(end.endDate); setEndTime(end.endTime); setDurationVersion((version) => version + 1); }} />}
+                    </>
                   )}
                   {hasInvalidTimedInterval && (
                     <p role="alert" className="text-[11px] font-medium text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))]">

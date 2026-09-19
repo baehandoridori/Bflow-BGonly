@@ -2,6 +2,7 @@ import {
   useEffect, useMemo, useRef, useState, useSyncExternalStore,
 } from 'react';
 import { motion } from 'framer-motion';
+import { CalendarSubscriptionPanel } from './CalendarSubscriptionPanel';
 import { Check, Crown, Search, Settings, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -1006,6 +1007,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
               </p>
             </section>
           )}
+          {calendar && ownerId === currentUser?.id && <CalendarSubscriptionPanel calendarId={calendar.id} disabled={saving || reconciliationRequired} />}
         </div>
 
         {reconciliationRequired && (

@@ -2,11 +2,10 @@ import { EventTagManagerButton } from './EventTagManagerButton';
 import { toggleEventTag } from './eventTagPresentation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CalendarDays, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
-import { useAppStore } from '@/stores/useAppStore';
 import {
   getTagCanonicalSnapshot,
   isOptimisticCalendarTagId,
@@ -17,6 +16,7 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import { fmtDate } from '@/utils/calendarDate';
 import { floatingGlassStyle } from '@/utils/glassStyles';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
+import { CalendarDateRangePicker, CalendarTimeInput, CalendarDurationButtons } from './inputs';
 
 export const GOOGLE_CALENDAR_OPTION = 'google';
 
@@ -50,7 +50,6 @@ function oneHourAfter(date: string, time: string): { date: string; time: string 
 export function EventCreateModal({ initialDate, initialEndDate, initialStartTime, initialEndTime, episodes, googleAuthenticated, onClose, onSave }: Props) {
   const currentUser = useAuthStore((state) => state.currentUser);
   const episodeTitles = useDataStore((state) => state.episodeTitles);
-  const colorMode = useAppStore((state) => state.colorMode);
   const calendars = useCalendarStore((state) => state.calendars);
   const tags = useCalendarStore((state) => state.tags);
   const optimisticDeletedTagIds = useCalendarStore((state) => state.optimisticDeletedTagIds);
@@ -85,6 +84,10 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
   // 새 useState는 반드시 기존 선언들 뒤에 — 테스트 하네스가 훅을 슬롯 인덱스로 흉내 낸다.
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [datesValid, setDatesValid] = useState(true);
+  const [startTimeValid, setStartTimeValid] = useState(true);
+  const [endTimeValid, setEndTimeValid] = useState(true);
+  const [durationVersion, setDurationVersion] = useState(0);
   const userSelectedCalendarRef = useRef(false);
 
   const isGoogle = selectedCalendarId === GOOGLE_CALENDAR_OPTION;
@@ -183,7 +186,8 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
     && selectedDestinationAvailable
     && (allDay || (startTime && endTime))
     && hasRequiredLinkTarget
-  ) && !hasInvalidTimedInterval;
+  ) && datesValid && Boolean(startDate && endDate) && endDate >= startDate
+    && (allDay || (startTimeValid && endTimeValid)) && !hasInvalidTimedInterval;
 
   const handleSubmit = async () => {
     if (!canSubmit || saving) return;
@@ -197,7 +201,7 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
         color: selectedCalendar?.color ?? '#6C5CE7',
         type: evType,
         startDate,
-        endDate: endDate < startDate ? startDate : endDate,
+        endDate,
         createdBy: currentUser?.name ?? '알 수 없음',
         ...(isGoogle ? {} : { calendarId: selectedCalendarId }),
         tagId: isGoogle ? undefined : persistedTagIds[0],
@@ -224,7 +228,6 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
     : selectedCalendar?.visibility === 'members'
       ? '이 캘린더 멤버와 공유돼요'
       : '';
-  const inputClass = 'w-full bg-bg-card border border-accent/40 rounded-lg px-3 py-2 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20';
 
   return (
     <>
@@ -267,23 +270,15 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
               <span>종일</span>
               <input aria-label="종일 일정" type="checkbox" checked={allDay} onChange={(event) => setAllDay(event.target.checked)} className="h-4 w-4 rounded accent-accent cursor-pointer" />
             </label>
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-medium text-text-secondary">시작일</label>
-                <div className="relative mt-1">
-                  <input aria-label="시작일" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className={`${inputClass} pr-8 date-picker-hidden`} style={{ colorScheme: colorMode }} />
-                  <CalendarDays size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+            <div className="mt-2">
+              <CalendarDateRangePicker startDate={startDate} endDate={endDate} onChange={(range) => { setStartDate(range.startDate); setEndDate(range.endDate); }} disabled={saving} onValidityChange={setDatesValid} />
+              {!allDay && <>
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  <CalendarTimeInput label="시작 시각" value={startTime} onChange={changeStartTime} disabled={saving} onValidityChange={setStartTimeValid} />
+                  <CalendarTimeInput key={durationVersion} label="종료 시각" value={endTime} onChange={setEndTime} disabled={saving} onValidityChange={setEndTimeValid} />
                 </div>
-              </div>
-              {!allDay && <TimeField label="시작 시각" value={startTime} onChange={changeStartTime} colorMode={colorMode} inputClass={inputClass} />}
-              <div>
-                <label className="text-[11px] font-medium text-text-secondary">종료일</label>
-                <div className="relative mt-1">
-                  <input aria-label="종료일" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className={`${inputClass} pr-8 date-picker-hidden`} style={{ colorScheme: colorMode }} />
-                  <CalendarDays size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
-                </div>
-              </div>
-              {!allDay && <TimeField label="종료 시각" value={endTime} onChange={setEndTime} colorMode={colorMode} inputClass={inputClass} />}
+                <CalendarDurationButtons startDate={startDate} startTime={startTime} disabled={saving || !datesValid || !startTimeValid} onChange={(end) => { setEndDate(end.endDate); setEndTime(end.endTime); setDurationVersion((version) => version + 1); }} />
+              </>}
             </div>
             {hasInvalidTimedInterval && (
               <p role="alert" className="mt-2 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))]">
@@ -379,14 +374,5 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
         </div>
       </motion.div>
     </>
-  );
-}
-
-function TimeField({ label, value, onChange, colorMode, inputClass }: { label: string; value: string; onChange: (value: string) => void; colorMode: 'dark' | 'light'; inputClass: string }) {
-  return (
-    <div>
-      <label className="text-[11px] font-medium text-text-secondary">{label}</label>
-      <input aria-label={label} type="time" step={600} value={value} onChange={(event) => onChange(event.target.value)} className={`${inputClass} mt-1`} style={{ colorScheme: colorMode }} />
-    </div>
   );
 }

@@ -1,0 +1,4 @@
+# Calendar applications cannot send an app session/JWT. This function performs its
+# own 256-bit bearer-token authentication before reading any calendar data.
+[functions.calendar-feed]
+verify_jwt = false
