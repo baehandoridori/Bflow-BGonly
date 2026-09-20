@@ -151,6 +151,17 @@ function addedTask(h: Awaited<ReturnType<typeof harness>>, beforeIds: Set<string
   assert.equal(added.length, 1, 'exactly one task is created in the requested project');return added[0];
 }
 
+test('linked recurrence canvas navigation opens the selected derived occurrence instead of the canonical master',async()=>{
+ const h=await harness();h.render();h.makeLinked(A);
+ const source={...row(id(80),'task',null,0),startDate:'2026-09-01',endDate:'2026-09-01',sourceCalendarEventId:id(80),recurrenceRule:{frequency:'daily' as const,interval:1}};
+ h.latestProject(A).tasks=[source];let tree=h.render();
+ (h.canvas(tree) as any).onVisibleRange({from:'2035-01-01',to:'2035-01-03'});tree=h.render();
+ const shown=h.canvas(tree).projects.find(p=>p.id===A)!;assert.equal(shown.tasks.length,3);
+ const selected=shown.tasks[1];h.canvas(tree).onSelect(A,selected.id);tree=h.render();
+ const panel=elements(tree,'LinkedCalendarPanel')[0] as any;assert.ok(panel);assert.equal(panel.props.taskId,selected.id);assert.equal(panel.props.project.tasks.find((t:any)=>t.id===selected.id).sourceCalendarEventId,`recurrence:${source.id}:2035-01-02`);
+ assert.equal(h.latestProject(A).tasks.length,1);assert.equal(h.latestProject(A).tasks[0].id,source.id);assert.equal(h.commands.length,0);
+});
+
 test('navigation branch and folder folds never change chart folds or visibility',async()=>{
   const h=await harness();let tree=h.render();
   for(const branch of [GROUP,B]){

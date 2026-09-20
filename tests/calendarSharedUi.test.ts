@@ -348,6 +348,7 @@ let scheduleCanonicalEvents: ScheduleCalendarEvent[] = [];
 let scheduleUpdateCalls: Array<{
   id: string;
   updates: Partial<ScheduleCalendarEvent>;
+  scope?: string;
   targetIdentity?: ScheduleEventIdentity;
 }> = [];
 let scheduleUpdateHandler: ((id: string, updates: Partial<ScheduleCalendarEvent>) => Promise<void>) | undefined;
@@ -359,6 +360,7 @@ let scheduleAddedEvents: ScheduleCalendarEvent[] = [];
 let schedulePersistedAddIdentities: ScheduleEventIdentity[] = [];
 let scheduleCreateUuidValues: string[] = [];
 let scheduleGetEventsCalls = 0;
+let scheduleEventRanges: unknown[] = [];
 let scheduleGetEventsGate: Promise<void> | null = null;
 let resolveScheduleGetEventsGate: (() => void) | null = null;
 let schedulePendingEffects: Array<() => void | (() => void)> = [];
@@ -735,6 +737,7 @@ function resetHarness(): void {
   schedulePersistedAddIdentities = [];
   scheduleCreateUuidValues = [];
   scheduleGetEventsCalls = 0;
+  scheduleEventRanges = [];
   scheduleGetEventsGate = null;
   resolveScheduleGetEventsGate = null;
   schedulePendingEffects = [];
@@ -1295,7 +1298,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         }));
       },
     }],
-    external: ['./inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
+    external: ['react-dom', '@/stores/useAuthStore', './inputs', './EventTagManagerButton', './useEventTagTooltip', '@/components/common/GlassDropdown',
       'react', 'react/jsx-runtime', 'framer-motion', 'lucide-react',
       '@/utils/cn', '@/stores/useDataStore', '@/stores/useAppStore', '@/services/calendarService',
       '@/services/vacationService', '@/hooks/useCalendarDnD', '@/utils/vacationEvents',
@@ -1319,6 +1322,8 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
     const emptyComponent = () => null;
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
+      if (id === 'react-dom') return { createPortal: (children: unknown) => children };
+      if (id === '@/stores/useAuthStore') return { useAuthStore: { getState: () => ({ currentUser: settingsCurrentUser }) } };
       if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
@@ -1413,7 +1418,8 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
         return { useAppStore: (selector?: (state: typeof appState) => unknown) => selector ? selector(appState) : appState };
       }
       if (id === '@/services/calendarService') return {
-        getEvents: async () => {
+        getEvents: async (range?: unknown) => {
+          scheduleEventRanges.push(range);
           scheduleGetEventsCalls += 1;
           if (scheduleGetEventsGate) await scheduleGetEventsGate;
           return scheduleCanonicalEvents;
@@ -1436,8 +1442,9 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           id: string,
           updates: Partial<ScheduleCalendarEvent>,
           targetIdentity?: ScheduleEventIdentity,
+          scope?: string,
         ) => {
-          scheduleUpdateCalls.push({ id, updates, targetIdentity });
+          scheduleUpdateCalls.push({ id, updates, targetIdentity, ...(scope ? { scope } : {}) });
           await scheduleUpdateHandler?.(id, updates);
         },
         deleteEvent: async (id: string, targetIdentity?: ScheduleEventIdentity) => {
@@ -8897,7 +8904,7 @@ test('EventCreateModal shows editable calendars in field order, defaults persona
   assert.doesNotMatch(renderedText, /색상/);
   assert.equal(formElementByLabel(tree, '종일 일정').props.checked, true, 'all-day is enabled by default');
   assert.equal(findFormElements(tree).some((element) => element.props.type === 'time'), false, 'time fields stay hidden for all-day events');
-  assert.doesNotMatch(renderedText, /팀 캘린더에 공유돼요|이 캘린더 멤버와 공유돼요|알림/, 'personal calendars do not show shared-calendar copy');
+  assert.doesNotMatch(renderedText, /팀 캘린더에 공유돼요|이 캘린더 멤버와 공유돼요/, 'personal calendars do not show shared-calendar copy');
 });
 
 test('EventCreateModal blocks incomplete linked types and saves them after every required target is selected', async (t) => {
@@ -9033,12 +9040,12 @@ test('EventCreateModal describes shared visibility without promising deferred no
   formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'team', checked: false } });
   tree = await renderEventCreateModal(false, () => {});
   assert.match(textContent(tree), /팀 캘린더에 공유돼요/);
-  assert.doesNotMatch(textContent(tree), /알림/, 'team creation must not promise a notification that is not implemented');
+  assert.doesNotMatch(textContent(tree), /팀원에게 알림|멤버에게 알림/, 'sharing does not promise a broadcast notification; per-event reminders are separate');
 
   formElementByLabel(tree, '캘린더').props.onChange?.({ target: { value: 'editable-share', checked: false } });
   tree = await renderEventCreateModal(false, () => {});
   assert.match(textContent(tree), /이 캘린더 멤버와 공유돼요/);
-  assert.doesNotMatch(textContent(tree), /알림/, 'member creation must not promise a notification that is not implemented');
+  assert.doesNotMatch(textContent(tree), /팀원에게 알림|멤버에게 알림/, 'member sharing does not promise broadcast notifications');
 });
 
 test('EventCreateModal creates a tagged timed B flow event and rolls an empty end time into the next day', async () => {
@@ -9258,3 +9265,36 @@ test('EventCreateModal restores draft tag selection after an optimistic tag dele
   await buttonByText(tree, '만들기').props.onClick?.();
   assert.deepEqual(saved[0].tagIds, ['tag-meeting']);
 });
+
+ test('ScheduleView expands the visible remote month without reloading the database', async () => {
+  bundledScheduleView = undefined;
+  resetHarness(); await renderScheduleView(); await flushScheduleMountEffects();
+  const loads = scheduleLoadBflowEventsCalls; stateSlots[17] = 2040; stateSlots[18] = 1;
+  await renderScheduleView(); await flushScheduleMountEffects();
+  assert.ok(scheduleEventRanges.some(range => (range as any)?.from === '2040-01-29' && (range as any)?.to === '2040-03-10'));
+  assert.equal(scheduleLoadBflowEventsCalls, loads);
+ });
+ test('ScheduleView recurring month drag asks a scope before any write', async () => {
+  resetHarness(); const event = { id:'recurrence:series:2026-09-20',title:'반복',memo:'',color:'#6C5CE7',type:'custom',startDate:'2026-09-20',endDate:'2026-09-20',createdBy:'user-me',createdAt:'',source:'bflow',sourceCalendarId:'bflow:personal-me',calendarId:'personal-me',canEdit:true,recurrenceRule:{frequency:'daily',interval:1},recurrenceSeriesId:'series',recurrenceDate:'2026-09-20' } as ScheduleCalendarEvent;
+  scheduleCanonicalEvents=[event]; await renderScheduleView(); stateSlots[0]=[event]; await renderScheduleView();
+  scheduleGridProps.at(-1)?.onDragStart(event,'move',event.startDate); await scheduleDragDoneHandler?.(event.id,'2026-09-21','2026-09-21');
+  const tree=await renderScheduleView(); assert.equal(scheduleUpdateCalls.length,0); assert.ok(buttonByText(tree,'이 일정만'));
+  buttonByText(tree,'범위 선택 취소').props.onClick?.(); assert.equal(scheduleUpdateCalls.length,0);
+  await renderScheduleView(); scheduleGridProps.at(-1)?.onDragStart(event,'move',event.startDate); await scheduleDragDoneHandler?.(event.id,'2026-09-21','2026-09-21');
+  const retry=await renderScheduleView(); buttonByText(retry,'이 일정만').props.onClick?.(); await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(scheduleUpdateCalls[0].scope,'this'); assert.equal(scheduleUpdateCalls[0].updates.startDate,'2026-09-21');
+ });
+
+ test('ScheduleView copies an occurrence as one independent non-recurring event', async () => {
+  resetHarness(); const event = { id:'recurrence:series:2026-09-20',title:'회차',memo:'',color:'#6C5CE7',type:'custom',startDate:'2026-09-20',endDate:'2026-09-20',createdBy:'user-me',createdAt:'',source:'bflow',sourceCalendarId:'bflow:mine',calendarId:'mine',canEdit:true,recurrenceRule:{frequency:'daily',interval:1},recurrenceSeriesId:'series',recurrenceDate:'2026-09-20',recurrenceRevision:4,recurrenceExceptions:[{occurrenceDate:'2026-09-21',cancelled:true}] } as ScheduleCalendarEvent;
+  await renderScheduleView();stateSlots[0]=[event];await renderScheduleView();scheduleGridProps.at(-1)?.onEventContextMenu(event,{preventDefault(){},stopPropagation(){},clientX:1,clientY:1});await renderScheduleView();
+  await scheduleQuickEditProps.at(-1)?.onDuplicate(event);const copy=scheduleAddedEvents[0] as any;assert.equal(copy.recurrenceRule,null);assert.equal(copy.recurrenceSeriesId,undefined);assert.equal(copy.recurrenceDate,undefined);assert.equal(copy.recurrenceRevision,undefined);assert.equal(copy.recurrenceExceptions,undefined);assert.equal(copy.startDate,event.startDate);
+ });
+
+ test('ScheduleView time-grid recurrence resize asks scope and rejects a stale source before confirmation', async () => {
+  resetHarness(); const event = {id:'recurrence:series:2026-09-20',title:'반복 시각',memo:'',color:'#6C5CE7',type:'custom',startDate:'2026-09-20',endDate:'2026-09-20',startTime:'09:00',endTime:'10:00',allDay:false,createdBy:'user-me',createdAt:'',source:'bflow',sourceCalendarId:'bflow:mine',calendarId:'mine',canEdit:true,recurrenceRule:{frequency:'daily',interval:1},recurrenceSeriesId:'series',recurrenceDate:'2026-09-20'} as ScheduleCalendarEvent;
+  await renderScheduleView();stateSlots[0]=[event];stateSlots[2]='week';stateSlots[3]='timegrid';await renderScheduleView();
+  await scheduleTimeGridProps.at(-1)?.onTimeGridEventChange?.(event.id,{id:event.id,source:event.source,sourceCalendarId:event.sourceCalendarId},{startDate:event.startDate,endDate:event.endDate,startTime:'09:00',endTime:'11:00'});
+  let tree=await renderScheduleView();assert.equal(scheduleUpdateCalls.length,0);assert.ok(buttonByText(tree,'전체 일정'));
+  stateSlots[0]=[{...event,title:'동료가 변경함'}];tree=await renderScheduleView();buttonByText(tree,'전체 일정').props.onClick?.();await new Promise(resolve=>setImmediate(resolve));assert.equal(scheduleUpdateCalls.length,0);assert.match(textContent(await renderScheduleView()),/최신 일정을 다시 선택/);
+ });

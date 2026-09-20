@@ -1,3 +1,5 @@
+import { EventScheduleDetails, EventScheduleDetailsSummary, eventScheduleDetails, eventScheduleDetailsPatch, eventScheduleDetailsValid, eventScheduleValidationDate } from './EventScheduleDetails';
+import { useRecurrenceScope, type CalendarEditScope } from './RecurrenceScopeDialog';
 import { EventTagManagerButton } from './EventTagManagerButton';
 import { EventTagBadges } from './EventTagBadges';
 import { getEventTagIds, toggleEventTag } from './eventTagPresentation';
@@ -85,8 +87,8 @@ function isPromiseLike(value: unknown): value is PromiseLike<void> {
 interface EventSidePanelProps {
   event: CalendarEvent;
   onClose: () => void;
-  onDelete: (id: string) => void | Promise<void>;
-  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
+  onDelete: (id: string, scope?: CalendarEditScope) => void | Promise<void>;
+  onUpdate: (id: string, updates: Partial<CalendarEvent>, scope?: CalendarEditScope) => void | Promise<void>;
   onNavigate: (ev: CalendarEvent) => void;
 }
 
@@ -134,6 +136,7 @@ export function EventSidePanel({
   const [startTimeValid, setStartTimeValid] = useState(true);
   const [endTimeValid, setEndTimeValid] = useState(true);
   const [durationVersion, setDurationVersion] = useState(0);
+  const [scheduleDetails, setScheduleDetails] = useState(() => eventScheduleDetails(event));
   const users = useAuthStore((s) => s.users);
   const userNames = useMemo(() => users.map((u) => u.name), [users]);
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -166,6 +169,7 @@ export function EventSidePanel({
     setDraftAllDay(nextEvent.allDay ?? true);
     setDraftStartTime(nextEvent.startTime ?? '');
     setDraftEndTime(nextEvent.endTime ?? '');
+    setScheduleDetails(eventScheduleDetails(nextEvent));
     setMutationError(null);
     setEditing(false);
   };
@@ -218,7 +222,7 @@ export function EventSidePanel({
   // ESC 닫기
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !document.querySelector('[data-calendar-recurrence-scope]')) {
         if (document.querySelector('[data-calendar-tag-manager]') || document.querySelector('[data-calendar-input-popover]')) return;
         if (editing) abandonEdit();
         else onClose();
@@ -249,7 +253,10 @@ export function EventSidePanel({
     && !milestone
     && Boolean(draftStartTime && effectiveEndTime)
     && `${effectiveEnd}T${effectiveEndTime}` <= `${draftStart}T${draftStartTime}`;
-  const isTimedSaveBlocked = !datesValid || !draftStart || !effectiveEnd || effectiveEnd < draftStart || (supportsTimeEditing
+  const detailsValidationDate = eventScheduleValidationDate(scheduleDetails, event, draftStart);
+  const nativeDetails = isCanonicalBflow && !ganttProjection;
+  const scopePrompt = useRecurrenceScope(`${currentUser?.id}:${eventIdentityKey}:${eventSnapshot}`, nativeDetails && Boolean(event.recurrenceRule || event.recurrenceSeriesId));
+  const isTimedSaveBlocked = (nativeDetails && !eventScheduleDetailsValid(scheduleDetails, detailsValidationDate)) || !datesValid || !draftStart || !effectiveEnd || effectiveEnd < draftStart || (supportsTimeEditing
     && !draftAllDay
     && (!draftStartTime || !effectiveEndTime || !startTimeValid || (!milestone && !endTimeValid) || hasInvalidTimedInterval));
 
@@ -295,7 +302,7 @@ export function EventSidePanel({
   };
 
   // 편집 저장
-  const handleSave = () => {
+  const handleSave = (scope?: CalendarEditScope) => {
     if (isVacation || isViewOnly) {
       setEditing(false);
       return;
@@ -331,10 +338,12 @@ export function EventSidePanel({
         updates.tagId = persistedTagIds[0];
       }
     }
+    if (nativeDetails) Object.assign(updates, eventScheduleDetailsPatch(scheduleDetails, event));
     if (Object.keys(updates).length === 0) {
       setEditing(false);
       return;
     }
+    if (!scope && scopePrompt.ask('edit', selected => handleSave(selected), 'recurrenceRule' in updates, 'recurrenceRule' in updates || 'startDate' in updates || 'endDate' in updates, 'calendarId' in updates)) return;
     setMutationError(null);
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
@@ -348,7 +357,7 @@ export function EventSidePanel({
     };
     beginMutation(mutation);
     try {
-      const persistence = onUpdate(event.id, updates);
+      const persistence = onUpdate(event.id, updates, scope);
       if (isPromiseLike(persistence)) {
         void persistence.then(
           () => {
@@ -367,8 +376,9 @@ export function EventSidePanel({
   // 편집 취소
   const handleCancel = abandonEdit;
 
-  const handleDelete = () => {
+  const handleDelete = (scope?: CalendarEditScope) => {
     if (isVacation || isViewOnly || pendingMutationRef.current) return;
+    if (!scope && scopePrompt.ask('delete', selected => handleDelete(selected))) return;
     setMutationError(null);
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
@@ -376,7 +386,7 @@ export function EventSidePanel({
     };
     beginMutation(mutation);
     try {
-      const persistence = onDelete(event.id);
+      const persistence = onDelete(event.id, scope);
       if (isPromiseLike(persistence)) {
         void persistence.then(
           () => {
@@ -438,6 +448,7 @@ export function EventSidePanel({
         boxShadow: '-12px 0 32px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.2))',
       }}
     >
+      {scopePrompt.dialog}
       {/* ── 컬러 스트라이프 ── */}
       <div
         className="h-1 w-full shrink-0"
@@ -455,6 +466,7 @@ export function EventSidePanel({
             <input
               value={draftTitle}
               disabled={isMutating}
+              aria-label="제목"
               onChange={(e) => setDraftTitle(e.target.value)}
               className={fieldClassName}
               autoFocus
@@ -660,6 +672,8 @@ export function EventSidePanel({
           )}
         </div>
 
+        {nativeDetails && (isEditing ? <EventScheduleDetails value={scheduleDetails} onChange={setScheduleDetails} startDate={draftStart} validationStartDate={detailsValidationDate} allDay={draftAllDay} disabled={isMutating} /> : <EventScheduleDetailsSummary event={event} />)}
+
         {/* 메모 */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-1.5 text-text-secondary">
@@ -747,7 +761,7 @@ export function EventSidePanel({
               취소
             </button>
             <button
-              onClick={handleSave}
+              onClick={() => handleSave()}
               disabled={isTimedSaveBlocked || isMutating}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/20 text-[#6C5CE7] hover:bg-[#6C5CE7]/30 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
             >
@@ -772,7 +786,7 @@ export function EventSidePanel({
               {linkedNavigationButtons}
             </div>
             <button
-              onClick={handleDelete}
+              onClick={() => handleDelete()}
               disabled={isMutating}
               className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-red-500/10 text-[color:color-mix(in_srgb,var(--status-error)_65%,rgb(var(--color-text-primary)))] hover:bg-red-500/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-45"
             >

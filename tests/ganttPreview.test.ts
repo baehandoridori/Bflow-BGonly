@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createPreviewGateway, listCalendarEvents, patchCalendarEvent, deleteCalendarEvent } from '../src/features/gantt/previewGateway.ts';
 import { createProject, createSpace, createTask, shiftTaskSubtree } from '../src/features/gantt/domain.ts';
 import { createGanttStore } from '../src/features/gantt/useGanttStore.ts';
+import { expandLinkedCalendarProjects } from '../src/features/gantt/linkedCalendarRecurrence.ts';
 function setup() {
  const rows=new Map<string,string>();const storage={getItem:(k:string)=>rows.get(k)??null,setItem:(k:string,v:string)=>{rows.set(k,v);}};
  let tail=Promise.resolve();const locks={request<T>(_name:string,callback:()=>Promise<T>):Promise<T>{const result=tail.then(callback);tail=result.then(()=>undefined,()=>undefined);return result;}};
@@ -98,6 +99,21 @@ test('linked projection excludes Gantt exports and follows source tag colors wit
  assert.equal(result.projects[0].tasks[0].color,tag.color);
  assert.equal(result.projects[0].tasks.some(t=>t.id.startsWith('gantt:')),false);
  tag.color='#BB66AA';assert.equal((await gateway.read()).projects[0].tasks[0].color,tag.color);
+});
+
+test('preview linked calendar keeps recurrence metadata, all-day semantics and live exception tag colors',async()=>{
+ const f=linkedCalendarSetup(),tag={id:crypto.randomUUID(),color:'#DDAA55'};
+ const rule={frequency:'daily' as const,interval:1,count:3};
+ Object.assign(f.event,{all_day:true,start_date:'2026-09-17',end_date:'2026-09-17',recurrence_rule:rule,recurrence_revision:7,location:'회의실',meeting_url:'https://example.com/meet',reminder_minutes:30,
+  recurrence_exceptions:[{occurrence_date:'2026-09-18',cancelled:true,patch:{}},{occurrence_date:'2026-09-19',cancelled:false,patch:{title:'이동한 회의',start_date:'2026-10-01',end_date:'2026-10-01',tag_ids:[tag.id]}}]});
+ const gateway=createPreviewGateway('reader',{...f.options,calendarTags:()=>[tag]});
+ const snapshot=await gateway.execute({requestId:crypto.randomUUID(),command:{type:'linkCalendar',calendarId:f.calendar.id}}),task=snapshot.projects[0].tasks[0];
+ assert.deepEqual(task.recurrenceRule,rule);assert.equal(task.recurrenceRevision,7);assert.equal(task.allDay,true);assert.equal(task.startTime,'');assert.equal(task.endTime,'');
+ assert.equal(task.location,'회의실');assert.equal(task.meetingUrl,'https://example.com/meet');assert.equal(task.reminderMinutes,30);assert.equal(task.recurrenceExceptions?.[1].patch?.color,tag.color);
+ const displayed=expandLinkedCalendarProjects(snapshot.projects,{from:'2026-10-01',to:'2026-10-01'});assert.equal(displayed[0].tasks.length,1);assert.equal(displayed[0].tasks[0].title,'이동한 회의');assert.equal(displayed[0].tasks[0].color,tag.color);assert.equal(displayed[0].calendarLink?.canEdit,false);
+ tag.color='#123456';assert.equal((await gateway.read()).projects[0].tasks[0].recurrenceExceptions?.[1].patch?.color,'#123456');
+ const withoutTag=createPreviewGateway('reader',{...f.options,calendarTags:()=>[]});assert.equal((await withoutTag.read()).projects[0].tasks[0].recurrenceExceptions?.[1].patch?.color,f.calendar.color);
+ assert.equal(f.memory.storage.getItem('bflow-gantt-preview-authority-v1')!.includes('recurrence_rule'),false,'recurrence remains calendar-owned, never copied into Gantt storage');
 });
 
 test('unlink removes only the binding and queued linking cannot cross a session change',async()=>{

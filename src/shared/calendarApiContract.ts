@@ -1,4 +1,5 @@
 import type { CalendarNotificationCatchupInput } from './calendarNotificationCatchup';
+import type { CalendarRecurrenceRule } from './calendarRecurrence';
 
 export type CalendarVisibility = 'private' | 'members' | 'team';
 
@@ -22,6 +23,10 @@ export type CalendarUpdateInput = Partial<{
 }>;
 
 export interface CalendarEventCreateInput {
+  recurrence_rule?: CalendarRecurrenceRule | null;
+  location?: string;
+  meeting_url?: string;
+  reminder_minutes?: number | null;
   calendar_id: string;
   title: string;
   memo: string | null;

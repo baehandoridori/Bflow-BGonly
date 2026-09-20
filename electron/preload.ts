@@ -376,6 +376,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     members: Parameters<CalendarApiInputContract['calendarSetMembers']>[1],
   ) =>
     ipcRenderer.invoke('calendar:set-members', calendarId, members),
+  calendarRecurrenceList: () => ipcRenderer.invoke('calendar:recurrence:list'),
+  calendarRemindersPoll: (muted: string[]) => ipcRenderer.invoke('calendar:reminders:poll', muted),
+  calendarRecurrenceExecute: (request: import('../src/shared/calendarRecurrenceContract').CalendarRecurrenceRequest) => ipcRenderer.invoke('calendar:recurrence:execute', request),
   calendarEventsList: (params?: Parameters<CalendarApiInputContract['calendarEventsList']>[0]) =>
     ipcRenderer.invoke('calendar:events:list', params),
   calendarEventCreate: (input: Parameters<CalendarApiInputContract['calendarEventCreate']>[0]) =>

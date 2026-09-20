@@ -1,4 +1,7 @@
 import { normalizeCalendarTagIds } from '@/shared/calendarTagIds';
+import { expandRecurringEvents, parseRecurrenceEventId, materializeRecurrenceOccurrence, shiftRecurrenceDate } from '@/shared/calendarRecurrence';
+import { recurrenceFieldsFromRow, calendarPatchToRow, type CalendarRecurrenceFields, type CalendarRecurrenceScope } from '@/shared/calendarRecurrenceContract';
+import { mutateRecurringMaster } from '@/shared/calendarRecurrenceMutation';
 /**
  * 캘린더 서비스 (어댑터)
  * Google Calendar API를 기존 CalendarEvent 인터페이스로 래핑
@@ -34,7 +37,7 @@ const PRIVATE_CAL_ID = 'supabase-private';
 const BFLOW_CAL_PREFIX = 'bflow:';
 
 type RawPrivateEvent = Awaited<ReturnType<NonNullable<Window['electronAPI']>['supabaseReadPrivateEvents']>>[number];
-type RawBflowEvent = Awaited<ReturnType<NonNullable<Window['electronAPI']>['calendarEventsList']>>[number];
+type RawBflowEvent = Awaited<ReturnType<NonNullable<Window['electronAPI']>['calendarEventsList']>>[number] & CalendarRecurrenceFields;
 
 // 마이그레이션이 ID를 유지한 구 비공개 행. 사용자 전환이나 읽기 실패 때 다른 사용자의
 // ID를 재사용하지 않도록, 조회 신뢰도까지 함께 보관한다.
@@ -146,6 +149,7 @@ function toCalendarEventFromBflowRow(
         : 'custom';
 
   return {
+    ...recurrenceFieldsFromRow(row),
     id: row.id,
     title: row.title,
     memo: row.memo ?? '',
@@ -1050,11 +1054,15 @@ function mutateSourceEvents(
   rebuildEventCache();
 }
 
-export async function getEvents(): Promise<CalendarEvent[]> {
+export async function getEvents(range?: { from: string; to: string }): Promise<CalendarEvent[]> {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const window = range ?? { from: shiftRecurrenceDate(today, -366), to: shiftRecurrenceDate(today, 1096) };
+  const expand = (events: CalendarEvent[]) => range ? expandRecurringEvents(events, window.from, window.to)
+    : events.flatMap(event => event.recurrenceRule ? expandRecurringEvents([event], window.from, window.to) : [event]);
   const calendarState = useCalendarStore.getState();
   // 외부 구독은 bflow/google 캐시 밖에 따로 두고 출력 시점에만 합친다(D14).
   // 그래야 뮤테이션·구글 새로고침 경로가 구독 일정을 건드리지 못한다.
-  if (!calendarState.loaded) return [...eventCache, ...icsEvents];
+  if (!calendarState.loaded) return expand([...eventCache, ...icsEvents]);
   const calendarsById = new Map(calendarState.calendars.map((calendar) => [calendar.id, calendar]));
   const bflowAndGoogle = eventCache.flatMap((event) => {
     if (event.source !== 'bflow' || !event.calendarId) return [event];
@@ -1063,7 +1071,7 @@ export async function getEvents(): Promise<CalendarEvent[]> {
     // 간트 연결 일정 색은 작업·그룹·프로젝트에서 상속한 projection 정본을 유지한다.
     return [withBflowCalendarPresentation(event, event.calendarId)];
   });
-  return [...bflowAndGoogle, ...icsEvents];
+  return expand([...bflowAndGoogle, ...icsEvents]);
 }
 
 /* ─── 외부 캘린더(ICS) 구독 ───────────────────────────────────── */
@@ -1159,7 +1167,7 @@ async function loadBflowEventsInternal(options: LoadBflowEventsOptions = {}): Pr
     if (!calendarState.loaded) return false;
     const calendars = calendarState.calendars;
     const calendarsById = new Map(calendars.map((calendar) => [calendar.id, calendar]));
-    const rows = await window.electronAPI.calendarEventsList();
+    const rows = await (window.electronAPI.calendarRecurrenceList?.() ?? window.electronAPI.calendarEventsList());
     const next = rows
       .filter((row) => !isCommittedBflowDelete(row.calendar_id, row.id))
       .map((row) => toCalendarEventFromBflowRow(row, calendarsById));
@@ -1838,6 +1846,8 @@ async function addBflowEvent(
 
     try {
       const createInput = {
+        recurrence_rule: event.recurrenceRule ?? null,
+        location: event.location ?? '', meeting_url: event.meetingUrl ?? '', reminder_minutes: event.reminderMinutes ?? null,
         calendar_id: calendarId,
         title: event.title,
         memo: event.memo,
@@ -1876,7 +1886,9 @@ async function addBflowEvent(
       }
       const actualId = replacement
         ? replacement.actual_id
-        : (await window.electronAPI.calendarEventCreate(createInput)).id;
+        : (window.electronAPI.calendarRecurrenceExecute && (event.recurrenceRule || event.location || event.meetingUrl || event.reminderMinutes != null)
+          ? (await window.electronAPI.calendarRecurrenceExecute({ action: 'create', scope: 'all', expectedRevision: 0, patch: createInput })).event!.id
+          : (await window.electronAPI.calendarEventCreate(createInput)).id);
       const created: CreatedEventRef = {
         actualId,
         storage: 'bflow',
@@ -2342,13 +2354,85 @@ async function compensateCreatedEvent(
   return true;
 }
 
+const recurrenceMutations = new Set<string>();
+function needsRecurrenceCommand(eventId: string, updates: Partial<CalendarEvent>): boolean {
+  return !!parseRecurrenceEventId(eventId) || (!('isPrivate' in updates) && !!window.electronAPI.calendarRecurrenceExecute);
+}
+
+async function changeRecurrence(eventId: string, action: 'update'|'delete', updates: Partial<CalendarEvent>,
+  identity?: CalendarEventIdentity, scope: CalendarRecurrenceScope = 'this'): Promise<boolean> {
+  const parsed = parseRecurrenceEventId(eventId);
+  const master = bflowEvents.find(event => event.id === (parsed?.seriesId ?? eventId) && (!identity || event.sourceCalendarId === identity.sourceCalendarId));
+  const extended = ['recurrenceRule', 'location', 'meetingUrl', 'reminderMinutes'].some(key => Object.prototype.hasOwnProperty.call(updates, key));
+  if (!parsed && !master?.recurrenceRule && !extended && !window.electronAPI.calendarRecurrenceExecute) return false;
+  if (!master || master.source !== 'bflow' || !master.calendarId || isGanttProjection(master) || 'isPrivate' in updates) {
+    if (parsed) throw new Error('반복 일정 원본을 찾을 수 없습니다. 새로고침해 주세요.');
+    return false;
+  }
+  if (!parsed && !identity && rawEventIdentityCandidates(eventId).length > 1) {
+    throw new Error(`[calendar] ambiguous event identity for ${eventId}`);
+  }
+  if (master.canEdit === false || master.isReadOnly) throw new Error('이 일정을 수정할 권한이 없습니다.');
+  const api = window.electronAPI.calendarRecurrenceExecute;
+  if (!api) throw new Error('반복 일정 기능을 사용하려면 B flow를 업데이트해 주세요.');
+  if (recurrenceMutations.has(master.id)) throw new Error('이 일정의 저장이 진행 중입니다. 잠시 후 다시 시도해 주세요.');
+  if (!master.recurrenceRule) scope = 'all';
+  // Editors send a full draft. Remove unchanged occurrence values before changing a whole series.
+  const occurrence = parsed ? materializeRecurrenceOccurrence(master, parsed.occurrenceDate,
+    master.recurrenceExceptions?.find(ex => ex.occurrenceDate === parsed.occurrenceDate)?.patch) : master;
+  const patch = { ...updates };
+  for (const key of Object.keys(patch) as Array<keyof CalendarEvent>) {
+    if (JSON.stringify(patch[key] ?? null) === JSON.stringify(occurrence?.[key] ?? null)) delete patch[key];
+  }
+  if (scope === 'all' && parsed) {
+    for (const key of ['startDate', 'endDate'] as const) {
+      if (patch[key] && occurrence?.[key]) {
+        const days = Math.round((Date.parse(patch[key]!) - Date.parse(occurrence[key])) / 86400000);
+        patch[key] = shiftRecurrenceDate(master[key], days);
+      }
+    }
+  }
+  recurrenceMutations.add(master.id);
+  try {
+    await withBflowMutation(async token => {
+      if (!isBflowMutationCurrent(token)) return;
+      const optimistic = mutateRecurringMaster(master, action, scope, parsed?.occurrenceDate, patch, createUuid());
+      mutateSourceEvents('bflow', events => events.flatMap(item => item === master ? optimistic : [item]));
+      broadcastCalendarChange();
+      try {
+        const result = await api({ action, eventId: master.id, occurrenceDate: parsed?.occurrenceDate,
+          scope, expectedRevision: master.recurrenceRevision ?? 0,
+          patch: { ...calendarPatchToRow(patch), expected_calendar_id: master.calendarId } });
+        if (!isBflowMutationCurrent(token)) return;
+        const calendars = new Map(useCalendarStore.getState().calendars.map(calendar => [calendar.id, calendar]));
+        const rows = [result.event, result.split_event].filter((row): row is NonNullable<typeof row> => row !== null)
+          .map(row => toCalendarEventFromBflowRow(row, calendars));
+        const ids = new Set([master.id, ...optimistic.map(event => event.id)]);
+        mutateSourceEvents('bflow', events => [...events.filter(item => !ids.has(item.id)), ...rows]);
+        broadcastCalendarChange();
+      } catch (error) {
+        if (isBflowMutationCurrent(token)) {
+          const ids = new Set([master.id, ...optimistic.map(event => event.id)]);
+          mutateSourceEvents('bflow', events => [...events.filter(item => !ids.has(item.id)), master]);
+          broadcastCalendarChange();
+        }
+        throw error;
+      }
+    });
+  } finally { recurrenceMutations.delete(master.id); }
+  return true;
+}
+
 export async function updateEvent(
   eventId: string,
   updates: Partial<CalendarEvent>,
   targetIdentity?: CalendarEventIdentity,
+  scope?: CalendarRecurrenceScope,
 ): Promise<void> {
   assertTargetIdentityMatchesRequest(eventId, targetIdentity);
   const requestToken = captureBflowMutationToken();
+  if (needsRecurrenceCommand(eventId, updates) && await changeRecurrence(eventId, 'update', updates, targetIdentity, scope)) return;
+  if (!isBflowMutationCurrent(requestToken)) return;
   return runUpdateEventIntent(eventId, updates, requestToken, targetIdentity);
 }
 
@@ -2716,9 +2800,12 @@ async function updateEventForToken(
 export async function deleteEvent(
   eventId: string,
   targetIdentity?: CalendarEventIdentity,
+  scope?: CalendarRecurrenceScope,
 ): Promise<void> {
   assertTargetIdentityMatchesRequest(eventId, targetIdentity);
   const requestToken = captureBflowMutationToken();
+  if (needsRecurrenceCommand(eventId, {}) && await changeRecurrence(eventId, 'delete', {}, targetIdentity, scope)) return;
+  if (!isBflowMutationCurrent(requestToken)) return;
   return runDeleteEventIntent(eventId, requestToken, targetIdentity);
 }
 

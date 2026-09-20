@@ -1,3 +1,4 @@
+import { EventScheduleDetails, eventScheduleDetails, eventScheduleDetailsValid } from './EventScheduleDetails';
 import { EventTagManagerButton } from './EventTagManagerButton';
 import { toggleEventTag } from './eventTagPresentation';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -88,6 +89,7 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
   const [startTimeValid, setStartTimeValid] = useState(true);
   const [endTimeValid, setEndTimeValid] = useState(true);
   const [durationVersion, setDurationVersion] = useState(0);
+  const [scheduleDetails, setScheduleDetails] = useState(() => eventScheduleDetails());
   const userSelectedCalendarRef = useRef(false);
 
   const isGoogle = selectedCalendarId === GOOGLE_CALENDAR_OPTION;
@@ -187,7 +189,7 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
     && (allDay || (startTime && endTime))
     && hasRequiredLinkTarget
   ) && datesValid && Boolean(startDate && endDate) && endDate >= startDate
-    && (allDay || (startTimeValid && endTimeValid)) && !hasInvalidTimedInterval;
+    && (allDay || (startTimeValid && endTimeValid)) && !hasInvalidTimedInterval && (isGoogle || eventScheduleDetailsValid(scheduleDetails, startDate));
 
   const handleSubmit = async () => {
     if (!canSubmit || saving) return;
@@ -203,7 +205,7 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
         startDate,
         endDate,
         createdBy: currentUser?.name ?? '알 수 없음',
-        ...(isGoogle ? {} : { calendarId: selectedCalendarId }),
+        ...(isGoogle ? {} : { calendarId: selectedCalendarId, ...scheduleDetails, location: scheduleDetails.location.trim(), meetingUrl: scheduleDetails.meetingUrl.trim() }),
         tagId: isGoogle ? undefined : persistedTagIds[0],
         tagIds: isGoogle ? undefined : persistedTagIds,
         allDay,
@@ -354,6 +356,8 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
               )}
             </div>
           )}
+
+          {!isGoogle && <EventScheduleDetails value={scheduleDetails} onChange={setScheduleDetails} startDate={startDate} allDay={allDay} disabled={saving} />}
 
           <div>
             <label className="text-xs font-semibold text-text-secondary uppercase tracking-wider">메모</label>

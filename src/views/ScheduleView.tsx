@@ -1,3 +1,7 @@
+import { RecurrenceScopeDialog } from '@/components/calendar/RecurrenceScopeDialog';
+import { scheduleEventWindow } from '@/utils/calendarEventWindow';
+import { useAuthStore } from '@/stores/useAuthStore';
+import type { CalendarRecurrenceScope } from '@/shared/calendarRecurrenceContract';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import {
@@ -291,6 +295,11 @@ export function ScheduleView() {
   const [monthDir, setMonthDir] = useState(0); // 월 슬라이드 방향
   const { reduce } = useMotionPref();
 
+  const eventRange = useMemo(() => scheduleEventWindow(viewMode, year, month), [viewMode, year, month]);
+  const eventRangeRef = useRef(eventRange); eventRangeRef.current = eventRange;
+  const previousEventRangeRef = useRef(eventRange);
+  const latestEventsRef = useRef(events); latestEventsRef.current = events;
+  const pendingPositionRef = useRef<{ event: CalendarEvent; patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>; actor: unknown } | null>(null);
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
   const calendars = useCalendarStore((state) => state.calendars);
@@ -520,8 +529,9 @@ export function ScheduleView() {
     let cancelled = false;
     isInitialCalendarSyncRef.current = true;
     const refresh = async (options?: { suppressRealtimeHighlight?: boolean }) => {
-      const canonicalEvents = await getEvents();
-      if (!cancelled) applyCanonicalEvents(canonicalEvents, options);
+      const range = eventRangeRef.current;
+      const canonicalEvents = await getEvents(range);
+      if (!cancelled && range.from === eventRangeRef.current.from && range.to === eventRangeRef.current.to) applyCanonicalEvents(canonicalEvents, options);
     };
     // B flow와 Google 캐시는 별도로 준비된다. B flow 행이 있어도 Google full sync는 필요할 수 있다.
     (async () => {
@@ -552,6 +562,15 @@ export function ScheduleView() {
     window.addEventListener('bflow:calendar-changed', handleCalendarChanged);
     return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', handleCalendarChanged); };
   }, [applyCanonicalEvents]);
+
+  // Period navigation expands the local canonical cache without another database load.
+  useEffect(() => {
+    if (previousEventRangeRef.current.from === eventRange.from && previousEventRangeRef.current.to === eventRange.to) return;
+    previousEventRangeRef.current = eventRange;
+    let cancelled = false;
+    void getEvents(eventRange).then(result => { if (!cancelled) applyCanonicalEvents(result, { suppressRealtimeHighlight: true }); });
+    return () => { cancelled = true; };
+  }, [eventRange, applyCanonicalEvents]);
 
   // 휴가 이벤트 로드
   const loadVacationEvents = useCallback(async () => {
@@ -838,7 +857,7 @@ export function ScheduleView() {
     }
   }, [guardCreatedEvent, guardPersistedCreatedEvent, resetCreatePrefill]);
 
-  const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent) => {
+  const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent, scope?: CalendarRecurrenceScope) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
     const localGuard = guardLocalIdentity(mutationIdentity, deletingEvent, 'delete');
     const mutationIdentityKey = calendarEventIdentityKey(mutationIdentity);
@@ -851,7 +870,7 @@ export function ScheduleView() {
       pendingEditorDeleteCountsRef.current.set(mutationIdentityKey, current + 1);
     }
     try {
-      await deleteEvent(deletingEvent.id, mutationIdentity);
+      await deleteEvent(deletingEvent.id, mutationIdentity, scope);
       settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
       settleLocalMutationGuard(localGuard, 'failed');
@@ -900,7 +919,7 @@ export function ScheduleView() {
   }, [setView]);
 
   const reconcileEventMutation = useCallback(async (mutationIdentity?: CalendarEventIdentity) => {
-    const canonicalEvents = await getEvents();
+    const canonicalEvents = await getEvents(eventRangeRef.current);
     const canonical = mutationIdentity
       ? canonicalEvents.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
       : undefined;
@@ -910,12 +929,16 @@ export function ScheduleView() {
   }, [applyCanonicalEvents]);
 
   // 드래그&드롭
-  const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
-    const mutationIdentity = draggedEventIdentityRef.current;
+  const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string, scope?: CalendarRecurrenceScope, targetIdentity?: CalendarEventIdentity) => {
+    const mutationIdentity = targetIdentity ?? draggedEventIdentityRef.current;
     draggedEventIdentityRef.current = null;
     const eventBeforeUpdate = mutationIdentity
       ? events.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity))
       : undefined;
+    if (!scope && eventBeforeUpdate?.source === 'bflow' && (eventBeforeUpdate.recurrenceRule || eventBeforeUpdate.recurrenceSeriesId)) {
+      const request = { event: eventBeforeUpdate, patch: { startDate: newStart, endDate: newEnd }, actor: useAuthStore.getState().currentUser };
+      pendingPositionRef.current = request; setPendingPosition(request); setPositionError(null); return;
+    }
     const localGuard = mutationIdentity && eventBeforeUpdate
       ? guardLocalIdentity(mutationIdentity, {
         ...eventBeforeUpdate,
@@ -928,6 +951,7 @@ export function ScheduleView() {
         eventId,
         { startDate: newStart, endDate: newEnd },
         mutationIdentity ?? undefined,
+        scope,
       );
       if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
@@ -941,13 +965,18 @@ export function ScheduleView() {
     eventId: string,
     mutationIdentity: CalendarEventIdentity,
     patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
+    scope?: CalendarRecurrenceScope,
   ) => {
     const eventBeforeUpdate = events.find((event) => hasSameCalendarEventIdentity(event, mutationIdentity));
+    if (!scope && eventBeforeUpdate?.source === 'bflow' && (eventBeforeUpdate.recurrenceRule || eventBeforeUpdate.recurrenceSeriesId)) {
+      const request = { event: eventBeforeUpdate, patch, actor: useAuthStore.getState().currentUser };
+      pendingPositionRef.current = request; setPendingPosition(request); setPositionError(null); return;
+    }
     const localGuard = eventBeforeUpdate
       ? guardLocalIdentity(mutationIdentity, { ...eventBeforeUpdate, ...patch }, 'update', eventBeforeUpdate)
       : undefined;
     try {
-      await updateEvent(eventId, patch, mutationIdentity);
+      await updateEvent(eventId, patch, mutationIdentity, scope);
       if (eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
       if (eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'failed');
@@ -1254,6 +1283,7 @@ export function ScheduleView() {
     eventBeforeUpdate: CalendarEvent,
     id: string,
     updates: Partial<CalendarEvent>,
+    scope?: CalendarRecurrenceScope,
   ) => {
     const mutationIdentity = snapshotCalendarEventIdentity(eventBeforeUpdate);
     const sanitized = { ...updates };
@@ -1273,7 +1303,7 @@ export function ScheduleView() {
     let persistenceFailed = false;
     let persistenceError: unknown;
     try {
-      await updateEvent(id, sanitized, mutationIdentity);
+      await updateEvent(id, sanitized, mutationIdentity, scope);
       settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
       persistenceFailed = true;
@@ -1282,7 +1312,7 @@ export function ScheduleView() {
     }
 
     try {
-      const canonicalEvents = await getEvents();
+      const canonicalEvents = await getEvents(eventRangeRef.current);
       const canonical = canonicalEvents.find((event) => (
         hasSameCalendarEventIdentity(event, mutationIdentity)
       ));
@@ -1325,6 +1355,11 @@ export function ScheduleView() {
       source: undefined,
       canEdit: undefined,
       // 연결 정보 모두 제거: 완전 독립 이벤트로 복제
+      recurrenceRule: null,
+      recurrenceSeriesId: undefined,
+      recurrenceDate: undefined,
+      recurrenceExceptions: undefined,
+      recurrenceRevision: undefined,
       linkedTodoId: undefined,
       isReadOnly: false,
       type: 'custom',
@@ -1390,6 +1425,18 @@ export function ScheduleView() {
    */
   const [showWeekends, setShowWeekends] = useState(() => readCalendarViewPreference().showWeekends);
 
+  const [pendingPosition, setPendingPosition] = useState<{ event: CalendarEvent; patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>; actor: unknown } | null>(null);
+  const [positionError, setPositionError] = useState<string | null>(null);
+  const cancelPosition = () => { pendingPositionRef.current = null; setPendingPosition(null); };
+  const confirmPosition = async (scope: CalendarRecurrenceScope) => {
+    const request = pendingPositionRef.current; if (!request) return;
+    cancelPosition();
+    const latest = latestEventsRef.current.find(event => hasSameCalendarEventIdentity(event, request.event));
+    if (!latest || latest.canEdit === false || latest.isReadOnly || eventContentSnapshot(latest) !== eventContentSnapshot(request.event) || useAuthStore.getState().currentUser !== request.actor) { setPositionError('일정이나 로그인 정보가 바뀌었어요. 최신 일정을 다시 선택해 주세요.'); return; }
+    try { await handleTimeGridEventChange(request.event.id, snapshotCalendarEventIdentity(request.event), request.patch, scope); }
+    catch { setPositionError('일정 이동을 저장하지 못했어요. 다시 시도해 주세요.'); }
+  };
+
   useEffect(() => {
     try {
       window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, JSON.stringify({ viewMode, weekSubMode, showWeekends }));
@@ -1446,6 +1493,8 @@ export function ScheduleView() {
   return (
     <MotionConfig reducedMotion={reduce ? 'always' : 'never'}>
       <div className="flex h-full">
+      {pendingPosition && <RecurrenceScopeDialog action="edit" ruleChanged={false} resetsExceptions onCancel={cancelPosition} onChoose={scope => { void confirmPosition(scope); }} />}
+      {positionError && <div role="alert" className="absolute bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-bg-border bg-bg-card px-4 py-3 text-xs text-text-primary">{positionError}<button type="button" aria-label="이동 오류 닫기" className="ml-3" onClick={() => setPositionError(null)}>닫기</button></div>}
       {/* ═══ 좌측 사이드바 ═══ */}
       <div
         className="flex-shrink-0 border-r border-bg-border/30 transition-all duration-250 overflow-hidden"
@@ -1797,8 +1846,8 @@ export function ScheduleView() {
             key={`panel-${calendarEventIdentityKey(panelEvent)}`}
             event={panelEvent}
             onClose={() => setPanelEvent(null)}
-            onDelete={() => handleDeleteEvent(panelEvent)}
-            onUpdate={(id, updates) => handleUpdateEventDirect(panelEvent, id, updates)}
+            onDelete={(_id, scope) => handleDeleteEvent(panelEvent, scope)}
+            onUpdate={(id, updates, scope) => handleUpdateEventDirect(panelEvent, id, updates, scope)}
             onNavigate={handleNavigate}
           />
         )}
@@ -1812,10 +1861,10 @@ export function ScheduleView() {
           event={quickEdit.event}
           position={quickEdit.position}
           onClose={() => setQuickEdit(null)}
-            onUpdate={(id, updates) => handleUpdateEventDirect(quickEdit.event, id, updates)}
-            onDelete={() => {
+            onUpdate={(id, updates, scope) => handleUpdateEventDirect(quickEdit.event, id, updates, scope)}
+            onDelete={(_id, scope) => {
               const deletingEvent = quickEdit.event;
-              const deletion = handleDeleteEvent(deletingEvent);
+              const deletion = handleDeleteEvent(deletingEvent, scope);
               setPanelEvent((previous) => previous
                 && hasSameCalendarEventIdentity(previous, deletingEvent)
                 ? null

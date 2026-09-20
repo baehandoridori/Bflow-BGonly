@@ -2,6 +2,7 @@
  * 권한 검증·broadcast 는 calendarIpc.ts 담당 — 여기는 순수 데이터 접근만.
  * 마이그레이션 전(테이블 부재) 안전: 읽기는 빈 결과 + console.warn, 쓰기는 throw. */
 import { supabase } from './supabase';
+import type { CalendarRecurrenceFields, CalendarRecurrenceRequest, CalendarRecurrenceResult, CalendarRecurrenceRow } from '../src/shared/calendarRecurrenceContract';
 import { isGanttCalendarEventId, listGanttCalendarEvents, updateGanttCalendarEvent, unlinkGanttCalendarEvent } from './ganttStore';
 import type { CalendarUpdateInput } from '../src/shared/calendarApiContract';
 import { normalizeCalendarNotificationCatchupInput } from '../src/shared/calendarNotificationCatchup';
@@ -31,7 +32,7 @@ export interface CalendarTagRow {
   sort_order: number;
 }
 
-export interface CalendarEventRow {
+export interface CalendarEventRow extends CalendarRecurrenceFields {
   id: string;
   calendar_id: string;
   title: string;
@@ -124,6 +125,27 @@ export function setCalendarSessionTokenResolver(resolver: { tokenFor(actorId: st
   calendarSessionResolver = resolver;
 }
 let calendarSessionResolver = { tokenFor(_actorId: string): string { throw new Error('로그인 세션이 필요합니다. 다시 로그인해 주세요.'); } };
+
+export async function listRecurrenceEvents(actorId: string): Promise<CalendarEventRow[]> {
+  const { data, error } = await supabase.rpc('calendar_session_recurrence_events', {
+    p_session_token: calendarSessionResolver.tokenFor(actorId),
+  });
+  throwIfError(error);
+  if (!Array.isArray(data)) throw new Error('반복 일정 목록 응답이 올바르지 않습니다.');
+  return [...data as CalendarRecurrenceRow[], ...await listGanttCalendarEvents(actorId, {})];
+}
+
+export async function executeRecurrence(actorId: string, request: CalendarRecurrenceRequest): Promise<CalendarRecurrenceResult> {
+  const { data, error } = await supabase.rpc('calendar_session_recurrence_execute', {
+    p_session_token: calendarSessionResolver.tokenFor(actorId),
+    p_action: request.action, p_event_id: request.eventId ?? null,
+    p_occurrence_date: request.occurrenceDate ?? null, p_scope: request.scope,
+    p_expected_revision: request.expectedRevision, p_patch: request.patch,
+  });
+  throwIfError(error);
+  if (!data || typeof data.deleted !== 'boolean') throw new Error('반복 일정 저장 응답이 올바르지 않습니다.');
+  return data;
+}
 
 export async function listCalendarsWithMembers(actorId: string): Promise<{ calendars: CalendarRow[]; members: CalendarMemberRow[] }> {
   const { data, error } = await supabase.rpc('calendar_session_list', {

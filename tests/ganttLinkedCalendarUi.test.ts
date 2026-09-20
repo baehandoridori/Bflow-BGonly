@@ -14,7 +14,7 @@ async function harness(canEdit = true) {
   const source={id:'native-event',source:'bflow',sourceCalendarId:'bflow:calendar',calendarId:'calendar',title:'원본 일정',memo:'메모',startDate:'2026-09-17',endDate:'2026-09-17',color:'#74B9FF',allDay:true,canEdit:true};
   const calendar={id:'calendar',name:'공유 캘린더',ownerId:'owner',visibility:'members',members:[{userId:'me',canEdit}],canEdit,canManage:false};
   let project:any={id:'project',name:'공유 캘린더',calendarLink:{calendarId:'calendar',canUnlink:false},tasks:[{id:'native-event',sourceCalendarEventId:'native-event'}]};
-  const calls:any[]=[], gantt={actorId:'me',refresh:async()=>{refreshes++;return true;}};
+  const calls:any[]=[], ranges:any[]=[], gantt={actorId:'me',refresh:async()=>{refreshes++;return true;}};
   const auth=Object.assign((fn:any)=>fn({currentUser:user,users:[]}),{getState:()=>({currentUser:user}),subscribe:(fn:any)=>{subscribers.add(fn);return()=>subscribers.delete(fn);}});
   const result=await build({entryPoints:['src/features/gantt/LinkedCalendarPanel.tsx'],bundle:true,format:'cjs',platform:'node',write:false,external:['react','react/jsx-runtime','lucide-react','@/components/calendar/EventSidePanel','@/components/calendar/CalendarSettingsModal','@/services/calendarService','@/stores/useAuthStore','@/stores/useAppStore','@/stores/useCalendarStore','./useGanttStore']});
   const module={exports:{} as any};new Function('require','module','exports',result.outputFiles[0].text)((id:string)=>{
@@ -26,11 +26,11 @@ async function harness(canEdit = true) {
     if(id==='@/stores/useAppStore')return {useAppStore:{getState:()=>({navigateToScheduleDate(){}})}};
     if(id==='@/stores/useCalendarStore')return {useCalendarStore:Object.assign((fn:any)=>fn({calendars:[calendar]}),{getState:()=>({calendars:[calendar]})})};
     if(id==='./useGanttStore')return {useGanttStore:{getState:()=>gantt}};
-    if(id==='@/services/calendarService')return {loadBflowEvents:async()=>{await gate;return fresh;},getEvents:async()=>[{...source}],updateEvent:async(...args:any[])=>{calls.push(['update',...args]);Object.assign(source,args[1]);},deleteEvent:async(...args:any[])=>calls.push(['delete',...args])};
+    if(id==='@/services/calendarService')return {loadBflowEvents:async()=>{await gate;return fresh;},getEvents:async(range:any)=>{ranges.push(range);return [{...source}];},updateEvent:async(...args:any[])=>{calls.push(['update',...args]);Object.assign(source,args[1]);},deleteEvent:async(...args:any[])=>calls.push(['delete',...args])};
     return require(id);
   },module,module.exports);
   const render=()=>{stateIndex=refIndex=effectIndex=0;const tree=module.exports.LinkedCalendarPanel({project,taskId:'native-event',actorId:'me',onClose:()=>{closed++;},onUnlink:async()=>{}});while(effects.length)effects.shift()!();return tree;};
-  return {render,calls,calendar,unmountOnRefresh:()=>{gantt.refresh=async()=>{refreshes++;cleanups.forEach(cleanup=>cleanup?.());return true;};},setFresh:(value:boolean)=>{fresh=value;},closed:()=>closed,refreshes:()=>refreshes,gate:(value:Promise<void>)=>{gate=value;},updateProject:()=>{project={...project};},switchUser:()=>{const previous={currentUser:user};user={id:'other'};subscribers.forEach(fn=>fn({currentUser:user},previous));},panel:(tree:ReactNode)=>nodes(tree).find(node=>node.type==='EventSidePanel')};
+  return {render,calls,ranges,calendar,setOccurrence:(date:string)=>{source.id=`recurrence:native-event:${date}`;source.startDate=source.endDate=date;Object.assign(project.tasks[0],{sourceCalendarEventId:source.id,startDate:date,endDate:date});},unmountOnRefresh:()=>{gantt.refresh=async()=>{refreshes++;cleanups.forEach(cleanup=>cleanup?.());return true;};},setFresh:(value:boolean)=>{fresh=value;},closed:()=>closed,refreshes:()=>refreshes,gate:(value:Promise<void>)=>{gate=value;},updateProject:()=>{project={...project};},switchUser:()=>{const previous={currentUser:user};user={id:'other'};subscribers.forEach(fn=>fn({currentUser:user},previous));},panel:(tree:ReactNode)=>nodes(tree).find(node=>node.type==='EventSidePanel')};
 }
 
 test('linked event detail reuses calendar editor and writes the native calendar identity',async()=>{
@@ -43,6 +43,20 @@ test('linked event detail reuses calendar editor and writes the native calendar 
 test('read-only linked source cannot edit through a stale event editor callback',async()=>{
  const h=await harness(false);h.render();await settle();const panel=h.panel(h.render());assert.equal(panel.props.event.isReadOnly,true);
  await assert.rejects(panel.props.onUpdate('native-event',{title:'금지'}),/편집 권한/);assert.equal(h.calls.length,0);
+});
+
+test('linked source editor forwards explicit recurring edit and delete scopes',async()=>{
+ const h=await harness();h.render();await settle();const panel=h.panel(h.render());
+ await panel.props.onUpdate('native-event',{title:'이후 일정'},'following');
+ await panel.props.onDelete('native-event','all');
+ assert.equal(h.calls[0][4],'following');assert.equal(h.calls[1][3],'all');
+});
+
+test('distant recurring linked occurrence is fetched within its task dates and edited using its synthetic identity',async()=>{
+ const h=await harness();h.setOccurrence('2040-01-03');h.render();await settle();const panel=h.panel(h.render());assert.ok(panel);
+ assert.deepEqual(h.ranges[0],{from:'2040-01-03',to:'2040-01-03'});
+ await panel.props.onUpdate(panel.props.event.id,{title:'2040년 회의'},'this');
+ assert.equal(h.calls[0][1],'recurrence:native-event:2040-01-03');assert.equal(h.calls[0][4],'this');
 });
 
 test('session change hides linked source detail and refuses late editor writes',async()=>{

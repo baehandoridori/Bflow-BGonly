@@ -10,6 +10,7 @@ import { compactDuration, DISPLAY_OPTIONS_KEY, localDate, millisecondsUntilMidni
 export { localDate } from './barLabels';
 import { GanttTooltip, type GanttHover } from './GanttTooltip';
 import type { GanttProject, GanttTask } from './types';
+import { linkedCalendarVisibleRange, type LinkedCalendarRange } from './linkedCalendarRecurrence';
 import './navigation.css';
 import './canvas.css';
 
@@ -32,6 +33,7 @@ interface Props {
   onMenu: (p: GanttProject, task: GanttTask | null, x: number, y: number) => void;
   onAdd: (p: GanttProject, parentId: string | null, start: string, end: string) => void;
   onShiftGroup?: (project: GanttProject, task: GanttTask, deltaDays: number) => void;
+  onVisibleRange?: (range: LinkedCalendarRange) => void;
   onRelocate?: (sourceProject: GanttProject, task: GanttTask, targetProject: GanttProject, targetTaskId: string | null, position: RowDropPosition) => void;
 }
 export function GanttCanvas(props: Props) {
@@ -69,11 +71,16 @@ export function GanttCanvas(props: Props) {
     observer?.observe(el);window.addEventListener('resize',measure);
     return () => { observer?.disconnect();window.removeEventListener('resize',measure); };
   }, []);
-  const allDates = projects.flatMap(p => p.tasks.map(t => t.startDate));
+  // Expanded recurring rows follow the viewport, so they must not move that viewport themselves.
+  const axisTasks = projects.flatMap(p => p.tasks.filter(t => !t.sourceCalendarEventId?.startsWith('recurrence:')));
+  const allDates = axisTasks.map(t => t.startDate);
   const firstDate = allDates.sort()[0] || localDate();
   const [base, setBase] = useState(() => moveDate(firstDate < localDate() ? firstDate : localDate(), -6));
   const [visibleDate, setVisibleDate] = useState(base);
   const [visibleScrollLeft, setVisibleScrollLeft] = useState(0);
+  useEffect(() => {
+    props.onVisibleRange?.(linkedCalendarVisibleRange(visibleDate,Math.max(1,viewportWidth-leftWidth),width));
+  }, [visibleDate,viewportWidth,leftWidth,width,props.onVisibleRange]);
   const [navigationEnd, setNavigationEnd] = useState(() => moveDate(base,59));
   const pendingScroll = useRef<{base:string;left:number;kind:'view'|'zoom'} | null>(null);
   // Keep the viewport date stable when a project with earlier work is enabled.
@@ -84,7 +91,7 @@ export function GanttCanvas(props: Props) {
       setBase(candidate);
     }
   }, [firstDate, base]);
-  const lastDate = projects.flatMap(p => p.tasks.map(t => t.endDate)).sort().at(-1) || localDate();
+  const lastDate = axisTasks.map(t => t.endDate).sort().at(-1) || localDate();
   const extent = useRef(navigationEnd);
   extent.current = [extent.current, navigationEnd, moveDate(lastDate,30)].sort().at(-1)!;
   const days = dayDiff(base,extent.current)+1;

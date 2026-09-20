@@ -36,6 +36,13 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - `calendar-feed` Edge Function은 URL 토큰을 직접 인증하므로 이 함수만 `verify_jwt=false`다. 서비스 전용 `calendar_feed_read`가 해당 캘린더의 원본·간트 projection만 반환한다. 링크 중지·교체·소유권 이전·삭제로 기존 주소를 무효화한다.
 - 종일 일정 종료일은 ICS에서 다음 날로 변환하고, 시간 일정은 서울 시간에서 UTC로 변환한다. 읽기 전용 URL 구독이며 외부 앱의 갱신 주기를 따른다. 프리뷰 주소는 `.invalid`로 실제 외부 구독이 불가능함을 표시한다.
 
+### 반복 일정 데이터 경계 (v1.125.0)
+
+- 반복 원본은 `calendar_events.recurrence_rule`, 날짜별 예외는 `calendar_event_exceptions`에 저장한다. `calendar_session_recurrence_events/execute`는 canonical session과 원본 revision을 검사한다.
+- 화면 ID `recurrence:<UUID>:<원래 날짜>`는 표시용이다. 저장·알림 외래키에는 원본 UUID만 사용한다. `src/shared/calendarRecurrence.ts`로 각 화면의 날짜 구간에서 펼치며, 간트의 저장 snapshot에는 펼친 작업을 쓰지 않는다.
+- 알림은 메인 프로세스가 조회 권한·한국 시간·사용자별 전달 기록을 검사한다. 종일 일정은 오전 9시, 재시작 catch-up은 최근 30분이며 관리자 전체 열람만으로 알림 대상이 되지 않는다. 앱이 종료된 동안 Windows 알림을 보장하지 않는다.
+- 외부 구독은 RRULE/EXDATE/RECURRENCE-ID를 출력한다. 시간 지정 반복은 Asia/Seoul TZID를 유지하고, 매월 없는 날짜는 건너뛴다.
+
 ### 간트 데이터 경계 (v1.111.0)
 
 - v1.117.4부터 새 로그인은 `SessionManager` → `app_login` 서버 결과만 사용한다. 로컬 `users.dat`나 사용자 디렉터리를 새 로그인 인증·미등록·비밀번호 불일치 판정의 근거로 사용하지 않는다. 서버 불가 시 연결·업데이트 안내 후 보류하며 자격 증명을 자동 재전송하지 않는다. 기존 토큰 복원·데이터 파일은 이 변경으로 삭제하지 않는다.

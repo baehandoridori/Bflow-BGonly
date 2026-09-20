@@ -1,3 +1,7 @@
+import { claimCalendarReminders, dueCalendarReminders } from '../shared/calendarReminders';
+import { calendarPatchFromRow, calendarPatchToRow, recurrenceFieldsFromRow, type CalendarRecurrenceFields, type CalendarRecurrenceRow } from '../shared/calendarRecurrenceContract';
+import { mutateRecurringMaster } from '../shared/calendarRecurrenceMutation';
+import { validateCalendarRecurrenceRule } from '../shared/calendarRecurrence';
 import { normalizeCalendarTagIds } from '@/shared/calendarTagIds';
 import { createCalendarSubscriptionPreview } from './calendarSubscriptionPreview';
 /**
@@ -142,7 +146,7 @@ function requireGanttPreviewSession() {
 }
 
 type MockCalendarRow = Awaited<ReturnType<ElectronAPI['calendarCreate']>>;
-type MockCalendarEventRow = Awaited<ReturnType<ElectronAPI['calendarEventCreate']>>;
+type MockCalendarEventRow = Awaited<ReturnType<ElectronAPI['calendarEventCreate']>> & CalendarRecurrenceFields;
 type MockCalendarTagRow = Awaited<ReturnType<ElectronAPI['calendarTagsList']>>[number];
 type MockCalendarMemberRow = { calendar_id: string; user_id: string; can_edit: boolean };
 type MockCalendarEventCreateInput = Parameters<ElectronAPI['calendarEventCreate']>[0];
@@ -1449,6 +1453,33 @@ function createMockCalendarEvent(input: MockCalendarEventCreateInput, userId: st
   };
   mockCalendarEvents.push(created);
   return created;
+}
+
+/** Recurrence commands validate the complete candidate before touching preview authority. */
+function validateMockRecurrenceCandidate(row: Record<string, any>): void {
+  const date=(value:unknown)=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&value>='0001-01-01'&&value<='9999-12-31'&&Number.isFinite(Date.parse(value+'T00:00:00Z'))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
+  const time=(value:unknown)=>typeof value==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+  if(typeof row.calendar_id!=='string'||!row.calendar_id||typeof row.title!=='string'||!row.title.trim()||typeof row.all_day!=='boolean'
+    ||!date(row.start_date)||!date(row.end_date)||row.end_date<row.start_date
+    ||(!row.all_day&&(!time(row.start_time)||!time(row.end_time)||(row.start_date===row.end_date&&row.end_time<row.start_time))))throw new Error('일정 제목과 날짜·시간을 확인해 주세요.');
+  if(row.meeting_url){let url:URL;try{url=new URL(row.meeting_url);}catch{throw new Error('회의 주소를 확인해 주세요.');}if(!['http:','https:'].includes(url.protocol)||!url.hostname||/\s/.test(row.meeting_url))throw new Error('회의 주소를 확인해 주세요.');}
+  if(row.reminder_minutes!=null&&(!Number.isInteger(row.reminder_minutes)||row.reminder_minutes<0||row.reminder_minutes>10080))throw new Error('알림 시간을 확인해 주세요.');
+  if(row.recurrence_rule)row.recurrence_rule=validateCalendarRecurrenceRule(row.recurrence_rule,row.start_date);
+  row.tag_ids=normalizeCalendarTagIds(row.tag_ids,row.tag_id).map(id=>normalizeMockCalendarEventTagId(id)!);row.tag_id=row.tag_ids[0]??null;
+}
+
+function validateMockRecurrenceCommand(request:any):void {
+  const allowed=['expected_calendar_id','calendar_id','title','memo','tag_id','tag_ids','all_day','start_date','end_date','start_time','end_time','linked_episode','linked_part','linked_sheet_name','linked_scene_id','linked_department','linked_todo_id','recurrence_rule','location','meeting_url','reminder_minutes'];
+  if(!request||!['create','update','delete'].includes(request.action)||!['this','following','all'].includes(request.scope)||!Number.isInteger(request.expectedRevision)||request.expectedRevision<0||!request.patch||typeof request.patch!=='object'||Array.isArray(request.patch))throw new Error('일정 변경 요청이 올바르지 않습니다.');
+  for(const [key,value] of Object.entries(request.patch)) {
+    if(!allowed.includes(key))throw new Error('변경할 수 없는 일정 항목입니다.');
+    if(key==='all_day'&&typeof value!=='boolean')throw new Error('종일 설정을 확인해 주세요.');
+    if(key==='tag_ids'&&(!Array.isArray(value)||value.some(id=>typeof id!=='string')))throw new Error('태그 목록을 확인해 주세요.');
+    if(['linked_episode','reminder_minutes'].includes(key)&&value!=null&&!Number.isInteger(value))throw new Error('숫자 입력을 확인해 주세요.');
+    if(!['recurrence_rule','all_day','tag_ids','linked_episode','reminder_minutes'].includes(key)&&value!=null&&typeof value!=='string')throw new Error('일정 입력 형식을 확인해 주세요.');
+  }
+  if(request.action==='create'&&(request.scope!=='all'||request.expectedRevision!==0||request.eventId!=null||request.occurrenceDate!=null))throw new Error('새 일정 요청이 올바르지 않습니다.');
+  if(request.action==='delete'&&Object.keys(request.patch).some(key=>key!=='expected_calendar_id'))throw new Error('일정 삭제에 변경 내용이 포함되어 있습니다.');
 }
 
 /**
@@ -2888,6 +2919,53 @@ export function installDevElectronAPI(): void {
       }
       replaceMockCalendarMembers(calendar, members);
       publishMockCalendarChange({ table: 'calendar_members', action: 'UPDATE', calendarId });
+    },
+    calendarRemindersPoll: async (muted) => {
+      const actor = requireMockCalendarUser();
+      const visible = new Set(mockCalendars.filter(calendar => canViewCalendar(calendar, mockCalendarMembers.filter(member => member.calendar_id === calendar.id).map(member => member.user_id), actor.id)).map(calendar => calendar.id));
+      const events = mockCalendarEvents.filter(row => visible.has(row.calendar_id)).map(row => ({...calendarPatchFromRow(row),...recurrenceFieldsFromRow(row),id:row.id,color:'#6C5CE7',type:'custom',createdBy:row.created_by ?? '',createdAt:row.created_at} as import('../types/calendar').CalendarEvent));
+      const key = `bflow-preview-reminders:${actor.id}`;
+      let ledger: Record<string,number> = {};
+      try { ledger = JSON.parse(localStorage.getItem(key) ?? '{}'); } catch {}
+      const claimed = claimCalendarReminders(dueCalendarReminders(events, Date.now(), muted),ledger,Date.now());
+      localStorage.setItem(key,JSON.stringify(ledger));
+      for (const reminder of claimed) window.dispatchEvent(new CustomEvent('bflow:calendar-reminder', { detail: reminder }));
+      return claimed;
+    },
+    calendarRecurrenceList: async () => {
+      const visible = visibleMockCalendarIds();
+      const actor = requireMockCalendarUser();
+      const options=ganttPreviewOptions(actor.id,previewCanonicalEpoch);
+      const linked = await listGanttCalendarEvents(actor.id, options);
+      options.assertCurrent?.();
+      return [...mockCalendarEvents.filter(row => visible.has(row.calendar_id)), ...linked].map(row => structuredClone(row));
+    },
+    calendarRecurrenceExecute: async (request) => {
+      const actor = requireMockCalendarUser();
+      validateMockRecurrenceCommand(request);
+      const normalizedPatch={...request.patch};
+      if('tag_ids' in normalizedPatch || 'tag_id' in normalizedPatch){const tags=normalizeCalendarTagIds(normalizedPatch.tag_ids,normalizedPatch.tag_id).map(id=>normalizeMockCalendarEventTagId(id)!);normalizedPatch.tag_ids=tags;normalizedPatch.tag_id=tags[0]??null;}
+      if (request.action === 'create') {
+        const input={memo:'',all_day:true,tag_ids:[],...normalizedPatch};validateMockRecurrenceCandidate(input);
+        const created = createMockCalendarEvent(input as MockCalendarEventCreateInput, actor.id);
+        created.recurrence_revision = 0;
+        publishMockCalendarChange({table:'calendar_events',action:'INSERT',eventId:created.id});
+        return {event: structuredClone(created), split_event: null, deleted: false};
+      }
+      const row = mockCalendarEvents.find(row => row.id === request.eventId);
+      if (!row) throw new Error('일정을 찾을 수 없습니다.');
+      requireMockCalendarEventWrite(row.calendar_id, actor.id);
+      if(request.scope!=='all'&&!row.recurrence_rule)throw new Error('반복 일정 원본이 아닙니다.');
+      if (request.patch.expected_calendar_id !== row.calendar_id || (row.recurrence_revision ?? 0) !== request.expectedRevision) throw new Error('다른 변경이 있습니다. 새로고침 후 다시 시도해 주세요.');
+      if (request.patch.calendar_id) requireMockCalendarEventWrite(request.patch.calendar_id, actor.id);
+      const master = { ...calendarPatchFromRow(row), ...recurrenceFieldsFromRow(row), id:row.id, color:'#6C5CE7',type:'custom',createdBy:row.created_by ?? '',createdAt:row.created_at } as import('../types/calendar').CalendarEvent;
+      const changed = mutateRecurringMaster(master,request.action,request.scope,request.occurrenceDate,calendarPatchFromRow(normalizedPatch),createUuid());
+      const rows = changed.map(event => ({...row,...calendarPatchToRow(event),id:event.id,recurrence_revision:event.recurrenceRevision ?? 0,
+        recurrence_exceptions:event.recurrenceExceptions?.map(ex=>({occurrence_date:ex.occurrenceDate,cancelled:ex.cancelled,patch:calendarPatchToRow(ex.patch ?? {})})),updated_at:new Date().toISOString() } as CalendarRecurrenceRow));
+      for(const candidate of rows){validateMockRecurrenceCandidate(candidate);for(const exception of candidate.recurrence_exceptions??[]){if(exception.cancelled)continue;const duration=(Date.parse(candidate.end_date)-Date.parse(candidate.start_date))/86400000;validateMockRecurrenceCandidate({...candidate,start_date:exception.occurrence_date,end_date:new Date(Date.parse(exception.occurrence_date+'T00:00:00Z')+duration*86400000).toISOString().slice(0,10),...exception.patch,recurrence_rule:null});}}
+      mockCalendarEvents.splice(mockCalendarEvents.indexOf(row),1,...rows);
+      publishMockCalendarChange({table:'calendar_events',action:request.action === 'delete' ? 'DELETE':'UPDATE',eventId:row.id});
+      return { event: rows.find(event=>event.id===row.id) ?? null,split_event:rows.find(event=>event.id!==row.id) ?? null,deleted:rows.length===0 };
     },
     calendarEventsList: async (params) => {
       const visibleIds = visibleMockCalendarIds();

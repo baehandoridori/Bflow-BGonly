@@ -1472,6 +1472,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
     calendarId: Parameters<CalendarApiInputContract['calendarSetMembers']>[0],
     members: Parameters<CalendarApiInputContract['calendarSetMembers']>[1],
   ) => Promise<void>;
+  calendarRemindersPoll?: (muted: string[]) => Promise<import('../shared/calendarReminders').CalendarReminder[]>;
+  calendarRecurrenceList?: () => Promise<Array<Awaited<ReturnType<ElectronAPI['calendarEventsList']>>[number] & import('../shared/calendarRecurrenceContract').CalendarRecurrenceFields>>;
+  calendarRecurrenceExecute?: (request: import('../shared/calendarRecurrenceContract').CalendarRecurrenceRequest) => Promise<import('../shared/calendarRecurrenceContract').CalendarRecurrenceResult>;
   calendarEventsList: (
     params?: Parameters<CalendarApiInputContract['calendarEventsList']>[0]
   ) => Promise<Array<{

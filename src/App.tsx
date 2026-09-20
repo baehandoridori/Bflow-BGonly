@@ -1281,6 +1281,21 @@ export default function App() {
     })();
   }, [currentUser, authReady]);
 
+  useEffect(() => {
+    if (!currentUser || !authReady || !window.electronAPI?.calendarRemindersPoll) return;
+    let stopped = false;
+    const poll = () => {
+      if (stopped) return;
+      void window.electronAPI.calendarRemindersPoll!(useCalendarStore.getState().mutedCalendarIds)
+        .then(reminders => { if (!stopped) for (const reminder of reminders) sonnerToast(reminder.title, {description: reminder.body, duration: 15000}); })
+        .catch(error => { if (!stopped) console.warn('[calendar-reminders] 알림 확인 실패:', error); });
+    };
+    poll();
+    const timer = setInterval(poll, 30000);
+    window.addEventListener('focus', poll);
+    return () => { stopped = true; clearInterval(timer); window.removeEventListener('focus', poll); };
+  }, [currentUser?.id, authReady]);
+
   // PR4: 캘린더 알림 catch-up — 최근 30일 미읽음은 read_at 기준으로 IPC가 제한한다.
   // 원본 IPC 행은 snake_case 경계를 유지하고, renderer에서는 표시 메타데이터만 만든다.
   const calendarCatchupDoneRef = useRef<string | null>(null);
