@@ -6,6 +6,22 @@ function choose(h: Awaited<ReturnType<typeof harness>>, label: string, value: st
   const select = nodes(h.render()).find(node => node.type === 'select' && node.props['aria-label'] === label);
   assert.ok(select, `select ${label}`); select.props.onChange({ target: { value } }); h.render();
 }
+test('meeting links use the desktop external browser and retain normal preview navigation', async () => {
+  const h = await harness('EventSidePanel', { meetingUrl: 'https://example.com/meeting' }, { openEdit: false });
+  try {
+    const link = nodes(h.render()).find(node => node.type === 'a' && node.props.href === 'https://example.com/meeting');
+    assert.ok(link);
+    let prevented = false;
+    const click = { preventDefault() { prevented = true; } };
+    await link.props.onClick(click);
+    assert.equal(prevented, false);
+    const opened: string[] = [];
+    Object.assign(window, { electronAPI: { openExternal: async (url: string) => { opened.push(url); return { ok: true }; } } });
+    await link.props.onClick(click);
+    assert.equal(prevented, true);
+    assert.deepEqual(opened, ['https://example.com/meeting']);
+  } finally { h.dispose(); }
+});
 test('monthly missing dates skip, custom weekly days and end conditions are previewed and validated', async () => {
   const h = await harness('EventCreateModal', { startDate: '2026-01-31', endDate: '2026-01-31' }); try {
     choose(h, '반복', 'monthly'); assert.ok(text(h.render()).includes('2026-03-31')); assert.equal(text(h.render()).includes('2026-02-28'), false);

@@ -1292,8 +1292,11 @@ export default function App() {
     };
     poll();
     const timer = setInterval(poll, 30000);
+    const unsubscribe = useCalendarStore.subscribe((state, previous) => {
+      if (state.mutedCalendarIds !== previous.mutedCalendarIds) poll();
+    });
     window.addEventListener('focus', poll);
-    return () => { stopped = true; clearInterval(timer); window.removeEventListener('focus', poll); };
+    return () => { stopped = true; clearInterval(timer); unsubscribe(); window.removeEventListener('focus', poll); };
   }, [currentUser?.id, authReady]);
 
   // PR4: 캘린더 알림 catch-up — 최근 30일 미읽음은 read_at 기준으로 IPC가 제한한다.
