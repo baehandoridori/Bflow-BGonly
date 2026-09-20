@@ -5106,7 +5106,6 @@ test('ScheduleView reconciles an open calendar settings modal without closing cr
   await t.test('same-id metadata replaces the stale object and missing or unmanaged rows close the modal', async () => {
     resetHarness();
     let tree = await renderScheduleView();
-    buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
     tree = await renderScheduleView();
     buttonByLabel(tree, '레일 캘린더 설정').props.onClick?.();
     tree = await renderScheduleView();
@@ -5151,7 +5150,6 @@ test('ScheduleView reconciles an open calendar settings modal without closing cr
   await t.test('the null create-mode sentinel survives unrelated calendar list refreshes', async () => {
     resetHarness();
     let tree = await renderScheduleView();
-    buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
     tree = await renderScheduleView();
     buttonByLabel(tree, '레일 새 캘린더').props.onClick?.();
     tree = await renderScheduleView();
@@ -5167,7 +5165,6 @@ test('ScheduleView reconciles an open calendar settings modal without closing cr
   await t.test('a pending optimistic delete keeps its matching retry modal until canonical settlement', async () => {
     resetHarness();
     let tree = await renderScheduleView();
-    buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
     tree = await renderScheduleView();
     buttonByLabel(tree, '레일 캘린더 설정').props.onClick?.();
     tree = await renderScheduleView();
@@ -5263,7 +5260,6 @@ test('ScheduleView applies one reduced-motion policy above every calendar branch
   resetHarness();
   scheduleReducedMotion = true;
   let tree = await renderScheduleView();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.({ stopPropagation() {} });
   tree = await renderScheduleView();
   let boundary = boundaryFor(tree, 'always');
   assert.ok(
@@ -5940,7 +5936,6 @@ test('ScheduleView suppresses calendar shortcuts while calendar settings is open
   let tree = await renderScheduleView();
   await flushScheduleMountEffects();
 
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
   buttonByLabel(tree, '레일 새 캘린더').props.onClick?.();
   tree = await rerenderScheduleViewWithFreshEffects();
@@ -6172,7 +6167,6 @@ test('ScheduleView counts every event overlapping the displayed month', async ()
   let tree = await renderScheduleView();
   await flushScheduleMountEffects();
   // The fixture describes August 2026; never let the host's current month choose this assertion.
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
   const miniCalendar = scheduleMiniCalendarProps.at(-1);
   assert.ok(miniCalendar, 'the expanded sidebar provides the public month navigation');
@@ -6287,7 +6281,6 @@ test('the weekly header names the month and week, and today pulses in every view
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
   tree = await renderScheduleView();
   await flushScheduleMountEffects();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
   assert.equal(scheduleDayScrollProps.at(-1)?.pulseDate, null, '오늘 카드: 처음에는 펄스가 없다');
 
@@ -6434,7 +6427,6 @@ test('a later move pulse is not cut short by the earlier one', async () => {
   let tree = await renderScheduleView();
   await flushScheduleMountEffects();
   tree = await renderScheduleView();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
 
   const clock = installScheduleFakeClock();
@@ -7236,14 +7228,32 @@ test('ScheduleView shows the mini calendar in every view and navigates instead o
   resetHarness();
   let tree = await renderScheduleView();
   await flushScheduleMountEffects();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
 
   assert.equal(
     findElements(tree, (node) => node.props['data-testid'] === 'mini-calendar').length,
     1,
-    '월 보기에도 미니 달력이 있다',
+    '월 보기는 처음부터 열린 사이드바에 미니 달력을 보여준다',
   );
+  assert.equal(findButtons(tree).some(button => button.props.title === '사이드바 펼치기'), false);
+  buttonByText(tree, '접기').props.onClick?.();
+  tree = await renderScheduleView();
+  assert.equal(findElements(tree, node => node.props['data-testid'] === 'mini-calendar').length, 0, '사용자가 접으면 현재 화면에서는 접힌 상태를 유지한다');
+  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
+  tree = await renderScheduleView();
+  assert.equal(findElements(tree, node => node.props['data-testid'] === 'mini-calendar').length, 1, '수동으로 다시 펼칠 수 있다');
+
+  // 화면을 떠나기 직전에 접었어도 재진입은 기본 열린 상태로 시작한다.
+  buttonByText(tree, '접기').props.onClick?.();
+  tree = await renderScheduleView();
+  assert.equal(findElements(tree, node => node.props['data-testid'] === 'mini-calendar').length, 0);
+  const savedPreferences = new Map(scheduleLocalStorage);
+  resetHarness();
+  for (const [key, value] of savedPreferences) scheduleLocalStorage.set(key, value);
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  tree = await renderScheduleView();
+  assert.equal(findElements(tree, node => node.props['data-testid'] === 'mini-calendar').length, 1, '기존 보기 설정을 복원해도 재진입 시 사이드바는 열린다');
 
   scheduleMiniCalendarProps.at(-1)?.onDateSelect('2026-08-11');
   tree = await renderScheduleView();
@@ -7256,7 +7266,6 @@ test('ScheduleView shows the mini calendar in every view and navigates instead o
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
   tree = await renderScheduleView();
   await flushScheduleMountEffects();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
 
   assert.equal(
@@ -7278,7 +7287,6 @@ test('ScheduleView shows the mini calendar in every view and navigates instead o
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'today', weekSubMode: 'card' }));
   tree = await renderScheduleView();
   await flushScheduleMountEffects();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
 
   assert.equal(
@@ -7304,7 +7312,6 @@ test('browsing months in the mini calendar does not drag the weekly view along',
   scheduleLocalStorage.set('bflow_calendar_view_v1', JSON.stringify({ viewMode: 'week', weekSubMode: 'card' }));
   let tree = await renderScheduleView();
   await flushScheduleMountEffects();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
 
   const headerBefore = textContent(tree);
@@ -7431,7 +7438,6 @@ test('ScheduleView opens calendar settings from both rail entry points', async (
   resetHarness();
 
   let tree = await renderScheduleView();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
   buttonByLabel(tree, '레일 새 캘린더').props.onClick?.();
   tree = await renderScheduleView();
@@ -7439,7 +7445,6 @@ test('ScheduleView opens calendar settings from both rail entry points', async (
 
   resetHarness();
   tree = await renderScheduleView();
-  buttonByTitle(tree, '사이드바 펼치기').props.onClick?.();
   tree = await renderScheduleView();
   buttonByLabel(tree, '레일 캘린더 설정').props.onClick?.();
   tree = await renderScheduleView();

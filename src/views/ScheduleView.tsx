@@ -1410,7 +1410,7 @@ export function ScheduleView() {
   const maxBars = viewMode === 'month' ? 3 : viewMode === '2week' ? 5 : 8;
 
   // 사이드바 상태
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   /**
    * 주간·오늘 보기는 연 기준 절대 인덱스로 그려서, 미니 달력 화살표로 연 경계를 넘기는
    * 것만으로 본화면이 1년 점프해 버렸다. 넘겨보기(browse)는 미니 달력 안에서만 유지하고
