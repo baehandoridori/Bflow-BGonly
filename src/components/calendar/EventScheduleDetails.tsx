@@ -81,7 +81,14 @@ export function EventScheduleDetailsSummary({ event }: { event: CalendarEvent })
   return <div className="space-y-1 text-xs text-text-secondary">
     {event.recurrenceRule && <p>반복 일정 · {({ daily: '매일', weekly: '매주', monthly: '매월', yearly: '매년' })[event.recurrenceRule.frequency]}</p>}
     {event.location && <p>장소 · {event.location}</p>}
-    {event.meetingUrl && safeMeetingUrl(event.meetingUrl) && <a href={event.meetingUrl} target="_blank" rel="noopener noreferrer" className="block break-all text-accent">회의 참여 · {event.meetingUrl}</a>}
+    {event.meetingUrl && safeMeetingUrl(event.meetingUrl) && <a href={event.meetingUrl.trim()} target="_blank" rel="noopener noreferrer" onClick={async click => {
+      if (!window.electronAPI?.openExternal) return;
+      click.preventDefault();
+      try {
+        const result = await window.electronAPI.openExternal(event.meetingUrl!.trim());
+        if (!result.ok) window.alert('회의 주소를 열지 못했어요. 주소를 복사해 브라우저에서 열어 주세요.');
+      } catch { window.alert('회의 주소를 열지 못했어요. 주소를 복사해 브라우저에서 열어 주세요.'); }
+    }} className="block break-all text-accent">회의 참여 · {event.meetingUrl}</a>}
     {event.reminderMinutes != null && <p>알림 · {event.reminderMinutes === 0 ? '시작할 때' : `${event.reminderMinutes}분 전`}{event.allDay ? ' (오전 9시, 한국 시간 기준)' : ''}</p>}
   </div>;
 }
