@@ -1,4 +1,6 @@
 // ─── 캘린더 이벤트 타입 정의 ─────────────────────
+import type { CalendarRecurrenceException, CalendarRecurrenceRule } from '../shared/calendarRecurrence';
+export type { CalendarRecurrenceException, CalendarRecurrenceRule } from '../shared/calendarRecurrence';
 
 /** 이벤트 종류 */
 export type CalendarEventType = 'custom' | 'episode' | 'part' | 'scene' | 'vacation';
@@ -103,6 +105,14 @@ export interface CalendarEvent {
   allDay?: boolean;
   startTime?: string;
   endTime?: string;
+  recurrenceRule?: CalendarRecurrenceRule | null;
+  recurrenceRevision?: number;
+  recurrenceSeriesId?: string;
+  recurrenceDate?: string;
+  recurrenceExceptions?: CalendarRecurrenceException[];
+  location?: string;
+  meetingUrl?: string;
+  reminderMinutes?: number | null;
   canEdit?: boolean;
   /** 'ics'는 읽기 전용 외부 구독. 뮤테이션 경로에 진입해서는 안 된다. */
   source?: 'bflow' | 'google' | 'vacation' | 'ics';

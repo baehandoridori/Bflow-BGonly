@@ -1,3 +1,4 @@
+import { widgetEventWindow, readCalendarWindowWithToday } from '@/utils/calendarEventWindow';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Filter, Settings2, Palmtree, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -76,9 +77,13 @@ export function CalendarWidget() {
   const isHovered = useRef(false);
 
   const today = fmtDate(new Date());
+  const eventRange = useMemo(() => widgetEventWindow(viewMode, year, month, weekOffset, dayOffset, today), [viewMode, year, month, weekOffset, dayOffset, today]);
+  const eventRangeRef = useRef(eventRange); eventRangeRef.current = eventRange;
+  const previousEventRangeRef = useRef(eventRange);
 
   useEffect(() => {
     let cancelled = false;
+    const refresh = async () => { const range = eventRangeRef.current; const result = await readCalendarWindowWithToday(getEvents, range, today, calendarEventIdentityKey); if (!cancelled && range === eventRangeRef.current) setEvents(result); };
     // 초기 로드: 인증된 경우 전체 동기화 후 캐시 반영
     (async () => {
       try {
@@ -88,16 +93,22 @@ export function CalendarWidget() {
           await syncAll({ skipBflowLoad: true });
         }
       } catch { /* GCal 미연결 시 무시 */ }
-      if (!cancelled) getEvents().then(setEvents);
+      if (!cancelled) void refresh();
     })();
 
-    const refresh = () => getEvents().then(setEvents);
     window.addEventListener('bflow:calendar-changed', refresh);
     return () => {
       cancelled = true;
       window.removeEventListener('bflow:calendar-changed', refresh);
     };
   }, []);
+
+  useEffect(() => {
+    if (previousEventRangeRef.current.from === eventRange.from && previousEventRangeRef.current.to === eventRange.to) return;
+    previousEventRangeRef.current = eventRange; let cancelled = false;
+    void readCalendarWindowWithToday(getEvents, eventRange, today, calendarEventIdentityKey).then(result => { if (!cancelled) setEvents(result); });
+    return () => { cancelled = true; };
+  }, [eventRange, today]);
 
   // 휴가 이벤트 로드
   const loadVacationEvents = useCallback(() => {

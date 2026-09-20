@@ -22,6 +22,7 @@ import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage, u
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
+import { registerCalendarReminders } from './calendarReminders';
 import { registerGanttIpc } from './ganttIpc';
 import { registerCalendarSubscriptionIpc } from './calendarSubscriptionIpc';
 import { createCalendarSubscriptionService } from './calendarSubscriptionService';
@@ -2581,6 +2582,7 @@ setCalendarChangedLocalListener((payload) => {
   );
 });
 
+registerCalendarReminders(getSessionOriginOrThrow, () => { mainWindow?.show(); mainWindow?.focus(); });
 calendarNotificationDrain = registerCalendarIpc({
   getSessionUserIdOrThrow,
   getSessionOriginOrThrow,

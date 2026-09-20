@@ -1,4 +1,5 @@
 import { normalizeCalendarTagIds } from '../src/shared/calendarTagIds';
+import { shiftRecurrenceDate } from '../src/shared/calendarRecurrence';
 /** electron/calendarIpc.ts — calendar:* IPC 등록.
  *  세션 검증(getSessionUserIdOrThrow 주입) + 권한 강제(calendarPermissions) + broadcast.
  *  main.ts 비대화 방지를 위해 분리. 렌더러 → 여기 → calendarStore → Supabase 단일 경로. */
@@ -1080,6 +1081,46 @@ export function registerCalendarIpc(deps: CalendarIpcDeps): CalendarNotification
     broadcastDataChange('calendar_members', 'UPDATE');
     broadcastCalendarChanged('UPDATE');
   }));
+
+  ipcMain.handle('calendar:recurrence:list', wrap(async () => {
+    const origin = deps.getSessionOriginOrThrow();
+    const rows = await store.listRecurrenceEvents(origin.userId);
+    const current = deps.getSessionOriginOrThrow();
+    if (current.userId !== origin.userId || current.epoch !== origin.epoch) throw new Error('로그인 사용자가 변경되었습니다.');
+    return rows;
+  }));
+  ipcMain.handle('calendar:recurrence:execute', wrap(async (request: import('../src/shared/calendarRecurrenceContract').CalendarRecurrenceRequest) => runNotificationMutation(async () => {
+    const origin = deps.getSessionOriginOrThrow();
+    if (!request || !['create', 'update', 'delete'].includes(request.action) || !['this', 'following', 'all'].includes(request.scope)) throw new Error('일정 변경 요청이 올바르지 않습니다.');
+    const previous = request.action === 'create' ? null : await store.getEventByIdForWrite(request.eventId!, origin.userId);
+    const notificationCalendarId = request.patch?.calendar_id ?? previous?.calendar_id;
+    const target = notificationCalendarId ? await store.getCalendarWithMembers(notificationCalendarId) : null;
+    const beforeCommit = deps.getSessionOriginOrThrow();
+    if (beforeCommit.userId !== origin.userId || beforeCommit.epoch !== origin.epoch) throw new Error('로그인 사용자가 변경되었습니다.');
+    const result = await store.executeRecurrence(origin.userId, request);
+    let notificationEvent = result.split_event ?? result.event;
+    let notificationPrevious = previous;
+    if (request.scope === 'this' && request.occurrenceDate && previous) {
+      const occurrenceRow = (row: CalendarEventRow): CalendarEventRow => {
+        const duration = Math.round((Date.parse(row.end_date) - Date.parse(row.start_date)) / 86400000);
+        const exception = row.recurrence_exceptions?.find(ex => ex.occurrence_date === request.occurrenceDate);
+        return { ...row, start_date: request.occurrenceDate!, end_date: shiftRecurrenceDate(request.occurrenceDate!, duration), ...exception?.patch, id: row.id };
+      };
+      notificationPrevious = occurrenceRow(previous);
+      notificationEvent = request.action === 'delete' ? null : notificationEvent ? occurrenceRow(notificationEvent) : null;
+    }
+    if (target?.calendar) {
+      queueCalendarNotification(calendarNotificationContext({
+        actorId: origin.userId, action: request.action, calendar: target.calendar,
+        members: target.members, event: notificationEvent, previous: notificationPrevious,
+      }));
+    }
+    broadcastDataChange('calendar_events', request.action === 'create' ? 'INSERT' : request.action === 'delete' ? 'DELETE' : 'UPDATE');
+    broadcastCalendarChanged('UPDATE');
+    const current = deps.getSessionOriginOrThrow();
+    if (current.userId !== origin.userId || current.epoch !== origin.epoch) throw new Error('로그인 사용자가 변경되었습니다.');
+    return result;
+  })));
 
   ipcMain.handle('calendar:events:list', wrap(async (params?: { from?: string; to?: string }) => {
     const user = await sessionUser();

@@ -1,3 +1,5 @@
+import { EventScheduleDetails, EventScheduleDetailsSummary, eventScheduleDetails, eventScheduleDetailsPatch, eventScheduleDetailsValid, eventScheduleValidationDate } from './EventScheduleDetails';
+import { useRecurrenceScope, type CalendarEditScope } from './RecurrenceScopeDialog';
 import { EventTagManagerButton } from './EventTagManagerButton';
 import { EventTagBadges } from './EventTagBadges';
 import { getEventTagIds, toggleEventTag } from './eventTagPresentation';
@@ -25,8 +27,8 @@ interface EventQuickEditProps {
   event: CalendarEvent;
   position: { x: number; y: number };
   onClose: () => void;
-  onUpdate: (id: string, updates: Partial<CalendarEvent>) => void | Promise<void>;
-  onDelete: (id: string) => void | Promise<void>;
+  onUpdate: (id: string, updates: Partial<CalendarEvent>, scope?: CalendarEditScope) => void | Promise<void>;
+  onDelete: (id: string, scope?: CalendarEditScope) => void | Promise<void>;
   onDuplicate: (event: CalendarEvent) => void | Promise<void>;
 }
 
@@ -89,6 +91,7 @@ export function EventQuickEdit({
   const [endTimeValid, setEndTimeValid] = useState(true);
   const [durationVersion, setDurationVersion] = useState(0);
   const [inputResetVersion, setInputResetVersion] = useState(0);
+  const [scheduleDetails, setScheduleDetails] = useState(() => eventScheduleDetails(event));
   const calendarUpdateRequestRef = useRef(0);
   const tagUpdateRequestRef = useRef(0);
   const eventIdentityKey = calendarEventIdentityKey(event);
@@ -116,7 +119,10 @@ export function EventQuickEdit({
     && !milestone
     && Boolean(startTime && effectiveEndTime)
     && `${effectiveEndDate}T${effectiveEndTime}` <= `${startDate}T${startTime}`;
-  const isTimedSaveBlocked = !datesValid || !startDate || !effectiveEndDate || effectiveEndDate < startDate || (supportsTimeEditing
+  const detailsValidationDate = eventScheduleValidationDate(scheduleDetails, event, startDate);
+  const nativeDetails = isCanonicalBflow && !ganttProjection;
+  const scopePrompt = useRecurrenceScope(`${currentUser?.id}:${eventIdentityKey}:${eventSnapshot}`, nativeDetails && Boolean(event.recurrenceRule || event.recurrenceSeriesId));
+  const isTimedSaveBlocked = (nativeDetails && !eventScheduleDetailsValid(scheduleDetails, detailsValidationDate)) || !datesValid || !startDate || !effectiveEndDate || effectiveEndDate < startDate || (supportsTimeEditing
     && !allDay
     && (!startTime || !effectiveEndTime || !startTimeValid || (!milestone && !endTimeValid) || hasInvalidTimedInterval));
   const displayedCalendarId = pendingCalendar?.eventId === event.id
@@ -161,12 +167,12 @@ export function EventQuickEdit({
     const handleClick = (mouseEvent: MouseEvent) => {
       if (shouldIgnore()) return;
       const target = mouseEvent.target as Element | null;
-      if (target?.closest?.('[data-dropdown-owner="calendar-quick-edit"]') || target?.closest?.('[data-calendar-tag-manager]') || target?.closest?.('[data-calendar-input-popover]')) return;
+      if (target?.closest?.('[data-dropdown-owner="calendar-quick-edit"]') || target?.closest?.('[data-calendar-tag-manager]') || target?.closest?.('[data-calendar-input-popover]') || target?.closest?.('[data-calendar-recurrence-scope]')) return;
       if (ref.current && !ref.current.contains(mouseEvent.target as Node)) onClose();
     };
     const handleKey = (keyboardEvent: KeyboardEvent) => {
       if (shouldIgnore()) return;
-      if (keyboardEvent.key === 'Escape' && !document.querySelector('[data-calendar-tag-manager]') && !document.querySelector('[data-calendar-input-popover]')) onClose();
+      if (keyboardEvent.key === 'Escape' && !document.querySelector('[data-calendar-recurrence-scope]') && !document.querySelector('[data-calendar-tag-manager]') && !document.querySelector('[data-calendar-input-popover]')) onClose();
     };
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
@@ -194,6 +200,7 @@ export function EventQuickEdit({
     setAllDay(event.allDay ?? true);
     setStartTime(event.startTime ?? '');
     setEndTime(event.endTime ?? '');
+    setScheduleDetails(eventScheduleDetails(event));
     setInputResetVersion(version => version + 1);
     setMutationError(null);
   }, [event, eventIdentityKey, eventSnapshot]);
@@ -227,6 +234,7 @@ export function EventQuickEdit({
       setAllDay(latestEvent.allDay ?? true);
       setStartTime(latestEvent.startTime ?? '');
       setEndTime(latestEvent.endTime ?? '');
+      setScheduleDetails(eventScheduleDetails(latestEvent));
       setInputResetVersion(version => version + 1);
       setMutationError(null);
       return;
@@ -235,7 +243,7 @@ export function EventQuickEdit({
     setMutationError(message);
   }, [settleMutation]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback((scope?: CalendarEditScope) => {
     if (!canWrite || pendingMutationRef.current || isTimedSaveBlocked) return;
     const updates: Partial<CalendarEvent> = {};
     if (title !== event.title) updates.title = title;
@@ -258,10 +266,12 @@ export function EventQuickEdit({
         if (effectiveEndTime !== event.endTime) updates.endTime = effectiveEndTime;
       }
     }
+    if (nativeDetails) Object.assign(updates, eventScheduleDetailsPatch(scheduleDetails, event));
     if (Object.keys(updates).length === 0) {
       onClose();
       return;
     }
+    if (!scope && scopePrompt.ask('edit', selected => handleSave(selected), 'recurrenceRule' in updates, 'recurrenceRule' in updates || 'startDate' in updates || 'endDate' in updates, 'calendarId' in updates)) return;
     setMutationError(null);
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
@@ -270,7 +280,7 @@ export function EventQuickEdit({
     };
     beginMutation(mutation);
     try {
-      const persistence = onUpdate(event.id, updates);
+      const persistence = onUpdate(event.id, updates, scope);
       if (isPromiseLike(persistence)) {
         void persistence.then(
           () => {
@@ -284,10 +294,11 @@ export function EventQuickEdit({
     } catch {
       markMutationFailed(mutation, '일정 저장에 실패했어요. 다시 시도해 주세요.');
     }
-  }, [allDay, beginMutation, canWrite, effectiveEndDate, effectiveEndTime, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, isTimedSaveBlocked, markMutationFailed, memo, onClose, onUpdate, settleMutation, startDate, startTime, supportsTimeEditing, title, type]);
+  }, [allDay, beginMutation, canWrite, effectiveEndDate, effectiveEndTime, event, eventIdentityKey, eventSnapshot, isCanonicalBflow, isTimedSaveBlocked, markMutationFailed, memo, onClose, onUpdate, settleMutation, startDate, startTime, supportsTimeEditing, title, type, nativeDetails, scheduleDetails, scopePrompt]);
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback((scope?: CalendarEditScope) => {
     if (!canWrite || pendingMutationRef.current) return;
+    if (!scope && scopePrompt.ask('delete', selected => handleDelete(selected))) return;
     setMutationError(null);
     const mutation: LocalMutationRecovery = {
       identityKey: eventIdentityKey,
@@ -295,7 +306,7 @@ export function EventQuickEdit({
     };
     beginMutation(mutation);
     try {
-      const persistence = onDelete(event.id);
+      const persistence = onDelete(event.id, scope);
       if (isPromiseLike(persistence)) {
         void persistence.then(
           () => {
@@ -309,7 +320,7 @@ export function EventQuickEdit({
     } catch {
       markMutationFailed(mutation, '일정 삭제에 실패했어요. 다시 시도해 주세요.');
     }
-  }, [beginMutation, canWrite, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDelete, settleMutation]);
+  }, [beginMutation, canWrite, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDelete, settleMutation, scopePrompt]);
 
   const handleDuplicate = useCallback(() => {
     if (pendingMutationRef.current) return;
@@ -338,9 +349,10 @@ export function EventQuickEdit({
     }
   }, [beginMutation, event, eventIdentityKey, eventSnapshot, markMutationFailed, onClose, onDuplicate, settleMutation]);
 
-  const handleCalendarChange = useCallback(async (calendarId: string) => {
+  const handleCalendarChange = useCallback(async (calendarId: string, scope?: CalendarEditScope) => {
     if (pendingMutationRef.current) return;
     if (!canWrite || !isCanonicalBflow || ganttProjection || calendarSelectionPending || calendarId === displayedCalendarId) return;
+    if (!scope && scopePrompt.ask('edit', selected => { void handleCalendarChange(calendarId, selected); }, false, false, true)) return;
     const requestId = ++calendarUpdateRequestRef.current;
     setMutationError(null);
     setPendingCalendar({
@@ -349,20 +361,21 @@ export function EventQuickEdit({
       requestId,
     });
     try {
-      await onUpdate(event.id, { calendarId });
+      await onUpdate(event.id, { calendarId }, scope);
     } catch {
       if (calendarUpdateRequestRef.current === requestId && calendarEventIdentityKey(latestEventRef.current) === eventIdentityKey) {
         setMutationError('캘린더 변경에 실패했어요. 다시 시도해 주세요.');
       }
     }
     setPendingCalendar((current) => current?.requestId === requestId ? null : current);
-  }, [calendarSelectionPending, canWrite, displayedCalendarId, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate]);
+  }, [calendarSelectionPending, canWrite, displayedCalendarId, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate, scopePrompt]);
 
-  const handleTagChange = useCallback(async (tagId: string | undefined) => {
+  const handleTagChange = useCallback(async (tagId: string | undefined, scope?: CalendarEditScope) => {
     if (pendingMutationRef.current) return;
     if (!canWrite || !isCanonicalBflow || ganttProjection || tagSelectionPending) return;
     const tagIds = toggleEventTag(displayedTagIds, tagId);
     if (JSON.stringify(tagIds) === JSON.stringify(displayedTagIds)) return;
+    if (!scope && scopePrompt.ask('edit', selected => { void handleTagChange(tagId, selected); })) return;
     const requestId = ++tagUpdateRequestRef.current;
     setMutationError(null);
     setPendingTag({
@@ -371,14 +384,14 @@ export function EventQuickEdit({
       requestId,
     });
     try {
-      await onUpdate(event.id, { tagIds, tagId: tagIds[0] });
+      await onUpdate(event.id, { tagIds, tagId: tagIds[0] }, scope);
     } catch {
       if (tagUpdateRequestRef.current === requestId && calendarEventIdentityKey(latestEventRef.current) === eventIdentityKey) {
         setMutationError('태그 변경에 실패했어요. 다시 시도해 주세요.');
       }
     }
     setPendingTag((current) => current?.requestId === requestId ? null : current);
-  }, [canWrite, displayedTagIds, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate, tagSelectionPending]);
+  }, [canWrite, displayedTagIds, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate, tagSelectionPending, scopePrompt]);
 
   // 자체 AnimatePresence 로 감싸면 부모 presence 의 exit 가 전파되지 않아 닫힘 애니가 죽는다
   // (framer-motion 10.x). presence 는 ScheduleView 쪽 조건부 렌더가 소유한다.
@@ -394,12 +407,15 @@ export function EventQuickEdit({
           ...floatingGlassStyle,
           left: adjusted.x,
           top: adjusted.y,
-          width: 300,
+          width: 340,
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
           background: 'rgb(var(--color-bg-card) / 0.95)',
           borderRadius: 12,
           boxShadow: '0 16px 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.28))',
         }}
       >
+        {scopePrompt.dialog}
         {readOnlyDescriptionId && (
           <p id={readOnlyDescriptionId} className="sr-only">보기 전용 일정이라 변경하거나 삭제할 수 없지만 복사는 가능합니다.</p>
         )}
@@ -514,6 +530,7 @@ export function EventQuickEdit({
                 </div>
               )}
 
+              {nativeDetails && <EventScheduleDetailsSummary event={event} />}
               {ganttProjection && <p className="text-[11px] text-text-secondary">연결 캘린더는 타임라인의 작업 상세에서 변경해 주세요. 간트 연결 일정은 태그를 지원하지 않아요.</p>}
 
               <div className="flex gap-2">
@@ -527,7 +544,7 @@ export function EventQuickEdit({
                 <button
                   disabled={!canWrite || isMutating}
                   aria-describedby={readOnlyDescriptionId}
-                  onClick={canWrite ? handleDelete : undefined}
+                  onClick={canWrite ? () => handleDelete() : undefined}
                   className="flex-1 cursor-pointer rounded-lg py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-45"
                   style={{ background: 'rgba(255,107,107,0.15)', color: '#FF6B6B' }}
                 >
@@ -545,6 +562,7 @@ export function EventQuickEdit({
                     type="text"
                     value={title}
                     disabled={isMutating}
+                    aria-label="제목"
                     onChange={(changeEvent) => setTitle(changeEvent.target.value)}
                     placeholder="일정 제목"
                     className="w-full rounded-lg px-2.5 py-1.5 text-xs outline-none placeholder:text-text-secondary"
@@ -614,7 +632,8 @@ export function EventQuickEdit({
                     dropdownPositionClassName="left-2 right-2"
                     className="w-full resize-none rounded-lg border border-bg-border/[0.56] bg-bg-primary/[0.82] px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary"
                   />
-                  <button onClick={handleSave} disabled={isMutating || isTimedSaveBlocked} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
+                  {nativeDetails && <EventScheduleDetails value={scheduleDetails} onChange={setScheduleDetails} startDate={startDate} validationStartDate={detailsValidationDate} allDay={allDay} disabled={isMutating} />}
+                  <button onClick={() => handleSave()} disabled={isMutating || isTimedSaveBlocked} className="w-full cursor-pointer rounded-lg py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45" style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}>저장</button>
                 </div>
               )}
             </div>

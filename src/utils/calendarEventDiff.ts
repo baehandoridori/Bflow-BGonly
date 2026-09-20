@@ -12,6 +12,12 @@ function eventChangeKey(event: CalendarEvent): string {
   return JSON.stringify({
     title: event.title,
     memo: event.memo,
+    recurrenceRule: event.recurrenceRule,
+    recurrenceRevision: event.recurrenceRevision,
+    recurrenceExceptions: event.recurrenceExceptions,
+    location: event.location,
+    meetingUrl: event.meetingUrl,
+    reminderMinutes: event.reminderMinutes,
     color: event.color,
     type: event.type,
     startDate: event.startDate,

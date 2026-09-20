@@ -1,3 +1,4 @@
+import type { CalendarRecurrenceException, CalendarRecurrenceRule } from '../../shared/calendarRecurrence';
 /** Server-derived, actor-scoped source access. Never accepted in ordinary Gantt writes. */
 export interface GanttCalendarLink {
   calendarId:string; linkId:string; actorId:string;
@@ -27,6 +28,13 @@ export interface GanttTask {
   /** Copy provenance only; does not create a calendar projection or grant access. */
   importedCalendarEvent?: GanttCalendarImportSource;
   sourceCalendarEventId?: string;
+  /** Read-only calendar master metadata; display occurrences are never persisted as tasks. */
+  recurrenceRule?: CalendarRecurrenceRule | null;
+  recurrenceRevision?: number;
+  recurrenceExceptions?: CalendarRecurrenceException[];
+  location?: string;
+  meetingUrl?: string;
+  reminderMinutes?: number | null;
   completed: boolean; sortOrder: number;
 }
 export interface GanttProject {

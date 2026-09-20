@@ -1,12 +1,25 @@
 import type { GanttGateway, GanttProject, GanttRequest, GanttSnapshot, GanttTask } from './types.ts';
 import { applyCommand, canEditProject, createProject, createSpace, createTask, rememberGanttRevisions, resolveTaskColor, shiftDate, todayDate, updateTask, visibleSnapshot } from './domain.ts';
 import type { GanttRevisionLedger } from './domain.ts';
+import { recurrenceFieldsFromRow, type CalendarRecurrenceFields } from '../../shared/calendarRecurrenceContract.ts';
 
 export interface PreviewCalendar { id:string; owner_id:string; visibility:string; name?:string; color?:string; is_personal?:boolean; updated_at?:string; members?:Array<{user_id:string;can_edit:boolean}> }
-export interface PreviewNativeCalendarEvent {
+export interface PreviewNativeCalendarEvent extends CalendarRecurrenceFields {
   id:string; calendar_id:string; title:string; memo:string|null; all_day:boolean;
   start_date:string; end_date:string; start_time:string|null; end_time:string|null; updated_at?:string;
   tag_id?:string|null; tag_ids?:string[];
+}
+function linkedRecurrenceFields(event:PreviewNativeCalendarEvent,tags:Array<{id:string;color:string}>,calendarColor:string) {
+  const fields=recurrenceFieldsFromRow(event);
+  return {recurrenceRule:fields.recurrenceRule,recurrenceRevision:fields.recurrenceRevision,
+    location:fields.location,meetingUrl:fields.meetingUrl,reminderMinutes:fields.reminderMinutes,
+    recurrenceExceptions:fields.recurrenceExceptions?.map(exception=>{
+      const patch=exception.patch;
+      if(!patch||(!Object.prototype.hasOwnProperty.call(patch,'tagIds')&&!Object.prototype.hasOwnProperty.call(patch,'tagId')))return exception;
+      const tagId=patch.tagIds?patch.tagIds[0]:patch.tagId;
+      return {...exception,patch:{...patch,color:tags.find(tag=>tag.id===tagId)?.color??calendarColor}};
+    }),
+  };
 }
 export interface PreviewOptions {
   storage?: { getItem(key:string):string|null; setItem(key:string,value:string):void };
@@ -132,6 +145,7 @@ function linkedSnapshot(value:Authority,actorId:string,options:PreviewOptions):G
       allDay:event.all_day,startTime:event.all_day?'':(event.start_time??'').slice(0,5),endTime:event.all_day?'':(event.end_time??'').slice(0,5),
       mode:'manual',predecessorId:null,progress:0,progressMode:'manual',sceneLinks:[],workers:[],attendees:[],color:tags.find(tag=>tag.id===(event.tag_ids?.[0]??event.tag_id))?.color??null,
       calendarId:null,calendarEventId:null,sourceCalendarEventId:event.id,completed:false,sortOrder:index,
+      ...linkedRecurrenceFields(event,tags,color),
     }))});
   }
   return snapshot;
