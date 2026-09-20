@@ -65,4 +65,3 @@ export async function harness(surface:Surface,eventOverrides:Record<string,unkno
 }
 export function nodes(tree:Node):any[]{if(Array.isArray(tree))return tree.flatMap(nodes);return isValidElement(tree)?[tree,...nodes((tree.props as any).children)]:[];}
 export function text(tree:Node):string{if(typeof tree==='string'||typeof tree==='number')return String(tree);if(Array.isArray(tree))return tree.map(text).join('');return isValidElement(tree)?text((tree.props as any).children):'';}
-
