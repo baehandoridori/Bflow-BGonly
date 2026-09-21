@@ -1715,7 +1715,9 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
           },
           useMemo: (factory: () => unknown) => factory(),
           useRef: (initial: unknown) => ({ current: initial }),
+          useCallback: (fn: unknown) => fn,
           useEffect: (effect: () => void | (() => void)) => { pendingCalendarGridEffects.push(effect); },
+          useLayoutEffect: (effect: () => void | (() => void)) => { pendingCalendarGridEffects.push(effect); },
         };
       }
       if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
@@ -1728,6 +1730,7 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
       if (id === 'lucide-react') return {
         CheckSquare: () => jsxRuntime.jsx('span', { 'data-linked-todo-icon': true }),
         Palmtree: emptyComponent,
+        Plus: emptyComponent,
         X: emptyComponent,
       };
       if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };

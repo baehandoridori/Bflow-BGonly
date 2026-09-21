@@ -1278,6 +1278,13 @@ export function ScheduleView() {
     return false;
   }, [isDateInRange, persistedDateRange, pulseDate]);
 
+  // 고스트 전용 — 날짜 이동 표시(pulseDate)는 빼고 '지금 만들고 있는 범위'만.
+  const isDateInCreateRange = useCallback((date: string): boolean => {
+    if (isDateInRange(date)) return true;
+    if (persistedDateRange && date >= persistedDateRange.startDate && date <= persistedDateRange.endDate) return true;
+    return false;
+  }, [isDateInRange, persistedDateRange]);
+
   // ─── 사이드 패널 / 퀵 에디트 핸들러 ───
   const handleUpdateEventDirect = useCallback(async (
     eventBeforeUpdate: CalendarEvent,
@@ -1783,6 +1790,7 @@ export function ScheduleView() {
                 isDragging={isDragging}
                 onCellMouseDown={handleCellMouseDown}
                 isDateInDragRange={isDateInHighlightRange}
+                isDateInCreateRange={isDateInCreateRange}
                 onEventContextMenu={handleEventContextMenu}
                 monthKey={`${year}-${month}`}
                 monthDirection={monthDir}
