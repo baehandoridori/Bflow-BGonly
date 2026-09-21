@@ -12,8 +12,8 @@ import {
   persistSequentialStagePatchWithRollback,
   SEQUENTIAL_STAGE_ORDER,
 } from '@/utils/sceneStageProgression';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import * as supabaseService from '@/services/supabaseService';
-import { buildSceneStagePatchProgress, saveAssigneeProgress } from '@/services/assigneeProgressActions';
 import type { CharacterTaskItem, SceneKey, PersonalTodo, PersonalTodoLabel, FlatScene, StageSaveBaseline, PersonalTodoStatus } from '../types';
 import { createStageSaveBaseline } from '../types';
 import { computeMyTasksStats } from '../statsUtils';
@@ -254,6 +254,14 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   // 토글 핸들러 (씬 단계 순차 토글)
   const handleSceneToggle = useCallback(async (flat: FlatScene, stage: Stage) => {
     const { sheetName, scene, sceneIndex } = flat;
+    // 담당자가 둘 이상인 씬의 4단계는 담당자 전원의 공통 진행이라 개인 체크박스가 아니다.
+    // 여기서 저장하면 (a) 내 것만 바꿔도 공통 진행이 안 움직여 되돌아가고,
+    // (b) 전원을 맞추면 앞서간 사람의 기록을 끌어내린다. 씬 목록의 담당자별 줄로 안내한다.
+    // (씬 뷰도 다중 담당이면 공통 칩 대신 담당자별 줄을 보여준다 — 같은 규칙.)
+    if (hasMultiAssigneeProgress(scene)) {
+      toast.info('담당자가 둘 이상인 씬은 씬 목록에서 담당자별로 체크해주세요.');
+      return;
+    }
     const stagePatch = buildSequentialStagePatch(scene, stage);
     const changedStages = getChangedSequentialStages(scene, stagePatch);
     if (changedStages.length === 0) return;
@@ -290,19 +298,6 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       };
     };
 
-    // 다중 담당 씬이면 담당자별 기록에도 같은 변경을 반영해야 저장이 유지된다.
-    const assigneeProgressWrite = (() => {
-      const built = buildSceneStagePatchProgress(scene, stagePatch, currentUser?.name, sheetName.endsWith('_ACT'));
-      if (!built || !scene.id) return null;
-      updateSceneByUuid(scene.id, { assigneeProgress: built.progress });
-      // 저장이 실패하면 낙관적으로 올려둔 기록이 남아 "저장된 줄" 알게 되므로 되돌릴 값을 들고 있는다.
-      return { sceneUuid: scene.id, prevProgress: scene.assigneeProgress, ...built };
-    })();
-    const rollbackAssigneeProgress = () => {
-      if (assigneeProgressWrite) {
-        updateSceneByUuid(assigneeProgressWrite.sceneUuid, { assigneeProgress: assigneeProgressWrite.prevProgress });
-      }
-    };
 
     const immediateCompletionMeta = buildCompletionMeta(scene);
 
@@ -325,8 +320,6 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       }
 
       if (queuedChangedStages.length === 0 && !queuedCompletionMeta) {
-        // 저장할 씬 변경이 없으면 담당자별 기록도 저장되지 않는다 — 낙관적 반영만 남기지 않는다.
-        rollbackAssigneeProgress();
         return;
       }
 
@@ -349,22 +342,6 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
               : null,
           ).catch(() => {});
         }
-        // 담당자가 둘 이상인 씬은 화면에 보이는 단계가 담당자별 기록에서 다시 계산된다.
-        // 씬 컬럼만 저장하면 다음 동기화 때 원래대로 되돌아가므로, 담당자별 기록도 같이 맞춘다.
-        if (assigneeProgressWrite) {
-          try {
-            const merged = await saveAssigneeProgress(
-              assigneeProgressWrite.sceneUuid,
-              assigneeProgressWrite.progress,
-              assigneeProgressWrite.changedNames,
-            );
-            updateSceneByUuid(assigneeProgressWrite.sceneUuid, { assigneeProgress: merged });
-          } catch (progressErr) {
-            console.error('[MyTasks 담당자별 진행 저장 실패]', progressErr);
-            toast.error(SAVE_FAIL_MESSAGE);
-            rollbackAssigneeProgress();
-          }
-        }
         stageSaveBaselineRef.current.set(saveQueueKey, {
           ...createStageSaveBaseline(previousBaseline),
           ...stagePatch,
@@ -375,7 +352,6 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       } catch (err) {
         console.error('[MyTasks 토글 실패]', err);
         toast.error(SAVE_FAIL_MESSAGE);
-        rollbackAssigneeProgress();
         stageSaveBaselineRef.current.set(saveQueueKey, previousBaseline);
         SEQUENTIAL_STAGE_ORDER.forEach((changedStage) => {
           updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(Boolean(previousBaseline[changedStage])));

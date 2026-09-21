@@ -149,26 +149,11 @@ test('담당자가 한 명 이하이면 담당자별 진행을 저장하지 않�
   );
 });
 
-test('씬 단위 단계 토글은 담당자 전원을 맞춘다 (집계가 AND 라 본인만 바꾸면 되돌아간다)', () => {
-  const actions = read('src/services/assigneeProgressActions.ts');
-  assert.match(actions, /export function buildSceneStagePatchProgress/);
-  assert.match(actions, /updateAllAssigneeProgressEntries\(scene, update, actorName\)/, '담당자 전원을 맞춰야 집계가 움직인다');
-  assert.match(actions, /changedNames: parseAssigneeNames\(scene\.assignee\)/);
-  assert.match(
-    actions,
-    /if \(!scene\.id \|\| !hasMultiAssigneeProgress\(scene\)\) return null;/,
-    '담당자가 한 명 이하인 씬에까지 담당자별 기록을 만들면 안 된다',
-  );
-  assert.doesNotMatch(
-    actions,
-    /names\.includes\(actorName\)/,
-    "누른 사람 항목만 바꾸면 씬 집계(BG=전원 AND)가 안 움직여 화면이 그대로 되돌아간다",
-  );
-  // 액팅은 단계 상태가 정본 — 체크만 바꾸고 단계 상태를 비우면 담당자별 단계·차수 표시가 사라진다.
-  assert.match(actions, /isActingScene\s*$|isActingScene:/m, 'isActingScene 인자를 받아야 한다');
-  assert.match(actions, /deriveActingPhaseFromStages\(scene, stagePatch\)/);
-  assert.match(actions, /kind: 'phase' as const/);
-
+test('다중 담당 씬의 공통 단계 칩은 어느 화면에서도 저장하지 않는다', () => {
+  // 공통 칩은 담당자 전원의 AND(액팅은 최저 단계)라 개인 체크박스가 아니다.
+  //  - 누른 사람 것만 바꾸면 공통값이 안 움직여 재조회 때 그대로 되돌아간다.
+  //  - 전원을 맞추면 나보다 앞서간 사람의 기록을 끌어내린다(서버까지 덮어씀).
+  // 그래서 씬 뷰처럼 편집은 담당자별 줄에서만 하고, 여기서는 읽기 전용으로 둔다.
   for (const path of [
     'src/components/widgets/my-tasks/hooks/useMyTasksData.ts',
     'src/views/compositing-dashboard/modal/CompositingSceneModal.tsx',
@@ -176,18 +161,29 @@ test('씬 단위 단계 토글은 담당자 전원을 맞춘다 (집계가 AND �
     const src = read(path);
     assert.match(
       src,
-      /buildSceneStagePatchProgress\([^)]*sheetName\.endsWith\('_ACT'\)\)/,
-      `${path}: 액팅 여부를 넘기지 않으면 액팅 씬의 단계 상태가 지워진다`,
+      /if \(hasMultiAssigneeProgress\((?:scene|sc)\)\) \{/,
+      `${path}: 다중 담당 씬에서 공통 칩 저장을 막는 가드가 없다`,
     );
-    assert.match(src, /saveAssigneeProgress\(/, `${path}: 담당자별 기록 저장이 빠졌다`);
-    assert.match(src, /rollbackAssigneeProgress\(\)/, `${path}: 저장 실패 시 낙관적 기록을 되돌려야 한다`);
-    // 실패 경로 3곳(씬 컬럼 저장 실패 / 담당자별 저장 실패 / 저장할 변경이 없어 조기 반환) 모두에서 되돌린다.
-    assert.equal(
-      (src.match(/rollbackAssigneeProgress\(\)/g) ?? []).length,
-      3,
-      `${path}: 롤백 호출이 세 실패 경로에 모두 있어야 한다`,
-    );
+    assert.match(src, /담당자가 둘 이상인 씬은 씬 목록에서 담당자별로 체크해주세요/, `${path}: 어디서 바꿔야 하는지 안내가 없다`);
+    assert.doesNotMatch(src, /saveAssigneeProgress\(/, `${path}: 공통 칩에서 담당자별 기록을 저장하면 안 된다`);
+    assert.doesNotMatch(src, /buildSceneStagePatchProgress/, `${path}: 공통 칩 → 담당자별 기록 변환 경로가 남아 있다`);
   }
+  // 불온전한 헬퍼 자체가 남아 있으면 안 된다.
+  const actions = read('src/services/assigneeProgressActions.ts');
+  assert.doesNotMatch(actions, /buildSceneStagePatchProgress/);
+});
+
+test('나의 할 일 칩은 다중 담당 씬에서 눌리지 않는다', () => {
+  const chips = read('src/components/widgets/my-tasks/components/StageChips.tsx');
+  assert.match(chips, /const readOnly = hasMultiAssigneeProgress\(scene\);/);
+  assert.match(chips, /disabled=\{readOnly\}/, '눌러도 아무 일이 없는 칩은 두지 않는다');
+  assert.match(chips, /if \(!readOnly\) onToggleStage\(stage\)/);
+  assert.match(chips, /담당자가 둘 이상인 씬이에요/, '왜 못 누르는지 알려줘야 한다');
+});
+
+test('씬 뷰는 다중 담당 씬에서 공통 칩 대신 담당자별 줄을 보여준다 (이 규칙의 근거)', () => {
+  const modal = read('src/components/scenes/UnifiedSceneDetailModal.tsx');
+  assert.match(modal, /const canUseAssigneeProgressStack = hasMultiAssigneeProgress\(scene\) && \(/);
 });
 
 test('씬 뷰와 씬 단위 토글이 같은 액팅 단계 역산을 쓴다', () => {
