@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { BflowCalendar, CalendarTag } from '@/types/calendar';
 import { useAuthStore } from './useAuthStore.ts';
+import { VACATION_CHIP_ID } from '../utils/calendarEventFilter.ts';
 
 const VISIBLE_CALENDARS_KEY = 'bflow_calendar_visible_v1';
 const ENABLED_TAGS_KEY = 'bflow_calendar_tags_enabled_v1';
@@ -77,6 +78,7 @@ export interface CalendarState {
   loadAll(options?: { waitForLatest?: boolean }): Promise<CalendarMetadataFreshness>;
   toggleCalendarVisible(id: string): void;
   toggleTag(id: string): void;
+  toggleAllTags(includeVacation: boolean): void;
   resetTagsAllOn(): void;
   toggleMuted(id: string): void;
   upsertCalendarOptimistically(actorId: string, calendar: BflowCalendar): void;
@@ -514,6 +516,21 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   resetTagsAllOn() {
     saveExplicitFalseRecords(ENABLED_TAGS_KEY, {});
     set({ enabledTagIds: {} });
+  },
+
+  toggleAllTags(includeVacation) {
+    set((state) => {
+      const ids = state.tags.map((tag) => tag.id).filter(isPersistableTagPreferenceId);
+      if (includeVacation) ids.push(VACATION_CHIP_ID);
+      const allEnabled = ids.every((id) => isTagEnabled(state, id));
+      const next = { ...state.enabledTagIds };
+      for (const id of ids) {
+        if (allEnabled) next[id] = false;
+        else delete next[id];
+      }
+      saveExplicitFalseRecords(ENABLED_TAGS_KEY, next);
+      return { enabledTagIds: next };
+    });
   },
 
   toggleMuted(id) {

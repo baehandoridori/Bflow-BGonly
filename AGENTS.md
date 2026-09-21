@@ -29,10 +29,10 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 
 **동기화**: 체크박스 토글 → 로컬 즉시 반영(낙관적) → Supabase 저장 → 실패 시 롤백. 다른 사용자 변경은 Realtime WebSocket으로 수신.
 
-### 외부 캘린더 구독 (v1.124.0)
+### 외부 캘린더 구독 (v1.126.0)
 
-- 캘린더 설정에서 소유자가 명시적으로 발급한 주소만 공개한다. `calendarSubscriptionIpc`는 canonical 세션 epoch를 검사하고 `calendar_session_feed_status/manage`는 서버 세션으로 소유자를 확인한다.
-- `calendar_external_feeds`는 256비트 구독 토큰의 SHA256만 보관한다. 원문 주소는 발급 응답에만 포함하며 로그·설정 파일에 보관하지 않는다. revision 비교로 오래된 창의 교체·중지를 거절한다.
+- 캘린더 설정에서 소유자가 명시적으로 발급한 주소만 공개한다. `calendarSubscriptionIpc`는 canonical 세션 epoch를 검사하고 상태 조회는 서버 세션으로 소유자·팀 공유·명시적 공유 멤버를 확인하고, 발급·교체·중지는 소유자만 허용한다. 관리자 전체 조회만으로 구독 주소를 읽을 수 없다.
+- `calendar_external_feeds`는 256비트 구독 토큰의 SHA256만 보관한다. 재조회용 별칭 원문은 Supabase Vault에 암호화하고 `calendar_feed_private.aliases`는 해시·비밀 참조만 보관한다. 기존 발급 주소도 계속 유효하며, 공유 멤버는 상태 조회로 별칭 주소를 반복 확인한다. 원문 주소는 로그·개인 설정에 보관하지 않는다. revision 비교로 오래된 창의 교체·중지를 거절한다.
 - `calendar-feed` Edge Function은 URL 토큰을 직접 인증하므로 이 함수만 `verify_jwt=false`다. 서비스 전용 `calendar_feed_read`가 해당 캘린더의 원본·간트 projection만 반환한다. 링크 중지·교체·소유권 이전·삭제로 기존 주소를 무효화한다.
 - 종일 일정 종료일은 ICS에서 다음 날로 변환하고, 시간 일정은 서울 시간에서 UTC로 변환한다. 읽기 전용 URL 구독이며 외부 앱의 갱신 주기를 따른다. 프리뷰 주소는 `.invalid`로 실제 외부 구독이 불가능함을 표시한다.
 

@@ -645,7 +645,7 @@ export function ScheduleView() {
       if (previous === undefined || previous === null) return previous;
       const canonical = calendars.find((calendar) => calendar.id === previous.id);
       if (!canonical && optimisticDeletedCalendarIds.includes(previous.id)) return previous;
-      return canonical?.canManage ? canonical : undefined;
+      return canonical;
     });
   }, [calendars, calendarsLoaded, optimisticDeletedCalendarIds]);
 

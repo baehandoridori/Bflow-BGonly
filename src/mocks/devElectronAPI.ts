@@ -1336,6 +1336,11 @@ function normalizeMockCalendarEventTagId(tagId: unknown): string | null {
 
 const previewCalendarFeeds = createCalendarSubscriptionPreview({
   owner: calendarId => requireMockCalendar(calendarId).owner_id,
+  canRead: (calendarId, actorId) => {
+    const calendar = requireMockCalendar(calendarId);
+    sharedMockCalendarVisibility(calendar);
+    return canViewCalendar(calendar, mockMembersOf(calendarId).map(member => member.user_id), actorId);
+  },
   actor: () => ({ id: requireMockCalendarUser().id, epoch: previewCanonicalEpoch }),
   storage: {
     getItem: key => window.localStorage.getItem(key),

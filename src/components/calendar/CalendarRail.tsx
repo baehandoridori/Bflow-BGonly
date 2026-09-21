@@ -92,16 +92,14 @@ function CalendarRow({
           role="menu"
           className="absolute right-0 top-7 z-30 w-36 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
         >
-          {calendar.canManage && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={onOpenSettings}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-text-primary hover:bg-bg-border/50 cursor-pointer"
-            >
-              <Settings size={12} /> 설정 열기
-            </button>
-          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onOpenSettings}
+            className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-text-primary hover:bg-bg-border/50 cursor-pointer"
+          >
+            <Settings size={12} /> 설정 열기
+          </button>
           <button
             type="button"
             role="menuitem"

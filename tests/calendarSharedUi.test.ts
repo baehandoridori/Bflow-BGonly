@@ -293,6 +293,7 @@ let calendarState: {
   toggleCalendarVisible(id: string): void;
   toggleTag(id: string): void;
   resetTagsAllOn(): void;
+  toggleAllTags(includeVacation: boolean): void;
   toggleMuted(id: string): void;
   upsertCalendarOptimistically(actorId: string, calendar: BflowCalendar): void;
   removeCalendarOptimistically(actorId: string, calendarId: string): void;
@@ -854,6 +855,15 @@ function resetHarness(): void {
     },
     resetTagsAllOn() {
       calendarState.enabledTagIds = {};
+    },
+    toggleAllTags(includeVacation) {
+      const ids = calendarState.tags.map(tag => tag.id).filter(id => !id.startsWith('optimistic-tag:'));
+      if (includeVacation) ids.push('builtin-vacation');
+      const allEnabled = ids.every(id => calendarState.enabledTagIds[id] !== false);
+      for (const id of ids) {
+        if (allEnabled) calendarState.enabledTagIds[id] = false;
+        else delete calendarState.enabledTagIds[id];
+      }
     },
     toggleMuted(id) {
       calendarState.mutedCalendarIds = calendarState.mutedCalendarIds.includes(id)
@@ -2016,7 +2026,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
       // The panel has its own async/session harness; avoid sharing parent hook slots.
-      if (id === './CalendarSubscriptionPanel') return { CalendarSubscriptionPanel: () => null };
+      if (id === './CalendarSubscriptionPanel') return { CalendarSubscriptionPanel: (props: { calendarId: string; isAdminOverview?: boolean }) => jsxRuntime.jsx('div', { 'aria-label': '구독 패널', 'data-calendar-id': props.calendarId, 'data-admin-overview': props.isAdminOverview, children: '구독 안내' }) };
       if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
@@ -2833,11 +2843,17 @@ test('CalendarRail renders four grouped sections and drives visibility, menu per
   buttonByLabel(tree, '리드 회의 메뉴 열기').props.onClick?.({ stopPropagation() {} });
   tree = await renderRail(false);
   assert.ok(findButtons(tree).some((button) => textContent(button).includes('알림 끄기')), 'non-manageable shared calendar keeps its mute action');
-  assert.equal(findButtons(tree).some((button) => textContent(button).includes('설정 열기')), false, 'non-manageable shared calendar has no settings action');
+  assert.ok(findButtons(tree).some((button) => textContent(button).includes('설정 열기')), 'shared editors can open subscription settings without management permission');
   buttonByText(tree, '알림 끄기').props.onClick?.();
   assert.deepEqual(calendarState.mutedCalendarIds, ['editable-share']);
   tree = await renderRail(false);
   assert.ok(nodeByAriaLabel(tree, '리드 회의 알림이 꺼짐'), 'muted calendar exposes its BellOff state');
+
+  buttonByLabel(tree, '외부 보기 메뉴 열기').props.onClick?.({ stopPropagation() {} });
+  tree = await renderRail(false);
+  buttonByText(tree, '설정 열기').props.onClick?.();
+  assert.equal(openedSettings.at(-1)?.id, 'view-share', 'view-only readers can open settings');
+  openedSettings.length = 0;
 
   buttonByLabel(tree, 'EP 마일스톤 메뉴 열기').props.onClick?.({ stopPropagation() {} });
   tree = await renderRail(false);
@@ -2878,6 +2894,21 @@ test('TagBar independently toggles tags, resets every chip, and forwards the cli
   assert.deepEqual(calendarState.enabledTagIds, {}, '전체 restores every tag using the store reset action');
 
   tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  buttonByLabel(tree, '전체 태그 끄기').props.onClick?.();
+  tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  for (const label of ['회의 태그', '검수 태그', '휴가 태그']) {
+    assert.equal(buttonByLabel(tree, label).props['aria-pressed'], false, `${label} turns off with all`);
+  }
+  buttonByLabel(tree, '전체 태그 켜기').props.onClick?.();
+  tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  assert.equal(buttonByLabel(tree, '전체 태그 끄기').props['aria-pressed'], true);
+  calendarState.enabledTagIds['builtin-vacation'] = false;
+  tree = await renderTagBar(false, (anchorRect) => openedAnchors.push(anchorRect));
+  assert.equal(buttonByLabel(tree, '전체 태그 끄기').props['aria-pressed'], true, 'disconnected vacation does not affect all state');
+  buttonByLabel(tree, '전체 태그 끄기').props.onClick?.();
+  tree = await renderTagBar(false, (anchorRect) => openedAnchors.push(anchorRect));
+  buttonByLabel(tree, '전체 태그 켜기').props.onClick?.();
+  assert.equal(calendarState.enabledTagIds['builtin-vacation'], false, 'all does not modify a disconnected vacation chip');
   const anchor = { left: 17, top: 29, width: 84, height: 28 } as DOMRect;
   buttonByLabel(tree, '태그 관리').props.onClick?.({
     currentTarget: { getBoundingClientRect: () => anchor },
@@ -5103,7 +5134,7 @@ test('ScheduleView todo navigation prefers the unique linked identity over a raw
 });
 
 test('ScheduleView reconciles an open calendar settings modal without closing create mode', async (t) => {
-  await t.test('same-id metadata replaces the stale object and missing or unmanaged rows close the modal', async () => {
+  await t.test('same-id metadata updates read-only settings and only missing rows close the modal', async () => {
     resetHarness();
     let tree = await renderScheduleView();
     tree = await renderScheduleView();
@@ -5127,8 +5158,8 @@ test('ScheduleView reconciles an open calendar settings modal without closing cr
     tree = await renderScheduleView();
     assert.equal(
       findElements(tree, (element) => element.props['aria-label'] === '캘린더 설정 모달').length,
-      0,
-      'loss of manage permission closes the modal',
+      1,
+      'loss of manage permission keeps the modal available for read-only subscriptions',
     );
 
     calendarState.calendars = calendarState.calendars.map((calendar) => (
@@ -7945,6 +7976,37 @@ test('ScheduleView duplicates a subscribed (ICS) event into the editable persona
   );
   assert.equal(scheduleAddedEvents[0].source, undefined);
   assert.equal(scheduleAddedEvents[0].sourceCalendarId, undefined);
+});
+
+test('CalendarSettingsModal gives readers and event editors subscription access without calendar management controls', async (t) => {
+  for (const canEdit of [false, true]) {
+    await t.test(canEdit ? 'event editor' : 'read-only member', async () => {
+      resetHarness();
+      const shared = calendar({ id: 'subscription-shared', name: '공유 제작 일정', ownerId: 'other-owner', visibility: 'members', canManage: false, canEdit });
+      const tree = await renderCalendarSettingsModal(shared);
+      assert.match(textContent(tree), /공유 제작 일정/);
+      assert.match(textContent(tree), /설정을 변경할 수 없어요/);
+      assert.equal(nodeByAriaLabel(tree, '구독 패널').props['data-calendar-id'], shared.id);
+      assert.equal(findElements(tree, (node) => node.props['aria-label'] === '캘린더 이름' || node.props['aria-label'] === '멤버 검색').length, 0);
+      assert.equal(findElements(tree, (node) => node.type === 'input').length, 0);
+      assert.equal(findButtons(tree).some((button) => /저장|삭제|제거|권한|색상/.test(textContent(button) + String(button.props['aria-label'] ?? ''))), false);
+      buttonByText(tree, '닫기').props.onClick?.();
+      assert.equal(settingsCloseCount, 1);
+      assert.deepEqual(settingsApiCalls, []);
+    });
+  }
+});
+
+test('CalendarSettingsModal switches to read-only when management is revoked and flags administrator-only access', async () => {
+  resetHarness();
+  const managed = calendar({ id: 'manage-revoked', canManage: true });
+  let tree = await renderCalendarSettingsModal(managed);
+  assert.ok(buttonByText(tree, '저장'));
+  tree = await renderCalendarSettingsModal({ ...managed, canManage: false, isAdminOverview: true });
+  assert.equal(findButtons(tree).some((button) => textContent(button) === '저장'), false);
+  assert.match(textContent(tree), /관리자 조회/);
+  assert.equal(nodeByAriaLabel(tree, '구독 패널').props['data-admin-overview'], true);
+  assert.deepEqual(settingsApiCalls, []);
 });
 
 test('CalendarSettingsModal creates a members calendar atomically and reloads before closing', async () => {
