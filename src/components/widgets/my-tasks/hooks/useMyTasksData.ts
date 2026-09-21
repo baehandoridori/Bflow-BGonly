@@ -292,11 +292,17 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
 
     // 다중 담당 씬이면 담당자별 기록에도 같은 변경을 반영해야 저장이 유지된다.
     const assigneeProgressWrite = (() => {
-      const built = buildSceneStagePatchProgress(scene, stagePatch, currentUser?.name);
+      const built = buildSceneStagePatchProgress(scene, stagePatch, currentUser?.name, sheetName.endsWith('_ACT'));
       if (!built || !scene.id) return null;
       updateSceneByUuid(scene.id, { assigneeProgress: built.progress });
-      return { sceneUuid: scene.id, ...built };
+      // 저장이 실패하면 낙관적으로 올려둔 기록이 남아 "저장된 줄" 알게 되므로 되돌릴 값을 들고 있는다.
+      return { sceneUuid: scene.id, prevProgress: scene.assigneeProgress, ...built };
     })();
+    const rollbackAssigneeProgress = () => {
+      if (assigneeProgressWrite) {
+        updateSceneByUuid(assigneeProgressWrite.sceneUuid, { assigneeProgress: assigneeProgressWrite.prevProgress });
+      }
+    };
 
     const immediateCompletionMeta = buildCompletionMeta(scene);
 
@@ -318,7 +324,11 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
         updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', queuedCompletionMeta.nextCompletedAt);
       }
 
-      if (queuedChangedStages.length === 0 && !queuedCompletionMeta) return;
+      if (queuedChangedStages.length === 0 && !queuedCompletionMeta) {
+        // 저장할 씬 변경이 없으면 담당자별 기록도 저장되지 않는다 — 낙관적 반영만 남기지 않는다.
+        rollbackAssigneeProgress();
+        return;
+      }
 
       try {
         const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
@@ -352,6 +362,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
           } catch (progressErr) {
             console.error('[MyTasks 담당자별 진행 저장 실패]', progressErr);
             toast.error(SAVE_FAIL_MESSAGE);
+            rollbackAssigneeProgress();
           }
         }
         stageSaveBaselineRef.current.set(saveQueueKey, {
@@ -364,6 +375,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       } catch (err) {
         console.error('[MyTasks 토글 실패]', err);
         toast.error(SAVE_FAIL_MESSAGE);
+        rollbackAssigneeProgress();
         stageSaveBaselineRef.current.set(saveQueueKey, previousBaseline);
         SEQUENTIAL_STAGE_ORDER.forEach((changedStage) => {
           updateSceneFieldOptimistic(sheetName, sceneIndex, changedStage, String(Boolean(previousBaseline[changedStage])));

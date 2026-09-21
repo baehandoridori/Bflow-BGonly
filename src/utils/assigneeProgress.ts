@@ -249,7 +249,6 @@ export function updateAssigneeProgressEntry(
   assigneeName: string,
   update:
     | { kind: 'stage'; stage: Stage }
-    | { kind: 'stagePatch'; patch: Partial<Record<Stage, boolean>> }
     | { kind: 'phase'; state: ScenePhaseState }
     | { kind: 'round'; roundKind: 'work' | 'feedback'; delta: 1 | -1 },
   updatedBy?: string,
@@ -258,7 +257,6 @@ export function updateAssigneeProgressEntry(
   const current = map[assigneeName] ?? baseProgressFromScene(scene);
   const next = (() => {
     if (update.kind === 'stage') return nextProgressForStage(current, update.stage);
-    if (update.kind === 'stagePatch') return { ...current, ...update.patch, sceneState: null };
     if (update.kind === 'phase') return nextProgressForPhase(current, update.state);
     return nextProgressForRound(current, update.roundKind, update.delta);
   })();

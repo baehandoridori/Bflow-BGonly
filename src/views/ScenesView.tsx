@@ -20,6 +20,7 @@ import {
 import { getAllViewCompletionState, getSingleViewCompletionState } from '@/utils/visibleCompletion';
 import {
   buildSequentialStagePatch,
+  deriveActingPhaseFromStages,
   getChangedSequentialStages,
   isSequentialStageComplete,
   persistSequentialStagePatchWithRollback,
@@ -2529,13 +2530,19 @@ export function ScenesView() {
           // 서버 정본 위에 내 항목만 얹어 저장하고, 그 결과로 화면을 다시 맞춘다.
           // 저장하는 동안 상대가 바꾼 값이 있으면 그것까지 함께 반영된다.
           const merged = await saveAssigneeProgress(sceneUuid, nextProgress, [assigneeName]);
+          // 완료 판정은 저장 전 내 화면 기준이었다. 병합으로 상대의 최신 값이 들어오면 결과가 달라질 수 있으므로
+          // 실제 저장된 값으로 다시 판정한다. 어긋나면 완료 도장을 찍지 않고 이전 값을 되살린다.
+          const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
+          const mergedPatch = latest ? aggregateScenePatchFromAssignees(latest, merged, department) : null;
+          const mergedFullyDone = latest && mergedPatch ? isFullyDone({ ...latest, ...mergedPatch }) : willBeFullyDone;
+          const completionStillHolds = !completionMeta || mergedFullyDone === willBeFullyDone;
           if (assigneeProgressMutationSeqRef.current.get(sceneUuid) === mutationSeq) {
-            const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
-            if (latest) {
-              updateSceneByUuid(sceneUuid, aggregateScenePatchFromAssignees(latest, merged, department));
+            if (mergedPatch) updateSceneByUuid(sceneUuid, mergedPatch);
+            if (completionMeta && !completionStillHolds) {
+              updateSceneByUuid(sceneUuid, { completedBy: prevCompletedBy, completedAt: prevCompletedAt });
             }
           }
-          if (completionMeta) {
+          if (completionMeta && completionStillHolds) {
             try {
               await updateSceneCompletionMeta(
                 sheetName,
@@ -3976,24 +3983,12 @@ export function ScenesView() {
     const isActingScene = sheetName.endsWith('_ACT');
     let actingPhaseSync: { state: ScenePhaseState; workRound: number; feedbackRound: number } | null = null;
     if (isActingScene && scene.id) {
-      const newPhase: ScenePhaseState =
-        stagePatch.png ? 'done'
-        : stagePatch.review ? 'feedback'
-        : stagePatch.done ? 'work'
-        : 'wait';
-      const prevPhase: ScenePhaseState = scene.sceneState ?? 'wait';
-      const work = newPhase === 'work'
-        ? (prevPhase === 'work' ? Math.max(1, scene.workRound ?? 1) : 1)
-        : 0;
-      const feedback = newPhase === 'feedback'
-        ? (prevPhase === 'feedback' ? Math.max(1, scene.feedbackRound ?? 1) : 1)
-        : 0;
-      actingPhaseSync = { state: newPhase, workRound: work, feedbackRound: feedback };
+      actingPhaseSync = deriveActingPhaseFromStages(scene, stagePatch);
       updateSceneByUuid(scene.id, {
-        sceneState: newPhase,
-        workRound: work,
-        feedbackRound: feedback,
-        ...legacyStagesFor(newPhase),
+        sceneState: actingPhaseSync.state,
+        workRound: actingPhaseSync.workRound,
+        feedbackRound: actingPhaseSync.feedbackRound,
+        ...legacyStagesFor(actingPhaseSync.state),
       });
     }
 

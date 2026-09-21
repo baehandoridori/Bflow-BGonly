@@ -236,15 +236,26 @@ export function CompositingSceneModal({
     store.updateSceneByUuid(sc.id, stagePatch);
     // 담당자가 둘 이상인 씬은 표시 단계가 담당자별 기록에서 다시 계산된다.
     // 씬 컬럼만 저장하면 다음 동기화 때 되돌아가므로 담당자별 기록도 같이 맞춘다.
-    const assigneeProgressWrite = buildSceneStagePatchProgress(sc, stagePatch, currentUser.name);
+    const assigneeProgressWrite = buildSceneStagePatchProgress(sc, stagePatch, currentUser.name, sheetName.endsWith('_ACT'));
+    const prevAssigneeProgress = sc.assigneeProgress;
     if (assigneeProgressWrite) {
       store.updateSceneByUuid(sc.id, { assigneeProgress: assigneeProgressWrite.progress });
     }
+    // 저장이 실패하면 낙관적으로 올려둔 담당자별 기록도 같이 되돌린다.
+    const rollbackAssigneeProgress = () => {
+      if (assigneeProgressWrite) {
+        useDataStore.getState().updateSceneByUuid(sc.id!, { assigneeProgress: prevAssigneeProgress });
+      }
+    };
     const queuedSave = enqueueSequentialStageSave(stageSaveQueueRef.current, sc.id, async () => {
       const previousBaseline = stageSaveBaselineRef.current.get(sc.id!) ?? snapshotSequentialStages(sc);
       const queuedChangedStages = getChangedSequentialStages(previousBaseline, stagePatch);
       store.updateSceneByUuid(sc.id!, stagePatch);
-      if (queuedChangedStages.length === 0) return;
+      if (queuedChangedStages.length === 0) {
+        // 저장할 씬 변경이 없으면 담당자별 기록도 저장되지 않는다 — 낙관적 반영만 남기지 않는다.
+        rollbackAssigneeProgress();
+        return;
+      }
       try {
         await persistSequentialStagePatchWithRollback(queuedChangedStages, stagePatch, previousBaseline, (changedStage, value) =>
           updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
@@ -257,9 +268,11 @@ export function CompositingSceneModal({
           } catch (progressErr) {
             console.error('[컴포지팅 모달] 담당자별 진행 저장 실패:', progressErr);
             sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
+            rollbackAssigneeProgress();
           }
         }
       } catch (err) {
+        rollbackAssigneeProgress();
         stageSaveBaselineRef.current.set(sc.id!, previousBaseline);
         useDataStore.getState().updateSceneByUuid(sc.id!, {
           lo: previousBaseline.lo,

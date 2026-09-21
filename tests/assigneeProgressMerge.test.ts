@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mergeAssigneeProgressForWrite } from '../src/utils/assigneeProgressMerge.ts';
+import { deriveActingPhaseFromStages } from '../src/utils/sceneStageProgression.ts';
 
 const wait = { lo: false, done: false, review: false, png: false, sceneState: null, workRound: 0, feedbackRound: 0 };
 const work = { lo: true, done: true, review: false, png: false, sceneState: 'work' as const, workRound: 1, feedbackRound: 0 };
@@ -63,6 +64,48 @@ test('입력 맵을 변형하지 않는다', () => {
   assert.deepEqual(local, localCopy);
 });
 
+/* ─── 액팅 단계 역산 ───────────────────────────────────── */
+
+const stages = (lo: boolean, done: boolean, review: boolean, png: boolean) => ({ lo, done, review, png });
+
+test('액팅: 체크 4개에서 단계 상태를 역산한다', () => {
+  const none = { sceneState: null, workRound: 0, feedbackRound: 0 };
+  assert.deepEqual(deriveActingPhaseFromStages(none, stages(false, false, false, false)), { state: 'wait', workRound: 0, feedbackRound: 0 });
+  assert.deepEqual(deriveActingPhaseFromStages(none, stages(true, true, false, false)), { state: 'work', workRound: 1, feedbackRound: 0 });
+  assert.deepEqual(deriveActingPhaseFromStages(none, stages(true, true, true, false)), { state: 'feedback', workRound: 0, feedbackRound: 1 });
+  assert.deepEqual(deriveActingPhaseFromStages(none, stages(true, true, true, true)), { state: 'done', workRound: 0, feedbackRound: 0 });
+  // 가장 앞선 체크가 단계를 결정한다 — PNG 만 켜져 있어도 완료.
+  assert.equal(deriveActingPhaseFromStages(none, stages(false, false, false, true)).state, 'done');
+});
+
+test('액팅: 같은 단계에 머물면 차수를 유지하고, 단계가 바뀌면 1차부터', () => {
+  assert.deepEqual(
+    deriveActingPhaseFromStages({ sceneState: 'work', workRound: 3, feedbackRound: 0 }, stages(true, true, false, false)),
+    { state: 'work', workRound: 3, feedbackRound: 0 },
+  );
+  // 단계가 바뀌면 이전 차수가 아무리 높아도 1차부터 — 이전 차수를 그대로 끌고 오면 안 된다.
+  assert.deepEqual(
+    deriveActingPhaseFromStages({ sceneState: 'feedback', workRound: 4, feedbackRound: 2 }, stages(true, true, false, false)),
+    { state: 'work', workRound: 1, feedbackRound: 0 },
+  );
+  assert.deepEqual(
+    deriveActingPhaseFromStages({ sceneState: 'work', workRound: 3, feedbackRound: 5 }, stages(true, true, true, false)),
+    { state: 'feedback', workRound: 0, feedbackRound: 1 },
+  );
+  assert.deepEqual(
+    deriveActingPhaseFromStages({ sceneState: 'feedback', workRound: 0, feedbackRound: 2 }, stages(true, true, true, false)),
+    { state: 'feedback', workRound: 0, feedbackRound: 2 },
+  );
+  // 차수가 비어 있거나 0 이어도 최소 1차로 올라온다.
+  assert.equal(deriveActingPhaseFromStages({ sceneState: 'work', workRound: 0, feedbackRound: 0 }, stages(true, true, false, false)).workRound, 1);
+  assert.equal(deriveActingPhaseFromStages({ sceneState: 'work' }, stages(true, true, false, false)).workRound, 1);
+  // 대기/완료로 가면 차수는 리셋.
+  assert.deepEqual(
+    deriveActingPhaseFromStages({ sceneState: 'work', workRound: 5, feedbackRound: 0 }, stages(false, false, false, false)),
+    { state: 'wait', workRound: 0, feedbackRound: 0 },
+  );
+});
+
 /* ─── 쓰기 경로가 실제로 병합 저장을 쓰는지 ─────────────────── */
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
@@ -84,12 +127,16 @@ test('ScenesView 의 담당자별 진행 저장은 통째 덮어쓰기로 되돌
     /writeMetadata\(\s*SCENE_ASSIGNEE_PROGRESS_META_TYPE/,
     '담당자별 진행을 병합 없이 직접 저장하면 상대 변경이 사라진다',
   );
-  // changedNames 인자 없이 호출하는 곳이 남아 있으면 안 된다.
-  const calls = src.match(/writeAssigneeProgressMetadata\([^)]*\)/g) ?? [];
-  const writeCalls = calls.filter((c) => c.includes(','));
+  // 호출부가 changedNames 를 실제로 채워 넘기는지 — 빈 배열이면 병합이 아무것도 안 바꾼다.
+  const writeCalls = (src.match(/await writeAssigneeProgressMetadata\((?:[^()]|\([^()]*\))*\)/g) ?? [])
+    .filter((c) => !c.includes('(sceneUuid: string'));
   assert.ok(writeCalls.length >= 6, `호출부를 찾지 못했다 (${writeCalls.length})`);
   for (const call of writeCalls) {
-    assert.equal(call.split(',').length >= 3, true, `changedNames 가 빠진 호출: ${call}`);
+    assert.match(
+      call,
+      /,\s*Object\.keys\([A-Za-z.]+\)\)$/,
+      `changedNames 가 비었거나 빠진 호출 — 병합이 아무것도 반영하지 않는다: ${call}`,
+    );
   }
 });
 
@@ -102,20 +149,59 @@ test('담당자가 한 명 이하이면 담당자별 진행을 저장하지 않�
   );
 });
 
-test('씬 단위 단계 토글도 담당자별 기록을 같이 맞춘다', () => {
+test('씬 단위 단계 토글은 담당자 전원을 맞춘다 (집계가 AND 라 본인만 바꾸면 되돌아간다)', () => {
   const actions = read('src/services/assigneeProgressActions.ts');
   assert.match(actions, /export function buildSceneStagePatchProgress/);
-  assert.match(actions, /names\.includes\(actorName\)/, '본인이 담당자면 본인 항목만 바꿔야 한다');
-  assert.match(actions, /updateAllAssigneeProgressEntries/, '담당자가 아니면 전원을 맞춘다');
+  assert.match(actions, /updateAllAssigneeProgressEntries\(scene, update, actorName\)/, '담당자 전원을 맞춰야 집계가 움직인다');
+  assert.match(actions, /changedNames: parseAssigneeNames\(scene\.assignee\)/);
+  assert.match(
+    actions,
+    /if \(!scene\.id \|\| !hasMultiAssigneeProgress\(scene\)\) return null;/,
+    '담당자가 한 명 이하인 씬에까지 담당자별 기록을 만들면 안 된다',
+  );
+  assert.doesNotMatch(
+    actions,
+    /names\.includes\(actorName\)/,
+    "누른 사람 항목만 바꾸면 씬 집계(BG=전원 AND)가 안 움직여 화면이 그대로 되돌아간다",
+  );
+  // 액팅은 단계 상태가 정본 — 체크만 바꾸고 단계 상태를 비우면 담당자별 단계·차수 표시가 사라진다.
+  assert.match(actions, /isActingScene\s*$|isActingScene:/m, 'isActingScene 인자를 받아야 한다');
+  assert.match(actions, /deriveActingPhaseFromStages\(scene, stagePatch\)/);
+  assert.match(actions, /kind: 'phase' as const/);
 
   for (const path of [
     'src/components/widgets/my-tasks/hooks/useMyTasksData.ts',
     'src/views/compositing-dashboard/modal/CompositingSceneModal.tsx',
   ]) {
     const src = read(path);
-    assert.match(src, /buildSceneStagePatchProgress\(/, `${path}: 씬 단위 토글이 담당자별 기록을 건너뛴다`);
+    assert.match(
+      src,
+      /buildSceneStagePatchProgress\([^)]*sheetName\.endsWith\('_ACT'\)\)/,
+      `${path}: 액팅 여부를 넘기지 않으면 액팅 씬의 단계 상태가 지워진다`,
+    );
     assert.match(src, /saveAssigneeProgress\(/, `${path}: 담당자별 기록 저장이 빠졌다`);
+    assert.match(src, /rollbackAssigneeProgress\(\)/, `${path}: 저장 실패 시 낙관적 기록을 되돌려야 한다`);
+    // 실패 경로 3곳(씬 컬럼 저장 실패 / 담당자별 저장 실패 / 저장할 변경이 없어 조기 반환) 모두에서 되돌린다.
+    assert.equal(
+      (src.match(/rollbackAssigneeProgress\(\)/g) ?? []).length,
+      3,
+      `${path}: 롤백 호출이 세 실패 경로에 모두 있어야 한다`,
+    );
   }
+});
+
+test('씬 뷰와 씬 단위 토글이 같은 액팅 단계 역산을 쓴다', () => {
+  const scenesView = read('src/views/ScenesView.tsx');
+  assert.match(scenesView, /actingPhaseSync = deriveActingPhaseFromStages\(scene, stagePatch\)/);
+  // 역산 로직이 두 벌로 갈라지면 화면마다 차수가 달라진다.
+  assert.doesNotMatch(scenesView, /stagePatch\.png \? 'done'/, '역산 로직이 ScenesView 에 다시 복제됐다');
+});
+
+test('완료 도장은 병합 결과와 어긋나면 찍지 않는다', () => {
+  const src = read('src/views/ScenesView.tsx');
+  assert.match(src, /const completionStillHolds = !completionMeta \|\| mergedFullyDone === willBeFullyDone;/);
+  assert.match(src, /if \(completionMeta && completionStillHolds\) \{/, '조건 없이 완료 메타를 쓰면 미완료 씬에 완료자가 남는다');
+  assert.match(src, /completedBy: prevCompletedBy, completedAt: prevCompletedAt/, '도장을 건너뛰면 화면도 되돌려야 한다');
 });
 
 test('에피소드 이름 저장 실패는 롤백하고 알린다', () => {
