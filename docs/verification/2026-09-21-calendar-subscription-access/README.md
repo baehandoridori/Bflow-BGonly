@@ -22,3 +22,12 @@
 - Google 공식 URL 추가 안내: https://support.google.com/calendar/answer/37100?hl=ko
 - Naver 공식 외부 URL 가져오기 안내: https://help.naver.com/service/5620/contents/18399?lang=ko&osType=PC
 - 네이버 안내는 가져오기이며 자동 갱신 보장을 하지 않는 문구로 구분.
+
+## 배포 완료
+- PR #300 merged: 6a79527abbb42f0fe225056c90a94318907124ed. 이 정확한 SHA에서 npm run build 성공.
+- typecheck 및 전체 2,855개 테스트 통과, fail 0 / skip 0.
+- Windows installer 201,438,696 bytes. SHA256 f45b9c957192f3a588615af7735dbd6ed495c26b105a92fa18d15a0ff5aff1a3.
+- 이전 배포 전체 백업 8,231개 파일 / 986,040,598 bytes, mismatch 0. 원격에 보존하던 추가 파일도 함께 백업.
+- payload 선복사/검증 후 manifest 마지막 게시. 최종 7,337개 파일 / 923,594,236 bytes SHA256 mismatch 0. 원격 추가 파일 보존.
+- manifest/latest/설치 패키지 모두 1.126.0. 독립 artifact 리뷰도 통과.
+- 배포 완료 2026-09-21 12:58 KST. 설치된 사용자 앱은 그대로 두었음.
