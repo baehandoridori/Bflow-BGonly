@@ -1,7 +1,7 @@
 import { EventTagBadges } from './EventTagBadges';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { resolveEventTags } from './eventTagPresentation';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Palmtree, CheckSquare, CalendarDays } from 'lucide-react';
@@ -415,7 +415,8 @@ export function CalendarGrid({
   isDragging,
   onCellMouseDown,
   isDateInDragRange,
-  isDateInCreateRange,
+  createRange,
+  onCellActivate,
   onEventContextMenu,
   onWheel,
   monthKey,
@@ -442,8 +443,13 @@ export function CalendarGrid({
   isDragging?: boolean;
   onCellMouseDown?: (e: React.MouseEvent, date: string) => void;
   isDateInDragRange?: (date: string) => boolean;
-  /** 드래그로 '지금 만들고 있는' 범위. 고스트는 이것만 본다(날짜 이동 하이라이트와 분리). */
-  isDateInCreateRange?: (date: string) => boolean;
+  /**
+   * 지금 만들고 있는 범위. 고스트는 이것만 본다 — 날짜 이동 표시와 완전히 분리된다.
+   * 일수(days)도 같이 받아, 주말을 숨겨도 라벨과 실제로 만들어지는 기간이 어긋나지 않는다.
+   */
+  createRange?: { startDate: string; endDate: string; days: number; dragging: boolean } | null;
+  /** 키보드로 + 를 눌렀을 때 — 끌 수가 없으니 그 날 하루로 연다. */
+  onCellActivate?: (date: string) => void;
   onWheel?: (e: React.WheelEvent) => void;
   onEventContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
   monthKey?: string;
@@ -483,25 +489,17 @@ export function CalendarGrid({
   );
   const columnCount = visibleWeeks[0]?.length ?? (showWeekends ? 7 : 5);
 
-  // 고스트 라벨용 요약 — 보이는 칸만 세어 'N일' 표시가 실제 화면과 어긋나지 않게 한다.
-  const createRange = useMemo(() => {
-    if (!isDateInCreateRange) return { count: 0, start: '' };
-    const picked: string[] = [];
-    for (const week of visibleWeeks) {
-      for (const day of week) {
-        const ds = fmtDate(day);
-        if (isDateInCreateRange(ds)) picked.push(ds);
-      }
-    }
-    return { count: picked.length, start: picked[0] ?? '' };
-  }, [isDateInCreateRange, visibleWeeks]);
+  const isInCreateRange = useCallback(
+    (date: string) => !!createRange && date >= createRange.startDate && date <= createRange.endDate,
+    [createRange],
+  );
 
   // 커서와의 거리로 + 버튼을 서서히 드러낸다. 누르고 있는 버튼은 계속 또렷하게.
   const { refresh: refreshReveal } = useProximityReveal({
     radius: 160,
     isPinned: (el) => el.classList.contains('is-active'),
   });
-  useEffect(() => { refreshReveal(); }, [createRange.count, refreshReveal]);
+  useEffect(() => { refreshReveal(); }, [visibleWeeks, createRange, refreshReveal]);
   const gridTemplateColumns = `repeat(${columnCount}, minmax(0, 1fr))`;
   const visibleWeekdayLabels = useMemo(
     () => (showWeekends ? WEEKDAYS : WEEKDAYS.filter((_, index) => index !== 0 && index !== 6)),
@@ -547,7 +545,7 @@ export function CalendarGrid({
           <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2">
             <CalendarDays size={36} className="text-text-secondary/60" />
             <span className="text-sm text-text-secondary">이번 달 일정이 없습니다</span>
-            <span className="text-[11px] text-text-secondary/60">날짜를 눌러 새 일정을 만들어 보세요</span>
+            <span className="text-[11px] text-text-secondary/60">날짜 옆 + 버튼을 눌러 새 일정을 만들어 보세요</span>
           </div>
         )}
         {visibleWeeks.map((week, wi) => {
@@ -561,13 +559,15 @@ export function CalendarGrid({
               className={cn("relative grid flex-1 min-h-0", isCurrentWeek && 'bg-accent/[0.03]')}
               style={{ gridTemplateColumns }}
             >
-              {isDateInCreateRange && (
+              {createRange && (
                 <DragCreateGhost
                   week={week.map((d) => fmtDate(d))}
-                  isSelected={isDateInCreateRange}
+                  isSelected={isInCreateRange}
                   gridTemplateColumns={gridTemplateColumns}
-                  totalDays={createRange.count}
-                  showLabel={week.some((d) => fmtDate(d) === createRange.start)}
+                  totalDays={createRange.days}
+                  showLabel={week.some((d) => fmtDate(d) === createRange.startDate)}
+                  reduceMotion={reduceMotion}
+                  dragging={createRange.dragging}
                 />
               )}
               {/* 날짜 셀 배경 */}
@@ -621,6 +621,7 @@ export function CalendarGrid({
                           date={dateStr}
                           label={`${day.getMonth() + 1}월 ${day.getDate()}일`}
                           onStart={onCellMouseDown}
+                          onActivate={onCellActivate}
                         />
                       )}
                     </div>

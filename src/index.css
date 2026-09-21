@@ -1676,7 +1676,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* 표면을 훑고 지나가는 반사 */
-.calendar-drag-ghost::before {
+.is-dragging .calendar-drag-ghost::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -1716,4 +1716,28 @@ input[type="range"]::-webkit-slider-thumb {
   .calendar-drag-ghost::before,
   .calendar-day-add.is-active::after { animation: none; }
   .calendar-day-add { transition: none; }
+}
+
+/* 라이트 모드: 밝은 배경 위에서는 흰 글리프·흰 테두리가 묻힌다. 액센트로 대비를 만든다. */
+[data-color-mode="light"] .calendar-day-add {
+  color: rgb(var(--color-accent) / calc(0.55 + 0.45 * var(--reveal)));
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / calc(0.5 * var(--reveal))), rgb(255 255 255 / 0) 58%),
+    rgb(var(--color-accent) / calc(0.06 + 0.16 * var(--reveal)));
+  border-color: rgb(var(--color-accent) / calc(0.12 + 0.3 * var(--reveal)));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / calc(0.5 * var(--reveal))),
+    0 6px 16px rgb(var(--color-accent) / calc(0.18 * var(--reveal)));
+}
+[data-color-mode="light"] .calendar-day-add:hover,
+[data-color-mode="light"] .calendar-day-add.is-active {
+  color: #fff;
+  background: linear-gradient(180deg, rgb(var(--color-accent-sub)), rgb(var(--color-accent)));
+  border-color: rgb(var(--color-accent));
+}
+[data-color-mode="light"] .calendar-drag-ghost {
+  border-color: rgb(var(--color-accent) / 0.45);
+  box-shadow:
+    0 8px 20px rgb(var(--color-accent) / 0.22),
+    inset 0 1px 0 rgb(255 255 255 / 0.5);
 }

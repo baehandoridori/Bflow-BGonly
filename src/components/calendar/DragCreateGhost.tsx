@@ -10,32 +10,35 @@ import { toDragRuns, type DragRun } from '@/utils/calendarDragRuns';
  *
  * 한 주(행) 안에서만 그리므로 주 경계를 넘는 범위는 이 컴포넌트가 주마다 하나씩 그려진다.
  */
-function GhostBar({ run, label }: { run: DragRun; label: string }) {
+function GhostBar({
+  run, label, reduceMotion,
+}: { run: DragRun; label: string; reduceMotion: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const prevWidth = useRef(0);
-  const prevSpan = useRef(run.span);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const width = el.getBoundingClientRect().width;
-    const grew = prevSpan.current !== run.span;
-    // 처음 생길 때는 등장 애니메이션(CSS)에 맡기고, 폭이 바뀔 때만 늘어나는 느낌을 준다.
-    if (grew && prevWidth.current > 0 && width > 0 && Math.abs(prevWidth.current - width) > 0.5) {
-      el.animate(
-        [{ transform: `scaleX(${prevWidth.current / width})` }, { transform: 'scaleX(1)' }],
-        { duration: 380, easing: 'cubic-bezier(.22,1.2,.36,1)' },
-      );
-    }
+    const before = prevWidth.current;
     prevWidth.current = width;
-    prevSpan.current = run.span;
-  }, [run.span, run.col]);
+    // 첫 렌더는 CSS 등장 애니메이션에 맡긴다. 폭이 바뀐 뒤부터만 늘어나는 느낌을 준다.
+    if (reduceMotion || before <= 0 || width <= 0 || Math.abs(before - width) < 0.5) return;
+    el.animate(
+      [{ transform: `scaleX(${before / width})` }, { transform: 'scaleX(1)' }],
+      { duration: 380, easing: 'cubic-bezier(.22,1.2,.36,1)' },
+    );
+  }, [run.span, run.col, reduceMotion]);
 
   return (
     <div
       ref={ref}
       className="calendar-drag-ghost"
-      style={{ gridColumn: `${run.col} / span ${run.span}`, transformOrigin: 'left center' }}
+      style={{
+        gridColumn: `${run.col} / span ${run.span}`,
+        // 왼쪽으로 늘어날 때는 오른쪽 끝이 제자리에 있어야 자연스럽다.
+        transformOrigin: 'left center',
+      }}
     >
       {label && <span className="calendar-drag-ghost-label">{label}</span>}
     </div>
@@ -48,15 +51,20 @@ export function DragCreateGhost({
   gridTemplateColumns,
   totalDays,
   showLabel,
+  reduceMotion = false,
+  dragging = false,
 }: {
   /** 이 행에 그려지는 날짜들(주말 숨김이 적용된 실제 칸 순서) */
   week: string[];
   isSelected: (date: string) => boolean;
   gridTemplateColumns: string;
-  /** 전체 범위의 날짜 수 — 라벨에 'N일' 로 적는다. */
+  /** 실제로 만들어질 날짜 수. 화면 칸 수가 아니라 시작~종료 일수다(주말을 숨겨도 어긋나지 않게). */
   totalDays: number;
   /** 범위가 시작하는 행에서만 true — 줄마다 라벨이 반복되면 지저분하다. */
   showLabel: boolean;
+  reduceMotion?: boolean;
+  /** 끄는 중에만 표면 반사를 돌린다. 생성 폼을 채우는 동안 계속 돌면 낭비다. */
+  dragging?: boolean;
 }) {
   const selected = week.map(isSelected);
   if (!selected.some(Boolean)) return null;
@@ -64,15 +72,18 @@ export function DragCreateGhost({
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-[3] grid"
+      className={`pointer-events-none absolute inset-0 z-[3] grid${dragging ? ' is-dragging' : ''}`}
       style={{ gridTemplateColumns }}
       aria-hidden
     >
       {runs.map((run, i) => (
+        // key 는 위치가 아니라 구간 순서로 — col 을 키로 쓰면 왼쪽으로 끌 때마다
+        // 새 요소로 갈려서 FLIP 대신 등장 애니메이션이 반복된다.
         <GhostBar
-          key={`${run.col}`}
+          key={i}
           run={run}
           label={i === 0 && showLabel ? (totalDays > 1 ? `새 일정 · ${totalDays}일` : '새 일정') : ''}
+          reduceMotion={reduceMotion}
         />
       ))}
     </div>

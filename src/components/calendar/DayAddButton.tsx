@@ -18,12 +18,16 @@ export function DayAddButton({
   date,
   label,
   onStart,
+  onActivate,
   className,
 }: {
   date: string;
   /** 스크린리더·툴팁용 날짜 표현. 예: '9월 21일' */
   label: string;
+  /** 마우스로 누르기 시작 — 여기서부터 끌면 범위가 잡힌다. */
   onStart: (e: React.MouseEvent, date: string) => void;
+  /** 키보드(Enter/Space)로 눌렀을 때 — 끌 수가 없으니 그 날 하루로 바로 연다. */
+  onActivate?: (date: string) => void;
   className?: string;
 }) {
   const [pressed, setPressed] = useState(false);
@@ -47,12 +51,19 @@ export function DayAddButton({
       title={`${label}에 일정 추가 — 누른 채 끌면 여러 날`}
       onMouseDown={(e) => {
         if (e.button !== 0) return;
-        e.stopPropagation();
+        // stopPropagation 을 부르면 안 된다. React 는 루트 컨테이너에서 이벤트를 받으므로
+        // 여기서 멈추면 document 에 걸린 '바깥 클릭으로 닫기'(퀵에디트·태그 팝오버·레일 메뉴)가
+        // 통째로 죽는다. 위쪽에 가로챌 mousedown 핸들러도 이제 없다.
         setPressed(true);
         onStart(e, date);
       }}
-      // 생성은 mousedown~mouseup 으로 끝난다. click 이 상위로 올라가 다른 동작을 깨우지 않게 막는다.
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // 키보드 활성화(Enter/Space)는 mousedown 없이 click 만 온다 — detail 0 이 그 신호다.
+        // 끌 수가 없으므로 그 날 하루짜리로 바로 연다.
+        if (e.detail === 0) onActivate?.(date);
+      }}
       className={cn(
         'calendar-day-add group/add relative grid place-items-center shrink-0',
         'h-[22px] w-[22px] rounded-[7px] cursor-pointer',

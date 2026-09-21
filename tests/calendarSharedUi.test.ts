@@ -1547,7 +1547,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           }),
         };
       }
-      if (id === '@/hooks/useCalendarDragCreate') return { useCalendarDragCreate: () => ({ handleCellMouseDown() {}, isDateInRange: () => false }) };
+      if (id === '@/hooks/useCalendarDragCreate') return { useCalendarDragCreate: () => ({ dragState: { isDragging: false, startDate: null, endDate: null, anchorElement: null }, handleCellMouseDown() {}, isDateInRange: () => false }) };
       if (id === '@/stores/useCalendarStore') {
         const useCalendarStore = Object.assign(
           (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
@@ -6333,7 +6333,8 @@ test('the month grid explains an empty month without blocking the create path', 
   resetHarness();
   const emptyTree = await renderCalendarGrid([]);
   assert.match(textContent(emptyTree), /이번 달 일정이 없습니다/);
-  assert.match(textContent(emptyTree), /날짜를 눌러 새 일정을 만들어 보세요/);
+  // 생성 시작점이 칸 전체에서 + 버튼으로 좁혀졌으므로 안내도 그쪽을 가리켜야 한다.
+  assert.match(textContent(emptyTree), /날짜 옆 \+ 버튼을 눌러 새 일정을 만들어 보세요/);
 
   const notice = findElements(emptyTree, (node) => (
     typeof node.props.className === 'string'
@@ -6344,7 +6345,7 @@ test('the month grid explains an empty month without blocking the create path', 
   assert.match(
     String(notice.props.className),
     /pointer-events-none/,
-    '날짜 셀 클릭이 곧 생성 경로이므로 안내가 클릭을 가리면 안 된다',
+    '안내가 날짜 칸의 + 버튼을 가리면 안 된다',
   );
 
   // 이번 달에 걸치는 일정이 하나라도 있으면 안내를 숨긴다.
