@@ -279,6 +279,9 @@ function useLassoSelection(
       const target = e.target as HTMLElement;
       if (target.closest('button, input, select, textarea, a, [role="button"], [data-no-lasso], [contenteditable="true"]')) return;
       if (e.button !== 0) return;
+      // Modifier clicks belong to the card toggle. Small pointer movement must
+      // not start a replacing lasso before that click preserves/adds the card.
+      if ((e.ctrlKey || e.metaKey) && target.closest(cardSelector)) return;
 
       startRef.current = { x: e.clientX, y: e.clientY };
       const scrollEl = findScrollParent(target) ?? container;

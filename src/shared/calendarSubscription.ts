@@ -1,10 +1,11 @@
-/** External read-only feed; the bearer URL is returned only when issuing a key. */
+/** External read-only feed; authorized viewers may re-read the current bearer URL. */
 export interface CalendarFeedStatus {
   calendarId: string;
   enabled: boolean;
   issuedAt: string | null;
   revision: string | null;
   preview?: boolean;
+  url?: string;
 }
 export interface CalendarFeedRequest {
   calendarId: string;

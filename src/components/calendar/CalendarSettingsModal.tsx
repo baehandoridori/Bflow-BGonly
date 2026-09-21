@@ -413,7 +413,8 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
   const viewCount = members.length - editCount;
   const showMembers = !isPersonal && visibility !== 'private';
   const createdDate = calendar?.createdAt?.slice(0, 10) || '-';
-  const canSubmit = Boolean(name.trim() && currentUser && !saving && !reconciliationRequired);
+  const isReadOnly = Boolean(calendar && !calendar.canManage);
+  const canSubmit = Boolean(!isReadOnly && name.trim() && currentUser && !saving && !reconciliationRequired);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -669,6 +670,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
     const trimmedName = name.trim();
     if (
       !trimmedName
+      || isReadOnly
       || !currentUser
       || saving
       || mutationsLocked
@@ -825,6 +827,17 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
         </header>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          {isReadOnly ? (
+            <section>
+              <h4 className="text-sm font-semibold text-text-primary">{calendar?.name}</h4>
+              <p className="mt-2 text-xs leading-5 text-text-secondary">
+                {calendar?.isAdminOverview
+                  ? '관리자 조회로 보고 있는 캘린더예요. 이 화면에서는 캘린더 설정을 변경할 수 없어요.'
+                  : '이 캘린더의 설정을 변경할 수 없어요. 구독 주소를 이용하면 다른 캘린더 앱에서도 일정을 볼 수 있어요.'}
+              </p>
+            </section>
+          ) : (
+          <>
           <section>
             <label className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">이름</label>
             <input
@@ -1007,7 +1020,9 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
               </p>
             </section>
           )}
-          {calendar && ownerId === currentUser?.id && <CalendarSubscriptionPanel calendarId={calendar.id} disabled={saving || reconciliationRequired} />}
+          </>
+          )}
+          {calendar && <CalendarSubscriptionPanel calendarId={calendar.id} isAdminOverview={calendar.isAdminOverview} disabled={saving || reconciliationRequired} />}
         </div>
 
         {reconciliationRequired && (
@@ -1038,10 +1053,10 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
             )}
           </div>
           <div className="flex shrink-0 gap-2">
-            <button type="button" onClick={onClose} disabled={saving} className="rounded-lg px-3 py-2 text-xs text-text-secondary hover:bg-bg-primary hover:text-text-primary disabled:opacity-40 cursor-pointer">취소</button>
-            <button type="button" onClick={handleSave} disabled={!canSubmit} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-30 cursor-pointer">
+            <button type="button" onClick={onClose} disabled={saving} className="rounded-lg px-3 py-2 text-xs text-text-secondary hover:bg-bg-primary hover:text-text-primary disabled:opacity-40 cursor-pointer">{isReadOnly ? '닫기' : '취소'}</button>
+            {!isReadOnly && <button type="button" onClick={handleSave} disabled={!canSubmit} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-30 cursor-pointer">
               {saving ? '저장 중…' : '저장'}
-            </button>
+            </button>}
           </div>
         </footer>
       </motion.div>
