@@ -36,6 +36,7 @@ import {
   type IcsHttpResponse,
 } from './icsSubscriptions';
 import { registerIcsSubscriptionIpc } from './icsSubscriptionIpc';
+import { chunkForInQuery } from '../src/shared/postgrestPaging';
 import {
   broadcastCalendarNotificationToSessionWindows,
   broadcastCommittedCalendarDeleteToWindows,
@@ -2214,22 +2215,28 @@ ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, 
       console.warn('[bulk-assignee-sender-name] 조회 실패 — default 사용:', err);
     }
   }
+  // 이전 담당자를 UPDATE 전에 캡처해 두고, 새로 *추가된* 사람에게만 알림을 보낸다.
+  // 이 조회가 비면 prevAssignee 가 빈 문자열이 되어 차집합이 전체가 되고,
+  // 이미 그 씬을 맡고 있던 사람들에게까지 "새로 배정됐다" 알림이 다시 날아간다.
+  // 그래서 (1) URL 길이·응답 행수 한계에 걸리지 않게 100개씩 끊어 읽고,
+  //        (2) 값을 못 받은 씬은 '모름'으로 남겨 알림을 아예 보내지 않는다 (잘못 보내는 것보다 낫다).
   const prevAssigneeByUuid = new Map<string, string>();
   if (senderId) {
     const sceneUuidsWithAssigneeChange = updates
       .filter((u) => typeof u.fields.assignee === 'string')
       .map((u) => u.sceneUuid);
-    if (sceneUuidsWithAssigneeChange.length > 0) {
+    for (const chunk of chunkForInQuery(Array.from(new Set(sceneUuidsWithAssigneeChange)))) {
       try {
-        const { data: prevRows } = await supabaseClient
+        const { data: prevRows, error } = await supabaseClient
           .from('scenes')
           .select('id, assignee')
-          .in('id', sceneUuidsWithAssigneeChange);
+          .in('id', chunk);
+        if (error) throw new Error(error.message);
         for (const r of ((prevRows ?? []) as Array<{ id: string; assignee?: string | null }>)) {
           prevAssigneeByUuid.set(r.id, (r.assignee ?? '').toString().trim());
         }
       } catch (err) {
-        console.warn('[bulk-assignee-prev-fetch] 실패:', err);
+        console.warn('[bulk-assignee-prev-fetch] 실패 — 해당 묶음은 알림을 건너뜁니다:', err);
       }
     }
   }
@@ -2245,7 +2252,12 @@ ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, 
     }
     // 담당자 변경 시 알림 분기 (단일 핸들러와 동일 로직)
     if (senderId && typeof u.fields.assignee === 'string' && u.fields.assignee.trim()) {
-      const prevAssignee = prevAssigneeByUuid.get(u.sceneUuid) ?? '';
+      const prevAssignee = prevAssigneeByUuid.get(u.sceneUuid);
+      if (prevAssignee === undefined) {
+        // 이전 담당자를 못 읽은 씬. 빈 문자열로 진행하면 기존 담당자 전원에게 재배정 알림이 간다.
+        console.warn('[bulk-assignee-prev-fetch] 이전 담당자 미확인 — 알림 생략:', u.sceneUuid);
+        continue;
+      }
       await notifyAssigneeChange(u.sceneUuid, prevAssignee, u.fields.assignee.trim(), senderId, senderName);
     }
   }
