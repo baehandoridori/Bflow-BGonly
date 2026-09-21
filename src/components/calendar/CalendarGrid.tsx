@@ -1,7 +1,7 @@
 import { EventTagBadges } from './EventTagBadges';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { resolveEventTags } from './eventTagPresentation';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Palmtree, CheckSquare, CalendarDays } from 'lucide-react';
@@ -21,6 +21,9 @@ import {
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
 import { cursorTooltipAnchor } from '@/utils/tooltipPosition';
 import { layoutEventBars, visibleWeekDays, type EventBar } from '@/utils/calendarWeekdays';
+import { DayAddButton } from './DayAddButton';
+import { DragCreateGhost } from './DragCreateGhost';
+import { useProximityReveal } from '@/hooks/useProximityReveal';
 
 // 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
 export { layoutEventBars, type EventBar };
@@ -412,6 +415,8 @@ export function CalendarGrid({
   isDragging,
   onCellMouseDown,
   isDateInDragRange,
+  createRange,
+  onCellActivate,
   onEventContextMenu,
   onWheel,
   monthKey,
@@ -438,6 +443,13 @@ export function CalendarGrid({
   isDragging?: boolean;
   onCellMouseDown?: (e: React.MouseEvent, date: string) => void;
   isDateInDragRange?: (date: string) => boolean;
+  /**
+   * 지금 만들고 있는 범위. 고스트는 이것만 본다 — 날짜 이동 표시와 완전히 분리된다.
+   * 일수(days)도 같이 받아, 주말을 숨겨도 라벨과 실제로 만들어지는 기간이 어긋나지 않는다.
+   */
+  createRange?: { startDate: string; endDate: string; days: number; dragging: boolean } | null;
+  /** 키보드로 + 를 눌렀을 때 — 끌 수가 없으니 그 날 하루로 연다. */
+  onCellActivate?: (date: string) => void;
   onWheel?: (e: React.WheelEvent) => void;
   onEventContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
   monthKey?: string;
@@ -476,6 +488,18 @@ export function CalendarGrid({
     [showWeekends, weeks],
   );
   const columnCount = visibleWeeks[0]?.length ?? (showWeekends ? 7 : 5);
+
+  const isInCreateRange = useCallback(
+    (date: string) => !!createRange && date >= createRange.startDate && date <= createRange.endDate,
+    [createRange],
+  );
+
+  // 커서와의 거리로 + 버튼을 서서히 드러낸다. 누르고 있는 버튼은 계속 또렷하게.
+  const { refresh: refreshReveal } = useProximityReveal({
+    radius: 160,
+    isPinned: (el) => el.classList.contains('is-active'),
+  });
+  useEffect(() => { refreshReveal(); }, [visibleWeeks, createRange, refreshReveal]);
   const gridTemplateColumns = `repeat(${columnCount}, minmax(0, 1fr))`;
   const visibleWeekdayLabels = useMemo(
     () => (showWeekends ? WEEKDAYS : WEEKDAYS.filter((_, index) => index !== 0 && index !== 6)),
@@ -521,7 +545,7 @@ export function CalendarGrid({
           <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2">
             <CalendarDays size={36} className="text-text-secondary/60" />
             <span className="text-sm text-text-secondary">이번 달 일정이 없습니다</span>
-            <span className="text-[11px] text-text-secondary/60">날짜를 눌러 새 일정을 만들어 보세요</span>
+            <span className="text-[11px] text-text-secondary/60">날짜 옆 + 버튼을 눌러 새 일정을 만들어 보세요</span>
           </div>
         )}
         {visibleWeeks.map((week, wi) => {
@@ -535,6 +559,17 @@ export function CalendarGrid({
               className={cn("relative grid flex-1 min-h-0", isCurrentWeek && 'bg-accent/[0.03]')}
               style={{ gridTemplateColumns }}
             >
+              {createRange && (
+                <DragCreateGhost
+                  week={week.map((d) => fmtDate(d))}
+                  isSelected={isInCreateRange}
+                  gridTemplateColumns={gridTemplateColumns}
+                  totalDays={createRange.days}
+                  showLabel={week.some((d) => fmtDate(d) === createRange.startDate)}
+                  reduceMotion={reduceMotion}
+                  dragging={createRange.dragging}
+                />
+              )}
               {/* 날짜 셀 배경 */}
               {week.map((day, di) => {
                 const dateStr = fmtDate(day);
@@ -559,30 +594,16 @@ export function CalendarGrid({
                     key={di}
                     data-date={dateStr}
                     className={cn(
-                      'bg-bg-primary/50 transition-colors duration-100 cursor-pointer relative overflow-hidden border-b border-r border-bg-border/20',
+                      'bg-bg-primary/50 transition-colors duration-100 relative overflow-hidden border-b border-r border-bg-border/20',
                       isCurMonth ? 'hover:bg-bg-border/15' : 'opacity-30',
                       isToday && 'bg-accent/5',
                       isDropTarget && 'bg-accent/10',
                       isInDragRange && 'bg-accent/15 border-accent/30',
                       isFocused && 'ring-2 ring-inset ring-accent/60 bg-accent/8 z-10',
                     )}
-                    onMouseDown={onCellMouseDown ? (e) => onCellMouseDown(e, dateStr) : undefined}
                   >
-                    {/* 드래그 중 가상 이벤트 바 — 셀 내부 하단에 고정해서 칸을 넘지 않게 */}
-                    {isInDragRange && (
-                      <div
-                        className="absolute left-0.5 right-0.5 rounded-sm pointer-events-none"
-                        style={{
-                          bottom: '4px',
-                          height: '22px',
-                          background: 'linear-gradient(135deg, rgba(108,92,231,0.3) 0%, rgba(108,92,231,0.15) 100%)',
-                          border: '1px dashed rgba(108,92,231,0.6)',
-                          borderLeft: di === 0 || !isDateInDragRange?.(fmtDate(addDays(day, -1))) ? '3px solid #6C5CE7' : '1px dashed rgba(108,92,231,0.6)',
-                        }}
-                      />
-                    )}
-                    {/* 날짜 번호 */}
-                    <div className="p-2">
+                    {/* 날짜 번호 + 일정 추가 버튼 */}
+                    <div className="p-2 flex items-start justify-between gap-1">
                       <span
                         className={cn(
                           'text-sm tabular-nums inline-flex items-center justify-center font-medium',
@@ -595,6 +616,14 @@ export function CalendarGrid({
                       >
                         {day.getDate()}
                       </span>
+                      {onCellMouseDown && (
+                        <DayAddButton
+                          date={dateStr}
+                          label={`${day.getMonth() + 1}월 ${day.getDate()}일`}
+                          onStart={onCellMouseDown}
+                          onActivate={onCellActivate}
+                        />
+                      )}
                     </div>
                     {/* 펄스 애니메이션 (navigate-to-date) */}
                     {dateStr === pulseDate && (

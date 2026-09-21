@@ -1025,7 +1025,7 @@ export function ScheduleView() {
   // 오늘 버튼 하이라이트 (persistedDateRange와 분리)
   // todayHighlight 제거됨 — pulseDate로 통합
 
-  const { handleCellMouseDown, isDateInRange } = useCalendarDragCreate({
+  const { dragState, handleCellMouseDown, isDateInRange } = useCalendarDragCreate({
     onDragComplete: (startDate, endDate, _anchorEl) => {
       // 드래그/클릭 완료 → 상세 편집 모달 열기 (시작일+종료일 프리필)
       setCreateDate(startDate);
@@ -1277,6 +1277,34 @@ export function ScheduleView() {
     if (date === pulseDate) return true;
     return false;
   }, [isDateInRange, persistedDateRange, pulseDate]);
+
+  /**
+   * 고스트가 그릴 '지금 만들고 있는 범위'.
+   *
+   * persistedDateRange 는 날짜 이동 펄스에도 쓰이므로(아래 navigate 경로) 여기에 섞으면
+   * 미니 달력만 눌러도 '새 일정' 유리 막대가 뜬다. 드래그 상태와 생성 폼의 값만 본다.
+   * 일수도 여기서 한 번만 계산해, 주말을 숨겨도 라벨과 실제 생성 기간이 어긋나지 않는다.
+   */
+  const createRange = useMemo(() => {
+    const pair = dragState.isDragging && dragState.startDate && dragState.endDate
+      ? [dragState.startDate, dragState.endDate]
+      : (showCreate && createDate && createEndDate ? [createDate, createEndDate] : null);
+    if (!pair) return null;
+    const [a, b] = pair;
+    const startDate = a <= b ? a : b;
+    const endDate = a <= b ? b : a;
+    const days = Math.round((parseDate(endDate).getTime() - parseDate(startDate).getTime()) / 86_400_000) + 1;
+    return { startDate, endDate, days, dragging: dragState.isDragging };
+  }, [dragState, showCreate, createDate, createEndDate]);
+
+  /** 키보드로 + 를 눌렀을 때 — 끌 수가 없으니 그 날 하루로 연다. */
+  const handleCellActivate = useCallback((date: string) => {
+    setCreateDate(date);
+    setCreateEndDate(date);
+    setCreateStartTime(undefined);
+    setCreateEndTime(undefined);
+    setShowCreate(true);
+  }, []);
 
   // ─── 사이드 패널 / 퀵 에디트 핸들러 ───
   const handleUpdateEventDirect = useCallback(async (
@@ -1783,6 +1811,8 @@ export function ScheduleView() {
                 isDragging={isDragging}
                 onCellMouseDown={handleCellMouseDown}
                 isDateInDragRange={isDateInHighlightRange}
+                createRange={createRange}
+                onCellActivate={handleCellActivate}
                 onEventContextMenu={handleEventContextMenu}
                 monthKey={`${year}-${month}`}
                 monthDirection={monthDir}
