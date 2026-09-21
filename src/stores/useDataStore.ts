@@ -10,6 +10,7 @@ import type {
 } from '@/types';
 import { SCENE_PHASE_ROUND_MIN, SCENE_PHASE_ROUND_MAX } from '@/types';
 import { calcDashboardStats } from '@/utils/calcStats';
+import { defaultEpisodeTitle } from '@/shared/episodeTitle';
 import { loadCompositingStates as svcLoadCompositingStates } from '@/services/supabaseService';
 
 /**
@@ -319,7 +320,7 @@ export const useDataStore = create<DataState>((set, get) => ({
     const pad = String(episodeNumber).padStart(2, '0');
     const newEp: Episode = {
       episodeNumber,
-      title: `EP.${pad}`,
+      title: defaultEpisodeTitle(episodeNumber),
       parts: [
         { partId: 'A', department: 'bg', sheetName: `EP${pad}_A_BG`, scenes: [] },
         { partId: 'A', department: 'acting', sheetName: `EP${pad}_A_ACT`, scenes: [] },

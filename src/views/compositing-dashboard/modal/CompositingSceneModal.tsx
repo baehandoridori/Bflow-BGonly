@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
+import { buildSceneStagePatchProgress, saveAssigneeProgress } from '@/services/assigneeProgressActions';
 import type { MergedScene, Scene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
 import {
   COMPOSITING_STATUS_LABEL,
@@ -233,6 +234,12 @@ export function CompositingSceneModal({
     }
 
     store.updateSceneByUuid(sc.id, stagePatch);
+    // 담당자가 둘 이상인 씬은 표시 단계가 담당자별 기록에서 다시 계산된다.
+    // 씬 컬럼만 저장하면 다음 동기화 때 되돌아가므로 담당자별 기록도 같이 맞춘다.
+    const assigneeProgressWrite = buildSceneStagePatchProgress(sc, stagePatch, currentUser.name);
+    if (assigneeProgressWrite) {
+      store.updateSceneByUuid(sc.id, { assigneeProgress: assigneeProgressWrite.progress });
+    }
     const queuedSave = enqueueSequentialStageSave(stageSaveQueueRef.current, sc.id, async () => {
       const previousBaseline = stageSaveBaselineRef.current.get(sc.id!) ?? snapshotSequentialStages(sc);
       const queuedChangedStages = getChangedSequentialStages(previousBaseline, stagePatch);
@@ -243,6 +250,15 @@ export function CompositingSceneModal({
           updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
         );
         stageSaveBaselineRef.current.set(sc.id!, { ...stagePatch });
+        if (assigneeProgressWrite) {
+          try {
+            const merged = await saveAssigneeProgress(sc.id!, assigneeProgressWrite.progress, assigneeProgressWrite.changedNames);
+            useDataStore.getState().updateSceneByUuid(sc.id!, { assigneeProgress: merged });
+          } catch (progressErr) {
+            console.error('[컴포지팅 모달] 담당자별 진행 저장 실패:', progressErr);
+            sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
+          }
+        }
       } catch (err) {
         stageSaveBaselineRef.current.set(sc.id!, previousBaseline);
         useDataStore.getState().updateSceneByUuid(sc.id!, {

@@ -13,6 +13,7 @@ import {
   SEQUENTIAL_STAGE_ORDER,
 } from '@/utils/sceneStageProgression';
 import * as supabaseService from '@/services/supabaseService';
+import { buildSceneStagePatchProgress, saveAssigneeProgress } from '@/services/assigneeProgressActions';
 import type { CharacterTaskItem, SceneKey, PersonalTodo, PersonalTodoLabel, FlatScene, StageSaveBaseline, PersonalTodoStatus } from '../types';
 import { createStageSaveBaseline } from '../types';
 import { computeMyTasksStats } from '../statsUtils';
@@ -119,6 +120,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const episodes = useDataStore((s) => s.episodes);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
+  const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
   const currentUser = useAuthStore((s) => s.currentUser);
   const { pendingCharacterTasks, doneCharacterTasks } = useMyCharacterTasks();
   const personalTodos = usePersonalTodos();
@@ -288,6 +290,14 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       };
     };
 
+    // 다중 담당 씬이면 담당자별 기록에도 같은 변경을 반영해야 저장이 유지된다.
+    const assigneeProgressWrite = (() => {
+      const built = buildSceneStagePatchProgress(scene, stagePatch, currentUser?.name);
+      if (!built || !scene.id) return null;
+      updateSceneByUuid(scene.id, { assigneeProgress: built.progress });
+      return { sceneUuid: scene.id, ...built };
+    })();
+
     const immediateCompletionMeta = buildCompletionMeta(scene);
 
     if (immediateCompletionMeta) {
@@ -329,6 +339,21 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
               : null,
           ).catch(() => {});
         }
+        // 담당자가 둘 이상인 씬은 화면에 보이는 단계가 담당자별 기록에서 다시 계산된다.
+        // 씬 컬럼만 저장하면 다음 동기화 때 원래대로 되돌아가므로, 담당자별 기록도 같이 맞춘다.
+        if (assigneeProgressWrite) {
+          try {
+            const merged = await saveAssigneeProgress(
+              assigneeProgressWrite.sceneUuid,
+              assigneeProgressWrite.progress,
+              assigneeProgressWrite.changedNames,
+            );
+            updateSceneByUuid(assigneeProgressWrite.sceneUuid, { assigneeProgress: merged });
+          } catch (progressErr) {
+            console.error('[MyTasks 담당자별 진행 저장 실패]', progressErr);
+            toast.error(SAVE_FAIL_MESSAGE);
+          }
+        }
         stageSaveBaselineRef.current.set(saveQueueKey, {
           ...createStageSaveBaseline(previousBaseline),
           ...stagePatch,
@@ -353,7 +378,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     if (!stageSaveQueueRef.current.has(saveQueueKey)) {
       stageSaveBaselineRef.current.delete(saveQueueKey);
     }
-  }, [updateSceneFieldOptimistic, currentUser, notifyChange]);
+  }, [updateSceneFieldOptimistic, updateSceneByUuid, currentUser, notifyChange]);
 
   // 인라인 필드 편집
   const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {
