@@ -10,6 +10,8 @@ import type {
 } from '@/types';
 import { SCENE_PHASE_ROUND_MAX, SCENE_PHASE_ROUND_MIN, STAGES } from '@/types';
 
+export { mergeAssigneeProgressForWrite } from '@/utils/assigneeProgressMerge';
+
 export const SCENE_ASSIGNEE_PROGRESS_META_TYPE = 'scene-assignee-progress';
 
 export interface AssigneeProgressEntry {

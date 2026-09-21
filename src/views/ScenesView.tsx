@@ -20,6 +20,7 @@ import {
 import { getAllViewCompletionState, getSingleViewCompletionState } from '@/utils/visibleCompletion';
 import {
   buildSequentialStagePatch,
+  deriveActingPhaseFromStages,
   getChangedSequentialStages,
   isSequentialStageComplete,
   persistSequentialStagePatchWithRollback,
@@ -72,9 +73,7 @@ import {
 } from '@/utils/lengthChangePersistence';
 import { compareSceneIdsByNumberThenSuffix, compareScenesByNumberThenSuffix } from '@/utils/sceneSort';
 import {
-  SCENE_ASSIGNEE_PROGRESS_META_TYPE,
   aggregateScenePatchFromAssignees,
-  serializeAssigneeProgress,
   updateAllAssigneeProgressEntries,
   updateAssigneeProgressEntry,
   hasMultiAssigneeProgress,
@@ -83,6 +82,7 @@ import {
   matchesAssigneeStatusFilter,
   sceneProgressForAssigneeFilter,
 } from '@/utils/assigneeProgress';
+import { saveAssigneeProgress } from '@/services/assigneeProgressActions';
 import { getSceneWorkLinkSlots, getUniqueSceneUuids } from '@/utils/sceneWorkLinks';
 import { SceneWorkLinkBadges } from '@/components/scenes/SceneWorkLinkBadges';
 
@@ -2191,11 +2191,11 @@ export function ScenesView() {
   const assigneeProgressMutationSeqRef = useRef<Map<string, number>>(new Map());
 
   const enqueueAssigneeProgressWrite = useCallback(
-    (sceneUuid: string, task: () => Promise<void>) => {
+    <T,>(sceneUuid: string, task: () => Promise<T>): Promise<T> => {
       const queues = assigneeProgressWriteQueueRef.current;
       const previous = queues.get(sceneUuid) ?? Promise.resolve();
       const run = previous.catch(() => undefined).then(task);
-      const settled = run.catch(() => undefined);
+      const settled = run.then(() => undefined, () => undefined);
       queues.set(sceneUuid, settled);
       void settled.finally(() => {
         if (queues.get(sceneUuid) === settled) {
@@ -2207,14 +2207,15 @@ export function ScenesView() {
     [],
   );
 
+  /**
+   * 담당자별 진행률 저장. 통째로 덮어쓰지 않고 서버 정본 위에 `changedNames` 항목만 얹는다
+   * (같은 씬을 둘이 맡았을 때 상대 변경이 사라지는 것 방지 — saveAssigneeProgress 주석 참고).
+   * 저장된 맵을 돌려주므로 호출자가 스토어를 한 번 더 맞출 수 있다.
+   */
   const writeAssigneeProgressMetadata = useCallback(
-    (sceneUuid: string, progress: SceneAssigneeProgressMap) =>
+    (sceneUuid: string, progress: SceneAssigneeProgressMap, changedNames: string[]) =>
       enqueueAssigneeProgressWrite(sceneUuid, () =>
-        writeMetadata(
-          SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-          sceneUuid,
-          serializeAssigneeProgress(progress),
-        ),
+        saveAssigneeProgress(sceneUuid, progress, changedNames),
       ),
     [enqueueAssigneeProgressWrite],
   );
@@ -2360,7 +2361,7 @@ export function ScenesView() {
 
       if (nextProgress) {
         try {
-          await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
+          await writeAssigneeProgressMetadata(sceneUuid, nextProgress, Object.keys(nextProgress));
         } catch (err) {
           console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
           sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
@@ -2484,6 +2485,9 @@ export function ScenesView() {
         : -1;
       const scene = sceneIndex >= 0 ? latestPart?.scenes[sceneIndex] : undefined;
       if (!scene?.id || sceneIndex < 0) return;
+      // 담당자가 한 명 이하로 보이는 순간(담당자 편집 중 realtime 수신 등)에는 저장하지 않는다.
+      // 그대로 쓰면 담당자 목록에서 빠진 사람의 기록까지 같이 지워진다.
+      if (!hasMultiAssigneeProgress(scene)) return;
       const sceneUuid = scene.id;
 
       const prevScene = { ...scene };
@@ -2523,12 +2527,22 @@ export function ScenesView() {
 
       try {
         await enqueueAssigneeProgressWrite(sceneUuid, async () => {
-          await writeMetadata(
-            SCENE_ASSIGNEE_PROGRESS_META_TYPE,
-            sceneUuid,
-            serializeAssigneeProgress(nextProgress),
-          );
-          if (completionMeta) {
+          // 서버 정본 위에 내 항목만 얹어 저장하고, 그 결과로 화면을 다시 맞춘다.
+          // 저장하는 동안 상대가 바꾼 값이 있으면 그것까지 함께 반영된다.
+          const merged = await saveAssigneeProgress(sceneUuid, nextProgress, [assigneeName]);
+          // 완료 판정은 저장 전 내 화면 기준이었다. 병합으로 상대의 최신 값이 들어오면 결과가 달라질 수 있으므로
+          // 실제 저장된 값으로 다시 판정한다. 어긋나면 완료 도장을 찍지 않고 이전 값을 되살린다.
+          const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
+          const mergedPatch = latest ? aggregateScenePatchFromAssignees(latest, merged, department) : null;
+          const mergedFullyDone = latest && mergedPatch ? isFullyDone({ ...latest, ...mergedPatch }) : willBeFullyDone;
+          const completionStillHolds = !completionMeta || mergedFullyDone === willBeFullyDone;
+          if (assigneeProgressMutationSeqRef.current.get(sceneUuid) === mutationSeq) {
+            if (mergedPatch) updateSceneByUuid(sceneUuid, mergedPatch);
+            if (completionMeta && !completionStillHolds) {
+              updateSceneByUuid(sceneUuid, { completedBy: prevCompletedBy, completedAt: prevCompletedAt });
+            }
+          }
+          if (completionMeta && completionStillHolds) {
             try {
               await updateSceneCompletionMeta(
                 sheetName,
@@ -2652,7 +2666,7 @@ export function ScenesView() {
         const patch = aggregateScenePatchFromAssignees(scene, nextProgress, 'acting');
         updateSceneByUuid(sceneUuid, patch);
         try {
-          await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
+          await writeAssigneeProgressMetadata(sceneUuid, nextProgress, Object.keys(nextProgress));
         } catch (err) {
           console.error('[ScenesView] 담당자별 피드백 대기 저장 실패:', err);
           sonnerToast.error('담당자별 피드백 대기 저장에 실패했습니다.');
@@ -2727,7 +2741,7 @@ export function ScenesView() {
       const patch = aggregateScenePatchFromAssignees(scene, nextProgress, 'acting');
       updateSceneByUuid(sceneUuid, patch);
       try {
-        await writeAssigneeProgressMetadata(sceneUuid, nextProgress);
+        await writeAssigneeProgressMetadata(sceneUuid, nextProgress, Object.keys(nextProgress));
         sonnerToast.success('상태만 변경했습니다 (알림 없음).');
       } catch (err) {
         console.error('[ScenesView] 담당자별 피드백 대기(조용히) 저장 실패:', err);
@@ -3969,24 +3983,12 @@ export function ScenesView() {
     const isActingScene = sheetName.endsWith('_ACT');
     let actingPhaseSync: { state: ScenePhaseState; workRound: number; feedbackRound: number } | null = null;
     if (isActingScene && scene.id) {
-      const newPhase: ScenePhaseState =
-        stagePatch.png ? 'done'
-        : stagePatch.review ? 'feedback'
-        : stagePatch.done ? 'work'
-        : 'wait';
-      const prevPhase: ScenePhaseState = scene.sceneState ?? 'wait';
-      const work = newPhase === 'work'
-        ? (prevPhase === 'work' ? Math.max(1, scene.workRound ?? 1) : 1)
-        : 0;
-      const feedback = newPhase === 'feedback'
-        ? (prevPhase === 'feedback' ? Math.max(1, scene.feedbackRound ?? 1) : 1)
-        : 0;
-      actingPhaseSync = { state: newPhase, workRound: work, feedbackRound: feedback };
+      actingPhaseSync = deriveActingPhaseFromStages(scene, stagePatch);
       updateSceneByUuid(scene.id, {
-        sceneState: newPhase,
-        workRound: work,
-        feedbackRound: feedback,
-        ...legacyStagesFor(newPhase),
+        sceneState: actingPhaseSync.state,
+        workRound: actingPhaseSync.workRound,
+        feedbackRound: actingPhaseSync.feedbackRound,
+        ...legacyStagesFor(actingPhaseSync.state),
       });
     }
 
@@ -4041,7 +4043,7 @@ export function ScenesView() {
         }
         if (scene.id && nextAssigneeProgress) {
           try {
-            await writeAssigneeProgressMetadata(scene.id, nextAssigneeProgress);
+            await writeAssigneeProgressMetadata(scene.id, nextAssigneeProgress, Object.keys(nextAssigneeProgress));
           } catch (progressErr) {
             console.error('[ScenesView] 담당자별 진행 저장 실패:', progressErr);
             sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
@@ -4272,7 +4274,7 @@ export function ScenesView() {
             const nextProgress = bulkAssigneeProgressByUuid.get(result.sceneUuid);
             if (!result.success || !nextProgress) return result;
             try {
-              await writeAssigneeProgressMetadata(result.sceneUuid, nextProgress);
+              await writeAssigneeProgressMetadata(result.sceneUuid, nextProgress, Object.keys(nextProgress));
               return result;
             } catch (err) {
               const message = err instanceof Error ? err.message : 'assignee progress metadata failed';
@@ -4432,7 +4434,7 @@ export function ScenesView() {
               }
               if (patch.assigneeProgress) {
                 try {
-                  await writeAssigneeProgressMetadata(uuid, patch.assigneeProgress);
+                  await writeAssigneeProgressMetadata(uuid, patch.assigneeProgress, Object.keys(patch.assigneeProgress));
                 } catch (progressErr) {
                   const prev = prevByUuid.get(uuid);
                   if (prev) updateSceneByUuid(uuid, { assigneeProgress: prev.assigneeProgress });
@@ -5231,6 +5233,10 @@ export function ScenesView() {
     setEpEditOpen(false);
     const key = String(currentEp.episodeNumber);
 
+    // 롤백용 스냅샷 — 저장이 실패하면 화면만 바뀐 채 남지 않도록 되돌린다.
+    const prevTitles = { ...episodeTitles };
+    const prevMemos = { ...episodeMemos };
+
     // 즉시 UI 반영 — setState 콜백 안에서 글로벌 스토어 업데이트하면
     // "Cannot update a component while rendering" 경고 발생하므로 분리
     if (title.trim()) {
@@ -5245,13 +5251,21 @@ export function ScenesView() {
     }
     setEpisodeMemos({ ...episodeMemos, [currentEp.episodeNumber]: memo });
 
-    // 저장
-    try {
-      await writeMetadata('episode-title', key, title.trim());
-      await writeMetadata('episode-memo', key, memo);
-    } catch (err) {
-      console.warn('[에피소드 메타] 시트 저장 실패', err);
+    // 저장 — 제목과 메모는 서로 독립이라 한쪽이 실패해도 다른 쪽은 시도한다.
+    const [titleResult, memoResult] = await Promise.allSettled([
+      writeMetadata('episode-title', key, title.trim()),
+      writeMetadata('episode-memo', key, memo),
+    ]);
+    const failed = [titleResult, memoResult].filter((r) => r.status === 'rejected');
+    if (failed.length > 0) {
+      // 조용히 삼키면 화면에는 새 이름이 남아 있다가 다음 동기화 때 소리 없이 되돌아간다.
+      console.warn('[에피소드 메타] 저장 실패', failed.map((r) => (r as PromiseRejectedResult).reason));
+      setEpisodeTitles(prevTitles);
+      setEpisodeMemos(prevMemos);
+      sonnerToast.error('에피소드 이름·메모 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      return;
     }
+    syncInBackground();
   };
 
   const backLabel = !hasNavigationBackTarget && previousView && previousView !== 'scenes' ? VIEW_LABELS[previousView] : null;

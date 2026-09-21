@@ -53,7 +53,7 @@ test('whole-scene and bulk actions persist all assignee progress together', () =
 
   assert.match(util, /updateAllAssigneeProgressEntries/);
   assert.match(scenesView, /bulkAssigneeProgressByUuid/);
-  assert.match(scenesView, /writeAssigneeProgressMetadata\(uuid, patch\.assigneeProgress\)/);
+  assert.match(scenesView, /writeAssigneeProgressMetadata\(uuid, patch\.assigneeProgress, Object\.keys\(patch\.assigneeProgress\)\)/);
   assert.match(scenesView, /assigneeProgress: nextProgress/);
   assert.match(scenesView, /phasePatch\.assigneeProgress = nextProgress/);
 });
@@ -113,7 +113,7 @@ test('per-assignee progress metadata writes are serialized per scene', () => {
   assert.match(scenesView, /assigneeProgressWriteQueueRef/);
   assert.match(scenesView, /queues\.get\(sceneUuid\) \?\? Promise\.resolve\(\)/);
   assert.match(scenesView, /const run = previous\.catch\(\(\) => undefined\)\.then\(task\)/);
-  assert.match(scenesView, /writeAssigneeProgressMetadata\(sceneUuid, nextProgress\)/);
+  assert.match(scenesView, /writeAssigneeProgressMetadata\(sceneUuid, nextProgress, Object\.keys\(nextProgress\)\)/);
   assert.match(scenesView, /assigneeProgressMutationSeqRef/);
 });
 

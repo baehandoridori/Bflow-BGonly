@@ -8,6 +8,8 @@ import {
 import { deleteImage as storageDeleteImage } from './storage';
 import { createRetryManager } from './retry-utils';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds, type CharacterCommentSummaries } from '../src/shared/characterCommentSummary';
+import { collectAllPages, POSTGREST_PAGE_SIZE } from '../src/shared/postgrestPaging';
+import { defaultEpisodeTitle } from '../src/shared/episodeTitle';
 import type {
   PersonalTodoLabelColorKey,
   PersonalTodoLabelRecord,
@@ -401,7 +403,9 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     const epParts = partsByEp.get(ep.id) || [];
     return {
       episodeNumber: ep.episode_number,
-      title: ep.title || '',
+      // 제목은 metadata(type='episode-title')에 저장되므로 episodes.title 은 보통 비어 있다.
+      // 커스텀 제목이 없을 때 이름 없는 줄이 생기지 않도록 EP.xx 폴백을 준다.
+      title: ep.title || defaultEpisodeTitle(ep.episode_number),
       memo: ep.memo || '',
       reelFilePath: (ep as { reel_file_path?: string | null }).reel_file_path ?? null,
       parts: epParts.map((p) => {
@@ -526,7 +530,7 @@ export async function readArchivedEpisodes(): Promise<{
   throwIfError(error);
   return (data || []).map((e) => ({
     episodeNumber: e.episode_number,
-    title: e.title || '',
+    title: e.title || defaultEpisodeTitle(e.episode_number),
     archivedBy: e.archived_by || '',
     archivedAt: e.archived_at || '',
     archiveMemo: e.archive_memo || '',
@@ -2757,13 +2761,27 @@ export async function deleteSceneWorkLink(
 // METADATA
 // ═══════════════════════════════════════════════
 
-/** 모든 메타데이터 읽기 */
+/** 모든 메타데이터 읽기.
+ *
+ *  PostgREST 는 한 응답을 기본 1000행으로 제한한다. metadata 는 씬 완료 기록(scene-completion)이
+ *  쌓이면서 이미 1000행을 훌쩍 넘겼고, 단일 select 로 읽으면 뒤쪽 행이 통째로 누락된다.
+ *  누락되는 행에는 에피소드 제목(episode-title)과 담당자별 진행률(scene-assignee-progress)이 섞여 있어서
+ *  "에피소드 이름을 바꿔도 되돌아온다", "두 명이 같이 맡은 씬의 체크가 되돌아온다"로 나타난다.
+ *  게다가 upsert 로 행이 갱신될 때마다 물리적 위치가 바뀌어 잘려나가는 행이 계속 달라지므로
+ *  증상이 "간헐적"으로 보인다. → range() 로 끝까지 받아 전량을 적재한다.
+ *  페이지 경계에서 누락/중복이 없도록 고유키(id)로 정렬한다. */
 export async function readAllMetadata(): Promise<{ type: string; key: string; value: string; updatedAt: string }[]> {
-  const { data, error } = await supabase
-    .from('metadata')
-    .select('type, key, value, updated_at');
-  throwIfError(error);
-  return (data || []).map((m) => ({
+  type MetadataRow = { type: string; key: string; value: string | null; updated_at: string | null };
+  const rows = await collectAllPages<MetadataRow>(async (from, to) => {
+    const { data, error } = await supabase
+      .from('metadata')
+      .select('type, key, value, updated_at')
+      .order('id', { ascending: true })
+      .range(from, to);
+    throwIfError(error);
+    return (data || []) as MetadataRow[];
+  }, POSTGREST_PAGE_SIZE);
+  return rows.map((m) => ({
     type: m.type,
     key: m.key,
     value: m.value || '',

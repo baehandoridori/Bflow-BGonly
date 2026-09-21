@@ -12,6 +12,7 @@ import { STAGES } from '@/types';
 import type { Stage, Scene } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { currentStageInfo } from '../stageInfo';
 
 interface StageChipsProps {
@@ -28,6 +29,11 @@ export function StageChips({ scene, deptCfg, onToggleStage, size = 'sm', reduce 
   // 강조 단계는 currentStageInfo 와 동일 기준으로 단 하나만 — 행/카드의 'n/4' 라벨과 일치하게
   // (비연속 데이터에서 칩 여러 개가 강조되며 라벨과 어긋나던 불일치 제거 + 규칙 일원화).
   const currentKey = currentStageInfo(scene).currentStageKey;
+  // 담당자가 둘 이상인 씬의 칩은 '담당자 전원의 공통 진행'이라 개인 체크박스가 아니다.
+  // 여기서 누르면 (a) 내 것만 바꿔도 공통 진행이 안 움직여 그대로 되돌아가고,
+  // (b) 전원을 맞추면 나보다 앞서간 사람의 기록을 끌어내린다.
+  // 그래서 진행 표시로만 두고, 편집은 씬 목록의 담당자별 줄에서 한다(씬 뷰도 같은 규칙).
+  const readOnly = hasMultiAssigneeProgress(scene);
   return (
     <div className="flex bg-bg-primary rounded-md p-0.5 border border-bg-border gap-0.5 shrink-0 w-fit">
       {STAGES.map((stage) => {
@@ -39,14 +45,21 @@ export function StageChips({ scene, deptCfg, onToggleStage, size = 'sm', reduce 
           <motion.button
             key={stage}
             type="button"
-            whileTap={reduce ? undefined : { scale: 0.85 }}
-            onClick={(e) => { e.stopPropagation(); onToggleStage(stage); }}
-            title={`${deptCfg.stageLabels[stage]}${checked ? ' · 누르면 해제' : ' 표시'}`}
+            whileTap={reduce || readOnly ? undefined : { scale: 0.85 }}
+            onClick={(e) => { e.stopPropagation(); if (!readOnly) onToggleStage(stage); }}
+            disabled={readOnly}
+            title={
+              readOnly
+                ? `${deptCfg.stageLabels[stage]} · 담당자가 둘 이상인 씬이에요. 씬 목록에서 담당자별로 체크해주세요.`
+                : `${deptCfg.stageLabels[stage]}${checked ? ' · 누르면 해제' : ' 표시'}`
+            }
             aria-pressed={checked}
             className={cn(
               dim,
-              'rounded font-medium flex items-center justify-center cursor-pointer transition-all',
-              !checked && 'text-text-secondary/40 border border-dashed border-bg-border/60 hover:text-text-secondary/80 hover:border-accent/40 hover:bg-bg-border/15',
+              'rounded font-medium flex items-center justify-center transition-all',
+              readOnly ? 'cursor-default' : 'cursor-pointer',
+              !checked && 'text-text-secondary/40 border border-dashed border-bg-border/60',
+              !checked && !readOnly && 'hover:text-text-secondary/80 hover:border-accent/40 hover:bg-bg-border/15',
             )}
             style={
               isCurrent

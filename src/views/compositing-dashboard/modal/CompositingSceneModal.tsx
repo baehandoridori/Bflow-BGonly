@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import type { MergedScene, Scene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
 import {
   COMPOSITING_STATUS_LABEL,
@@ -225,6 +226,13 @@ export function CompositingSceneModal({
       ? part?.scenes.find((s) => s.id === options.sceneUuid)
       : part?.scenes.find((s) => s.sceneId === sceneIdArg);
     if (!sc?.id) return;
+    // 담당자가 둘 이상인 씬의 4단계는 담당자 전원의 공통 진행이라 개인 체크박스가 아니다.
+    // 여기서 저장하면 (a) 한 명만 바꿔도 공통 진행이 안 움직여 되돌아가고,
+    // (b) 전원을 맞추면 앞서간 사람의 기록을 끌어내린다. 씬 목록의 담당자별 줄로 안내한다.
+    if (hasMultiAssigneeProgress(sc)) {
+      sonnerToast.info('담당자가 둘 이상인 씬은 씬 목록에서 담당자별로 체크해주세요.');
+      return;
+    }
     const stagePatch = buildSequentialStagePatch(sc, stage);
     const changedStages = getChangedSequentialStages(sc, stagePatch);
     if (changedStages.length === 0) return;
@@ -237,7 +245,9 @@ export function CompositingSceneModal({
       const previousBaseline = stageSaveBaselineRef.current.get(sc.id!) ?? snapshotSequentialStages(sc);
       const queuedChangedStages = getChangedSequentialStages(previousBaseline, stagePatch);
       store.updateSceneByUuid(sc.id!, stagePatch);
-      if (queuedChangedStages.length === 0) return;
+      if (queuedChangedStages.length === 0) {
+        return;
+      }
       try {
         await persistSequentialStagePatchWithRollback(queuedChangedStages, stagePatch, previousBaseline, (changedStage, value) =>
           updateSceneStageInSupabase(sc.id!, changedStage, value, currentUser.id),
