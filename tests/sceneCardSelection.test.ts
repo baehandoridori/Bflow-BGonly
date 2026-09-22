@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { selectSceneCard } from '../src/utils/sceneCardSelection.ts';
+import { buildSingleSceneSelectionId } from '../src/utils/sceneSelectionId.ts';
 
 const viewSource = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const unifiedSource = readFileSync('src/components/scenes/UnifiedSceneCard.tsx', 'utf8');
@@ -13,6 +15,91 @@ function findNode(source: string, predicate: (node: ts.Node) => boolean): ts.Nod
 }
 const namedFunction = (name: string) => findNode(viewSource, node => ts.isFunctionDeclaration(node) && node.name?.text === name).getText();
 const compile = (source: string) => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+function cardParents(tag: string): ts.JsxSelfClosingElement[] {
+  const file = ts.createSourceFile('view.tsx', viewSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const matches: ts.JsxSelfClosingElement[] = [];
+  function visit(node: ts.Node) { if (ts.isJsxSelfClosingElement(node) && node.tagName.getText() === tag) matches.push(node); ts.forEachChild(node, visit); }
+  visit(file); return matches;
+}
+function parentProps(node: ts.JsxSelfClosingElement, context: Record<string, unknown>) {
+  const props: Record<string, unknown> = {};
+  for (const attr of node.attributes.properties) {
+    if (!ts.isJsxAttribute(attr) || !['onSelect', 'onCtrlSelect', 'onShiftSelect', 'onCtrlClick', 'onShiftClick'].includes(attr.name.getText())) continue;
+    const expression = (attr.initializer as ts.JsxExpression).expression!;
+    props[attr.name.getText()] = new Function(...Object.keys(context), compile(`return (${expression.getText()});`))(...Object.values(context));
+  }
+  return props;
+}
+
+test('both actual unified card parents wire Shift range selection instead of falling back to a single scene', () => {
+  const parents = cardParents('UnifiedSceneCard'); assert.equal(parents.length, 2);
+  for (const parent of parents) {
+    const shift = parent.attributes.properties.find(attr => ts.isJsxAttribute(attr) && attr.name.getText() === 'onShiftSelect');
+    assert.ok(shift, 'flat and layout-group parents must pass the Shift callback');
+  }
+});
+
+/** Parent JSX callbacks + parent selection handler + child handler are all production code. */
+function parentHarness(mode: 'single' | 'unified', parentIndex: number) {
+  let selection = new Set<string>();
+  const all = ['a', 'b', 'c', 'd'].map(id => ({ id, mergedKey: id, sceneId: id, bgScene: {} as object | null, actScene: {} as object | null }));
+  let visible = all, groups: Array<[string, typeof all]> | null = null;
+  const anchor = { current: null as string | null };
+  const parent = cardParents(mode === 'single' ? 'SceneCard' : 'UnifiedSceneCard')[parentIndex];
+  assert.ok(parent);
+  const handlerNode = findNode(viewSource, node => ts.isVariableDeclaration(node) && node.name.getText() === 'handleCardSelection') as ts.VariableDeclaration;
+  const click = (id: string, keys: Record<string, boolean> = {}) => {
+    const scene = all.find(row => row.id === id)!;
+    const context = {
+      selectedDepartment: mode === 'unified' ? 'all' : 'bg', mergedLayoutGroups: groups, layoutGroups: groups,
+      mergedScenes: visible, scenes: visible, currentPart: { sheetName: 'sheet', scenes: all },
+      bgPart: {}, actPart: {}, lastClickedSceneKeyRef: anchor, selectSceneCard, buildSingleSceneSelectionId,
+      useAppStore: { getState: () => ({ selectedSceneIds: selection }) }, setSelectedScenes: (next: Set<string>) => { selection = next; },
+    };
+    const handleCardSelection = new Function(...Object.keys(context), compile(`return (${handlerNode.initializer!.getText()});`))(...Object.values(context));
+    const callbacks = parentProps(parent, { m: scene, selectionId: buildSingleSceneSelectionId('sheet', scene, all.indexOf(scene)), handleCardSelection });
+    // Single-card ordinary mouseup resets selection before its click (covered above).
+    if (mode === 'single' && !keys.ctrlKey && !keys.metaKey && !keys.shiftKey) selection = new Set();
+    clickHandler(mode, callbacks)({ ctrlKey: false, metaKey: false, shiftKey: false, preventDefault() {}, ...keys });
+  };
+  return { click, order(ids: string[]) { visible = ids.map(id => all.find(row => row.id === id)!); groups = null; },
+    layout(ids: string[][]) { groups = ids.map((group, i) => [String(i), group.map(id => all.find(row => row.id === id)!)]); },
+    keys: () => all.filter(row => selection.has(mode === 'unified' ? `bg:${row.id}` : buildSingleSceneSelectionId('sheet', row, all.indexOf(row)))).map(row => row.id),
+    ids: () => [...selection], anchor: () => anchor.current,
+    missing(id: string, department: 'bgScene' | 'actScene') { all.find(row => row.id === id)![department] = null; },
+  };
+}
+
+for (const mode of ['single', 'unified'] as const) for (const parentIndex of [0, 1]) {
+  test(`${mode} actual parent ${parentIndex}: inclusive forward/reverse range and repeated Shift retain the click anchor`, () => {
+    const h = parentHarness(mode, parentIndex);
+    h.click('b'); const anchor = h.anchor(); h.click('d', { shiftKey: true }); assert.deepEqual(h.keys(), ['b', 'c', 'd']);
+    h.click('a', { shiftKey: true }); assert.deepEqual(h.keys(), ['a', 'b', 'c', 'd']); assert.equal(h.anchor(), anchor);
+    const reverse = parentHarness(mode, parentIndex); reverse.click('d'); reverse.click('b', { shiftKey: true }); assert.deepEqual(reverse.keys(), ['b', 'c', 'd']);
+    if (mode === 'unified') assert.equal(reverse.ids().length, 6, 'BG and ACT selection IDs remain paired');
+  });
+  test(`${mode} actual parent ${parentIndex}: Ctrl coexists, filtered sort and cross-layout ranges follow displayed rows`, () => {
+    const h = parentHarness(mode, parentIndex);
+    h.click('a'); h.click('d', { ctrlKey: true }); h.click('c', { shiftKey: true }); assert.deepEqual(h.keys(), ['a', 'c', 'd']);
+    h.click('d', { ctrlKey: true }); assert.deepEqual(h.keys(), ['a', 'c']);
+    const sorted = parentHarness(mode, parentIndex); sorted.order(['d', 'b', 'a']); sorted.click('d'); sorted.click('a', { shiftKey: true }); assert.deepEqual(sorted.keys(), ['a', 'b', 'd']);
+    const grouped = parentHarness(mode, parentIndex); grouped.layout([['c', 'a'], ['d', 'b']]); grouped.click('a'); grouped.click('b', { shiftKey: true }); assert.deepEqual(grouped.keys(), ['a', 'b', 'd']);
+  });
+  test(`${mode} actual parent ${parentIndex}: missing or filtered-out anchor safely selects the target and establishes a new anchor`, () => {
+    const h = parentHarness(mode, parentIndex); h.click('c', { shiftKey: true }); assert.deepEqual(h.keys(), ['c']); assert.ok(h.anchor());
+    h.click('a', { shiftKey: true }); assert.deepEqual(h.keys(), ['a', 'b', 'c']);
+    const hidden = parentHarness(mode, parentIndex); hidden.click('a'); hidden.order(['d', 'b', 'c']); hidden.click('b', { shiftKey: true }); assert.deepEqual(hidden.keys(), ['a', 'b']);
+    const anchor = hidden.anchor(); hidden.click('c', { shiftKey: true }); assert.deepEqual(hidden.keys(), ['a', 'b', 'c']); assert.equal(hidden.anchor(), anchor);
+  });
+}
+for (const parentIndex of [0, 1]) test(`unified actual parent ${parentIndex}: absent department scenes never produce selection IDs`, () => {
+  const h = parentHarness('unified', parentIndex);
+  h.missing('a', 'actScene'); h.missing('b', 'bgScene');
+  h.click('a'); assert.deepEqual(h.ids(), ['bg:a']);
+  h.click('b', { shiftKey: true }); assert.deepEqual(h.ids(), ['bg:a', 'act:b']);
+  h.click('b', { ctrlKey: true }); assert.deepEqual(h.ids(), ['bg:a']);
+});
+
 function clickHandler(mode: 'single' | 'unified', callbacks: Record<string, unknown>) {
   const source = mode === 'single' ? viewSource.slice(viewSource.indexOf('function SceneCard(')) : unifiedSource;
   const node = findNode(source, node => ts.isVariableDeclaration(node) && node.name.getText() === 'handleClick') as ts.VariableDeclaration;

@@ -736,3 +736,8 @@ PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor �
 - `git worktree remove --force`·`rm -rf`·`Remove-Item -Recurse` 는 Windows junction 을 실제 디렉터리처럼 따라 들어가 **대상(다른 워크트리의 node_modules) 내용을 지운다**. 검증 에이전트 워크트리를 지우다 공유 node_modules 의 `.bin`·`@`-scoped 패키지가 사라져 다른 워크트리의 `tsc` 가 통째로 실패했다. 반드시 `cmd /c rmdir "<워크트리>\node_modules"` 로 링크를 먼저 끊은 뒤 워크트리를 지운다(`cmd /c "dir /AL"` 로 junction 유무 확인).
 - 워크트리에 node_modules 를 연결해 쓸 때는 `npm install`/`npm ci` 를 그 워크트리에서 실행하지 않는다(연결 대상이 지워진다). 손상되면 대상 워크트리에서 `npm ci` 로 복구한다.
 - 서브에이전트에게 워크트리 격리 작업을 시킬 때는 "워크트리는 지우지 마라" 를 지시하고, 정리는 메인 세션이 위 순서로 한다.
+
+### 2026-09-21: 카드 선택은 부모 연결과 화면 순서까지 확인한다
+
+- 카드 내부 Shift 분기에 성공 callback을 주입하는 테스트만으로 실제 화면의 Shift 지원을 증명할 수 없다. 부모 JSX가 callback을 전달하는지와 실제 클릭 시 선택 개수·범위를 함께 확인한다.
+- 범위 선택 앵커를 그룹 내부 배열 index로 기억하면 정렬·필터·다른 그룹 클릭에서 엉뚱한 범위를 선택한다. 안정된 씬 식별자로 기억하고 현재 화면의 표시 순서에서 위치를 다시 찾는다.
