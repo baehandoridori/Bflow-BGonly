@@ -26,6 +26,7 @@ import {
   persistSequentialStagePatchWithRollback,
 } from '@/utils/sceneStageProgression';
 import { buildSingleSceneSelectionId } from '@/utils/sceneSelectionId';
+import { selectSceneCard } from '@/utils/sceneCardSelection';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus, UserRound } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
@@ -2933,8 +2934,8 @@ export function ScenesView() {
   const [commentReadAtByKey, setCommentReadAtByKey] = useState<Record<string, string>>({});
   // 댓글 카운트 로딩은 currentPart 정의 후 아래에서 수행 (useEffect)
 
-  // Shift+Click 범위 선택을 위한 마지막 클릭 인덱스
-  const lastClickedIndexRef = useRef<number | null>(null);
+  // Stable identity survives sorting/filtering and crossing layout groups.
+  const lastClickedSceneKeyRef = useRef<string | null>(null);
 
   // 라쏘 드래그 선택
   const gridRef = useRef<HTMLDivElement>(null);
@@ -2970,7 +2971,7 @@ export function ScenesView() {
   );
 
   // 파트/에피소드/뷰모드 변경 시 선택 초기화
-  useEffect(() => { clearSelectedScenes(); }, [selectedEpisode, selectedPart, selectedDepartment, sceneViewMode, clearSelectedScenes]);
+  useEffect(() => { clearSelectedScenes(); lastClickedSceneKeyRef.current = null; }, [selectedEpisode, selectedPart, selectedDepartment, sceneViewMode, clearSelectedScenes]);
 
   // 백그라운드 동기화: 낙관적 업데이트 후 서버와 싱크
   // 동기화 매니저: 버전 카운터로 오래된 응답 폐기 + 아카이브 가드로 낙관적 상태 보호
@@ -3748,6 +3749,24 @@ export function ScenesView() {
       return a[0].localeCompare(b[0], undefined, { numeric: true });
     });
   }, [mergedScenes, selectedDepartment, sceneGroupMode]);
+
+  const handleCardSelection = (key: string, mode: 'replace' | 'toggle' | 'range') => {
+    const rows = selectedDepartment === 'all'
+      ? (mergedLayoutGroups ? mergedLayoutGroups.flatMap(([, group]) => group) : mergedScenes).map(merged => ({
+        key: merged.mergedKey,
+        selectionIds: [bgPart && merged.bgScene ? `bg:${merged.mergedKey}` : null, actPart && merged.actScene ? `act:${merged.mergedKey}` : null]
+          .filter((id): id is string => id !== null),
+      }))
+      : (layoutGroups ? layoutGroups.flatMap(([, group]) => group) : scenes).map(scene => {
+        const index = currentPart?.scenes.indexOf(scene) ?? -1;
+        const id = buildSingleSceneSelectionId(currentPart?.sheetName ?? '', scene, index);
+        return { key: id, selectionIds: [id] };
+      });
+    setSelectedScenes(selectSceneCard(useAppStore.getState().selectedSceneIds, rows, lastClickedSceneKeyRef.current, key, mode));
+    if (mode !== 'range' || !rows.some(row => row.key === lastClickedSceneKeyRef.current)) {
+      lastClickedSceneKeyRef.current = key;
+    }
+  };
 
   // 담당자 목록 (현재 파트 기준)
   const assignees = Array.from(
@@ -5970,16 +5989,9 @@ export function ScenesView() {
                               setDetailMerged(merged);
                             }}
                             onCelebrationEnd={clearCelebration}
-                            onSelect={() => {
-                              const ids = new Set<string>();
-                              if (bgPart) ids.add(`bg:${m.mergedKey}`);
-                              if (actPart) ids.add(`act:${m.mergedKey}`);
-                              setSelectedScenes(ids);
-                            }}
-                            onCtrlSelect={() => {
-                              if (bgPart) toggleSelectedScene(`bg:${m.mergedKey}`);
-                              if (actPart) toggleSelectedScene(`act:${m.mergedKey}`);
-                            }}
+                            onSelect={() => handleCardSelection(m.mergedKey, 'replace')}
+                            onCtrlSelect={() => handleCardSelection(m.mergedKey, 'toggle')}
+                            onShiftSelect={() => handleCardSelection(m.mergedKey, 'range')}
                             onActPhaseStateClick={handleActPhaseStateClick}
                             onActFeedbackRequest={handleActFeedbackRequest}
                             onActRoundBump={handleActRoundBump}
@@ -6030,16 +6042,9 @@ export function ScenesView() {
                         setDetailMerged(merged);
                       }}
                       onCelebrationEnd={clearCelebration}
-                      onSelect={() => {
-                        const ids = new Set<string>();
-                        if (bgPart) ids.add(`bg:${m.mergedKey}`);
-                        if (actPart) ids.add(`act:${m.mergedKey}`);
-                        setSelectedScenes(ids);
-                      }}
-                      onCtrlSelect={() => {
-                        if (bgPart) toggleSelectedScene(`bg:${m.mergedKey}`);
-                        if (actPart) toggleSelectedScene(`act:${m.mergedKey}`);
-                      }}
+                      onSelect={() => handleCardSelection(m.mergedKey, 'replace')}
+                      onCtrlSelect={() => handleCardSelection(m.mergedKey, 'toggle')}
+                      onShiftSelect={() => handleCardSelection(m.mergedKey, 'range')}
                       onActPhaseStateClick={handleActPhaseStateClick}
                       onActFeedbackRequest={handleActFeedbackRequest}
                       onActRoundBump={handleActRoundBump}
@@ -6185,30 +6190,8 @@ export function ScenesView() {
                               onDelete={handleDeleteScene}
                               onOpenDetail={() => setDetailSceneIndex(sIdx)}
                               onCelebrationEnd={clearCelebration}
-                              onCtrlClick={() => {
-                                toggleSelectedScene(selectionId);
-                                lastClickedIndexRef.current = idx;
-                              }}
-                              onShiftClick={() => {
-                                const lastIdx = lastClickedIndexRef.current;
-                                if (lastIdx !== null && lastIdx !== idx) {
-                                  const from = Math.min(lastIdx, idx);
-                                  const to = Math.max(lastIdx, idx);
-                                  const rangeIds = new Set(selectedSceneIds);
-                                  for (let i = from; i <= to; i++) {
-                                    const rangeScene = groupScenes[i];
-                                    if (rangeScene) {
-                                      const rangeRawIdx = currentPart?.scenes.indexOf(rangeScene) ?? -1;
-                                      const rangeIdx = rangeRawIdx >= 0 ? rangeRawIdx : i;
-                                      rangeIds.add(buildSingleSceneSelectionId(currentPart?.sheetName ?? '', rangeScene, rangeIdx));
-                                    }
-                                  }
-                                  setSelectedScenes(rangeIds);
-                                } else {
-                                  toggleSelectedScene(selectionId);
-                                }
-                                lastClickedIndexRef.current = idx;
-                              }}
+                              onCtrlClick={() => handleCardSelection(selectionId, 'toggle')}
+                              onShiftClick={() => handleCardSelection(selectionId, 'range')}
                             />
                           );
                         })}
@@ -6279,30 +6262,8 @@ export function ScenesView() {
                     onDelete={handleDeleteScene}
                     onOpenDetail={() => setDetailSceneIndex(sIdx)}
                     onCelebrationEnd={clearCelebration}
-                    onCtrlClick={() => {
-                      toggleSelectedScene(selectionId);
-                      lastClickedIndexRef.current = idx;
-                    }}
-                    onShiftClick={() => {
-                      const lastIdx = lastClickedIndexRef.current;
-                      if (lastIdx !== null && lastIdx !== idx) {
-                        const from = Math.min(lastIdx, idx);
-                        const to = Math.max(lastIdx, idx);
-                        const rangeIds = new Set(selectedSceneIds);
-                        for (let i = from; i <= to; i++) {
-                          const rangeScene = scenes[i];
-                          if (rangeScene) {
-                            const rangeRawIdx = currentPart?.scenes.indexOf(rangeScene) ?? -1;
-                            const rangeIdx = rangeRawIdx >= 0 ? rangeRawIdx : i;
-                            rangeIds.add(buildSingleSceneSelectionId(currentPart?.sheetName ?? '', rangeScene, rangeIdx));
-                          }
-                        }
-                        setSelectedScenes(rangeIds);
-                      } else {
-                        toggleSelectedScene(selectionId);
-                      }
-                      lastClickedIndexRef.current = idx;
-                    }}
+                    onCtrlClick={() => handleCardSelection(selectionId, 'toggle')}
+                    onShiftClick={() => handleCardSelection(selectionId, 'range')}
                   />
                 );
               })}
