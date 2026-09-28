@@ -18,8 +18,7 @@ import { VACATION_COLOR } from '@/types/vacation';
 import type { VacationStatus, VacationLogEntry, VacationEvent } from '@/types/vacation';
 import { cn } from '@/utils/cn';
 import {
-  layoutVacationBars, vacationBarRowCount, fitVacationBarRows, hiddenVacationBarsByColumn,
-  vacationMoreChipTopPx, VACATION_BAR_LAYOUT, type VacationEventBar,
+  layoutVacationBars, vacationWeekRenderModel, VACATION_BAR_LAYOUT, type VacationEventBar,
 } from '@/utils/vacationCalendarLayout';
 import { createVacationGuardRetry } from '@/utils/vacationGuardRetry';
 
@@ -267,7 +266,11 @@ export function VacationView() {
   // 가드 때문에 서버 결과를 버렸으면 가드가 끝난 직후 한 번 다시 읽는다(예약은 늘 하나, 언마운트 때 정리)
   const [guardRetry] = useState(createVacationGuardRetry);
   const loadMyDataRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
-  useEffect(() => () => guardRetry.cancel(), [guardRetry]);
+  // 언마운트하면 남은 예약을 지우고, 그 뒤에 끝나는 로드도 새 예약을 못 잡게 한다(StrictMode 재마운트 때 다시 붙인다)
+  useEffect(() => {
+    guardRetry.activate();
+    return () => guardRetry.dispose();
+  }, [guardRetry]);
 
   // ── 월 탐색 ──
   const todayStr = fmtDate(new Date());
@@ -768,10 +771,8 @@ export function VacationView() {
             >
               {Array.from({ length: 6 }).map((_, weekIdx) => {
                 const weekDays = calendarDays.slice(weekIdx * 7, weekIdx * 7 + 7);
-                const bars = weeklyBars.get(weekIdx) ?? [];
-                const visibleRows = fitVacationBarRows(weekRowHeight, vacationBarRowCount(bars));
-                const hiddenByCol = hiddenVacationBarsByColumn(bars, visibleRows, 7);
-                const moreChipTop = vacationMoreChipTopPx(visibleRows);
+                // 그릴 막대·'+N' 칩(개수·자리)은 순수 함수가 정한다 — 여기서는 그 결과만 그린다
+                const week = vacationWeekRenderModel(weeklyBars.get(weekIdx) ?? [], weekRowHeight, 7);
 
                 return (
                   <div
@@ -815,10 +816,10 @@ export function VacationView() {
                     })}
 
                     {/* 이벤트 바 오버레이 — 행 높이에 들어가는 줄만 */}
-                    {bars.filter((bar) => bar.row < visibleRows).map((bar, bi) => {
+                    {week.bars.map(({ bar, topPx }, bi) => {
                       const left = `${(bar.startCol / 7) * 100}%`;
                       const width = `${(bar.span / 7) * 100}%`;
-                      const top = `${VACATION_BAR_LAYOUT.topPx + bar.row * VACATION_BAR_LAYOUT.pitchPx}px`;
+                      const top = `${topPx}px`;
                       const label = bar.event.type === '연차'
                         ? bar.event.name
                         : `${bar.event.name} ${bar.event.type}`;
@@ -844,27 +845,26 @@ export function VacationView() {
                     })}
 
                     {/* 넘친 막대 — 날짜 칸마다 '+N 더보기' (일정 뷰 월 보기와 같은 칩). 누르면 그 날짜를 골라 오른쪽에 명단이 나온다 */}
-                    {hiddenByCol.map((count, col) => {
-                      if (count <= 0) return null;
-                      const day = weekDays[col];
+                    {week.chips.map((chip) => {
+                      const day = weekDays[chip.col];
                       return (
                         <div
                           key={`more-${day.dateStr}`}
                           className="absolute z-20 flex items-center justify-center pointer-events-none"
                           style={{
-                            left: `${(col / 7) * 100}%`,
+                            left: `${(chip.col / 7) * 100}%`,
                             width: `${100 / 7}%`,
-                            top: `${moreChipTop}px`,
+                            top: `${chip.topPx}px`,
                             height: `${VACATION_BAR_LAYOUT.heightPx}px`,
                           }}
                         >
                           <button
                             type="button"
                             onClick={() => setSelectedDate(day.dateStr)}
-                            aria-label={`${day.dateStr} 휴가 ${count}건 더 보기`}
+                            aria-label={`${day.dateStr} 휴가 ${chip.count}건 더 보기`}
                             className="pointer-events-auto whitespace-nowrap text-[9px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded-full hover:bg-accent/20 cursor-pointer"
                           >
-                            +{count} 더보기
+                            +{chip.count} 더보기
                           </button>
                         </div>
                       );

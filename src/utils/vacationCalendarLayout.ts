@@ -158,3 +158,56 @@ export function hiddenVacationBarsByColumn(
 export function vacationMoreChipTopPx(visibleRows: number): number {
   return VACATION_BAR_LAYOUT.topPx + visibleRows * VACATION_BAR_LAYOUT.pitchPx;
 }
+
+/** 막대 줄(row)의 top(px) */
+export function vacationBarTopPx(row: number): number {
+  return VACATION_BAR_LAYOUT.topPx + row * VACATION_BAR_LAYOUT.pitchPx;
+}
+
+/** 그릴 막대 하나와 그 자리 */
+export interface VacationBarPlacement<B> {
+  bar: B;
+  topPx: number;
+}
+
+/** 날짜 칸 하나의 '+N 더보기' 칩 */
+export interface VacationMoreChip {
+  /** 날짜 칸(0 = 일요일) */
+  col: number;
+  /** 그 칸에서 가려진 막대 수(1 이상) */
+  count: number;
+  topPx: number;
+}
+
+/** 주 행 하나를 그리는 데 필요한 전부 — VacationView 는 이 결과만 그린다 */
+export interface VacationWeekRenderModel<B> {
+  visibleRows: number;
+  bars: VacationBarPlacement<B>[];
+  chips: VacationMoreChip[];
+}
+
+/**
+ * 주 행 하나의 렌더 모델: 행 높이(rowHeightPx, 막대가 놓이는 안쪽 높이)에 들어가는 줄의 막대와,
+ * 넘친 막대가 걸친 날짜 칸마다 '+N 더보기' 칩.
+ *
+ * 보장(테스트가 고정한다):
+ * - 그린 막대와 칩은 모두 행 안에 들어간다(행을 잰 뒤, 칩 한 줄이 들어가는 높이부터).
+ * - 막대는 그리거나(bars) 걸친 칸마다 칩 count 로 세거나 둘 중 하나 — 소리 없이 사라지지 않는다.
+ * - 칩은 가려진 막대가 있는 칸에만, 가려진 막대가 1개여도 나온다.
+ */
+export function vacationWeekRenderModel<B extends Pick<VacationEventBar, 'row' | 'startCol' | 'span'>>(
+  bars: readonly B[],
+  rowHeightPx: number,
+  cols: number,
+): VacationWeekRenderModel<B> {
+  const visibleRows = fitVacationBarRows(rowHeightPx, vacationBarRowCount(bars));
+  const placed = bars
+    .filter((bar) => bar.row < visibleRows)
+    .map((bar) => ({ bar, topPx: vacationBarTopPx(bar.row) }));
+  const chipTopPx = vacationMoreChipTopPx(visibleRows);
+  const chips: VacationMoreChip[] = [];
+  hiddenVacationBarsByColumn(bars, visibleRows, cols).forEach((count, col) => {
+    if (count > 0) chips.push({ col, count, topPx: chipTopPx });
+  });
+  return { visibleRows, bars: placed, chips };
+}

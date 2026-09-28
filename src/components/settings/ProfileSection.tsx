@@ -141,7 +141,11 @@ export function ProfileSection() {
   // 가드 때문에 서버 결과를 버렸으면 가드가 끝난 직후 한 번 다시 읽는다(예약은 늘 하나, 언마운트 때 정리)
   const [guardRetry] = useState(createVacationGuardRetry);
   const loadVacationDataRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
-  useEffect(() => () => guardRetry.cancel(), [guardRetry]);
+  // 언마운트하면 남은 예약을 지우고, 그 뒤에 끝나는 로드도 새 예약을 못 잡게 한다(StrictMode 재마운트 때 다시 붙인다)
+  useEffect(() => {
+    guardRetry.activate();
+    return () => guardRetry.dispose();
+  }, [guardRetry]);
 
   // 대휴 드롭다운 외부 클릭 닫기
   useEffect(() => {

@@ -35,10 +35,23 @@ export interface VacationGuardRetry {
    * - 가드 중이면 가드가 끝난 직후 retry 를 **한 번** 예약하고 true(=이번 결과는 버려라).
    *   이미 예약이 있으면 새 가드 끝에 맞춰 다시 잡는다(예약은 늘 하나).
    * - 가드가 끝났으면 남은 예약을 지우고 false(=적용하라).
+   * - dispose() 뒤에는 판정만 같고 예약은 잡지 않는다.
    */
   deferIfGuarded(mutationAt: number, now: number, retry: () => void): boolean;
-  /** 남은 예약을 지운다(언마운트 시) */
+  /** 남은 예약을 지운다 */
   cancel(): void;
+  /**
+   * 화면이 붙었다(마운트). 처음부터 붙은 상태로 만들어지므로, StrictMode 가 effect 를
+   * 한 번 떼었다(dispose) 다시 붙일 때 예약을 다시 받게 하려고 부른다.
+   */
+  activate(): void;
+  /**
+   * 화면이 떨어졌다(언마운트). 남은 예약을 지우고, 그 뒤에 들어오는 deferIfGuarded 는
+   * 판정(버릴지·적용할지)만 돌려주고 **새 예약을 잡지 않는다**.
+   * cancel() 만으로는 언마운트 뒤에 끝난 로드(취소 8초 뒤 재조회·변경 신호 재조회 등)가
+   * 새 타이머를 잡아, 떨어진 화면에서 한 번 더 서버를 읽었다.
+   */
+  dispose(): void;
 }
 
 const defaultTimers: VacationGuardTimers = {
@@ -48,6 +61,7 @@ const defaultTimers: VacationGuardTimers = {
 
 export function createVacationGuardRetry(timers: VacationGuardTimers = defaultTimers): VacationGuardRetry {
   let pending: TimerHandle | null = null;
+  let active = true;
 
   const cancel = () => {
     if (pending !== null) {
@@ -59,11 +73,10 @@ export function createVacationGuardRetry(timers: VacationGuardTimers = defaultTi
   return {
     deferIfGuarded(mutationAt, now, retry) {
       const delay = vacationGuardRetryDelayMs(mutationAt, now);
-      if (delay === null) {
-        cancel();
-        return false;
-      }
       cancel();
+      if (delay === null) return false;
+      // 떨어진 화면: 이번 결과는 버리되 다시 읽기는 예약하지 않는다
+      if (!active) return true;
       pending = timers.setTimeout(() => {
         pending = null;
         retry();
@@ -71,5 +84,12 @@ export function createVacationGuardRetry(timers: VacationGuardTimers = defaultTi
       return true;
     },
     cancel,
+    activate() {
+      active = true;
+    },
+    dispose() {
+      active = false;
+      cancel();
+    },
   };
 }

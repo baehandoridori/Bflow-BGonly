@@ -5,7 +5,8 @@
  * 화면이 옛 값으로 되돌아가 보이지 않게). 그런데 버리고 끝이라, 그 30초 안에 슬랙 등에서 온 휴가 변경
  * 신호로 다시 읽은 결과도 사라졌고 5분 캐시가 끝날 때까지 화면이 늦었다.
  *
- * 해결: 가드 때문에 버렸으면 가드가 끝난 직후 한 번 다시 읽도록 예약(예약은 늘 하나, 언마운트 때 정리).
+ * 해결: 가드 때문에 버렸으면 가드가 끝난 직후 한 번 다시 읽도록 예약(예약은 늘 하나, 언마운트 때 정리하고
+ * 언마운트 뒤에 끝난 로드는 새 예약을 잡지 않는다).
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -129,6 +130,56 @@ test('언마운트(cancel)하면 예약이 정리된다', () => {
   assert.equal(reloads, 0);
 });
 
+// ── 언마운트 뒤 늦게 끝난 로드 ────────────────────────────────────────
+// cancel() 은 이미 잡힌 예약만 지운다. 언마운트한 뒤에 끝난 로드(취소 8초 뒤 재조회, 도는 중이던 변경 신호 재조회)가
+// 가드 안이면 새 예약을 잡았고, 그 예약은 아무도 지우지 않아 떨어진 화면에서 한 번 더 서버를 읽었다.
+
+test('dispose 뒤에 들어온 로드는 결과만 버리고 새 예약을 잡지 않는다 (언마운트 → 예약 순서)', () => {
+  const clock = fakeTimers();
+  const guard = createVacationGuardRetry(clock.timers);
+  let reloads = 0;
+  clock.advance(1_000);
+  const mutationAt = clock.now;
+  guard.dispose(); // 언마운트 — 이때는 예약이 없다
+  clock.advance(8_500); // 취소 8초 뒤 재조회가 가드 안에서 끝났다
+  assert.equal(guard.deferIfGuarded(mutationAt, clock.now, () => { reloads++; }), true, '가드 중 결과는 여전히 버린다');
+  assert.equal(clock.pendingCount(), 0, '떨어진 화면에 새 타이머가 남으면 안 된다');
+  clock.advance(60_000);
+  assert.equal(reloads, 0);
+  // 가드가 끝난 뒤 결과는 그대로 적용 판정(공용 휴가 캐시 갱신은 예전처럼)
+  assert.equal(guard.deferIfGuarded(mutationAt, clock.now, () => { reloads++; }), false);
+  assert.equal(clock.pendingCount(), 0);
+});
+
+test('dispose 는 이미 잡힌 예약도 지운다 (예약 → 언마운트 순서)', () => {
+  const clock = fakeTimers();
+  const guard = createVacationGuardRetry(clock.timers);
+  let reloads = 0;
+  clock.advance(1_000);
+  assert.equal(guard.deferIfGuarded(clock.now, clock.now, () => { reloads++; }), true);
+  assert.equal(clock.pendingCount(), 1);
+  guard.dispose();
+  assert.equal(clock.pendingCount(), 0);
+  clock.advance(60_000);
+  assert.equal(reloads, 0);
+});
+
+test('StrictMode 이중 실행(마운트 → 정리 → 다시 마운트) 뒤에는 다시 예약한다', () => {
+  const clock = fakeTimers();
+  const guard = createVacationGuardRetry(clock.timers);
+  let reloads = 0;
+  guard.activate();
+  guard.dispose();
+  guard.activate();
+  clock.advance(1_000);
+  const mutationAt = clock.now;
+  clock.advance(2_000);
+  assert.equal(guard.deferIfGuarded(mutationAt, clock.now, () => { reloads++; }), true);
+  assert.equal(clock.pendingCount(), 1, '다시 붙은 화면은 가드 뒤 재조회를 잃으면 안 된다');
+  clock.advance(30_000);
+  assert.equal(reloads, 1);
+});
+
 // ── 두 화면 배선 ──────────────────────────────────────────────────────
 for (const [file, loader] of [
   ['src/views/VacationView.tsx', 'loadMyData'],
@@ -138,7 +189,12 @@ for (const [file, loader] of [
     const src = readFileSync(file, 'utf8');
     assert.match(src, /import \{ createVacationGuardRetry \} from '@\/utils\/vacationGuardRetry';/);
     assert.match(src, /const \[guardRetry\] = useState\(createVacationGuardRetry\);/);
-    assert.match(src, /useEffect\(\(\) => \(\) => guardRetry\.cancel\(\), \[guardRetry\]\);/, '언마운트 때 타이머 정리');
+    assert.match(
+      src,
+      /useEffect\(\(\) => \{\s*guardRetry\.activate\(\);\s*return \(\) => guardRetry\.dispose\(\);\s*\}, \[guardRetry\]\);/,
+      '언마운트 때 예약을 지우고 이후 로드도 예약을 못 잡게(dispose), StrictMode 재마운트 때 다시 붙인다(activate)',
+    );
+    assert.doesNotMatch(src, /guardRetry\.cancel\(\)/, 'cancel() 만으로는 언마운트 뒤에 끝난 로드가 새 타이머를 잡는다');
     assert.doesNotMatch(src, /Date\.now\(\) - mutationTimeRef\.current > 30_000/, '버리고 끝나는 옛 가드 검사가 남아 있다');
 
     const ref = `${loader}Ref`;
