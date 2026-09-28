@@ -17,6 +17,10 @@ import { DahyuDeleteModal } from '@/components/vacation/DahyuDeleteModal';
 import { VACATION_COLOR } from '@/types/vacation';
 import type { VacationStatus, VacationLogEntry, VacationEvent } from '@/types/vacation';
 import { cn } from '@/utils/cn';
+import {
+  layoutVacationBars, vacationWeekRenderModel, VACATION_BAR_LAYOUT, type VacationEventBar,
+} from '@/utils/vacationCalendarLayout';
+import { createVacationGuardRetry } from '@/utils/vacationGuardRetry';
 
 /* ───────────── date helpers ───────────── */
 
@@ -35,80 +39,6 @@ function parseDate(s: string): Date {
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const DAHYU_ADMINS = ['허혜원', '배한솔'] as const;
 const TYPE_COLORS = ['#00B894', '#6C5CE7', '#FDCB6E', '#74B9FF', '#FD79A8'];
-
-/* ───────────── event bar layout ───────────── */
-
-interface EventBar {
-  event: VacationEvent;
-  row: number;
-  startCol: number;
-  span: number;
-  isStart: boolean;
-  isEnd: boolean;
-}
-
-function layoutEventBars(
-  events: VacationEvent[],
-  weekStart: Date,
-  weekEnd: Date,
-  cols: number,
-): EventBar[] {
-  const weekStartStr = fmtDate(weekStart);
-  const weekEndStr = fmtDate(weekEnd);
-
-  const relevant = events
-    .filter((e) => e.endDate >= weekStartStr && e.startDate <= weekEndStr)
-    .sort((a, b) => {
-      const aSpan = Math.round((parseDate(a.endDate).getTime() - parseDate(a.startDate).getTime()) / 86400000) + 1;
-      const bSpan = Math.round((parseDate(b.endDate).getTime() - parseDate(b.startDate).getTime()) / 86400000) + 1;
-      const dSpan = bSpan - aSpan;
-      if (dSpan !== 0) return dSpan;
-      return a.startDate.localeCompare(b.startDate);
-    });
-
-  const rows: string[][] = [];
-  const bars: EventBar[] = [];
-
-  for (const ev of relevant) {
-    const evStart = parseDate(ev.startDate);
-    const evEnd = parseDate(ev.endDate);
-    const clampStart = evStart < weekStart ? weekStart : evStart;
-    const clampEnd = evEnd > weekEnd ? weekEnd : evEnd;
-
-    const startCol = Math.round((clampStart.getTime() - weekStart.getTime()) / 86400000);
-    const endCol = Math.round((clampEnd.getTime() - weekStart.getTime()) / 86400000);
-    const span = endCol - startCol + 1;
-
-    const evKey = `${ev.name}-${ev.startDate}-${ev.endDate}`;
-
-    let placed = -1;
-    for (let r = 0; r < rows.length; r++) {
-      let free = true;
-      for (let c = startCol; c <= endCol; c++) {
-        if (rows[r][c]) { free = false; break; }
-      }
-      if (free) { placed = r; break; }
-    }
-    if (placed === -1) {
-      placed = rows.length;
-      rows.push(new Array(cols).fill(''));
-    }
-    for (let c = startCol; c <= endCol; c++) {
-      rows[placed][c] = evKey;
-    }
-
-    bars.push({
-      event: ev,
-      row: placed,
-      startCol,
-      span,
-      isStart: evStart >= weekStart,
-      isEnd: evEnd <= weekEnd,
-    });
-  }
-
-  return bars;
-}
 
 /* ───────────── sub-components ───────────── */
 
@@ -333,6 +263,14 @@ export function VacationView() {
 
   // 변경(등록/삭제) 후 캐시 유예 — 30초간 캐시 저장 안 함
   const mutationTimeRef = useRef(0);
+  // 가드 때문에 서버 결과를 버렸으면 가드가 끝난 직후 한 번 다시 읽는다(예약은 늘 하나, 언마운트 때 정리)
+  const [guardRetry] = useState(createVacationGuardRetry);
+  const loadMyDataRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+  // 언마운트하면 남은 예약을 지우고, 그 뒤에 끝나는 로드도 새 예약을 못 잡게 한다(StrictMode 재마운트 때 다시 붙인다)
+  useEffect(() => {
+    guardRetry.activate();
+    return () => guardRetry.dispose();
+  }, [guardRetry]);
 
   // ── 월 탐색 ──
   const todayStr = fmtDate(new Date());
@@ -408,8 +346,8 @@ export function VacationView() {
     if (!force) {
       const cache = useAppStore.getState().vacationCache;
       if (cache && cache.userName === currentUser.name && Date.now() - cache.lastFetch < 300_000) {
-        // mutation guard 기간에는 캐시도 적용하지 않음 (낙관적 값 유지)
-        if (Date.now() - mutationTimeRef.current > 30_000) {
+        // mutation guard 기간에는 캐시도 적용하지 않음 (낙관적 값 유지) — 가드가 끝나면 다시 읽는다
+        if (!guardRetry.deferIfGuarded(mutationTimeRef.current, Date.now(), () => { void loadMyDataRef.current(true); })) {
           setVacStatus(cache.status);
           setVacLog(cache.log);
         }
@@ -422,8 +360,9 @@ export function VacationView() {
         fetchVacationStatus(currentUser.name),
         fetchVacationLog(currentUser.name, new Date().getFullYear(), 20),
       ]);
-      // 변경(등록/삭제) 직후 30초간은 낙관적 상태 유지 (서버 데이터가 아직 stale일 수 있음)
-      if (Date.now() - mutationTimeRef.current > 30_000) {
+      // 변경(등록/삭제) 직후 30초간은 낙관적 상태 유지 (서버 데이터가 아직 stale일 수 있음).
+      // 이때 버린 결과(슬랙 등에서 온 변경 신호의 재조회 포함)는 가드가 끝난 직후 한 번 다시 읽어 따라잡는다.
+      if (!guardRetry.deferIfGuarded(mutationTimeRef.current, Date.now(), () => { void loadMyDataRef.current(true); })) {
         setVacStatus(status);
         setVacLog(log);
         setVacationCache({ userName: currentUser.name, status, log, lastFetch: Date.now() });
@@ -433,7 +372,8 @@ export function VacationView() {
     } finally {
       setLoading(false);
     }
-  }, [currentUser, vacationConnected, setVacationCache]);
+  }, [currentUser, vacationConnected, setVacationCache, guardRetry]);
+  useEffect(() => { loadMyDataRef.current = loadMyData; }, [loadMyData]);
 
   const loadEvents = useCallback(async () => {
     if (!vacationConnected) return;
@@ -451,7 +391,7 @@ export function VacationView() {
   useEffect(() => { loadMyData(); }, [loadMyData]);
   useEffect(() => { loadEvents(); }, [loadEvents]);
   // 이 창 밖(슬랙·다른 사람·관리자)에서 휴가가 바뀌면 캐시를 건너뛰고 다시 읽는다.
-  // 방금 이 창에서 등록·취소했다면 loadMyData 의 30초 낙관 가드가 그대로 지켜진다.
+  // 방금 이 창에서 등록·취소했다면 loadMyData 의 30초 낙관 가드가 그대로 지켜지고, 가드가 끝나면 다시 읽는다.
   useOnVacationChange(() => {
     void loadMyData(true);
     void loadEvents();
@@ -459,15 +399,34 @@ export function VacationView() {
 
   // ── 이벤트 바 레이아웃 (주별) ──
   const weeklyBars = useMemo(() => {
-    const result: Map<number, EventBar[]> = new Map();
+    const result: Map<number, VacationEventBar[]> = new Map();
     for (let weekIdx = 0; weekIdx < 6; weekIdx++) {
       const weekStart = parseDate(calendarDays[weekIdx * 7].dateStr);
       const weekEnd = parseDate(calendarDays[weekIdx * 7 + 6].dateStr);
-      const bars = layoutEventBars(allEvents, weekStart, weekEnd, 7);
+      const bars = layoutVacationBars(allEvents, weekStart, weekEnd, 7);
       result.set(weekIdx, bars);
     }
     return result;
   }, [calendarDays, allEvents]);
+
+  // ── 주 행 높이 → 그릴 막대 줄 수 ──
+  // 휴가가 몰린 날 막대가 주 행 높이를 넘으면 다음 주 칸 위에 겹쳐 그려졌다.
+  // 여섯 주 행은 높이가 같으므로 첫 주 행을 재서, 들어가는 줄만 그리고 나머지는 날짜 칸마다 '+N' 칩으로 묶는다.
+  const [weekRowHeight, setWeekRowHeight] = useState(0);
+  const weekRowObserverRef = useRef<ResizeObserver | null>(null);
+  const measureWeekRow = useCallback((el: HTMLDivElement | null) => {
+    weekRowObserverRef.current?.disconnect();
+    weekRowObserverRef.current = null;
+    if (!el) return;
+    // clientHeight: 테두리를 뺀 안쪽 높이 — absolute 막대의 top 기준과 같다
+    const update = () => setWeekRowHeight(el.clientHeight);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    weekRowObserverRef.current = observer;
+  }, []);
+  useEffect(() => () => weekRowObserverRef.current?.disconnect(), []);
 
   // 선택된 날짜의 이벤트
   const selectedDateEvents = useMemo(() => {
@@ -812,10 +771,15 @@ export function VacationView() {
             >
               {Array.from({ length: 6 }).map((_, weekIdx) => {
                 const weekDays = calendarDays.slice(weekIdx * 7, weekIdx * 7 + 7);
-                const bars = weeklyBars.get(weekIdx) ?? [];
+                // 그릴 막대·'+N' 칩(개수·자리)은 순수 함수가 정한다 — 여기서는 그 결과만 그린다
+                const week = vacationWeekRenderModel(weeklyBars.get(weekIdx) ?? [], weekRowHeight, 7);
 
                 return (
-                  <div key={weekIdx} className="grid grid-cols-7 border-b border-bg-border/20 relative min-h-0">
+                  <div
+                    key={weekIdx}
+                    ref={weekIdx === 0 ? measureWeekRow : undefined}
+                    className="grid grid-cols-7 border-b border-bg-border/20 relative min-h-0 overflow-hidden"
+                  >
                     {weekDays.map((day) => {
                       const isSelected = selectedDate !== null && day.dateStr === selectedDate;
                       const hasEvent = allEvents.some((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
@@ -851,11 +815,11 @@ export function VacationView() {
                       );
                     })}
 
-                    {/* 이벤트 바 오버레이 */}
-                    {bars.map((bar, bi) => {
+                    {/* 이벤트 바 오버레이 — 행 높이에 들어가는 줄만 */}
+                    {week.bars.map(({ bar, topPx }, bi) => {
                       const left = `${(bar.startCol / 7) * 100}%`;
                       const width = `${(bar.span / 7) * 100}%`;
-                      const top = `${28 + bar.row * 22}px`;
+                      const top = `${topPx}px`;
                       const label = bar.event.type === '연차'
                         ? bar.event.name
                         : `${bar.event.name} ${bar.event.type}`;
@@ -864,7 +828,7 @@ export function VacationView() {
                         <div
                           key={`${bar.event.name}-${bar.event.startDate}-${bi}`}
                           className="absolute overflow-hidden pointer-events-none z-10"
-                          style={{ left, width, top, height: '18px', padding: '0 1px' }}
+                          style={{ left, width, top, height: `${VACATION_BAR_LAYOUT.heightPx}px`, padding: '0 1px' }}
                         >
                           <div
                             className={cn(
@@ -876,6 +840,32 @@ export function VacationView() {
                           >
                             {bar.isStart && label}
                           </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* 넘친 막대 — 날짜 칸마다 '+N 더보기' (일정 뷰 월 보기와 같은 칩). 누르면 그 날짜를 골라 오른쪽에 명단이 나온다 */}
+                    {week.chips.map((chip) => {
+                      const day = weekDays[chip.col];
+                      return (
+                        <div
+                          key={`more-${day.dateStr}`}
+                          className="absolute z-20 flex items-center justify-center pointer-events-none"
+                          style={{
+                            left: `${(chip.col / 7) * 100}%`,
+                            width: `${100 / 7}%`,
+                            top: `${chip.topPx}px`,
+                            height: `${VACATION_BAR_LAYOUT.heightPx}px`,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDate(day.dateStr)}
+                            aria-label={`${day.dateStr} 휴가 ${chip.count}건 더 보기`}
+                            className="pointer-events-auto whitespace-nowrap text-[9px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded-full hover:bg-accent/20 cursor-pointer"
+                          >
+                            +{chip.count} 더보기
+                          </button>
                         </div>
                       );
                     })}

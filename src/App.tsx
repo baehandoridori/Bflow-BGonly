@@ -37,7 +37,7 @@ import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
-import { loadVacationConfig, connectVacation } from '@/services/vacationService';
+import { resolveVacationConnection, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
 import {
@@ -68,7 +68,7 @@ import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { installEditableFocusRecovery } from '@/utils/editableFocus';
-import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL, DEFAULT_VACATION_TOKEN } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { SvgIconDefs } from '@/components/SvgIconDefs';
@@ -948,13 +948,12 @@ export default function App() {
           }
         }
 
-        // 휴가 API 자동 연결 (저장된 URL 또는 기본 URL로 시도)
-        const vacConfig = await loadVacationConfig();
-        const vacUrlToConnect = vacConfig?.webAppUrl || DEFAULT_VACATION_URL;
+        // 휴가 API 자동 연결 — 저장된 주소가 비었거나 구 Apps Script 주소면 기본 주소(이관 후 새 주소)로 붙고,
+        // 구 주소는 설정 파일에서도 새 주소로 바꿔 둔다(resolveVacationConnection).
         // 토큰은 빌드에 박힌 값이 기본. 설정 파일에 넣어 둔 값이 있으면 그쪽이 우선한다(폴백·긴급 교체용).
-        const vacTokenToUse = vacConfig?.apiToken || DEFAULT_VACATION_TOKEN;
-        if (vacUrlToConnect) {
-          const vacResult = await connectVacation(vacUrlToConnect, vacTokenToUse);
+        const vacConnection = await resolveVacationConnection();
+        if (vacConnection.url) {
+          const vacResult = await connectVacation(vacConnection.url, vacConnection.apiToken);
           if (vacResult.ok) {
             setVacationConnected(true);
           }
