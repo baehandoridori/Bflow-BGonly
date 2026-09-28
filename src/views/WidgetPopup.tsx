@@ -44,7 +44,7 @@ import { readAll, checkConnection, readMetadata } from '@/services/supabaseServi
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
 import { invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
-import { loadVacationConfig, connectVacation } from '@/services/vacationService';
+import { checkVacationConnection, connectVacation, resolveVacationConnection } from '@/services/vacationService';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
@@ -56,7 +56,7 @@ import type {
   SupabaseRealtimeStatusMetadata,
 } from '@/types';
 import { getPreset, getLightColors, applyTheme, type ThemeColors } from '@/themes';
-import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_TOKEN } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
 // 모듈 레벨 쿨다운: dataNotifyChange 호출 시 자체 변경 감지
 let _reloadCooldown = false;
@@ -227,6 +227,26 @@ export async function reconcilePopupUserDirectory(): Promise<'unchanged' | 'upda
       console.warn('[WidgetPopup] 삭제 사용자 canonical session 종료 실패:', error);
     },
   });
+}
+
+/**
+ * 팝업 창의 휴가 연결.
+ *
+ * 휴가 연결 상태는 메인 프로세스 한 곳에 있다(창마다 따로가 아니다). 메인 창이 이미 붙어 있으면
+ * 그대로 쓰고 다른 주소로 덮어쓰지 않는다. 아니면 메인 창과 같은 규칙으로 붙는다 —
+ * 설정이 없거나 구 Apps Script 주소면 기본 주소(resolveVacationConnection).
+ * 예전에는 설정 파일이 없으면 아예 시도하지 않아 팝업 위젯에 '휴가 연동이 필요합니다'가 떴다.
+ */
+export async function connectPopupVacation(): Promise<boolean> {
+  try {
+    if (await checkVacationConnection()) return true;
+  } catch {
+    // 상태 확인이 실패해도 직접 연결을 시도한다
+  }
+  const { url, apiToken } = await resolveVacationConnection();
+  if (!url) return false;
+  const result = await connectVacation(url, apiToken);
+  return result.ok;
 }
 
 // 현황판은 App.tsx 와 동일하게 lazy — 팝업 엔트리 청크를 무겁게 하지 않는다 (피드백 36).
@@ -746,16 +766,13 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         //   연결 성공 시 켜야 아래 loadUsers() 가 Supabase 사용자 디렉터리(전체 팀원)를 읽는다.
         if (connected) setUsersSheetsMode(true);
 
-        // 휴가 API 자동 연결
-        const vacConfig = await loadVacationConfig();
-        if (vacConfig?.webAppUrl) {
-          const vacResult = await connectVacation(
-            vacConfig.webAppUrl,
-            vacConfig.apiToken || DEFAULT_VACATION_TOKEN
-          );
-          if (vacResult.ok) {
+        // 휴가 API 자동 연결 — 메인 창 연결을 먼저 확인하고, 없으면 기본 주소 폴백으로 붙는다.
+        try {
+          if (await connectPopupVacation()) {
             useAppStore.getState().setVacationConnected(true);
           }
+        } catch (err) {
+          console.warn('[WidgetPopup] 휴가 연결 실패', err);
         }
 
         if (connected) {

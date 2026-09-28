@@ -8,10 +8,12 @@ import {
   checkGasConnection,
 } from '@/services/gasConfigService';
 import {
-  loadVacationConfig,
   saveVacationConfig,
   connectVacation,
   checkVacationConnection,
+  resolveVacationConnection,
+  legacyVacationUrlError,
+  LEGACY_VACATION_URL_MESSAGE,
 } from '@/services/vacationService';
 import * as gcalService from '@/services/googleCalendarService';
 import { getGCalSettings, saveGCalSettings, saveLocalGCalSettings, syncAll } from '@/services/calendarService';
@@ -41,6 +43,7 @@ export function SheetsSection() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   // ─── 휴가 API ─────
+  // 입력칸 기본값은 새 주소(2026-09-16 이관 후 vacation-api). 구 Apps Script 주소는 저장·연결 테스트를 거부한다.
   const [vacationUrl, setVacationUrl] = useState(DEFAULT_VACATION_URL || '');
   // 토큰 입력란은 **폴백**이다 — 빌드에 토큰이 박혀 있으면 비워 둔 채로 연결된다
   const [vacationToken, setVacationToken] = useState('');
@@ -70,14 +73,12 @@ export function SheetsSection() {
       const connected = await checkGasConnection();
       setDataConnected(connected);
 
-      const vacConfig = await loadVacationConfig();
-      if (vacConfig) {
-        setVacationUrl(vacConfig.webAppUrl);
-        setVacationToken(vacConfig.apiToken ?? '');
-        const result = await connectVacation(
-          vacConfig.webAppUrl,
-          vacConfig.apiToken || DEFAULT_VACATION_TOKEN
-        );
+      // 저장된 주소가 비었거나 구 주소면 새 주소로 바뀌어 나온다(구 주소는 설정 파일도 새 주소로 다시 쓴다)
+      const vacConnection = await resolveVacationConnection();
+      setVacationUrl(vacConnection.url);
+      setVacationToken(vacConnection.savedApiToken);
+      if (vacConnection.hasSavedConfig) {
+        const result = await connectVacation(vacConnection.url, vacConnection.apiToken);
         setVacationConnected(result.ok);
       } else {
         const vacConnected = await checkVacationConnection();
@@ -116,8 +117,19 @@ export function SheetsSection() {
     setTimeout(() => setSaveMessage(null), 2000);
   };
 
+  /** 구 Apps Script 주소면 거부하고 입력칸을 새 주소로 되돌린다. 거부했으면 true */
+  const rejectLegacyVacationUrl = (): boolean => {
+    const legacyError = legacyVacationUrlError(vacationUrl);
+    if (!legacyError) return false;
+    setVacationUrl(DEFAULT_VACATION_URL);
+    setVacationError(legacyError);
+    setVacationSaveMessage(null);
+    return true;
+  };
+
   const handleVacationConnect = async () => {
     if (!vacationUrl) { setVacationError('휴가 API URL을 입력해주세요.'); return; }
+    if (rejectLegacyVacationUrl()) return;
     setIsVacationConnecting(true); setVacationError(null);
     try {
       const result = await connectVacation(vacationUrl, vacationToken || DEFAULT_VACATION_TOKEN);
@@ -128,6 +140,8 @@ export function SheetsSection() {
   };
 
   const handleVacationSave = async () => {
+    if (rejectLegacyVacationUrl()) return;
+    setVacationError((prev) => (prev === LEGACY_VACATION_URL_MESSAGE ? null : prev));
     const config = { webAppUrl: vacationUrl, ...(vacationToken ? { apiToken: vacationToken } : {}) };
     await saveVacationConfig(config);
     setVacationConfig(config);
