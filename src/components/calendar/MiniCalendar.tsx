@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/utils/cn';
@@ -17,7 +17,8 @@ export interface MiniCalendarProps {
 
 // ─── Utility functions ───────────────────────────
 // ─── Component ───────────────────────────────────
-export function MiniCalendar({
+// 캘린더 화면의 다른 상태(호버·펄스·패널 등)가 바뀔 때마다 사이드바 달력까지 다시 그리지 않는다.
+export const MiniCalendar = memo(function MiniCalendar({
   currentMonth,
   onMonthChange,
   onDateSelect,
@@ -143,13 +144,14 @@ export function MiniCalendar({
         ))}
       </div>
 
-      {/* Calendar grid with month transition */}
+      {/* Calendar grid with month transition — transform 문자열이라 합성 스레드(WAAPI)에서 돈다.
+          끝값은 'none' 으로 둬 남은 transform 이 없게 한다. */}
       <AnimatePresence mode="wait">
         <motion.div
           key={monthKey}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
+          initial={{ opacity: 0, transform: 'translateX(20px)' }}
+          animate={{ opacity: 1, transform: 'translateX(0px)', transitionEnd: { transform: 'none' } }}
+          exit={{ opacity: 0, transform: 'translateX(-20px)' }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
           className="grid grid-cols-7 gap-px"
         >
@@ -213,4 +215,4 @@ export function MiniCalendar({
       </AnimatePresence>
     </div>
   );
-}
+});

@@ -53,7 +53,10 @@ export function useProximityReveal(options: UseProximityRevealOptions = {}) {
     const p = pointerRef.current;
     if (typeof document === 'undefined') return;
 
-    document.querySelectorAll<HTMLElement>(SELECTOR).forEach((el) => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>(SELECTOR));
+    // 읽기를 먼저 모두 끝내고 쓰기는 나중에 몰아서 한다. 요소마다 측정·기록을 번갈아 하면
+    // 기록이 스타일을 무효화해 다음 측정이 매번 강제 재계산을 일으킨다(레이아웃 스래싱).
+    const values = elements.map((el) => {
       let t = 0;
       if (pinned?.(el)) {
         t = 1;
@@ -67,7 +70,13 @@ export function useProximityReveal(options: UseProximityRevealOptions = {}) {
           t = ratio <= 0 ? 0 : ratio >= 1 ? 1 : Math.pow(ratio, f);
         }
       }
-      el.style.setProperty('--reveal', t.toFixed(3));
+      return t.toFixed(3);
+    });
+    // 값이 그대로인 요소(대부분 멀리 있는 0)는 건드리지 않는다. 쓰기마다 스타일 재계산이 든다.
+    elements.forEach((el, index) => {
+      if (el.style.getPropertyValue('--reveal') !== values[index]) {
+        el.style.setProperty('--reveal', values[index]);
+      }
     });
   }, []);
 

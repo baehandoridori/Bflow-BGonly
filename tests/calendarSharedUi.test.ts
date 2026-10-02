@@ -2199,6 +2199,8 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
           useMemo: (factory: () => unknown) => factory(),
           useRef: (initial: unknown) => ({ current: initial }),
           useCallback: (fn: unknown) => fn,
+          // 주 넘김 미끄러짐(useStackFlip)은 그린 직후 DOM 을 잰다. 하네스에는 DOM 이 없으니 건너뛴다.
+          useLayoutEffect: () => {},
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -2248,6 +2250,8 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
           useMemo: (factory: () => unknown) => factory(),
           useRef: (initial: unknown) => ({ current: initial }),
           useCallback: (fn: unknown) => fn,
+          // 주 넘김 미끄러짐(useStackFlip)은 그린 직후 DOM 을 잰다. 하네스에는 DOM 이 없으니 건너뛴다.
+          useLayoutEffect: () => {},
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -6806,7 +6810,12 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
 
     const body = calendarBody(tree);
     assert.ok(body, '캘린더 본체 컨테이너가 있다');
-    assert.deepEqual((body.props as { animate?: unknown }).animate, { opacity: 1, y: 0 });
+    // transform 을 문자열로 넘겨야 합성 스레드(WAAPI)에서 돈다(y 는 메인 스레드가 매 프레임 계산).
+    // 끝나면 'none' 으로 돌려 남은 transform 이 안쪽 fixed 요소의 기준 상자를 바꾸지 않게 한다.
+    assert.deepEqual(
+      (body.props as { animate?: unknown }).animate,
+      { opacity: 1, transform: 'translateY(0px)', transitionEnd: { transform: 'none' } },
+    );
     assert.deepEqual(
       (body.props as { transition?: unknown }).transition,
       { duration: 0.2, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.12 } },
@@ -9369,3 +9378,65 @@ test('EventCreateModal restores draft tag selection after an optimistic tag dele
   let tree=await renderScheduleView();assert.equal(scheduleUpdateCalls.length,0);assert.ok(buttonByText(tree,'전체 일정'));
   stateSlots[0]=[{...event,title:'동료가 변경함'}];tree=await renderScheduleView();buttonByText(tree,'전체 일정').props.onClick?.();await new Promise(resolve=>setImmediate(resolve));assert.equal(scheduleUpdateCalls.length,0);assert.match(textContent(await renderScheduleView()),/최신 일정을 다시 선택/);
  });
+
+test('CalendarGrid month layer slides on the compositor and exits toward the latest navigation direction', async () => {
+  resetHarness();
+  const events = [calendarListEvent({ id: 'month-layer-event', title: '월 전환 대상' })];
+  const monthLayer = (tree: ReactNode) => findElements(tree, (node) => (
+    (node.props.style as { gridArea?: string } | undefined)?.gridArea === '1 / 1'
+  ))[0];
+  const resolveVariant = (layer: ReactElement<Record<string, unknown>>, name: string) => {
+    const variant = (layer.props.variants as Record<string, unknown>)[name];
+    return (typeof variant === 'function' ? (variant as (custom: unknown) => unknown)(layer.props.custom) : variant) as Record<string, unknown>;
+  };
+
+  const forward = monthLayer(await renderCalendarGrid(events, { monthKey: '2026-8', monthDirection: 1 } as Partial<CalendarGridProps>));
+  assert.ok(forward, '달 한 장이 겹침 칸(1/1)에 놓인다 — 나가는 달을 측정해 띄우지 않는다');
+  assert.equal(forward.props.initial, 'enter');
+  assert.deepEqual(resolveVariant(forward, 'enter'), { opacity: 0, transform: 'translateY(24px)' }, '다음 달은 아래에서 올라온다');
+  assert.deepEqual(resolveVariant(forward, 'center').transitionEnd, { transform: 'none' }, '끝나면 transform 을 남기지 않는다');
+  assert.equal(resolveVariant(forward, 'exit').transform, 'translateY(-24px)', '다음 달로 갈 때 나가는 달은 위로 빠진다');
+
+  // 나가는 달은 AnimatePresence custom 으로 '지금' 방향을 받는다 — 이전 달로 돌아가면 아래로 빠진다.
+  const backward = monthLayer(await renderCalendarGrid(events, { monthKey: '2026-7', monthDirection: -1 } as Partial<CalendarGridProps>));
+  assert.deepEqual(backward.props.custom, { direction: -1, instant: false });
+  assert.equal(resolveVariant(backward, 'exit').transform, 'translateY(24px)');
+  assert.equal(resolveVariant(backward, 'enter').transform, 'translateY(-24px)', '이전 달은 위에서 내려온다');
+
+  // 연타·동작 줄이기에서는 미끄러지지 않고 바로 바꾼다(나가는 달도 즉시 사라진다).
+  const rapid = monthLayer(await renderCalendarGrid(events, { monthKey: '2026-9', monthDirection: 1, instantTransition: true } as Partial<CalendarGridProps>));
+  assert.equal(rapid.props.initial, false);
+  assert.deepEqual(resolveVariant(rapid, 'exit'), { opacity: 0, transition: { duration: 0 } });
+  const reduced = monthLayer(await renderCalendarGrid(events, { monthKey: '2026-9', monthDirection: 1, reduceMotion: true }));
+  assert.equal(reduced.props.initial, false, '동작 줄이기에서는 슬라이드하지 않는다');
+});
+
+test('ScheduleView period navigation keeps the same event state when the canonical content did not change', async () => {
+  resetHarness();
+  const steady = calendarListEvent({ id: 'steady-event', title: '그대로인 일정' });
+  const edited = calendarListEvent({ id: 'edited-event', title: '바뀔 일정', startDate: '2026-08-12', endDate: '2026-08-12' });
+  scheduleCanonicalEvents = [steady, edited];
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  tree = await renderScheduleView();
+  const before = stateSlots[0] as ScheduleCalendarEvent[];
+  assert.equal(before.length, 2, '첫 정본이 들어왔다');
+
+  // 정본 캐시는 기간을 넘길 때마다 같은 내용의 새 객체를 만든다.
+  scheduleCanonicalEvents = [{ ...steady }, { ...edited }];
+  buttonByLabel(tree, '다음 기간').props.onClick?.();
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.ok(scheduleEventRanges.length >= 2, '달을 넘기면 새 범위로 정본을 다시 읽는다');
+  assert.equal(stateSlots[0], before, '내용이 같으면 상태 배열을 바꾸지 않는다 — 전환 도중 화면 전체가 다시 그려지지 않는다');
+
+  // 실제로 바뀐 일정만 새 객체로 들어오고, 그대로인 일정은 이전 객체를 유지한다.
+  scheduleCanonicalEvents = [{ ...steady }, { ...edited, title: '동료가 바꾼 제목' }];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  const after = stateSlots[0] as ScheduleCalendarEvent[];
+  assert.notEqual(after, before);
+  assert.equal(after[0], before[0], '그대로인 일정은 같은 객체(편집기·메모가 흔들리지 않는다)');
+  assert.equal(after[1].title, '동료가 바꾼 제목');
+});

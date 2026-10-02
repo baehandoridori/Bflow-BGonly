@@ -1,9 +1,9 @@
 // ─── WeekSidebar: 주간 네비게이션 사이드바 (ISO 주차) ────────────────
-import React, { useMemo, useRef, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { memo, useMemo, useRef, useEffect } from 'react';
 import type { CalendarEvent } from '@/types/calendar';
 import { fmtDate, getISOWeekNumber } from '@/utils/calendarDate';
 import { visibleWeekDays } from '@/utils/calendarWeekdays';
+import { scrollIntoNearestScroller } from '@/utils/scrollIntoScroller';
 
 /* ── 로컬 유틸 ──────────────────────────────────────── */
 /* ── 타입 ────────────────────────────────────────────── */
@@ -37,16 +37,17 @@ export default function WeekSidebar({
   showWeekends = true,
 }: WeekSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrolledOnceRef = useRef(false);
 
-  // 활성 주가 변경될 때 스크롤하여 보이게 함
+  // 활성 주가 바뀌면 사이드바 목록 안에서만 보이게 옮긴다. 처음 열 때는 바로, 그 뒤로는 부드럽게.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const activeEl = container.querySelector(`[data-week-idx="${activeWeekIndex}"]`);
-    if (activeEl) {
-      activeEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
-  }, [activeWeekIndex]);
+    const activeEl = container.querySelector<HTMLElement>(`[data-week-idx="${activeWeekIndex}"]`);
+    if (!activeEl) return;
+    scrollIntoNearestScroller(activeEl, scrolledOnceRef.current ? 'smooth' : 'auto');
+    scrolledOnceRef.current = true;
+  }, [activeWeekIndex, weeks]);
 
   return (
     <div
@@ -62,7 +63,7 @@ export default function WeekSidebar({
           events={events}
           today={today}
           isActive={idx === activeWeekIndex}
-          onSelect={() => onWeekSelect(idx)}
+          onWeekSelect={onWeekSelect}
           showWeekends={showWeekends}
         />
       ))}
@@ -71,13 +72,14 @@ export default function WeekSidebar({
 }
 
 /* ── WeekItem ────────────────────────────────────────── */
-function WeekItem({
+// 주를 넘길 때 실제로 바뀌는 건 '활성' 두 줄뿐이다. 나머지 51주는 다시 그리지 않는다.
+const WeekItem = memo(function WeekItem({
   week,
   weekIndex,
   events,
   today,
   isActive,
-  onSelect,
+  onWeekSelect,
   showWeekends,
 }: {
   week: Date[];
@@ -85,7 +87,7 @@ function WeekItem({
   events: CalendarEvent[];
   today: string;
   isActive: boolean;
-  onSelect: () => void;
+  onWeekSelect: (index: number) => void;
   showWeekends: boolean;
 }) {
   const isoWeek = getISOWeekNumber(week[3]); // 목요일 기준
@@ -108,12 +110,12 @@ function WeekItem({
   const rangeLabel = `${week[0].getMonth() + 1}.${week[0].getDate()} ~ ${week[6].getMonth() + 1}.${week[6].getDate()}`;
 
   return (
-    <motion.button
+    <button
+      type="button"
       data-week-idx={weekIndex}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-      onClick={onSelect}
-      className="w-full text-left rounded-lg px-2.5 py-2 transition-colors"
+      onClick={() => onWeekSelect(weekIndex)}
+      // 호버·누름 확대는 CSS 로 — 53개를 framer 컴포넌트로 두면 넘길 때마다 그만큼 무겁다.
+      className="w-full text-left rounded-lg px-2.5 py-2 transition duration-150 motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98]"
       style={{
         background: isActive ? ACTIVE_BG : 'transparent',
         border: isActive
@@ -183,6 +185,6 @@ function WeekItem({
           )}
         </div>
       )}
-    </motion.button>
+    </button>
   );
-}
+});

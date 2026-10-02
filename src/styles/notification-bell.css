@@ -1,30 +1,44 @@
 /* v1.24.0 — 헤더 알림 벨 강조 + 미읽 카운트 배지 그라데이션 */
 
-/* 자동 알림(차분한 글로우 — bellGlow 2.0s ease-out infinite) */
-.bell-glow-soft {
+/* 벨 강조 빛은 box-shadow 를 키프레임으로 바꾸지 않는다. 그러면 매 프레임 메인 스레드가 다시 칠해,
+   안 읽은 알림이 있는 동안 앱 전체(캘린더 넘김 포함)가 무거워진다(느린 PC 유휴 작업의 절반 이상).
+   빛은 가상 요소에 고정해 두고 투명도·크기만 움직인다 — 합성 스레드에서 돈다.
+   버튼은 isolation 으로 쌓임 맥락을 만들어, 빛(z-index -1)이 버튼 내용 뒤·버튼 배경 위에 그려지게 한다. */
+.bell-glow-soft,
+.bell-glow-mention {
+  isolation: isolate;
+}
+.bell-glow-soft::after,
+.bell-glow-mention::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* 자동 알림(차분한 글로우 — 2.0s 숨쉬기). 예전 0%·100% 의 은은한 빛 ↔ 50% 의 넓고 진한 빛 */
+.bell-glow-soft::after {
+  box-shadow:
+    0 0 0 1px rgba(108, 92, 231, 0.20),
+    0 0 18px rgba(108, 92, 231, 0.40);
   animation: bell-glow-soft-anim 2.0s ease-out infinite;
 }
 @keyframes bell-glow-soft-anim {
-  0%, 100% {
-    box-shadow:
-      0 0 0 0 rgba(108, 92, 231, 0.30),
-      0 0 12px rgba(108, 92, 231, 0.18);
-  }
-  50% {
-    box-shadow:
-      0 0 0 5px rgba(108, 92, 231, 0),
-      0 0 18px rgba(108, 92, 231, 0.40);
-  }
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
 }
 
-/* 멘션 포함(강한 펄스 — mentionPing 1.6s ease-out infinite) */
-.bell-glow-mention {
+/* 멘션 포함(강한 펄스 — 1.6s). 테두리에서 고리가 퍼져 나가며 사라진다(예전 0→10px 번짐과 같은 범위) */
+.bell-glow-mention::after {
+  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.65);
   animation: bell-glow-mention-anim 1.6s ease-out infinite;
 }
 @keyframes bell-glow-mention-anim {
-  0%   { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.65); }
-  60%  { box-shadow: 0 0 0 10px rgba(108, 92, 231, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0); }
+  0% { opacity: 1; transform: scale(1); }
+  60% { opacity: 0; transform: scale(1.45); }
+  100% { opacity: 0; transform: scale(1.45); }
 }
 
 /* 카운트 배지 — 자동 알림(보라 그라데이션) */
@@ -47,8 +61,9 @@
 
 /* prefers-reduced-motion — 모든 무한 애니메이션 OFF */
 @media (prefers-reduced-motion: reduce) {
-  .bell-glow-soft,
-  .bell-glow-mention {
+  .bell-glow-soft::after,
+  .bell-glow-mention::after {
     animation: none !important;
+    display: none;
   }
 }

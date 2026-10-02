@@ -52,6 +52,7 @@ import { fmtDate, parseDate, addDays, formatWeekHeaderLabel } from '@/utils/cale
 import { calendarViewAnchor } from '@/utils/calendarViewAnchor';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
+import { reuseUnchangedCalendarEvents } from '@/utils/calendarEventReuse';
 import { eventContentSnapshot, withCalendarPresentationForSnapshot } from '@/utils/calendarLocalMutation';
 
 type WeekSubMode = 'card' | 'timegrid';
@@ -464,7 +465,9 @@ export function ScheduleView() {
       }
     }
 
-    setEvents(canonicalEvents);
+    // 기간을 넘길 때마다 정본은 내용이 같아도 새 객체로 온다. 같은 일정은 이전 객체를 그대로 쓰고,
+    // 목록 전체가 같으면 상태를 바꾸지 않아 전환 애니메이션 도중 화면 전체가 다시 그려지지 않게 한다.
+    setEvents((previous) => reuseUnchangedCalendarEvents(previous, canonicalEvents));
     // bflow 일정은 재조회 때마다 새 객체로 만들어진다. 내용이 그대로인데 참조만 바뀌면
     // 편집기의 재수화 effect가 돌아 편집 모드가 풀리고 초안이 사라진다(팀원이 '다른'
     // 일정을 바꿔도 재조회가 돌기 때문에 상시 발생). 내용이 같으면 기존 객체를 그대로 둔다.
@@ -649,6 +652,10 @@ export function ScheduleView() {
     });
   }, [calendars, calendarsLoaded, optimisticDeletedCalendarIds]);
 
+  // 주간·2주 보기는 연도 전체 주 배열을 쓴다. 주를 넘기다 달이 바뀔 때마다 새로 만들면
+  // 사이드바 53주가 전부 새 날짜 객체를 받아 통째로 다시 그려지므로 연도에만 묶어 둔다.
+  const yearWeeks = useMemo(() => generateYearWeeks(year), [year]);
+
   // 주 데이터 계산 (모든 날짜를 정오로 생성 — parseDate와 일관성 유지)
   const weeks = useMemo(() => {
     if (viewMode === 'today') return [];
@@ -681,16 +688,16 @@ export function ScheduleView() {
 
     if (viewMode === 'week') {
       // 주간 뷰: 전체 연도 주 배열 (사이드바용)
-      return generateYearWeeks(year);
+      return yearWeeks;
     }
 
     if (viewMode === '2week') {
       // 2주 뷰도 전체 연도 주 배열 사용 (사이드바 + activeWeekIndex 통일)
-      return generateYearWeeks(year);
+      return yearWeeks;
     }
 
     return [];
-  }, [viewMode, year, month]);
+  }, [viewMode, year, month, yearWeeks]);
 
   const moveToWeekContaining = useCallback((date: Date) => {
     const target = normalizeCalendarDate(date);
@@ -1729,11 +1736,13 @@ export function ScheduleView() {
       {/* ═══ 캘린더 본체 ═══ */}
       <div className="flex-1 flex flex-col overflow-hidden px-3 pb-2">
         <AnimatePresence mode="wait">
+          {/* transform 은 문자열로 넘겨 합성 스레드(WAAPI)에서 돌린다. 끝값은 'none' —
+              translateY(0) 이 남으면 안쪽의 fixed 요소(더보기 팝업 등) 기준 상자가 바뀐다. */}
           <motion.div
             key={`${viewMode}:${weekSubMode}`}
-            initial={reduce ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: filterFadeOpacity, y: 0 }}
-            exit={reduce ? undefined : { opacity: 0, y: -8 }}
+            initial={reduce ? false : { opacity: 0, transform: 'translateY(8px)' }}
+            animate={{ opacity: filterFadeOpacity, transform: 'translateY(0px)', transitionEnd: { transform: 'none' } }}
+            exit={reduce ? undefined : { opacity: 0, transform: 'translateY(-8px)' }}
             transition={reduce || skipPeriodTransition
               ? { duration: 0 }
               : { duration: 0.2, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.12 } }}
