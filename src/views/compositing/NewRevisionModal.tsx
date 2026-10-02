@@ -300,14 +300,14 @@ export default function NewRevisionModal({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/50 bf-scrim-in"
       onMouseDown={(e) => {
         // 백드롭 클릭 → 닫기 (모달 본체 클릭은 stopPropagation 으로 보호)
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className="bg-bg-card border border-bg-border/60 rounded-2xl w-[640px] max-h-[88vh] overflow-y-auto shadow-2xl"
+        className="bg-bg-card border border-bg-border/60 rounded-2xl w-[640px] max-h-[88vh] overflow-y-auto shadow-2xl bf-modal-in"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}

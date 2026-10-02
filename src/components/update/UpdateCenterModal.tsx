@@ -319,14 +319,14 @@ export function UpdateCenterModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/60 px-4">
+    <div className="bf-scrim-in fixed inset-0 z-[10020] flex items-center justify-center bg-black/60 px-4">
       <div
         ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="update-center-title"
         tabIndex={-1}
-        className="w-full max-w-[720px] flex flex-col overflow-hidden rounded-2xl border border-bg-border bg-bg-card/95 shadow-2xl shadow-black/40"
+        className="w-full max-w-[720px] flex flex-col overflow-hidden rounded-2xl border border-bg-border bg-bg-card/95 shadow-2xl shadow-black/40 bf-modal-in"
         style={{ height: '86vh' }}
         onMouseDown={(e) => e.stopPropagation()}
       >

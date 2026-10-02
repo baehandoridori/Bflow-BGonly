@@ -100,8 +100,8 @@ export function UserManagerModal() {
   }, [users, setUsers]);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/60">
-      <div className="w-[480px] max-h-[80vh] bg-bg-card border border-bg-border rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/60 bf-scrim-in">
+      <div className="w-[480px] max-h-[80vh] bg-bg-card border border-bg-border rounded-2xl p-6 flex flex-col gap-4 shadow-2xl bf-modal-in">
         {/* 헤더 */}
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-text-primary">사용자 관리 (관리자)</h2>

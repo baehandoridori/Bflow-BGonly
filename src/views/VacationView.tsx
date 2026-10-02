@@ -21,6 +21,9 @@ import {
   layoutVacationBars, vacationWeekRenderModel, VACATION_BAR_LAYOUT, type VacationEventBar,
 } from '@/utils/vacationCalendarLayout';
 import { createVacationGuardRetry } from '@/utils/vacationGuardRetry';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { useSwapIn } from '@/hooks/useContentSwap';
+import { dateCardPreset, swapInClassName } from '@/utils/contentSwap';
 
 /* ───────────── date helpers ───────────── */
 
@@ -181,13 +184,9 @@ function VacationDeleteListModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.15 }}
-        className="bg-bg-card border border-bg-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 backdrop-blur-sm bf-scrim-in" onClick={onClose}>
+      <div
+        className="bf-modal-in bg-bg-card border border-bg-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border/50">
@@ -247,7 +246,7 @@ function VacationDeleteListModal({
             </div>
           )}
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }
@@ -277,6 +276,9 @@ export function VacationView() {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(todayStr);
+  // 다른 날짜를 누르면 카드 틀은 그대로, 안의 날짜·명단만 바뀐다(움직임 폴리싱 11번).
+  const { reduce } = useMotionPref();
+  const dateSwapIn = useSwapIn(selectedDate);
   const [direction, setDirection] = useState(0);
 
   const goToday = () => {
@@ -712,7 +714,7 @@ export function VacationView() {
                 <ChevronDown size={10} className={cn('transition-transform', dahyuDropdownOpen && 'rotate-180')} />
               </button>
               {dahyuDropdownOpen && (
-                <div className="absolute right-0 top-full mt-1 w-40 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[50]">
+                <div className="bf-pop absolute right-0 top-full mt-1 w-40 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[50]">
                   <button
                     onClick={() => { setShowDahyuModal(true); setDahyuDropdownOpen(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"
@@ -985,60 +987,62 @@ export function VacationView() {
             </div>
           )}
 
-          {/* ── 선택 날짜 상세 (날짜 선택 시에만 표시) ── */}
-          <AnimatePresence mode="wait">
+          {/* ── 선택 날짜 상세 (날짜 선택 시에만 표시) ──
+              카드 틀(key 고정)은 처음 날짜를 고를 때·닫을 때만 움직이고, 다른 날짜를 누르면 틀은 그대로 두고
+              안쪽만 날짜 key 로 새로 그려 살짝 떠오른다 — 아래 '내 휴가 내역'이 들썩이지 않는다.
+              높이는 움직이지 않는다. 움직이는 카드라 흐림은 뺀다 — 뒤가 단색 바탕이라 옆 카드들과 눈에는 같다. */}
+          <AnimatePresence>
             {selectedDate && (
               <motion.div
-                key={selectedDate}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.15 }}
-                className="bg-bg-card/60 rounded-xl border border-bg-border/30 p-4 backdrop-blur-sm"
+                key="selected-date-detail"
+                {...dateCardPreset(reduce)}
+                className="bg-bg-card/60 rounded-xl border border-bg-border/30 p-4"
               >
-                <div className="flex items-center gap-2 mb-3">
-                  <CalendarDays size={15} className="text-accent" />
-                  <span className="text-[13px] font-semibold text-text-primary">
-                    {(() => {
-                      const d = parseDate(selectedDate);
-                      return `${d.getMonth() + 1}/${d.getDate()} (${WEEKDAYS[d.getDay()]})`;
-                    })()}
-                    {selectedDate === todayStr && (
-                      <span className="ml-1.5 text-[10px] text-accent font-normal">오늘</span>
-                    )}
-                  </span>
-                  <button
-                    onClick={() => setSelectedDate(null)}
-                    className="ml-auto p-0.5 rounded hover:bg-bg-border/50 cursor-pointer transition-colors"
-                  >
-                    <X size={12} className="text-text-secondary/40" />
-                  </button>
-                </div>
-
-                {selectedDateEvents.length === 0 ? (
-                  <p className="text-xs text-text-secondary/40 py-2">이 날짜에 휴가가 없습니다</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {selectedDateEvents.map((ev, i) => (
-                      <div
-                        key={`${ev.name}-${ev.startDate}-${i}`}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-border/20 transition-colors duration-200"
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ background: VACATION_COLOR }}
-                        />
-                        <span className="text-sm font-medium text-text-primary">{ev.name}</span>
-                        <span className="text-xs text-text-secondary/60">{ev.type}</span>
-                        {ev.startDate !== ev.endDate && (
-                          <span className="text-[10px] text-text-secondary/40 ml-auto">
-                            {ev.startDate} ~ {ev.endDate}
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                <div key={selectedDate} className={swapInClassName(dateSwapIn, true) || undefined}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <CalendarDays size={15} className="text-accent" />
+                    <span className="text-[13px] font-semibold text-text-primary">
+                      {(() => {
+                        const d = parseDate(selectedDate);
+                        return `${d.getMonth() + 1}/${d.getDate()} (${WEEKDAYS[d.getDay()]})`;
+                      })()}
+                      {selectedDate === todayStr && (
+                        <span className="ml-1.5 text-[10px] text-accent font-normal">오늘</span>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => setSelectedDate(null)}
+                      className="ml-auto p-0.5 rounded hover:bg-bg-border/50 cursor-pointer transition-colors"
+                    >
+                      <X size={12} className="text-text-secondary/40" />
+                    </button>
                   </div>
-                )}
+
+                  {selectedDateEvents.length === 0 ? (
+                    <p className="text-xs text-text-secondary/40 py-2">이 날짜에 휴가가 없습니다</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {selectedDateEvents.map((ev, i) => (
+                        <div
+                          key={`${ev.name}-${ev.startDate}-${i}`}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-border/20 transition-colors duration-200"
+                        >
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ background: VACATION_COLOR }}
+                          />
+                          <span className="text-sm font-medium text-text-primary">{ev.name}</span>
+                          <span className="text-xs text-text-secondary/60">{ev.type}</span>
+                          {ev.startDate !== ev.endDate && (
+                            <span className="text-[10px] text-text-secondary/40 ml-auto">
+                              {ev.startDate} ~ {ev.endDate}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

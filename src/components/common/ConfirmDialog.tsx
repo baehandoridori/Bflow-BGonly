@@ -63,20 +63,20 @@ export function ConfirmDialogHost() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/50 bf-scrim-in"
       onMouseDown={(event) => { if (event.target === event.currentTarget) handle(false); }}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label="확인"
-        className="bg-[#1A1D27] border border-[#2D3041] rounded-lg p-6 min-w-[320px] max-w-[480px] shadow-xl"
+        className="bg-bg-card border border-bg-border rounded-lg p-6 min-w-[320px] max-w-[480px] shadow-xl bf-modal-in"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <p className="text-[#E8E8EE] text-sm mb-5 whitespace-pre-line">{state.message}</p>
+        <p className="text-text-primary text-sm mb-5 whitespace-pre-line">{state.message}</p>
         <div className="flex justify-end gap-2">
           <button
-            className="px-4 py-2 rounded text-sm text-[#8B8DA3] hover:bg-[#2D3041]"
+            className="px-4 py-2 rounded text-sm text-text-secondary hover:bg-bg-border hover:text-text-primary"
             onClick={() => handle(false)}
             autoFocus
           >
@@ -86,7 +86,7 @@ export function ConfirmDialogHost() {
             className={`px-4 py-2 rounded text-sm font-medium ${
               state.tone === 'danger'
                 ? 'bg-red-600 hover:bg-red-500 text-white'
-                : 'bg-[#6C5CE7] hover:bg-[#7D6FFF] text-white'
+                : 'bg-accent hover:brightness-110 text-on-accent'
             }`}
             onClick={() => handle(true)}
           >
