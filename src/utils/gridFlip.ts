@@ -131,6 +131,83 @@ export function planGridFlip(
   return { moves, enters };
 }
 
+/**
+ * 새로 보이는 카드만 떠오르게 한다(남는 카드는 움직이지 않음) — 검색어처럼 글자마다 바뀌는 키용.
+ * 바뀌기 전에는 위치를 재지 않고 '있던 카드 목록'만 본다(강제 레이아웃 없음).
+ */
+export function planGridEnters(
+  beforeIds: ReadonlySet<string>,
+  after: ReadonlyMap<string, FlipRect>,
+  options: Pick<GridFlipPlanOptions, 'viewport' | 'maxItems' | 'staggerStepMs' | 'staggerMaxMs'> = {},
+): GridFlipPlan | null {
+  const {
+    viewport = null,
+    maxItems = GRID_FLIP.maxItems,
+    staggerStepMs = GRID_FLIP.staggerStepMs,
+    staggerMaxMs = GRID_FLIP.staggerMaxMs,
+  } = options;
+  if (beforeIds.size > maxItems || after.size > maxItems) return null;
+  const enters: GridFlipEnter[] = [];
+  for (const [id, next] of after) {
+    if (beforeIds.has(id)) continue;
+    if (viewport && !rectsIntersect(next, viewport)) continue;
+    enters.push({ id, delay: enterDelayMs(enters.length, staggerStepMs, staggerMaxMs) });
+  }
+  return { moves: [], enters };
+}
+
+/* ─── 언제 재고 언제 움직이나 (src/hooks/useGridFlip.ts 가 그대로 따른다) ─── */
+
+export type GridFlipMeasureMode = 'full' | 'enter-only';
+
+/**
+ * 렌더 단계(바뀌기 전 DOM)에서 무엇을 잴지. null 이면 재지 않는다.
+ * - flipKey 가 바뀌면 전체(카드마다 위치) — 필터·정렬·붙잡기 해제.
+ * - enterKey 만 바뀌면 '있던 카드 목록'만 — 검색어(글자마다 카드 150장 위치를 다시 재지 않게).
+ * - 이미 잰 값이 있거나(StrictMode 이중 렌더) 꺼져 있으면 재지 않는다.
+ */
+export function gridFlipMeasureMode({
+  keyChanged,
+  enterKeyChanged,
+  disabled,
+  alreadyMeasured,
+}: {
+  keyChanged: boolean;
+  enterKeyChanged: boolean;
+  disabled: boolean;
+  alreadyMeasured: boolean;
+}): GridFlipMeasureMode | null {
+  if (alreadyMeasured || disabled) return null;
+  if (keyChanged) return 'full';
+  if (enterKeyChanged) return 'enter-only';
+  return null;
+}
+
+/**
+ * 커밋 직후(그리기 전) 할 일.
+ * - keep: 키가 그대로 — 아무것도 움직이지 않는다(버려진 렌더가 잰 값만 비운다).
+ * - skip: 키는 바뀌었지만 바로 바뀐다(진행 중 움직임은 끊는다) — 꺼짐(동작 줄이기·끌어 고르기),
+ *   보기 전환(scope — 파트·화면 전환은 다른 움직임이 맡는다), 잰 값 없음·카드가 너무 많음.
+ * - run: 바뀐 자리를 재 미끄러뜨린다.
+ */
+export function gridFlipCommitAction({
+  keyChanged,
+  enterKeyChanged,
+  disabled,
+  scopeChanged,
+  measured,
+}: {
+  keyChanged: boolean;
+  enterKeyChanged: boolean;
+  disabled: boolean;
+  scopeChanged: boolean;
+  measured: boolean;
+}): 'keep' | 'skip' | 'run' {
+  if (!keyChanged && !enterKeyChanged) return 'keep';
+  if (disabled || scopeChanged || !measured) return 'skip';
+  return 'run';
+}
+
 function round(value: number): number {
   return Math.round(value * 100) / 100;
 }

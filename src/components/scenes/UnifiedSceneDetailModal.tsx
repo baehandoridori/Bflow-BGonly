@@ -55,7 +55,18 @@ import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEdit
 import { editingModalBeamClass } from '@/utils/editingPresence';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { useSceneFlip, useSavedFlash } from '@/hooks/useSceneFlip';
-import { preloadImage, sceneModalMotion, tabShiftPx } from '@/utils/sceneFlip';
+import {
+  EMPTY_IMAGE_SAVE,
+  beginImageSave,
+  clearImageSave,
+  finishImageSave,
+  imageSaveView,
+  preloadImage,
+  sceneModalMotion,
+  showImageSavePreview,
+  tabShiftPx,
+  type ImageSaveState,
+} from '@/utils/sceneFlip';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -430,12 +441,16 @@ export function UnifiedSceneDetailModal({
     };
   }, [focusRevisionId, focusRevisionCommentId, tab]);
   const [showImageModal, setShowImageModal] = useState<null | 'storyboard' | 'guide'>(null);
-  const [imageLoading, setImageLoading] = useState<null | 'storyboard' | 'guide'>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<null | 'storyboard' | 'guide' | 'bg' | 'act' | 'both'>(null);
-  const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
+  // 칸마다 저장 상태(바로 보일 미리보기·저장 중·저장됨 시각)를 '어느 씬의 몇 번째 저장인지'와 함께 둔다.
+  // 붙여넣고 곧바로 다음 씬으로 넘기거나 거기서 또 붙여넣어도 앞 저장이 지금 씬의 표시를 건드리지 않는다(리뷰 반영).
+  const [imageSave, setImageSave] = useState<ImageSaveState>(EMPTY_IMAGE_SAVE);
+  const imageSaveTokenRef = useRef(0);
+  const imageSceneKey = bgScene ? `${bgSheetName ?? ''}:${bgScene.id || bgScene.no}` : '';
+  const storyboardSave = imageSaveView(imageSave, 'storyboard', imageSceneKey);
+  const guideSave = imageSaveView(imageSave, 'guide', imageSceneKey);
+  const imageLoading: null | 'storyboard' | 'guide' = storyboardSave.saving ? 'storyboard' : guideSave.saving ? 'guide' : null;
   const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
-  // 저장이 끝난 시각 — '저장됨 ✓' 칩을 잠깐 띄운다.
-  const [savedAt, setSavedAt] = useState<{ storyboard?: number; guide?: number }>({});
   const { persistLatestImageUrl } = useOptimisticSceneImageUrl('UnifiedSceneDetailModal');
   const addingRef = useRef<{ bg: boolean; acting: boolean }>({ bg: false, acting: false });
 
@@ -453,7 +468,7 @@ export function UnifiedSceneDetailModal({
       const previousUrl = imageType === 'storyboard' ? bgScene?.storyboardUrl : bgScene?.guideUrl;
 
       setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+      setImageSave((s) => clearImageSave(s, imageType, imageSceneKey));
 
       persistLatestImageUrl({
         sceneUuid,
@@ -465,7 +480,7 @@ export function UnifiedSceneDetailModal({
         },
       });
     },
-    [bgScene?.id, bgScene?.storyboardUrl, bgScene?.guideUrl, persistLatestImageUrl],
+    [bgScene?.id, bgScene?.storyboardUrl, bgScene?.guideUrl, persistLatestImageUrl, imageSceneKey],
   );
 
   // ── 씬 넘김: 카드가 왼쪽·오른쪽으로 지나간다 (움직임 폴리싱 14번, 한솔 결정 2026-10-03) ──
@@ -664,6 +679,8 @@ export function UnifiedSceneDetailModal({
     return () => document.removeEventListener('keydown', onKey, true);
   }, [pinnedImageSlot]);
   // Ctrl+V 이미지 붙여넣기 (BG 만, 도킹 모드 제외)
+  // 아래 구독은 씬이 바뀌어도 그림 주소가 같으면(둘 다 빈 칸 등) 다시 걸리지 않는다 — 저장 함수는 늘 지금 씬 것을 ref 로 읽는다.
+  const uploadImageRef = useRef<(blob: Blob, imageType: 'storyboard' | 'guide') => Promise<boolean>>(async () => false);
   useEffect(() => {
     if (dockMode !== 'modal') return;
     if (!bgScene || !bgSheetName) return;
@@ -691,7 +708,7 @@ export function UnifiedSceneDetailModal({
           setPinnedImageSlot(null);
           // 코덱스 2차 P2: uploadImage 가 boolean 반환 — 성공 시에만 success 토스트.
           //   실패 시 uploadImage 자체가 error 토스트 띄움. 이중 토스트 방지.
-          const ok = await uploadImage(blob, imageType);
+          const ok = await uploadImageRef.current(blob, imageType);
           if (ok) {
             const slotLabel = imageType === 'storyboard' ? '스토리보드' : '가이드';
             sonnerToast.success(`${slotLabel} 칸에 붙여넣어졌어요`);
@@ -712,13 +729,15 @@ export function UnifiedSceneDetailModal({
       sonnerToast.error('BG 씬이 없어 이미지를 저장할 수 없습니다.');
       return false;
     }
+    // 이 저장의 번호·대상 씬 — 끝날 때 더 새 저장이 칸을 차지했거나 씬이 바뀌었으면 표시를 건드리지 않는다.
+    const token = ++imageSaveTokenRef.current;
+    setImageSave((s) => beginImageSave(s, imageType, imageSceneKey, token));
     try {
-      setImageLoading(imageType);
       // v1.30.2 (코덱스 P1, 한솔 보고 2026-05-24): 주석 결과(PNG, 투명 배경) 가 JPEG 으로 재인코딩되며
       //   투명 픽셀이 검정 matte 되던 버그 fix — 입력 mime 이 PNG 면 PNG 로 유지.
       const isPng = blob.type === 'image/png';
       const base64 = await resizeBlob(blob, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
+      setImageSave((s) => showImageSavePreview(s, imageType, token, base64));
       const { saveImage: si } = await import('@/utils/imageUtils');
       const url = await si(
         base64,
@@ -730,18 +749,16 @@ export function UnifiedSceneDetailModal({
       onFieldUpdate(bgSheetName, bgSceneIndex, field, url);
       // 저장된 그림을 미리 받아 그린 뒤에 미리보기를 걷는다 — 바꾸는 순간 칸이 비거나 덜컹이지 않게.
       await preloadImage(url);
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-      setSavedAt((prev) => ({ ...prev, [imageType]: Date.now() }));
+      setImageSave((s) => finishImageSave(s, imageType, token, Date.now()));
       return true;
     } catch (err) {
       console.error('[UnifiedSceneDetailModal] 이미지 업로드 실패', err);
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+      setImageSave((s) => finishImageSave(s, imageType, token, null));
       sonnerToast.error(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
       return false;
-    } finally {
-      setImageLoading(null);
     }
-  }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate]);
+  }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate, imageSceneKey]);
+  uploadImageRef.current = uploadImage;
 
   const pickFile = useCallback((imageType: 'storyboard' | 'guide') => {
     const input = document.createElement('input');
@@ -759,9 +776,9 @@ export function UnifiedSceneDetailModal({
     const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
     onFieldUpdate(bgSheetName, bgSceneIndex, field, '');
     setLatestImageUrls((prev) => ({ ...prev, [imageType]: '' }));
-    setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+    setImageSave((s) => clearImageSave(s, imageType, imageSceneKey));
     setDeleteConfirm(null);
-  }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate]);
+  }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate, imageSceneKey]);
 
   const handleAddDept = useCallback(async (dept: Department) => {
     if (addingRef.current[dept]) return;
@@ -1043,9 +1060,9 @@ export function UnifiedSceneDetailModal({
                               <UnifiedImageSlot
                                 label="스토리보드"
                                 continuityTarget="storyboard"
-                                url={previewUrls.storyboard ?? latestImageUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
-                                loading={imageLoading === 'storyboard'}
-                                savedAt={savedAt.storyboard}
+                                url={storyboardSave.preview ?? latestImageUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
+                                loading={storyboardSave.saving}
+                                savedAt={storyboardSave.savedAt}
                                 canEdit={!!bgScene && !!bgSheetName}
                                 onPick={() => pickFile('storyboard')}
                                 onRemove={() => setDeleteConfirm('storyboard')}
@@ -1060,9 +1077,9 @@ export function UnifiedSceneDetailModal({
                               <UnifiedImageSlot
                                 label="가이드"
                                 continuityTarget="guide"
-                                url={previewUrls.guide ?? latestImageUrls.guide ?? bgScene?.guideUrl ?? ''}
-                                loading={imageLoading === 'guide'}
-                                savedAt={savedAt.guide}
+                                url={guideSave.preview ?? latestImageUrls.guide ?? bgScene?.guideUrl ?? ''}
+                                loading={guideSave.saving}
+                                savedAt={guideSave.savedAt}
                                 canEdit={!!bgScene && !!bgSheetName}
                                 onPick={() => pickFile('guide')}
                                 onRemove={() => setDeleteConfirm('guide')}

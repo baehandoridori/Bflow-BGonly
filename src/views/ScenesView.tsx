@@ -90,6 +90,7 @@ import { useMotionPref } from '@/hooks/useMotionPref';
 import { useGridFlip } from '@/hooks/useGridFlip';
 import { useReflowLinger } from '@/hooks/useReflowLinger';
 import { holdLingeringItems, lingerHoldMs, shouldHoldForReflow, type LingerPhase } from '@/utils/reflowLinger';
+import { resolveDetailContext, type DetailTarget } from '@/utils/sceneFlip';
 
 type SceneHashTarget = Extract<HashTarget, { kind: 'scene' }>;
 
@@ -3437,12 +3438,34 @@ export function ScenesView() {
     loadArchived();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // #화·#파트 점프·뒤로 가기 시 열려 있는 씬 상세 모달을 닫는 신호(아래 effect 가 소비한다).
+  const closeSceneModalSignal = useAppStore((s) => s.closeSceneModalSignal);
+  // 마지막으로 소비한 signal 값을 추적해 "값이 실제로 증가(변경)" 했을 때만 닫는다.
+  // mount/remount 직후엔 ref===store값이라 닫지 않음 → 뷰 전환 remount 시 pending 점프 모달을 즉시 닫지 않는다.
+  const lastCloseSignalRef = useRef(closeSceneModalSignal);
+  // 닫기 신호를 받은 렌더부터 창이 다 닫힐 때까지 단일 상세 창은 직전에 보이던 씬을 그대로 가리킨다(리뷰 반영).
+  // 점프·뒤로 가기는 파트를 바꾸는 같은 갱신에서 신호를 보내므로, '지금 파트의 n번째'로 찾으면 가라앉는 동안 엉뚱한 씬이 보인다.
+  // - 신호를 소비하기 전 렌더: 값 비교(closeSceneModalSignal !== lastCloseSignalRef)로 안다.
+  // - 소비한 뒤 ~ onClose: closingDetailPinRef 로 안다(effect 의 setDetailContext 보다 먼저 다른 갱신이 그려져도 흔들리지 않게).
+  const detailPinRef = useRef<DetailTarget | null>(null);
+  const closingDetailPinRef = useRef<DetailTarget | null>(null);
+  if (detailSceneIndex === null) closingDetailPinRef.current = null; // 닫힌 뒤에는 고정할 것이 없다
+  const resolvedDetail = resolveDetailContext({
+    context: detailContext,
+    sceneIndex: detailSceneIndex,
+    currentSheetName: currentPart?.sheetName ?? null,
+    closePending: closeSceneModalSignal !== lastCloseSignalRef.current || closingDetailPinRef.current !== null,
+    pinned: closingDetailPinRef.current ?? detailPinRef.current,
+  });
+  detailPinRef.current = resolvedDetail.pin;
+  const shownDetailContext = resolvedDetail.context;
+
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   // detailContext가 있으면 해당 시트의 씬을, 없으면 기존 방식
   const detailScene = (() => {
-    if (detailContext) {
-      const part = allParts.find((p) => p.sheetName === detailContext.sheetName);
-      return part?.scenes[detailContext.sceneIndex] ?? null;
+    if (shownDetailContext) {
+      const part = allParts.find((p) => p.sheetName === shownDetailContext.sheetName);
+      return part?.scenes[shownDetailContext.sceneIndex] ?? null;
     }
     if (detailSceneIndex !== null) {
       return currentPart?.scenes[detailSceneIndex] ?? null;
@@ -3451,11 +3474,11 @@ export function ScenesView() {
   })();
 
   // 상세 모달의 sheetName / sceneIndex / department
-  const detailSheetName = detailContext?.sheetName ?? currentPart?.sheetName ?? '';
-  const detailSceneIdx = detailContext?.sceneIndex ?? detailSceneIndex;
+  const detailSheetName = shownDetailContext?.sheetName ?? currentPart?.sheetName ?? '';
+  const detailSceneIdx = shownDetailContext?.sceneIndex ?? detailSceneIndex;
   const detailDept: Department = (() => {
-    if (detailContext) {
-      const part = allParts.find((p) => p.sheetName === detailContext.sheetName);
+    if (shownDetailContext) {
+      const part = allParts.find((p) => p.sheetName === shownDetailContext.sheetName);
       return part?.department ?? 'bg';
     }
     return effectiveDept;
@@ -3626,16 +3649,25 @@ export function ScenesView() {
     reflowViewRef.current.order = order;
   }
   const singleLingerPhase = (scene: Scene): LingerPhase | null =>
-    (heldSingleScenes.leaving.has(scene) ? reflowLinger.phase : null);
+    (heldSingleScenes.leaving.has(scene)
+      ? reflowLinger.phaseOf([reflowSceneKey(currentPart?.sheetName ?? '', scene)])
+      : null);
   const mergedLingerPhase = (merged: MergedScene): LingerPhase | null =>
-    (heldMergedScenes.leaving.has(merged) ? reflowLinger.phase : null);
-  // 필터·정렬·검색을 바꾸거나 붙잡아 둔 카드가 빠질 때, 남는 카드는 새 자리로 미끄러지고 새 카드는 떠오른다.
+    (heldMergedScenes.leaving.has(merged)
+      ? reflowLinger.phaseOf([
+          ...(merged.bgScene ? [reflowSceneKey(bgPart?.sheetName ?? '', merged.bgScene)] : []),
+          ...(merged.actScene ? [reflowSceneKey(actPart?.sheetName ?? '', merged.actScene)] : []),
+        ])
+      : null);
+  // 필터·정렬을 바꾸거나 붙잡아 둔 카드가 빠질 때, 남는 카드는 새 자리로 미끄러지고 새 카드는 떠오른다.
+  // 검색어는 글자마다 바뀌므로 enterKey 로만 넘긴다 — 위치를 다시 재지 않고 새로 보이는 카드만 떠오른다.
   // 체크 같은 데이터 변경은 키에 넣지 않는다(붙잡기가 맡는다). 파트·화면이 바뀌는 전환은 scope 로 건너뛴다.
   const sceneListRef = useRef<HTMLDivElement>(null);
   useGridFlip(
     sceneListRef,
-    JSON.stringify([statusFilter, selectedAssignee, sortKey, sortDir, searchQuery, sceneGroupMode, reflowLinger.generation]),
+    JSON.stringify([statusFilter, selectedAssignee, sortKey, sortDir, sceneGroupMode, reflowLinger.generation]),
     {
+      enterKey: searchQuery,
       scope: JSON.stringify([selectedEpisode, selectedPart, selectedDepartment, sceneViewMode]),
       disabled: reduceMotion || sceneViewMode !== 'card' || lassoRect !== null,
       idAttribute: 'data-scene-id',
@@ -3792,10 +3824,7 @@ export function ScenesView() {
   // navigateToSceneView({ closeModal: true }) 가 store 카운터를 올리면 감지해 두 상세 모달 상태를 비운다.
   // 두 onClose 핸들러(SceneDetailModal / UnifiedSceneDetailModal)와 동일하게 정리한다.
   // scene 점프는 modalRequest 경로라 이 신호를 보내지 않으므로(navigateToSceneView 가드) 충돌 없음.
-  const closeSceneModalSignal = useAppStore((s) => s.closeSceneModalSignal);
-  // 마지막으로 소비한 signal 값을 추적해 "값이 실제로 증가(변경)" 했을 때만 닫는다.
-  // mount/remount 직후엔 ref===store값이라 닫지 않음 → 뷰 전환 remount 시 pending 점프 모달을 즉시 닫지 않는다.
-  const lastCloseSignalRef = useRef(closeSceneModalSignal);
+  // (closeSceneModalSignal·lastCloseSignalRef 는 위 detailScene 계산 앞에 있다 — 닫히는 동안 대상 고정에 쓴다.)
   // 움직임 폴리싱 14번: 상세 창이 떠 있으면 바로 지우지 않고 '닫아 달라'는 신호(sceneModalCloseToken)만 보낸다 →
   // 창이 Esc·바깥 클릭과 같은 0.16초 가라앉음을 거친 뒤 자기 onClose 로 아래와 같은 상태를 비운다.
   const [sceneModalCloseToken, setSceneModalCloseToken] = useState(0);
@@ -3805,9 +3834,14 @@ export function ScenesView() {
     if (closeSceneModalSignal === lastCloseSignalRef.current) return; // 변화 없으면 무시(remount 포함)
     lastCloseSignalRef.current = closeSceneModalSignal;
     if (sceneModalShownRef.current) {
+      // 가라앉는 동안 단일 창이 보이는 씬을 고정한다(파트가 바뀌어도 '지금 파트의 n번째'로 다시 찾지 않게).
+      const pin = detailPinRef.current;
+      closingDetailPinRef.current = pin;
+      if (pin) setDetailContext((prev) => prev ?? pin);
       setSceneModalCloseToken((n) => n + 1);
       return;
     }
+    closingDetailPinRef.current = null;
     setDetailSceneIndex(null);
     setDetailContext(null);
     setDetailMerged(null);
@@ -6746,8 +6780,8 @@ export function ScenesView() {
       {detailScene && detailSceneIdx !== null && (() => {
         // 필터링된 씬 목록에서 현재/이전/다음 씬의 원본 인덱스를 계산
         const detailPartScenes = (() => {
-          if (detailContext) {
-            const part = allParts.find((p) => p.sheetName === detailContext.sheetName);
+          if (shownDetailContext) {
+            const part = allParts.find((p) => p.sheetName === shownDetailContext.sheetName);
             return part?.scenes ?? [];
           }
           return currentPart?.scenes ?? [];
@@ -6793,7 +6827,7 @@ export function ScenesView() {
             onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
             onAssigneeActFeedbackRequest={handleActFeedbackRequest}
             onAssigneeActRoundBump={handleAssigneeActRoundBump}
-            onClose={() => { setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
+            onClose={() => { closingDetailPinRef.current = null; setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
             closeRequestToken={sceneModalCloseToken}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}

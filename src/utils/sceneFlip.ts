@@ -229,3 +229,141 @@ export function preloadImage(url: string, timeoutMs = 6000): Promise<void> {
     img.src = url;
   });
 }
+
+/*
+ * 칸마다 '어느 씬의 몇 번째 저장인지'를 함께 기억한다(리뷰 반영).
+ * 붙여넣고 곧바로 다음 씬으로 넘기면 앞 저장이 원격 그림을 미리 받는 동안(최대 6초) 끝나지 않는다.
+ * - 다른 씬의 미리보기·저장 중·저장됨은 지금 씬에 보이지 않는다(imageSaveView 가 씬 키로 거른다).
+ * - 같은 칸에 새 저장이 시작되면 앞 저장의 마무리는 무시된다(token) — 새 미리보기·저장 중을 지우지 않는다.
+ */
+export type ImageSlotType = 'storyboard' | 'guide';
+
+export interface ImageSaveEntry {
+  sceneKey: string;
+  token: number;
+  /** 저장이 끝나기 전에 바로 보여 줄 그림(data: URL). */
+  preview?: string;
+  /** 올리는 중이거나 원격 그림을 미리 받는 중. */
+  saving: boolean;
+  /** 저장이 끝난 시각 — '저장됨 ✓' 칩. */
+  savedAt?: number;
+}
+
+export type ImageSaveState = Readonly<Partial<Record<ImageSlotType, ImageSaveEntry>>>;
+
+export interface ImageSaveView {
+  preview?: string;
+  saving: boolean;
+  savedAt?: number;
+}
+
+export const EMPTY_IMAGE_SAVE: ImageSaveState = Object.freeze({});
+const IDLE_IMAGE_SAVE: ImageSaveView = Object.freeze({ saving: false });
+
+export function beginImageSave(state: ImageSaveState, type: ImageSlotType, sceneKey: string, token: number): ImageSaveState {
+  return { ...state, [type]: { sceneKey, token, saving: true } };
+}
+
+export function showImageSavePreview(state: ImageSaveState, type: ImageSlotType, token: number, preview: string): ImageSaveState {
+  const entry = state[type];
+  if (!entry || entry.token !== token) return state;
+  return { ...state, [type]: { ...entry, preview } };
+}
+
+/** 저장 마무리(성공이면 savedAt, 실패·취소면 null). 더 새 저장이 칸을 차지했으면 아무것도 바꾸지 않는다. */
+export function finishImageSave(state: ImageSaveState, type: ImageSlotType, token: number, savedAt: number | null): ImageSaveState {
+  const entry = state[type];
+  if (!entry || entry.token !== token) return state;
+  return { ...state, [type]: { sceneKey: entry.sceneKey, token, saving: false, ...(savedAt != null ? { savedAt } : {}) } };
+}
+
+/** 지금 씬의 그 칸을 비운다(그림 지우기·주석 반영). 진행 중이던 저장의 마무리도 무효가 된다. */
+export function clearImageSave(state: ImageSaveState, type: ImageSlotType, sceneKey: string): ImageSaveState {
+  const entry = state[type];
+  if (!entry || entry.sceneKey !== sceneKey) return state;
+  const next: Partial<Record<ImageSlotType, ImageSaveEntry>> = { ...state };
+  delete next[type];
+  return next;
+}
+
+/** 지금 씬에서 보일 모습. 다른 씬의 저장이면 아무것도 없는 것으로 본다. */
+export function imageSaveView(state: ImageSaveState, type: ImageSlotType, sceneKey: string): ImageSaveView {
+  const entry = state[type];
+  if (!entry || entry.sceneKey !== sceneKey) return IDLE_IMAGE_SAVE;
+  return entry;
+}
+
+/* ─── 나가는 카드(고스트) 자리 ─────────────────────────────── */
+
+/**
+ * 나가는 카드를 칸 안 어디에 얼마만큼 깔지(리뷰 반영).
+ * - 바깥 스크롤 상자가 있으면(BG 창) 다음 씬이 짧아 스크롤 위치가 당겨진 만큼(scrollShift, 보통 음수) 같이 옮겨
+ *   보던 그 자리 그대로 지나가게 한다(맨 아래까지 내려 보다 짧은 씬으로 넘기면 나가는 카드가 위로 튀던 것).
+ * - 아래 끝은 칸 높이(heightCap)를 넘지 않는다 — 고스트가 스크롤 영역을 늘리지 않게.
+ */
+export function ghostBox({
+  top,
+  height,
+  scrollShift = 0,
+  heightCap = null,
+}: {
+  top: number;
+  height: number;
+  scrollShift?: number;
+  heightCap?: number | null;
+}): { top: number; height: number } {
+  const placedTop = top + scrollShift;
+  if (heightCap == null) return { top: placedTop, height };
+  return { top: placedTop, height: Math.max(0, Math.min(height, heightCap - placedTop)) };
+}
+
+/* ─── 넘김 준비 소비 ───────────────────────────────────────── */
+
+/**
+ * 씬이 바뀔 때마다 준비해 둔 넘김을 한 칸 소비한다.
+ * - 준비가 오래됐으면(staleMs) 버린다.
+ * - 도트로 여러 칸을 건너뛰면 마지막 칸에 도착했을 때 한 번만 넘긴다(그 전 칸은 keep 으로 남긴다).
+ */
+export function advancePendingFlip<P extends { at: number; stepsLeft: number }>(
+  pending: P | null,
+  now: number,
+): { ready: P | null; keep: P | null } {
+  if (!pending) return { ready: null, keep: null };
+  if (now - pending.at > SCENE_FLIP.staleMs) return { ready: null, keep: null };
+  const stepsLeft = pending.stepsLeft - 1;
+  if (stepsLeft > 0) return { ready: null, keep: { ...pending, stepsLeft } };
+  return { ready: { ...pending, stepsLeft: 0 }, keep: null };
+}
+
+/* ─── 닫히는 동안 단일 상세 창 대상 고정 ─────────────────────── */
+
+export interface DetailTarget {
+  sheetName: string;
+  sceneIndex: number;
+}
+
+/**
+ * 단일(BG/액팅) 상세 창이 가리킬 대상(리뷰 반영).
+ * 카드에서 열면 detailContext 가 없어 '지금 파트의 n번째'로 찾는다. 그런데 #화·#파트 점프·뒤로 가기는
+ * 파트를 바꾸는 같은 갱신에서 닫기 신호를 보낸다 — 창이 0.16초 가라앉는 동안 대상 파트의 같은 순번 씬이
+ * 보이면 안 되므로, 닫기 신호를 아직 소비하지 않은 렌더(closePending)에서는 직전에 보이던 대상(pinned)을 쓴다.
+ * 돌려준 pin 은 다음 렌더의 pinned 로 넘긴다(닫기 신호 effect 가 이 값을 detailContext 로 고정한다).
+ */
+export function resolveDetailContext({
+  context,
+  sceneIndex,
+  currentSheetName,
+  closePending,
+  pinned,
+}: {
+  context: DetailTarget | null;
+  sceneIndex: number | null;
+  currentSheetName: string | null;
+  closePending: boolean;
+  pinned: DetailTarget | null;
+}): { context: DetailTarget | null; pin: DetailTarget | null } {
+  if (context) return { context, pin: context };
+  if (sceneIndex === null) return { context: null, pin: null };
+  if (closePending && pinned) return { context: pinned, pin: pinned };
+  return { context: null, pin: currentSheetName ? { sheetName: currentSheetName, sceneIndex } : null };
+}

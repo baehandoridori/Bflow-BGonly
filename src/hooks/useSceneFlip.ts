@@ -3,6 +3,8 @@ import { animateEl } from '@/utils/motion';
 import {
   SAVED_CHIP_MS,
   SCENE_FLIP,
+  advancePendingFlip,
+  ghostBox,
   isChainedFlip,
   planSceneFlip,
   planTitleRoll,
@@ -53,6 +55,8 @@ interface PendingFlip {
   at: number;
   layer: Snapshot | null;
   title: Snapshot | null;
+  /** 칸을 감싼 바깥 스크롤 상자(BG 창)와 넘기기 직전 스크롤 위치. */
+  outerScroll: { el: HTMLElement; top: number } | null;
 }
 
 interface GhostEntry {
@@ -127,6 +131,17 @@ function snapshot(el: HTMLElement | null | undefined): Snapshot | null {
   };
 }
 
+/**
+ * 칸 바로 바깥이 세로 스크롤 상자면 그 상자(BG 창: 창 본체가 스크롤되고 칸은 그 안의 일반 흐름).
+ * 창 밖(뒤 목록 등)의 스크롤은 보지 않는다 — 뒤 화면이 움직여도 나가는 카드 자리는 흔들리지 않게.
+ */
+function scrollParentOf(el: HTMLElement | null | undefined): HTMLElement | null {
+  const parent = el?.parentElement ?? null;
+  if (!parent) return null;
+  const overflowY = getComputedStyle(parent).overflowY;
+  return overflowY === 'auto' || overflowY === 'scroll' ? parent : null;
+}
+
 function canAnimate(el: Element | null | undefined): el is HTMLElement {
   return !!el && typeof (el as { animate?: unknown }).animate === 'function';
 }
@@ -160,14 +175,16 @@ export function useSceneFlip(options: SceneFlipOptions): SceneFlipControls {
     }, ms + 40);
   }, []);
 
-  const addGhost = useCallback((kind: 'layer' | 'title', parent: HTMLElement, snap: Snapshot, plan: FlipPlan, heightCap: number | null) => {
+  const addGhost = useCallback((kind: 'layer' | 'title', parent: HTMLElement, snap: Snapshot, plan: FlipPlan, heightCap: number | null, scrollShift = 0) => {
     const ghost = snap.node;
     const style = ghost.style;
+    // 보던 자리 그대로(바깥 스크롤이 당겨졌으면 그만큼 같이), 아래 끝은 칸 높이까지만 — ghostBox(단위 테스트)
+    const box = ghostBox({ top: snap.top, height: snap.height, scrollShift, heightCap });
     style.position = 'absolute';
     style.left = `${snap.left}px`;
-    style.top = `${snap.top}px`;
+    style.top = `${box.top}px`;
     style.width = `${snap.width}px`;
-    style.height = `${heightCap != null ? Math.max(0, Math.min(snap.height, heightCap)) : snap.height}px`;
+    style.height = `${box.height}px`;
     style.margin = '0';
     style.zIndex = '-1';
     style.pointerEvents = 'none';
@@ -222,7 +239,9 @@ export function useSceneFlip(options: SceneFlipOptions): SceneFlipControls {
     bounceRef.current = null;
 
     stageFor(viewport, plan.durationMs, !!clipX && !reduce);
-    if (pending.layer) addGhost('layer', viewport, pending.layer, plan, viewport.clientHeight);
+    const outer = pending.outerScroll;
+    const scrollShift = outer && outer.el.isConnected ? outer.el.scrollTop - outer.top : 0;
+    if (pending.layer) addGhost('layer', viewport, pending.layer, plan, viewport.clientHeight, scrollShift);
     const anims: Animation[] = [
       live.animate(plan.incoming, { duration: plan.durationMs, easing: plan.easing, fill: 'backwards' }),
     ];
@@ -240,15 +259,17 @@ export function useSceneFlip(options: SceneFlipOptions): SceneFlipControls {
   }, [addGhost, stageFor]);
 
   const prepare = useCallback((dir: FlipDir, steps = 1) => {
-    const { layerRef, titleRef } = optsRef.current;
+    const { layerRef, titleRef, viewportRef } = optsRef.current;
     const at = now();
     lastRef.current.navAt = at;
+    const scroller = scrollParentOf(viewportRef.current);
     pendingRef.current = {
       dir,
       stepsLeft: Math.max(1, Math.floor(steps)),
       at,
       layer: snapshot(layerRef.current),
       title: snapshot(titleRef?.current),
+      outerScroll: scroller ? { el: scroller, top: scroller.scrollTop } : null,
     };
   }, []);
 
@@ -280,16 +301,10 @@ export function useSceneFlip(options: SceneFlipOptions): SceneFlipControls {
   useLayoutEffect(() => {
     if (identityRef.current === options.identity) return;
     identityRef.current = options.identity;
-    const pending = pendingRef.current;
-    if (!pending) return;
-    if (now() - pending.at > SCENE_FLIP.staleMs) {
-      pendingRef.current = null;
-      return;
-    }
-    pending.stepsLeft -= 1;
-    if (pending.stepsLeft > 0) return;
-    pendingRef.current = null;
-    run(pending);
+    // 오래된 준비는 버리고, 도트로 여러 칸을 건너뛰면 마지막 칸에서만 넘긴다(advancePendingFlip — 단위 테스트).
+    const { ready, keep } = advancePendingFlip(pendingRef.current, now());
+    pendingRef.current = keep;
+    if (ready) run(ready);
   }, [options.identity, run]);
 
   // 맨 끝에 닿으면 그쪽 카드 모서리는 걷는다.

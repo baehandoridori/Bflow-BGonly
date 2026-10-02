@@ -52,7 +52,18 @@ import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { useSceneFlip, useSavedFlash } from '@/hooks/useSceneFlip';
-import { preloadImage, sceneModalMotion } from '@/utils/sceneFlip';
+import {
+  EMPTY_IMAGE_SAVE,
+  beginImageSave,
+  clearImageSave,
+  finishImageSave,
+  imageSaveView,
+  preloadImage,
+  sceneModalMotion,
+  showImageSavePreview,
+  type ImageSaveState,
+  type ImageSlotType,
+} from '@/utils/sceneFlip';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -460,8 +471,9 @@ function ReadOnlyImagePreview({
           draggable={false}
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
-        <div className="absolute inset-0 bg-overlay/0 group-hover:bg-overlay/30 transition-colors rounded-xl flex items-center justify-center">
-          <span className="opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 rounded-md bg-bg-card/80 border border-bg-border text-xs text-text-primary backdrop-blur-sm">
+        {/* hover 안내 — 고정 배경 위 투명도만 0.15초(배경색·흐림 전환 없음, 씬 넘김 고스트에 흐림이 복제되지 않게). */}
+        <div className="absolute inset-0 bg-overlay/30 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <span className="px-3 py-1.5 rounded-md bg-bg-card/95 border border-bg-border text-xs text-text-primary">
             클릭하여 확대
           </span>
         </div>
@@ -502,7 +514,6 @@ export function SceneDetailModal({
   focusRevisionCommentId,
   closeRequestToken,
 }: SceneDetailModalProps) {
-  const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const { reduce } = useMotionPref();
   const modalMotion = sceneModalMotion(reduce);
@@ -712,24 +723,48 @@ export function SceneDetailModal({
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
 
-  // 이미지 즉시 프리뷰용 낙관적 URL (업로드 중 base64 표시)
-  const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
+  // 칸마다 저장 상태(바로 보일 미리보기·저장 중·저장됨 시각)를 '어느 씬의 몇 번째 저장인지'와 함께 둔다.
+  // 저장 중 다른 씬으로 넘기거나 같은 칸에 또 붙여넣어도 서로의 표시를 건드리지 않는다(리뷰 반영).
+  const [imageSave, setImageSave] = useState<ImageSaveState>(EMPTY_IMAGE_SAVE);
+  const imageSaveTokenRef = useRef(0);
+  const imageSceneKey = `${sheetName}:${scene.id || scene.no}`;
   const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
-  // 저장이 끝난 시각 — '저장됨 ✓' 칩을 잠깐 띄운다.
-  const [savedAt, setSavedAt] = useState<{ storyboard?: number; guide?: number }>({});
   const { persistLatestImageUrl } = useOptimisticSceneImageUrl('SceneDetailModal');
 
   /**
-   * 저장이 끝난 그림 반영: 값 저장(낙관적) → 원격 그림을 미리 받아 그린 뒤 미리보기를 걷고 '저장됨 ✓'.
+   * 그림 저장 한 번: 바로 미리보기 → 올리기 → 값 저장(낙관적) → 원격 그림을 미리 받아 그린 뒤 미리보기를 걷고 '저장됨 ✓'.
    * 미리 받기 전에 걷으면 원격 그림이 오는 동안 칸이 비었다가 커지며 아래 내용이 덜컹 밀렸다.
+   * 대상 씬(시트·순번·씬 키)은 시작할 때의 값으로 끝까지 간다.
    */
-  const commitSavedImage = useCallback(async (imageType: 'storyboard' | 'guide', url: string) => {
-    const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-    onFieldUpdate(sceneIndex, field, url);
-    await preloadImage(url);
-    setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-    setSavedAt((prev) => ({ ...prev, [imageType]: Date.now() }));
-  }, [onFieldUpdate, sceneIndex]);
+  const saveSlotImage = useCallback(async (
+    imageType: ImageSlotType,
+    readDataUrl: () => Promise<string | null>,
+    failure: { log: string; toast: string },
+  ) => {
+    const token = ++imageSaveTokenRef.current;
+    setImageSave((s) => beginImageSave(s, imageType, imageSceneKey, token));
+    try {
+      const dataUrl = await readDataUrl();
+      if (!dataUrl) {
+        setImageSave((s) => finishImageSave(s, imageType, token, null));
+        return;
+      }
+      // 즉시 프리뷰: 저장이 끝나기 전에도 붙여넣은 그림을 보여 준다
+      setImageSave((s) => showImageSavePreview(s, imageType, token, dataUrl));
+      const { saveImage: si } = await import('@/utils/imageUtils');
+      const url = await si(dataUrl, sheetName, scene.sceneId || String(scene.no), imageType);
+      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+      onFieldUpdate(sceneIndex, field, url);
+      await preloadImage(url);
+      setImageSave((s) => finishImageSave(s, imageType, token, Date.now()));
+    } catch (err) {
+      console.error(failure.log, err);
+      setImageSave((s) => finishImageSave(s, imageType, token, null));
+      sonnerToast.error(`${failure.toast}: ${err instanceof Error ? err.message : err}`);
+    }
+  }, [imageSceneKey, sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate]);
+  const storyboardSave = imageSaveView(imageSave, 'storyboard', imageSceneKey);
+  const guideSave = imageSaveView(imageSave, 'guide', imageSceneKey);
 
   useEffect(() => {
     setLatestImageUrls({});
@@ -746,7 +781,7 @@ export function SceneDetailModal({
       const previousUrl = imageType === 'storyboard' ? scene.storyboardUrl : scene.guideUrl;
 
       setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+      setImageSave((s) => clearImageSave(s, imageType, imageSceneKey));
 
       persistLatestImageUrl({
         sceneUuid: scene.id,
@@ -758,7 +793,7 @@ export function SceneDetailModal({
         },
       });
     },
-    [department, scene.id, scene.storyboardUrl, scene.guideUrl, persistLatestImageUrl],
+    [department, scene.id, scene.storyboardUrl, scene.guideUrl, persistLatestImageUrl, imageSceneKey],
   );
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
@@ -828,105 +863,44 @@ export function SceneDetailModal({
           if (!blob) continue;
           // 스토리보드가 없으면 스토리보드에, 아니면 가이드에
           const imageType: 'storyboard' | 'guide' = !scene.storyboardUrl ? 'storyboard' : 'guide';
-          try {
-            setImageLoading(imageType);
-            const base64 = await resizeBlob(blob);
-            // 즉시 프리뷰: base64를 낙관적으로 표시
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
-            const { saveImage: si } = await import('@/utils/imageUtils');
-            const url = await si(
-              base64,
-              sheetName,
-              scene.sceneId || String(scene.no),
-              imageType,
-
-            );
-            await commitSavedImage(imageType, url);
-          } catch (err) {
-            console.error('[Ctrl+V 실패]', err);
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-            sonnerToast.error(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
-          } finally {
-            setImageLoading(null);
-          }
+          await saveSlotImage(imageType, () => resizeBlob(blob), { log: '[Ctrl+V 실패]', toast: '이미지 붙여넣기 실패' });
           return;
         }
       }
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [showImageModal, scene.storyboardUrl, sheetName, scene.sceneId, scene.no, commitSavedImage]);
+  }, [showImageModal, scene.storyboardUrl, saveSlotImage]);
 
-  // ── 이미지 핸들러 ──
+  // ── 이미지 핸들러 ── (모두 saveSlotImage 한 길: 바로 미리보기 → 저장 → 미리 받은 뒤 걷기)
 
   const pickFile = useCallback(
     (imageType: 'storyboard' | 'guide') => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
-      input.onchange = async () => {
+      input.onchange = () => {
         const file = input.files?.[0];
         if (!file) return;
-        try {
-          setImageLoading(imageType);
-          const { resizeBlob: rb, saveImage: si } = await import(
-            '@/utils/imageUtils'
-          );
-          const base64 = await rb(file);
-          // 즉시 프리뷰
-          setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
-          const url = await si(
-            base64,
-            sheetName,
-            scene.sceneId || String(scene.no),
-            imageType,
-
-          );
-          await commitSavedImage(imageType, url);
-        } catch (err) {
-          console.error('[파일 선택 실패]', err);
-          setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-          sonnerToast.error(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
-        } finally {
-          setImageLoading(null);
-        }
+        void saveSlotImage(imageType, () => resizeBlob(file), { log: '[파일 선택 실패]', toast: '이미지 저장 실패' });
       };
       input.click();
     },
-    [sheetName, scene.sceneId, scene.no, commitSavedImage],
+    [saveSlotImage],
   );
 
   const pasteClipboard = useCallback(
-    async (imageType: 'storyboard' | 'guide') => {
-      try {
-        setImageLoading(imageType);
+    (imageType: 'storyboard' | 'guide') => saveSlotImage(
+      imageType,
+      async () => {
         // 클립보드에서 이미지 읽기 → 즉시 프리뷰
         const dataUrl = await window.electronAPI.clipboardReadImage();
-        if (!dataUrl) {
-          sonnerToast.error('클립보드에 이미지가 없습니다.');
-          setImageLoading(null);
-          return;
-        }
-        // 즉시 프리뷰 표시
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: dataUrl }));
-        // 백그라운드 업로드
-        const { saveImage: si } = await import('@/utils/imageUtils');
-        const url = await si(
-          dataUrl,
-          sheetName,
-          scene.sceneId || String(scene.no),
-          imageType,
-        );
-        await commitSavedImage(imageType, url);
-      } catch (err) {
-        console.error('[클립보드 붙여넣기 실패]', err);
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-        sonnerToast.error(`클립보드 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
-      } finally {
-        setImageLoading(null);
-      }
-    },
-    [sheetName, scene.sceneId, scene.no, commitSavedImage],
+        if (!dataUrl) sonnerToast.error('클립보드에 이미지가 없습니다.');
+        return dataUrl || null;
+      },
+      { log: '[클립보드 붙여넣기 실패]', toast: '클립보드 붙여넣기 실패' },
+    ),
+    [saveSlotImage],
   );
 
   const handlePasteEvent = useCallback(
@@ -938,61 +912,21 @@ export function SceneDetailModal({
           e.preventDefault();
           const blob = item.getAsFile();
           if (!blob) continue;
-          try {
-            setImageLoading(imageType);
-            const base64 = await resizeBlob(blob);
-            // 즉시 프리뷰
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
-            const { saveImage: si } = await import('@/utils/imageUtils');
-            const url = await si(
-              base64,
-              sheetName,
-              scene.sceneId || String(scene.no),
-              imageType,
-
-            );
-            await commitSavedImage(imageType, url);
-          } catch (err) {
-            console.error('[Ctrl+V 실패]', err);
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-            sonnerToast.error(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
-          } finally {
-            setImageLoading(null);
-          }
+          await saveSlotImage(imageType, () => resizeBlob(blob), { log: '[Ctrl+V 실패]', toast: '이미지 붙여넣기 실패' });
           return;
         }
       }
     },
-    [sheetName, scene.sceneId, scene.no, commitSavedImage],
+    [saveSlotImage],
   );
 
   const handleDrop = useCallback(
     async (e: React.DragEvent, imageType: 'storyboard' | 'guide') => {
       const file = e.dataTransfer?.files?.[0];
       if (!file || !file.type.startsWith('image/')) return;
-      try {
-        setImageLoading(imageType);
-        const base64 = await resizeBlob(file);
-        // 즉시 프리뷰
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
-        const { saveImage: si } = await import('@/utils/imageUtils');
-        const url = await si(
-          base64,
-          sheetName,
-          scene.sceneId || String(scene.no),
-          imageType,
-
-        );
-        await commitSavedImage(imageType, url);
-      } catch (err) {
-        console.error('[드롭 실패]', err);
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-        sonnerToast.error(`이미지 드롭 실패: ${err instanceof Error ? err.message : err}`);
-      } finally {
-        setImageLoading(null);
-      }
+      await saveSlotImage(imageType, () => resizeBlob(file), { log: '[드롭 실패]', toast: '이미지 드롭 실패' });
     },
-    [sheetName, scene.sceneId, scene.no, commitSavedImage],
+    [saveSlotImage],
   );
 
   const confirmRemoveImage = useCallback(
@@ -1006,10 +940,10 @@ export function SceneDetailModal({
       // 3) DB 필드 비우기
       onFieldUpdate(sceneIndex, field, '');
       setLatestImageUrls((prev) => ({ ...prev, [deleteConfirm]: '' }));
-      setPreviewUrls((prev) => ({ ...prev, [deleteConfirm]: undefined }));
+      setImageSave((s) => clearImageSave(s, deleteConfirm, imageSceneKey));
       setDeleteConfirm(null);
     },
-    [sceneIndex, onFieldUpdate, deleteConfirm, scene.storyboardUrl, scene.guideUrl],
+    [sceneIndex, onFieldUpdate, deleteConfirm, scene.storyboardUrl, scene.guideUrl, imageSceneKey],
   );
 
   // 씬 네비게이션 도트 표시 여부 (2개 이상일 때만)
@@ -1223,10 +1157,10 @@ export function SceneDetailModal({
                     <div className="flex flex-col gap-5 px-4">
                       <ImageSlot
                         label="스토리보드"
-                        url={previewUrls.storyboard ?? latestImageUrls.storyboard ?? scene.storyboardUrl}
-                        loading={imageLoading === 'storyboard' && !previewUrls.storyboard}
-                        uploading={!!previewUrls.storyboard}
-                        savedAt={savedAt.storyboard}
+                        url={storyboardSave.preview ?? latestImageUrls.storyboard ?? scene.storyboardUrl}
+                        loading={storyboardSave.saving && !storyboardSave.preview}
+                        uploading={storyboardSave.saving && !!storyboardSave.preview}
+                        savedAt={storyboardSave.savedAt}
                         onPickFile={() => pickFile('storyboard')}
                         onPasteClipboard={() => pasteClipboard('storyboard')}
                         onRemove={() => setDeleteConfirm('storyboard')}
@@ -1236,10 +1170,10 @@ export function SceneDetailModal({
                       />
                       <ImageSlot
                         label="가이드"
-                        url={previewUrls.guide ?? latestImageUrls.guide ?? scene.guideUrl}
-                        loading={imageLoading === 'guide' && !previewUrls.guide}
-                        uploading={!!previewUrls.guide}
-                        savedAt={savedAt.guide}
+                        url={guideSave.preview ?? latestImageUrls.guide ?? scene.guideUrl}
+                        loading={guideSave.saving && !guideSave.preview}
+                        uploading={guideSave.saving && !!guideSave.preview}
+                        savedAt={guideSave.savedAt}
                         onPickFile={() => pickFile('guide')}
                         onPasteClipboard={() => pasteClipboard('guide')}
                         onRemove={() => setDeleteConfirm('guide')}

@@ -26,6 +26,8 @@ export type LingerPhase = 'hold' | 'leaving';
 export interface LingerEntry {
   /** 체크하기 직전 화면에서의 순서(0부터). */
   order: number;
+  /** 이미 사라지던 중(leaving)에 다른 카드가 새로 붙잡혔다 — 다시 나타나지 않고 끝까지 사라진 채로 기다린다. */
+  gone?: boolean;
 }
 
 /** 붙잡아 둘 필요가 있는 보기인가: 상태 필터가 걸렸거나, 체크로 순서가 바뀌는 정렬(진행률·미완료). */
@@ -40,6 +42,73 @@ export function lingerHoldMs(celebrating: boolean): number {
 /** 연속 체크: 마감은 늘리기만 한다(지난 마감이면 지금부터 다시). */
 export function extendLingerDeadline(previousDeadline: number, now: number, holdMs: number): number {
   return Math.max(previousDeadline, now + holdMs);
+}
+
+/* ─── 붙잡기 상태 흐름 (src/hooks/useReflowLinger.ts 가 타이머로 몬다) ───
+   hold(체크) → [마감] expire: 빠질 카드가 0.2초에 사라짐 → clear: 비우고 generation+1(나머지 카드가 미끄러짐).
+   scope(파트·필터·정렬·검색 등)가 바뀌면 그 자리에서 버린다(미끄러짐 없음 — 보기 전환은 다른 움직임이 맡는다). */
+
+export interface LingerState {
+  scope: string;
+  entries: ReadonlyMap<string, LingerEntry>;
+  phase: LingerPhase;
+  /** 붙잡기를 풀 때마다 1씩 오른다 — 목록 미끄러짐(useGridFlip)의 키. */
+  generation: number;
+}
+
+export type LingerAction =
+  | { type: 'hold'; scope: string; keys: readonly string[]; order: number }
+  | { type: 'expire' }
+  | { type: 'clear' }
+  | { type: 'scope'; scope: string };
+
+export const EMPTY_LINGER_ENTRIES: ReadonlyMap<string, LingerEntry> = new Map();
+
+export function initialLingerState(scope: string): LingerState {
+  return { scope, entries: EMPTY_LINGER_ENTRIES, phase: 'hold', generation: 0 };
+}
+
+export function lingerReducer(state: LingerState, action: LingerAction): LingerState {
+  switch (action.type) {
+    case 'hold': {
+      if (action.keys.length === 0) return state;
+      const sameScope = state.scope === action.scope;
+      const next = new Map<string, LingerEntry>();
+      if (sameScope) {
+        // 이미 사라지던 카드는 다시 나타나지 않게 gone 으로 남긴다(체크 전 순서는 그대로 — 자리가 흔들리지 않게).
+        const fading = state.phase === 'leaving';
+        for (const [key, entry] of state.entries) next.set(key, fading && !entry.gone ? { ...entry, gone: true } : entry);
+      }
+      // 이미 붙잡은 키는 처음 순서를 지킨다.
+      for (const key of action.keys) if (!next.has(key)) next.set(key, { order: action.order });
+      return { scope: action.scope, entries: next, phase: 'hold', generation: state.generation };
+    }
+    case 'expire':
+      return state.entries.size === 0 || state.phase === 'leaving' ? state : { ...state, phase: 'leaving' };
+    case 'clear':
+      return state.entries.size === 0
+        ? state
+        : { scope: state.scope, entries: EMPTY_LINGER_ENTRIES, phase: 'hold', generation: state.generation + 1 };
+    case 'scope':
+      return state.scope === action.scope || state.entries.size === 0
+        ? state
+        : { scope: action.scope, entries: EMPTY_LINGER_ENTRIES, phase: 'hold', generation: state.generation };
+    default:
+      return state;
+  }
+}
+
+/** 지금 보기(scope)에서 쓸 값 — 다른 보기에서 붙잡은 것은 렌더에서 바로 무효(effect 가 곧 비운다). */
+export function lingerView(state: LingerState, scope: string): { entries: ReadonlyMap<string, LingerEntry>; phase: LingerPhase } {
+  return state.scope === scope
+    ? { entries: state.entries, phase: state.phase }
+    : { entries: EMPTY_LINGER_ENTRIES, phase: 'hold' };
+}
+
+/** 카드 하나(키 여러 개일 수 있음)의 '곧 빠짐' 단계 — 사라지던 중이던 카드(gone)는 계속 사라진 채. */
+export function lingerPhaseOf(entries: ReadonlyMap<string, LingerEntry>, phase: LingerPhase, keys: readonly string[]): LingerPhase {
+  if (phase === 'leaving') return 'leaving';
+  return keys.some((key) => entries.get(key)?.gone) ? 'leaving' : 'hold';
 }
 
 export interface HeldItems<T> {

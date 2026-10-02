@@ -9,7 +9,10 @@ import {
   GRID_FLIP_EASING,
   enterDelayMs,
   enterKeyframes,
+  gridFlipCommitAction,
+  gridFlipMeasureMode,
   moveKeyframes,
+  planGridEnters,
   planGridFlip,
   rectsIntersect,
   shouldRevealOnMount,
@@ -19,9 +22,14 @@ import {
   REFLOW_LINGER,
   extendLingerDeadline,
   holdLingeringItems,
+  initialLingerState,
   lingerHoldMs,
+  lingerPhaseOf,
+  lingerReducer,
+  lingerView,
   shouldHoldForReflow,
   type LingerEntry,
+  type LingerState,
 } from '../../src/utils/reflowLinger.ts';
 import { EASE_CSS } from '../../src/utils/motion.ts';
 
@@ -107,6 +115,40 @@ test('키프레임: 이동은 translate 하나(크기 보정 없음 — 글자�
   for (const frame of [...moveKeyframes(1, 2), ...enterKeyframes()]) {
     assert.equal(/scale/.test(String(frame.transform)), false);
   }
+});
+
+test('언제 재나: 필터·정렬 키가 바뀌면 전체, 검색어(enterKey)만 바뀌면 카드 목록만, 이미 쟀거나 꺼져 있으면 재지 않는다', () => {
+  const base = { keyChanged: false, enterKeyChanged: false, disabled: false, alreadyMeasured: false };
+  assert.equal(gridFlipMeasureMode(base), null, '바뀐 것이 없으면 재지 않는다');
+  assert.equal(gridFlipMeasureMode({ ...base, keyChanged: true }), 'full');
+  assert.equal(gridFlipMeasureMode({ ...base, keyChanged: true, enterKeyChanged: true }), 'full', '둘 다 바뀌면 전체');
+  assert.equal(gridFlipMeasureMode({ ...base, enterKeyChanged: true }), 'enter-only', '검색어만 — 카드 위치는 다시 재지 않는다');
+  assert.equal(gridFlipMeasureMode({ ...base, keyChanged: true, disabled: true }), null, '동작 줄이기·끌어 고르기 중');
+  assert.equal(gridFlipMeasureMode({ ...base, keyChanged: true, alreadyMeasured: true }), null, 'StrictMode 이중 렌더는 처음 잰 값');
+});
+
+test('커밋 직후: 키 그대로면 손대지 않고, 꺼짐·보기 전환(scope)·잰 값 없음은 바로 바뀌고, 그 밖에는 미끄러진다', () => {
+  const base = { keyChanged: true, enterKeyChanged: false, disabled: false, scopeChanged: false, measured: true };
+  assert.equal(gridFlipCommitAction(base), 'run');
+  assert.equal(gridFlipCommitAction({ ...base, keyChanged: false, enterKeyChanged: true }), 'run', '검색어만 바뀌어도 새 카드 떠오름');
+  assert.equal(gridFlipCommitAction({ ...base, keyChanged: false }), 'keep', '키가 그대로인 커밋(체크 등 데이터 변경)은 진행 중 움직임도 그대로');
+  assert.equal(gridFlipCommitAction({ ...base, scopeChanged: true }), 'skip', '파트·화면 전환은 미끄러지지 않는다');
+  assert.equal(gridFlipCommitAction({ ...base, disabled: true }), 'skip');
+  assert.equal(gridFlipCommitAction({ ...base, measured: false }), 'skip', '못 쟀거나 카드가 너무 많음');
+});
+
+test('검색어만 바뀔 때: 남는 카드는 움직이지 않고 새로 보이는 카드만(화면 안, 순서대로 지연) 떠오른다', () => {
+  const plan = planGridEnters(new Set(['a01', 'a02']), new Map([
+    ['a03', rect(0, 0)],
+    ['a04', rect(200, 0)],
+    ['a05', rect(0, 5000)],
+  ]), { viewport: rect(0, 0, 1000, 800) });
+  assert.ok(plan);
+  assert.deepEqual(plan.moves, []);
+  assert.deepEqual(plan.enters, [{ id: 'a03', delay: 0 }, { id: 'a04', delay: 12 }], '화면 밖 a05 는 건너뛴다');
+  assert.deepEqual(planGridEnters(new Set(['a01']), new Map([['a01', rect(0, 0)]]))?.enters, [], '있던 카드는 떠오르지 않는다');
+  const many = new Set(Array.from({ length: 151 }, (_, i) => `x${i}`));
+  assert.equal(planGridEnters(many, new Map()), null, '150장을 넘으면 생략');
 });
 
 /* ─── 체크한 카드 붙잡아 두기 ────────────────────────────────── */
@@ -198,6 +240,68 @@ test('붙잡은 것이 없으면 같은 배열을 그대로 돌려준다(렌더�
   assert.equal(holdLingeringItems(visible, visible, keysOf, new Map()).items, visible);
 });
 
+/* ─── 붙잡기 상태 흐름 (useReflowLinger 가 타이머로 모는 lingerReducer) ─── */
+
+const ids = (state: LingerState) => [...state.entries.keys()];
+
+test('붙잡기 흐름: hold → (마감) expire 사라짐 → clear 비우고 generation+1 — 나머지 카드가 그때 미끄러진다', () => {
+  let state = initialLingerState('v1');
+  assert.deepEqual({ ...state, entries: ids(state) }, { scope: 'v1', entries: [], phase: 'hold', generation: 0 });
+  state = lingerReducer(state, { type: 'hold', scope: 'v1', keys: ['a02'], order: 1 });
+  assert.deepEqual(ids(state), ['a02']);
+  assert.equal(state.phase, 'hold');
+  // 연속 체크: 이미 붙잡은 키는 처음 순서를 지키고 새 키만 더한다.
+  state = lingerReducer(state, { type: 'hold', scope: 'v1', keys: ['a02', 'a04'], order: 3 });
+  assert.deepEqual(state.entries.get('a02'), { order: 1 });
+  assert.deepEqual(state.entries.get('a04'), { order: 3 });
+  state = lingerReducer(state, { type: 'expire' });
+  assert.equal(state.phase, 'leaving', '빠질 카드가 0.2초에 사라진다');
+  assert.equal(state.generation, 0, '사라지는 동안은 아직 자리를 그대로 둔다');
+  state = lingerReducer(state, { type: 'clear' });
+  assert.deepEqual(ids(state), []);
+  assert.equal(state.phase, 'hold');
+  assert.equal(state.generation, 1, '비우는 순간 목록 미끄러짐 키가 바뀐다');
+  // 이미 비었으면 같은 상태(쓸데없는 다시 그리기·미끄러짐 없음)
+  assert.equal(lingerReducer(state, { type: 'clear' }), state);
+  assert.equal(lingerReducer(state, { type: 'expire' }), state);
+  assert.equal(lingerReducer(state, { type: 'hold', scope: 'v1', keys: [], order: 0 }), state);
+});
+
+test('붙잡기 흐름: 보기(필터·정렬·검색·파트)가 바뀌면 붙잡은 것을 버리고, 미끄러짐 키는 그대로(보기 전환은 다른 움직임이 맡는다)', () => {
+  let state = lingerReducer(initialLingerState('v1'), { type: 'hold', scope: 'v1', keys: ['a02'], order: 1 });
+  // 렌더에서는 바로 무효
+  assert.deepEqual(lingerView(state, 'v2'), { entries: new Map(), phase: 'hold' });
+  assert.equal(lingerView(state, 'v1').entries, state.entries);
+  state = lingerReducer(state, { type: 'scope', scope: 'v2' });
+  assert.deepEqual(ids(state), []);
+  assert.equal(state.scope, 'v2');
+  assert.equal(state.generation, 0);
+  // 다른 보기에서 붙잡혔던 것은 새 hold 에 섞이지 않는다
+  const stale = lingerReducer(initialLingerState('v1'), { type: 'hold', scope: 'v1', keys: ['a02'], order: 1 });
+  const fresh = lingerReducer(stale, { type: 'hold', scope: 'v2', keys: ['b01'], order: 0 });
+  assert.deepEqual(ids(fresh), ['b01']);
+  assert.equal(fresh.scope, 'v2');
+});
+
+test('사라지는 중(leaving)에 다른 카드를 체크해도 사라지던 카드는 다시 나타나지 않고, 새 카드와 함께 끝에 빠진다', () => {
+  let state = lingerReducer(initialLingerState('v1'), { type: 'hold', scope: 'v1', keys: ['a02'], order: 1 });
+  state = lingerReducer(state, { type: 'expire' });
+  assert.equal(lingerPhaseOf(state.entries, state.phase, ['a02']), 'leaving');
+  state = lingerReducer(state, { type: 'hold', scope: 'v1', keys: ['a05'], order: 4 });
+  assert.equal(state.phase, 'hold', '새로 체크한 카드는 다시 머문다');
+  assert.equal(lingerPhaseOf(state.entries, state.phase, ['a02']), 'leaving', '사라지던 카드는 계속 사라진 채(.65 로 되살아나지 않음)');
+  assert.equal(lingerPhaseOf(state.entries, state.phase, ['a05']), 'hold');
+  assert.deepEqual(state.entries.get('a02'), { order: 1, gone: true }, '체크 전 순서는 그대로 — 자리가 흔들리지 않는다');
+  assert.equal(state.generation, 0);
+  state = lingerReducer(lingerReducer(state, { type: 'expire' }), { type: 'clear' });
+  assert.deepEqual(ids(state), []);
+  assert.equal(state.generation, 1, '마지막에 한 번에 비우고 미끄러진다');
+  // 통합 카드(키 두 개)는 하나라도 사라지던 중이면 사라진 채
+  const merged = new Map<string, LingerEntry>([['bg', { order: 0, gone: true }], ['act', { order: 0 }]]);
+  assert.equal(lingerPhaseOf(merged, 'hold', ['bg', 'act']), 'leaving');
+  assert.equal(lingerPhaseOf(merged, 'hold', ['act']), 'hold');
+});
+
 /* ─── 캐릭터 카드 놓기 · 캘린더 ────────────────────────────── */
 
 test('캐릭터 카드 놓기: 내가 놓은 뒤 1.5초 안의 순서 변경만, 40장 이하에서만 미끄러진다', () => {
@@ -213,6 +317,27 @@ test('캘린더: 필터를 바꾼 직후(0.4초 안)에 새로 생긴 막대만 
 });
 
 /* ─── 연결 가드(소스) ─────────────────────────────────────── */
+
+test('훅은 순수 함수가 정한 대로만: 붙잡기는 hold → 마감 expire → 0.2초 뒤 clear, 보기 바뀌면 scope / 미끄러짐은 재기·커밋 판정', () => {
+  const linger = read('src/hooks/useReflowLinger.ts');
+  assert.match(linger, /setState\(\(previous\) => lingerReducer\(previous, action\)\)/);
+  assert.match(linger, /dispatch\(\{ type: 'hold', scope: scopeRef\.current, keys, order \}\);/);
+  assert.match(linger, /dispatch\(\{ type: 'expire' \}\);\n\s+timerRef\.current = setTimeout\(\(\) => \{\n\s+timerRef\.current = null;\n\s+deadlineRef\.current = 0;\n\s+dispatch\(\{ type: 'clear' \}\);\n\s+\}, REFLOW_LINGER\.fadeOutMs\);\n\s+\}, Math\.max\(0, deadlineRef\.current - now\)\);/);
+  assert.match(linger, /dispatch\(\{ type: 'scope', scope \}\);/);
+  assert.match(linger, /const view = lingerView\(state, scope\);/);
+  assert.match(linger, /generation: state\.generation,/);
+  assert.match(read('src/views/ScenesView.tsx'), /reflowLinger\.phaseOf\(\[reflowSceneKey\(currentPart\?\.sheetName \?\? '', scene\)\]\)/);
+
+  const grid = read('src/hooks/useGridFlip.ts');
+  assert.match(grid, /const measureMode = gridFlipMeasureMode\(\{\n\s+keyChanged: committedKeyRef\.current !== flipKey,\n\s+enterKeyChanged: committedEnterKeyRef\.current !== options\.enterKey,\n\s+disabled: !!options\.disabled,\n\s+alreadyMeasured: snapshotRef\.current !== null,\n\s+\}\);/);
+  assert.match(grid, /const scopeChanged = committedScopeRef\.current !== scope;/);
+  assert.match(grid, /const action = gridFlipCommitAction\(\{\n\s+keyChanged,\n\s+enterKeyChanged,\n\s+disabled: !!disabled,\n\s+scopeChanged,\n\s+measured: before !== null && before !== TOO_MANY,\n\s+\}\);/, '파트·화면 전환(scope)은 판정에 그대로 넘긴다');
+  assert.match(grid, /if \(action === 'keep'\) return;\n\s+for \(const animation of runningRef\.current\) animation\.cancel\(\);\n\s+runningRef\.current = \[\];\n\s+if \(action === 'skip' \|\| !before \|\| before === TOO_MANY\) return;/);
+  // 검색어(enter-only)는 있던 카드 위치를 재지 않는다(속성만 읽음)
+  const ids = grid.slice(grid.indexOf('function measureIds('), grid.indexOf('/** 스크롤 상자'));
+  assert.doesNotMatch(ids, /getBoundingClientRect/);
+  assert.match(grid, /const after = measure\(container, attr, maxItems, before\.ids\);/);
+});
 
 test('씬 목록: 체크 직전(낙관 갱신 전)에 붙잡고, 붙잡은 카드는 체크 전 자리·곧 빠짐 표시로 그린다', () => {
   const view = read('src/views/ScenesView.tsx');
@@ -238,7 +363,9 @@ test('씬 목록: 체크 직전(낙관 갱신 전)에 붙잡고, 붙잡은 카�
 test('씬 목록 미끄러짐: 필터·정렬·검색·붙잡기 해제만 키로 쓰고(체크 데이터 X), 동작 줄이기·시트 보기·끌어 고르기 중에는 끈다', () => {
   const view = read('src/views/ScenesView.tsx');
   const call = view.slice(view.indexOf('useGridFlip(\n    sceneListRef,'), view.indexOf("idAttribute: 'data-scene-id',"));
-  assert.match(call, /JSON\.stringify\(\[statusFilter, selectedAssignee, sortKey, sortDir, searchQuery, sceneGroupMode, reflowLinger\.generation\]\)/);
+  assert.match(call, /JSON\.stringify\(\[statusFilter, selectedAssignee, sortKey, sortDir, sceneGroupMode, reflowLinger\.generation\]\)/);
+  // 검색어는 글자마다 바뀐다 — 카드 위치를 다시 재지 않고 새로 보이는 카드만 떠오르게(enterKey)
+  assert.match(call, /enterKey: searchQuery,/);
   assert.match(call, /disabled: reduceMotion \|\| sceneViewMode !== 'card' \|\| lassoRect !== null/);
   assert.match(call, /scope: JSON\.stringify\(\[selectedEpisode, selectedPart, selectedDepartment, sceneViewMode\]\)/, '파트·화면 전환은 건너뛴다');
   assert.equal((view.match(/ref=\{sceneListRef\}/g) ?? []).length, 2, '통합·개별 목록 상자 모두');
