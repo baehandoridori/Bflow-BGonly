@@ -5,6 +5,9 @@ import { DEPARTMENT_CONFIGS, SCENE_PHASES, SCENE_PHASE_COLORS, SCENE_PHASE_LABEL
 import { cn } from '@/utils/cn';
 import { getAssigneeProgressEntries, sceneStateFromScene, type AssigneeProgressEntry } from '@/utils/assigneeProgress';
 import { useStageFillSteps } from './useStageFillSteps';
+import { StageRollbackFlash, useStageSaveStatus } from './StageSaveStatus';
+import { assigneeCellId, phaseCellId } from './stageSaveFeedback';
+import type { StageRollbackFlash as StageRollbackFlashState } from '@/stores/useStageSaveStatusStore';
 
 interface AssigneeProgressStackProps {
   scene: Scene;
@@ -41,12 +44,16 @@ function AssigneeStageControls({
   department,
   compact,
   onToggle,
+  pending,
+  rollback,
 }: {
   name: string;
   progress: AssigneeProgressEntry['progress'];
   department: Department;
   compact: boolean;
   onToggle: (stage: Stage) => void;
+  pending: ReadonlySet<string>;
+  rollback: StageRollbackFlashState | undefined;
 }) {
   const cfg = DEPARTMENT_CONFIGS[department];
   const fillSteps = useStageFillSteps(STAGES.map((stage) => progress[stage] === true));
@@ -62,11 +69,16 @@ function AssigneeStageControls({
       {STAGES.map((stage, i) => {
         const active = progress[stage] === true;
         const label = cfg.stageLabels[stage];
+        const cellId = assigneeCellId(name, stage);
+        const savePending = pending.has(cellId);
         return (
           <button
             type="button"
             key={stage}
             data-on={active}
+            data-stage-key={cellId}
+            data-save-pending={savePending || undefined}
+            aria-busy={savePending || undefined}
             className={cn(
               'stage-seg [--stage-seg-hover-alpha:0.35] min-w-0 inline-flex items-center justify-center rounded font-semibold leading-none',
               'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
@@ -95,6 +107,7 @@ function AssigneeStageControls({
                 '--stage-seg-glow': `${cfg.stageColors[stage]}35`,
               } as CSSProperties}
             />
+            {rollback?.cells.includes(cellId) && <StageRollbackFlash key={rollback.at} />}
             <span aria-hidden="true" className="inline-flex shrink-0 items-center justify-center">
               {STAGE_ICON_BY_STAGE[stage]}
             </span>
@@ -115,6 +128,8 @@ export function AssigneeProgressStack({
   onAssigneeFeedbackRequest,
   onAssigneeRoundBump,
 }: AssigneeProgressStackProps) {
+  // 20번: 저장이 실패해 다시 보내는 중인 버튼(점선·흐림)과 끝내 되돌린 버튼(도리도리·빨간 테두리). 훅이라 일찍 돌아가기 전에.
+  const { pending, rollback } = useStageSaveStatus(scene.id);
   const entries = getAssigneeProgressEntries(scene);
   if (entries.length <= 1) return null;
 
@@ -178,6 +193,7 @@ export function AssigneeProgressStack({
           ) : null;
 
         const activeIndex = SCENE_PHASES.indexOf(activeState);
+        const activePending = pending.has(assigneeCellId(entry.name, phaseCellId(activeState)));
         const controls =
           department === 'acting' ? (
             <div
@@ -192,6 +208,7 @@ export function AssigneeProgressStack({
                 <span
                   aria-hidden="true"
                   className="stage-seg-pill rounded"
+                  data-save-pending={activePending || undefined}
                   style={{
                     '--stage-pill-index': activeIndex,
                     '--stage-pill-count': SCENE_PHASES.length,
@@ -216,11 +233,16 @@ export function AssigneeProgressStack({
               {SCENE_PHASES.map((state) => {
                 const active = activeState === state;
                 const label = SCENE_PHASE_LABELS_SHORT[state];
+                const cellId = assigneeCellId(entry.name, phaseCellId(state));
+                const savePending = pending.has(cellId);
                 return (
                   <button
                     type="button"
                     key={state}
                     data-on={active}
+                    data-stage-key={cellId}
+                    data-save-pending={savePending || undefined}
+                    aria-busy={savePending || undefined}
                     className={cn(
                       'stage-seg [--stage-seg-hover-alpha:0.35] min-w-0 inline-flex items-center justify-center rounded font-semibold leading-none',
                       'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
@@ -248,6 +270,7 @@ export function AssigneeProgressStack({
                       {PHASE_ICON_BY_STATE[state]}
                     </span>
                     {compact ? null : <span className="whitespace-nowrap leading-none">{label}</span>}
+                    {rollback?.cells.includes(cellId) && <StageRollbackFlash key={rollback.at} />}
                   </button>
                 );
               })}
@@ -259,6 +282,8 @@ export function AssigneeProgressStack({
               department={department}
               compact={compact}
               onToggle={(stage) => onAssigneeStageToggle?.(entry.name, stage)}
+              pending={pending}
+              rollback={rollback}
             />
           );
 

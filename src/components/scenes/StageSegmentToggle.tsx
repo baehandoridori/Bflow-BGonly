@@ -6,6 +6,7 @@ import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { cn } from '@/utils/cn';
 import { useStageLabelDisplayMode } from './useStageLabelDisplayMode';
 import { useStageFillSteps } from './useStageFillSteps';
+import { StageRollbackFlash, useStageSaveStatus } from './StageSaveStatus';
 
 export function stageIcon(stage: Stage, size = 12) {
   if (stage === 'lo') return <Clock size={size} strokeWidth={2.4} />;
@@ -40,6 +41,8 @@ export function StageSegmentToggle({
   const { modeOf, setNode } = useStageLabelDisplayMode(cfg.stageLabels, compact, iconDisplay === 'auto');
   // 움직임 폴리싱 6번: 여러 칸이 한 번에 바뀌면 LO→PNG(켤 때)·PNG→LO(끌 때) 순서로 40ms 씩 이어서.
   const fillSteps = useStageFillSteps(STAGES.map((stage) => Boolean(scene[stage])));
+  // 20번: 저장이 실패해 다시 보내는 중인 칸(점선·흐림)과 끝내 되돌린 칸(도리도리·빨간 테두리).
+  const { pending, rollback } = useStageSaveStatus(scene.id);
   const fillColorStyle = { '--stage-seg-color': cfg.color, '--stage-seg-glow': `${cfg.color}40` } as CSSProperties;
   const iconClassName =
     iconDisplay === 'never'
@@ -62,6 +65,7 @@ export function StageSegmentToggle({
         const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
         const extraClassName =
           typeof segmentClassName === 'function' ? segmentClassName(stage) : segmentClassName;
+        const savePending = pending.has(stage);
 
         return (
           <button
@@ -91,6 +95,9 @@ export function StageSegmentToggle({
             data-on={isDone}
             // 17번: 마지막 칸(PNG)까지 켜졌으면 완료 칸 — 동작 줄이기에서 꽃가루 대신 이 칸 테두리가 한 번 빛난다.
             data-celebrate-cell={isCurrent && i === STAGES.length - 1 ? true : undefined}
+            data-stage-key={stage}
+            data-save-pending={savePending || undefined}
+            aria-busy={savePending || undefined}
             // stage-seg: 누름(scale .94 → 톡) · transform/opacity/color 만 전환 · hover 바탕은 겹친 층의 opacity.
             // 굵기는 고정(semibold) — 굵기가 바뀌면 글자 폭이 바뀌어 다시 배치된다.
             className={cn(
@@ -115,6 +122,7 @@ export function StageSegmentToggle({
               data-glow={isCurrent}
               style={fillColorStyle}
             />
+            {rollback?.cells.includes(stage) && <StageRollbackFlash key={rollback.at} />}
             <CompactIconLabel
               icon={stageIcon(stage, 12)}
               label={cfg.stageLabels[stage]}

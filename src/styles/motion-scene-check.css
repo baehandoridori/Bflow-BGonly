@@ -428,3 +428,38 @@ button.success-check:focus-visible {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* ═══ 20. 실패 순간의 안심 장치 — 단계 체크 자동 재전송 (safety-net#scene) ═══
+   세 버튼 묶음(.stage-seg)에 같이 붙는다. 저장 규칙은 src/utils/saveRetry.ts, 표시 수치는 src/components/scenes/stageSaveFeedback.ts.
+   - 다시 보내는 중: 칸이 살짝 흐려지고(opacity .72, 기본 규칙의 opacity 전환) 은은한 점선 테두리가 떠오른다.
+     성공하면 표시만 조용히 사라진다. 점선은 그 칸에만 생기는 겹친 층(::after) — 평소 칸에는 층이 없다
+     (일괄 작업 실패 표시 .bflow-pending-failed::after 와 겹치지 않게 기본 ::after 규칙을 두지 않는다).
+   - 끝내 되돌림: 칸 안의 빨간 테두리 층(.stage-seg-rollback)이 번졌다 사라지고(WAAPI opacity 0.9초) 칸이 좌우로 흔들린다
+     (WAAPI translate 0.24초, StageSaveStatus.tsx). 동작 줄이기면 흔들림 없이 테두리만. */
+.stage-seg[data-save-pending='true'],
+.stage-seg-pill[data-save-pending='true'] {
+  opacity: 0.72;
+}
+.stage-seg[data-save-pending='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  border: 1px dashed currentColor;
+  opacity: 0.6;
+  pointer-events: none;
+  animation: stage-save-pending-in var(--motion-base) var(--ease-std) both;
+}
+@keyframes stage-save-pending-in {
+  from { opacity: 0; }
+}
+.stage-seg-rollback {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  border: 1.5px solid #E17055;
+  opacity: 0;
+  pointer-events: none;
+}

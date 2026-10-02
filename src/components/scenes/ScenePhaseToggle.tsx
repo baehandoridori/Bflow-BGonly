@@ -20,6 +20,8 @@ import { SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/ty
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { cn } from '@/utils/cn';
 import { useStageLabelDisplayMode } from './useStageLabelDisplayMode';
+import { StageRollbackFlash, useStageSaveStatus } from './StageSaveStatus';
+import { phaseCellId } from './stageSaveFeedback';
 
 export interface ScenePhaseToggleProps {
   scene: Scene;
@@ -66,6 +68,9 @@ export function ScenePhaseToggle({
   const workRound = scene.workRound ?? 1;
   const pointerHandledRef = useRef(false);
   const { modeOf, setNode } = useStageLabelDisplayMode(SCENE_PHASE_LABELS_SHORT, compact, iconDisplay === 'auto');
+  // 20번: 저장이 실패해 다시 보내는 중인 칩(점선·흐림)과 끝내 되돌린 칩(도리도리·빨간 테두리).
+  const { pending, rollback } = useStageSaveStatus(scene.id);
+  const activePending = pending.has(phaseCellId(activeState));
   const phaseIconClassName =
     (compact && iconDisplay !== 'auto') || iconDisplay === 'never'
       ? 'hidden'
@@ -120,6 +125,7 @@ export function ScenePhaseToggle({
           <span
             aria-hidden="true"
             className={cn('stage-seg-pill rounded-md', disabled && 'opacity-40')}
+            data-save-pending={activePending || undefined}
             style={{
               '--stage-pill-index': activeIndex,
               '--stage-pill-count': SCENE_PHASES.length,
@@ -143,6 +149,8 @@ export function ScenePhaseToggle({
         )}
         {SCENE_PHASES.map((state) => {
           const isActive = activeState === state;
+          const cellId = phaseCellId(state);
+          const savePending = pending.has(cellId);
           return (
             <div
               key={state}
@@ -150,6 +158,9 @@ export function ScenePhaseToggle({
               data-continuity-stage-segment
               data-on={isActive}
               data-celebrate-cell={isActive && state === 'done' ? true : undefined}
+              data-stage-key={cellId}
+              data-save-pending={savePending || undefined}
+              aria-busy={savePending || undefined}
               role="radio"
               aria-checked={isActive}
               aria-disabled={disabled || undefined}
@@ -199,6 +210,7 @@ export function ScenePhaseToggle({
                       : 'both'
                 }
               />
+              {rollback?.cells.includes(cellId) && <StageRollbackFlash key={rollback.at} />}
             </div>
           );
         })}

@@ -105,3 +105,60 @@ export function enqueueSequentialStageSave(
   queue.set(key, next);
   return next;
 }
+
+/* ─── 저장 실패 자동 재전송 (움직임 폴리싱 20번 safety-net) ─────────────── */
+
+/**
+ * 아직 저장이 확인되지 않은 칸들.
+ * - stages: 함께 보낼 칸(LO→PNG 순) · desired: 보낼 값 · baseline: 되돌릴 값(첫 저장 전 값)
+ * - expected: 클릭 직후 화면에 보이던 값. 보통 desired 와 같지만, 액팅 씬은 단계 상태가 체크 4개를 다시 맞춰
+ *   달라질 수 있다(예: '대기' 칸만 켜면 단계가 대기라 체크가 모두 꺼진다). '아직 내 값인가'는 이 값으로 본다.
+ */
+export interface PendingStageWrites {
+  stages: Stage[];
+  desired: Partial<Record<Stage, boolean>>;
+  baseline: Partial<Record<Stage, boolean>>;
+  expected: Partial<Record<Stage, boolean>>;
+}
+
+/** 화면 값이 아직 내 클릭 직후 값인 칸만. 그 사이 바뀐 칸(다른 사람·주기 동기화)은 빠진다 — 덮지도 되돌리지도 않는다. */
+export function stagesStillMine(writes: PendingStageWrites, scene: SequentialStageSnapshot): Stage[] {
+  return writes.stages.filter((stage) => Boolean(scene[stage]) === writes.expected[stage]);
+}
+
+/** 내 값이 아니게 된 칸 중 처음 값으로 돌아간 칸 — 내 클릭이 저장되지 않은 채 화면에서 사라진 칸이다. */
+export function stagesRevertedToBaseline(writes: PendingStageWrites, scene: SequentialStageSnapshot): Stage[] {
+  return writes.stages.filter(
+    (stage) => Boolean(scene[stage]) !== writes.expected[stage] && Boolean(scene[stage]) === writes.baseline[stage],
+  );
+}
+
+/**
+ * 보내는 중이거나 다시 보낼 차례를 기다리던 칸에 새 클릭을 얹는다. 새 저장은 앞 저장의 칸까지 마지막 값으로 함께 보낸다
+ * (앞 저장의 재전송은 취소된다). 되돌릴 값은 가장 처음 저장 전 값을 지킨다.
+ * scene 은 이번 클릭을 화면에 반영하기 직전 값이다. expected 는 desired 로 채워 두고, 호출자가 클릭 직후 화면 값으로 고친다.
+ */
+export function mergePendingStageWrites(
+  pending: PendingStageWrites | undefined,
+  scene: SequentialStageSnapshot,
+  patch: SequentialStagePatch,
+  changedStages: readonly Stage[],
+): PendingStageWrites {
+  const carried = pending ? stagesStillMine(pending, scene) : [];
+  const stages = SEQUENTIAL_STAGE_ORDER.filter((stage) => changedStages.includes(stage) || carried.includes(stage));
+  const desired: Partial<Record<Stage, boolean>> = {};
+  const baseline: Partial<Record<Stage, boolean>> = {};
+  for (const stage of stages) {
+    desired[stage] = changedStages.includes(stage) ? patch[stage] : pending?.desired[stage];
+    baseline[stage] = carried.includes(stage) ? pending?.baseline[stage] : Boolean(scene[stage]);
+  }
+  return { stages, desired, baseline, expected: { ...desired } };
+}
+
+/** 클릭을 화면에 다 반영한 뒤의 값으로 expected 를 맞춘다. */
+export function withExpectedStages(writes: PendingStageWrites, scene: SequentialStageSnapshot): PendingStageWrites {
+  return {
+    ...writes,
+    expected: Object.fromEntries(writes.stages.map((stage) => [stage, Boolean(scene[stage])])) as Partial<Record<Stage, boolean>>,
+  };
+}
