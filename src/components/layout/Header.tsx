@@ -1,7 +1,10 @@
+import { useLayoutEffect, useRef } from 'react';
 import { ArrowLeft, RefreshCw, Sun, Moon, Database, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { EASE_CSS, MOTION_MS, animateEl } from '@/utils/motion';
 import { UserMenu } from '@/components/auth/UserMenu';
 import { NotificationBell } from '@/components/NotificationPanel';
 import { HeaderPointsBadge } from './HeaderPointsBadge';
@@ -23,6 +26,36 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
 
   const headerTitle = resolveHeaderTitle(activeView, episodeDashboardEp, episodeTitles);
 
+  // 움직임 폴리싱 18번: '돌아가기'가 생기거나 없어질 때 제목이 순간이동하지 않고 스르륵 비켜선다(FLIP).
+  // 바뀌기 직전 자리는 렌더 단계에서 잰다(DOM 이 아직 옛 상태) — useStackFlip 과 같은 방식.
+  const { reduce } = useMotionPref();
+  const hasBack = navigationBackTarget !== null;
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const committedHasBackRef = useRef(hasBack);
+  const titleLeftBeforeRef = useRef<number | null>(null);
+  if (committedHasBackRef.current !== hasBack && titleLeftBeforeRef.current === null && titleRef.current) {
+    titleLeftBeforeRef.current = titleRef.current.offsetLeft;
+  }
+  useLayoutEffect(() => {
+    if (committedHasBackRef.current === hasBack) {
+      titleLeftBeforeRef.current = null;
+      return;
+    }
+    committedHasBackRef.current = hasBack;
+    const before = titleLeftBeforeRef.current;
+    titleLeftBeforeRef.current = null;
+    const title = titleRef.current;
+    if (before === null || !title) return;
+    const shift = before - title.offsetLeft;
+    if (Math.abs(shift) < 1) return;
+    animateEl(
+      title,
+      [{ transform: `translateX(${shift}px)` }, { transform: 'translateX(0)' }],
+      { duration: MOTION_MS.base, easing: EASE_CSS.snap },
+      reduce,
+    );
+  });
+
   const lastSyncLabel = lastSyncTime
     ? `마지막 동기화: ${new Date(lastSyncTime).toLocaleTimeString('ko-KR')}`
     : '동기화 대기 중';
@@ -42,13 +75,15 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
             className={cn(
               'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/10 px-2.5',
               'bf-press text-xs font-medium text-accent hover:border-accent/40 hover:bg-accent/18',
+              // 생길 때 왼쪽에서 밀려 나온다(160ms, motion-comments-notify.css). 없어질 땐 바로.
+              'bf-back-in',
             )}
           >
             <ArrowLeft size={15} />
             <span className="hidden sm:inline">돌아가기</span>
           </button>
         )}
-        <h1 className="truncate text-lg font-semibold">{headerTitle}</h1>
+        <h1 ref={titleRef} className="truncate text-lg font-semibold">{headerTitle}</h1>
       </div>
 
       {/* 오른쪽: 액션 버튼들 */}

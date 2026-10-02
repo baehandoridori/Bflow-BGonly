@@ -185,3 +185,68 @@
 .emoji-picker-extra {
   animation: comment-send-fade-in 140ms var(--ease-out) backwards;
 }
+
+/* ─── 18. notification-journey — 알림이 와서 → 열고 → 건너뛰어 → 도착하기까지 ──────
+   종 '딩동'·배지 톡·숫자 굴림·지운 줄 밀어내기·아래 줄 미끄러짐·제목 비켜서기는 WAAPI(src/components/NotificationPanel.tsx,
+   src/components/layout/Header.tsx, 값은 src/utils/notificationArrival.ts). 여기는 상태로 정해지는 전환과 등장만 둔다.
+   종 주변 은은한 빛(notification-bell.css)은 그대로. */
+
+/* 알림 창 줄 — 읽으면 왼쪽 막대가 색은 그대로 둔 채 위아래로 접히듯 사라진다(scaleY + opacity 200ms). */
+.bf-noti-unread-bar {
+  transform-origin: 50% 50%;
+  transition: transform 200ms var(--ease-std), opacity 200ms var(--ease-std);
+}
+[data-noti-read="true"] > .bf-noti-unread-bar {
+  transform: scaleY(0);
+  opacity: 0;
+}
+
+/* 헤더 '← 돌아가기' — 생길 때 왼쪽 6px 에서 밀려 나온다(160ms). 채움 backwards 라 끝나면 누름 반응(.bf-press)을 막지 않는다. */
+.bf-back-in {
+  animation: bf-back-in 160ms var(--ease-out) backwards;
+}
+@keyframes bf-back-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* 리테이크 허브에 링크·알림으로 도착한 줄 — 2px 보라 테두리. 평소엔 투명, 도착할 때만 WAAPI 로 opacity 0→.9→0→.9→0(1.4초).
+   box-shadow 를 키프레임으로 바꾸지 않는다(매 프레임 다시 칠함) — 미리 그린 테두리 층의 opacity 만 움직인다. */
+.bf-arrive-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px rgb(var(--color-accent));
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 오른쪽 아래 알림 카드 — 종류별 왼쪽 3px 색 막대(index.css .bflow-toast 그림자 맨 앞 inset). 알림 창 아이콘과 같은 색.
+   나를 부른 알림(멘션·배정)은 보라, 피드백 요청은 노랑, 일정은 파랑. */
+[data-sonner-toast].bflow-toast--mention,
+[data-sonner-toast].bflow-toast--scene_assignment,
+[data-sonner-toast].bflow-toast--revision {
+  --bflow-toast-tone: rgb(var(--color-accent));
+}
+[data-sonner-toast].bflow-toast--acting_feedback { --bflow-toast-tone: #FDCB6E; }
+[data-sonner-toast].bflow-toast--calendar,
+[data-sonner-toast].bflow-toast--scene_change { --bflow-toast-tone: #74B9FF; }
+[data-sonner-toast].bflow-toast--milestone { --bflow-toast-tone: #00B894; }
+[data-sonner-toast].bflow-toast--comment,
+[data-sonner-toast].bflow-toast--comment_reaction,
+[data-sonner-toast].bflow-toast--system { --bflow-toast-tone: #8B8DA3; }
+
+/* 동작 줄이기: 알림 카드는 미끄러지지 않고 opacity 만(나타날 때·사라질 때 120ms).
+   sonner 의 동작 줄이기 규칙(animation:none !important)보다 구체적이라 이 페이드만 남는다. */
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toaster] [data-sonner-toast].bflow-toast[data-mounted="true"] {
+    animation: bflow-toast-fade-in 120ms var(--ease-std) !important;
+  }
+  [data-sonner-toaster] [data-sonner-toast].bflow-toast[data-removed="true"] {
+    animation: bflow-toast-calm-out 120ms var(--ease-in) forwards !important;
+  }
+}
+@keyframes bflow-toast-calm-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}

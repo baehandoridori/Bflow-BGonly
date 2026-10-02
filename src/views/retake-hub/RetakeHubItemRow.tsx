@@ -36,6 +36,8 @@ import { FinalResolveBar } from '@/components/scenes/revision/FinalResolveBar';
 import { ReassignInline } from '@/components/scenes/revision/ReassignInline';
 import { RevisionStatusAction } from '@/components/scenes/RevisionPanel';
 import { RemindRetakeButton } from '@/components/scenes/revision/RemindRetakeButton';
+import { prefersReducedMotion } from '@/utils/motion';
+import { playArrivalRing } from '@/utils/notificationArrival';
 
 interface Props {
   revision: CompRevision;
@@ -51,6 +53,7 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel, fo
   const { setView, setHighlightUserName } = useAppStore();
   const openRetakeScene = useRetakeSceneModal();
   const rowRef = useRef<HTMLDivElement>(null);
+  const arrivalRingRef = useRef<HTMLSpanElement>(null);
 
   const startAssignee = useRevisionStore((s) => s.startAssignee);
   const completeAssignee = useRevisionStore((s) => s.completeAssignee);
@@ -74,10 +77,16 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel, fo
   const [descriptionDraft, setDescriptionDraft] = useState(revision.description);
   const [savingDescription, setSavingDescription] = useState(false);
 
+  // 링크·알림으로 도착: 펼치고 그 줄로 데려간 뒤 테두리에 보라 빛을 두 번 켰다 끈다(움직임 폴리싱 18번).
+  // 다시 도착하면(focusToken) 빛도 처음부터. 동작 줄이기면 바로 이동하고 빛은 1.4초 동안 정지 표시.
   useEffect(() => {
     if (!focused) return;
     setExpanded(true);
-    const frame = requestAnimationFrame(() => rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    const reduce = prefersReducedMotion();
+    const frame = requestAnimationFrame(() => {
+      rowRef.current?.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+      playArrivalRing(arrivalRingRef.current, reduce);
+    });
     return () => cancelAnimationFrame(frame);
   }, [focused, focusToken]);
 
@@ -247,6 +256,8 @@ export function RetakeHubItemRow({ revision, allUsers, sideBarClass, reLabel, fo
     >
       {/* 좌측 상태 색막대 (§8.1 status별 4색) */}
       <span className={`rev-side-bar ${sideBarClass}`} aria-hidden />
+      {/* 도착 표시 — 평소엔 투명. 도착할 때만 opacity 로 켜진다(motion-comments-notify.css .bf-arrive-ring). */}
+      <span ref={arrivalRingRef} className="bf-arrive-ring" aria-hidden />
 
       {/* ─── 접힘 행 ─── */}
       {/* div(role=button) — 내용의 파일경로 칩(PathBadge=button)이 button 안에 중첩되는 잘못된 DOM 을 피한다(코덱스 P2). */}

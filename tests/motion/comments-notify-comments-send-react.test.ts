@@ -30,7 +30,10 @@ const panel = read('src/components/scenes/CommentPanel.tsx');
 const chip = read('src/components/scenes/ReactionChip.tsx');
 const picker = read('src/components/scenes/EmojiPicker.tsx');
 const css = read('src/styles/motion-comments-notify.css');
-const sendReactCss = css.slice(css.indexOf('/* ─── 19. comments-send-react'));
+// 19번 묶음만 — 뒤에 이어지는 18번(notification-journey) 묶음은 자기 테스트가 본다.
+const sendReactStart = css.indexOf('/* ─── 19. comments-send-react');
+const sendReactEnd = css.indexOf('/* ─── 18. notification-journey', sendReactStart);
+const sendReactCss = css.slice(sendReactStart, sendReactEnd > sendReactStart ? sendReactEnd : undefined);
 
 /** 함수 본문(여는 중괄호부터 짝이 맞는 닫는 중괄호까지). */
 function bodyOf(source: string, signature: string): string {

@@ -1,4 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { prefersReducedMotion } from '@/utils/motion';
+import { claimHighlightScroll } from '@/utils/notificationArrival';
 import { createPortal } from 'react-dom';
 import { toast as sonnerToast } from 'sonner';
 import { useDataStore, legacyStagesFor } from '@/stores/useDataStore';
@@ -970,6 +972,17 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const lengthChangeInFlightRef = useRef(false);
 
+  // 강조된 카드로는 처음 한 번만 데려다준다(움직임 폴리싱 18번). 예전엔 인라인 ref 콜백이라 카드가 마운트될 때마다
+  // (강조 4초 동안 목록이 다시 그려지면) 다시 끌어당겼고, 이미 떠 있던 카드가 강조되면 데려가지 못했다.
+  const highlightCardRef = useRef<HTMLDivElement>(null);
+  const wasHighlightedRef = useRef(false);
+  useEffect(() => {
+    if (isHighlighted && !wasHighlightedRef.current && claimHighlightScroll(scene.sceneId)) {
+      highlightCardRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
+    }
+    wasHighlightedRef.current = Boolean(isHighlighted);
+  }, [isHighlighted, scene.sceneId]);
+
   const borderColor = pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
   const workLinkSlots = useMemo(
     () => getSceneWorkLinkSlots(linkMap, scene.id, department),
@@ -1047,7 +1060,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       onClick={handleClick}
       onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
       onContextMenu={handleContextMenu}
-      ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
+      ref={highlightCardRef}
       {...(isHighlighted ? {
         initial: { scale: 1.06 },
         animate: { scale: 1 },

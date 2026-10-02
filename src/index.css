@@ -920,39 +920,44 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* ─── Sonner 토스트 — 테마 색상 연동 ─── */
+/* 흐림 없음(움직임 폴리싱 18번): 바탕이 거의 불투명이라 흐림은 눈에 안 보이는데, 카드가 쌓이며 움직일 때마다
+   흐림을 다시 계산했다. 흐림이 없으면 뒤 글자가 또렷이 비쳐 알파를 .985 로 올린다. 맨 앞 inset 3px 는 종류별 왼쪽 색 막대(--bflow-toast-tone, motion-comments-notify.css). */
 [data-sonner-toaster] [data-sonner-toast].bflow-toast {
-  --normal-bg: rgb(var(--color-bg-card) / 0.92);
+  --normal-bg: rgb(var(--color-bg-card) / 0.985);
   --normal-border: rgb(var(--color-bg-border) / 0.35);
   --normal-text: rgb(var(--color-text-primary));
-  background: rgb(var(--color-bg-card) / 0.92) !important;
+  background: rgb(var(--color-bg-card) / 0.985) !important;
   border: 1px solid rgb(var(--color-bg-border) / 0.35) !important;
   color: rgb(var(--color-text-primary)) !important;
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
   box-shadow:
+    inset 3px 0 0 0 var(--bflow-toast-tone, transparent),
     0 8px 32px rgb(var(--color-shadow) / var(--shadow-alpha)),
     0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset !important;
 }
 
-/* ─── 호버 시 스택 부드럽게 펼침 ─── */
-[data-sonner-toaster] [data-sonner-toast] {
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
+/* 움직임은 '동작 줄이기'가 꺼져 있을 때만 — 이 규칙들이 !important 라 sonner·앱의 동작 줄이기 규칙을 이겨
+   애니메이션 효과를 끈 사람에게도 계속 미끄러졌다. 동작 줄이기면 opacity 만(motion-comments-notify.css). */
+@media (prefers-reduced-motion: no-preference) {
+  /* ─── 호버 시 스택 부드럽게 펼침 ─── */
+  [data-sonner-toaster] [data-sonner-toast] {
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
 
-/* 스르륵 슬라이드 인 */
-[data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
-  animation: bflow-toast-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  /* 스르륵 슬라이드 인 */
+  [data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
+    animation: bflow-toast-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* 닫힐 때 페이드 아웃 — sonner 가 0.2초 뒤에 카드를 지우므로 그 안에 끝낸다. */
+  [data-sonner-toast][data-removed="true"] {
+    animation: bflow-toast-fade-out 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+  }
 }
 @keyframes bflow-toast-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }
-}
-
-/* 닫힐 때 페이드 아웃 */
-[data-sonner-toast][data-removed="true"] {
-  animation: bflow-toast-fade-out 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
 }
 @keyframes bflow-toast-fade-out {
   to { opacity: 0; transform: scale(0.95); }
