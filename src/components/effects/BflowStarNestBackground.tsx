@@ -7,7 +7,7 @@ import {
 } from '@/utils/starNestSettings';
 import { cn } from '@/utils/cn';
 import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
-import { createFrameLoop } from '@/utils/frameLoop';
+import { createFrameLoop, type FrameInfo } from '@/utils/frameLoop';
 
 interface BflowStar {
   x: number;
@@ -84,7 +84,8 @@ export function BflowStarNestBackground({
   settingsRef.current = settings;
   schemeRef.current = resolvedScheme;
   // 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다. 멈춘 동안 설정·밝기 모드가 바뀌면 한 장을 다시 그린다.
-  const { loopRef, stillRef } = useBackgroundLoopGate(`${resolvedScheme}|${JSON.stringify(settings)}`);
+  // 초당 30장까지만, 다른 프로그램을 쓰는 동안·위젯을 끄는 동안은 서서히 멈춘다.
+  const { loopRef, loopOptions } = useBackgroundLoopGate(`${resolvedScheme}|${JSON.stringify(settings)}`);
 
   useEffect(() => {
     if (!enabled) return;
@@ -103,7 +104,7 @@ export function BflowStarNestBackground({
     const smoothDrift = { x: 0, y: 0, edge: 0 };
     const offset = { x: 0, y: 0 };
     let lastPointerEvent: { x: number; y: number; time: number } | null = null;
-    let lastNow = 0;
+    let lastFrameAt = 0;
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 1.8);
@@ -192,7 +193,9 @@ export function BflowStarNestBackground({
       lastPointerEvent = { x: event.clientX, y: event.clientY, time: now };
     };
 
-    const draw = (now: number): boolean => {
+    // info.time·info.dtMs 는 움직임 배율이 곱해진 시간 — 서서히 멈췄다 이어도 별이 순간이동하지 않는다.
+    // 마우스 잔상은 배율과 무관하게 실제 시간(realDtMs)으로 사라져, 멈춘 그림에 얼어붙지 않는다.
+    const draw = (frameNow: number, info: FrameInfo): boolean => {
       const rect = canvas.getBoundingClientRect();
       // 아직 크기가 없으면 '못 그림' — 멈춤 상태라도 루프가 다음 프레임에 다시 부른다.
       if (!rect.width || !rect.height) return false;
@@ -210,8 +213,12 @@ export function BflowStarNestBackground({
       const hueC = wrapHue(colorHue + 76);
       const toneSaturation = 72 * colorSaturation;
       const light = (base: number) => clampNumber(base * colorBrightness, 3, 96);
-      const dt = lastNow ? Math.min(0.05, Math.max(0.001, (now - lastNow) / 1000)) : 0.016;
-      lastNow = now;
+      const now = info.time;
+      const dt = Math.min(0.05, info.dtMs / 1000);
+      const realDt = Math.min(0.05, info.realDtMs / 1000);
+      // 루프가 잠들었다 깨면(다른 프로그램을 쓰다 돌아옴·위젯 끌기 끝) 그 사이에 쌓인 잔상은 버린다.
+      if (lastFrameAt && frameNow - lastFrameAt > 250) trailParticles.length = 0;
+      lastFrameAt = frameNow;
       const follow = 1 - Math.exp(-dt * 4.2);
       smoothFlow.x += (flow.x - smoothFlow.x) * follow;
       smoothFlow.y += (flow.y - smoothFlow.y) * follow;
@@ -327,13 +334,13 @@ export function BflowStarNestBackground({
         ];
         for (let i = trailParticles.length - 1; i >= 0; i -= 1) {
           const particle = trailParticles[i];
-          particle.age += dt;
+          particle.age += realDt;
           if (particle.age >= particle.life) {
             trailParticles.splice(i, 1);
             continue;
           }
-          particle.x += particle.vx * dt;
-          particle.y += particle.vy * dt;
+          particle.x += particle.vx * realDt;
+          particle.y += particle.vy * realDt;
           const t = Math.max(0, 1 - particle.age / particle.life);
           const alpha = particle.alpha * t * intensity;
           const radius = particle.r * (0.75 + t * 0.7);
@@ -504,7 +511,7 @@ export function BflowStarNestBackground({
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     window.addEventListener('mouseleave', stopMouseFlow);
     // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
-    const loop = createFrameLoop(draw, { still: stillRef.current });
+    const loop = createFrameLoop(draw, loopOptions());
     loopRef.current = loop;
 
     return () => {

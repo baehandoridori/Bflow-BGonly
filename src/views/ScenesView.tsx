@@ -5414,7 +5414,7 @@ export function ScenesView() {
       )}
 
       {/* 필터 바 — 2줄 구조 */}
-      <div className="sticky top-0 z-30 flex flex-col gap-2 bg-bg-card/95 border border-bg-border rounded-xl p-3 shadow-[0_14px_32px_rgba(0,0,0,0.24)] backdrop-blur-md">
+      <div className="sticky top-0 z-30 flex flex-col gap-2 bg-bg-card/[0.97] border border-bg-border rounded-xl p-3 shadow-[0_14px_32px_rgba(0,0,0,0.24)]">
         {/* 1줄: 필수 네비게이션 (부서 + 에피소드 + 파트) */}
         <div className="flex flex-wrap items-center gap-3">
           {/* 부서 탭 */}
@@ -6311,13 +6311,15 @@ export function ScenesView() {
             animate={{ opacity: 1, y: 0, scale: 1, left: bulkBarLeftPx, x: '-50%' }}
             exit={{ opacity: 0, y: 20, scale: 0.96 }}
             transition={{ duration: 0.45, ease: [0.22, 1.4, 0.36, 1] }}
-            className="bflow-bulk-bar-pulse fixed bottom-6 z-50 flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-center gap-3 overflow-x-auto px-5 py-2.5 rounded-xl"
+            // 움직임 폴리싱 바탕 C: 떠오르며 움직이는 바라 뒤 흐림을 뺐다(바탕을 95% → 97% 로 올려 눈에는 같다).
+            // 숨쉬는 빛은 바 바깥으로 그려지는 층(::after)이라, 가로 스크롤(overflow)은 안쪽 줄이 맡는다.
+            className="bflow-bulk-bar-pulse fixed bottom-6 z-50 max-w-[calc(100vw-2rem)] rounded-xl"
             style={{
-              background: 'rgb(var(--color-bg-card) / 0.95)',
+              background: 'rgb(var(--color-bg-card) / 0.97)',
               border: '1.5px solid rgb(var(--color-accent) / 0.55)',
-              backdropFilter: 'blur(12px)',
             }}
           >
+            <div className="flex flex-wrap items-center justify-center gap-3 overflow-x-auto px-5 py-2.5">
             <div className="flex items-center gap-2 pr-3 border-r border-bg-border shrink-0">
               <CheckSquare size={14} className="text-accent" />
               <span className="text-xs font-medium text-text-primary whitespace-nowrap leading-none">
@@ -6476,6 +6478,7 @@ export function ScenesView() {
             >
               <X size={14} />
             </button>
+            </div>
           </motion.div>
           );
         })()}

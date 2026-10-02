@@ -291,13 +291,14 @@ test("'최소' 전역 규칙: 동작 줄이기 전역 규칙과 같은 네 값, 
   assert.match(css, /html\[data-motion='minimal'\] \.bf-press:active:not\(:disabled\) \{\s*transform: none;/);
 });
 
-test("'가볍게' 이상: 숨 쉬는 장식을 멈추고 움직이는 알림 카드 흐림을 뺀다", () => {
+test("'가볍게' 이상: 숨 쉬는 장식을 멈춘다", () => {
   const css = stripComments(read('src/styles/motion-foundation.css'));
   const lite = ":root:is([data-motion='lite'], [data-motion='minimal'])";
-  for (const target of ['.comment-unread-badge', '.bflow-peak-pulse', '.bflow-badge-pulse', '.bflow-bulk-bar-pulse', '.bell-glow-soft::after', '.bell-glow-mention::after', '.scene-num-glow-wrap::before', '.editing-beam::before', '.scene-top-progress-fill::after', '.bflow-update-latest-card::before']) {
+  // 바탕 C: 새 댓글·새 버전 배지·그래프 정점은 미리 그린 빛 층(::before/::after)의 opacity 로 숨 쉰다 — 층을 멈춘다.
+  for (const target of ['.comment-unread-badge::after', '.bflow-peak-pulse::after', '.bflow-badge-pulse::before', '.bflow-badge-pulse::after', '.bell-glow-soft::after', '.bell-glow-mention::after', '.scene-num-glow-wrap::before', '.editing-beam::before', '.scene-top-progress-fill::after', '.bflow-update-latest-card::before']) {
     assert.ok(css.includes(`${lite} ${target}`), `가볍게 정지 대상 없음: ${target}`);
   }
-  assert.ok(css.includes(`${lite} [data-sonner-toaster] [data-sonner-toast].bflow-toast {\n  backdrop-filter: none;`));
+  // 바탕 C: 알림 카드는 흐림 자체를 뺐으므로(index.css) '가볍게' 전용 흐림 끄기 규칙이 필요 없다.
 });
 
 test('휴가 화면 동기화 막대: framer x 반복 대신 CSS transform 훑기, 동작 줄이기·최소는 멈춘 막대', () => {
@@ -361,7 +362,8 @@ test('계속 움직이는 배경(대시보드·로그인 플렉서스, StarNest 
   for (const file of files) {
     const source = read(file);
     assert.match(source, /useBackgroundLoopGate\(/, `${file}: 문지기`);
-    assert.match(source, /createFrameLoop\((animate|render|draw), \{ still: stillRef\.current \}\)/, `${file}: 루프`);
+    // 바탕 C: 옵션은 문지기가 만든다(멈춤·창 상태·초당 30장 상한)
+    assert.match(source, /createFrameLoop\((animate|render|draw), loopOptions\(\)\)/, `${file}: 루프`);
     assert.match(source, /loop\.dispose\(\);/, `${file}: 정리`);
     // 그리기 함수가 스스로 다음 프레임을 예약하지 않는다(멈춤 상태를 우회하게 됨)
     assert.doesNotMatch(source, /requestAnimationFrame\((animate|render|draw)\)/, `${file}: 자체 rAF 예약`);

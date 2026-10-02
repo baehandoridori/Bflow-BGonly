@@ -673,10 +673,9 @@ export function SpotlightSearch() {
           {/* ── 백드롭 ── */}
           <motion.div
             className="fixed inset-0 z-[9998]"
+            // 화면 전체 흐림은 열고 닫히는 동안 매 프레임 다시 계산된다 — 흐림 대신 조금 더 짙은 단색 막(움직임 폴리싱 바탕 C)
             style={{
-              backgroundColor: 'rgb(var(--color-overlay) / var(--overlay-alpha))',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
+              backgroundColor: 'rgb(var(--color-overlay) / calc(var(--overlay-alpha) + 0.08))',
             }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -698,7 +697,7 @@ export function SpotlightSearch() {
               <div
                 className="rounded-2xl overflow-hidden"
                 style={{
-                  backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
+                  backgroundColor: 'rgb(var(--color-bg-card) / 0.97)',
                   border: '1px solid rgb(var(--color-bg-border) / 0.5)',
                   boxShadow:
                     '0 24px 48px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5)) inset',

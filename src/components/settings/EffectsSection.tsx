@@ -10,7 +10,7 @@ import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackg
 import { EffectLayoutDesigner } from './EffectLayoutDesigner';
 import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
 import { useMotionLevel } from '@/hooks/useMotionPref';
-import { createFrameLoop } from '@/utils/frameLoop';
+import { createFrameLoop, type FrameInfo } from '@/utils/frameLoop';
 import { saveMotionLevel } from '@/services/motionLevelSync';
 import type { MotionLevel } from '@/utils/motionLevel';
 import {
@@ -127,7 +127,7 @@ interface PreviewProps {
 function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseForce, glowIntensity, connectionDist, dense }: PreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // 실제 배경과 같게: 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다(설정을 바꾸면 다시 그림).
-  const { stillRef, loopRef } = useBackgroundLoopGate(`${particleCount}|${dense}|${glowIntensity}|${connectionDist}`);
+  const { loopRef, loopOptions } = useBackgroundLoopGate(`${particleCount}|${dense}|${glowIntensity}|${connectionDist}`);
   const particlesRef = useRef<MiniParticle[]>([]);
   const mouseRef = useRef({ x: -9999, y: -9999 });
   const settingsRef = useRef({ speed, mouseRadius, mouseForce, glowIntensity, connectionDist });
@@ -166,13 +166,10 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mouseleave', onMouseLeave);
 
-    let lastTime = 0;
     const TARGET_FRAME_MS = 1000 / 60;
 
-    const animate = (timestamp: number): boolean => {
-      const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
-      lastTime = timestamp;
-      const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3);
+    const animate = (_now: number, info: FrameInfo): boolean => {
+      const dtFactor = Math.min(info.dtMs / TARGET_FRAME_MS, 3);
 
       const ps = particlesRef.current;
       const target = targetRef.current;
@@ -268,7 +265,7 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
     };
 
     // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
-    const loop = createFrameLoop(animate, { still: stillRef.current });
+    const loop = createFrameLoop(animate, loopOptions());
     loopRef.current = loop;
     return () => {
       loop.dispose();

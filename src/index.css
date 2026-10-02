@@ -457,25 +457,37 @@ body.theme-ready,
   }
 }
 
+/* 새 댓글 배지의 숨쉬는 빛 (움직임 폴리싱 바탕 C)
+   box-shadow 를 키프레임으로 바꾸면 배지가 보이는 동안 매 프레임 다시 칠한다(씬 목록에 배지가 많으면
+   목록 전체가 무거워짐). 쉬는 빛은 배지에 고정하고, 가장 밝은 빛을 ::after 에 미리 그려 opacity 만
+   움직인다(합성 스레드 — 알림 종 notification-bell.css 와 같은 방식). */
 @keyframes comment-unread-badge-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 0 rgb(var(--color-accent) / 0.22),
-      0 0 10px rgb(var(--color-accent) / 0.16);
-  }
-  50% {
-    box-shadow:
-      0 0 0 4px rgb(var(--color-accent) / 0),
-      0 0 16px rgb(var(--color-accent) / 0.28);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 
 .comment-unread-badge {
+  box-shadow: 0 0 10px rgb(var(--color-accent) / 0.16);
+}
+/* :where — 배지가 이미 absolute 등으로 자리를 잡았으면 그쪽이 이긴다 */
+:where(.comment-unread-badge) {
+  position: relative;
+}
+.comment-unread-badge::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px rgb(var(--color-accent) / 0.1),
+    0 0 16px rgb(var(--color-accent) / 0.28);
+  opacity: 0;
   animation: comment-unread-badge-pulse 2.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .comment-unread-badge {
+  .comment-unread-badge::after {
     animation: none !important;
   }
 }
@@ -925,16 +937,16 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
-/* ─── Sonner 토스트 — 테마 색상 연동 ─── */
+/* ─── Sonner 토스트 — 테마 색상 연동 ───
+   움직임 폴리싱 바탕 C: 쌓이고 밀려 올라가며 움직이는 카드라 뒤 흐림(backdrop-filter)을 두지 않는다
+   (움직일 때마다 흐림을 새로 계산). 대신 바탕을 92% → 97% 로 조금 더 불투명하게 해 같은 느낌을 낸다. */
 [data-sonner-toaster] [data-sonner-toast].bflow-toast {
-  --normal-bg: rgb(var(--color-bg-card) / 0.92);
+  --normal-bg: rgb(var(--color-bg-card) / 0.97);
   --normal-border: rgb(var(--color-bg-border) / 0.35);
   --normal-text: rgb(var(--color-text-primary));
-  background: rgb(var(--color-bg-card) / 0.92) !important;
+  background: rgb(var(--color-bg-card) / 0.97) !important;
   border: 1px solid rgb(var(--color-bg-border) / 0.35) !important;
   color: rgb(var(--color-text-primary)) !important;
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
   box-shadow:
     0 8px 32px rgb(var(--color-shadow) / var(--shadow-alpha)),
     0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset !important;
@@ -1352,66 +1364,95 @@ input[type="range"]::-webkit-slider-thumb {
     0 8px 18px rgb(var(--color-accent) / 0.12);
 }
 
-/* v1.23.3 (#4): 막대 차트 정점 펄스 — 노란색 글로우 + 살짝 깜빡 */
+/* v1.23.3 (#4): 막대 차트 정점 펄스 — 노란색 글로우 + 살짝 깜빡
+   움직임 폴리싱 바탕 C: box-shadow·filter 키프레임(매 프레임 다시 칠함) 대신, 쉬는 빛은 막대에 고정하고
+   가장 밝은 빛(+살짝 밝아짐)을 ::after 에 미리 그려 opacity 만 움직인다. */
 @keyframes bflow-peak-bar-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(253, 203, 110, 0.5), 0 0 12px rgba(253, 203, 110, 0.45);
-    filter: brightness(1);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgba(253, 203, 110, 0.18), 0 0 22px rgba(253, 203, 110, 0.7);
-    filter: brightness(1.15);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 .bflow-peak-pulse {
+  box-shadow: 0 0 12px rgba(253, 203, 110, 0.45);
+}
+.bflow-peak-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: rgb(255 255 255 / 0.1);
+  box-shadow: 0 0 0 4px rgba(253, 203, 110, 0.18), 0 0 22px rgba(253, 203, 110, 0.7);
+  opacity: 0;
   animation: bflow-peak-bar-pulse 1.6s ease-in-out infinite;
 }
 
-/* v1.27.0: 사이드바 새 버전 배지 — 노란색 펄스 + 사이드바 우측 contour 밖 돌출 */
+/* v1.27.0: 사이드바 새 버전 배지 — 노란색 펄스 + 사이드바 우측 contour 밖 돌출
+   움직임 폴리싱 바탕 C: box-shadow 키프레임(매 프레임 다시 칠함) 대신 미리 그린 층을 움직인다.
+   ::before = 배지 둘레로 퍼졌다 돌아오는 고리(예전 0→6px 번짐 = 12px 배지의 2배 크기), ::after = 진한 빛. */
 @keyframes bflow-badge-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(253, 203, 110, 0.6), 0 0 8px 2px rgba(253, 203, 110, 0.35);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(253, 203, 110, 0), 0 0 12px 4px rgba(253, 203, 110, 0.5);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+@keyframes bflow-badge-ring {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 0; transform: scale(2); }
 }
 .bflow-badge-pulse {
+  box-shadow: 0 0 8px 2px rgba(253, 203, 110, 0.35);
+}
+.bflow-badge-pulse::before,
+.bflow-badge-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+.bflow-badge-pulse::before {
+  background: rgba(253, 203, 110, 1);
+  animation: bflow-badge-ring 2s ease-in-out infinite;
+}
+.bflow-badge-pulse::after {
+  box-shadow: 0 0 12px 4px rgba(253, 203, 110, 0.5);
   animation: bflow-badge-pulse 2s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .bflow-badge-pulse {
+  .bflow-badge-pulse::before,
+  .bflow-badge-pulse::after {
     animation: none !important;
-    box-shadow: 0 0 8px 2px rgba(253, 203, 110, 0.4);
   }
 }
 
 /* v1.27.0: 카드뷰 하단 일괄 액션 바 — 사용자들이 존재를 잘 모름 (한솔 보고).
    액센트 색 외곽 글로우 + 잔잔한 pulse 로 시선을 끌되 정신없지 않게.
-   사이즈는 변하지 않고 box-shadow 만 호흡하듯 변동. */
+   움직임 폴리싱 바탕 C: 나타날 때 두 번만 숨 쉬고 멈춘다(계속 숨 쉬면 바가 떠 있는 내내 다시 칠함).
+   쉬는 빛은 바에 고정하고, 가장 밝은 빛을 ::after 에 미리 그려 opacity 만 움직인다.
+   ::after 는 바 바깥으로 빛을 내므로 바 자체에는 overflow 를 두지 않는다(가로 스크롤은 안쪽 줄이 맡는다). */
 @keyframes bflow-bulk-bar-pulse {
-  0%, 100% {
-    box-shadow:
-      0 12px 28px rgba(0, 0, 0, 0.45),
-      0 0 0 0 rgb(var(--color-accent) / 0.45),
-      0 0 22px 4px rgb(var(--color-accent) / 0.22);
-  }
-  50% {
-    box-shadow:
-      0 12px 28px rgba(0, 0, 0, 0.45),
-      0 0 0 8px rgb(var(--color-accent) / 0),
-      0 0 36px 10px rgb(var(--color-accent) / 0.35);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 .bflow-bulk-bar-pulse {
-  animation: bflow-bulk-bar-pulse 2.4s ease-in-out infinite;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.45),
+    0 0 22px 4px rgb(var(--color-accent) / 0.22);
+}
+.bflow-bulk-bar-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 4px rgb(var(--color-accent) / 0.14),
+    0 0 36px 10px rgb(var(--color-accent) / 0.28);
+  opacity: 0;
+  animation: bflow-bulk-bar-pulse 2.4s ease-in-out 2;
 }
 @media (prefers-reduced-motion: reduce) {
-  .bflow-bulk-bar-pulse {
+  .bflow-bulk-bar-pulse::after {
     animation: none !important;
-    box-shadow:
-      0 12px 28px rgba(0, 0, 0, 0.45),
-      0 0 24px 4px rgb(var(--color-accent) / 0.3);
   }
 }
 

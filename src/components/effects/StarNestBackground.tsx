@@ -3,7 +3,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { DEFAULT_STAR_NEST_SETTINGS, normalizeStarNestSettings, type StarNestSettings } from '@/utils/starNestSettings';
 import { cn } from '@/utils/cn';
 import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
-import { createFrameLoop } from '@/utils/frameLoop';
+import { createFrameLoop, type FrameInfo } from '@/utils/frameLoop';
 
 // Star Nest shader adapted for WebGL from ShipSwift SWStarNest and the original Star Nest shader by Pablo Roman Andrioli.
 // Source references:
@@ -302,7 +302,8 @@ export function StarNestBackground({
   settingsRef.current = settings;
   colorModeRef.current = colorMode;
   // 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다. 멈춘 동안 설정·밝기 모드가 바뀌면 한 장을 다시 그린다.
-  const { loopRef, stillRef } = useBackgroundLoopGate(`${colorMode}|${JSON.stringify(settings)}`);
+  // 초당 30장까지만, 다른 프로그램을 쓰는 동안·위젯을 끄는 동안은 서서히 멈춘다.
+  const { loopRef, loopOptions } = useBackgroundLoopGate(`${colorMode}|${JSON.stringify(settings)}`);
 
   useEffect(() => {
     if (!enabled) return;
@@ -328,7 +329,6 @@ export function StarNestBackground({
       edge: Math.min(1, Math.hypot(DEFAULT_STAR_NEST_SETTINGS.directionX, DEFAULT_STAR_NEST_SETTINGS.directionY)),
     };
     const offset = { x: 0, y: 0, z: 0 };
-    let lastNow = 0;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -364,10 +364,10 @@ export function StarNestBackground({
     window.addEventListener('mousemove', onMouseMove, { passive: true });
     window.addEventListener('mouseleave', onMouseLeave);
 
-    const render = (now: number) => {
+    // info.dtMs·info.time 은 움직임 배율이 곱해진 시간 — 서서히 멈췄다 이어도 별·반짝임이 튀지 않는다.
+    const render = (_now: number, info: FrameInfo) => {
       const current = settingsRef.current;
-      const dt = lastNow ? Math.min(0.05, Math.max(0.001, (now - lastNow) / 1000)) : 0.016;
-      lastNow = now;
+      const dt = Math.min(0.05, info.dtMs / 1000);
 
       const target = resolveFlow(current, mouseFlow);
       const follow = 1 - Math.exp(-dt * 4.2);
@@ -389,7 +389,7 @@ export function StarNestBackground({
       const { locs } = bundle;
       gl.useProgram(bundle.program);
       gl.uniform2f(locs.uRes, canvas.width, canvas.height);
-      gl.uniform1f(locs.uTime, now * 0.001);
+      gl.uniform1f(locs.uTime, info.time * 0.001);
       gl.uniform1f(locs.uSpeed, speed);
       gl.uniform1f(locs.uZoom, current.zoom);
       gl.uniform1f(locs.uBrightness, current.brightness);
@@ -412,7 +412,7 @@ export function StarNestBackground({
     };
 
     // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
-    const loop = createFrameLoop(render, { still: stillRef.current });
+    const loop = createFrameLoop(render, loopOptions());
     loopRef.current = loop;
     return () => {
       loop.dispose();

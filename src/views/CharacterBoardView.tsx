@@ -442,7 +442,8 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
   return (
     <div className="flex flex-col gap-4">
       {/* 검색·버튼·필터 칩 — 스크롤해도 상단에 붙는다 (피드백 38). 배경은 토큰 기반이라 라이트/다크 자동 대응. */}
-      <div ref={stickyHeaderRef} className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
+      {/* 스크롤 따라오는 위쪽 띠 — 흐림(backdrop-blur)은 스크롤할 때마다 다시 계산돼 빼고, 바탕을 더 불투명하게(움직임 폴리싱 바탕 C) */}
+      <div ref={stickyHeaderRef} className="sticky top-0 z-20 -mx-6 bg-bg-primary/[0.97] px-6 pt-4 pb-3 flex flex-col gap-2.5">
         {/* 사용자 정의 탭 (피드백 41) */}
         <BoardTabStrip
           tabs={tabs}

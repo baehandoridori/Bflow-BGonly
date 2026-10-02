@@ -10,7 +10,7 @@ import { useCapsLockWarning } from '@/hooks/useCapsLockWarning';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
 import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
-import { createFrameLoop } from '@/utils/frameLoop';
+import { createFrameLoop, type FrameInfo } from '@/utils/frameLoop';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -118,7 +118,7 @@ function PlexusBackground() {
   const themeId = useAppStore((s) => s.themeId);
   const colorMode = useAppStore((s) => s.colorMode);
   const customThemeColors = useAppStore((s) => s.customThemeColors);
-  const { stillRef, loopRef } = useBackgroundLoopGate(
+  const { loopRef, loopOptions } = useBackgroundLoopGate(
     `${themeId}|${colorMode}|${customThemeColors ? JSON.stringify(customThemeColors) : ''}|${plexusSettings.glowIntensity}|${plexusSettings.connectionDist}`,
   );
 
@@ -189,13 +189,11 @@ function PlexusBackground() {
     const onMouse = (e: MouseEvent) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
     window.addEventListener('mousemove', onMouse, { passive: true });
 
-    let lastTime = 0;
     const TARGET_FRAME_MS = 1000 / 60;
 
-    const animate = (timestamp: number) => {
-      const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
-      lastTime = timestamp;
-      const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3); // cap at 3x (최소 ~20fps)
+    // info.dtMs: 실제 경과 × 움직임 배율(초당 30장 상한, 창을 떠나면 서서히 멈춤 — 루프 문지기)
+    const animate = (_now: number, info: FrameInfo) => {
+      const dtFactor = Math.min(info.dtMs / TARGET_FRAME_MS, 3); // cap at 3x
 
       // 매 프레임 최신 팔레트 조회 → 테마 변경 시 즉시 색 반영
       const palette = getPlexusColors();
@@ -336,7 +334,7 @@ function PlexusBackground() {
     };
 
     // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
-    const loop = createFrameLoop(animate, { still: stillRef.current });
+    const loop = createFrameLoop(animate, loopOptions());
     loopRef.current = loop;
     return () => {
       loop.dispose();

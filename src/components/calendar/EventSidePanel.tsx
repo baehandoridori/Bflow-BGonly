@@ -31,7 +31,7 @@ import {
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
-import { floatingGlassStyle } from '@/utils/glassStyles';
+import { floatingSolidStyle } from '@/utils/glassStyles';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { parseDate } from '@/utils/calendarDate';
 import { calendarEventIdentityKey, calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
@@ -442,8 +442,7 @@ export function EventSidePanel({
       transition={panelTransition}
       className="absolute right-0 top-0 bottom-0 w-[280px] z-40 flex flex-col"
       style={{
-        ...floatingGlassStyle,
-        background: 'rgb(var(--color-bg-card) / 0.95)',
+        ...floatingSolidStyle,
         borderLeft: '1px solid rgb(var(--color-bg-border) / 0.4)',
         boxShadow: '-12px 0 32px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.2))',
       }}

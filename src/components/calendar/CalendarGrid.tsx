@@ -24,7 +24,7 @@ import {
   snapshotCalendarEventIdentity,
   type CalendarEventIdentity,
 } from '@/utils/calendarEventIdentity';
-import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
+import { floatingSolidStyle, tooltipGlassStyle } from '@/utils/glassStyles';
 import { cursorTooltipAnchor } from '@/utils/tooltipPosition';
 import { layoutEventBars, visibleWeekDays, type EventBar } from '@/utils/calendarWeekdays';
 import { DayAddButton } from './DayAddButton';
@@ -371,7 +371,7 @@ function OverflowPopup({
       transition={{ duration: 0.15 }}
       className="fixed z-50 rounded-xl p-3 w-64 max-h-72 overflow-y-auto"
       style={{
-        ...floatingGlassStyle,
+        ...floatingSolidStyle,
         left: anchorRect ? Math.min(anchorRect.left, window.innerWidth - 280) : 100,
         top: anchorRect ? Math.min(anchorRect.bottom + 4, window.innerHeight - 300) : 100,
       }}
