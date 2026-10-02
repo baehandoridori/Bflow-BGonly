@@ -42,6 +42,22 @@ export interface SceneComment {
 
 export type CommentsStore = Record<string, SceneComment[]>;
 
+/**
+ * 댓글 조회 옵션. throwOnError 를 켠 호출자(댓글 패널)만 '불러오지 못함'을 예외로 받는다.
+ * 기본(배지·개수 등)은 예전처럼 빈 목록으로 조용히 넘어간다.
+ */
+export interface CommentReadOptions {
+  throwOnError?: boolean;
+}
+
+/** 서버 조회가 실패해 '댓글 없음'과 구분해야 할 때 던지는 오류. */
+export class CommentLoadError extends Error {
+  constructor(message = '댓글을 불러오지 못했어요') {
+    super(message);
+    this.name = 'CommentLoadError';
+  }
+}
+
 export function hydrateLocalCommentsForPreview(store: CommentsStore): void {
   localCache = store;
   void window.electronAPI?.writeSettings?.(COMMENTS_FILE, store);
@@ -118,7 +134,7 @@ function getRelatedSheetNames(sheetName: string): string[] {
  * 일 때 엉뚱한 카드에 매핑된다. 댓글이 달린 "장면"의 scene_number 를 정규화하여 요청 파트에서
  * 같은 정규화 값을 가진 씬의 scene.no 로 키를 재구성한다. 매칭 씬이 없으면 안전하게 skip.
  */
-export async function loadPartComments(sheetName: string): Promise<CommentsStore> {
+export async function loadPartComments(sheetName: string, options: CommentReadOptions = {}): Promise<CommentsStore> {
   if (sheetPartCache.has(sheetName)) return sheetPartCache.get(sheetName)!;
 
   const related = getRelatedSheetNames(sheetName);
@@ -141,6 +157,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
   let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; images?: string[]; createdAt: string; editedAt: string | null; revisionId?: string | null; parentCommentId?: string | null }[] = [];
 
   let supabaseFailed = false;
+  let fallbackLoaded = false;
   if (partUuids.length > 0) {
     // Supabase 경로 — 관련 파트(BG·ACT) UUID 모두에서 조회
     try {
@@ -159,6 +176,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     try {
       const result = await window.electronAPI.sheetsReadComments(sheetName);
       if (result.ok) {
+        fallbackLoaded = true;
         rawComments = (result.data ?? []).map((c) => ({
           id: c.commentId, partId: '', sceneId: c.sceneId,
           userId: c.userId, userName: c.userName, text: c.text,
@@ -169,6 +187,13 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
         }));
       }
     } catch { /* fallback도 실패 */ }
+  }
+
+  // 서버 조회가 실패했고 대체 경로도 못 읽었으면 '댓글 없음'이 아니라 '불러오지 못함'이다.
+  // 빈 결과를 캐시하지 않아야 '다시 불러오기'가 서버를 다시 본다(배지 등 기본 호출자는 예전처럼 빈 목록).
+  if (supabaseFailed && !fallbackLoaded) {
+    if (options.throwOnError) throw new CommentLoadError();
+    return {};
   }
 
   /**
@@ -268,10 +293,10 @@ export function invalidatePartCache(sheetName?: string): void {
 
 // ─── 통합 API ───────────────────────────────────
 
-export async function getComments(sceneKey: string): Promise<SceneComment[]> {
+export async function getComments(sceneKey: string, options: CommentReadOptions = {}): Promise<SceneComment[]> {
   if (sheetsMode) {
     const { sheetName } = parseSceneKey(sceneKey);
-    const store = await loadPartComments(sheetName);
+    const store = await loadPartComments(sheetName, options);
     return [...(store[sceneKey] ?? [])];
   }
   const all = await loadLocalAll();
@@ -312,7 +337,7 @@ interface RawCharacterCommentRow {
 }
 
 /** 캐릭터별 댓글 조회 — Supabase(IPC) 경로. mock/preview 도 같은 IPC 핸들을 구현한다. */
-export async function getCommentsForCharacter(characterId: string): Promise<SceneComment[]> {
+export async function getCommentsForCharacter(characterId: string, options: CommentReadOptions = {}): Promise<SceneComment[]> {
   if (!characterId) return [];
   const reader = window.electronAPI?.supabaseReadCommentsForCharacter;
   if (!reader) return [];
@@ -334,6 +359,7 @@ export async function getCommentsForCharacter(characterId: string): Promise<Scen
     }));
   } catch (err) {
     console.warn('[댓글] 캐릭터 댓글 로드 실패:', err);
+    if (options.throwOnError) throw new CommentLoadError();
     return [];
   }
 }

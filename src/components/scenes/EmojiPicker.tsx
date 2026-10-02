@@ -3,10 +3,14 @@
  *
  * 기본 노출: 빠른 7개 (✅ 👍 ❤️ 👀 🎉 🙏 🔥)
  * "더 많은 이모지" 누르면 70여 개로 확장.
+ *
+ * 움직임 폴리싱 19번(comments-send-react): 스마일 버튼 쪽에서 피어나고(0.92배 → 제자리, 140ms),
+ * '더 많은 이모지'는 버튼 쪽 가장자리를 붙인 채 반대쪽으로만 펼쳐진다(위로 열렸으면 아래 가장자리 고정 → 위로).
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { emojiPickerPlacement } from '@/utils/commentSendReact';
 
 export const QUICK_EMOJIS = ['✅', '👍', '❤️', '👀', '🎉', '🙏', '🔥'] as const;
 
@@ -50,45 +54,43 @@ export function EmojiPicker({ open, onPick, onClose, anchorEl }: EmojiPickerProp
 
   if (!open) return null;
 
-  const list = showAll ? [...QUICK_EMOJIS, ...EXTRA_EMOJIS] : [...QUICK_EMOJIS];
-
   // v1.26.1: Portal + anchor 기준 위치 계산 — 댓글 패널 overflow 에 잘리지 않게.
+  // 위·아래는 접힌 높이로 한 번 정하고 버튼 쪽 가장자리를 고정한다 — 펼쳐도 반대쪽으로 튀지 않는다.
   const width = showAll ? 280 : 220;
-  const height = showAll ? 320 : 80;
-  let top = 0;
-  let left = 0;
-  if (anchorEl) {
-    const rect = anchorEl.getBoundingClientRect();
-    top = rect.top - height - 8;
-    if (top < 8) top = rect.bottom + 8;
-    left = rect.left;
-    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
-    if (left < 8) left = 8;
-  }
+  const rect = anchorEl?.getBoundingClientRect() ?? null;
+  const placement = emojiPickerPlacement({
+    anchor: rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width } : null,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    width,
+  });
 
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[10001] bg-bg-card border border-bg-border rounded-xl p-2 shadow-2xl"
-      style={{ width, top, left }}
+      className="emoji-picker-pop fixed z-[10001] bg-bg-card border border-bg-border rounded-xl p-2 shadow-2xl overflow-y-auto"
+      style={{
+        width,
+        left: placement.left,
+        ...(placement.side === 'above' ? { bottom: placement.bottom } : { top: placement.top }),
+        maxHeight: placement.maxHeight,
+        transformOrigin: `${placement.originX}px ${placement.side === 'above' ? '100%' : '0%'}`,
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="grid grid-cols-7 gap-1">
-        {list.map((emoji, i) => (
-          <button
-            key={`${emoji}-${i}`}
-            type="button"
-            className="w-7 h-7 hover:bg-bg-border/60 rounded text-lg leading-none flex items-center justify-center"
-            onClick={() => {
-              onPick(emoji);
-              onClose();
-            }}
-            aria-label={`${emoji} 추가`}
-          >
-            {emoji}
-          </button>
+        {QUICK_EMOJIS.map((emoji, i) => (
+          <EmojiButton key={`${emoji}-${i}`} emoji={emoji} onPick={onPick} onClose={onClose} />
         ))}
       </div>
+      {/* 펼친 이모지는 한 덩어리로 옅게 들어온다(빠른 7개는 제자리). */}
+      {showAll && (
+        <div className="emoji-picker-extra mt-1 grid grid-cols-7 gap-1">
+          {EXTRA_EMOJIS.map((emoji, i) => (
+            <EmojiButton key={`${emoji}-${i}`} emoji={emoji} onPick={onPick} onClose={onClose} />
+          ))}
+        </div>
+      )}
       {!showAll && (
         <button
           type="button"
@@ -100,5 +102,21 @@ export function EmojiPicker({ open, onPick, onClose, anchorEl }: EmojiPickerProp
       )}
     </div>,
     document.body,
+  );
+}
+
+function EmojiButton({ emoji, onPick, onClose }: { emoji: string; onPick: (emoji: string) => void; onClose: () => void }) {
+  return (
+    <button
+      type="button"
+      className="w-7 h-7 hover:bg-bg-border/60 rounded text-lg leading-none flex items-center justify-center"
+      onClick={() => {
+        onPick(emoji);
+        onClose();
+      }}
+      aria-label={`${emoji} 추가`}
+    >
+      {emoji}
+    </button>
   );
 }

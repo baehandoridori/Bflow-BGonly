@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, Reply, MessageSquareWarning, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, ArrowDown, CornerDownRight, Reply, MessageSquareWarning, Clock, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -62,8 +62,56 @@ import { createUuid } from '@/utils/createUuid';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { ThreadTodoSection } from './ThreadTodoSection';
 import { COMMENT_LIST_FOLLOW_CHECK_MS, commentListScrollAfterSectionGrow, shouldFollowCommentListToBottom } from '@/utils/commentListAnchor';
+import {
+  COMMENT_NEAR_BOTTOM_PX,
+  COMMENT_OPEN_PIN_WINDOW_MS,
+  COMMENT_READ_STATE_WAIT_MS,
+  COMMENT_STICK_BOTTOM_PX,
+  COMMENT_UNREAD_DIVIDER_FADE_DELAY_MS,
+  commentArrivalAction,
+  commentListDistanceFromBottom,
+  commentLoadStatusAfter,
+  commentOpenPinTarget,
+  UNREAD_DIVIDER_UNCAPTURED,
+  captureUnreadDivider,
+  commentOpenScrollTop,
+  isUnreadDividerRead,
+  newCommentsPillLabel,
+  splitNewCommentIds,
+  unreadDividerCommentId,
+  type CommentLoadStatus,
+  type CommentOpenPinTarget,
+  type CommentScrollAnchor,
+  type UnreadDividerSlot,
+} from '@/utils/commentOpenCalm';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import {
+  COMMENT_SLOW_SEND_MS,
+  REACTION_CHIP_REST,
+  commentBubbleRise,
+  commentSendBubbleClass,
+  freshReactionEmojis,
+  mergeUnsentComments,
+  reactionChipExit,
+  type CommentSendStatus,
+} from '@/utils/commentSendReact';
 import { toast as sonnerToast } from 'sonner';
 import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { showUndoToast } from '@/components/common/UndoToast';
+import { EASE_CSS, animateEl } from '@/utils/motion';
+import { notificationRowShifts } from '@/utils/notificationArrival';
+import {
+  COMMENT_DELETE_EXIT_KEYFRAMES,
+  COMMENT_DELETE_EXIT_MS,
+  COMMENT_REFLOW_ANIMATION_ID,
+  COMMENT_REFLOW_EASING,
+  COMMENT_REFLOW_MS,
+  commentRestoreFade,
+  insertCommentByTime,
+  measureFlipRows,
+  withoutPendingDeletes,
+  type UndoWindow,
+} from '@/utils/undoDelete';
 import '@/styles/comment-panel.css';
 
 // ─── 타입 ───────────────────────────────────
@@ -167,6 +215,56 @@ interface AttachedImage {
   error?: string;
 }
 
+/**
+ * 움직임 폴리싱 19번: 아직 서버에 없는 내 댓글 하나. '다시 보내기'는 같은 댓글(같은 id)을 같은 키로 다시 보내고,
+ * 저장 뒤 할 일(읽음·미리보기 정리·슬랙 멘션)도 처음 보낼 때와 똑같이 한다. 댓글 객체에는 아무것도 덧붙이지 않는다.
+ */
+interface UnsentCommentDraft {
+  comment: SceneCommentWithSource;
+  /** addComment 에 넘기는 저장 키(답글이면 부모 댓글의 키). */
+  targetSceneKey: string;
+  /** 슬랙 멘션 알림에 적는 씬 키 — 본문 입력칸은 패널 씬, 스레드 창은 저장 키(예전과 같게). */
+  webhookSceneKey: string;
+  /** 보낼 때 첨부했던 이미지 — 저장되면 미리보기만 정리, 지우기·씬 이동·패널 닫기면 올린 파일까지 정리. */
+  attached: AttachedImage[];
+  /** 저장되면 읽음 처리(답글·스레드 창). */
+  markReadOnSuccess: boolean;
+}
+interface UnsentComment extends UnsentCommentDraft {
+  status: CommentSendStatus;
+}
+
+/**
+ * 움직임 폴리싱 20번: 휴지통을 누른 댓글 — 5초 동안 '되돌리기'를 기다렸다가(waiting) 서버에서 지운다(deleting).
+ * 이 동안 다시 불러온 목록에서도 빼서 실시간 재조회로 되살아나지 않게 한다. 서버에서 지워지면 목록에서 뺀다.
+ */
+interface PendingCommentDelete {
+  comment: SceneCommentWithSource;
+  /** deleteComment 에 넘기는 저장 키. */
+  targetKey: string;
+  /** 밀려나는 말풍선과 그 움직임 — 0.15초 안에 되돌리면 제자리로. */
+  element: HTMLElement | null;
+  exit: Animation | null;
+  /** 밀려난 뒤 목록에서 빼는 타이머(0.15초). */
+  collapseTimer: ReturnType<typeof setTimeout> | null;
+  phase: 'waiting' | 'deleting';
+  undoWindow: UndoWindow | null;
+}
+
+// 앱 종료(트레이 '종료'·'지금 업데이트') — 되돌리기를 기다리는 댓글 삭제를 바로 확정하고, 메인이 종료를 잠시 미뤄 주는 동안
+// 서버 삭제가 끝나게 한다. 패널이 막 닫히며 확정한 삭제도 기다리도록 패널 밖(모듈)에 모은다.
+const commentDeleteFlushers = new Set<() => void>();
+const commentDeletesInFlight = new Set<Promise<void>>();
+let commentDeleteQuitFlushHooked = false;
+function hookCommentDeleteQuitFlush() {
+  if (commentDeleteQuitFlushHooked) return;
+  const off = window.electronAPI?.onBeforeQuitFlush?.(() => {
+    commentDeleteFlushers.forEach((flush) => flush());
+    return Promise.allSettled([...commentDeletesInFlight]).then(() => undefined);
+  });
+  commentDeleteQuitFlushHooked = typeof off === 'function';
+}
+
 function cleanupDraftImages(images: AttachedImage[], context: string) {
   images.forEach((item) => {
     try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
@@ -207,6 +305,9 @@ interface ReactionsAreaProps {
   onPickerOpen: () => void;
   onPickerClose: () => void;
   compact?: boolean;  // 답글에서는 더 작게
+  /** 반응을 다 불러온 뒤에만 새 칩을 '톡' 한다(패널을 열 때 이미 있던 칩은 가만히). */
+  animateNew: boolean;
+  reduceMotion: boolean;
 }
 
 function ReactionsArea({
@@ -218,10 +319,23 @@ function ReactionsArea({
   onPickerOpen,
   onPickerClose,
   compact = false,
+  animateNew,
+  reduceMotion,
 }: ReactionsAreaProps) {
   const groups = groupReactionsByEmoji(reactions, currentUserId);
   const btnRef = useRef<HTMLButtonElement>(null);
   const hasReactions = groups.length > 0;
+  // 움직임 폴리싱 19번: 지난 그림까지 보이던 칩과, 그때 반응을 다 불러온 상태였는지.
+  // 새로 생긴 칩만 '톡' — 패널을 열며 반응을 처음 받을 때·말풍선이 새로 그려질 때 이미 있던 칩은 튀지 않는다.
+  const seenEmojisRef = useRef<Set<string>>(new Set());
+  const armedRef = useRef(false);
+  const emojis = groups.map((g) => g.emoji);
+  const freshEmojis = freshReactionEmojis(armedRef.current, seenEmojisRef.current, emojis);
+  useEffect(() => {
+    seenEmojisRef.current = new Set(emojis);
+    armedRef.current = animateNew;
+  });
+  const chipExit = reactionChipExit(reduceMotion);
   // 답글에선 칩 없을 때 + 버튼 평소 보이지 않다가 hover 시만. 부모도 동일하지만 살짝 더 노출 폭 큼.
   return (
     <div
@@ -231,14 +345,19 @@ function ReactionsArea({
         !hasReactions && 'group/reactions-empty',
       )}
     >
-      {groups.map((g) => (
-        <ReactionChip
-          key={g.emoji}
-          group={g}
-          currentUserId={currentUserId}
-          onToggle={(emoji) => onToggle(commentId, emoji)}
-        />
-      ))}
+      {/* 반응을 모두 취소한 칩은 0.6배로 줄며 옅어진 뒤 빠진다(옆 칩은 그 뒤 제자리로 — 이웃 미끄러짐은 생략). */}
+      <AnimatePresence initial={false}>
+        {groups.map((g) => (
+          <motion.span key={g.emoji} className="inline-flex" initial={false} animate={REACTION_CHIP_REST} exit={chipExit}>
+            <ReactionChip
+              group={g}
+              currentUserId={currentUserId}
+              onToggle={(emoji) => onToggle(commentId, emoji)}
+              pop={freshEmojis.has(g.emoji)}
+            />
+          </motion.span>
+        ))}
+      </AnimatePresence>
       <button
         ref={btnRef}
         type="button"
@@ -248,7 +367,7 @@ function ReactionsArea({
           else onPickerOpen();
         }}
         className={cn(
-          'inline-flex items-center justify-center rounded-full border border-dashed border-bg-border text-text-secondary/60 hover:border-accent/60 hover:text-accent-sub hover:bg-accent/[0.06] transition-all',
+          'inline-flex items-center justify-center rounded-full border border-dashed border-bg-border text-text-secondary/60 hover:border-accent/60 hover:text-accent-sub hover:bg-accent/[0.06] transition-[opacity,color,background-color,border-color]',
           compact ? 'w-5 h-5' : 'w-6 h-5',
           hasReactions ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-70 hover:opacity-100',
         )}
@@ -286,7 +405,7 @@ function ThreadReplyButton({
       aria-label={ariaLabel}
       title="이 스레드에 답글"
       className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded-full border border-bg-border/70 bg-bg-primary/60 text-text-secondary/70 hover:border-accent/50 hover:bg-accent/[0.08] hover:text-accent-sub transition-all',
+        'inline-flex shrink-0 items-center gap-1 rounded-full border border-bg-border/70 bg-bg-primary/60 text-text-secondary/70 hover:border-accent/50 hover:bg-accent/[0.08] hover:text-accent-sub transition-colors',
         compact ? 'h-5 px-1.5 text-[10px]' : 'h-6 px-2 text-[11px]',
       )}
     >
@@ -294,6 +413,134 @@ function ThreadReplyButton({
       <span>답글</span>
     </button>
   );
+}
+
+// ─── 댓글 보내기 (움직임 폴리싱 19번 comments-send-react) ─────────
+
+/** 저장이 0.4초를 넘길 때만 말풍선 모서리에 붙는 작은 시계. 말풍선과 따로 그려 흐림에 같이 묻히지 않는다. */
+function CommentSendClock() {
+  return (
+    <span
+      role="status"
+      aria-label="보내는 중"
+      title="보내는 중"
+      className="comment-send-clock pointer-events-none absolute -bottom-1.5 -left-1.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border border-bg-border bg-bg-card text-text-secondary"
+    >
+      <Clock size={12} strokeWidth={2.2} aria-hidden />
+    </span>
+  );
+}
+
+/** 보내지 못한 내 댓글 — 말풍선 아래 작은 글. '다시 보내기'는 처음과 같은 저장 길로 같은 댓글을 다시 보낸다. */
+function CommentSendFailedNotice({
+  align = 'start',
+  compact = false,
+  onRetry,
+  onDiscard,
+}: {
+  align?: 'start' | 'end';
+  compact?: boolean;
+  onRetry: () => void;
+  onDiscard: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className={cn(
+        'comment-send-failed-notice mt-1 flex flex-wrap items-center gap-x-1.5',
+        compact ? 'text-[10.5px]' : 'text-[11px]',
+        align === 'end' ? 'justify-end' : 'justify-start',
+      )}
+    >
+      <span className="font-semibold text-status-low">보내지 못했어요</span>
+      <span className="text-text-secondary/60" aria-hidden>·</span>
+      <button
+        type="button"
+        onClick={(event) => { event.stopPropagation(); onRetry(); }}
+        className="font-semibold text-accent underline-offset-2 hover:underline cursor-pointer"
+      >
+        다시 보내기
+      </button>
+      <span className="text-text-secondary/60" aria-hidden>·</span>
+      <button
+        type="button"
+        onClick={(event) => { event.stopPropagation(); onDiscard(); }}
+        className="text-text-secondary underline-offset-2 hover:text-text-primary hover:underline cursor-pointer"
+      >
+        지우기
+      </button>
+    </div>
+  );
+}
+
+// ─── 댓글 칸 열기 (움직임 폴리싱 4번 comment-open-calm) ─────────
+
+/** 불러오는 동안의 회색 말풍선 자리. 0.15초 안에 오면 CSS animation-delay 로 아예 보이지 않는다. */
+function CommentListSkeleton() {
+  return (
+    <div className="comment-skeleton" role="status" aria-label="댓글을 불러오는 중">
+      <div className="comment-skeleton-bubble comment-skeleton-bubble--left comment-skeleton-bubble--h44" />
+      <div className="comment-skeleton-bubble comment-skeleton-bubble--right comment-skeleton-bubble--h60" />
+      <div className="comment-skeleton-bubble comment-skeleton-bubble--left comment-skeleton-bubble--h36" />
+    </div>
+  );
+}
+
+/** 조회 실패 — '의견 없음'과 구분한다. ThreadTodoSection 의 '다시 불러오기' 줄과 같은 말투. */
+function CommentLoadFailedNotice({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="comment-empty-arrive py-10 text-center text-xs text-text-secondary">
+      <span>댓글을 불러오지 못했어요</span>
+      <span className="mx-1.5 text-text-secondary/40" aria-hidden>·</span>
+      <button type="button" onClick={onRetry} className="font-semibold text-accent underline-offset-2 hover:underline cursor-pointer">
+        다시 불러오기
+      </button>
+    </div>
+  );
+}
+
+/** '새 댓글' 줄. 읽음 처리 4초 뒤 자리를 지킨 채 옅어진다(--fading 은 한 방향으로만 붙는다). */
+function UnreadCommentsDivider({ nodeRef, fading }: { nodeRef: (node: HTMLDivElement | null) => void; fading: boolean }) {
+  return (
+    <div
+      ref={nodeRef}
+      className={cn('comment-unread-divider flex items-center gap-2 py-1', fading && 'comment-unread-divider--fading')}
+      aria-label="새 댓글 시작"
+      aria-hidden={fading || undefined}
+    >
+      <span className="h-px flex-1 bg-accent/30" />
+      <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+        새 댓글
+      </span>
+      <span className="h-px flex-1 bg-accent/30" />
+    </div>
+  );
+}
+
+/** 본문 목록 안의 댓글 요소(스레드 옆 칸의 같은 id 는 제외). */
+function findMainListComment(root: HTMLElement | null, commentId: string): HTMLElement | null {
+  if (!root) return null;
+  const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(commentId) : commentId.replace(/"/g, '\\"');
+  return root.querySelector<HTMLElement>(`[data-comment-id="${escaped}"]`);
+}
+
+/** 스크롤 상자 내용 기준 위치. */
+function measureCommentAnchor(root: HTMLElement, node: HTMLElement): CommentScrollAnchor {
+  const rect = node.getBoundingClientRect();
+  return { top: rect.top - root.getBoundingClientRect().top + root.scrollTop, height: rect.height };
+}
+
+/** 가장 가까운 세로 스크롤 상자 하나만 움직인다(scrollIntoView 는 바깥 상자까지 움직인다 — tasks/lessons.md 2026-10-02). */
+function centerInScrollParent(node: HTMLElement, behavior: ScrollBehavior) {
+  let parent = node.parentElement;
+  while (parent) {
+    const overflowY = getComputedStyle(parent).overflowY;
+    if ((overflowY === 'auto' || overflowY === 'scroll') && parent.scrollHeight > parent.clientHeight) break;
+    parent = parent.parentElement;
+  }
+  if (!parent) return;
+  const top = commentOpenScrollTop(parent, measureCommentAnchor(parent, node));
+  parent.scrollTo({ top, behavior });
 }
 
 // ─── 메인 컴포넌트 ──────────────────────────
@@ -347,6 +594,51 @@ export function CommentPanel({
 
   // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
+  // 움직임 폴리싱 4번: 첫 조회가 끝나기 전엔 '의견 없음'을 띄우지 않고, 실패는 '불러오지 못했어요'로 구분한다.
+  const [loadStatus, setLoadStatus] = useState<CommentLoadStatus>('loading');
+  const loadStatusRef = useRef<CommentLoadStatus>(loadStatus);
+  loadStatusRef.current = loadStatus;
+  const loadSeqRef = useRef(0);
+  const { reduce: reduceMotion } = useMotionPref();
+  const reduceMotionRef = useRef(reduceMotion);
+  reduceMotionRef.current = reduceMotion;
+  // 처음 자리(맨 아래·새 댓글 줄 가운데·찾아온 댓글) — 첫 ~1초는 반응·이미지로 높이가 늘어도 자리를 지킨다.
+  const openPinRef = useRef<{ target: CommentOpenPinTarget; until: number } | null>(null);
+  const openPinStartedRef = useRef(false);
+  // 바닥까지 거리(새 항목이 그려지기 '전' 값). 스크롤할 때·자리를 잡을 때 갱신한다.
+  const distanceFromBottomRef = useRef(0);
+  const knownCommentIdsRef = useRef<Set<string>>(new Set());
+  const knownEventCountRef = useRef(0);
+  // '새 댓글' 줄 — 처음 자리를 잡을 때 패널마다 한 번만 정하고 그 자리를 지킨다(읽음 처리 4초 뒤 옅어짐).
+  // 그 뒤 실시간으로 온 댓글엔 줄을 만들지 않는다(알약·바닥 따라가기로 알린다).
+  const [unreadDividerSlot, setUnreadDividerSlot] = useState<UnreadDividerSlot>(UNREAD_DIVIDER_UNCAPTURED);
+  const unreadDivider = unreadDividerSlot.divider;
+  // 위를 읽는 중 화면 아래에 생긴 팀원 댓글 수 — '새 댓글 N개 ↓' 알약.
+  const [newBelowCount, setNewBelowCount] = useState(0);
+  const newBelowCountRef = useRef(0);
+  newBelowCountRef.current = newBelowCount;
+  // 움직임 폴리싱 19번: 아직 서버에 없는 내 댓글. 화면 표시('보내는 중' 흐림·'보내지 못했어요')는 state,
+  // 다시 보내기·지우기에 쓸 저장 정보는 ref. 0.4초 안에 끝나는 보통의 보내기는 state 를 건드리지 않는다.
+  const [sendStatusById, setSendStatusById] = useState<ReadonlyMap<string, 'slow' | 'failed'>>(() => new Map());
+  const unsentCommentsRef = useRef<Map<string, UnsentComment>>(new Map());
+  const slowSendTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // 움직임 폴리싱 20번: 휴지통을 누른 뒤 되돌리기를 기다리거나 서버에서 지우는 중인 댓글(id → 정보).
+  const pendingDeletesRef = useRef<Map<string, PendingCommentDelete>>(new Map());
+  // 되돌린 말풍선은 떠오르지 않고 제자리에서 다시 나타난다(이 id 들만 등장 모양을 바꾼다).
+  const restoredCommentIdsRef = useRef<Set<string>>(new Set());
+  // 지운 자리로 아래 말풍선이 올라오는(되돌리면 비켜 주는) 미끄러짐 — 바뀌기 직전 위치와, 그때 숨길 말풍선.
+  const reflowBeforeRef = useRef<Map<string, number> | null>(null);
+  const reflowHideRef = useRef<HTMLElement[]>([]);
+  // 마지막 답글과 함께 숨긴 답글 묶음(접기 버튼·왼쪽 줄) — 나가는 0.12초 동안 자리를 차지했다가 툭 당겨지지 않게.
+  const hiddenReplyGroupsRef = useRef<HTMLElement[]>([]);
+  // 반응을 처음 다 불러온 뒤에만 새 칩을 '톡' 한다(패널을 열 때 이미 있던 칩은 가만히).
+  const [reactionsReady, setReactionsReady] = useState(false);
+  const bubbleRise = commentBubbleRise(reduceMotion);
+  // 움직임 폴리싱 20번: 되돌린 말풍선은 떠오르지 않고 제자리에서 다시 나타난다.
+  const commentRestore = commentRestoreFade(reduceMotion);
+  const [listContentNode, setListContentNode] = useState<HTMLDivElement | null>(null);
+  const focusCommentIdRef = useRef<string | null>(focusCommentId ?? null);
+  focusCommentIdRef.current = focusCommentId ?? null;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   // v1.26.0: 이모지 리액션 — commentId → reactions
@@ -376,11 +668,7 @@ export function CommentPanel({
   //   cross-scene parentCommentId 가 박혀 orphan 답글 + 잘못된 부모 작성자에게 알림 발송.
   const [replyTarget, setReplyTarget] = useState<SceneCommentWithSource | null>(null);
   const [activeThreadRootId, setActiveThreadRootId] = useState<string | null>(null);
-  const activeThreadRootIdRef = useRef<string | null>(activeThreadRootId);
-  activeThreadRootIdRef.current = activeThreadRootId;
   const [activeRevisionThreadId, setActiveRevisionThreadId] = useState<string | null>(null);
-  const activeRevisionThreadIdRef = useRef<string | null>(activeRevisionThreadId);
-  activeRevisionThreadIdRef.current = activeRevisionThreadId;
   const [lastThreadRootId, setLastThreadRootId] = useState<string | null>(null);
   useEffect(() => {
     setReplyTarget(null);
@@ -395,6 +683,8 @@ export function CommentPanel({
     setThreadSubmitting(false);
     threadSubmitRequestRef.current = null;
     setThreadMentionTarget(null);
+    // 움직임 폴리싱 19번: 다른 씬으로 넘어가면 보내지 못한 말풍선은 버린다(올린 첨부도 정리).
+    forgetUnsentComments('[보내지 못한 댓글 scene 변경]');
   }, [primaryStorageKey]);
   useEffect(() => {
     setThreadInput('');
@@ -423,6 +713,8 @@ export function CommentPanel({
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(focusCommentId ?? null);
   const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [lastReadAt, setLastReadAt] = useState<string | null>(null);
+  // 읽음 기록을 받기 전에 목록을 그리면 '새 댓글' 줄이 맨 위 댓글에 잘못 붙었다가 옮겨 간다 — 받은 뒤에 처음 자리를 잡는다.
+  const [readStateReady, setReadStateReady] = useState(false);
   const readMarkedRef = useRef<string | null>(null);
   const unreadDividerRef = useRef<HTMLDivElement | null>(null);
   const [unreadDividerElement, setUnreadDividerElement] = useState<HTMLDivElement | null>(null);
@@ -634,21 +926,25 @@ export function CommentPanel({
 
   // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직).
   // 캐릭터 스레드 모드는 character 경로로만 로드하고 secondary 는 무시한다 (씬 키 경로 미사용).
-  const loadComments = useCallback(() => {
+  const loadComments = useCallback((options?: { absorbNew?: boolean }) => {
+    // 실패를 '댓글 없음'과 구분해 받는다. 더 새 조회가 시작됐으면 늦게 온 옛 결과는 버린다.
+    const seq = ++loadSeqRef.current;
+    const readOptions = { throwOnError: true };
     const primaryPromise = characterId
-      ? getCommentsForCharacter(characterId).then((list) =>
+      ? getCommentsForCharacter(characterId, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: characterCommentKey ?? undefined })),
         )
-      : getComments(sceneKey).then((list) =>
+      : getComments(sceneKey, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
         );
     const secondaryPromise = !characterId && secondarySceneKey
-      ? getComments(secondarySceneKey).then((list) =>
+      ? getComments(secondarySceneKey, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: secondarySceneKey })),
         )
       : Promise.resolve([] as SceneCommentWithSource[]);
 
     Promise.all([primaryPromise, secondaryPromise]).then(([a, b]) => {
+      if (seq !== loadSeqRef.current) return;
       const merged = [...a, ...b].sort(
         (x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime(),
       );
@@ -658,15 +954,62 @@ export function CommentPanel({
         seen.add(c.id);
         return true;
       });
-      setComments(deduped);
-      onCountChange?.(deduped.length);
+      // 움직임 폴리싱 19번: 아직 서버에 없는 내 댓글(보내는 중·보내지 못함)은 다시 불러와도 남긴다.
+      // 서버에 이미 있으면 저장된 것 — '보내지 못했어요'였어도 표시만 지운다(올린 첨부는 그 댓글 것이라 그대로).
+      const unsent = [...unsentCommentsRef.current.values()];
+      const { list: mergedList, saved } = mergeUnsentComments(deduped, unsent.map((entry) => entry.comment));
+      // 움직임 폴리싱 20번: 휴지통을 누른 댓글은 서버에서 지워질 때까지 다시 불러와도 빼 둔다(되돌리면 그때 다시 넣는다).
+      const list = withoutPendingDeletes(mergedList, pendingDeletesRef.current);
+      // 조용히 다시 불러올 때(상대 부서 키만 바뀜) 합쳐진 댓글은 새로 온 게 아니다 — 알약·바닥 따라가기를 하지 않는다.
+      if (options?.absorbNew) list.forEach((c) => knownCommentIdsRef.current.add(c.id));
+      for (const id of saved) {
+        const entry = unsentCommentsRef.current.get(id);
+        if (!entry || entry.status !== 'failed') continue; // 보내는 중이면 그 요청이 끝낼 때 정리한다.
+        unsentCommentsRef.current.delete(id);
+        entry.attached.forEach((item) => { try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ } });
+        setCommentSendStatus(id, null);
+      }
+      setComments(list);
+      setLoadStatus('ready');
+      onCountChange?.(list.length);
       // v1.26.0: 댓글 로드 후 리액션도 함께 fetch
       const ids = deduped.map((c) => c.id);
-      fetchReactionsBulk(ids).then((map) => setReactionsByCommentId(map));
+      fetchReactionsBulk(ids).then((map) => {
+        if (seq !== loadSeqRef.current) return;
+        setReactionsByCommentId(map);
+        setReactionsReady(true);
+      });
+    }).catch((err) => {
+      if (seq !== loadSeqRef.current) return;
+      console.warn('[댓글] 목록을 불러오지 못했습니다:', err);
+      // 이미 보여 준 목록은 실시간 재조회 실패로 지우지 않는다.
+      setLoadStatus((prev) => commentLoadStatusAfter(prev, 'failure'));
     });
   }, [sceneKey, secondarySceneKey, characterId, characterCommentKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { loadComments(); }, [loadComments]);
+  // 씬·캐릭터가 바뀌면(같은 패널을 다시 쓰는 경우) '불러오는 중'부터 다시 — 처음 자리·새 댓글 줄·알약도 새로 잡는다.
+  // 상대 부서 키(secondarySceneKey)만 늦게 정해졌으면 보이던 목록·자리를 그대로 두고 조용히 다시 불러온다
+  // (그때 합쳐지는 상대 부서 댓글은 원래 있던 댓글이라 '새 댓글'로 치지 않는다).
+  const loadIdentityRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadIdentityRef.current !== primaryStorageKey) {
+      loadIdentityRef.current = primaryStorageKey;
+      setLoadStatus('loading');
+      setReactionsReady(false);
+      openPinStartedRef.current = false;
+      openPinRef.current = null;
+      setUnreadDividerSlot(UNREAD_DIVIDER_UNCAPTURED);
+      setNewBelowCount(0);
+      loadComments();
+      return;
+    }
+    loadComments({ absorbNew: true });
+  }, [loadComments, primaryStorageKey]);
+
+  const retryLoadComments = useCallback(() => {
+    setLoadStatus('loading');
+    loadComments();
+  }, [loadComments]);
 
   // v1.28.0 (코덱스 2차 P1): 다른 클라이언트의 리액션 변경 broadcast 수신 → 해당 댓글만 재fetch.
   //   App.tsx 가 'bflow:comment-reaction-changed' window event 를 dispatch 한다.
@@ -754,6 +1097,7 @@ export function CommentPanel({
   useEffect(() => {
     if (!currentUser?.id) {
       setLastReadAt(null);
+      setReadStateReady(true);
       return;
     }
 
@@ -761,6 +1105,10 @@ export function CommentPanel({
     const load = () => {
       void getCommentReadStateForUser(currentUser.id).then((state) => {
         if (!cancelled) setLastReadAt(state[effectiveSceneThreadKey] ?? null);
+      }).catch((err) => {
+        console.warn('[댓글 읽음] 상태를 불러오지 못했습니다:', err);
+      }).finally(() => {
+        if (!cancelled) setReadStateReady(true);
       });
     };
 
@@ -823,9 +1171,11 @@ export function CommentPanel({
 
     const tryScroll = () => {
       if (scrolled) return;
-      const el = commentRefs.current.get(focusCommentId);
+      // 본문 목록의 말풍선 먼저(commentRefs 는 스레드 칸과 같이 써서 그쪽 요소나, 스레드 칸이 닫힌 뒤 null 일 수 있다).
+      const el = findMainListComment(scrollRef.current, focusCommentId) ?? commentRefs.current.get(focusCommentId);
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 처음 자리 잡기가 이미 가운데에 두었으면 거의 움직이지 않는다. 가까운 스크롤 상자만 움직이고 동작 줄이기면 즉시.
+        centerInScrollParent(el, reduceMotionRef.current ? 'auto' : 'smooth');
         scrolled = true;
         clearTimer = setTimeout(() => setFocusedCommentId(null), 1700);
         return;
@@ -988,6 +1338,72 @@ export function CommentPanel({
       cleanupDraftImages(threadAttachedImagesRef.current, '[스레드 댓글 패널 unmount]');
     };
   }, []);
+
+  // ── 움직임 폴리싱 19번: 보내는 중·보내지 못한 내 댓글 ──
+  // 화면 표시는 sendStatusById('slow'·'failed'), 다시 보내기·지우기에 쓸 정보는 unsentCommentsRef.
+  const setCommentSendStatus = useCallback((id: string, status: 'slow' | 'failed' | null) => {
+    setSendStatusById((prev) => {
+      if ((prev.get(id) ?? null) === status) return prev;
+      const next = new Map(prev);
+      if (status) next.set(id, status);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const clearSlowSendTimer = (id: string) => {
+    const timer = slowSendTimersRef.current.get(id);
+    if (timer) clearTimeout(timer);
+    slowSendTimersRef.current.delete(id);
+  };
+  /** 보내기 시작 — 0.4초 안에 끝나면 말풍선에 아무 표시도 없다. 넘기면 살짝 흐림 + 시계. */
+  const beginCommentSend = (draft: UnsentCommentDraft) => {
+    const id = draft.comment.id;
+    unsentCommentsRef.current.set(id, { ...draft, status: 'sending' });
+    setCommentSendStatus(id, null);
+    clearSlowSendTimer(id);
+    slowSendTimersRef.current.set(id, setTimeout(() => {
+      slowSendTimersRef.current.delete(id);
+      const entry = unsentCommentsRef.current.get(id);
+      if (!entry || entry.status !== 'sending' || !mountedRef.current) return;
+      entry.status = 'slow';
+      setCommentSendStatus(id, 'slow');
+    }, COMMENT_SLOW_SEND_MS));
+  };
+  /** 저장됨(또는 버림) — 표시를 지운다. 흐렸던 말풍선은 0.2초에 걸쳐 또렷해진다. */
+  const finishCommentSend = (id: string) => {
+    clearSlowSendTimer(id);
+    unsentCommentsRef.current.delete(id);
+    setCommentSendStatus(id, null);
+  };
+  /** 보내지 못함 — 말풍선을 남겨 다시 보내기·지우기를 붙인다. 남길 자리가 없으면(패널 닫힘·씬 바뀜) false. */
+  const failCommentSend = (id: string): boolean => {
+    clearSlowSendTimer(id);
+    const entry = unsentCommentsRef.current.get(id);
+    if (!entry || !mountedRef.current) {
+      unsentCommentsRef.current.delete(id);
+      return false;
+    }
+    entry.status = 'failed';
+    setCommentSendStatus(id, 'failed');
+    return true;
+  };
+  /** 남길 자리 없이 실패한 댓글 — 말없이 사라지지 않게 알린다(첨부 정리는 부른 쪽이). */
+  const notifyLostComment = () => {
+    sonnerToast.error('댓글을 보내지 못했어요', {
+      description: '보내는 사이 다른 화면으로 넘어가 저장되지 않았어요. 다시 남겨 주세요.',
+    });
+  };
+  /** 보내지 못한 말풍선을 모두 버린다(씬 바뀜·패널 닫힘). 보내는 중인 것은 그 요청이 끝날 때 정리한다. */
+  const forgetUnsentComments = (context: string) => {
+    slowSendTimersRef.current.forEach((timer) => clearTimeout(timer));
+    slowSendTimersRef.current.clear();
+    unsentCommentsRef.current.forEach((entry) => {
+      if (entry.status === 'failed') cleanupDraftImages(entry.attached, context);
+    });
+    unsentCommentsRef.current.clear();
+    if (mountedRef.current) setSendStatusById((prev) => (prev.size === 0 ? prev : new Map()));
+  };
+  useEffect(() => () => forgetUnsentComments('[보내지 못한 댓글 패널 unmount]'), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 이미지 업로드 ──
   const uploadAttachedImage = useCallback(async (id: string, file: File | Blob) => {
@@ -1200,6 +1616,74 @@ export function CommentPanel({
       && !hasUploadingImage
       && (input.trim().length > 0 || uploadedImageUrls.length > 0);
 
+  // 슬랙 멘션 웹훅 (기존 로직 보존) — 캐릭터 댓글은 씬 deeplink 가 없으므로 스킵.
+  // 본문 입력칸·스레드 창·다시 보내기가 함께 쓴다(webhookSceneKey 로 예전과 같은 씬 표기).
+  const notifyCommentMentions = (comment: SceneComment, webhookSceneKey: string) => {
+    if (!currentUser || characterCommentKey || comment.mentions.length === 0 || !currentUser.slackId) return;
+    const { sheetName: hookSheetName, sceneId: hookSceneId } = parseSceneKey(webhookSceneKey);
+    const parts = hookSheetName.match(/^EP(\d+)_([A-Z])_/);
+    const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : hookSheetName;
+    const partLabel = parts ? `${parts[2]}파트` : '';
+    for (const mentionedName of comment.mentions) {
+      const target = users.find(u => u.name === mentionedName);
+      if (target?.slackId && target.slackId !== currentUser.slackId) {
+        sendMentionWebhook({
+          // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
+          commentText: stripEntityTokens(comment.text),
+          episodeLabel: epLabel,
+          sceneId: hookSceneId,
+          partLabel,
+          sheetName: hookSheetName,
+          authorSlackId: currentUser.slackId,
+          targetSlackId: target.slackId,
+        });
+      }
+    }
+  };
+
+  /** 저장된 뒤 할 일 — 처음 보낼 때와 '다시 보내기'가 같은 길로. */
+  const afterCommentDelivered = (draft: UnsentCommentDraft) => {
+    // 목록을 못 불러온 채('다시 불러오기' 안내) 보냈으면 저장된 지금 다시 불러와 내 댓글과 기존 댓글을 함께 보여 준다.
+    if (loadStatusRef.current === 'error') loadComments();
+    if (draft.markReadOnSuccess) markUnreadCommentsRead();
+    // 성공 — 이전 미리보기 blob URL revoke (메모리 정리)
+    draft.attached.forEach((item) => {
+      try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+    });
+    notifyCommentMentions(draft.comment, draft.webhookSceneKey);
+  };
+
+  /** '다시 보내기' — 같은 댓글(같은 id)을 같은 키로, 처음과 같은 저장 길(addComment)로 다시 보낸다. */
+  const retryUnsentComment = async (commentId: string) => {
+    const entry = unsentCommentsRef.current.get(commentId);
+    if (!entry || entry.status !== 'failed') return;
+    const { status: _status, ...draft } = entry;
+    beginCommentSend(draft);
+    try {
+      await addComment(draft.targetSceneKey, draft.comment);
+      finishCommentSend(commentId);
+      afterCommentDelivered(draft);
+    } catch (err) {
+      console.error('[댓글 다시 보내기 실패]', err);
+      if (!failCommentSend(commentId)) {
+        cleanupDraftImages(draft.attached, '[댓글 다시 보내기 실패]');
+        notifyLostComment();
+      }
+    }
+  };
+
+  /** '지우기' — 아직 저장되지 않은 말풍선을 목록에서 빼고 올린 첨부를 정리한다(서버에는 처음부터 없다). */
+  const discardUnsentComment = (commentId: string) => {
+    const entry = unsentCommentsRef.current.get(commentId);
+    if (!entry || entry.status !== 'failed') return;
+    finishCommentSend(commentId);
+    // 개수 알림은 상태 갱신 함수 밖에서(그리는 도중 부모 상태를 바꾸지 않게).
+    const remaining = comments.filter((c) => c.id !== commentId);
+    setComments((current) => current.filter((c) => c.id !== commentId));
+    onCountChange?.(remaining.length);
+    cleanupDraftImages(entry.attached, '[보내지 못한 댓글 지우기]');
+  };
+
   const handleSubmit = async () => {
     if (!canSubmit || !currentUser) return;
     if (quickRevisionActive && quickRevision) {
@@ -1340,7 +1824,6 @@ export function CommentPanel({
     // Codex P1 6차(2026-04-29): ref sync useEffect 가 한 렌더 늦을 수 있어, setState 직후 unmount 가 일어나면
     // unmount cleanup 이 pre-submit 첨부물을 보고 in-flight 댓글의 이미지를 삭제하는 race 발생 가능.
     // setState 와 동시에 ref 도 즉시 동기화하여 cleanup 이 항상 최신 상태(빈 배열) 를 본다.
-    const prevInput = input;
     const prevAttached = attachedImages;
     const prevReplyTarget = replyTarget;
     setInput('');
@@ -1349,86 +1832,44 @@ export function CommentPanel({
     hash.close();
     setAttachedImages([]);
     attachedImagesRef.current = [];
-    // v1.24.0: 답글 전송 후 답글 모드 해제 (성공/실패 무관 — 실패 시 아래에서 복원).
+    // v1.24.0: 답글 전송 후 답글 모드 해제 (성공/실패 무관 — 실패하면 말풍선이 그 스레드에 남는다).
     setReplyTarget(null);
+    // 움직임 폴리싱 19번: 0.4초 넘게 걸리면 말풍선에 '보내는 중', 실패하면 말풍선을 남겨 다시 보내기·지우기.
+    const sendDraft: UnsentCommentDraft = {
+      comment,
+      targetSceneKey,
+      webhookSceneKey: primaryStorageKey,
+      attached: prevAttached,
+      markReadOnSuccess: !!prevReplyTarget,
+    };
+    beginCommentSend(sendDraft);
 
     try {
       // v1.24.0: 답글이면 targetSceneKey (부모 sourceKey) 로 저장 → 부모/답글이 같은 sheet 에 모임.
       await addComment(targetSceneKey, comment);
-      if (prevReplyTarget) {
-        markUnreadCommentsRead();
-      }
-
-      // 성공 — 이전 미리보기 blob URL revoke (메모리 정리)
-      prevAttached.forEach(a => {
-        try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
-      });
-
-      // 슬랙 멘션 웹훅 (기존 로직 보존) — 캐릭터 댓글은 씬 deeplink 가 없으므로 스킵.
-      if (!characterCommentKey && mentions.length > 0 && currentUser.slackId) {
-        const parts = sheetName.match(/^EP(\d+)_([A-Z])_/);
-        const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : sheetName;
-        const partLabel = parts ? `${parts[2]}파트` : '';
-        for (const mentionedName of mentions) {
-          const target = users.find(u => u.name === mentionedName);
-          if (target?.slackId && target.slackId !== currentUser.slackId) {
-            sendMentionWebhook({
-              // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
-              commentText: stripEntityTokens(comment.text),
-              episodeLabel: epLabel,
-              sceneId,
-              partLabel,
-              sheetName,
-              authorSlackId: currentUser.slackId,
-              targetSlackId: target.slackId,
-            });
-          }
-        }
-      }
+      finishCommentSend(comment.id);
+      // 저장 뒤 할 일(목록 다시 불러오기·읽음·미리보기 정리·슬랙 멘션)은 '다시 보내기'와 같은 길로.
+      afterCommentDelivered(sendDraft);
     } catch (err) {
       console.error('[댓글 추가 실패]', err);
 
+      // 움직임 폴리싱 19번: 말풍선을 지우고 입력칸에 글을 되돌리던 롤백 대신, 말풍선을 남긴 채
+      // '보내지 못했어요 · 다시 보내기 · 지우기'를 붙인다. 입력칸은 비운 채 둔다(같은 글이 두 번 보이지 않게).
+      // 첨부는 그 말풍선이 들고 있다가 다시 보내기면 그대로 쓰고, 지우기·씬 이동·패널 닫기면 정리한다.
+      if (failCommentSend(comment.id)) return;
+
       // Codex P2 9차(2026-04-29): addComment 실패 + panel 이 그 동안 unmount 된 케이스 (slow request 중 close).
       // setState 가 unmounted component 에서 drop 되어 prevAttached 의 uploadedUrl 정리 안 됨 → orphan.
-      // mountedRef 체크 후 state 복원 대신 storage 직접 정리.
-      if (!mountedRef.current) {
-        prevAttached.forEach(a => {
-          try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
-          if (a.uploadedUrl) {
-            storageService.deleteImage(a.uploadedUrl).catch(err2 => {
-              console.warn('[댓글 전송 실패 + unmount] storage 정리 실패:', err2);
-            });
-          }
-        });
-        return;
-      }
-
-      // 롤백 — 댓글 리스트는 항상 복원.
-      setComments(comments);
-      onCountChange?.(comments.length);
-
-      // Codex P2 4차(2026-04-29): in-flight 동안 사용자가 새 텍스트 *또는* 새 이미지 첨부를 시작했는지
-      // 두 ref 로 함께 확인. 둘 중 하나라도 새 작업이 있으면 prev 복원하면 stale draft 와 섞임 → 덮어쓰지 않고
-      // prev blob URL 만 revoke 해 leak 방지. 새 작업이 전혀 없을 때만 prev 복원해 단순 재시도.
-      const userStartedNew =
-        inputValueRef.current.length > 0 || attachedImagesRef.current.length > 0;
-      if (userStartedNew) {
-        // Codex P2 7차(2026-04-29): 사용자가 새 드래프트 시작했고 prev 를 버리는 분기 →
-        // previewUrl 뿐 아니라 *이미 업로드 완료된* uploadedUrl 도 storage 에서 삭제 (orphan 방지).
-        prevAttached.forEach(a => {
-          try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
-          if (a.uploadedUrl) {
-            storageService.deleteImage(a.uploadedUrl).catch(err => {
-              console.warn('[댓글 전송 실패 롤백] 버려진 업로드 객체 정리 실패:', err);
-            });
-          }
-        });
-      } else {
-        setInput(prevInput);
-        setAttachedImages(prevAttached);
-        // v1.24.0: 답글 전송 실패 시 답글 모드도 복원해 사용자가 그대로 재시도 가능.
-        if (prevReplyTarget) setReplyTarget(prevReplyTarget);
-      }
+      // mountedRef 체크 후 state 복원 대신 storage 직접 정리. 남길 말풍선이 없으니 말없이 사라지지 않게 알린다.
+      prevAttached.forEach(a => {
+        try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+        if (a.uploadedUrl) {
+          storageService.deleteImage(a.uploadedUrl).catch(err2 => {
+            console.warn('[댓글 전송 실패 + unmount] storage 정리 실패:', err2);
+          });
+        }
+      });
+      notifyLostComment();
     } finally {
       setSubmitting(false);
     }
@@ -1462,24 +1903,172 @@ export function CommentPanel({
     }
   };
 
-  // 댓글 삭제 (낙관적)
-  const handleDelete = async (commentId: string) => {
-    const target = comments.find((c) => c.id === commentId);
-    const targetKey = target?.storageKey ?? target?._sourceKey ?? primaryStorageKey;
-    const prevComments = [...comments];
-    const next = comments.filter(c => c.id !== commentId);
+  // ── 댓글 삭제 — 움직임 폴리싱 20번 '되돌리기' ──
+  // 휴지통 → 말풍선이 오른쪽 12px 로 밀리며 0.15초에 사라지고, 아래 말풍선들이 그 자리로 0.22초에 올라온다.
+  // 서버에서는 5초 뒤에 지운다('댓글을 지웠어요 · 되돌리기'). 그 사이 다른 씬으로 넘어가거나 패널을 닫거나
+  // 창을 숨기면(트레이·최소화) 기다리지 않고 바로 지운다. 답글이 달린 댓글을 지우면 답글은 지금처럼
+  // '원답글' 표시를 단 채 본문 흐름에 남는다(서버에서 지운 뒤와 같은 모양) — 되돌리면 다시 그 아래로 모인다.
 
-    setComments(next);
+  /** 목록이 바뀌기 직전 줄 위치를 잰다 — 바뀐 뒤(useLayoutEffect) 새 위치와 비교해 미끄러뜨린다. */
+  const captureCommentReflow = () => {
+    reflowBeforeRef.current = reduceMotionRef.current
+      ? null
+      : new Map(measureFlipRows(scrollRef.current, 'data-comment-flip').map((row) => [row.key, row.top]));
+  };
+
+  /** 지운 댓글을 시간 순서 제자리에 다시 넣는다(되돌리기·서버 삭제 실패). 새 댓글로 치지 않아 바닥으로 끌려가지 않는다. */
+  const reinsertComment = (comment: SceneCommentWithSource) => {
+    if (!mountedRef.current) return;
+    if (commentsRef.current.some((c) => c.id === comment.id)) return;
+    captureCommentReflow();
+    knownCommentIdsRef.current.add(comment.id);
+    restoredCommentIdsRef.current.add(comment.id);
+    const next = insertCommentByTime(commentsRef.current, comment);
+    setComments((current) => insertCommentByTime(current, comment));
     onCountChange?.(next.length);
+  };
 
-    try {
-      await deleteComment(targetKey, commentId);
-    } catch (err) {
-      console.error('[댓글 삭제 실패]', err);
-      setComments(prevComments);
-      onCountChange?.(prevComments.length);
+  /** 밀려난 말풍선을 목록에서 뺀다. 숨김은 다음 그림 직전에(useLayoutEffect) — 빈자리가 한 번 그려지지 않게. */
+  const collapseDeletedComment = (commentId: string, element: HTMLElement | null) => {
+    const entry = pendingDeletesRef.current.get(commentId);
+    if (entry) entry.collapseTimer = null;
+    if (!mountedRef.current) return;
+    if (!commentsRef.current.some((c) => c.id === commentId)) return;
+    captureCommentReflow();
+    if (element) {
+      reflowHideRef.current.push(element);
+      // 묶음의 마지막 답글이면 답글 묶음(접기 버튼·왼쪽 줄)도 같은 그림에서 숨긴다 — 묶음이 0.12초 동안 옅어지며
+      // 자리를 차지하면 미끄러짐이 끝난 뒤 아래 줄이 그만큼 한 번 더 툭 당겨졌다.
+      const group = element.closest<HTMLElement>('[data-reply-group]');
+      const othersLeft = !!group && Array.from(group.querySelectorAll<HTMLElement>('[data-comment-id]'))
+        .some((row) => row !== element && row.style.display !== 'none');
+      if (group && !othersLeft) {
+        reflowHideRef.current.push(group);
+        hiddenReplyGroupsRef.current.push(group);
+      }
+    }
+    const next = commentsRef.current.filter((c) => c.id !== commentId);
+    setComments((current) => current.filter((c) => c.id !== commentId));
+    onCountChange?.(next.length);
+  };
+
+  /** 밀려나던 말풍선을 제자리로(0.15초 안에 되돌렸거나 서버 삭제 실패) — 목록에서 빼는 타이머도 멈춘다. */
+  const settleDeleteVisual = (entry: PendingCommentDelete) => {
+    if (entry.collapseTimer) {
+      clearTimeout(entry.collapseTimer);
+      entry.collapseTimer = null;
+    }
+    entry.exit?.cancel();
+    entry.exit = null;
+    if (entry.element) {
+      entry.element.style.pointerEvents = '';
+      entry.element.style.display = '';
+      const element = entry.element;
+      reflowHideRef.current = reflowHideRef.current.filter((el) => el !== element);
     }
   };
+
+  /** '되돌리기' — 서버에는 아직 그대로라 화면에만 다시 넣는다. */
+  const restoreDeletedComment = (commentId: string) => {
+    const entry = pendingDeletesRef.current.get(commentId);
+    if (!entry || entry.phase !== 'waiting') return;
+    pendingDeletesRef.current.delete(commentId);
+    settleDeleteVisual(entry);
+    reinsertComment(entry.comment);
+  };
+
+  /** 5초가 지났거나 바로 확정할 때 — 서버에서 지운다. 실패하면 말풍선을 제자리에 되돌려 놓고 알린다. */
+  const commitDeletedComment = (commentId: string) => {
+    const entry = pendingDeletesRef.current.get(commentId);
+    if (!entry || entry.phase !== 'waiting') return;
+    entry.phase = 'deleting';
+    // 앱 종료가 이 요청을 기다린다(hookCommentDeleteQuitFlush).
+    const deletion: Promise<void> = deleteComment(entry.targetKey, commentId).then(() => {
+      pendingDeletesRef.current.delete(commentId);
+    }).catch((err) => {
+      pendingDeletesRef.current.delete(commentId);
+      console.error('[댓글 삭제 실패]', err);
+      sonnerToast.error('댓글을 지우지 못했어요 · 인터넷 연결을 확인해 주세요');
+      settleDeleteVisual(entry);
+      reinsertComment(entry.comment);
+    }).finally(() => {
+      commentDeletesInFlight.delete(deletion);
+    });
+    commentDeletesInFlight.add(deletion);
+  };
+
+  const handleDelete = (commentId: string) => {
+    if (pendingDeletesRef.current.has(commentId)) return;
+    const target = commentsRef.current.find((c) => c.id === commentId) ?? comments.find((c) => c.id === commentId);
+    if (!target) return;
+    const targetKey = target.storageKey ?? target._sourceKey ?? primaryStorageKey;
+    // 본문 목록의 말풍선을 직접 찾는다 — commentRefs 는 오른쪽 스레드 칸과 같이 써서, 스레드 칸이 열려 있으면 그쪽 요소를,
+    // 닫힌 뒤엔 null 을 가리킨다(그러면 밀려남·미끄러짐 없이 아래 줄이 툭 당겨졌다).
+    const element = findMainListComment(scrollRef.current, commentId);
+    const exit = animateEl(
+      element,
+      COMMENT_DELETE_EXIT_KEYFRAMES,
+      { duration: COMMENT_DELETE_EXIT_MS, easing: EASE_CSS.in, fill: 'forwards' },
+      reduceMotionRef.current,
+    );
+    // 밀려나는 동안 다시 누르지 못하게.
+    if (element) element.style.pointerEvents = 'none';
+    const entry: PendingCommentDelete = {
+      comment: target,
+      targetKey,
+      element,
+      exit,
+      collapseTimer: null,
+      phase: 'waiting',
+      undoWindow: null,
+    };
+    pendingDeletesRef.current.set(commentId, entry);
+    if (exit) entry.collapseTimer = setTimeout(() => collapseDeletedComment(commentId, element), COMMENT_DELETE_EXIT_MS);
+    else collapseDeletedComment(commentId, element);
+    entry.undoWindow = showUndoToast({
+      message: '댓글을 지웠어요',
+      onUndo: () => restoreDeletedComment(commentId),
+      onExpire: () => commitDeletedComment(commentId),
+    });
+  };
+
+  // 기다리지 않고 바로 지운다 — 창을 숨기거나(닫기 = 트레이로 숨기·최소화) 새로고침할 때, 그리고 앱을 끌 때.
+  // 앱 종료(트레이 '종료'·'지금 업데이트')는 메인이 대기 작업이 없어도 보내는 신호로 받아, 서버 삭제가 끝날 때까지
+  // 종료를 잠시(최대 몇 초) 미룬다 — 예전처럼 신호가 대기 작업이 있을 때만 오면 지운 댓글이 남았다.
+  useEffect(() => {
+    const pending = pendingDeletesRef.current;
+    const flushAll = () => {
+      for (const entry of [...pending.values()]) entry.undoWindow?.expire();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flushAll();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flushAll);
+    window.addEventListener('beforeunload', flushAll);
+    commentDeleteFlushers.add(flushAll);
+    hookCommentDeleteQuitFlush();
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flushAll);
+      window.removeEventListener('beforeunload', flushAll);
+      commentDeleteFlushers.delete(flushAll);
+    };
+  }, []);
+
+  // 다른 씬으로 넘어가거나 패널이 닫히면 바로 지운다. 목록에서 빼는 타이머는 멈춘다(새 씬 목록·개수를 건드리지 않게).
+  useEffect(() => {
+    const pending = pendingDeletesRef.current;
+    return () => {
+      for (const entry of [...pending.values()]) {
+        if (entry.collapseTimer) {
+          clearTimeout(entry.collapseTimer);
+          entry.collapseTimer = null;
+        }
+        entry.undoWindow?.expire();
+      }
+    };
+  }, [primaryStorageKey, secondarySceneKey]);
 
   // @멘션 등 엔티티 자동완성은 useMentionAutocomplete 가 담당. 여기선 입력값만 반영(자라기는 useLayoutEffect).
   const handleInputChange = (text: string) => {
@@ -1611,11 +2200,20 @@ export function CommentPanel({
 
     const next = [...comments, comment];
     const submitRequestId = comment.id;
+    // 움직임 폴리싱 19번: 스레드 창 메시지도 0.4초 넘으면 '보내는 중', 실패하면 말풍선을 남겨 다시 보내기·지우기.
+    const sendDraft: UnsentCommentDraft = {
+      comment,
+      targetSceneKey,
+      webhookSceneKey: targetSceneKey,
+      attached: submittedThreadAttached,
+      markReadOnSuccess: true,
+    };
     try {
       setThreadSubmitting(true);
       threadSubmitRequestRef.current = submitRequestId;
       setComments(next);
       onCountChange?.(next.length);
+      beginCommentSend(sendDraft);
       if (threadRoot) {
         setLastThreadRootId(threadRoot.id);
         setCollapsedThreads((prev) => {
@@ -1633,63 +2231,20 @@ export function CommentPanel({
       threadAttachedImagesRef.current = [];
 
       await addComment(targetSceneKey, comment);
-      markUnreadCommentsRead();
+      finishCommentSend(comment.id);
+      // 저장 뒤 할 일(읽음·미리보기 정리·슬랙 멘션)은 '다시 보내기'와 같은 길로.
+      afterCommentDelivered(sendDraft);
       setThreadMentionTarget((current) => current?.id === threadMentionTarget?.id ? null : current);
-      submittedThreadAttached.forEach((item) => {
-        try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
-      });
-
-      // 캐릭터 스레드 답글은 씬 deeplink 가 없으므로 슬랙 웹훅 스킵(상위 작성 경로와 동일 가드).
-      if (!characterCommentKey && mentions.length > 0 && currentUser.slackId) {
-        const { sheetName: threadSheetName, sceneId: threadSceneId } = parseSceneKey(targetSceneKey);
-        const parts = threadSheetName.match(/^EP(\d+)_([A-Z])_/);
-        const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : threadSheetName;
-        const partLabel = parts ? `${parts[2]}파트` : '';
-        for (const mentionedName of mentions) {
-          const target = users.find(u => u.name === mentionedName);
-          if (target?.slackId && target.slackId !== currentUser.slackId) {
-            sendMentionWebhook({
-              // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
-              commentText: stripEntityTokens(comment.text),
-              episodeLabel: epLabel,
-              sceneId: threadSceneId,
-              partLabel,
-              sheetName: threadSheetName,
-              authorSlackId: currentUser.slackId,
-              targetSlackId: target.slackId,
-            });
-          }
-        }
-      }
     } catch (err) {
       console.error('[스레드 댓글 추가 실패]', err);
-      const cleanupSubmittedThreadDraft = () => cleanupDraftImages(submittedThreadAttached, '[스레드 댓글 전송 실패]');
-      if (!mountedRef.current || sceneKeyRef.current !== panelSceneKey) {
-        cleanupSubmittedThreadDraft();
-        return;
-      }
-      setComments((current) => {
-        const withoutFailedComment = current.filter((c) => c.id !== comment.id);
-        if (withoutFailedComment.length !== current.length) {
-          onCountChange?.(withoutFailedComment.length);
-        }
-        return withoutFailedComment;
-      });
-      const canRestoreThreadDraft =
-        (
-          revisionThreadId
-            ? activeRevisionThreadIdRef.current === revisionThreadId
-            : activeThreadRootIdRef.current === threadRoot?.id
-        )
-        && threadInputValueRef.current.length === 0
-        && threadAttachedImagesRef.current.length === 0;
-      if (canRestoreThreadDraft) {
-        setThreadInput(text);
-        threadInputValueRef.current = text;
-        setThreadAttachedImages(submittedThreadAttached);
-        threadAttachedImagesRef.current = submittedThreadAttached;
-      } else {
-        cleanupSubmittedThreadDraft();
+      // 움직임 폴리싱 19번: 말풍선을 지우고 입력칸에 글을 되돌리던 롤백 대신, 말풍선을 남긴 채
+      // '보내지 못했어요 · 다시 보내기 · 지우기'를 붙인다(본문 목록의 답글 자리와 스레드 창 양쪽).
+      // 패널이 닫혔거나 씬이 바뀌어 남길 자리가 없으면 첨부만 정리하고 알린다.
+      const keptForRetry = sceneKeyRef.current === panelSceneKey && failCommentSend(comment.id);
+      if (!keptForRetry) {
+        finishCommentSend(comment.id);
+        cleanupDraftImages(submittedThreadAttached, '[스레드 댓글 전송 실패]');
+        notifyLostComment();
       }
     } finally {
       if (
@@ -1728,7 +2283,7 @@ export function CommentPanel({
     [mainFlowComments, visibleInlineEvents],
   );
 
-  const firstUnreadCommentId = useMemo(() => {
+  const firstUnreadComment = useMemo(() => {
     if (!currentUser?.id || !hasUnreadComments) return null;
     const readMs = lastReadAt ? Date.parse(lastReadAt) : Number.NEGATIVE_INFINITY;
 
@@ -1736,11 +2291,12 @@ export function CommentPanel({
       if (comment.userId === currentUser.id) continue;
       const createdMs = Date.parse(comment.createdAt);
       if (!Number.isFinite(createdMs)) continue;
-      if (createdMs > readMs) return comment.id;
+      if (createdMs > readMs) return comment;
     }
 
     return null;
   }, [currentUser?.id, hasUnreadComments, lastReadAt, orderedVisibleComments]);
+  const firstUnreadCommentId = firstUnreadComment?.id ?? null;
 
   useEffect(() => {
     if (!firstUnreadCommentId) return;
@@ -1758,37 +2314,220 @@ export function CommentPanel({
     }
   }, [firstUnreadCommentId, comments]);
 
-  // 새 댓글 시 스크롤. 읽지 않은 댓글이 있으면 구분선으로 먼저 이동한다.
+  // ── 움직임 폴리싱 4번(comment-open-calm): 처음 자리 · '새 댓글' 줄 · 읽는 중 새 댓글 ──
+  // 목록은 댓글과 읽음 기록이 모두 도착한 뒤 처음 그린다(그 전엔 0.15초 뒤 회색 말풍선 자리).
+  // 읽음 기록만 오래 늦으면(서버 지연) 목록을 계속 가리지 않고 1.5초 뒤 줄 없이 먼저 보여 준다.
+  const [readStateWaitExpired, setReadStateWaitExpired] = useState(false);
   useEffect(() => {
-    if (firstUnreadCommentId) return;
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    // Codex R3 P2 (2026-05-03): inlineEvents 도 watch — system 활동만 도착해도 스크롤 따라가게.
-  }, [comments.length, inlineEvents?.length, firstUnreadCommentId]);
+    if (loadStatus !== 'ready' || readStateReady) return;
+    const timer = window.setTimeout(() => setReadStateWaitExpired(true), COMMENT_READ_STATE_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [loadStatus, readStateReady]);
+  const listReady = loadStatus === 'ready' && (readStateReady || readStateWaitExpired);
+  // 줄은 처음 자리를 잡을 때 정한 자리(읽음 처리 뒤에도 유지)에만 붙인다. 정하기 전(처음 그리는 순간)엔 지금 첫 안 읽은 댓글.
+  // 읽음 기록 없이 붙이면 맨 위 댓글에 잘못 붙으므로 기록이 온 뒤에만.
+  const dividerCommentId = listReady && readStateReady ? unreadDividerCommentId(unreadDividerSlot, firstUnreadCommentId) : null;
+  const unreadDividerFading = !!unreadDivider?.fading;
 
+  // 처음 그린 그 순간의 첫 안 읽은 댓글로 한 번만 정한다 — 그 뒤 실시간으로 온 댓글엔 줄을 만들지 않는다.
   useEffect(() => {
-    if (!firstUnreadCommentId || !unreadDividerElement) return;
-    const timer = setTimeout(() => {
-      unreadDividerElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 150);
-    return () => clearTimeout(timer);
-  }, [firstUnreadCommentId, unreadDividerElement]);
+    if (!listReady || !readStateReady) return;
+    setUnreadDividerSlot((slot) => captureUnreadDivider(
+      slot,
+      firstUnreadComment ? { id: firstUnreadComment.id, createdAt: firstUnreadComment.createdAt } : null,
+    ));
+  }, [listReady, readStateReady, firstUnreadComment]);
 
+  // 읽음 처리는 지금처럼 곧바로, 줄은 그 뒤 4초 동안 남았다가 자리를 지킨 채 옅어진다.
+  // 읽음은 읽음 기록 시각으로 본다 — 줄이 붙은 댓글이 읽기 전에 실시간으로 지워져도 옅어지기 시작하지 않는다.
+  const unreadDividerRead = isUnreadDividerRead(unreadDivider, lastReadAt);
   useEffect(() => {
-    if (!firstUnreadCommentId || !latestOtherUserCommentAt || !unreadDividerElement) return;
-    const anchor = unreadDividerElement;
+    if (!unreadDividerRead) return;
+    const timer = window.setTimeout(() => {
+      setUnreadDividerSlot((slot) => (slot.divider ? { ...slot, divider: { ...slot.divider, fading: true } } : slot));
+    }, COMMENT_UNREAD_DIVIDER_FADE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [unreadDividerRead]);
+
+  const applyOpenPin = useCallback(() => {
+    const el = scrollRef.current;
+    const pin = openPinRef.current;
+    if (!el || !pin) return;
+    let anchorNode: HTMLElement | null = null;
+    if (pin.target === 'focus' && focusCommentIdRef.current) anchorNode = findMainListComment(el, focusCommentIdRef.current);
+    else if (pin.target === 'divider') anchorNode = unreadDividerRef.current;
+    el.scrollTop = commentOpenScrollTop(el, anchorNode ? measureCommentAnchor(el, anchorNode) : null);
+    distanceFromBottomRef.current = commentListDistanceFromBottom(el);
+  }, []);
+
+  const endOpenPin = useCallback(() => {
+    openPinRef.current = null;
+  }, []);
+
+  const scrollListToBottom = useCallback((behavior?: ScrollBehavior) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const resolved = behavior ?? (reduceMotionRef.current ? 'auto' : 'smooth');
+    if (resolved === 'smooth') {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    } else {
+      el.scrollTop = el.scrollHeight;
+      distanceFromBottomRef.current = commentListDistanceFromBottom(el);
+    }
+    if (newBelowCountRef.current > 0) {
+      newBelowCountRef.current = 0;
+      setNewBelowCount(0);
+    }
+  }, []);
+
+  // 처음 그릴 때: 화면에 그리기 전에 맨 아래(또는 새 댓글 줄 가운데)에 둔다 — 맨 위에서 미끄러져 내려가지 않는다.
+  // 그 뒤에 생긴 항목: 바닥에 붙어 있었으면 그대로 붙이고, 위를 읽는 중이면 끌어내리지 않고 알약으로 알린다.
+  useLayoutEffect(() => {
+    if (!listReady) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const eventCount = inlineEvents?.length ?? 0;
+    if (!openPinStartedRef.current) {
+      openPinStartedRef.current = true;
+      knownCommentIdsRef.current = new Set(comments.map((c) => c.id));
+      knownEventCountRef.current = eventCount;
+      openPinRef.current = {
+        target: commentOpenPinTarget({ focusCommentId: focusCommentId ?? null, dividerCommentId }),
+        until: performance.now() + COMMENT_OPEN_PIN_WINDOW_MS,
+      };
+      applyOpenPin();
+      return;
+    }
+
+    const added = splitNewCommentIds(knownCommentIdsRef.current, comments, currentUser?.id);
+    knownCommentIdsRef.current = new Set(comments.map((c) => c.id));
+    const eventsGrew = eventCount > knownEventCountRef.current;
+    knownEventCountRef.current = eventCount;
+    if (added.mine.length === 0 && added.others.length === 0 && !eventsGrew) return;
+
+    if (openPinRef.current) {
+      if (performance.now() <= openPinRef.current.until) {
+        applyOpenPin();
+        return;
+      }
+      openPinRef.current = null;
+    }
+    const viewBottom = el.getBoundingClientRect().bottom;
+    const othersBelow = added.others.filter((id) => {
+      const node = findMainListComment(el, id);
+      return !!node && node.getBoundingClientRect().top >= viewBottom - 4;
+    }).length;
+    // 내가 단 답글(스레드 칸에서 보냄)은 부모 아래에 붙으므로 본문을 맨 아래로 끌고 가지 않는다.
+    const mineTopLevel = added.mine.filter((id) => !comments.find((c) => c.id === id)?.parentCommentId).length;
+    const action = commentArrivalAction({
+      mineAdded: mineTopLevel,
+      othersBelow,
+      distanceFromBottom: distanceFromBottomRef.current,
+    });
+    if (action === 'stick') scrollListToBottom('auto');
+    else if (action === 'follow') scrollListToBottom();
+    else if (action === 'pill') setNewBelowCount((count) => count + othersBelow);
+  }, [listReady, comments, inlineEvents?.length, currentUser?.id, focusCommentId, dividerCommentId, applyOpenPin, scrollListToBottom]);
+
+  // 움직임 폴리싱 20번: 지운 자리로 아래 말풍선들이 올라오고, 되돌리면 비켜 준다 — 바뀌기 직전 위치에서 제자리로 0.22초.
+  // (새 댓글이 붙을 때의 자리 잡기는 위 효과가 먼저 끝낸 뒤라 그 뒤 위치를 잰다.)
+  useLayoutEffect(() => {
+    const hide = reflowHideRef.current;
+    reflowHideRef.current = [];
+    // 밀려난 말풍선은 이 그림부터 자리를 비운다 — 나가는 동안 자리를 차지했다가 툭 당겨지지 않게.
+    hide.forEach((element) => { element.style.display = 'none'; });
+    // 함께 숨긴 답글 묶음은 나가는 동안(0.12초) 되돌리기·새 답글로 다시 들어오면 다시 보인다(다 나가면 목록에서 뺀다).
+    hiddenReplyGroupsRef.current = hiddenReplyGroupsRef.current.filter((group) => {
+      if (!group.isConnected) return false;
+      const visible = Array.from(group.querySelectorAll<HTMLElement>('[data-comment-id]'))
+        .some((row) => row.style.display !== 'none');
+      if (!visible) return true;
+      group.style.display = '';
+      return false;
+    });
+    const before = reflowBeforeRef.current;
+    reflowBeforeRef.current = null;
     const root = scrollRef.current;
-    if (!root) return;
+    if (!before || !root) return;
+    // 바닥에 붙어 읽던 중이면 먼저 바닥에 다시 붙인 뒤 잰다(나중에 붙이면 미끄러짐이 그만큼 어긋난다).
+    if (distanceFromBottomRef.current <= COMMENT_STICK_BOTTOM_PX) root.scrollTop = root.scrollHeight;
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-comment-flip]'));
+    // 앞서 미끄러지던 줄은 지금 보이는 자리(before 에 이미 담김)에서 새로 출발한다.
+    rows.forEach((row) => row.getAnimations?.().forEach((animation) => {
+      if (animation.id === COMMENT_REFLOW_ANIMATION_ID) animation.cancel();
+    }));
+    const shifts = notificationRowShifts(before, measureFlipRows(root, 'data-comment-flip'));
+    rows.forEach((row) => {
+      const shift = shifts.get(row.getAttribute('data-comment-flip') ?? '');
+      if (!shift) return;
+      const animation = animateEl(
+        row,
+        [{ transform: `translateY(${shift}px)` }, { transform: 'translateY(0px)' }],
+        { duration: COMMENT_REFLOW_MS, easing: COMMENT_REFLOW_EASING },
+        reduceMotionRef.current,
+      );
+      if (animation) animation.id = COMMENT_REFLOW_ANIMATION_ID;
+    });
+  }, [comments]);
 
+  // 반응 일괄 조회·이미지·팀 할 일 섹션으로 높이가 바뀌면: 첫 ~1초(손대기 전)는 처음 자리를 다시 맞추고,
+  // 그 뒤엔 바닥에 붙어 있을 때만 바닥에 다시 붙인다(움직임 없이).
+  useEffect(() => {
+    if (!listReady) return;
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const pin = openPinRef.current;
+      if (pin) {
+        if (performance.now() <= pin.until) {
+          applyOpenPin();
+          return;
+        }
+        openPinRef.current = null;
+      }
+      if (distanceFromBottomRef.current <= COMMENT_STICK_BOTTOM_PX) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
+    observer.observe(el);
+    if (listContentNode) observer.observe(listContentNode);
+    return () => observer.disconnect();
+  }, [listReady, listContentNode, applyOpenPin]);
+
+  const handleListScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = commentListDistanceFromBottom(el);
+    distanceFromBottomRef.current = distance;
+    if (distance < COMMENT_NEAR_BOTTOM_PX && newBelowCountRef.current > 0) {
+      newBelowCountRef.current = 0;
+      setNewBelowCount(0);
+    }
+  }, []);
+
+  // 읽음 처리: 첫 안 읽은 댓글(또는 그 위 '새 댓글' 줄)이 화면에 보이면 곧바로. 줄은 남아 있다가 위 타이머로 옅어진다.
+  useEffect(() => {
+    if (!listReady || !readStateReady || !firstUnreadCommentId || !latestOtherUserCommentAt) return;
+    const root = scrollRef.current;
+    if (!root || typeof IntersectionObserver === 'undefined') return;
+    const onDivider = dividerCommentId === firstUnreadCommentId && !!unreadDividerElement;
+    const anchor = onDivider ? unreadDividerElement : findMainListComment(root, firstUnreadCommentId);
+    if (!anchor) return;
+
+    // 줄은 작아서 60% 가 보이면, 댓글은 길 수 있어 화면 절반을 채워도 본 것으로 친다.
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
+      const seen = entries.some((entry) => entry.isIntersecting && (
+        entry.intersectionRatio >= 0.6 || (!onDivider && entry.intersectionRect.height >= root.clientHeight * 0.5)
+      ));
+      if (seen) {
         markUnreadCommentsRead();
         observer.disconnect();
       }
-    }, { root, threshold: 0.6 });
+    }, { root, threshold: onDivider ? 0.6 : [0, 0.25, 0.5, 0.6, 0.75, 1] });
 
     observer.observe(anchor);
     return () => observer.disconnect();
-  }, [firstUnreadCommentId, latestOtherUserCommentAt, markUnreadCommentsRead, unreadDividerElement]);
+  }, [listReady, readStateReady, firstUnreadCommentId, latestOtherUserCommentAt, markUnreadCommentsRead, unreadDividerElement, dividerCommentId, comments]);
 
   const handleMentionClick = (userName: string) => {
     setHighlightUserName(userName);
@@ -1889,6 +2628,8 @@ export function CommentPanel({
             // 섹션이 늦게 커져도 맨 아래(최신 댓글)를 보던 화면이 밀리지 않게 — 판단은 commentListScrollAfterSectionGrow.
             const el = scrollRef.current;
             if (!el) return;
+            // 처음 연 직후(손대기 전)는 목록의 크기 감시가 처음 자리(맨 아래·새 댓글 줄)를 다시 맞춘다.
+            if (openPinRef.current) return;
             const decision = commentListScrollAfterSectionGrow({
               scrollHeight: el.scrollHeight,
               clientHeight: el.clientHeight,
@@ -1902,7 +2643,7 @@ export function CommentPanel({
               const startTop = el.scrollTop;
               window.setTimeout(() => {
                 if (shouldFollowCommentListToBottom({ startTop, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, grewBy })) {
-                  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                  el.scrollTo({ top: el.scrollHeight, behavior: reduceMotionRef.current ? 'auto' : 'smooth' });
                 }
               }, COMMENT_LIST_FOLLOW_CHECK_MS);
             }
@@ -1911,11 +2652,28 @@ export function CommentPanel({
       ) : null}
 
       {/* 댓글 목록 — 시스템 이벤트(inlineEvents)와 시간순 머지 + 새 항목 슬라이드 인 */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
+      {/* 움직임 폴리싱 4번: 불러오는 중(0.15초 뒤 회색 자리)·실패·없음을 구분하고, 처음엔 맨 아래(또는 새 댓글 줄 가운데)에서 시작한다.
+          바깥 relative 상자는 위를 읽는 중 새 댓글을 알리는 '새 댓글 N개 ↓' 알약 자리다. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollRef}
+        onScroll={handleListScroll}
+        onWheel={endOpenPin}
+        onPointerDown={endOpenPin}
+        onKeyDown={endOpenPin}
+        onTouchStart={endOpenPin}
+        className="flex-1 overflow-y-auto px-4 py-3 min-h-0 select-text"
+      >
+        {loadStatus === 'error' ? (
+          <CommentLoadFailedNotice onRetry={retryLoadComments} />
+        ) : !listReady ? (
+          <CommentListSkeleton />
+        ) : (
+        <div ref={setListContentNode} className="comment-list-arrive space-y-4">
         {/* 코덱스 P3 fix (9차, 2026-05-05): reOnly 시 inlineEvents 는 어차피 mergeFeed 에서 drop 되므로
             empty-state 판정에서도 inlineEvents 무시 → 리테이크 댓글 0 + inline 만 있을 때 빈 영역 방지. */}
         {visibleComments.length === 0 && visibleInlineEvents.length === 0 ? (
-          <div className="text-center py-10">
+          <div className="comment-empty-arrive text-center py-10">
             <p className="text-text-secondary text-xs">
               {reOnly ? '리테이크 댓글이 없습니다' : '아직 의견이 없습니다'}
             </p>
@@ -1962,10 +2720,9 @@ export function CommentPanel({
                 return (
                   <motion.div
                     key={`evt:${node.event.id}`}
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                    // 움직임 폴리싱 19번: 새 항목은 목록 끝(입력칸 쪽)에 붙으니 아래에서 떠오른다.
+                    {...bubbleRise}
+                    data-comment-flip={`e:${node.event.id}`}
                     className={cn(
                       'flex items-center gap-2 text-[10.5px] py-0.5',
                       isRevisionEvent
@@ -2043,31 +2800,24 @@ export function CommentPanel({
               const threadCollapsed = collapsedThreads.has(comment.id);
               const isOrphanReply = !!comment.parentCommentId;
               const showUnreadDivider =
-                firstUnreadCommentId != null
-                && comment.id === firstUnreadCommentId;
+                dividerCommentId != null
+                && comment.id === dividerCommentId;
+              const sendStatus = sendStatusById.get(comment.id) ?? null;
               return (
               <Fragment key={comment.id}>
                 {showUnreadDivider && (
-                  <div
-                    ref={setUnreadDividerNode}
-                    className="flex items-center gap-2 py-1"
-                    aria-label="새 댓글 시작"
-                  >
-                    <span className="h-px flex-1 bg-accent/30" />
-                    <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                      새 댓글
-                    </span>
-                    <span className="h-px flex-1 bg-accent/30" />
-                  </div>
+                  <UnreadCommentsDivider nodeRef={setUnreadDividerNode} fading={unreadDividerFading} />
                 )}
               <motion.div
                 key={comment.id}
                 ref={(el) => { commentRefs.current.set(comment.id, el); }}
+                data-comment-id={comment.id}
                 onClick={markUnreadCommentsRead}
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                // 움직임 폴리싱 19번: 보낸 말풍선은 입력칸 쪽(아래)에서 8px 떠오른다(예전엔 위에서 내려왔다).
+                {...bubbleRise}
+                // 20번: 되돌린 말풍선은 떠오르지 않고 제자리에서 다시 나타난다. 지운 자리 미끄러짐(FLIP) 표시.
+                {...(restoredCommentIdsRef.current.has(comment.id) ? commentRestore : {})}
+                data-comment-flip={`c:${comment.id}`}
                 className={cn(
                   'group relative',
                   mentionsMe && 'pl-2',
@@ -2154,9 +2904,11 @@ export function CommentPanel({
                       </div>
                     ) : (
                       <div
-                        className={`rounded-xl px-3.5 py-2.5 text-xs leading-relaxed break-words text-text-primary ${
-                          isOwn ? 'bg-accent/20 border border-accent/30' : 'bg-bg-border/70'
-                        }`}
+                        className={cn(
+                          commentSendBubbleClass(sendStatus),
+                          'rounded-xl px-3.5 py-2.5 text-xs leading-relaxed break-words text-text-primary',
+                          isOwn ? 'bg-accent/20 border border-accent/30' : 'bg-bg-border/70',
+                        )}
                       >
                         {comment.text && <div>{renderText(comment.text, comment.storageKey ?? comment._sourceKey)}</div>}
                         {hasImages && (
@@ -2181,8 +2933,10 @@ export function CommentPanel({
                       </div>
                     )}
 
-                    {/* 수정/삭제 (자기 댓글만) + v1.24.0 답글 버튼 (모든 댓글) */}
-                    {!isEditing && (
+                    {!isEditing && sendStatus === 'slow' && <CommentSendClock />}
+
+                    {/* 수정/삭제 (자기 댓글만) + v1.24.0 답글 버튼 (모든 댓글). 보내지 못한 말풍선엔 아래 '다시 보내기·지우기'만. */}
+                    {!isEditing && sendStatus !== 'failed' && (
                       <div
                         className={cn(
                           'absolute top-0 flex gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity',
@@ -2219,7 +2973,14 @@ export function CommentPanel({
                   </div>
                 </div>
 
-                {/* v1.26.0: 이모지 리액션 — 부모 댓글 */}
+                {/* v1.26.0: 이모지 리액션 — 부모 댓글. 보내지 못한 말풍선은 이 자리에 '보내지 못했어요 · 다시 보내기 · 지우기'. */}
+                {sendStatus === 'failed' ? (
+                  <CommentSendFailedNotice
+                    align={isOwn ? 'end' : 'start'}
+                    onRetry={() => { void retryUnsentComment(comment.id); }}
+                    onDiscard={() => discardUnsentComment(comment.id)}
+                  />
+                ) : (
                 <div className={cn('mt-1 flex', isOwn ? 'justify-end' : 'justify-start')}>
                   <div className={cn('max-w-[85%] w-fit flex items-center gap-1.5', isOwn && 'flex-row-reverse')}>
                     <ReactionsArea
@@ -2230,6 +2991,8 @@ export function CommentPanel({
                       pickerOpen={reactionPicker?.surface === 'main' && reactionPicker.commentId === comment.id}
                       onPickerOpen={() => setReactionPicker({ commentId: comment.id, surface: 'main' })}
                       onPickerClose={() => setReactionPicker(null)}
+                      animateNew={reactionsReady}
+                      reduceMotion={reduceMotion}
                     />
                     <ThreadReplyButton
                       aria-label={`답글 달기: ${comment.userName}`}
@@ -2237,10 +3000,19 @@ export function CommentPanel({
                     />
                   </div>
                 </div>
+                )}
 
-                {/* v1.24.0: 답글 스레드 — 부모 댓글 아래 인라인 들여쓰기 + 좌측 라인 + 토글 */}
+                {/* v1.24.0: 답글 스레드 — 부모 댓글 아래 인라인 들여쓰기 + 좌측 라인 + 토글
+                    움직임 폴리싱 19번: 첫 답글이 생기면 답글 묶음째 아래에서 떠오른다(처음 불러온 목록은 그대로). */}
+                <AnimatePresence initial={false}>
                 {replies.length > 0 && (
-                  <div className="mt-1.5 ml-3 pl-3 border-l-2 border-accent/30 space-y-2">
+                  <motion.div
+                    key="replies"
+                    data-reply-group={comment.id}
+                    {...bubbleRise}
+                    {...(replies.every((reply) => restoredCommentIdsRef.current.has(reply.id)) ? commentRestore : {})}
+                    className="mt-1.5 ml-3 pl-3 border-l-2 border-accent/30 space-y-2"
+                  >
                     <button
                       onClick={() => toggleThread(comment.id)}
                       className="inline-flex items-center gap-1 text-[12px] font-semibold text-text-secondary hover:text-accent transition-colors"
@@ -2249,15 +3021,19 @@ export function CommentPanel({
                       <DisclosureChevron expanded={!threadCollapsed} size={11} />
                       <span>답글 {replies.length}개 {threadCollapsed ? '펼치기' : '접기'}</span>
                     </button>
-                    {!threadCollapsed && replies.map((reply, ri) => {
+                    {/* 움직임 폴리싱 19번: 새 답글만 아래에서 떠오른다(처음 그릴 때·펼칠 때는 그대로). */}
+                    {!threadCollapsed && (
+                    <AnimatePresence initial={false}>
+                    {replies.map((reply, ri) => {
                       const replyIsOwn = currentUser?.id === reply.userId;
                       const replyIsEditing = editingId === reply.id;
                       const replyHasImages = (reply.images?.length ?? 0) > 0;
                       const replyMentionsMe = !!currentUser && (reply.mentions ?? []).includes(currentUser.name);
                       const replyIsFocused = focusedCommentId === reply.id;
+                      const replySendStatus = sendStatusById.get(reply.id) ?? null;
                       const replyShowUnreadDivider =
-                        firstUnreadCommentId != null
-                        && reply.id === firstUnreadCommentId;
+                        dividerCommentId != null
+                        && reply.id === dividerCommentId;
                       const replyRevisionId = reply.revisionId ?? commentRevisionId;
                       const prevReplyRevisionId = ri > 0 ? replies[ri - 1].revisionId ?? commentRevisionId : null;
                       // 답글 묶음 — 답글 내부에서도 같은 사용자 연속이면 메타 숨김.
@@ -2266,21 +3042,15 @@ export function CommentPanel({
                       return (
                         <Fragment key={reply.id}>
                         {replyShowUnreadDivider && (
-                          <div
-                            ref={setUnreadDividerNode}
-                            className="flex items-center gap-2 py-1"
-                            aria-label="새 댓글 시작"
-                          >
-                            <span className="h-px flex-1 bg-accent/30" />
-                            <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                              새 댓글
-                            </span>
-                            <span className="h-px flex-1 bg-accent/30" />
-                          </div>
+                          <UnreadCommentsDivider nodeRef={setUnreadDividerNode} fading={unreadDividerFading} />
                         )}
-                        <div
+                        <motion.div
                           ref={(el) => { commentRefs.current.set(reply.id, el); }}
+                          data-comment-id={reply.id}
                           onClick={markUnreadCommentsRead}
+                          {...bubbleRise}
+                          {...(restoredCommentIdsRef.current.has(reply.id) ? commentRestore : {})}
+                          data-comment-flip={`c:${reply.id}`}
                           className={cn(
                             'group/reply relative',
                             replyMentionsMe && 'pl-1.5',
@@ -2334,9 +3104,11 @@ export function CommentPanel({
                               </div>
                             ) : (
                               <div
-                                className={`rounded-lg px-2.5 py-1.5 text-[11.5px] leading-relaxed break-words text-text-primary ${
-                                  replyIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50'
-                                }`}
+                                className={cn(
+                                  commentSendBubbleClass(replySendStatus),
+                                  'rounded-lg px-2.5 py-1.5 text-[11.5px] leading-relaxed break-words text-text-primary',
+                                  replyIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50',
+                                )}
                               >
                                 {reply.text && <div>{renderText(reply.text, reply.storageKey ?? reply._sourceKey)}</div>}
                                 {replyHasImages && (
@@ -2356,7 +3128,8 @@ export function CommentPanel({
                                 )}
                               </div>
                             )}
-                            {!replyIsEditing && (
+                            {!replyIsEditing && replySendStatus === 'slow' && <CommentSendClock />}
+                            {!replyIsEditing && replySendStatus !== 'failed' && (
                               <div className={cn(
                                 'absolute top-0 flex gap-0.5 opacity-0 group-hover/replybubble:opacity-100 transition-opacity',
                                 replyIsOwn ? '-right-16' : '-right-7',
@@ -2389,7 +3162,14 @@ export function CommentPanel({
                               </div>
                             )}
                           </div>
-                          {/* v1.26.0: 답글 리액션 영역 (compact) */}
+                          {/* v1.26.0: 답글 리액션 영역 (compact). 보내지 못한 답글은 '다시 보내기·지우기'. */}
+                          {replySendStatus === 'failed' ? (
+                            <CommentSendFailedNotice
+                              compact
+                              onRetry={() => { void retryUnsentComment(reply.id); }}
+                              onDiscard={() => discardUnsentComment(reply.id)}
+                            />
+                          ) : (
                           <div className="flex items-center gap-1.5">
                             <ReactionsArea
                               commentId={reply.id}
@@ -2400,6 +3180,8 @@ export function CommentPanel({
                               onPickerOpen={() => setReactionPicker({ commentId: reply.id, surface: 'main' })}
                               onPickerClose={() => setReactionPicker(null)}
                               compact
+                              animateNew={reactionsReady}
+                              reduceMotion={reduceMotion}
                             />
                             <ThreadReplyButton
                               compact
@@ -2407,12 +3189,16 @@ export function CommentPanel({
                               onClick={() => openContextualThreadReply(reply)}
                             />
                           </div>
-                        </div>
+                          )}
+                        </motion.div>
                         </Fragment>
                       );
                     })}
-                  </div>
+                    </AnimatePresence>
+                    )}
+                  </motion.div>
                 )}
+                </AnimatePresence>
               </motion.div>
               </Fragment>
             );
@@ -2420,6 +3206,21 @@ export function CommentPanel({
           })()}
         </AnimatePresence>
         )}
+        </div>
+        )}
+      </div>
+      {listReady && newBelowCount > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center">
+          <button
+            type="button"
+            onClick={() => scrollListToBottom()}
+            className="comment-new-pill pointer-events-auto inline-flex h-7 items-center gap-1 rounded-full bg-accent px-3 text-[12px] font-semibold text-white shadow-lg cursor-pointer"
+          >
+            {newCommentsPillLabel(newBelowCount)}
+            <ArrowDown size={12} strokeWidth={2.4} aria-hidden />
+          </button>
+        </div>
+      )}
       </div>
 
       {/* 입력 영역 — 떠있는 카드 (위 댓글 영역과 시각적 분리)
@@ -2813,6 +3614,8 @@ export function CommentPanel({
                   아직 리테이크 댓글이 없습니다
                 </div>
               )}
+              {/* 움직임 폴리싱 19번: 스레드 창에 새로 단 메시지도 아래에서 떠오른다(창을 열 때 있던 메시지는 그대로). */}
+              <AnimatePresence initial={false}>
               {activeThreadMessagesForPanel.map((message, index) => {
                 const messageIsOwn = currentUser?.id === message.userId;
                 const messageHasImages = (message.images?.length ?? 0) > 0;
@@ -2820,11 +3623,13 @@ export function CommentPanel({
                 const messageIsFocused = focusedCommentId === message.id;
                 const messageIsThreadRoot = !activeRevisionThreadId && index === 0;
                 const messageRevisionId = message.revisionId ?? activeRevisionThreadId;
+                const messageSendStatus = sendStatusById.get(message.id) ?? null;
                 return (
-                  <div
+                  <motion.div
                     key={message.id}
                     ref={(el) => { commentRefs.current.set(message.id, el); }}
                     onClick={markUnreadCommentsRead}
+                    {...bubbleRise}
                     className={cn(
                       'group/thread-message relative',
                       messageMentionsMe && 'pl-1.5',
@@ -2850,7 +3655,9 @@ export function CommentPanel({
                         <span className="text-[10px] text-text-secondary/30 italic">수정됨</span>
                       )}
                     </div>
+                    <div className="relative">
                     <div className={cn(
+                      commentSendBubbleClass(messageSendStatus),
                       'rounded-lg px-2.5 py-2 text-[11.5px] leading-relaxed break-words text-text-primary',
                       messageIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50',
                     )}>
@@ -2871,6 +3678,15 @@ export function CommentPanel({
                         </div>
                       )}
                     </div>
+                    {messageSendStatus === 'slow' && <CommentSendClock />}
+                    </div>
+                    {messageSendStatus === 'failed' ? (
+                      <CommentSendFailedNotice
+                        compact
+                        onRetry={() => { void retryUnsentComment(message.id); }}
+                        onDiscard={() => discardUnsentComment(message.id)}
+                      />
+                    ) : (
                     <div className="mt-1 flex items-center gap-1.5">
                       <ReactionsArea
                         commentId={message.id}
@@ -2881,6 +3697,8 @@ export function CommentPanel({
                         onPickerOpen={() => setReactionPicker({ commentId: message.id, surface: 'thread' })}
                         onPickerClose={() => setReactionPicker(null)}
                         compact
+                        animateNew={reactionsReady}
+                        reduceMotion={reduceMotion}
                       />
                       <ThreadReplyButton
                         compact
@@ -2888,9 +3706,11 @@ export function CommentPanel({
                         onClick={() => replyInActiveThread(message)}
                       />
                     </div>
-                  </div>
+                    )}
+                  </motion.div>
                 );
               })}
+              </AnimatePresence>
             </div>
 
             <div className="shrink-0 border-t border-bg-border bg-bg-primary/80 px-3 py-3">

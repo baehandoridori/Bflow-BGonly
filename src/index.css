@@ -941,45 +941,46 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* ─── Sonner 토스트 — 테마 색상 연동 ───
-   움직임 폴리싱 바탕 C: 쌓이고 밀려 올라가며 움직이는 카드라 뒤 흐림(backdrop-filter)을 두지 않는다
-   (움직일 때마다 흐림을 새로 계산). 대신 바탕을 92% → 97% 로 조금 더 불투명하게 해 같은 느낌을 낸다. */
+   흐림 없음(움직임 폴리싱 바탕 C·18번): 쌓이고 밀려 올라가며 움직이는 카드라 뒤 흐림(backdrop-filter)을 두지 않는다
+   (움직일 때마다 흐림을 새로 계산). 흐림이 없으면 뒤 글자가 또렷이 비쳐 바탕 알파를 .985 로 올린다(바탕 C 의 .97 에서
+   18번이 한 번 더 올림 — 대시보드 글자가 비쳤다). 맨 앞 inset 3px 는 종류별 왼쪽 색 막대(--bflow-toast-tone, motion-comments-notify.css). */
 [data-sonner-toaster] [data-sonner-toast].bflow-toast {
-  --normal-bg: rgb(var(--color-bg-card) / 0.97);
+  --normal-bg: rgb(var(--color-bg-card) / 0.985);
   --normal-border: rgb(var(--color-bg-border) / 0.35);
   --normal-text: rgb(var(--color-text-primary));
-  background: rgb(var(--color-bg-card) / 0.97) !important;
+  background: rgb(var(--color-bg-card) / 0.985) !important;
   border: 1px solid rgb(var(--color-bg-border) / 0.35) !important;
   color: rgb(var(--color-text-primary)) !important;
   box-shadow:
+    inset 3px 0 0 0 var(--bflow-toast-tone, transparent),
     0 8px 32px rgb(var(--color-shadow) / var(--shadow-alpha)),
     0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset !important;
 }
 
-/* ─── 호버 시 스택 부드럽게 펼침 ───
-   움직임 폴리싱 바탕 B: 아래 !important 전환·사라짐 애니메이션은 특이도가 높아 동작 줄이기 전역 규칙
+/* ─── 호버 시 스택 부드럽게 펼침 · 스르륵 슬라이드 인 ───
+   움직임 폴리싱 바탕 B·18번: 아래 !important 전환·사라짐 애니메이션은 특이도가 높아 동작 줄이기 전역 규칙
    (*, 0.01ms !important)을 이긴다. 그래서 동작 줄이기가 아닐 때만 적용한다('움직임: 최소'는
-   motion-foundation.css 의 ID 특이도 규칙이 이긴다). */
+   motion-foundation.css 의 ID 특이도 규칙이 이긴다). 동작 줄이기면 opacity 만(motion-comments-notify.css). */
 @media (prefers-reduced-motion: no-preference) {
   [data-sonner-toaster] [data-sonner-toast] {
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
                 opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
                 height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
   }
-}
 
-/* 스르륵 슬라이드 인 */
-[data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
-  animation: bflow-toast-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  [data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
+    animation: bflow-toast-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
 }
 @keyframes bflow-toast-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
-/* 닫힐 때 페이드 아웃 */
+/* 닫힐 때 페이드 아웃 — sonner 가 0.2초 뒤에 카드를 지우므로 그 안에 끝낸다(18번: 0.25s → 0.2s). */
 @media (prefers-reduced-motion: no-preference) {
   [data-sonner-toast][data-removed="true"] {
-    animation: bflow-toast-fade-out 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+    animation: bflow-toast-fade-out 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
   }
 }
 @keyframes bflow-toast-fade-out {

@@ -347,13 +347,14 @@ test('열리며 움직이는 펼침 메뉴·팝오버는 흐림 없는 짝을 �
   }
 });
 
-test('알림 카드(토스트)는 뒤 흐림 없이 바탕 97%', () => {
+test('알림 카드(토스트)는 뒤 흐림 없이 바탕 97% 이상', () => {
   const css = stripComments(read('src/index.css'));
   const at = css.indexOf('[data-sonner-toaster] [data-sonner-toast].bflow-toast {');
   const body = css.slice(at, css.indexOf('}', at));
   assert.doesNotMatch(body, /backdrop-filter/);
-  assert.match(body, /--normal-bg: rgb\(var\(--color-bg-card\) \/ 0\.97\);/);
-  assert.match(body, /background: rgb\(var\(--color-bg-card\) \/ 0\.97\) !important;/);
+  // 통합: 알림 여정(18번)이 흐림 없는 카드에서 뒤 글자가 비친다며 .97 → .985 로 한 번 더 올렸다.
+  assert.match(body, /--normal-bg: rgb\(var\(--color-bg-card\) \/ 0\.985\);/);
+  assert.match(body, /background: rgb\(var\(--color-bg-card\) \/ 0\.985\) !important;/);
 });
 
 test('인사 말풍선: transform 문자열로 떠오르고(가운데 정렬은 바깥 틀), 사라질 때 흐려지지 않는다', () => {

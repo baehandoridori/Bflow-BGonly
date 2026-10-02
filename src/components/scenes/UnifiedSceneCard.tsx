@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { prefersReducedMotion } from '@/utils/motion';
+import { claimHighlightScroll, highlightScrollKey } from '@/utils/notificationArrival';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { MessageCircle, Trash2 } from 'lucide-react';
@@ -186,11 +188,12 @@ export function UnifiedSceneCard({
   })();
 
   useEffect(() => {
-    if (isHighlighted && !prevHighlightedRef.current) {
-      cardRootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // 같은 강조는 한 번만 데려다준다 — 카드가 다시 마운트돼도 끌어당기지 않는다(움직임 폴리싱 18번).
+    if (isHighlighted && !prevHighlightedRef.current && claimHighlightScroll(highlightScrollKey([bgSheetName, actSheetName], primaryScene?.sceneId ?? ''))) {
+      cardRootRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
     }
     prevHighlightedRef.current = isHighlighted;
-  }, [isHighlighted]);
+  }, [isHighlighted, primaryScene?.sceneId, bgSheetName, actSheetName]);
 
   if (!primaryScene) return null;
 

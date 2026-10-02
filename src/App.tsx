@@ -93,7 +93,7 @@ import { useNotificationStore, type AppNotification } from '@/stores/useNotifica
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
-import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import { dispatchNotification, noteLiveNotificationArrival, type NotificationSettings } from '@/utils/notificationHelper';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
@@ -2825,6 +2825,7 @@ export default function App() {
         const me = useAuthStore.getState().currentUser;
         const n = payload?.notification;
         if (n && me && n.recipientId === me.id && n.actorId !== me.id) {
+          const unreadBefore = useNotificationStore.getState().unreadCount;
           useNotificationStore.getState().upsertCommentReaction({
             id: n.id,
             type: 'comment_reaction',
@@ -2840,6 +2841,8 @@ export default function App() {
             isRead: n.readAt !== null,
             createdAt: n.lastActionAt,
           });
+          // 움직임 폴리싱 18번: 실시간 반응 알림은 종 배지만 '톡'(나를 부른 알림이 아니라 종은 흔들지 않는다).
+          noteLiveNotificationArrival('comment_reaction', unreadBefore);
           // 코덱스 2차 P1: 실시간으로 받은 알림은 lastSeen 갱신.
           // 코덱스 6차 P2: monotonic max() 로 out-of-order broadcast 의 cursor 후퇴 차단.
           // 코덱스 15차 P2: lastSeen 을 composite "<lastActionAt>|<id>" 로 저장 → 같은 ts 행이

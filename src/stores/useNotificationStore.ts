@@ -6,6 +6,7 @@ import {
 } from '../utils/notificationIdentity';
 import { markNotificationDomainRead } from '../utils/notificationDomainRead';
 import { notificationFileNameForUser } from '../utils/notificationPersistence';
+import { mergeRestoredList } from '../utils/undoDelete';
 
 // ─── 알림 타입 정의 ─────────────────────────────────
 /**
@@ -121,7 +122,14 @@ interface NotificationState {
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   removeNotification: (id: string) => void;
-  clearAll: () => void;
+  /** 목록을 비우고 지운 알림을 돌려준다(움직임 폴리싱 20번 '되돌리기'가 그대로 되살린다). */
+  clearAll: () => AppNotification[];
+  /**
+   * 움직임 폴리싱 20번: '전체 삭제' 되돌리기 — 지운 알림을 그대로(읽음 표시까지) 되살린다.
+   * 그 사이 새로 온 알림은 위에 그대로 두고, 같은 알림은 겹치지 않게 묶는다.
+   * 로컬 목록만 되살린다 — 지울 때 끝난 서버 쪽 읽음 처리는 되돌리지 않는다. 계정이 바뀌었으면 하지 않는다.
+   */
+  restoreNotifications: (snapshot: AppNotification[], userId: string | null) => boolean;
   setPanelOpen: (open: boolean) => void;
   togglePanel: () => void;
   loadFromDisk: (userId: string | null) => Promise<void>;
@@ -215,9 +223,20 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 
   clearAll: () => {
+    const removed = get().notifications;
     get().notifications.forEach(syncDomainRead);
     setNotifications(set, []);
     persistToDisk(get().activeUserId, []);
+    return removed;
+  },
+
+  restoreNotifications: (snapshot, userId) => {
+    const { activeUserId, notifications } = get();
+    if (snapshot.length === 0 || !userId || activeUserId !== userId) return false;
+    const next = dedupeNotificationsByIdentity(mergeRestoredList(notifications, snapshot), MAX_NOTIFICATIONS);
+    setNotifications(set, next);
+    persistToDisk(activeUserId, next);
+    return true;
   },
 
   setPanelOpen: (open) => set({ panelOpen: open }),

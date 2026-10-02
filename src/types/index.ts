@@ -1096,6 +1096,8 @@ export interface ElectronAPI extends CalendarApiInputContract {
   onSheetChanged: (callback: (delta?: SheetDelta) => void) => () => void;
   onRetryNotify?: (callback: (message: string) => void) => () => void;
   onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
+  /** 앱 종료 직전에 끝낼 일 — 돌려준 Promise 가 끝날 때까지 메인이 종료를 잠시(최대 몇 초) 미룬다. */
+  onBeforeQuitFlush?: (callback: () => Promise<void> | void) => () => void;
   // v1.22.1: 자동 업데이트 알림
   getUpdateState?: () => Promise<UpdateInfo | null>;
   checkForUpdates?: () => Promise<UpdateInfo | null>;
