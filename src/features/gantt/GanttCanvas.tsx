@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, FolderKanban, GripVertical, Hand, Minus, Plus, Scan, SlidersHorizontal } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, FolderKanban, GripVertical, Hand, Minus, Plus, Scan, SlidersHorizontal } from 'lucide-react';
 import { descendantIds, durationLabel, isTaskComplete, projectProgress, resolveTaskColor, shiftTaskSubtree, taskBounds, taskConflicts, taskProgress } from './domain';
 import { barGeometry, rebaseScroll, zoomScroll } from './geometry';
 import { GANTT_RULER_HEIGHT as RULER, monthStart, navigationRange, weekBands } from './dateAxis';
@@ -411,7 +411,7 @@ export function GanttCanvas(props: Props) {
             if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10'){e.preventDefault();const rect=e.currentTarget.getBoundingClientRect();setHover(null);props.onMenu(r.project,t,rect.left,rect.bottom);}
           };
           const label=<>
-            {group?<button className="gantt-row-collapse" aria-label={`${title} ${collapsed.includes(r.id)?'펼치기':'접기'}`} aria-expanded={!collapsed.includes(r.id)} title={collapsed.includes(r.id)?'하위 일정 펼치기':'하위 일정 접기'} onClick={e=>{e.stopPropagation();setHover(null);onCollapse(r.id);}}>{collapsed.includes(r.id)?<ChevronRight size={16}/>:<ChevronDown size={16}/>}</button>:<span className="gantt-row-collapse-spacer" aria-hidden="true"/>}
+            {group?<button className="gantt-row-collapse" aria-label={`${title} ${collapsed.includes(r.id)?'펼치기':'접기'}`} aria-expanded={!collapsed.includes(r.id)} title={collapsed.includes(r.id)?'하위 일정 펼치기':'하위 일정 접기'} onClick={e=>{e.stopPropagation();setHover(null);onCollapse(r.id);}}><ChevronRight size={16} aria-hidden="true"/></button>:<span className="gantt-row-collapse-spacer" aria-hidden="true"/>}
             {relocatable&&<GripVertical size={12} className="gantt-row-grip" aria-hidden="true"/>}
             {!t&&<FolderKanban size={15} className="gantt-project-icon" aria-hidden="true"/>}
             <span className="gantt-name-copy"><span className="gantt-row-title">{title}</span></span>{!t&&r.project.calendarLink&&<span className="gantt-linked-badge">캘린더 연결</span>}

@@ -165,7 +165,7 @@ function MemoTabBar({
               {displayTitle}
             </span>
             <button
-              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-accent/15 hover:text-accent cursor-pointer"
+              className="opacity-0 group-hover:opacity-100 transition-[opacity,color,background-color] p-0.5 rounded hover:bg-accent/15 hover:text-accent cursor-pointer"
               onClick={(e) => { e.stopPropagation(); beginEdit(tab.id, tab.title); }}
               title="제목 편집"
               aria-label="제목 편집"
@@ -174,7 +174,7 @@ function MemoTabBar({
             </button>
             {tabs.length > 1 && (
               <button
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 cursor-pointer"
+                className="opacity-0 group-hover:opacity-100 transition-[opacity,color,background-color] p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 cursor-pointer"
                 onClick={(e) => { e.stopPropagation(); onDelete(tab.id); }}
                 title="탭 삭제"
                 aria-label="탭 삭제"

@@ -191,7 +191,7 @@ const CostumeThumbCard = memo(function CostumeThumbCard({
           });
           if (ok) await onDelete(costume.id);
         }}
-        className="absolute top-1 right-1 rounded-md bg-black/40 p-1.5 text-white/80 opacity-0 transition-opacity hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
+        className="absolute top-1 right-1 rounded-md bg-black/40 p-1.5 text-white/80 opacity-0 transition-[opacity,color] hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
       >
         <Trash2 size={13} />
       </button>

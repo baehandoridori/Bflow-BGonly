@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 
 export type IntegrationStatus = 'connected' | 'disconnected' | 'loading' | 'error';
 
@@ -84,7 +84,7 @@ export function IntegrationCard({
           {label}
         </span>
         <span className="text-text-secondary/60 ml-1">
-          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          <DisclosureChevron expanded={!collapsed} size={14} />
         </span>
       </button>
       <AnimatePresence initial={false}>

@@ -252,7 +252,7 @@ function ProgressHeatmap({ episodes, deptFilter, episodeTitles }: { episodes: Ep
             transition={{ duration: 0.2, delay: i * 0.015 }}
             className={cn(
               'rounded-lg p-3 border border-bg-border/20 cursor-default group',
-              'transition-border transition-shadow duration-200 ease-out',
+              'transition-[box-shadow,border-color] duration-200 ease-out',
               'hover:border-bg-border/50 hover:shadow-md hover:shadow-black/15',
             )}
             style={{ backgroundColor: `${color}${Math.round(opacity * 25).toString(16).padStart(2, '0')}` }}

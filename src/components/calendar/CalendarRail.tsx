@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BellOff, Check, ChevronRight, Info, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
+import { AlertTriangle, BellOff, Check, Info, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
 import type { BflowCalendar } from '@/types/calendar';
 import type { IcsSubscription } from '@/shared/icsApiContract';
 import { icsCalendarId } from '@/shared/icsApiContract';
@@ -9,6 +9,7 @@ import { useCalendarStore } from '@/stores/useCalendarStore';
 import { groupCalendarsForRail } from '@/utils/calendarEventFilter';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { IcsSubscribeForm } from '@/components/calendar/IcsSubscribeForm';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 
 export const GOOGLE_CALENDAR_ID = 'google';
 
@@ -82,7 +83,7 @@ function CalendarRow({
           event.stopPropagation();
           onToggleMenu();
         }}
-        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-opacity hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-[opacity,background-color] hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
       >
         <MoreHorizontal size={14} />
       </button>
@@ -188,7 +189,7 @@ function IcsSubscriptionRow({
           event.stopPropagation();
           onToggleMenu();
         }}
-        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-opacity hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-[opacity,background-color] hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
       >
         <MoreHorizontal size={14} />
       </button>
@@ -338,7 +339,7 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
             onClick={() => setAdminOverviewExpanded((expanded) => !expanded)}
             className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[10px] font-semibold text-text-secondary hover:bg-bg-border/25 cursor-pointer"
           >
-            <ChevronRight size={12} className={adminOverviewExpanded ? 'rotate-90' : ''} />
+            <DisclosureChevron expanded={adminOverviewExpanded} size={12} />
             <span className="flex-1">관리자 전용 · 미공유 캘린더</span>
             <span>{groups.adminOverview.length}</span>
           </button>

@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply, MessageSquareWarning, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, Reply, MessageSquareWarning, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -63,6 +63,7 @@ import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { ThreadTodoSection } from './ThreadTodoSection';
 import { COMMENT_LIST_FOLLOW_CHECK_MS, commentListScrollAfterSectionGrow, shouldFollowCommentListToBottom } from '@/utils/commentListAnchor';
 import { toast as sonnerToast } from 'sonner';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 import '@/styles/comment-panel.css';
 
 // ─── 타입 ───────────────────────────────────
@@ -2245,7 +2246,7 @@ export function CommentPanel({
                       className="inline-flex items-center gap-1 text-[12px] font-semibold text-text-secondary hover:text-accent transition-colors"
                       title={threadCollapsed ? '답글 펼치기' : '답글 접기'}
                     >
-                      {threadCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                      <DisclosureChevron expanded={!threadCollapsed} size={11} />
                       <span>답글 {replies.length}개 {threadCollapsed ? '펼치기' : '접기'}</span>
                     </button>
                     {!threadCollapsed && replies.map((reply, ri) => {

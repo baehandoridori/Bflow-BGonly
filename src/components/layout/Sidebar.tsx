@@ -101,7 +101,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       title="B flow — 스플래시 보기"
-      className="group relative w-10 h-10 rounded-xl mb-4 cursor-pointer transition-transform duration-300 hover:scale-110 active:scale-95"
+      className="group relative w-10 h-10 rounded-xl mb-4 cursor-pointer transition-transform duration-300 ease-out-expo hover:scale-110 active:scale-95 active:duration-fast motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
       style={{ perspective: '200px' }}
     >
       {/* 외부 글로우 */}
@@ -113,7 +113,8 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
         }}
       />
 
-      {/* 메인 글래스 레이어 */}
+      {/* 메인 글래스 레이어 — backdrop-filter 는 두지 않는다. hover 확대가 살아난 뒤로는 흐림 층까지 함께
+          확대·재계산되는데, 뒤가 사이드바 단색 배경이라 흐림은 눈에 보이지 않는다(움직임 폴리싱 1번). */}
       <div
         className="relative w-full h-full rounded-xl overflow-hidden"
         style={{
@@ -121,8 +122,6 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
             radial-gradient(circle at ${lightX}% ${lightY}%, rgba(255,255,255,0.18) 0%, transparent 60%),
             linear-gradient(135deg, rgba(${ac}, 0.35) 0%, rgba(${acSub}, 0.2) 50%, rgba(${ac}, 0.1) 100%)
           `,
-          backdropFilter: 'blur(20px) saturate(1.5)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
           border: '1px solid rgba(255, 255, 255, 0.2)',
           boxShadow: `
             0 0 0 0.5px rgba(255,255,255,0.1) inset,
@@ -371,7 +370,7 @@ export function Sidebar() {
             title={isVisuallyExpanded ? undefined : item.label}
             className={cn(
               'flex items-center cursor-pointer w-full h-10 rounded-lg',
-              'transition-colors duration-200',
+              'bf-press',
               currentView === item.id
                 ? 'bg-accent/20 text-accent'
                 : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50 group-hover/nav:text-text-primary group-hover/nav:bg-bg-border/50',
@@ -460,7 +459,7 @@ export function Sidebar() {
         <div className="mt-auto flex flex-col items-center gap-1.5 w-16 shrink-0 overflow-visible">
           <button
             onClick={handleToggle}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary/40 hover:text-text-primary hover:bg-bg-border/50 transition-all duration-200 cursor-pointer"
+            className="bf-press w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary/40 hover:text-text-primary hover:bg-bg-border/50 cursor-pointer"
             title={isExpanded ? '사이드바 접기' : '사이드바 펼치기'}
           >
             <PanelLeft

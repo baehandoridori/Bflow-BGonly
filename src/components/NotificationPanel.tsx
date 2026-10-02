@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus, CalendarDays, ChevronDown, ChevronRight } from 'lucide-react';
+import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus, CalendarDays } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
@@ -27,6 +27,7 @@ import {
 } from '@/utils/notificationGrouping';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { tokenizeGPaths } from '@/utils/pathLink';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
@@ -84,7 +85,7 @@ function NotificationGroupItem({
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-bg-border/20 transition-colors"
         title={collapsed ? '묶음 펼치기' : '묶음 접기'}
       >
-        {collapsed ? <ChevronRight size={13} className="text-text-secondary/70" /> : <ChevronDown size={13} className="text-text-secondary/70" />}
+        <DisclosureChevron expanded={!collapsed} size={13} className="text-text-secondary/70" />
         <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-text-primary">{group.title}</span>
         {group.unreadCount > 0 && (
           <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[9px] font-bold text-accent">
@@ -251,7 +252,7 @@ export function NotificationBell() {
         onClick={togglePanel}
         title={hasMention ? `멘션 ${unreadMentionCount}개 포함 ${unreadCount}개 새 알림` : `${unreadCount}개 새 알림`}
         className={cn(
-          'p-2 rounded-lg transition-colors relative cursor-pointer',
+          'bf-press p-2 rounded-lg relative cursor-pointer',
           panelOpen
             ? 'bg-accent/15 text-accent'
             : 'hover:bg-bg-border/50',

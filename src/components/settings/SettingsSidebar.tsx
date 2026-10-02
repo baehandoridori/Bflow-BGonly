@@ -4,11 +4,11 @@ import {
   Palette, Type, Keyboard, Sparkles, Monitor,
   KeyRound, Database, HelpCircle, UserCircle, Bell,
   Layers, ShieldCheck,
-  ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 
 export type SettingsTabId =
   | 'profile'
@@ -160,7 +160,7 @@ export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
               className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-secondary/60 hover:text-text-secondary transition-colors cursor-pointer"
             >
               <span>{group.label}</span>
-              {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              <DisclosureChevron expanded={!isCollapsed} size={12} />
             </button>
             <AnimatePresence initial={false}>
               {!isCollapsed && (

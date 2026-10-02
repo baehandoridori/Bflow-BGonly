@@ -135,7 +135,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
     <div
       className={cn(
         'rounded-xl border border-bg-border/50 bg-bg-card overflow-hidden',
-        'transition-shadow transition-border duration-200 ease-out',
+        'transition-[box-shadow,border-color] duration-200 ease-out',
         'hover:shadow-md hover:shadow-black/15 hover:border-bg-border/80',
       )}
     >

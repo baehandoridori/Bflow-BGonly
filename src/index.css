@@ -270,24 +270,37 @@ input, textarea, select, [contenteditable="true"] {
 
 /* ─── 라이트↔다크 전환 트랜지션 ───
    전역 * 트랜지션은 씬 시트/댓글 패널처럼 노드가 많은 화면에서 스타일 재계산을 크게 만든다.
-   테마 변경 때 체감상 필요한 큰 표면과 컨트롤만 부드럽게 전환한다. */
+   테마 변경 때 체감상 필요한 큰 표면과 컨트롤만 부드럽게 전환한다.
+   특이도는 :where() 로 0 에 둔다 — 요소가 스스로 transition 을 정했으면(Tailwind transition-*,
+   .calendar-day-add 같은 전용 클래스) 그쪽이 이기고, 아무것도 정하지 않은 요소만 이 색 페이드를 받는다.
+   v1.36.0~1.127.5 에는 `body.theme-ready button`(특이도 0,1,2)이 버튼·svg 의 transform/opacity 전환
+   150여 곳을 덮어 화살표 회전·hover 확대·숨은 버튼 페이드가 모두 '뚝' 바뀌었다. */
 body.theme-ready,
-body.theme-ready #root,
-body.theme-ready header,
-body.theme-ready aside,
-body.theme-ready main,
-body.theme-ready [role="dialog"],
-body.theme-ready button,
-body.theme-ready input,
-body.theme-ready textarea,
-body.theme-ready select,
-body.theme-ready svg {
+:where(body.theme-ready) :where(#root, header, aside, main, [role="dialog"], button, input, textarea, select, svg) {
   transition:
     background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     fill 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     stroke 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── 누르는 동안 살짝 눌림 (움직임 폴리싱 1번) ───
+   헤더·사이드바 아이콘 버튼 공용. hover 색 전환은 그대로 두고 누름(transform)만 짧게 더한다.
+   이 클래스가 transition 을 통째로 정하므로 같은 요소에 transition-* 유틸을 함께 쓰지 않는다.
+   transform 유틸(-translate-* 등)로 자리를 잡은 버튼에는 붙이지 말 것 — :active 가 그 transform 을 덮는다. */
+.bf-press {
+  transition:
+    color var(--motion-base) var(--ease-std),
+    background-color var(--motion-base) var(--ease-std),
+    border-color var(--motion-base) var(--ease-std),
+    transform var(--motion-fast) var(--ease-snap);
+}
+.bf-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bf-press:active:not(:disabled) { transform: none; }
 }
 
 /* ─── 씬 카드 → 상세 모달 continuity transition ─── */
@@ -1699,7 +1712,10 @@ input[type="range"]::-webkit-slider-thumb {
      달 전환 때 수십 개를 매 프레임 다시 그린다. 칸 배경이 단색이라 흐림은 눈에 띄지 않는다. */
   opacity: var(--reveal);
   transform: scale(calc(0.55 + 0.45 * var(--reveal)));
-  transition: color 0.14s linear, background 0.14s linear, box-shadow 0.14s linear, border-color 0.14s linear;
+  /* 색만 전환한다. --reveal 은 커서가 움직일 때마다 바뀌므로 여기 걸린 전환은 매번 다시 시작된다.
+     box-shadow 는 칸 밖까지 번지는 흐린 그림자를 매 프레임 다시 그리고, opacity·transform 은 근접 노출을
+     커서보다 늦게 따라오게 만든다. (예전엔 테마 전환 규칙이 이 줄을 덮어 색만 돌았다 — v1.127.5 측정 기준) */
+  transition: color 0.14s linear, background-color 0.14s linear, border-color 0.14s linear;
 }
 
 .calendar-day-add:hover {

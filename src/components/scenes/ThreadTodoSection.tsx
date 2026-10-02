@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, ListTodo, Plus, Trash2 } from 'lucide-react';
+import { ListTodo, Plus, Trash2 } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { createUuid } from '@/utils/createUuid';
@@ -15,6 +15,7 @@ import {
   type ThreadTodoRow,
 } from '@/shared/threadTodo';
 import type { AppUser } from '@/types';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 
 /**
  * 피드백 58: 댓글 패널 상단 고정 '팀 할 일' — 씬/캐릭터 스레드 단위 팀 공유 체크리스트.
@@ -237,7 +238,7 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
         aria-expanded={!collapsed}
         className="flex w-full items-center gap-1.5 py-1.5 text-[11px] font-bold text-text-secondary hover:text-text-primary cursor-pointer"
       >
-        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+        <DisclosureChevron expanded={!collapsed} size={12} />
         <ListTodo size={12} />
         <span>팀 할 일</span>
         <span className="ml-auto tabular-nums font-medium text-text-secondary/60">{openCount}/{items.length}</span>

@@ -7,6 +7,7 @@
 .gantt-canvas-wrap .gantt-name:focus-visible{outline:2px solid rgb(var(--color-accent));outline-offset:-2px}
 .gantt-canvas-wrap .gantt-row-collapse{width:24px;height:26px;flex:none;padding:0;color:var(--g-text);border:1px solid var(--g-border);background:rgb(var(--color-bg-border)/.22);border-radius:5px}
 .gantt-canvas-wrap .gantt-row-collapse:hover{background:rgb(var(--color-accent)/.15);border-color:rgb(var(--color-accent)/.45)}
+.gantt-canvas-wrap .gantt-row-collapse svg{transition:transform .2s cubic-bezier(.2,0,0,1)}.gantt-canvas-wrap .gantt-row-collapse[aria-expanded=true] svg{transform:rotate(90deg)}
 .gantt-canvas-wrap .gantt-row-collapse-spacer{display:block;flex:none;width:24px;height:24px}
 .gantt-canvas-wrap .gantt-inline-name{max-width:360px}
 .gantt-canvas-wrap .gantt-bar-tail{position:absolute;left:calc(100% + 11px);top:0;height:40px;display:flex;align-items:center;gap:16px;white-space:nowrap}
@@ -31,4 +32,4 @@
 .gantt-hover.gantt-detail-hover .gantt-hover-conflict{font-weight:600}
 .gantt-hover.gantt-detail-hover .gantt-hover-shortcut{display:block;font-size:10px;opacity:.7;margin-top:8px}
 .gantt-hover.gantt-detail-hover:focus-visible{outline:2px solid rgb(var(--color-accent));outline-offset:-2px}
-@media(prefers-reduced-motion:reduce){.gantt-canvas-wrap .gantt-row-grip,.gantt-canvas-wrap .gantt-progress,.gantt-canvas-wrap .gantt-row-progress-track>span{transition:none}.gantt-canvas-wrap .gantt-progress-pulse{animation:none;display:none}}
+@media(prefers-reduced-motion:reduce){.gantt-canvas-wrap .gantt-row-collapse svg,.gantt-canvas-wrap .gantt-row-grip,.gantt-canvas-wrap .gantt-progress,.gantt-canvas-wrap .gantt-row-progress-track>span{transition:none}.gantt-canvas-wrap .gantt-progress-pulse{animation:none;display:none}}

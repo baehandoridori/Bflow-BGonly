@@ -186,7 +186,7 @@ export function GlassDropdown<T extends string | number = string>({
         <ChevronDown
           size={14}
           className={cn(
-            'shrink-0 text-text-secondary transition-transform duration-200 motion-reduce:transition-none',
+            'shrink-0 text-text-secondary transition-transform duration-200 ease-snap motion-reduce:transition-none',
             open && 'rotate-180',
           )}
         />

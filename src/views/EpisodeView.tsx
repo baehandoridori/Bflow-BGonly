@@ -105,7 +105,7 @@ function EpisodeCard({
       className={cn(
         'relative w-full text-left rounded-xl p-5 cursor-pointer',
         'border border-bg-border/60 bg-bg-card',
-        'transition-shadow transition-border duration-200 ease-out',
+        'transition-[box-shadow,border-color] duration-200 ease-out',
         'hover:shadow-md hover:shadow-black/20 hover:border-bg-border',
         isComplete && 'border-status-high/30',
       )}
@@ -553,7 +553,7 @@ export function EpisodeView() {
                             </div>
                             <button
                               onClick={() => handleUnarchive(archived.episodeNumber)}
-                              className="p-1 opacity-0 group-hover:opacity-100 text-text-secondary/30 hover:text-accent transition-opacity shrink-0"
+                              className="p-1 opacity-0 group-hover:opacity-100 text-text-secondary/30 hover:text-accent transition-[opacity,color] shrink-0"
                               title="아카이빙 해제 (복원)"
                             >
                               <RotateCcw size={12} />

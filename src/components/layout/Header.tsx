@@ -41,7 +41,7 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
             title={`${navigationBackTarget.label}로 돌아가기`}
             className={cn(
               'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-accent/25 bg-accent/10 px-2.5',
-              'text-xs font-medium text-accent transition-colors hover:border-accent/40 hover:bg-accent/18',
+              'bf-press text-xs font-medium text-accent hover:border-accent/40 hover:bg-accent/18',
             )}
           >
             <ArrowLeft size={15} />
@@ -91,7 +91,7 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
           disabled={isSyncing}
           title="데이터 새로고침"
           className={cn(
-            'p-2 rounded-lg hover:bg-bg-border/50 transition-colors text-text-secondary hover:text-text-primary',
+            'bf-press p-2 rounded-lg hover:bg-bg-border/50 text-text-secondary hover:text-text-primary',
             isSyncing && 'animate-spin text-accent'
           )}
         >
@@ -102,7 +102,7 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
         <button
           onClick={toggleColorMode}
           title={colorMode === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환'}
-          className="p-2 rounded-lg hover:bg-bg-border/50 transition-colors"
+          className="bf-press p-2 rounded-lg hover:bg-bg-border/50"
         >
           {colorMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>

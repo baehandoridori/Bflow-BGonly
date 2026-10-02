@@ -4,11 +4,11 @@
  * spec: 2026-05-21-compositing-dashboard-design.md (8.2)
  */
 
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { PartBadge } from '@/components/compositing-dashboard/common/PartBadge';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { partCssColor } from '@/utils/compositingLabels';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 
 interface PartHeaderProps {
   partId: string;
@@ -44,9 +44,7 @@ export function PartHeader({ partId, sceneCount, doneCount, expanded, onToggle }
       )}
       style={{ background: 'rgb(var(--color-bg-card) / 0.35)' }}
     >
-      {expanded
-        ? <ChevronDown size={14} className="text-text-secondary shrink-0" />
-        : <ChevronRight size={14} className="text-text-secondary shrink-0" />}
+      <DisclosureChevron expanded={expanded} size={14} className="text-text-secondary shrink-0" />
       <PartBadge partId={partId as 'A' | 'B' | 'C' | 'D'} size="md" />
       <span className="text-[13px] font-semibold text-text-primary">
         파트 {partId}

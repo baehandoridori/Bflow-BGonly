@@ -333,7 +333,7 @@ function ImageThumb({
         type="button"
         aria-label="이미지 삭제"
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="absolute right-0.5 top-0.5 rounded bg-black/50 p-0.5 text-white/80 opacity-0 transition-opacity hover:text-red-400 focus-visible:opacity-100 group-hover/thumb:opacity-100"
+        className="absolute right-0.5 top-0.5 rounded bg-black/50 p-0.5 text-white/80 opacity-0 transition-[opacity,color] hover:text-red-400 focus-visible:opacity-100 group-hover/thumb:opacity-100"
       >
         <Trash2 size={11} />
       </button>

@@ -2,7 +2,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, MessageSquareText, Plus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, MessageSquareText, Plus } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import type { CompRevision, RevisionStatus, Episode } from '@/types';
 import { STATUS_CONFIG } from '@/constants/revision';
@@ -13,6 +13,7 @@ import type { SceneGroup } from './utils';
 import { buildFeedbackHubPartCollapseKey, type FeedbackHubEpisodeTree } from './feedbackHubUtils';
 import { RevisionCommentMarker, summarizeRevisionComments } from './RevisionCommentMarker';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 
 function statusColorMix(status: RevisionStatus, alpha: number): string {
   const color = STATUS_CONFIG[status]?.color ?? STATUS_CONFIG.open.color;
@@ -122,7 +123,7 @@ export function SceneRow({
           isSceneResolved ? 'text-text-secondary/25' : 'text-text-secondary/50'
         }`}>
           {openCount > 0 && (
-            expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />
+            <DisclosureChevron expanded={expanded} size={16} />
           )}
         </span>
 
@@ -344,7 +345,7 @@ export function FeedbackTreeSection({
               className="px-4 py-3 flex items-center gap-3 border-b border-bg-border/35 bg-bg-primary/20 hover:bg-bg-primary/35 transition-colors cursor-pointer"
             >
               <span className="shrink-0 text-text-secondary/60">
-                {isEpisodeExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <DisclosureChevron expanded={isEpisodeExpanded} size={16} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -410,7 +411,7 @@ export function FeedbackTreeSection({
                           }`}
                         >
                           <span className="shrink-0 text-text-secondary/55">
-                            {isPartExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            <DisclosureChevron expanded={isPartExpanded} size={14} />
                           </span>
                           <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
                             isPartResolved ? 'bg-text-secondary/25' : 'bg-accent-sub'

@@ -1228,7 +1228,7 @@ export function SceneDetailModal({
                   exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
                   transition={{ delay: 0.2, duration: 0.2 }}
                   onClick={() => setShowRevisions(true)}
-                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer"
+                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-colors cursor-pointer"
                   style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
                   title="컴포지팅 리테이크"
                 >
