@@ -367,7 +367,8 @@ export function Sidebar() {
                 setView(item.id);
               }
             }}
-            title={isVisuallyExpanded ? undefined : item.label}
+            // 설명 말풍선(title) 없음: 접힌 사이드바는 마우스를 올리는 순간 펼쳐져 같은 이름이 옆에 나타난다.
+            // title 을 두면 펼쳐지는 이름 위에 같은 글자의 말풍선이 겹쳐 떴다(움직임 폴리싱 2번).
             className={cn(
               'flex items-center cursor-pointer w-full h-10 rounded-lg',
               'bf-press',

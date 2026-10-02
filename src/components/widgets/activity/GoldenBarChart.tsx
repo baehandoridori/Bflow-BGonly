@@ -1,12 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { dayLabel, addGroupedCount, EMPTY_GROUPED_COUNT, type GroupedCount } from './utils';
+import type { TooltipAnchor } from '@/utils/tooltipPosition';
 
 export interface BarHoverInfo {
   label: string;
   cell: GroupedCount;
-  x: number;
-  y: number;
+  /** 말풍선 자리 — 막대(또는 선 그래프의 점) 위 가운데. 마우스를 따라다니지 않는다. */
+  anchor: TooltipAnchor;
+}
+
+/** 막대 위 가운데. */
+function barAnchor(el: Element): TooltipAnchor {
+  const rect = el.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom };
 }
 
 interface Props {
@@ -116,7 +123,7 @@ function BarHourChart({ buckets, max, peakIdx, onBarHover, tooltipLabel }: {
         const pct = max > 0 ? (cell.total / max) * 100 : 0;
         const isPeak = h === peakIdx && cell.total > 0;
         const reportHover = (e: React.MouseEvent<HTMLDivElement>) =>
-          onBarHover?.({ label: tooltipLabel(h), cell, x: e.clientX, y: e.clientY });
+          onBarHover?.({ label: tooltipLabel(h), cell, anchor: barAnchor(e.currentTarget) });
         return (
           <div
             key={h}
@@ -127,7 +134,6 @@ function BarHourChart({ buckets, max, peakIdx, onBarHover, tooltipLabel }: {
               transition: 'opacity 0.15s ease, filter 0.15s ease',
             }}
             onMouseEnter={reportHover}
-            onMouseMove={reportHover}
             onMouseLeave={() => onBarHover?.(null)}
           >
             {[0, 6, 12, 18].includes(h) && (
@@ -156,7 +162,7 @@ function BarDayChart({ buckets, max, peakIdx, onBarHover }: {
         const pct = max > 0 ? (cell.total / max) * 100 : 0;
         const isPeak = d === peakIdx && cell.total > 0;
         const reportHover = (e: React.MouseEvent<HTMLDivElement>) =>
-          onBarHover?.({ label: `${dayLabel(d)}요일`, cell, x: e.clientX, y: e.clientY });
+          onBarHover?.({ label: `${dayLabel(d)}요일`, cell, anchor: barAnchor(e.currentTarget) });
         return (
           <div
             key={d}
@@ -167,7 +173,6 @@ function BarDayChart({ buckets, max, peakIdx, onBarHover }: {
               transition: 'opacity 0.15s ease, filter 0.15s ease',
             }}
             onMouseEnter={reportHover}
-            onMouseMove={reportHover}
             onMouseLeave={() => onBarHover?.(null)}
           >
             <span className="absolute left-1/2 -translate-x-1/2 -bottom-5 text-[11px] text-text-secondary">
@@ -215,8 +220,18 @@ function LineAreaChart({ mode, buckets, totals, max, peakIdx, onBarHover, toolti
     return `${linePath} L ${points[n - 1].x.toFixed(1)} ${(H - PADDING_BOTTOM).toFixed(1)} L ${points[0].x.toFixed(1)} ${(H - PADDING_BOTTOM).toFixed(1)} Z`;
   }, [linePath, points, n]);
 
+  // 말풍선은 그 시각의 점 바로 위 가운데. svg 는 preserveAspectRatio="none" 이라 가상 좌표를 화면 비율로 그대로 옮긴다.
   const hoverPoint = (e: React.MouseEvent<SVGRectElement>, i: number) => {
-    onBarHover?.({ label: tooltipLabel(i), cell: buckets[i], x: e.clientX, y: e.clientY });
+    const svg = e.currentTarget.ownerSVGElement;
+    const point = points[i];
+    let anchor = { x: e.clientX, top: e.clientY, bottom: e.clientY };
+    if (svg && point) {
+      const rect = svg.getBoundingClientRect();
+      const x = rect.left + (point.x / W) * rect.width;
+      const y = rect.top + (point.y / H) * rect.height;
+      anchor = { x, top: y - 5, bottom: y + 5 };
+    }
+    onBarHover?.({ label: tooltipLabel(i), cell: buckets[i], anchor });
   };
 
   const xLabels: number[] = mode === 'hour' ? [0, 6, 12, 18] : [0, 1, 2, 3, 4, 5, 6];
@@ -273,7 +288,6 @@ function LineAreaChart({ mode, buckets, totals, max, peakIdx, onBarHover, toolti
             fill="transparent"
             className="cursor-pointer"
             onMouseEnter={(e) => hoverPoint(e, i)}
-            onMouseMove={(e) => hoverPoint(e, i)}
             onMouseLeave={() => onBarHover?.(null)}
           />
         ))}

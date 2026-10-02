@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Activity, BarChart3, ChevronLeft, ChevronRight, Clock, Disc, Grid3x3, X } from 'lucide-react';
 import { Widget } from './Widget';
+import { ChartHoverTooltip, type ChartHoverTooltipHandle } from './ChartHoverTooltip';
+import type { TooltipAnchor } from '@/utils/tooltipPosition';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { GoldenHeatmap } from './activity/GoldenHeatmap';
@@ -10,20 +11,46 @@ import { ActivityFilterChips } from './activity/ActivityFilterChips';
 import { ActivityFeed } from './activity/ActivityFeed';
 import { ActivityInsightsModal } from './activity/ActivityInsightsModal';
 import { getRangeBoundary, todayLabelFor } from './activity/timeRange';
-import { pickGoldenWindow, dayLabel, EMPTY_GROUPED_COUNT, type GroupedCount } from './activity/utils';
+import { pickGoldenWindow, dayLabel, type GroupedCount } from './activity/utils';
 import { ACTION_TYPE_TO_GROUP, GROUP_LABEL, GROUP_DOT_COLOR } from './activity/constants';
 import { subscribeToActivityRealtime } from '@/services/supabaseService';
 import type { ActionGroup, CellFilter, TimeUnit } from '@/types';
 
-interface TooltipState {
-  visible: boolean;
-  title: string;
-  cell: GroupedCount;
-  x: number;
-  y: number;
-}
-
 const TOOLTIP_GROUP_ORDER: ActionGroup[] = ['progress', 'memo', 'scene', 'etc'];
+
+/** 칸·막대 말풍선 모양. 뒤 흐림 없이 거의 불투명한 배경(움직이는 말풍선의 흐림은 매번 다시 계산된다). */
+const CELL_TOOLTIP_CLASS =
+  'bg-bg-card/[0.97] border border-bg-border rounded-lg px-2.5 py-2 text-[11.5px] text-text-primary shadow-xl min-w-[120px] whitespace-nowrap';
+
+function CellTooltipContent({ title, cell }: { title: string; cell: GroupedCount }) {
+  return (
+    <>
+      <div className="font-semibold text-accent-sub mb-1.5">
+        {title} <span className="text-text-secondary font-normal">· 총 {cell.total}건</span>
+      </div>
+      {cell.total === 0 ? (
+        <div className="text-text-secondary text-[11px]">활동 없음</div>
+      ) : (
+        <div className="flex flex-col gap-[3px]">
+          {TOOLTIP_GROUP_ORDER.map((g) => {
+            const c = cell[g];
+            if (c === 0) return null;
+            return (
+              <div key={g} className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+                <span
+                  className="w-[7px] h-[7px] rounded-full flex-shrink-0"
+                  style={{ background: GROUP_DOT_COLOR[g] }}
+                />
+                <span>{GROUP_LABEL[g]}</span>
+                <span className="text-text-primary ml-auto pl-2">{c}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
 
 export function RecentActivityWidget() {
   const {
@@ -43,17 +70,13 @@ export function RecentActivityWidget() {
   // year 모드는 12×7 grid 라 hour/day bar chart 와 호환 안 됨 → 강제로 heatmap.
   const effectiveChartMode = timeUnit === 'year' ? 'heatmap' : goldenMode;
 
-  const [tooltip, setTooltip] = useState<TooltipState>({
-    visible: false,
-    title: '',
-    cell: { ...EMPTY_GROUPED_COUNT },
-    x: 0,
-    y: 0,
-  });
+  // 칸·막대 말풍선은 따로 그려진다 — 마우스를 올리고 옮길 때 위젯 전체가 다시 그려지지 않게 show/hide 만 부른다.
+  const tooltipRef = useRef<ChartHoverTooltipHandle>(null);
   const [insightsOpen, setInsightsOpen] = useState(false);
 
-  const hideTooltip = () =>
-    setTooltip({ visible: false, title: '', cell: { ...EMPTY_GROUPED_COUNT }, x: 0, y: 0 });
+  const showCellTooltip = (title: string, cell: GroupedCount, anchor: TooltipAnchor) =>
+    tooltipRef.current?.show(title, cell, <CellTooltipContent title={title} cell={cell} />, anchor);
+  const hideTooltip = () => tooltipRef.current?.hide();
 
   const dashboardDeptFilter = useAppStore((s) => s.dashboardDeptFilter);
 
@@ -128,13 +151,7 @@ export function RecentActivityWidget() {
                 }}
                 onCellHover={(info) => {
                   if (!info) { hideTooltip(); return; }
-                  setTooltip({
-                    visible: true,
-                    title: info.title,
-                    cell: info.cell,
-                    x: info.x,
-                    y: info.y,
-                  });
+                  showCellTooltip(info.title, info.cell, info.anchor);
                 }}
               />
             )}
@@ -143,7 +160,7 @@ export function RecentActivityWidget() {
                 mode={effectiveChartMode}
                 onBarHover={(info) => {
                   if (!info) { hideTooltip(); return; }
-                  setTooltip({ visible: true, title: info.label, cell: info.cell, x: info.x, y: info.y });
+                  showCellTooltip(info.label, info.cell, info.anchor);
                 }}
               />
             )}
@@ -170,43 +187,8 @@ export function RecentActivityWidget() {
           {/* 피드 */}
           <ActivityFeed />
 
-          {/* 셀 호버 툴팁 — Portal */}
-          {tooltip.visible && createPortal(
-            <div
-              className="fixed z-[9999] bg-bg-card/95 border border-bg-border rounded-lg px-2.5 py-2 text-[11.5px] text-text-primary pointer-events-none shadow-xl backdrop-blur-md min-w-[120px]"
-              style={{
-                left: tooltip.x,
-                top: tooltip.y,
-                transform: 'translate(-50%, calc(-100% - 8px))',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <div className="font-semibold text-accent-sub mb-1.5">
-                {tooltip.title} <span className="text-text-secondary font-normal">· 총 {tooltip.cell.total}건</span>
-              </div>
-              {tooltip.cell.total === 0 ? (
-                <div className="text-text-secondary text-[11px]">활동 없음</div>
-              ) : (
-                <div className="flex flex-col gap-[3px]">
-                  {TOOLTIP_GROUP_ORDER.map((g) => {
-                    const c = tooltip.cell[g];
-                    if (c === 0) return null;
-                    return (
-                      <div key={g} className="flex items-center gap-1.5 text-[11px] text-text-secondary">
-                        <span
-                          className="w-[7px] h-[7px] rounded-full flex-shrink-0"
-                          style={{ background: GROUP_DOT_COLOR[g] }}
-                        />
-                        <span>{GROUP_LABEL[g]}</span>
-                        <span className="text-text-primary ml-auto pl-2">{c}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>,
-            document.body,
-          )}
+          {/* 칸·막대 말풍선 — Portal, 가리킨 칸/막대 바로 위 가운데 */}
+          <ChartHoverTooltip ref={tooltipRef} className={CELL_TOOLTIP_CLASS} />
         </div>
       </Widget>
 
