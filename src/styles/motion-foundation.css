@@ -123,7 +123,9 @@ html[data-motion='minimal'] .bf-press:active:not(:disabled) {
 /* '가볍게' 이상: 숨 쉬듯 계속 빛나는 장식을 멈춘다(동작 줄이기 블록과 같은 정지 모습).
    배지·막대 자체는 그대로 보이고 깜빡임만 멈춘다. 새 댓글·새 버전 배지와 그래프 정점은 바탕 C 에서
    '미리 그린 빛 층(::before/::after)의 opacity'로 바뀌어, 층의 움직임을 멈추면 쉬는 빛만 남는다.
-   일괄 작업 바는 나타날 때 두 번만 숨 쉬는 짧은 반응이라 '가볍게'에서도 남긴다. */
+   일괄 작업 바는 나타날 때 두 번만 숨 쉬는 짧은 반응이라 '가볍게'에서도 남긴다.
+   시트 씬 번호 테두리는 평소 멈춰 있고 마우스를 올린 줄만 돈다(scene-effects.css) — '가볍게'에서는 그 회전도 빼고
+   밝아짐만 남긴다. 글자 빛은 더 이상 숨 쉬지 않아 목록에 없다. */
 :root:is([data-motion='lite'], [data-motion='minimal']) .comment-unread-badge::after,
 :root:is([data-motion='lite'], [data-motion='minimal']) .bflow-peak-pulse::after,
 :root:is([data-motion='lite'], [data-motion='minimal']) .bflow-badge-pulse::before,
@@ -133,7 +135,6 @@ html[data-motion='minimal'] .bf-press:active:not(:disabled) {
 :root:is([data-motion='lite'], [data-motion='minimal']) .bell-glow-soft::after,
 :root:is([data-motion='lite'], [data-motion='minimal']) .bell-glow-mention::after,
 :root:is([data-motion='lite'], [data-motion='minimal']) .scene-num-glow-wrap::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) .scene-num-glow-text,
 :root:is([data-motion='lite'], [data-motion='minimal']) .editing-beam::before,
 :root:is([data-motion='lite'], [data-motion='minimal']) .editing-beam-modal::before,
 :root:is([data-motion='lite'], [data-motion='minimal']) .editing-namelabel::before,
