@@ -1,1 +1,144 @@
 /* 이 갈래 전용 움직임 CSS — motion-scene-flow (공통 토큰은 src/index.css :root 의 --motion-*·--ease-*, JS 는 src/utils/motion.ts) */
+
+/* ═══ 14. 씬 상세 창 (scene-detail-flow) ═══════════════════════════════
+   넘김·닫기·열기는 JS(src/hooks/useSceneFlip.ts, src/utils/sceneFlip.ts)가 transform·opacity 만 움직인다.
+   여기는 그 무대(쌓임 맥락)와 작은 반응(카드 모서리·탭·이미지 저장 표시)만 둔다. */
+
+/* 넘김 칸·제목 칸: 나가는 카드(고스트, z-index:-1)가 이 칸 안에서만 새 내용 뒤에 깔린다.
+   본문 칸은 움직이는 동안만 JS 가 isolation:isolate 를 건다(평소에는 칸 안 펼침 메뉴의 겹침 순서가 예전과 같게).
+   제목 칸은 펼침 메뉴가 없어 늘 쌓임 맥락이어도 된다. */
+.sf-flip-viewport {
+  position: relative;
+}
+.sf-title-slot {
+  position: relative;
+  isolation: isolate;
+}
+
+/* ←/→ 에 마우스를 올리면 그쪽 가장자리에 다음 카드 모서리가 살짝 비친다(덱처럼).
+   모양은 미리 그려 두고 transform·opacity 만 바꾼다(그림자·배경 전환 없음). */
+.sf-peek {
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  width: 18px;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(90deg, rgb(var(--color-bg-border) / 0.95), rgb(var(--color-bg-card) / 0.98));
+  border: 1px solid rgb(var(--color-text-secondary) / 0.18);
+  transition:
+    opacity var(--motion-base) var(--ease-std),
+    transform var(--motion-base) var(--ease-out);
+}
+.sf-peek--next {
+  right: 0;
+  border-right: 0;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -8px 0 16px rgb(var(--color-shadow) / 0.28);
+  transform: translateX(100%);
+}
+.sf-peek--prev {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  box-shadow: 8px 0 16px rgb(var(--color-shadow) / 0.28);
+  transform: translateX(-100%);
+}
+[data-scene-peek='next'] > .sf-peek--next {
+  opacity: 1;
+  transform: translateX(8px);
+}
+[data-scene-peek='prev'] > .sf-peek--prev {
+  opacity: 1;
+  transform: translateX(-8px);
+}
+
+/* 탭 전환 0.15초 — 누른 탭 쪽(--tab-dx: ±8px)에서 새 내용이 살며시 나타난다.
+   탭을 바꿀 때마다 새로 붙는(key) 요소라 한 번만 돈다. backwards 라 끝난 뒤 transform 이 남지 않는다. */
+.sf-tab-fade {
+  animation: sf-tab-in 150ms var(--ease-out) backwards;
+}
+@keyframes sf-tab-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--tab-dx, 0px));
+  }
+}
+@keyframes sf-tab-in-calm {
+  from { opacity: 0; }
+}
+
+/* 이미지 저장: 붙여넣은 그림이 바로 보이되 살짝 어둡고(.55) 아래 얇은 줄이 흐른다 → 저장되면 0.2초에 밝아지고 '저장됨 ✓'. */
+.sf-img {
+  transition: opacity 200ms var(--ease-std);
+}
+.sf-img.sf-img--saving {
+  opacity: 0.55;
+}
+.sf-upload-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  background: rgb(var(--color-accent) / 0.18);
+}
+.sf-upload-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  background: rgb(var(--color-accent));
+  animation: sf-upload-run 1s linear infinite;
+}
+@keyframes sf-upload-run {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+.sf-saved-chip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  color: #fff;
+  background: rgb(0 184 148 / 0.88);
+  animation: sf-saved-chip 1.2s var(--ease-std) both;
+}
+@keyframes sf-saved-chip {
+  0% { opacity: 0; transform: translateY(2px); }
+  15% { opacity: 1; transform: none; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* 동작 줄이기: 전역 규칙(index.css)이 모든 애니메이션을 0.01ms 로 줄이므로, 정보가 사라지지 않게 따로 정한다.
+   - 탭은 이동 없이 0.12초 투명도만.
+   - 저장 줄은 흐르지 않는 막대, '저장됨 ✓' 은 움직임 없이 떠 있다가(1.2초 뒤 화면에서 뺀다) 사라진다. */
+@media (prefers-reduced-motion: reduce) {
+  .sf-tab-fade {
+    animation-name: sf-tab-in-calm !important;
+    animation-duration: 120ms !important;
+  }
+  .sf-upload-bar::after {
+    animation: none !important;
+    width: 100%;
+    opacity: 0.55;
+  }
+  .sf-saved-chip {
+    animation: none !important;
+  }
+  /* 카드 모서리는 미끄러져 나오지 않고 제자리에서 나타나기만 한다. */
+  .sf-peek--next { transform: translateX(8px) !important; }
+  .sf-peek--prev { transform: translateX(-8px) !important; }
+}

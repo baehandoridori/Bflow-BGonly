@@ -3707,9 +3707,18 @@ export function ScenesView() {
   // 마지막으로 소비한 signal 값을 추적해 "값이 실제로 증가(변경)" 했을 때만 닫는다.
   // mount/remount 직후엔 ref===store값이라 닫지 않음 → 뷰 전환 remount 시 pending 점프 모달을 즉시 닫지 않는다.
   const lastCloseSignalRef = useRef(closeSceneModalSignal);
+  // 움직임 폴리싱 14번: 상세 창이 떠 있으면 바로 지우지 않고 '닫아 달라'는 신호(sceneModalCloseToken)만 보낸다 →
+  // 창이 Esc·바깥 클릭과 같은 0.16초 가라앉음을 거친 뒤 자기 onClose 로 아래와 같은 상태를 비운다.
+  const [sceneModalCloseToken, setSceneModalCloseToken] = useState(0);
+  const sceneModalShownRef = useRef(false);
+  sceneModalShownRef.current = Boolean((detailScene && detailSceneIdx !== null) || (detailMerged && selectedDepartment === 'all'));
   useEffect(() => {
     if (closeSceneModalSignal === lastCloseSignalRef.current) return; // 변화 없으면 무시(remount 포함)
     lastCloseSignalRef.current = closeSceneModalSignal;
+    if (sceneModalShownRef.current) {
+      setSceneModalCloseToken((n) => n + 1);
+      return;
+    }
     setDetailSceneIndex(null);
     setDetailContext(null);
     setDetailMerged(null);
@@ -6687,6 +6696,7 @@ export function ScenesView() {
             onAssigneeActFeedbackRequest={handleActFeedbackRequest}
             onAssigneeActRoundBump={handleAssigneeActRoundBump}
             onClose={() => { setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
+            closeRequestToken={sceneModalCloseToken}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}
             focusCommentId={modalRouting?.focusCommentId}
@@ -6852,6 +6862,7 @@ export function ScenesView() {
             focusCommentId={modalRouting?.focusCommentId}
             focusRevisionCommentId={modalRouting?.focusRevisionCommentId}
             onClose={() => { setDetailMerged(null); setModalRouting(null); clearContinuitySource(); clearReference(); }}
+            closeRequestToken={sceneModalCloseToken}
             onSceneReference={openReference}
             onToggle={(sheet, id, stage, options) => handleToggleForSheet(sheet, id, stage, options)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
