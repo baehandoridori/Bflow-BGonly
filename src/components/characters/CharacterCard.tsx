@@ -9,6 +9,7 @@ import { cn } from '@/utils/cn';
 import { useCostumeEditingPresence, useCostumeCollisionWarn } from '@/stores/useEditingPresenceStore';
 import { editingBeamClass } from '@/utils/editingPresence';
 import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
+import type { SwapDirection } from '@/utils/contentSwap';
 
 // 복장 없는 캐릭터에 매 렌더 새 [] 를 만들면 memo 비교가 항상 실패한다 — 안정 참조 하나를 공유 (CQ-6).
 export const EMPTY_COSTUMES: CharacterCostume[] = [];
@@ -63,10 +64,13 @@ export const CharacterCard = memo(function CharacterCard({
   // (원래 휠로 넘겼으나 preventDefault 가 페이지 스크롤을 하이재킹해 카드가 많은 화면에서 충돌 — 버튼으로 교체.)
   const imaged = costumes.filter((c) => c.featuredImageUrl);
   const [activeIdx, setActiveIdx] = useState(0);
+  // 누른 쪽에서 새 그림이 겹쳐 떠오른다(‹ 는 왼쪽, › 는 오른쪽 — 움직임 폴리싱 11번).
+  const [swapDirection, setSwapDirection] = useState<SwapDirection>(0);
   useEffect(() => { if (activeIdx >= imaged.length) setActiveIdx(0); }, [imaged.length, activeIdx]);
   const shown = imaged[activeIdx] ?? imaged[0] ?? null;
 
   const stepCostume = (dir: 1 | -1) => {
+    setSwapDirection(dir);
     setActiveIdx((i) => {
       const count = imaged.length;
       if (count <= 1) return i;
@@ -120,6 +124,7 @@ export const CharacterCard = memo(function CharacterCard({
               background={shown.imageBackground}
               fit={shown.imageFit}
               className="w-full h-full"
+              swapDirection={swapDirection}
             />
           ) : (
             <ImageIcon size={28} className="text-text-secondary/40" />

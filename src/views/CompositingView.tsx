@@ -561,7 +561,9 @@ export default function CompositingView({
 
   return (
     <RetakeSceneModalProvider>
-    <div className="h-full flex bg-bg-primary/40">
+    {/* relative: 상세 칸이 닫힐 때(popLayout) 목록 위에 떠서 빠지는 기준 상자.
+        overflow-x-clip: 칸이 오른쪽으로 24px 밀려 들어오고 나가는 동안 화면에 가로 스크롤바가 깜빡이지 않게. */}
+    <div className="relative h-full flex overflow-x-clip bg-bg-primary/40">
       {/* 좌측: 리테이크 허브 */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* 헤더 */}
@@ -753,11 +755,12 @@ export default function CompositingView({
         </div>
       </div>
 
-      {/* 우측: 리테이크 상세 패널 */}
-      <AnimatePresence>
+      {/* 우측: 리테이크 상세 패널 — 칸(셸)은 처음 열릴 때·닫힐 때만 움직이고, 다른 리테이크를 누르면
+          칸은 그대로 두고 내용만 바뀐다(움직임 폴리싱 11번). 닫을 때는 목록이 바로 넓어지고 칸만 위에서 빠진다. */}
+      <AnimatePresence mode="popLayout">
         {selectedRevision && (
           <DetailPanel
-            key={selectedRevision.id}
+            key="revision-detail"
             revision={selectedRevision}
             sceneInfo={selectedRevisionSceneInfo}
             onClose={() => setSelectedRevisionId(null)}

@@ -51,6 +51,8 @@ import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays, formatWeekHeaderLabel } from '@/utils/calendarDate';
 import { calendarViewAnchor } from '@/utils/calendarViewAnchor';
 import { useMotionPref } from '@/hooks/useMotionPref';
+import { useSwapIn } from '@/hooks/useContentSwap';
+import { sidePanelPreset } from '@/utils/contentSwap';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
 import { reuseUnchangedCalendarEvents } from '@/utils/calendarEventReuse';
 import { eventContentSnapshot, withCalendarPresentationForSnapshot } from '@/utils/calendarLocalMutation';
@@ -258,6 +260,9 @@ export function ScheduleView() {
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
+  // 열린 상세 창에서 다른 일정을 누르면 창 틀은 그대로, 내용만 바뀐다(움직임 폴리싱 11번).
+  const panelEventKey = panelEvent ? calendarEventIdentityKey(panelEvent) : null;
+  const panelSwapIn = useSwapIn(panelEventKey);
 
   // 월간 뷰 휠 — 디바운스 타이머
   const wheelTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -1880,17 +1885,26 @@ export function ScheduleView() {
         )}
       </AnimatePresence>
 
-      {/* ═══ 이벤트 사이드패널 ═══ */}
+      {/* ═══ 이벤트 사이드패널 ═══
+          바깥 셸(key 고정)은 처음 열릴 때·닫힐 때만 움직인다. 열린 채 다른 일정을 누르면 셸은 그대로 두고
+          안쪽 창만 일정 key 로 새로 그린다 — 편집 중이던 초안은 지금처럼 버려지고, 내용만 살짝 떠오르며 바뀐다. */}
       <AnimatePresence>
         {panelEvent && (
-          <EventSidePanel
-            key={`panel-${calendarEventIdentityKey(panelEvent)}`}
-            event={panelEvent}
-            onClose={() => setPanelEvent(null)}
-            onDelete={(_id, scope) => handleDeleteEvent(panelEvent, scope)}
-            onUpdate={(id, updates, scope) => handleUpdateEventDirect(panelEvent, id, updates, scope)}
-            onNavigate={handleNavigate}
-          />
+          <motion.div
+            key="event-side-panel"
+            {...sidePanelPreset(reduce)}
+            className="absolute right-0 top-0 bottom-0 w-[280px] z-40"
+          >
+            <EventSidePanel
+              key={`panel-${panelEventKey}`}
+              event={panelEvent}
+              swapIn={panelSwapIn}
+              onClose={() => setPanelEvent(null)}
+              onDelete={(_id, scope) => handleDeleteEvent(panelEvent, scope)}
+              onUpdate={(id, updates, scope) => handleUpdateEventDirect(panelEvent, id, updates, scope)}
+              onNavigate={handleNavigate}
+            />
+          </motion.div>
         )}
       </AnimatePresence>
 

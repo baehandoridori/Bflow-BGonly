@@ -26,6 +26,7 @@ import { autoHeightFromNatural } from '@/utils/characterHeightGuides';
 import { dataUrlToFile } from '@/utils/dataUrlToFile';
 import { cn } from '@/utils/cn';
 import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
+import { useSwapDirection } from '@/hooks/useContentSwap';
 import { CharacterImageFitEditor } from '@/components/characters/CharacterImageFitEditor';
 import { claimReactKey } from '@/utils/claimReactKey';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -376,6 +377,9 @@ export function FeaturedImageSlot({
   const images = (costume ? imagesByCostume.get(costume.id) : undefined) ?? [];
   const primary = images.find((i) => i.isPrimary) ?? images[0] ?? null;
   const selectedImage = images.find((i) => i.id === selectedImageId) ?? primary;
+  // 큰 미리보기는 옛 그림 위로 새 그림이 겹쳐 떠오른다 — 아래 목록에서 뒤쪽 그림을 고르면 오른쪽에서,
+  // 앞쪽이면 왼쪽에서. 복장이 바뀌면(목록 밖) 제자리에서 떠오르기만(움직임 폴리싱 11번).
+  const imageSwapDirection = useSwapDirection(selectedImage?.id ?? null, images.map((image) => image.id));
 
   // 복장이 바뀌면 선택을 초기화 — 파생 fallback 이 새 복장의 대표를 고른다.
   useEffect(() => { setSelectedImageId(null); }, [costume?.id]);
@@ -543,6 +547,7 @@ export function FeaturedImageSlot({
               background={selectedImage.imageBackground}
               fit={selectedImage.imageFit}
               className="h-full w-full rounded-xl"
+              swapDirection={imageSwapDirection}
               onClick={costume ? () => onView(costume.id, { id: selectedImage.id, url: selectedImage.url, background: selectedImage.imageBackground, fit: selectedImage.imageFit }) : undefined}
               onContextMenu={(event) => {
                 event.preventDefault();

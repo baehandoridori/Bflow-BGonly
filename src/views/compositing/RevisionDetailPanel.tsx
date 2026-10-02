@@ -1,6 +1,6 @@
 // ─── 상세내용 패널 ────────────────────────
 
-import { useState } from 'react';
+import { forwardRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock,
@@ -14,6 +14,9 @@ import type { CompRevision, RevisionStatus } from '@/types';
 import { formatDateTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle } from '@/utils/glassStyles';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { useSwapIn } from '@/hooks/useContentSwap';
+import { sidePanelPreset, swapInClassName } from '@/utils/contentSwap';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { canActAsAssignee, canFinalResolveRevision } from '@/utils/revisionWorkflow';
@@ -35,17 +38,50 @@ import {
   type AttachmentImageLightboxState,
 } from '@/components/scenes/AttachmentImageLightbox';
 
-export function DetailPanel({
-  revision,
-  sceneInfo,
-  onClose,
-  onStatusChange,
-}: {
+interface DetailPanelProps {
   revision: CompRevision;
   sceneInfo: SceneInfo | null;
   onClose: () => void;
   onStatusChange: (status: RevisionStatus, note?: string) => void;
-}) {
+}
+
+// 설명 카드 — 열리고 닫힐 때 움직이는 창 안이라 흐림 없이 거의 불투명하게(움직임 폴리싱 11번).
+const descriptionCardStyle = {
+  ...elevatedGlassStyle,
+  background: 'rgb(var(--color-bg-card) / 0.97)',
+  backdropFilter: 'none',
+  WebkitBackdropFilter: 'none',
+};
+
+/**
+ * '선택 리테이크' 칸의 바깥 셸 (움직임 폴리싱 11번).
+ * 처음 열릴 때만 오른쪽에서 살짝 밀려 들어오고(너비는 바로 380px — 목록이 프레임마다 다시 배치되지 않게),
+ * 열린 채 다른 리테이크를 누르면 셸은 그대로 두고 안쪽 내용만 리테이크 key 로 새로 그린다.
+ * 안쪽 상태(완료 메모·담당 완료 입력·크게 보기)는 항목마다 처음부터 — 쓰던 메모는 지금처럼 비워진다.
+ * 닫힐 때 목록이 바로 넓어지도록 부모의 AnimatePresence 는 popLayout 이라 ref 를 받는다.
+ * 그때 칸이 넓어진 목록 위에 떠서 빠지므로, 목록 글자가 비치지 않게 바탕색을 칠한다(바탕과 같은 색).
+ */
+export const DetailPanel = forwardRef<HTMLDivElement, DetailPanelProps>(function DetailPanel(props, ref) {
+  const { reduce } = useMotionPref();
+  const swapIn = useSwapIn(props.revision.id);
+  return (
+    <motion.div
+      ref={ref}
+      {...sidePanelPreset(reduce)}
+      className="shrink-0 w-[380px] border-l border-bg-border overflow-hidden h-full bg-bg-primary"
+    >
+      <DetailPanelContent key={props.revision.id} {...props} swapIn={swapIn} />
+    </motion.div>
+  );
+});
+
+function DetailPanelContent({
+  revision,
+  sceneInfo,
+  onClose,
+  onStatusChange,
+  swapIn,
+}: DetailPanelProps & { swapIn: boolean }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
@@ -109,15 +145,8 @@ export function DetailPanel({
   };
 
   return (
-    <motion.div
-      initial={{ width: 0, opacity: 0 }}
-      animate={{ width: 380, opacity: 1 }}
-      exit={{ width: 0, opacity: 0 }}
-      transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
-      className="shrink-0 border-l border-bg-border overflow-hidden h-full"
-    >
       <div className="w-[380px] h-full overflow-y-auto bg-bg-primary/25">
-        <div className="p-5">
+        <div className={`p-5 ${swapInClassName(swapIn)}`}>
           {/* 헤더 */}
           <div className="flex items-center justify-between mb-5">
             <div>
@@ -176,7 +205,7 @@ export function DetailPanel({
           {/* 설명 카드 */}
           <div
             className="rounded-xl p-4 mb-5 border border-bg-border/60"
-            style={elevatedGlassStyle}
+            style={descriptionCardStyle}
           >
             <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
               {descText || revision.description}
@@ -434,6 +463,5 @@ export function DetailPanel({
           )}
         </div>
       </div>
-    </motion.div>
   );
 }
