@@ -53,6 +53,16 @@ import './index.css';
 import './styles/path-link.css';
 import './styles/activity-widget.css';
 import './styles/scene-effects.css';
+// 움직임 폴리싱(2026-10): 갈래마다 자기 파일 하나만 고친다 — 같은 줄을 동시에 고쳐 충돌하지 않게.
+// 전역 CSS 뒤에 두어 같은 특이도의 기존 규칙을 순서로 덮을 수 있다(컴포넌트가 지연 로드하는 CSS 는 예외).
+// 위젯 팝업 창(#widget-popup)도 이 진입점을 그대로 쓴다.
+import './styles/motion-foundation.css';
+import './styles/motion-scene-check.css';
+import './styles/motion-scene-flow.css';
+import './styles/motion-view-entry.css';
+import './styles/motion-comments-notify.css';
+import './styles/motion-chrome-popups.css';
+import './styles/motion-live-drag.css';
 import { hasUsableElectronAPI, installDevElectronAPI } from './mocks/devElectronAPI';
 
 function shouldInstallBrowserElectronMock(): boolean {
