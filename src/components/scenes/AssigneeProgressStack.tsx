@@ -3,6 +3,7 @@ import { CheckCircle2, CheckSquare, ChevronDown, ChevronUp, Clock, MessageSquare
 import type { Department, Scene, ScenePhaseState, Stage } from '@/types';
 import { DEPARTMENT_CONFIGS, SCENE_PHASES, SCENE_PHASE_COLORS, SCENE_PHASE_LABELS_SHORT, STAGES } from '@/types';
 import { cn } from '@/utils/cn';
+import { RollingNumber } from '@/components/ui/RollingNumber';
 import { getAssigneeProgressEntries, sceneStateFromScene } from '@/utils/assigneeProgress';
 
 interface AssigneeProgressStackProps {
@@ -213,7 +214,7 @@ export function AssigneeProgressStack({
                 <div className="inline-flex shrink-0 items-center gap-1.5">
                   {roundBadge}
                   <div className="rounded-full bg-bg-primary/70 px-2 py-0.5 text-xs font-bold tabular-nums text-text-primary">
-                    {Math.round(entry.pct)}%
+                    <RollingNumber value={Math.round(entry.pct)} suffix="%" countUp={false} />
                   </div>
                 </div>
               </div>
@@ -238,7 +239,7 @@ export function AssigneeProgressStack({
             {controls}
 
             <div className="text-right text-[10px] font-bold tabular-nums text-text-secondary">
-              {Math.round(entry.pct)}%
+              <RollingNumber value={Math.round(entry.pct)} suffix="%" countUp={false} />
             </div>
           </div>
         );

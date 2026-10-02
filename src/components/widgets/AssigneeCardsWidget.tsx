@@ -47,7 +47,7 @@ export function AssigneeCardsWidget() {
               </div>
               <div className="h-1.5 bg-bg-border rounded-full overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all duration-700 ease-out"
+                  className="bf-entry-fill-x h-full rounded-full transition-all duration-700 ease-out"
                   style={{
                     width: `${pct}%`,
                     backgroundColor:

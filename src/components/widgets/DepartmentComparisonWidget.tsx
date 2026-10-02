@@ -4,10 +4,12 @@ import { Widget } from './Widget';
 import { ChartHoverTooltip, type ChartHoverTooltipHandle } from './ChartHoverTooltip';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
+import { useDashboardRollKey } from '@/hooks/useDashboardRollKey';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { VerticalBar } from './charts/VerticalBar';
 import { DonutChart } from './charts/DonutChart';
+import { RollingNumber } from '@/components/ui/RollingNumber';
 import type { Stage, ChartType } from '@/types';
 import { tooltipGlassStyle } from '@/utils/glassStyles';
 
@@ -79,6 +81,8 @@ export function DepartmentComparisonWidget() {
     if (withScenes.length === 0) return 0;
     return withScenes.reduce((sum, d) => sum + d.stats.overallPct, 0) / withScenes.length;
   }, [deptStats]);
+  // 탭·에피소드를 바꾼 직후, 데이터가 처음 도착한 순간에는 숫자를 굴리지 않는다.
+  const rollKey = `${useDashboardRollKey()}|${deptStats.some((d) => d.stats.totalScenes > 0) ? 'ready' : 'empty'}`;
 
   const activeChart = SUPPORTED_CHARTS.includes(chartType) ? chartType : 'horizontal-bar';
 
@@ -104,7 +108,7 @@ export function DepartmentComparisonWidget() {
                     return (
                       <div
                         key={d.dept}
-                        className="w-3 rounded-t transition-all duration-700 ease-out"
+                        className="bf-entry-fill-y w-3 rounded-t transition-all duration-700 ease-out"
                         style={{
                           height: `${Math.max(pct * 0.4, 2)}px`,
                           backgroundColor: d.config.stageColors[stage],
@@ -136,7 +140,7 @@ export function DepartmentComparisonWidget() {
               pct: d.stats.overallPct,
               color: d.config.color,
             }))}
-            centerValue={`${combinedPct.toFixed(1)}%`}
+            centerValue={<RollingNumber value={combinedPct} decimals={1} suffix="%" resetKey={rollKey} />}
             centerLabel="통합"
           />
           <div className="grid grid-cols-4 gap-2 pt-2 border-t border-bg-border/50">
@@ -149,7 +153,7 @@ export function DepartmentComparisonWidget() {
                     return (
                       <div
                         key={d.dept}
-                        className="w-3 rounded-t transition-all duration-700 ease-out"
+                        className="bf-entry-fill-y w-3 rounded-t transition-all duration-700 ease-out"
                         style={{
                           height: `${Math.max(pct * 0.4, 2)}px`,
                           backgroundColor: d.config.stageColors[stage],
@@ -178,25 +182,28 @@ export function DepartmentComparisonWidget() {
         <div className="flex items-center gap-3 pb-3 border-b border-bg-border/50">
           <span className="text-xs font-medium text-text-secondary w-10 text-right">통합</span>
           <div className="flex-1 h-6 bg-bg-primary rounded-full overflow-hidden flex">
-            {deptStats.map((d) => {
-              if (d.stats.totalScenes === 0) return null;
-              const width = d.stats.overallPct;
-              return (
-                <div
-                  key={d.dept}
-                  className="h-full transition-all duration-700 ease-out first:rounded-l-full last:rounded-r-full"
-                  style={{
-                    width: `${width}%`,
-                    backgroundColor: d.config.color,
-                    opacity: 0.8,
-                  }}
-                  title={`${d.config.label}: ${width.toFixed(1)}%`}
-                />
-              );
-            })}
+            {/* 이어 붙은 칸 묶음 — 첫 진입 때 묶음째 왼쪽에서 늘어난다(움직임 폴리싱 13번) */}
+            <div className="bf-entry-fill-sx flex h-full w-full">
+              {deptStats.map((d) => {
+                if (d.stats.totalScenes === 0) return null;
+                const width = d.stats.overallPct;
+                return (
+                  <div
+                    key={d.dept}
+                    className="bf-progress-bar h-full first:rounded-l-full last:rounded-r-full"
+                    style={{
+                      width: `${width}%`,
+                      backgroundColor: d.config.color,
+                      opacity: 0.8,
+                    }}
+                    title={`${d.config.label}: ${width.toFixed(1)}%`}
+                  />
+                );
+              })}
+            </div>
           </div>
           <span className="text-sm font-bold text-text-primary w-14 text-right">
-            {combinedPct.toFixed(1)}%
+            <RollingNumber value={combinedPct} decimals={1} suffix="%" resetKey={rollKey} />
           </span>
         </div>
 
@@ -213,7 +220,7 @@ export function DepartmentComparisonWidget() {
               </span>
               <div className="flex-1 h-5 bg-bg-primary rounded-full overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all duration-700 ease-out"
+                  className="bf-progress-bar bf-entry-fill-x h-full rounded-full"
                   style={{
                     width: `${pct}%`,
                     backgroundColor: d.config.color,
@@ -222,7 +229,7 @@ export function DepartmentComparisonWidget() {
               </div>
               <div className="flex flex-col items-end w-20">
                 <span className="text-sm font-bold" style={{ color: d.config.color }}>
-                  {pct.toFixed(1)}%
+                  <RollingNumber value={pct} decimals={1} suffix="%" resetKey={rollKey} />
                 </span>
                 <span className="text-[11px] text-text-secondary">
                   {d.stats.fullyDone}/{d.stats.totalScenes}씬
@@ -246,7 +253,7 @@ export function DepartmentComparisonWidget() {
                     return (
                       <div
                         key={d.dept}
-                        className="w-3 rounded-t transition-all duration-700 ease-out cursor-pointer"
+                        className="bf-entry-fill-y w-3 rounded-t transition-all duration-700 ease-out cursor-pointer"
                         style={{
                           height: `${Math.max(pct * 0.4, 2)}px`,
                           backgroundColor: d.config.stageColors[stage],

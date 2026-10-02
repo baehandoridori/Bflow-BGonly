@@ -1,13 +1,18 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useId } from 'react';
 import { PieChart } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Widget } from './Widget';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
+import { useDashboardRollKey } from '@/hooks/useDashboardRollKey';
+import { useMotionPref } from '@/hooks/useMotionPref';
 import { calcDashboardStats } from '@/utils/calcStats';
+import { MOTION_MS, transformPreset } from '@/utils/motion';
+import { progressBucket, ringReveal, ringSegmentArcs, type ProgressBucket } from '@/utils/progressMotion';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { HorizontalBar } from './charts/HorizontalBar';
 import { StatCard } from './charts/StatCard';
+import { RollingNumber } from '@/components/ui/RollingNumber';
 import type { ChartType } from '@/types';
 
 const SUPPORTED_CHARTS: ChartType[] = ['donut', 'horizontal-bar', 'stat-card'];
@@ -26,7 +31,7 @@ interface MotivMessage {
   author?: string;
 }
 
-const MESSAGES: Record<string, MotivMessage[]> = {
+const MESSAGES: Record<ProgressBucket, MotivMessage[]> = {
   '0': [
     { text: '시작이 반이다.', author: '아리스토텔레스' },
     { text: '천 리 길도 한 걸음부터.', author: '노자' },
@@ -76,17 +81,33 @@ const RANDOM_MESSAGES: MotivMessage[] = [
   { text: '응후응후 (여러분 모두 힘든 작업을 하고 계시지만 분명히 힘든 만큼 값진 결과가 되돌아올 것입니다. 포기하지 말고 옆에있는 팀원을 의지하면서 언제나 열심히 즐겁게 오래오래 일하는 스튜디오 장삐쭈가 되었으면 좋겠습니다. 사코팍 화이팅! 스튜디오장삐쭈 화이팅!)', author: '이혜민' },
 ];
 
-function getMessagePool(pct: number): MotivMessage[] {
-  let base: MotivMessage[];
-  if (pct === 0) base = MESSAGES['0'];
-  else if (pct >= 100) base = MESSAGES['100'];
-  else if (pct < 10) base = MESSAGES['1-10'];
-  else if (pct < 25) base = MESSAGES['10-25'];
-  else if (pct < 50) base = MESSAGES['25-50'];
-  else if (pct < 75) base = MESSAGES['50-75'];
-  else base = MESSAGES['75-99'];
-  return [...base, ...RANDOM_MESSAGES];
+/** 구간(progressBucket)마다 명언 풀. 팀원이 체크해 0.1% 움직여도 같은 구간이면 같은 풀·같은 명언을 유지한다. */
+function getMessagePool(bucket: ProgressBucket): MotivMessage[] {
+  return [...MESSAGES[bucket], ...RANDOM_MESSAGES];
 }
+
+/* 명언 바뀜 — 아래에서 떠올라 위로 사라진다. transform 문자열(합성 스레드), 동작 줄이기면 opacity 만. */
+const QUOTE_MOTION = transformPreset({ from: 'translateY(8px)', exitTo: 'translateY(-8px)', duration: 500, exitDuration: MOTION_MS.slow });
+const QUOTE_MOTION_REDUCED = transformPreset({ from: 'translateY(8px)' }, true);
+
+/* 진행률 원 */
+const RING_SIZE = 160;
+const RING_CENTER = RING_SIZE / 2;
+const RING_RADIUS = 60;
+const RING_STROKE = 10;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+/** 구간색 띠 4개 — 값과 무관하게 늘 그려 두고, 얼마나 보일지는 가림막 하나가 정한다(경계를 넘어도 띠가 이어진다). */
+const RING_ARCS = ringSegmentArcs(COLOR_SEGMENTS, RING_CIRCUMFERENCE);
+/**
+ * 끝의 둥근 머리 — 12시 자리에서 시계 방향(앞쪽)으로만 나온 반원. 원 전체를 쓰면 뒤쪽 반이 12시 앞의
+ * 마지막 구간(초록)을 비춰 0% 근처에서 두 색 점이 된다. 호와 맞닿는 곳 실선이 비치지 않게 0.5px 겹친다.
+ */
+const RING_CAP_PATH = [
+  `M ${RING_CENTER - 0.5} ${RING_CENTER - RING_RADIUS - RING_STROKE / 2}`,
+  `H ${RING_CENTER}`,
+  `A ${RING_STROKE / 2} ${RING_STROKE / 2} 0 0 1 ${RING_CENTER} ${RING_CENTER - RING_RADIUS + RING_STROKE / 2}`,
+  `H ${RING_CENTER - 0.5} Z`,
+].join(' ');
 
 export function OverallProgressWidget() {
   const episodes = useDashboardEpisodes();
@@ -98,6 +119,12 @@ export function OverallProgressWidget() {
   const stats = useMemo(() => calcDashboardStats(episodes, dept), [episodes, dept]);
   const pctRaw = stats.overallPct;
   const pct = Number(pctRaw.toFixed(1));
+  // 숫자는 소수 한 자리로 폭을 고정한다. 100% 만 '100%' 로(원 안에 넉넉히 들어가게).
+  const pctDecimals = pct >= 100 ? 0 : 1;
+  // 탭·에피소드를 바꾼 직후, 데이터가 처음 도착한 순간에는 굴리지 않는다.
+  const rollKey = `${useDashboardRollKey()}|${stats.totalScenes > 0 ? 'ready' : 'empty'}`;
+  const { reduce } = useMotionPref();
+  const ringMaskId = `bf-overall-ring-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
 
   const title = deptConfig
     ? `전체 진행률 (${deptConfig.shortLabel})`
@@ -105,27 +132,12 @@ export function OverallProgressWidget() {
 
   const activeChart = SUPPORTED_CHARTS.includes(chartType) ? chartType : 'donut';
 
-  // SVG 원형 진행률
-  const radius = 60;
-  const circumference = 2 * Math.PI * radius;
+  // SVG 원형 진행률 — 가림막이 드러내는 길이와 끝점(둥근 머리) 각도
+  const reveal = ringReveal(pct, RING_CIRCUMFERENCE);
 
-  const segments = useMemo(() => {
-    return COLOR_SEGMENTS.map((seg) => {
-      const segStart = seg.min;
-      const segEnd = Math.min(seg.max, pct);
-      if (segEnd <= segStart) return null;
-      const arcLength = ((segEnd - segStart) / 100) * circumference;
-      const startOffset = (segStart / 100) * circumference;
-      return {
-        color: seg.color,
-        dasharray: `${arcLength} ${circumference - arcLength}`,
-        dashoffset: -startOffset,
-      };
-    }).filter(Boolean) as { color: string; dasharray: string; dashoffset: number }[];
-  }, [pct, circumference]);
-
-  // ── 동기부여 메시지 로테이션 ──
-  const pool = useMemo(() => getMessagePool(pct), [pct]);
+  // ── 동기부여 메시지 로테이션 ── (구간이 실제로 바뀔 때와 8초 주기에만 바뀐다)
+  const bucket = progressBucket(pct);
+  const pool = useMemo(() => getMessagePool(bucket), [bucket]);
   const [msgIdx, setMsgIdx] = useState(0);
 
   const pickNext = useCallback(() => {
@@ -178,7 +190,7 @@ export function OverallProgressWidget() {
     return (
       <Widget title={title} icon={<PieChart size={16} />}>
         <StatCard
-          value={`${pct}%`}
+          value={<RollingNumber value={pctRaw} decimals={pctDecimals} suffix="%" resetKey={rollKey} />}
           label={title}
           subValue={`${stats.totalScenes}씬 중 ${stats.fullyDone} 완료`}
           pct={pct}
@@ -193,27 +205,60 @@ export function OverallProgressWidget() {
       <div className="flex flex-col items-center justify-center h-full gap-2">
         {/* 원형 차트 */}
         <div className="relative">
-          <svg width={160} height={160}>
-            <circle cx={80} cy={80} r={radius} fill="none" stroke="rgb(var(--color-bg-border))" strokeWidth={10} />
-            {segments.map((seg, i) => (
-              <circle
-                key={i}
-                cx={80}
-                cy={80}
-                r={radius}
-                fill="none"
-                stroke={seg.color}
-                strokeWidth={10}
-                strokeDasharray={seg.dasharray}
-                strokeDashoffset={seg.dashoffset}
-                strokeLinecap={i === segments.length - 1 ? 'round' : 'butt'}
-                transform="rotate(-90 80 80)"
-                className="transition-all duration-700 ease-out"
-              />
-            ))}
+          <svg width={RING_SIZE} height={RING_SIZE}>
+            <defs>
+              {/* 가림막: 호 하나(길이만 전환) + 끝의 둥근 머리(같은 박자로 회전). 흰 곳만 아래 색 띠가 보인다. */}
+              <mask id={ringMaskId} maskUnits="userSpaceOnUse" x={0} y={0} width={RING_SIZE} height={RING_SIZE}>
+                <circle
+                  cx={RING_CENTER}
+                  cy={RING_CENTER}
+                  r={RING_RADIUS}
+                  fill="none"
+                  stroke="#fff"
+                  strokeWidth={RING_STROKE}
+                  strokeDasharray={`${reveal.length} ${RING_CIRCUMFERENCE}`}
+                  transform={`rotate(-90 ${RING_CENTER} ${RING_CENTER})`}
+                  className="bf-progress-arc bf-entry-ring"
+                />
+                <g
+                  className="bf-progress-cap bf-entry-ring-cap"
+                  data-visible={reveal.capVisible ? 'true' : 'false'}
+                  style={{
+                    transform: `rotate(${reveal.capDeg}deg)`,
+                    transformOrigin: `${RING_CENTER}px ${RING_CENTER}px`,
+                    opacity: reveal.capVisible ? 1 : 0,
+                  }}
+                >
+                  <path d={RING_CAP_PATH} fill="#fff" />
+                </g>
+              </mask>
+            </defs>
+            <circle cx={RING_CENTER} cy={RING_CENTER} r={RING_RADIUS} fill="none" stroke="rgb(var(--color-bg-border))" strokeWidth={RING_STROKE} />
+            <g mask={`url(#${ringMaskId})`}>
+              {RING_ARCS.map((arc) => (
+                <circle
+                  key={arc.key}
+                  cx={RING_CENTER}
+                  cy={RING_CENTER}
+                  r={RING_RADIUS}
+                  fill="none"
+                  stroke={arc.color}
+                  strokeWidth={RING_STROKE}
+                  strokeDasharray={arc.dasharray}
+                  strokeDashoffset={arc.dashoffset}
+                  transform={`rotate(-90 ${RING_CENTER} ${RING_CENTER})`}
+                />
+              ))}
+            </g>
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-3xl font-bold text-text-primary">{pct}%</span>
+            <RollingNumber
+              value={pctRaw}
+              decimals={pctDecimals}
+              suffix="%"
+              resetKey={rollKey}
+              className="text-3xl font-bold text-text-primary"
+            />
           </div>
         </div>
 
@@ -229,10 +274,7 @@ export function OverallProgressWidget() {
           <AnimatePresence mode="wait">
             <motion.div
               key={`${msgIdx}-${pool[0]?.text}`}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.5, ease: 'easeOut' }}
+              {...(reduce ? QUOTE_MOTION_REDUCED : QUOTE_MOTION)}
               className="text-center px-3"
             >
               <p className="text-xs italic text-text-secondary/80 leading-relaxed">

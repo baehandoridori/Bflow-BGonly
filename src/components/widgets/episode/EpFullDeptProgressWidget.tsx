@@ -6,6 +6,8 @@ import { useDataStore } from '@/stores/useDataStore';
 import { calcEpisodeDetailStats } from '@/utils/calcStats';
 import { HorizontalBar } from '../charts/HorizontalBar';
 import { DonutChart } from '../charts/DonutChart';
+import { RollingNumber } from '@/components/ui/RollingNumber';
+import { useDashboardRollKey } from '@/hooks/useDashboardRollKey';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { ChartType, Department } from '@/types';
 
@@ -21,6 +23,7 @@ export function EpFullDeptProgressWidget({ dept }: { dept: Department }) {
     () => (epNum !== null ? calcEpisodeDetailStats(episodes, epNum) : null),
     [episodes, epNum],
   );
+  const rollKey = useDashboardRollKey();
 
   if (!stats || epNum === null) return null;
 
@@ -29,6 +32,8 @@ export function EpFullDeptProgressWidget({ dept }: { dept: Department }) {
   if (!deptStats) return null;
 
   const pct = deptStats.overallPct;
+  // 탭·에피소드를 바꾼 직후, 데이터가 처음 도착한 순간에는 숫자를 굴리지 않는다.
+  const pctNumber = <RollingNumber value={pct} decimals={1} suffix="%" resetKey={`${rollKey}|${deptStats.totalScenes > 0 ? 'ready' : 'empty'}`} />;
   const displayName = episodeTitles[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
   const title = `${displayName} 전체 ${cfg.shortLabel} 진행률`;
 
@@ -40,7 +45,7 @@ export function EpFullDeptProgressWidget({ dept }: { dept: Department }) {
       <Widget title={title} icon={<BarChart3 size={16} />}>
         <DonutChart
           segments={[{ label: cfg.shortLabel, pct, color: cfg.color }]}
-          centerValue={`${pct.toFixed(1)}%`}
+          centerValue={pctNumber}
           centerLabel={`${deptStats.totalScenes}씬`}
         />
       </Widget>
@@ -54,7 +59,7 @@ export function EpFullDeptProgressWidget({ dept }: { dept: Department }) {
         <div className="shrink-0">
           <DonutChart
             segments={[{ label: cfg.shortLabel, pct, color: cfg.color }]}
-            centerValue={`${pct.toFixed(1)}%`}
+            centerValue={pctNumber}
             size={72}
           />
         </div>

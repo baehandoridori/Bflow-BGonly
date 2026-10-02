@@ -915,6 +915,7 @@ import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
 import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
 import { editingBeamClassName } from '@/utils/editingPresence';
 import { Confetti } from '@/components/ui/Confetti';
+import { RollingNumber } from '@/components/ui/RollingNumber';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { PanelLeftOpen } from 'lucide-react';
@@ -1129,7 +1130,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             </span>
           )}
           <span className="bg-bg-primary/80 border border-bg-border/45 text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
-            {pct}%
+            <RollingNumber value={pct} decimals={Number.isInteger(pct) ? 0 : 1} suffix="%" countUp={false} />
           </span>
         </div>
       </div>
@@ -5828,11 +5829,13 @@ export function ScenesView() {
           <div className="flex min-w-[220px] flex-1 items-center gap-4">
             <div className="scene-top-progress-track flex-1">
               <div
-                className="scene-top-progress-fill transition-all duration-700 ease-out"
+                className="scene-top-progress-fill bf-progress-bar"
                 style={{ width: `${overallPct}%`, background: progressGradient(overallPct) }}
               />
             </div>
-            <span className="text-base font-bold text-accent">{overallPct}%</span>
+            <span className="text-base font-bold text-accent">
+              <RollingNumber value={overallPct} suffix="%" />
+            </span>
           </div>
           {/* 씬 추가 버튼 (개별 모드) */}
           {selectedDepartment !== 'all' && currentPart && (

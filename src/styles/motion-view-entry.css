@@ -1,1 +1,226 @@
 /* 이 갈래 전용 움직임 CSS — motion-view-entry (공통 토큰은 src/index.css :root 의 --motion-*·--ease-*, JS 는 src/utils/motion.ts) */
+
+/* ─── 10. 진행률 숫자 굴림 (rolling-numbers) ───────────────────────
+   숫자와 짝지은 막대·원은 숫자 카운트업과 같은 박자로 움직인다.
+   --motion-roll 은 src/utils/progressMotion.ts 의 ROLL_MS 와 같은 값(tests/motion/dash-entry-rolling-numbers.test.ts 가 묶는다).
+   !important 를 쓰지 않아 '동작 줄이기' 전역 규칙(전환 0.01ms)이 그대로 이긴다. */
+:root {
+  --motion-roll: 500ms;
+}
+
+/* 숫자 폭 고정 — 굴러가거나 세어 올라가는 동안 옆 글자가 흔들리지 않게 */
+.bf-roll {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 굴러가는 동안에만 생기는 자리 칸. 보이지 않는 숫자(ghost)가 폭·높이·기준선을 잡고,
+   그 위에 0~9 띠를 겹쳐 transform 으로만 움직인다.
+   overflow: clip — hidden 과 달리 스크롤 상자가 아니라 기준선이 그대로이고, clip-path 와 달리 40칸짜리 띠가
+   위젯 내용 칸의 스크롤 높이에 잡히지 않는다(굴러가는 동안 스크롤바가 생기지 않게). */
+.bf-roll-col {
+  position: relative;
+  display: inline-block;
+  overflow: clip;
+}
+
+.bf-roll-ghost {
+  visibility: hidden;
+}
+
+.bf-roll-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: block;
+  white-space: pre;
+  text-align: center;
+}
+
+/* 숫자와 함께 움직이는 막대 — 폭만 전환(그라데이션 배경은 보간되지 않으니 넣지 않는다) */
+.bf-progress-bar {
+  transition: width var(--motion-roll) var(--ease-out);
+}
+
+/* 숫자와 함께 움직이는 원 호 */
+.bf-progress-arc {
+  transition:
+    stroke-dasharray var(--motion-roll) var(--ease-out),
+    stroke-dashoffset var(--motion-roll) var(--ease-out),
+    stroke var(--motion-roll) var(--ease-out);
+}
+
+/* 진행률 원 끝의 둥근 머리 — 호 길이와 같은 박자로 돌아 늘 띠 끝에 붙어 있다.
+   0%로 내려갈 때는 호가 다 줄어든 뒤에 숨는다(나타날 때는 바로). */
+.bf-progress-cap {
+  transform-box: view-box;
+  transition:
+    transform var(--motion-roll) var(--ease-out),
+    opacity 0s linear var(--motion-roll);
+}
+
+.bf-progress-cap[data-visible='true'] {
+  transition-delay: 0s, 0s;
+}
+
+/* ─── 13. 아침 첫 진입 (first-entry) ────────────────────────────
+   'Bflow.' 첫 화면·로그인 화면(LoginScreen 덮개)이 떠 있는 동안 대시보드를 뒤에서 미리 그려 두고,
+   클릭(또는 로그인 성공)하면 글자가 떠오르며 흐려지고(300ms) 150ms 뒤 덮개가 350ms 동안 걷힌다.
+   덮개가 걷히기 시작하는 순간(html[data-entry-curtain='lifting']) 위젯이 (y,x) 순서로 28ms 간격(최대 224ms)
+   또렷해지고(320ms) 막대·원이 0에서 차오른다(700ms) — 앱을 켠 뒤 첫 대시보드 1회만(html[data-dash-entry]).
+   덮개가 내려가 있는 동안(html[data-entry-curtain='down'])은 미리 그린 위젯의 등장·차오름을 멈춰 두어
+   가려진 채로 먼저 끝나지 않게 한다. 수치는 src/utils/firstEntryMotion.ts 와 같다
+   (tests/motion/dash-entry-first-entry.test.ts 가 묶는다). 움직임은 opacity·transform 만
+   (원 그리기만 작은 SVG 의 stroke-dasharray — 첫 진입 한 번). */
+
+/* 덮개 걷기 — 걷히는 동안 클릭은 아래 대시보드로 통과한다 */
+@keyframes bf-entry-curtain-out {
+  to { opacity: 0; }
+}
+.bf-entry-curtain-lift {
+  animation: bf-entry-curtain-out 350ms ease forwards;
+  pointer-events: none;
+}
+
+/* 'Bflow.' 글자·안내 문구·로그인 카드 — 클릭 즉시 위로 떠오르며 흐려진다(지연 없음, 나갈 때 곡선) */
+@keyframes bf-entry-text-out {
+  to { opacity: 0; transform: translateY(-30px); }
+}
+.bf-entry-text-exit {
+  animation: bf-entry-text-out 300ms var(--ease-in) forwards;
+  pointer-events: none;
+}
+
+/* 로딩 영상 → 첫 화면: 영상 화면이 다음 화면 위에서 0.2초 동안 걷히며 짧게 겹친다 */
+@keyframes bf-loading-splash-out {
+  to { opacity: 0; }
+}
+.bf-loading-splash-out {
+  animation: bf-loading-splash-out 200ms ease forwards;
+  pointer-events: none;
+}
+
+/* 클릭을 기다리는 동안 숨쉬는 빛 — 겹친 빛 층의 opacity·화살표 transform 만(합성 스레드).
+   대시보드를 뒤에서 미리 그리느라 메인 스레드가 바빠도 멈칫하지 않는다. */
+@keyframes bf-entry-breathe {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+@keyframes bf-entry-glow {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+@keyframes bf-entry-nudge {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(5px); }
+}
+.bf-entry-breathe {
+  animation: bf-entry-breathe 3s ease-in-out infinite;
+}
+.bf-entry-glow {
+  opacity: 0;
+  animation: bf-entry-glow 3s ease-in-out infinite;
+}
+.bf-entry-nudge {
+  display: inline-block;
+  animation: bf-entry-nudge 2s ease-in-out infinite;
+}
+
+/* 위젯 차례 — 위젯 칸(data-entry-rank 0~8)마다 출발 지연 */
+[data-entry-rank='1'] { --bf-entry-delay: 28ms; }
+[data-entry-rank='2'] { --bf-entry-delay: 56ms; }
+[data-entry-rank='3'] { --bf-entry-delay: 84ms; }
+[data-entry-rank='4'] { --bf-entry-delay: 112ms; }
+[data-entry-rank='5'] { --bf-entry-delay: 140ms; }
+[data-entry-rank='6'] { --bf-entry-delay: 168ms; }
+[data-entry-rank='7'] { --bf-entry-delay: 196ms; }
+[data-entry-rank='8'] { --bf-entry-delay: 224ms; }
+
+@keyframes bf-entry-widget-in {
+  from { opacity: 0; }
+}
+@keyframes bf-entry-rise {
+  from { transform: translateY(6px); }
+}
+/* 가로 막대: 막대 자신의 폭만큼 왼쪽에서 밀려 들어온다 — 트랙(overflow hidden)이 왼쪽을 가려 0에서 차오르는 것처럼 보이고,
+   둥근 끝이 찌그러지지 않는다 */
+@keyframes bf-entry-fill-x {
+  from { transform: translateX(-100%); }
+}
+/* 여러 칸이 이어 붙은 막대(부서별 비교 '통합')는 묶음째 왼쪽에서 늘어난다 */
+@keyframes bf-entry-fill-sx {
+  from { transform: scaleX(0); }
+}
+/* 세로 막대는 바닥에서 자란다 */
+@keyframes bf-entry-fill-y {
+  from { transform: scaleY(0); }
+}
+/* 원 호가 그려진다(시작점에서 길이 0부터). 두 번째 값(빈칸)이 늘 원 둘레보다 길어 무늬가 반복되지 않는다 */
+@keyframes bf-entry-ring-draw {
+  from { stroke-dasharray: 0 2000; }
+}
+/* 진행률 원 끝의 둥근 머리 — 호 끝을 따라 12시에서부터 돈다 */
+@keyframes bf-entry-ring-cap {
+  from { transform: rotate(0deg); }
+}
+
+/* 위젯 유리 셸은 opacity 만(셸에 흐림이 있어 움직이면 매 프레임 다시 흐린다), 안쪽 내용만 6px 올라온다.
+   [data-entry-rank] > :first-child = 위젯 셸(Widget 루트), 그 > :last-child = 위젯 내용 칸. */
+html[data-dash-entry] [data-entry-rank] > :first-child {
+  animation: bf-entry-widget-in 320ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
+}
+html[data-dash-entry] [data-entry-rank] > :first-child > :last-child {
+  animation: bf-entry-rise 320ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
+}
+html[data-dash-entry] [data-entry-rank] .bf-entry-fill-x {
+  animation: bf-entry-fill-x 700ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
+}
+html[data-dash-entry] [data-entry-rank] .bf-entry-fill-sx {
+  transform-origin: left center;
+  animation: bf-entry-fill-sx 700ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
+}
+html[data-dash-entry] [data-entry-rank] .bf-entry-fill-y {
+  transform-origin: center bottom;
+  animation: bf-entry-fill-y 700ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
+}
+html[data-dash-entry] [data-entry-rank] .bf-entry-ring {
+  animation: bf-entry-ring-draw 700ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
+}
+html[data-dash-entry] [data-entry-rank] .bf-entry-ring-cap {
+  animation: bf-entry-ring-cap 700ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
+}
+
+/* 덮개가 내려가 있는 동안은 멈춰 둔다 — 걷히기 시작하면 그 자리(0)에서 흐른다. 클래스 토글이 아니라 재생 상태만 바꾼다. */
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] > :first-child,
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] > :first-child > :last-child,
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] .bf-entry-fill-x,
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] .bf-entry-fill-sx,
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] .bf-entry-fill-y,
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] .bf-entry-ring,
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] .bf-entry-ring-cap {
+  animation-play-state: paused;
+}
+
+/* 덮개 아래에서 위젯 판 폭이 잡히는 순간 위젯이 옆으로 쓸려 자리 잡지 않게(덮개가 떠 있는 동안만).
+   widget-animations.css 는 대시보드가 나중에 불러오므로 순서로 못 이긴다 → 특이도를 올린다. */
+html[data-entry-curtain] .react-grid-layout .react-grid-item {
+  transition: none !important;
+}
+
+/* 동작 줄이기: 덮개는 바로 걷히고(전역 규칙이 길이를 0.01ms 로), 위젯·막대·원은 처음부터 제자리.
+   지연(animation-delay)은 전역 규칙이 지우지 않으므로 등장 연출을 통째로 끈다. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-dash-entry] [data-entry-rank] > :first-child,
+  html[data-dash-entry] [data-entry-rank] > :first-child > :last-child,
+  html[data-dash-entry] [data-entry-rank] .bf-entry-fill-x,
+  html[data-dash-entry] [data-entry-rank] .bf-entry-fill-sx,
+  html[data-dash-entry] [data-entry-rank] .bf-entry-fill-y,
+  html[data-dash-entry] [data-entry-rank] .bf-entry-ring,
+  html[data-dash-entry] [data-entry-rank] .bf-entry-ring-cap,
+  .bf-entry-breathe,
+  .bf-entry-glow,
+  .bf-entry-nudge {
+    animation: none;
+  }
+}
