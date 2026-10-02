@@ -8,21 +8,37 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { subscribeToActivityRealtime } from '@/services/supabaseService';
-// 뷰 lazy 로딩 — 초기 번들에서 제외
-const Dashboard = lazy(() => import('@/views/Dashboard').then(m => ({ default: m.Dashboard })));
-const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default: m.ScenesView })));
-const EpisodeView = lazy(() => import('@/views/EpisodeView').then(m => ({ default: m.EpisodeView })));
-const AssigneeView = lazy(() => import('@/views/AssigneeView').then(m => ({ default: m.AssigneeView })));
-const TeamView = lazy(() => import('@/views/TeamView').then(m => ({ default: m.TeamView })));
-const CalendarView = lazy(() => import('@/features/gantt/GanttView').then(m => ({ default: m.GanttView })));
-const ScheduleView = lazy(() => import('@/views/ScheduleView').then(m => ({ default: m.ScheduleView })));
-const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ default: m.VacationView })));
-const CompositingView = lazy(() => import('@/views/CompositingView')); // default export — 기존 리테이크 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
-const CompositingDashboardView = lazy(() => import('@/views/CompositingDashboardView')); // v1.30.0+ 새 현황 대시보드
-const RetakeHubView = lazy(() => import('@/views/RetakeHubView')); // 리테이크 허브 5단계 — 감독 세트 허브
-const CharacterBoardView = lazy(() => import('@/views/CharacterBoardView')); // 캐릭터 현황판
+import {
+  loadAssigneeView,
+  loadCharacterBoardView,
+  loadCompositingDashboardView,
+  loadCompositingView,
+  loadDashboardView,
+  loadEpisodeView,
+  loadGanttView,
+  loadRetakeHubView,
+  loadScenesView,
+  loadScheduleView,
+  loadSettingsView,
+  loadTeamView,
+  loadVacationView,
+} from '@/views/viewLoaders';
+import { DelayedViewSpinner, ViewReady } from '@/components/layout/ViewReveal';
+// 뷰 lazy 로딩 — 초기 번들에서 제외. 로드 함수는 사이드바 hover 미리 준비와 같이 쓴다(viewLoaders).
+const Dashboard = lazy(() => loadDashboardView().then(m => ({ default: m.Dashboard })));
+const ScenesView = lazy(() => loadScenesView().then(m => ({ default: m.ScenesView })));
+const EpisodeView = lazy(() => loadEpisodeView().then(m => ({ default: m.EpisodeView })));
+const AssigneeView = lazy(() => loadAssigneeView().then(m => ({ default: m.AssigneeView })));
+const TeamView = lazy(() => loadTeamView().then(m => ({ default: m.TeamView })));
+const CalendarView = lazy(() => loadGanttView().then(m => ({ default: m.GanttView })));
+const ScheduleView = lazy(() => loadScheduleView().then(m => ({ default: m.ScheduleView })));
+const VacationView = lazy(() => loadVacationView().then(m => ({ default: m.VacationView })));
+const CompositingView = lazy(loadCompositingView); // default export — 기존 리테이크 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
+const CompositingDashboardView = lazy(loadCompositingDashboardView); // v1.30.0+ 새 현황 대시보드
+const RetakeHubView = lazy(loadRetakeHubView); // 리테이크 허브 5단계 — 감독 세트 허브
+const CharacterBoardView = lazy(loadCharacterBoardView); // 캐릭터 현황판
 const PlaygroundView = lazy(() => import('@/views/PlaygroundView'));
-const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
+const SettingsView = lazy(() => loadSettingsView().then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
 const PasswordChangeModal = lazy(() => import('@/components/auth/PasswordChangeModal').then(m => ({ default: m.PasswordChangeModal })));
@@ -3141,13 +3157,14 @@ export default function App() {
           return <Dashboard />;
       }
     })();
+    // 움직임 폴리싱 12번: 화면 코드가 도착해 처음 그려지는 순간(ViewReady) 본문 덮개를 걷는다.
+    // ViewReady 를 화면보다 앞에 둔다 — 본문 스크롤을 먼저 맨 위로 돌려 두고, 화면이 자기 layout effect 에서
+    // 하는 스크롤(강조 항목으로 이동 등)은 그 뒤에 그대로 살린다.
+    // 로딩 동그라미는 250ms 를 넘길 때만 보인다(DelayedViewSpinner).
     return (
       <LazyErrorBoundary key={currentView} name={`View:${currentView}`}>
-        <Suspense fallback={
-          <div className="flex items-center justify-center h-full w-full">
-            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-          </div>
-        }>
+        <Suspense fallback={<DelayedViewSpinner />}>
+          <ViewReady view={safeCurrentView} />
           {view}
         </Suspense>
       </LazyErrorBoundary>

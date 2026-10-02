@@ -1,5 +1,5 @@
-import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
+import { useMemo, useCallback, useState, useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
+import { Responsive, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2, RotateCcw, PieChart, BarChart3, Users, LayoutGrid, GitCompareArrows, Calendar as CalendarIcon, CheckSquare, StickyNote, Presentation, Palmtree, Activity, MessageSquareWarning, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
@@ -41,12 +41,45 @@ import {
   normalizeDashboardStarNestBlurPx,
   normalizeDashboardStarNestOpacity,
 } from '@/utils/starNestSettings';
+import { animateEl } from '@/utils/motion';
+import {
+  DASHBOARD_CONTENT_KEYFRAMES,
+  DASHBOARD_CONTENT_SWAP_MS,
+  INITIAL_SWAP_GATE,
+  dashboardBoardIdentity,
+  stepSwapGate,
+  type SwapGate,
+} from '@/utils/viewTransitionMotion';
 
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import '@/styles/widget-animations.css';
 
-const ResponsiveGridLayout = WidthProvider(Responsive);
+const ResponsiveGridLayout = Responsive;
+
+/**
+ * 위젯 판 폭을 첫 페인트 전에 잰다 (움직임 폴리싱 12번).
+ * react-grid-layout 의 WidthProvider 는 1280px 로 먼저 그린 뒤 실제 폭을 다음 틱에 알려 줘서, 메뉴로 대시보드에
+ * 들어올 때마다 오른쪽 위젯일수록 0.35초 옆으로 쓸려 자리를 잡았다. measureBeforeMount 는 빈 판이 한 프레임
+ * 보인다. 그래서 빈 래퍼를 layout effect 에서 재고(setState → 페인트 전 동기 재렌더) 처음부터 제 폭으로 그린다.
+ */
+function useMeasuredWidth(ref: RefObject<HTMLElement>): number | null {
+  const [width, setWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.width;
+      if (typeof next !== 'number') return;
+      setWidth((prev) => (prev !== null && Math.abs(prev - next) < 0.5 ? prev : next));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
+}
 
 /* ── 대시보드 플렉서스 배경 (연결선 + 그라데이션 조명 + 마우스 반응) ── */
 interface DashPt { x: number; y: number; vx: number; vy: number; size: number; colorIdx: number; alpha: number }
@@ -860,6 +893,30 @@ export function Dashboard() {
 
   const currentLayout = layouts.lg ?? defaultLayout;
 
+  // ── 탭·에피소드 전환 (움직임 폴리싱 12번) ──
+  // 위젯 판은 같은 레이아웃끼리 바꿀 때 다시 만들지 않는다(배경↔액팅, 에피소드↔에피소드) — 펼침·스크롤 상태 유지.
+  // 판이 바뀌어도(통합↔부서, 전체↔에피소드) 빈 순간 없이 바로 갈아 끼운다. 판(유리 셸)에는 opacity 를 걸지 않고
+  // 안쪽 내용만 180ms 다시 드러낸다 — 셸에 opacity 를 걸면 흐림이 풀렸다 '툭' 돌아온다.
+  const boardRef = useRef<HTMLDivElement>(null);
+  const boardWidth = useMeasuredWidth(boardRef);
+  const boardIdentity = dashboardBoardIdentity(isEpMode, dashboardFilter);
+  const contentKey = `${isEpMode ? `ep-${episodeDashboardEp}` : 'main'}-${dashboardFilter}`;
+  const contentSwapRef = useRef<{ gate: SwapGate; animations: Animation[] }>({ gate: INITIAL_SWAP_GATE, animations: [] });
+  useLayoutEffect(() => {
+    const swap = contentSwapRef.current;
+    const step = stepSwapGate(swap.gate, contentKey, performance.now());
+    swap.gate = step.gate;
+    if (step.decision === 'none') return; // 처음 들어올 때는 화면 덮개·첫 진입 연출 몫
+    for (const animation of swap.animations) animation.cancel();
+    swap.animations = [];
+    // 300ms 안에 다시 바꾸면(연타) 다시 드러나는 연출 없이 바로 바꾼다.
+    if (step.decision !== 'animate') return;
+    boardRef.current?.querySelectorAll('[data-widget-body]').forEach((el) => {
+      const animation = animateEl(el, DASHBOARD_CONTENT_KEYFRAMES, { duration: DASHBOARD_CONTENT_SWAP_MS });
+      if (animation) swap.animations.push(animation);
+    });
+  }, [contentKey]);
+
   // 위젯 추가 목록: 모든 위젯 표시 (이미 배치된 건 체크 표시로 구분)
   const widgetPool = isEpMode ? EP_WIDGETS : ALL_WIDGETS;
   const visibleIds = useMemo(() => new Set(currentLayout.map((l) => l.i)), [currentLayout]);
@@ -957,7 +1014,8 @@ export function Dashboard() {
   }, [setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, dashboardFilter, isEpMode]);
 
   return (
-    <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
+    // scrollbar-gutter: 위젯이 그려져 스크롤바가 생겨도 판 폭이 그대로 — 그려진 직후 위젯이 옆으로 밀리지 않는다.
+    <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0 [scrollbar-gutter:stable]">
       {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) — 그라데이션은 App.tsx의 전역 GradientBackdrop이 담당 */}
       <DashboardBackgroundArt />
 
@@ -1220,16 +1278,11 @@ export function Dashboard() {
 
       {!visibleIds.has('my-retakes') && <MyRetakesReminder />}
 
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={`${isEpMode ? `ep-${episodeDashboardEp}` : 'main'}-${dashboardFilter}`}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15, ease: 'easeOut' }}
-          className="flex-1"
-        >
+      <div ref={boardRef} className="flex-1 min-w-0">
+        {boardWidth !== null && (
           <ResponsiveGridLayout
+            key={boardIdentity}
+            width={boardWidth}
             className="layout"
             layouts={layouts}
             breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
@@ -1363,8 +1416,8 @@ export function Dashboard() {
               );
             })}
           </ResponsiveGridLayout>
-        </motion.div>
-      </AnimatePresence>
+        )}
+      </div>
 
       {/* 차트 타입 우클릭 메뉴 */}
       <AnimatePresence>

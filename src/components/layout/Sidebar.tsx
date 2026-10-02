@@ -17,6 +17,7 @@ import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { VersionHoverTip, deriveHoverState } from './VersionHoverTip';
+import { prefetchView } from '@/views/viewLoaders';
 import * as gcalService from '@/services/googleCalendarService';
 
 const GCAL_AUTH_EVENT = 'bflow:gcal-auth-changed';
@@ -424,6 +425,10 @@ export function Sidebar() {
             }}
             // 설명 말풍선(title) 없음: 접힌 사이드바는 마우스를 올리는 순간 펼쳐져 같은 이름이 옆에 나타난다.
             // title 을 두면 펼쳐지는 이름 위에 같은 글자의 말풍선이 겹쳐 떴다(움직임 폴리싱 2번).
+            // 움직임 폴리싱 12번: 마우스를 올리는(포커스하는) 순간 그 화면 코드를 미리 받아 둔다 —
+            //   누를 때 로딩 동그라미 없이 바로 그린다. 올린 항목만(전부 미리 받으면 입력이 막힌다).
+            onMouseEnter={() => prefetchView(item.id)}
+            onFocus={() => prefetchView(item.id)}
             className={cn(
               'flex items-center cursor-pointer w-full h-10 rounded-lg',
               'bf-press',

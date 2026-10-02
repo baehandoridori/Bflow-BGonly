@@ -60,6 +60,8 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import type { PartContextMenuTarget } from '@/utils/partMemoHelpers';
 import { usePartMemos } from '@/hooks/usePartMemos';
 import { useUnifiedScenes } from '@/hooks/useUnifiedScenes';
+import { useGroupSwapMotion } from '@/hooks/useGroupSwapMotion';
+import { SCENE_GROUP_SWAP, compareSceneLocation, parseSceneGroupKey, sceneGroupKey } from '@/utils/viewTransitionMotion';
 import { resolveReferenceMergedScene } from '@/utils/sceneReference';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import type { HashTarget } from '@/utils/hashEntity';
@@ -3570,6 +3572,27 @@ export function ScenesView() {
     [mergedScenes, selectedAssignee],
   );
 
+  // 움직임 폴리싱 12번: 파트·에피소드를 바꾸면 카드 묶음(카드·시트) 한 덩어리가 방향에서 살짝 미끄러져 들어온다.
+  //   다음 파트·에피소드는 오른쪽에서, 이전은 왼쪽에서. 연타·씬 창이 열린 중·알림으로 씬 창을 바로 여는 중엔 바로 바꾼다.
+  const sceneGroupSwapRef = useRef<HTMLDivElement>(null);
+  const sceneDetailOpenRef = useRef(false);
+  sceneDetailOpenRef.current = detailSceneIndex !== null || Boolean(detailMerged);
+  useGroupSwapMotion(
+    sceneGroupSwapRef,
+    sceneGroupKey(currentEp?.episodeNumber, selectedDepartment === 'all' ? currentPartId : currentPart?.partId),
+    {
+      direction: (prev, next) => compareSceneLocation(parseSceneGroupKey(prev), parseSceneGroupKey(next)),
+      distancePx: SCENE_GROUP_SWAP.distancePx,
+      durationMs: SCENE_GROUP_SWAP.durationMs,
+      skip: () => {
+        const app = useAppStore.getState();
+        return sceneDetailOpenRef.current || Boolean(app.pendingDeepLink || app.pendingSceneModalRequest);
+      },
+      // 묶음 바로 바깥이 패딩 없는 스크롤 상자라, 오른쪽에서 들어오는 동안 가로 스크롤바가 번쩍이지 않게 잠깐 숨긴다.
+      overflowGuard: () => sceneGroupSwapRef.current?.parentElement ?? null,
+    },
+  );
+
   // v1.18.0: 알림 패널에서 디스패치한 'bflow:open-scene-modal' → 모달 자동 오픈 + 탭/포커스.
   // sceneUuid/sceneName 기반으로 mergedScenes 또는 currentPart.scenes 에서 매칭.
   useEffect(() => {
@@ -5923,7 +5946,7 @@ export function ScenesView() {
           {showCompletionRestoreButton && (
             <CompletionRestoreButton onClick={() => setDismissedCompletionOverlayKey(null)} />
           )}
-          <div className="relative z-10 flex h-full min-h-0 flex-col">
+          <div ref={sceneGroupSwapRef} className="relative z-10 flex h-full min-h-0 flex-col">
             {mergedScenes.length === 0 ? (
               <div className="text-sm text-text-secondary/50 text-center py-8">표시할 씬이 없습니다</div>
             ) : sceneViewMode === 'sheet' ? (
@@ -6100,7 +6123,7 @@ export function ScenesView() {
         {showCompletionRestoreButton && (
           <CompletionRestoreButton onClick={() => setDismissedCompletionOverlayKey(null)} />
         )}
-        <div className="relative z-10 flex h-full min-h-0 flex-col">
+        <div ref={sceneGroupSwapRef} className="relative z-10 flex h-full min-h-0 flex-col">
           {scenes.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-text-secondary h-full gap-2">
               {bulkAddLoading || useDataStore.getState().isSyncing ? (

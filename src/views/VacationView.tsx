@@ -21,9 +21,21 @@ import {
   layoutVacationBars, vacationWeekRenderModel, VACATION_BAR_LAYOUT, type VacationEventBar,
 } from '@/utils/vacationCalendarLayout';
 import { createVacationGuardRetry } from '@/utils/vacationGuardRetry';
-import { useMotionPref } from '@/hooks/useMotionPref';
 import { useSwapIn } from '@/hooks/useContentSwap';
 import { dateCardPreset, swapInClassName } from '@/utils/contentSwap';
+import {
+  createMonthSlideVariants, MONTH_LAYER_STYLE, MONTH_STACK_STYLE, type MonthSlide,
+} from '@/components/calendar/monthSlideMotion';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { createRapidGate } from '@/utils/viewTransitionMotion';
+
+/* 달 넘김 — 캘린더 월 화면(CalendarGrid)과 같은 값: 나가는 달과 들어오는 달이 한 칸에 겹쳐 넘어간다.
+   transform 문자열이라 합성 스레드에서 돈다(움직임 폴리싱 12번). */
+const VACATION_MONTH_SLIDE_VARIANTS = createMonthSlideVariants(
+  24,
+  { duration: 0.32, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.2, ease: 'easeOut' } },
+  { duration: 0.22, ease: [0.4, 0, 1, 1], opacity: { duration: 0.16, ease: 'easeIn' } },
+);
 
 /* ───────────── date helpers ───────────── */
 
@@ -280,9 +292,14 @@ export function VacationView() {
   const { reduce } = useMotionPref();
   const dateSwapIn = useSwapIn(selectedDate);
   const [direction, setDirection] = useState(0);
+  // 달을 300ms 안에 연달아 넘기면 미끄러지지 않고 바로 바꾼다(캘린더 기간 넘김과 같은 규칙). 동작 줄이기는 위 reduce 를 같이 쓴다.
+  const [monthNavGate] = useState(createRapidGate);
+  const [rapidMonthNav, setRapidMonthNav] = useState(false);
+  const markMonthNavigation = () => setRapidMonthNav(monthNavGate.hit(performance.now()));
 
   const goToday = () => {
     const now = new Date();
+    markMonthNavigation();
     setDirection(0);
     setYear(now.getFullYear());
     setMonth(now.getMonth());
@@ -290,12 +307,14 @@ export function VacationView() {
   };
 
   const goPrev = () => {
+    markMonthNavigation();
     setDirection(-1);
     if (month === 0) { setYear((y) => y - 1); setMonth(11); }
     else setMonth((m) => m - 1);
   };
 
   const goNext = () => {
+    markMonthNavigation();
     setDirection(1);
     if (month === 11) { setYear((y) => y + 1); setMonth(0); }
     else setMonth((m) => m + 1);
@@ -417,9 +436,11 @@ export function VacationView() {
   const [weekRowHeight, setWeekRowHeight] = useState(0);
   const weekRowObserverRef = useRef<ResizeObserver | null>(null);
   const measureWeekRow = useCallback((el: HTMLDivElement | null) => {
+    // 달 넘김 동안 나가는 달과 들어오는 달이 함께 있다. 나가는 달이 나중에 떨어질 때(null) 들어온 달의
+    // 관찰까지 끊지 않도록, 새 행이 붙을 때만 이전 관찰을 끊는다(화면을 떠날 때는 아래 effect 가 끊는다).
+    if (!el) return;
     weekRowObserverRef.current?.disconnect();
     weekRowObserverRef.current = null;
-    if (!el) return;
     // clientHeight: 테두리를 뺀 안쪽 높이 — absolute 막대의 top 기준과 같다
     const update = () => setWeekRowHeight(el.clientHeight);
     update();
@@ -631,34 +652,35 @@ export function VacationView() {
     }
   }, [vacStatus, setToast]);
 
+  const monthKey = `${year}-${month}`;
+  // (훅이라 미연동 조기 반환보다 앞에 둔다)
+  // 같은 달로 금방 되돌아와도(A→B→A) 나가는 중인 층을 다시 쓰지 않게 넘길 때마다 새 키(CalendarGrid 와 같은 이유).
+  const monthLayerKeyRef = useRef({ monthKey, seq: 0 });
+  if (monthLayerKeyRef.current.monthKey !== monthKey) {
+    monthLayerKeyRef.current = { monthKey, seq: monthLayerKeyRef.current.seq + 1 };
+  }
+  const monthLayerKey = `${monthKey}#${monthLayerKeyRef.current.seq}`;
+  const monthSlide: MonthSlide = { direction, instant: rapidMonthNav || reduce };
+
   // ── 미연동 상태 ──
   if (!vacationConnected) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-center h-full"
-      >
+      <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <Palmtree size={48} className="text-text-secondary/20 mx-auto mb-4" />
           <p className="text-text-secondary/60 text-sm">휴가 연동이 필요합니다</p>
           <p className="text-text-secondary/40 text-xs mt-1">설정 → 연동에서 휴가 API URL을 등록하세요</p>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
-  const monthKey = `${year}-${month}`;
   const hasTypeStats = vacStatus?.found && typeStats.total > 0;
   const hasMonthSummary = monthSummary.count > 0;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="h-full flex flex-col overflow-hidden"
-    >
+    // 화면 들어올 때의 드러남은 본문 덮개(MainLayout)가 맡는다 — 화면마다 따로 미끄러지지 않는다.
+    <div className="h-full flex flex-col overflow-hidden">
       {/* ════════ 동기화 로딩 바 ════════ */}
       {/* 훑는 움직임은 CSS(.bf-sync-sweep, motion-foundation.css) — 합성 스레드에서 돌고 동작 줄이기·'최소'면 멈춘다 */}
       {syncing && (
@@ -756,15 +778,18 @@ export function VacationView() {
             ))}
           </div>
 
-          {/* 캘린더 그리드 */}
-          <AnimatePresence mode="wait" initial={false}>
+          {/* 캘린더 그리드 — 나가는 달과 들어오는 달을 같은 격자 칸에 겹쳐 둔다(빈 화면 없이 넘김) */}
+          <div className="grid flex-1 min-h-0" style={MONTH_STACK_STYLE}>
+          <AnimatePresence initial={false} custom={monthSlide}>
             <motion.div
-              key={monthKey}
-              initial={{ opacity: 0, x: direction * 40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: direction * -40 }}
-              transition={{ duration: 0.2 }}
-              className="flex-1 grid grid-rows-6"
+              key={monthLayerKey}
+              custom={monthSlide}
+              variants={VACATION_MONTH_SLIDE_VARIANTS}
+              initial={monthSlide.instant ? false : 'enter'}
+              animate="center"
+              exit="exit"
+              className="grid grid-rows-6 min-h-0"
+              style={MONTH_LAYER_STYLE}
             >
               {Array.from({ length: 6 }).map((_, weekIdx) => {
                 const weekDays = calendarDays.slice(weekIdx * 7, weekIdx * 7 + 7);
@@ -871,6 +896,7 @@ export function VacationView() {
               })}
             </motion.div>
           </AnimatePresence>
+          </div>
         </div>
 
         {/* ──── 우측: 사이드 패널 (35%) ──── */}
@@ -1184,6 +1210,6 @@ export function VacationView() {
           />
         </>
       )}
-    </motion.div>
+    </div>
   );
 }

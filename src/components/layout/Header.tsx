@@ -46,7 +46,8 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
             <span className="hidden sm:inline">돌아가기</span>
           </button>
         )}
-        <h1 className="truncate text-lg font-semibold">{headerTitle}</h1>
+        {/* 화면이 바뀌면 제목만 120ms 페이드(key 로 다시 마운트될 때 한 번) — 움직임 폴리싱 12번 */}
+        <h1 className="truncate text-lg font-semibold"><span key={headerTitle} className="bf-view-title">{headerTitle}</span></h1>
       </div>
 
       {/* 오른쪽: 액션 버튼들 */}

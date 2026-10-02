@@ -7,6 +7,7 @@ import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Episode, Department, Stage } from '@/types';
 import { cn } from '@/utils/cn';
+import { cardCascadeStyle } from '@/utils/viewTransitionMotion';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 
 /* ────────────────────────────────────────────────
@@ -357,15 +358,11 @@ export function AssigneeView() {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            {/* 움직임 폴리싱 12번: 차례 등장은 20ms 간격·최대 200ms 지연(20명이어도 0.4초면 모두 도착) — 마운트 때 한 번 */}
             {assignees.map((data, i) => (
-              <motion.div
-                key={data.name}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: i * 0.03 }}
-              >
+              <div key={data.name} className="bf-card-cascade" style={cardCascadeStyle(i)}>
                 <AssigneeCard data={data} onClickScene={handleClickScene} />
-              </motion.div>
+              </div>
             ))}
           </div>
         )}
