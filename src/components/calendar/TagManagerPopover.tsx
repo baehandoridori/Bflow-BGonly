@@ -11,7 +11,7 @@ import { loadBflowEvents } from '@/services/calendarService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getTagCanonicalSnapshot, useCalendarStore } from '@/stores/useCalendarStore';
 import { EVENT_COLORS, type CalendarTag } from '@/types/calendar';
-import { floatingGlassStyle } from '@/utils/glassStyles';
+import { floatingSolidStyle } from '@/utils/glassStyles';
 import { popClassName, popOriginFromAnchor, popOriginStyle, type PopOrigin } from '@/utils/popupMotion';
 
 interface TagManagerPopoverProps {
@@ -677,7 +677,7 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
       aria-label="태그 관리 팝오버"
       className={`${popClassName(popOrigin)} fixed z-[1000] max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl border border-bg-border/70 p-3 text-text-primary`}
       style={{
-        ...floatingGlassStyle,
+        ...floatingSolidStyle, // 140ms 피어나는 동안 흐림을 다시 계산하지 않게 흐림 없는 짝(통합: 바탕 C + 8번)
         ...popOriginStyle(popOrigin),
         left: position.left,
         top: position.top,
