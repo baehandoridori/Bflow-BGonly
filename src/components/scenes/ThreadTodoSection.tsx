@@ -16,6 +16,7 @@ import {
 } from '@/shared/threadTodo';
 import type { AppUser } from '@/types';
 import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { SuccessCheckCircle } from '@/components/ui/SuccessCheckCircle';
 
 /**
  * 피드백 58: 댓글 패널 상단 고정 '팀 할 일' — 씬/캐릭터 스레드 단위 팀 공유 체크리스트.
@@ -255,18 +256,20 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
             {items.map((item) => {
               const busy = busyIds.has(item.id);
               return (
-                <li key={item.id} className={cn('group/todo flex items-start gap-2 rounded px-1 py-0.5 hover:bg-bg-primary/50', busy && 'opacity-60')}>
+                <li key={item.id} className={cn('group/todo flex items-start gap-2 rounded px-1 py-0.5 transition-opacity duration-150 hover:bg-bg-primary/50', busy && 'opacity-60')}>
                   <label className="flex min-w-0 flex-1 items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
+                    {/* 17번: 동그란 체크 — 켜면 원이 초록으로 차고 체크가 '톡'. 글자를 눌러도 label 이 이 체크를 누른다. */}
+                    <SuccessCheckCircle
                       checked={item.done_at != null}
                       disabled={busy}
-                      onChange={() => void toggleDone(item)}
-                      aria-label={`${item.text} 완료 표시`}
-                      className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent cursor-pointer"
+                      onToggle={() => void toggleDone(item)}
+                      label={`${item.text} 완료 표시`}
+                      size="sm"
+                      className="mt-px"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className={cn('block text-xs break-words', item.done_at ? 'line-through text-text-secondary/60' : 'text-text-primary')}>
+                      {/* 취소선은 늘 그어 두고 색만 투명↔글자색(0.22초) — 글자색도 함께 흐려져 부드럽게 그어진다. */}
+                      <span data-done={item.done_at != null} className="thread-todo-text block text-xs break-words">
                         {item.text}
                       </span>
                       <span className="block text-[10px] text-text-secondary/60">

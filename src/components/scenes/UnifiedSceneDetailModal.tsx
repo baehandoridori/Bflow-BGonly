@@ -1502,6 +1502,7 @@ function DeptSection({
             <ScenePhaseToggle
               scene={scene}
               iconDisplay="always"
+              roundBadgePlacement="above"
               onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next, scene.id ?? null, sceneIndex)}
               onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
               onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}

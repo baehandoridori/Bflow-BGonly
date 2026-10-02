@@ -195,9 +195,11 @@ test('씬 뷰와 씬 단위 토글이 같은 액팅 단계 역산을 쓴다', ()
 
 test('완료 도장은 병합 결과와 어긋나면 찍지 않는다', () => {
   const src = read('src/views/ScenesView.tsx');
-  assert.match(src, /const completionStillHolds = !completionMeta \|\| mergedFullyDone === willBeFullyDone;/);
-  assert.match(src, /if \(completionMeta && completionStillHolds\) \{/, '조건 없이 완료 메타를 쓰면 미완료 씬에 완료자가 남는다');
-  assert.match(src, /completedBy: prevCompletedBy, completedAt: prevCompletedAt/, '도장을 건너뛰면 화면도 되돌려야 한다');
+  // 움직임 폴리싱 20번: 저장 확인 전 같은 담당자를 또 누르면 앞 클릭의 완료 판정을 넘겨받는다(effectiveCompletion),
+  // 되돌릴 값은 맨 처음 값(baseScene)이다.
+  assert.match(src, /const completionStillHolds = !effectiveCompletion \|\| mergedFullyDone === willBeFullyDone;/);
+  assert.match(src, /if \(effectiveCompletion && completionStillHolds\) \{/, '조건 없이 완료 메타를 쓰면 미완료 씬에 완료자가 남는다');
+  assert.match(src, /completedBy: baseScene\.completedBy \?\? '', completedAt: baseScene\.completedAt \?\? ''/, '도장을 건너뛰면 화면도 되돌려야 한다');
 });
 
 test('에피소드 이름 저장 실패는 롤백하고 알린다', () => {

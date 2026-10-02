@@ -15,6 +15,7 @@ import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { Confetti } from '@/components/ui/Confetti';
 import { RollingNumber } from '@/components/ui/RollingNumber';
+import { SceneCompletionFx } from './SceneCompletionFx';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -325,6 +326,9 @@ export function UnifiedSceneCard({
         transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
       } : {})}
     >
+        {/* 17번: 완료 초록빛 번짐·카드 '톡'(동작 줄이기면 완료 칸 빛) — 카드 루트의 첫 자식이어야 한다. */}
+        <SceneCompletionFx celebrating={celebrating} tinted={completionTintEnabled && isMergedComplete} />
+
         {isHighlighted && <div className="scene-highlight-bg" />}
 
         {/* 실시간 편집 프레즌스 — 무지개 이름표(좌상단, 개별 BG/ACT 카드와 동일 위치). BG/ACT 유니온. */}
@@ -345,14 +349,17 @@ export function UnifiedSceneCard({
           resolved={openRevCount <= 0 && resolvedRevCount > 0}
         />
 
-        {isSelected && (
-          <div className={cn(
-            'absolute right-2.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30',
+        {/* 선택 체크마크 — 늘 그려 두고 data-on 으로 '톡' 튀어나오며 체크가 그려진다(움직임 폴리싱 6번). */}
+        <div
+          aria-hidden="true"
+          data-on={isSelected}
+          className={cn(
+            'scene-select-check absolute right-2.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30',
             openRevCount > 0 || resolvedRevCount > 0 ? 'top-9' : 'top-2.5',
-          )}>
-            <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </div>
-        )}
+          )}
+        >
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
 
         {/* ── 헤더: 씬 ID + 전체 진행률 배지 ── */}
         <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">

@@ -16,6 +16,7 @@ import {
   POSTGREST_PAGE_SIZE,
 } from '../src/shared/postgrestPaging';
 import { defaultEpisodeTitle } from '../src/shared/episodeTitle';
+import { withHttpStatusMark } from '../src/shared/saveFailureMark';
 import type {
   PersonalTodoLabelColorKey,
   PersonalTodoLabelRecord,
@@ -253,6 +254,14 @@ function makeSheetName(epNum: number, partId: string, dept: string): string {
 
 function throwIfError(error: { message: string } | null) {
   if (error) throw new Error(error.message);
+}
+
+/**
+ * throwIfError + HTTP 상태 표시(' [HTTP 503]'). IPC 래퍼가 오류를 문구로만 넘기므로, 단계 체크 저장의
+ * 자동 재전송(src/utils/saveRetry.ts)이 '다시 보내 볼 만한 실패(5xx)'를 가릴 수 있게 상태를 문구에 싣는다.
+ */
+function throwIfErrorWithStatus(error: { message: string } | null, status: number | null | undefined) {
+  if (error) throw new Error(withHttpStatusMark(error.message, status));
 }
 
 type SupabaseErrorLike = {
@@ -706,8 +715,8 @@ export async function updateSceneStage(
   // 0행이 돼 affected=false → 재체크·중복저장에 대한 오적립을 막는다(NULL 안전: is.false 또는 is.null).
   const base = supabase.from('scenes').update(update).eq('id', sceneUuid);
   const mutation = value === true ? base.or(`${stage}.is.false,${stage}.is.null`) : base;
-  const { data: rows, error } = await mutation.select('id, parts(department)');
-  throwIfError(error);
+  const { data: rows, error, status } = await mutation.select('id, parts(department)');
+  throwIfErrorWithStatus(error, status);
   const updatedRow = Array.isArray(rows) ? rows[0] : null;
   const affected = !!updatedRow;
   const partsField = (updatedRow as { parts?: unknown } | null)?.parts;
@@ -760,8 +769,8 @@ export async function updateScenePhase(
   };
   if (updatedBy) update.updated_by = updatedBy;
   // 실제 바뀐 행을 결과로 받아 existed 를 판정(pre-read 이후 삭제된 씬은 0행 update 로 잡힌다).
-  const { data: rows, error } = await supabase.from('scenes').update(update).eq('id', sceneUuid).select('id');
-  throwIfError(error);
+  const { data: rows, error, status } = await supabase.from('scenes').update(update).eq('id', sceneUuid).select('id');
+  throwIfErrorWithStatus(error, status);
   const existed = Array.isArray(rows) && rows.length > 0;
   broadcastScenePhaseUpdate(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
   // legacy stage 도 broadcast — 다른 view 가 즉시 반영하도록 4개 컬럼 각각
@@ -2854,26 +2863,26 @@ export async function readMetadata(
   type: string,
   key: string,
 ): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
-  const { data, error } = await supabase
+  const { data, error, status } = await supabase
     .from('metadata')
     .select('type, key, value, updated_at')
     .eq('type', type)
     .eq('key', key)
     .maybeSingle();
-  throwIfError(error);
+  throwIfErrorWithStatus(error, status);
   if (!data) return null;
   return { type: data.type, key: data.key, value: data.value || '', updatedAt: data.updated_at || '' };
 }
 
 /** 메타데이터 쓰기 (upsert) */
 export async function writeMetadata(type: string, key: string, value: string): Promise<void> {
-  const { error } = await supabase
+  const { error, status } = await supabase
     .from('metadata')
     .upsert(
       { type, key, value, updated_at: new Date().toISOString() },
       { onConflict: 'type,key' },
     );
-  throwIfError(error);
+  throwIfErrorWithStatus(error, status);
   broadcastDataChange('metadata', 'UPSERT');
 }
 

@@ -151,7 +151,10 @@ test('섹션: IPC 직접 호출·변경 신호 구독·재로그인 재조회·�
   assert.match(section, /useEffect\(\(\) => \{ void load\(\); \}, \[load, currentUser\]\);/);
   assert.match(section, /cleanIpcErrorMessage\(/);
   assert.match(section, /const COLLAPSED_KEY = 'bflow_comment_todo_collapsed';/);
-  assert.match(section, /type="checkbox"/);
+  // 움직임 폴리싱 17번: 기본 네모 체크 상자 → 동그란 체크(role=checkbox 버튼, aria-checked·disabled 그대로).
+  assert.match(section, /import \{ SuccessCheckCircle \} from '@\/components\/ui\/SuccessCheckCircle';/);
+  assert.match(section, /<SuccessCheckCircle\s+checked=\{item\.done_at != null\}\s+disabled=\{busy\}\s+onToggle=\{\(\) => void toggleDone\(item\)\}\s+label=\{`\$\{item\.text\} 완료 표시`\}/);
+  assert.doesNotMatch(section, /type="checkbox"/);
   assert.match(section, /canDeleteThreadTodo\(item, currentUser\)/);
   // 신호 리스너 + 뮤테이션 finally 두 곳에서 "마지막 뮤테이션이 끝나면 다시 읽는다", load 자체도 뮤테이션 중엔 건너뛴다
   assert.equal((section.match(/if \(inFlightRef\.current === 0\) void load\(\);/g) ?? []).length, 2);
@@ -203,7 +206,8 @@ test('preload: 변경 신호 구독 해제는 같은 채널에서 같은 리스�
 test('섹션: 완료 방향·체크 표시·뮤테이션 마무리·조회 순번·안내 해제·입력 비우기/복구·폐기 판정·빈 입력·삭제 롤백·구독 해제·디바운스', () => {
   assert.match(section, /const done = item\.done_at == null;/);
   assert.match(section, /checked=\{item\.done_at != null\}/);
-  assert.match(section, /className=\{cn\('block text-xs break-words', item\.done_at \? 'line-through text-text-secondary\/60' : 'text-text-primary'\)\}/);
+  // 17번: 취소선은 늘 그어 두고 색만 투명↔글자색(완료 여부는 data-done) — .thread-todo-text 는 motion-scene-check.css.
+  assert.match(section, /<span data-done=\{item\.done_at != null\} className="thread-todo-text block text-xs break-words">/);
   assert.match(section, /\} finally \{\s*inFlightRef\.current -= 1;\s*if \(mountedRef\.current\) \{\s*setBusyIds\(\(prev\) => \{ const next = new Set\(prev\); next\.delete\(id\); return next; \}\);/);
   assert.match(section, /const seq = \+\+loadSeqRef\.current;/);
   assert.match(section, /if \(loadPendingRef\.current\) \{\s*loadSeqRef\.current \+= 1;\s*loadPendingRef\.current = false;\s*\}\s*inFlightRef\.current \+= 1;/);

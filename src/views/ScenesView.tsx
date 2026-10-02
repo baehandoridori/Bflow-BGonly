@@ -5,7 +5,7 @@ import { useDataStore, legacyStagesFor } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
-import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState, SceneAssigneeProgressMap, SceneWorkLink } from '@/types';
+import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState, SceneAssigneeProgress, SceneAssigneeProgressMap, SceneWorkLink } from '@/types';
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
 import { updateEpisodeReelPath, updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
 import { sceneProgress, isFullyDone, progressGradient } from '@/utils/calcStats';
@@ -23,8 +23,23 @@ import {
   deriveActingPhaseFromStages,
   getChangedSequentialStages,
   isSequentialStageComplete,
-  persistSequentialStagePatchWithRollback,
+  mergePendingStageWrites,
+  stagesRevertedToBaseline,
+  stagesStillMine,
+  withExpectedStages,
+  type PendingStageWrites,
 } from '@/utils/sceneStageProgression';
+import { sceneSaveRetry } from '@/services/sceneSaveRetry';
+import { useStageSaveStatusStore } from '@/stores/useStageSaveStatusStore';
+import {
+  assigneeCellId,
+  phaseCellId,
+  rollbackToastDescription,
+  rollbackToastTitle,
+  stageCellId,
+  type RollbackSubject,
+} from '@/components/scenes/stageSaveFeedback';
+import type { SaveFailureKind } from '@/utils/saveRetry';
 import { buildSingleSceneSelectionId } from '@/utils/sceneSelectionId';
 import { selectSceneCard } from '@/utils/sceneCardSelection';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -412,104 +427,6 @@ function ensureGlowCss() {
 /* ── 진행률 기반 그라데이션 (중간값 추가로 밴딩 방지) ── */
 // progressGradient → @/utils/calcStats 에서 import
 
-/*
- * 보케 RGB 팔레트 — rgba() 사용으로 밴딩 방지
- * UI/UX Pro Max: Dark OLED + Financial Dashboard 팔레트 기반
- * 성취감 → 초록(#22C55E) + 골드(#CA8A04) + 프로젝트 액센트(#6C5CE7)
- */
-const BOKEH_PALETTE = [
-  [0, 184, 148],   // emerald
-  [34, 197, 94],    // green-500 (CTA)
-  [108, 92, 231],   // accent (프로젝트)
-  [162, 155, 254],  // lavender
-  [202, 138, 4],    // gold (achievement)
-  [116, 185, 255],  // sky
-  [253, 203, 110],  // amber
-] as const;
-
-/* ── 보케 오브 (rgba 기반, 밴딩 없음) ── */
-function BokehOrbs({ count, minR, maxR, baseAlpha, drift, speed }: {
-  count: number; minR: number; maxR: number; baseAlpha: number; drift: number; speed: number;
-}) {
-  const orbs = useMemo(() =>
-    Array.from({ length: count }, (_, i) => {
-      const r = minR + Math.random() * (maxR - minR);
-      const [cr, cg, cb] = BOKEH_PALETTE[i % BOKEH_PALETTE.length];
-      return {
-        id: i, r, cr, cg, cb,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        dur: speed * (0.8 + Math.random() * 0.6),
-        delay: Math.random() * speed * 0.5,
-        path: Array.from({ length: 3 }, () => [(Math.random() - 0.5) * drift, (Math.random() - 0.5) * drift] as const),
-      };
-    }), [count, minR, maxR, baseAlpha, drift, speed]
-  );
-
-  return (
-    <>
-      {orbs.map((o) => (
-        <motion.div
-          key={o.id}
-          className="absolute rounded-full will-change-transform"
-          style={{
-            width: o.r, height: o.r,
-            left: `${o.x}%`, top: `${o.y}%`,
-            /* radial-gradient with rgba → 부드러운 8비트 이상 블렌딩 */
-            background: `radial-gradient(circle at 38% 38%,
-              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha}) 0%,
-              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha * 0.5}) 35%,
-              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha * 0.15}) 60%,
-              rgba(${o.cr},${o.cg},${o.cb},0) 80%)`,
-            filter: o.r > 30 ? `blur(${Math.round(o.r / 10)}px)` : 'none',
-          }}
-          animate={{
-            x: [0, o.path[0][0], o.path[1][0], o.path[2][0], 0],
-            y: [0, o.path[0][1], o.path[1][1], o.path[2][1], 0],
-            scale: [1, 1.08, 0.96, 1.04, 1],
-          }}
-          transition={{ duration: o.dur, delay: o.delay, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      ))}
-    </>
-  );
-}
-
-/* ── 오로라 메시 (conic-gradient → radial 다중 레이어로 밴딩 제거) ── */
-function AuroraMesh({ isLight }: { isLight?: boolean }) {
-  // 라이트 모드에서는 알파값을 높여 흰색 배경 위에서도 오로라가 보이게
-  const m = isLight ? 3 : 1;
-  return (
-    <>
-      {/* 부드러운 radial 워시 2개 — conic보다 밴딩 없음 */}
-      <motion.div
-        className="absolute will-change-transform"
-        style={{
-          width: '140%', height: '140%', left: '-20%', top: '-20%',
-          background: `radial-gradient(ellipse at 30% 40%,
-            rgba(0,184,148,${0.06 * m}) 0%, rgb(var(--color-accent) / ${0.04 * m}) 40%, transparent 70%),
-            radial-gradient(ellipse at 70% 60%,
-            rgba(202,138,4,${0.05 * m}) 0%, rgb(var(--color-accent-sub) / ${0.03 * m}) 40%, transparent 70%)`,
-        }}
-        animate={{ x: [0, 30, -20, 0], y: [0, -20, 15, 0] }}
-        transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
-      />
-      <motion.div
-        className="absolute will-change-transform"
-        style={{
-          width: '120%', height: '120%', left: '-10%', top: '-10%',
-          background: `radial-gradient(ellipse at 60% 30%,
-            rgba(34,197,94,${0.05 * m}) 0%, rgba(116,185,255,${0.03 * m}) 40%, transparent 65%),
-            radial-gradient(ellipse at 40% 70%,
-            rgba(253,203,110,${0.04 * m}) 0%, rgba(0,184,148,${0.03 * m}) 40%, transparent 65%)`,
-        }}
-        animate={{ x: [0, -25, 20, 0], y: [0, 20, -15, 0] }}
-        transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
-      />
-    </>
-  );
-}
-
 function buildSceneControlsCollapseKey(
   episodeNumber: number | null,
   partId: string | null,
@@ -530,353 +447,6 @@ function formatCompletedMeta(iso: string | undefined, completedBy: string | unde
   };
 }
 
-/* ── 파트 완료 오버레이 ── */
-function PartCompleteOverlay({ completedMeta, onDismiss, onUndoLastAction }: {
-  completedMeta?: ReturnType<typeof formatCompletedMeta>;
-  onDismiss: () => void;
-  onUndoLastAction?: () => void;
-}) {
-  const colorMode = useAppStore((s) => s.colorMode);
-  const isLight = colorMode === 'light';
-  const flowRibbons = useMemo(() => [
-    {
-      top: '14%',
-      left: '-14%',
-      width: '58%',
-      height: 120,
-      rotate: -12,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(144,234,191,0.16) 26%, rgba(107,154,255,0.14) 60%, rgba(255,255,255,0) 100%)'
-        : 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(74,222,128,0.12) 26%, rgba(108,92,231,0.16) 60%, rgba(255,255,255,0) 100%)',
-      blur: 'blur(30px)',
-      duration: 9.5,
-      x: [0, 80, -20, 0],
-      y: [0, 18, -8, 0],
-      rotateFrames: [-12, -6, -14, -12],
-    },
-    {
-      top: '56%',
-      left: '28%',
-      width: '48%',
-      height: 108,
-      rotate: 16,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(125,211,252,0.12) 24%, rgba(196,181,253,0.16) 54%, rgba(255,255,255,0) 100%)'
-        : 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(56,189,248,0.10) 24%, rgba(167,139,250,0.14) 54%, rgba(255,255,255,0) 100%)',
-      blur: 'blur(28px)',
-      duration: 11,
-      x: [0, -56, 26, 0],
-      y: [0, -14, 10, 0],
-      rotateFrames: [16, 10, 18, 16],
-    },
-    {
-      top: '72%',
-      left: '-6%',
-      width: '42%',
-      height: 92,
-      rotate: -6,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(253,224,71,0.12) 26%, rgba(34,197,94,0.10) 56%, rgba(255,255,255,0) 100%)'
-        : 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(250,204,21,0.10) 26%, rgba(34,197,94,0.10) 56%, rgba(255,255,255,0) 100%)',
-      blur: 'blur(26px)',
-      duration: 10.5,
-      x: [0, 62, -18, 0],
-      y: [0, -12, 8, 0],
-      rotateFrames: [-6, -2, -8, -6],
-    },
-  ], [isLight]);
-  const flowTraces = useMemo(() => [
-    {
-      top: '26%',
-      left: '6%',
-      width: '34%',
-      rotate: 7,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.72), rgba(110,231,183,0.58), rgba(255,255,255,0))'
-        : 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.18), rgba(110,231,183,0.30), rgba(255,255,255,0))',
-      shadow: isLight ? '0 0 22px rgba(110,231,183,0.22)' : '0 0 20px rgba(110,231,183,0.14)',
-      duration: 5.8,
-      delay: 0.1,
-    },
-    {
-      top: '46%',
-      right: '4%',
-      width: '26%',
-      rotate: -11,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0), rgba(196,181,253,0.54), rgba(255,255,255,0.68), rgba(255,255,255,0))'
-        : 'linear-gradient(90deg, rgba(255,255,255,0), rgba(167,139,250,0.22), rgba(255,255,255,0.16), rgba(255,255,255,0))',
-      shadow: isLight ? '0 0 18px rgba(196,181,253,0.18)' : '0 0 16px rgba(167,139,250,0.12)',
-      duration: 6.4,
-      delay: 0.9,
-    },
-    {
-      bottom: '16%',
-      left: '18%',
-      width: '30%',
-      rotate: 3,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.68), rgba(125,211,252,0.56), rgba(255,255,255,0))'
-        : 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.16), rgba(125,211,252,0.24), rgba(255,255,255,0))',
-      shadow: isLight ? '0 0 18px rgba(125,211,252,0.18)' : '0 0 16px rgba(125,211,252,0.10)',
-      duration: 5.2,
-      delay: 1.4,
-    },
-  ], [isLight]);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
-      className="fixed inset-0 z-[60] pointer-events-none overflow-hidden rounded-[28px]"
-    >
-      <div
-        className="absolute inset-0 rounded-[inherit]"
-        style={{
-          background: isLight
-            ? 'radial-gradient(circle at 50% 45%, rgba(255,255,255,0.44) 0%, rgba(255,255,255,0.16) 42%, rgba(255,255,255,0) 78%), linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 100%)'
-            : 'radial-gradient(circle at 50% 45%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 42%, rgba(255,255,255,0) 78%), linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
-          boxShadow: isLight
-            ? 'inset 0 0 0 1px rgba(255,255,255,0.42), inset 0 24px 60px rgba(255,255,255,0.18)'
-            : 'inset 0 0 0 1px rgba(255,255,255,0.08), inset 0 20px 60px rgba(255,255,255,0.03)',
-          WebkitMaskImage: 'radial-gradient(circle at center, black 32%, rgba(0,0,0,0.92) 68%, transparent 100%)',
-          maskImage: 'radial-gradient(circle at center, black 32%, rgba(0,0,0,0.92) 68%, transparent 100%)',
-        }}
-      />
-
-      <AuroraMesh isLight={isLight} />
-
-      <div
-        className="absolute inset-0 rounded-[inherit]"
-        style={{
-          background: isLight
-            ? 'radial-gradient(circle at 18% 26%, rgba(108,92,231,0.09) 0%, transparent 28%), radial-gradient(circle at 82% 24%, rgba(34,197,94,0.08) 0%, transparent 24%), radial-gradient(circle at 50% 78%, rgba(253,203,110,0.08) 0%, transparent 20%)'
-            : 'radial-gradient(circle at 18% 26%, rgba(108,92,231,0.06) 0%, transparent 28%), radial-gradient(circle at 82% 24%, rgba(34,197,94,0.05) 0%, transparent 24%), radial-gradient(circle at 50% 78%, rgba(253,203,110,0.05) 0%, transparent 20%)',
-          filter: 'blur(20px)',
-        }}
-      />
-
-      {flowRibbons.map((ribbon, index) => (
-        <motion.div
-          key={`flow-ribbon-${index}`}
-          className="absolute rounded-full"
-          style={{
-            top: ribbon.top,
-            left: ribbon.left,
-            width: ribbon.width,
-            height: ribbon.height,
-            background: ribbon.background,
-            filter: ribbon.blur,
-            transform: `rotate(${ribbon.rotate}deg)`,
-            opacity: isLight ? 0.92 : 0.76,
-          }}
-          animate={{
-            x: ribbon.x,
-            y: ribbon.y,
-            rotate: ribbon.rotateFrames,
-            opacity: isLight ? [0.36, 0.72, 0.42, 0.36] : [0.24, 0.52, 0.3, 0.24],
-          }}
-          transition={{
-            duration: ribbon.duration,
-            repeat: Infinity,
-            ease: 'easeInOut',
-            delay: index * 0.4,
-          }}
-        />
-      ))}
-
-      {flowTraces.map((trace, index) => (
-        <motion.div
-          key={`flow-trace-${index}`}
-          className="absolute h-px rounded-full"
-          style={{
-            top: 'top' in trace ? trace.top : undefined,
-            right: 'right' in trace ? trace.right : undefined,
-            bottom: 'bottom' in trace ? trace.bottom : undefined,
-            left: 'left' in trace ? trace.left : undefined,
-            width: trace.width,
-            background: trace.background,
-            boxShadow: trace.shadow,
-            transform: `rotate(${trace.rotate}deg)`,
-            opacity: isLight ? 0.9 : 0.72,
-          }}
-          animate={{
-            x: [0, 22, -10, 0],
-            scaleX: [0.94, 1.04, 0.98, 0.94],
-            opacity: isLight ? [0.22, 0.88, 0.34, 0.22] : [0.14, 0.5, 0.22, 0.14],
-          }}
-          transition={{
-            duration: trace.duration,
-            repeat: Infinity,
-            ease: 'easeInOut',
-            delay: trace.delay,
-          }}
-        />
-      ))}
-
-      <BokehOrbs count={4} minR={60} maxR={120} baseAlpha={isLight ? 0.18 : 0.1} drift={44} speed={11} />
-      <BokehOrbs count={6} minR={18} maxR={44} baseAlpha={isLight ? 0.26 : 0.14} drift={34} speed={8} />
-      <BokehOrbs count={10} minR={4} maxR={12} baseAlpha={isLight ? 0.4 : 0.22} drift={20} speed={6} />
-
-      <div
-        className="absolute inset-0 rounded-[inherit]"
-        style={{
-          background: isLight
-            ? 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.18) 46%, rgba(255,255,255,0.04) 100%)'
-            : 'linear-gradient(180deg, rgba(255,255,255,0.01) 0%, rgba(255,255,255,0.05) 46%, rgba(255,255,255,0.01) 100%)',
-          opacity: isLight ? 0.9 : 0.7,
-        }}
-      />
-
-      <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6">
-        <motion.div
-          initial={{ opacity: 0, y: 18, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-          className="pointer-events-auto relative w-full max-w-[560px] overflow-hidden rounded-[30px] border px-5 py-5 text-center sm:px-7 sm:py-6"
-          style={{
-            background: isLight
-              ? 'linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(244,255,251,0.86) 100%)'
-              : 'linear-gradient(180deg, rgba(22,28,38,0.88) 0%, rgba(15,20,29,0.82) 100%)',
-            borderColor: isLight ? 'rgba(167, 243, 208, 0.92)' : 'rgba(52, 211, 153, 0.26)',
-            boxShadow: isLight
-              ? '0 28px 96px rgba(16, 185, 129, 0.20), 0 10px 26px rgba(15, 23, 42, 0.08)'
-              : '0 30px 98px rgba(16, 185, 129, 0.18), 0 12px 30px rgba(0, 0, 0, 0.28)',
-            backdropFilter: 'blur(20px)',
-          }}
-        >
-          <button
-            type="button"
-            aria-label="완료 안내 숨기기"
-            title="완료 안내 숨기기"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDismiss();
-            }}
-            className={cn(
-              'absolute right-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border transition-all',
-              isLight
-                ? 'border-emerald-200 bg-white/80 text-emerald-800 hover:bg-white'
-                : 'border-emerald-300/20 bg-white/8 text-emerald-100 hover:bg-white/12',
-            )}
-          >
-            <X size={15} />
-          </button>
-          <motion.div
-            className="absolute inset-y-0 -left-1/3 w-1/3"
-            style={{
-              background: isLight
-                ? 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.52) 52%, rgba(255,255,255,0) 100%)'
-                : 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.14) 52%, rgba(255,255,255,0) 100%)',
-              filter: 'blur(10px)',
-            }}
-            animate={{ x: ['0%', '360%'] }}
-            transition={{ duration: 4.8, repeat: Infinity, ease: 'linear' }}
-          />
-          <div
-            className="absolute inset-0 rounded-[inherit]"
-            style={{
-              background: isLight
-                ? 'linear-gradient(135deg, rgba(110,231,183,0.18) 0%, rgba(108,92,231,0.08) 42%, rgba(255,255,255,0) 100%)'
-                : 'linear-gradient(135deg, rgba(74,222,128,0.14) 0%, rgba(108,92,231,0.12) 42%, rgba(255,255,255,0) 100%)',
-            }}
-          />
-          <div className="relative flex flex-col items-center gap-4">
-            <div
-              className="inline-flex items-center rounded-full px-4 py-1.5 text-[11px] font-semibold tracking-[0.24em]"
-              style={{
-                color: isLight ? '#047857' : '#86EFAC',
-                background: isLight ? 'rgba(16, 185, 129, 0.10)' : 'rgba(16, 185, 129, 0.12)',
-                border: `1px solid ${isLight ? 'rgba(16, 185, 129, 0.18)' : 'rgba(134, 239, 172, 0.18)'}`,
-              }}
-            >
-              COMPLETE
-            </div>
-            <div className="space-y-2">
-              <p
-                className="text-[32px] font-semibold tracking-[-0.03em] sm:text-[36px]"
-                style={{ color: isLight ? '#064E3B' : '#ECFDF5' }}
-              >
-                고생하셨습니다!
-              </p>
-              <p
-                className="text-base font-medium sm:text-lg"
-                style={{ color: isLight ? 'rgba(6, 95, 70, 0.88)' : 'rgba(236, 253, 245, 0.90)' }}
-              >
-                현재 보고계신 파트는 완료되었습니다.
-              </p>
-              <p
-                className="mx-auto max-w-[28rem] text-sm leading-6"
-                style={{ color: isLight ? 'rgba(6, 95, 70, 0.74)' : 'rgba(209, 250, 229, 0.72)' }}
-              >
-                고생 많으셨습니다! 다음 작업 이어서 하시기 전에, 잠깐 쉬셔요~ 띵호와
-              </p>
-            </div>
-            {completedMeta && (
-              <div
-                className={cn(
-                  'flex w-full flex-col gap-2 rounded-2xl border px-4 py-3 text-left sm:flex-row sm:items-center sm:justify-between',
-                  isLight
-                    ? 'border-emerald-200/80 bg-white/70'
-                    : 'border-emerald-300/15 bg-white/6',
-                )}
-                title={`${completedMeta.completedBy}님 · ${completedMeta.full}`}
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="shrink-0 text-[11px] font-medium tracking-[0.18em] text-text-secondary/70">마지막 완료</span>
-                  <span className="min-w-0 truncate text-sm font-semibold text-text-primary">{completedMeta.completedBy}님</span>
-                </div>
-                <div className="flex min-w-0 items-center gap-2 sm:justify-end">
-                  <span className="shrink-0 text-[11px] font-medium tracking-[0.18em] text-text-secondary/70">완료 시각</span>
-                  <span className="min-w-0 truncate text-sm font-medium text-text-primary/90">{completedMeta.full}</span>
-                </div>
-              </div>
-            )}
-            {onUndoLastAction && (
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onUndoLastAction();
-                }}
-                className={cn(
-                  'pointer-events-auto inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all',
-                  isLight
-                    ? 'border border-emerald-200 bg-white/80 text-emerald-800 hover:bg-white'
-                    : 'border border-emerald-300/20 bg-white/8 text-emerald-100 hover:bg-white/12',
-                )}
-              >
-                <RotateCcw size={14} />
-                마지막 체크 취소
-              </button>
-            )}
-          </div>
-        </motion.div>
-      </div>
-    </motion.div>
-  );
-}
-
-function CompletionRestoreButton({ onClick }: { onClick: () => void }) {
-  const colorMode = useAppStore((s) => s.colorMode);
-  const isLight = colorMode === 'light';
-  return (
-    <button
-      type="button"
-      aria-label="완료 안내 다시 보기"
-      onClick={onClick}
-      className={cn(
-        'fixed bottom-5 left-1/2 z-[61] -translate-x-1/2 rounded-full border px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5',
-        isLight
-          ? 'border-emerald-200 bg-white/90 text-emerald-800 shadow-emerald-900/10 hover:bg-white'
-          : 'border-emerald-300/25 bg-bg-card/85 text-emerald-100 shadow-black/30 hover:bg-bg-card',
-      )}
-    >
-      완료 안내 다시 보기
-    </button>
-  );
-}
 import {
   updateCell,
   updateCellByUuid,
@@ -916,6 +486,9 @@ import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
 import { editingBeamClassName } from '@/utils/editingPresence';
 import { Confetti } from '@/components/ui/Confetti';
 import { RollingNumber } from '@/components/ui/RollingNumber';
+import { SceneCompletionFx } from '@/components/scenes/SceneCompletionFx';
+import { PartCompleteOverlay, CompletionRestoreButton } from '@/components/scenes/PartCompleteOverlay';
+import { readSeenPartCompletionKeys, rememberSeenPartCompletionKey } from '@/components/scenes/celebrateMotion';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { PanelLeftOpen } from 'lucide-react';
@@ -1059,6 +632,9 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
       } : {})}
     >
+      {/* 17번: 완료 초록빛 번짐·카드 '톡'(동작 줄이기면 완료 칸 빛) — 카드 루트의 첫 자식이어야 한다. */}
+      <SceneCompletionFx celebrating={celebrating} tinted={completionTintEnabled && isComplete} />
+
       {/* 하이라이트 배경 오버레이 */}
       {isHighlighted && <div className="scene-highlight-bg" />}
 
@@ -1077,15 +653,17 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
       <RevisionCornerFlag count={revisionCount} />
 
-      {/* 선택 체크마크 */}
-      {isSelected && (
-        <div className={cn(
-          'absolute right-1.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30',
+      {/* 선택 체크마크 — 늘 그려 두고 data-on 으로 '톡' 튀어나오며 체크가 그려진다(움직임 폴리싱 6번). */}
+      <div
+        aria-hidden="true"
+        data-on={isSelected}
+        className={cn(
+          'scene-select-check absolute right-1.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30',
           revisionCount > 0 ? 'top-9' : 'top-1.5',
-        )}>
-          <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </div>
-      )}
+        )}
+      >
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      </div>
 
       {/* ── 상단: 씬 ID + 진행률 ── */}
       <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
@@ -1338,6 +916,83 @@ function findSceneLocationByUuid(sceneUuid: string): { sheetName: string; sceneI
     }
   }
   return null;
+}
+
+/* ─── 저장 실패 자동 재전송 (움직임 폴리싱 20번 safety-net — 한솔 결정 2026-10-03) ───
+   단계 체크가 저장에 실패하면 바로 되돌리지 않고 켜 둔 채 자동으로 다시 보낸다(규칙: src/utils/saveRetry.ts).
+   같은 칸 묶음을 다시 누르면 새 저장이 앞 저장의 칸까지 마지막 값으로 보내고, 되돌릴 값은 맨 처음 값을 지킨다(carry).
+   끝내 실패하거나 다시 보내도 소용없는 실패면 그때 되돌리고, 칸이 도리도리 + 빨간 테두리, 버튼 없는 안내 토스트. */
+
+type CompletionStamp = { completedBy: string; completedAt: string };
+
+/** 씬 단위 LO/완료/검수/PNG 칸 묶음(handleToggleForSheet). */
+interface StageSaveSlotCarry {
+  writes: PendingStageWrites;
+  /** 첫 저장 전 완료 기록·액팅 단계·담당자별 진행 — 끝내 실패하면 여기로 되돌린다. */
+  baseCompletion: CompletionStamp;
+  basePhase: { sceneState: ScenePhaseState; workRound: number; feedbackRound: number } | null;
+  baseAssigneeProgress: Scene['assigneeProgress'];
+  /** 마지막으로 정한 완료 기록(묶음 안에서 한 번이라도 바뀌었으면). */
+  completion: CompletionStamp | null;
+  assigneeTouched: boolean;
+}
+
+/** 액팅 단계 칩 묶음(handleActPhaseStateClick). */
+interface PhaseSaveSlotCarry {
+  base: Pick<Scene, 'sceneState' | 'workRound' | 'feedbackRound' | Stage | 'completedBy' | 'completedAt' | 'assigneeProgress'>;
+  completion: CompletionStamp | null;
+}
+
+/** 담당자 한 명의 버튼 묶음(persistAssigneeProgress). */
+interface AssigneeSaveSlotCarry {
+  prevScene: Scene;
+  completion: { nextCompletedBy: string; nextCompletedAt: string } | null;
+  cells: string[];
+}
+
+/** 담당자 한 명의 진행 값이 같은가(저장 시각·저장한 사람은 빼고). */
+function sameAssigneeProgress(a: SceneAssigneeProgress, b: SceneAssigneeProgress): boolean {
+  return (['lo', 'done', 'review', 'png', 'sceneState', 'workRound', 'feedbackRound'] as const)
+    .every((key) => (a[key] ?? null) === (b[key] ?? null));
+}
+
+function findSceneForSave(sheetName: string, sceneId: string, sceneUuid: string | null | undefined): Scene | undefined {
+  const state = useDataStore.getState();
+  if (sceneUuid) return state.findSceneByUuid(sceneUuid);
+  return state.findSceneInSheet(sheetName, sceneId);
+}
+
+/** 되돌리는 씬의 축하가 아직 진행 중이면 끈다. */
+function celebrationWithout(
+  current: CompletionCelebrationTarget,
+  sheetName: string,
+  sceneId: string,
+  sceneUuid: string | null | undefined,
+): CompletionCelebrationTarget {
+  if (!current) return current;
+  const same = sceneUuid && current.sceneUuid
+    ? current.sceneUuid === sceneUuid
+    : current.sheetName === sheetName && current.sceneId === sceneId;
+  return same ? null : current;
+}
+
+/** 되돌린 칸 표시(도리도리·빨간 테두리) + 버튼 없는 안내 토스트. */
+function announceStageRollback(options: {
+  sceneUuid: string | null | undefined;
+  cells: readonly string[];
+  toastId: string;
+  sceneId: string;
+  subject: RollbackSubject;
+  assigneeName?: string;
+  kind: SaveFailureKind;
+}) {
+  if (options.sceneUuid && options.cells.length > 0) {
+    useStageSaveStatusStore.getState().flashRollback(options.sceneUuid, options.cells);
+  }
+  sonnerToast.error(rollbackToastTitle(options.sceneId, options.subject, options.assigneeName), {
+    id: options.toastId,
+    description: rollbackToastDescription(options.kind),
+  });
 }
 
 function matchesSceneCelebration(
@@ -2355,13 +2010,12 @@ export function ScenesView() {
 
       // 새 round 값을 store와 동일한 규칙으로 다시 계산해 Supabase 동기화
       // 코덱스 2차 P2 fix: 99 상한 클램프 (store 전이 규칙과 일치)
-      try {
-        await updateScenePhaseInSupabase(sceneUuid, newState, workRound, feedbackRound, currentUser?.id);
-      } catch (err) {
-        console.error('[ScenesView] 단계 변경 실패:', err);
-        sonnerToast.error('단계 변경 저장에 실패했습니다.');
-        // 명시적 롤백 — sceneState/round 셋 + legacy 4개 모두 복원
-        updateSceneByUuid(sceneUuid, {
+      // 20번 safety-net: 실패해도 바로 되돌리지 않고 자동으로 다시 보낸다. 칩을 또 누르면 마지막 값만 보내고,
+      // 되돌릴 값은 저장 확인 전 맨 처음 값을 지킨다(carry).
+      const saveSlotKey = `${sceneUuid}|phase`;
+      const carried = sceneSaveRetry.pendingCarry<PhaseSaveSlotCarry>(saveSlotKey);
+      const saveCarry: PhaseSaveSlotCarry = {
+        base: carried?.base ?? {
           sceneState: prevState,
           workRound: prevWork,
           feedbackRound: prevFb,
@@ -2369,9 +2023,55 @@ export function ScenesView() {
           completedBy: prevCompletedBy,
           completedAt: prevCompletedAt,
           assigneeProgress: prevAssigneeProgress,
+        },
+        completion: completionMeta
+          ? { completedBy: completionMeta.nextCompletedBy, completedAt: completionMeta.nextCompletedAt }
+          : carried?.completion ?? null,
+      };
+      const phaseCell = phaseCellId(newState);
+      const saveStatus = useStageSaveStatusStore.getState();
+      const announcePhaseLoss = (kind: SaveFailureKind) => {
+        setCelebratingTarget((current) => celebrationWithout(current, sheetName, sceneId, sceneUuid));
+        announceStageRollback({
+          sceneUuid,
+          cells: [phaseCell],
+          toastId: `stage-rollback:${saveSlotKey}`,
+          sceneId,
+          subject: { kind: 'phase', label: SCENE_PHASE_LABELS_SHORT[newState] },
+          kind,
         });
-        return;
-      }
+      };
+      const phaseStillMine = () => {
+        const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
+        return Boolean(latest)
+          && (latest?.sceneState ?? 'wait') === newState
+          && (latest?.workRound ?? 0) === workRound
+          && (latest?.feedbackRound ?? 0) === feedbackRound;
+      };
+      const outcome = await sceneSaveRetry.run<PhaseSaveSlotCarry>(saveSlotKey, {
+        carry: saveCarry,
+        attempt: () => updateScenePhaseInSupabase(sceneUuid, newState, workRound, feedbackRound, currentUser?.id),
+        stillMine: phaseStillMine,
+        onRetrying: () => saveStatus.setRetrying(sceneUuid, 'phase', [phaseCell]),
+        onSaved: () => saveStatus.clearRetrying(sceneUuid, 'phase'),
+        // 다시 보내기 전에 화면 단계가 처음 값으로 돌아가 있으면(주기 동기화가 옛 서버 값을 읽어 옴 등)
+        // 덮지 않고 멈추되, 내 변경이 저장되지 않았음을 되돌림처럼 알린다.
+        onOvertaken: () => {
+          saveStatus.clearRetrying(sceneUuid, 'phase');
+          const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
+          if (latest && (latest.sceneState ?? 'wait') === (saveCarry.base.sceneState ?? 'wait')) announcePhaseLoss('transient');
+        },
+        onGiveUp: (err, kind) => {
+          console.error('[ScenesView] 단계 변경 실패:', err);
+          saveStatus.clearRetrying(sceneUuid, 'phase');
+          // 그 사이 다른 사람이 바꿨으면 그 값을 두고 되돌리지 않는다.
+          if (!phaseStillMine()) return;
+          // 명시적 롤백 — sceneState/round 셋 + legacy 4개 + 완료 기록 + 담당자별 진행 모두 복원
+          updateSceneByUuid(sceneUuid, saveCarry.base);
+          announcePhaseLoss(kind);
+        },
+      });
+      if (outcome !== 'saved') return;
 
       if (nextProgress) {
         try {
@@ -2384,17 +2084,13 @@ export function ScenesView() {
         }
       }
 
-      if (completionMeta) {
+      if (saveCarry.completion) {
+        const { completedBy, completedAt } = saveCarry.completion;
         try {
           await updateSceneCompletionMeta(
             sheetName,
             sceneIndex,
-            completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
-              ? {
-                  completedBy: completionMeta.nextCompletedBy,
-                  completedAt: completionMeta.nextCompletedAt,
-                }
-              : null,
+            completedBy && completedAt ? { completedBy, completedAt } : null,
           );
         } catch (metaErr) {
           console.error('[완료 메타 저장 실패]', metaErr);
@@ -2534,13 +2230,58 @@ export function ScenesView() {
         patch.completedAt = completionMeta.nextCompletedAt;
       }
 
+      // 20번 safety-net: 같은 담당자의 버튼을 저장 확인 전에 또 누르면, 새 저장이 마지막 값을 보내고
+      // (앞 저장의 재전송은 취소) 되돌릴 값은 맨 처음 값을 지킨다(carry).
+      const saveSlotKey = `${sceneUuid}|a:${assigneeName}`;
+      const carried = sceneSaveRetry.pendingCarry<AssigneeSaveSlotCarry>(saveSlotKey);
+      const baseScene = carried?.prevScene ?? prevScene;
+      const effectiveCompletion = completionMeta ?? carried?.completion ?? null;
+      const clickCell = assigneeCellId(
+        assigneeName,
+        update.kind === 'stage' ? update.stage : update.kind === 'phase' ? phaseCellId(update.state) : 'round',
+      );
+      // 칸(LO/완료/검수/PNG)은 따로따로 쌓이고, 단계·차수는 마지막 것 하나만.
+      const isStageCell = (cell: string) => !cell.includes(':phase:') && !cell.endsWith(':round');
+      const carriedCells = (carried?.cells ?? []).filter(isStageCell);
+      const saveCarry: AssigneeSaveSlotCarry = {
+        prevScene: baseScene,
+        completion: effectiveCompletion,
+        cells: carriedCells.includes(clickCell) ? carriedCells : [...carriedCells, clickCell],
+      };
+      const mine = nextProgress[assigneeName];
+      const assigneeStillMine = () => {
+        const current = useDataStore.getState().findSceneByUuid(sceneUuid)?.assigneeProgress?.[assigneeName];
+        return Boolean(current && mine && sameAssigneeProgress(current, mine));
+      };
+      const saveStatus = useStageSaveStatusStore.getState();
+      const statusSlot = `a:${assigneeName}`;
+      const announceAssigneeLoss = (kind: SaveFailureKind) => {
+        setCelebratingTarget((current) => celebrationWithout(current, sheetName, sceneId, sceneUuid));
+        const subject: RollbackSubject =
+          update.kind === 'stage'
+            ? { kind: 'check', label: DEPARTMENT_CONFIGS[department].stageLabels[update.stage] }
+            : update.kind === 'phase'
+              ? { kind: 'phase', label: SCENE_PHASE_LABELS_SHORT[update.state] }
+              : { kind: 'round' };
+        announceStageRollback({
+          sceneUuid,
+          cells: saveCarry.cells,
+          toastId: `stage-rollback:${saveSlotKey}`,
+          sceneId,
+          subject,
+          assigneeName,
+          kind,
+        });
+      };
+
       updateSceneByUuid(sceneUuid, patch);
       if (!wasFullyDone && willBeFullyDone) {
         setCelebratingTarget(buildCompletionTarget(sheetName, scene, sceneIndex));
       }
 
-      try {
-        await enqueueAssigneeProgressWrite(sceneUuid, async () => {
+      await sceneSaveRetry.run<AssigneeSaveSlotCarry>(saveSlotKey, {
+        carry: saveCarry,
+        attempt: () => enqueueAssigneeProgressWrite(sceneUuid, async () => {
           // 서버 정본 위에 내 항목만 얹어 저장하고, 그 결과로 화면을 다시 맞춘다.
           // 저장하는 동안 상대가 바꾼 값이 있으면 그것까지 함께 반영된다.
           const merged = await saveAssigneeProgress(sceneUuid, nextProgress, [assigneeName]);
@@ -2549,22 +2290,22 @@ export function ScenesView() {
           const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
           const mergedPatch = latest ? aggregateScenePatchFromAssignees(latest, merged, department) : null;
           const mergedFullyDone = latest && mergedPatch ? isFullyDone({ ...latest, ...mergedPatch }) : willBeFullyDone;
-          const completionStillHolds = !completionMeta || mergedFullyDone === willBeFullyDone;
+          const completionStillHolds = !effectiveCompletion || mergedFullyDone === willBeFullyDone;
           if (assigneeProgressMutationSeqRef.current.get(sceneUuid) === mutationSeq) {
             if (mergedPatch) updateSceneByUuid(sceneUuid, mergedPatch);
-            if (completionMeta && !completionStillHolds) {
-              updateSceneByUuid(sceneUuid, { completedBy: prevCompletedBy, completedAt: prevCompletedAt });
+            if (effectiveCompletion && !completionStillHolds) {
+              updateSceneByUuid(sceneUuid, { completedBy: baseScene.completedBy ?? '', completedAt: baseScene.completedAt ?? '' });
             }
           }
-          if (completionMeta && completionStillHolds) {
+          if (effectiveCompletion && completionStillHolds) {
             try {
               await updateSceneCompletionMeta(
                 sheetName,
                 sceneIndex,
-                completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
+                effectiveCompletion.nextCompletedBy && effectiveCompletion.nextCompletedAt
                   ? {
-                      completedBy: completionMeta.nextCompletedBy,
-                      completedAt: completionMeta.nextCompletedAt,
+                      completedBy: effectiveCompletion.nextCompletedBy,
+                      completedAt: effectiveCompletion.nextCompletedAt,
                     }
                   : null,
               );
@@ -2572,15 +2313,44 @@ export function ScenesView() {
               console.error('[담당자별 완료 메타 저장 실패]', metaErr);
             }
           }
-        });
-      } catch (err) {
-        console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
-        sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
-        if (assigneeProgressMutationSeqRef.current.get(sceneUuid) === mutationSeq) {
-          updateSceneByUuid(sceneUuid, prevScene);
-        }
-        return;
-      }
+        }),
+        stillMine: assigneeStillMine,
+        onRetrying: () => saveStatus.setRetrying(sceneUuid, statusSlot, saveCarry.cells),
+        onSaved: () => saveStatus.clearRetrying(sceneUuid, statusSlot),
+        // 다시 보내기 전에 이 담당자 값이 처음 값으로 돌아가 있으면(주기 동기화가 옛 서버 값을 읽어 옴 등)
+        // 덮지 않고 멈추되, 내 변경이 저장되지 않았음을 되돌림처럼 알린다.
+        onOvertaken: () => {
+          saveStatus.clearRetrying(sceneUuid, statusSlot);
+          const current = useDataStore.getState().findSceneByUuid(sceneUuid);
+          const currentEntry = current ? normalizeAssigneeProgressMap(current)[assigneeName] : undefined;
+          const baseEntry = normalizeAssigneeProgressMap(baseScene)[assigneeName];
+          if (currentEntry && baseEntry && sameAssigneeProgress(currentEntry, baseEntry)) announceAssigneeLoss('transient');
+        },
+        onGiveUp: (err, kind) => {
+          console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
+          saveStatus.clearRetrying(sceneUuid, statusSlot);
+          // 그 사이 다른 사람이 이 담당자 값을 바꿨으면 그 값을 두고 되돌리지 않는다.
+          if (!assigneeStillMine()) return;
+          const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
+          if (!latest) return;
+          // 이 담당자 몫만 맨 처음 값으로 — 그 사이 저장된 다른 담당자의 값은 그대로 둔다.
+          const restoredProgress = {
+            ...(latest.assigneeProgress ?? {}),
+            [assigneeName]: normalizeAssigneeProgressMap(baseScene)[assigneeName] ?? {},
+          };
+          const restorePatch = aggregateScenePatchFromAssignees(
+            { ...latest, workRound: baseScene.workRound, feedbackRound: baseScene.feedbackRound },
+            restoredProgress,
+            department,
+          );
+          if (effectiveCompletion) {
+            restorePatch.completedBy = baseScene.completedBy ?? '';
+            restorePatch.completedAt = baseScene.completedAt ?? '';
+          }
+          updateSceneByUuid(sceneUuid, restorePatch);
+          announceAssigneeLoss(kind);
+        },
+      });
     },
     [currentUser?.name, enqueueAssigneeProgressWrite, updateSceneByUuid, updateSceneCompletionMeta],
   );
@@ -3164,6 +2934,8 @@ export function ScenesView() {
   const [continuitySourceElement, setContinuitySourceElement] = useState<HTMLElement | null>(null);
   const [lastCompletionUndoAction, setLastCompletionUndoAction] = useState<CompletionUndoAction | null>(null);
   const [dismissedCompletionOverlayKey, setDismissedCompletionOverlayKey] = useState<string | null>(null);
+  // 17번: 한 번 닫은(본) 파트 완료 화면은 기억해 두었다가 다시 열 때 카드만 작게 띄운다(localStorage, 실패해도 이번 실행 안에서는 기억).
+  const [seenCompletionOverlayKeys, setSeenCompletionOverlayKeys] = useState<string[]>(readSeenPartCompletionKeys);
   const clearContinuitySource = useCallback(() => {
     setContinuitySourceElement(null);
   }, []);
@@ -3895,6 +3667,32 @@ export function ScenesView() {
     && completionOverlayKey
     && completionOverlayKey === dismissedCompletionOverlayKey,
   );
+  // '본 완료 화면' 기억용 키 — 위 키는 에피소드·파트를 직접 고르기 전(처음 들어왔을 때)과 후에 값이 달라지므로,
+  // 실제로 보고 있는 에피소드·파트(시트) + 마지막 완료 기록으로 만든다. 다시 들어와도 같은 완료면 같은 키다.
+  const completionSeenKey = useMemo(() => {
+    if (!isVisibleComplete) return null;
+    return [
+      currentEp?.episodeNumber ?? '__episode__',
+      selectedDepartment === 'all' ? (currentPartId ?? '__part__') : (currentPart?.sheetName ?? '__part__'),
+      selectedDepartment,
+      partCompletionState.completedMeta?.completedBy ?? '__unknown__',
+      partCompletionState.completedMeta?.completedAt ?? '__time__',
+    ].join(':');
+  }, [
+    isVisibleComplete,
+    currentEp?.episodeNumber,
+    currentPartId,
+    currentPart?.sheetName,
+    selectedDepartment,
+    partCompletionState.completedMeta?.completedBy,
+    partCompletionState.completedMeta?.completedAt,
+  ]);
+  const completionOverlayCompact = completionSeenKey != null && seenCompletionOverlayKeys.includes(completionSeenKey);
+  const dismissCompletionOverlay = useCallback(() => {
+    if (!completionOverlayKey) return;
+    setDismissedCompletionOverlayKey(completionOverlayKey);
+    if (completionSeenKey) setSeenCompletionOverlayKeys(rememberSeenPartCompletionKey(completionSeenKey));
+  }, [completionOverlayKey, completionSeenKey]);
   const canUndoLastCompletionAction = useMemo(() => {
     if (!lastCompletionUndoAction) return false;
     const undoTarget: CompletionCelebrationTarget = {
@@ -3948,6 +3746,12 @@ export function ScenesView() {
 
   // 토글 직렬화 큐: 빠른 연속 토글 시 race condition 방지
   const toggleQueueRef = useRef<Promise<void>>(Promise.resolve());
+  /** 큐 뒤에 붙여 차례로 보낸다. 실패는 호출자에게 돌려주되 큐는 끊기지 않는다(다시 보내기도 같은 큐로). */
+  const runInToggleQueue = (task: () => Promise<void>): Promise<void> => {
+    const run = toggleQueueRef.current.then(task);
+    toggleQueueRef.current = run.catch(() => undefined);
+    return run;
+  };
 
   // 공통 토글 로직 (sheetName 파라미터)
   const handleToggleForSheet = (
@@ -4063,28 +3867,75 @@ export function ScenesView() {
       updateSceneByUuid(scene.id, { assigneeProgress: nextAssigneeProgress });
     }
 
-    // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
-    toggleQueueRef.current = toggleQueueRef.current.then(async () => {
-      try {
-        await persistSequentialStagePatchWithRollback(changedStages, stagePatch, scene, async (changedStage, value) => {
-          if (scene.id) {
-            await updateCellByUuid(scene.id, changedStage, value, currentUser?.id);
-          } else {
-            await updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id);
-          }
-          window.electronAPI?.dataNotifyChange?.({
-            type: 'toggle',
-            sheetName,
-            sceneId,
-            field: changedStage,
-            value,
-          });
-        });
+    // 20번 safety-net: 저장이 실패해도 바로 되돌리지 않고 켜 둔 채 자동으로 다시 보낸다(src/utils/saveRetry.ts).
+    // 저장 확인 전인 앞 클릭이 있으면 그 칸까지 마지막 값으로 함께 보내고, 되돌릴 값은 맨 처음 값을 지킨다.
+    const sceneUuid = scene.id ?? null;
+    const saveSlotKey = `${sceneUuid ?? `${sheetName}::${sceneId}`}|stages`;
+    const carried = sceneSaveRetry.pendingCarry<StageSaveSlotCarry>(saveSlotKey);
+    const saveCarry: StageSaveSlotCarry = {
+      writes: mergePendingStageWrites(carried?.writes, scene, stagePatch, changedStages),
+      baseCompletion: carried?.baseCompletion ?? { completedBy: scene.completedBy ?? '', completedAt: scene.completedAt ?? '' },
+      basePhase: carried
+        ? carried.basePhase
+        : actingPhaseSync
+          ? { sceneState: scene.sceneState ?? 'wait', workRound: scene.workRound ?? 0, feedbackRound: scene.feedbackRound ?? 0 }
+          : null,
+      baseAssigneeProgress: carried ? carried.baseAssigneeProgress : prevAssigneeProgress,
+      completion: completionMeta
+        ? { completedBy: completionMeta.nextCompletedBy, completedAt: completionMeta.nextCompletedAt }
+        : carried?.completion ?? null,
+      assigneeTouched: Boolean(nextAssigneeProgress) || Boolean(carried?.assigneeTouched),
+    };
+    // '아직 내 값인가'는 클릭을 다 반영한 뒤 화면 값으로 본다(액팅 씬은 단계 상태가 체크를 다시 맞춘다).
+    const afterClick = findSceneForSave(sheetName, sceneId, sceneUuid);
+    if (afterClick) saveCarry.writes = withExpectedStages(saveCarry.writes, afterClick);
+    const writeStage = async (changedStage: Stage, value: boolean) => {
+      if (sceneUuid) {
+        await updateCellByUuid(sceneUuid, changedStage, value, currentUser?.id);
+      } else {
+        await updateCell(sheetName, sceneIndex, changedStage, value, currentUser?.id);
+      }
+      window.electronAPI?.dataNotifyChange?.({
+        type: 'toggle',
+        sheetName,
+        sceneId,
+        field: changedStage,
+        value,
+      });
+    };
+    const saveStatus = useStageSaveStatusStore.getState();
+    const showRetrying = () => {
+      if (sceneUuid) saveStatus.setRetrying(sceneUuid, 'stages', saveCarry.writes.stages.map((s) => stageCellId(s)));
+    };
+    const hideRetrying = () => {
+      if (sceneUuid) saveStatus.clearRetrying(sceneUuid, 'stages');
+    };
+    const announceStageLoss = (rolled: Stage[], kind: SaveFailureKind) => {
+      setCelebratingTarget((current) => celebrationWithout(current, sheetName, sceneId, sceneUuid));
+      const shownStage = rolled.includes(stage) ? stage : rolled[rolled.length - 1];
+      announceStageRollback({
+        sceneUuid,
+        cells: rolled.map((s) => stageCellId(s)),
+        toastId: `stage-rollback:${saveSlotKey}`,
+        sceneId,
+        subject: { kind: 'check', label: DEPARTMENT_CONFIGS[isActingScene ? 'acting' : 'bg'].stageLabels[shownStage] },
+        kind,
+      });
+    };
+
+    // API 호출을 큐에 넣어 순차 실행 (race condition 방지) — 다시 보낼 때도 같은 큐 뒤에 선다.
+    void sceneSaveRetry.run<StageSaveSlotCarry>(saveSlotKey, {
+      carry: saveCarry,
+      attempt: () => runInToggleQueue(async () => {
+        const { writes } = saveCarry;
+        for (const changedStage of writes.stages) {
+          await writeStage(changedStage, writes.desired[changedStage] === true);
+        }
         // 액팅 phase reverse dual-write — stage 저장 성공 후 새 컬럼도 동기화
-        if (actingPhaseSync && scene.id) {
+        if (actingPhaseSync && sceneUuid) {
           try {
             await updateScenePhaseInSupabase(
-              scene.id,
+              sceneUuid,
               actingPhaseSync.state,
               actingPhaseSync.workRound,
               actingPhaseSync.feedbackRound,
@@ -4094,52 +3945,76 @@ export function ScenesView() {
             console.warn('[액팅 phase 동기화 실패 — legacy stage 는 저장됨]', phaseErr);
           }
         }
-        if (scene.id && nextAssigneeProgress) {
+        if (sceneUuid && nextAssigneeProgress) {
           try {
-            await writeAssigneeProgressMetadata(scene.id, nextAssigneeProgress, Object.keys(nextAssigneeProgress));
+            await writeAssigneeProgressMetadata(sceneUuid, nextAssigneeProgress, Object.keys(nextAssigneeProgress));
           } catch (progressErr) {
             console.error('[ScenesView] 담당자별 진행 저장 실패:', progressErr);
             sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
-            updateSceneByUuid(scene.id, { assigneeProgress: prevAssigneeProgress });
+            updateSceneByUuid(sceneUuid, { assigneeProgress: prevAssigneeProgress });
             syncInBackground();
           }
         }
-      } catch (err) {
+        if (saveCarry.completion) {
+          const { completedBy, completedAt } = saveCarry.completion;
+          try {
+            await updateSceneCompletionMeta(
+              sheetName,
+              sceneIndex,
+              completedBy && completedAt ? { completedBy, completedAt } : null,
+            );
+          } catch (metaErr) {
+            console.error('[완료 메타 저장 실패]', metaErr);
+            syncInBackground();
+          }
+        }
+      }),
+      // 다시 보내기 직전: 화면 값이 바뀐 칸은 빼고(덮지 않음) 아직 내 값인 칸만 보낸다.
+      // 바뀐 칸이 처음 값으로 돌아가 있으면(주기 동기화가 아직 옛 서버 값을 읽어 왔거나 다른 사람이 되돌림)
+      // 내 체크가 저장되지 않은 것이니 되돌림처럼 알린다(값은 이미 화면에 있으니 건드리지 않는다).
+      stillMine: () => {
+        const latest = findSceneForSave(sheetName, sceneId, sceneUuid);
+        const { writes } = saveCarry;
+        const mine = latest ? stagesStillMine(writes, latest) : [];
+        if (mine.length !== writes.stages.length) {
+          const reverted = latest ? stagesRevertedToBaseline(writes, latest) : [];
+          saveCarry.writes = { ...writes, stages: mine };
+          if (mine.length > 0) showRetrying();
+          if (reverted.length > 0) announceStageLoss(reverted, 'transient');
+        }
+        return mine.length > 0;
+      },
+      onRetrying: showRetrying,
+      onSaved: hideRetrying,
+      onOvertaken: hideRetrying,
+      // 끝내 실패(또는 다시 보내도 소용없는 실패): 아직 내 값인 칸만 맨 처음 값으로 되돌린다.
+      onGiveUp: (err, kind) => {
         console.error('[토글 실패]', err);
-        changedStages.forEach((changedStage) => {
-          setSceneStageValue(sheetName, sceneId, changedStage, Boolean(scene[changedStage]));
+        hideRetrying();
+        const latest = findSceneForSave(sheetName, sceneId, sceneUuid);
+        const rolled = latest ? stagesStillMine(saveCarry.writes, latest) : [];
+        if (rolled.length === 0) return;
+        const { baseline } = saveCarry.writes;
+        if (sceneUuid) {
+          updateSceneByUuid(sceneUuid, {
+            ...Object.fromEntries(rolled.map((s) => [s, baseline[s] === true])),
+            ...(saveCarry.completion ? saveCarry.baseCompletion : {}),
+            ...(saveCarry.basePhase ?? {}),
+            ...(saveCarry.assigneeTouched ? { assigneeProgress: saveCarry.baseAssigneeProgress } : {}),
+          });
+        } else {
+          rolled.forEach((s) => setSceneStageValue(sheetName, sceneId, s, baseline[s] === true));
+          if (saveCarry.completion) {
+            updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', saveCarry.baseCompletion.completedBy);
+            updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', saveCarry.baseCompletion.completedAt);
+          }
+        }
+        // 일부 칸만 저장됐을 수 있으니 서버도 처음 값으로 돌려 둔다(이것도 실패하면 다음 동기화가 맞춘다).
+        void runInToggleQueue(async () => {
+          await Promise.allSettled(rolled.map((s) => writeStage(s, baseline[s] === true)));
         });
-        if (completionMeta) {
-          updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.prevCompletedBy);
-          updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.prevCompletedAt);
-        }
-        // 액팅 phase 도 롤백
-        if (actingPhaseSync) {
-          setScenePhaseOptimistic(sheetName, sceneId, scene.sceneState ?? 'wait');
-        }
-        if (scene.id && nextAssigneeProgress) {
-          updateSceneByUuid(scene.id, { assigneeProgress: prevAssigneeProgress });
-        }
-        return;
-      }
-
-      if (completionMeta) {
-        try {
-          await updateSceneCompletionMeta(
-            sheetName,
-            sceneIndex,
-            completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
-              ? {
-                  completedBy: completionMeta.nextCompletedBy,
-                  completedAt: completionMeta.nextCompletedAt,
-                }
-              : null,
-          );
-        } catch (metaErr) {
-          console.error('[완료 메타 저장 실패]', metaErr);
-          syncInBackground();
-        }
-      }
+        announceStageLoss(rolled, kind);
+      },
     });
   };
 
@@ -5937,11 +5812,10 @@ export function ScenesView() {
           <AnimatePresence>
             {showCompletionOverlay && (
               <PartCompleteOverlay
+                key={completionSeenKey ?? 'part-complete'}
                 completedMeta={visibleCompletedMeta}
-                onDismiss={() => {
-                  if (!completionOverlayKey) return;
-                  setDismissedCompletionOverlayKey(completionOverlayKey);
-                }}
+                compact={completionOverlayCompact}
+                onDismiss={dismissCompletionOverlay}
                 onUndoLastAction={canUndoLastCompletionAction ? handleUndoLastCompletionAction : undefined}
               />
             )}
@@ -6114,11 +5988,10 @@ export function ScenesView() {
         <AnimatePresence>
           {showCompletionOverlay && (
             <PartCompleteOverlay
+              key={completionSeenKey ?? 'part-complete'}
               completedMeta={visibleCompletedMeta}
-              onDismiss={() => {
-                if (!completionOverlayKey) return;
-                setDismissedCompletionOverlayKey(completionOverlayKey);
-              }}
+              compact={completionOverlayCompact}
+              onDismiss={dismissCompletionOverlay}
               onUndoLastAction={canUndoLastCompletionAction ? handleUndoLastCompletionAction : undefined}
             />
           )}
