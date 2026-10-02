@@ -33,11 +33,12 @@ test('F26: 이름 title=이름 풀버전 + 툴팁 줄바꿈 + key 최적화 유�
   assert.doesNotMatch(globalTooltip, /whitespace-nowrap/);
   assert.match(globalTooltip, /\[overflow-wrap:anywhere\]/);
   assert.match(globalTooltip, /max-w-\[min\(480px,80vw\)\]/);
-  // 가로 뷰포트 클램핑.
-  assert.match(globalTooltip, /left: tooltip\.x \+ shiftX/);
+  // 가로 뷰포트 클램핑 — 실측 크기(boxRef)로 가장자리 8px 안쪽에 놓는다(움직임 폴리싱 2번에서 placeFollowTooltip 으로 옮김).
+  assert.match(globalTooltip, /placeFollowTooltip\(/);
   assert.match(globalTooltip, /ref=\{boxRef\}/);
-  // 마우스 이동 중 re-mount 없이 style 만 갱신하는 key 최적화 유지(회귀 방지).
-  assert.match(globalTooltip, /key=\{tooltip\.text\}/);
+  // 마우스 이동 중 re-mount 없이 위치만 갱신(회귀 방지) — 상태를 바꾸지 않고 다음 프레임에 transform 만 고친다.
+  assert.match(globalTooltip, /frame\.current = requestAnimationFrame\(/);
+  assert.doesNotMatch(globalTooltip, /<AnimatePresence|key=\{tooltip/);
 });
 
 test('F27: 상세 모달 좌측 목록에 캐릭터 추가 + Escape 중첩 가드', () => {

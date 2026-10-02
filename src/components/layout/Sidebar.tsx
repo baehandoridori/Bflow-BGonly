@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Gamepad2, Settings, PanelLeft, ExternalLink } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
@@ -10,6 +11,8 @@ import { canAccessPlayground } from '@/features/playground/featureFlag';
 import { originFromActivation } from '@/features/playground/transition/dotWipeMath';
 import { usePlaygroundEntryStore } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
+import { CountBadge } from '@/components/ui/CountBadge';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
@@ -301,6 +304,47 @@ export function Sidebar() {
     };
   }, []);
 
+  // 누르자마자 선택 표시가 출발하게(움직임 폴리싱 7번): 표시는 이 사이드바 안 상태로 먼저 그리고(flushSync),
+  //   무거운 새 화면 그리기(setView)는 그 프레임이 화면에 나간 다음(rAF → setTimeout)으로 미룬다.
+  //   표시는 합성 스레드에서 미끄러지므로 새 화면을 그리는 동안에도 멈추지 않는다.
+  //   단축키·알림 링크처럼 클릭 없이 바뀐 화면은 currentView 를 그대로 따라간다(from 이 달라지면 무시).
+  const [pendingNav, setPendingNav] = useState<{ view: ViewMode; from: ViewMode } | null>(null);
+  const shownView = pendingNav && pendingNav.from === currentView ? pendingNav.view : currentView;
+  const navScheduleRef = useRef<{ frame: number | null; timers: ReturnType<typeof setTimeout>[] }>({ frame: null, timers: [] });
+  const cancelScheduledNav = useCallback(() => {
+    const schedule = navScheduleRef.current;
+    if (schedule.frame !== null) cancelAnimationFrame(schedule.frame);
+    schedule.timers.forEach((timer) => clearTimeout(timer));
+    schedule.frame = null;
+    schedule.timers = [];
+  }, []);
+  useEffect(() => cancelScheduledNav, [cancelScheduledNav]);
+  const goToView = useCallback((view: ViewMode) => {
+    cancelScheduledNav();
+    if (view === currentView) {
+      setPendingNav(null);
+      setView(view);
+      return;
+    }
+    flushSync(() => setPendingNav({ view, from: currentView }));
+    const schedule = navScheduleRef.current;
+    let applied = false;
+    const apply = () => {
+      if (applied) return;
+      applied = true;
+      cancelScheduledNav();
+      // 같은 작업 안의 두 갱신은 한 번에 그려진다 — 화면과 표시가 함께 확정된다.
+      setView(view);
+      setPendingNav(null);
+    };
+    schedule.frame = requestAnimationFrame(() => {
+      schedule.frame = null;
+      schedule.timers.push(setTimeout(apply, 0));
+    });
+    // 창이 가려져 rAF 가 멈춘 경우에도 화면은 바뀌어야 한다.
+    schedule.timers.push(setTimeout(apply, 120));
+  }, [cancelScheduledNav, currentView, setView]);
+
   const handleToggle = useCallback(async () => {
     toggleSidebarExpanded();
     const next = !sidebarExpanded;
@@ -351,12 +395,23 @@ export function Sidebar() {
           <LiquidGlassLogo onClick={() => setShowSplash(true)} />
         </div>
 
-        {/* 네비게이션 */}
+        {/* 네비게이션 — 선택 표시(보라 알약)는 하나만 두고 활성 메뉴로 세로로 미끄러진다(움직임 폴리싱 7번).
+            가로 자리는 CSS(left-2 right-2)라 사이드바 펼침(폭 350ms)과 겹쳐도 따로 놀지 않는다. */}
+        <SlidingIndicator
+          activeKey={shownView}
+          axis="y"
+          timing="rail"
+          deps={[navItems]}
+          className="left-2 right-2 rounded-lg bg-accent/20"
+        />
         {navItems.map((item) => {
           const navButton = (
           <button
+            data-slide-key={item.id}
             onClick={(event) => {
               if (item.id === 'playground') {
+                cancelScheduledNav();
+                setPendingNav(null);
                 requestPlaygroundEntry(originFromActivation(
                   event.clientX,
                   event.clientY,
@@ -364,15 +419,17 @@ export function Sidebar() {
                   event.currentTarget.getBoundingClientRect(),
                 ));
               } else {
-                setView(item.id);
+                goToView(item.id);
               }
             }}
-            title={isVisuallyExpanded ? undefined : item.label}
+            // 설명 말풍선(title) 없음: 접힌 사이드바는 마우스를 올리는 순간 펼쳐져 같은 이름이 옆에 나타난다.
+            // title 을 두면 펼쳐지는 이름 위에 같은 글자의 말풍선이 겹쳐 떴다(움직임 폴리싱 2번).
             className={cn(
               'flex items-center cursor-pointer w-full h-10 rounded-lg',
               'bf-press',
-              currentView === item.id
-                ? 'bg-accent/20 text-accent'
+              // 배경은 위의 미끄러지는 표시가 맡는다 — 여기서는 글자색만.
+              shownView === item.id
+                ? 'text-accent'
                 : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50 group-hover/nav:text-text-primary group-hover/nav:bg-bg-border/50',
             )}
           >
@@ -398,23 +455,22 @@ export function Sidebar() {
                   <span className="sr-only">{getCalendarAuthLabel(calendarAuthState)}</span>
                 </span>
               )}
-              {item.id === 'compositing-revisions' && totalOpenRevisions > 0 && (
-                <span
+              {/* 숫자 배지: 늘면 '톡', 0 이 되면 작게 줄며 사라진다(움직임 폴리싱 7번). */}
+              {item.id === 'compositing-revisions' && (
+                <CountBadge
+                  count={totalOpenRevisions}
                   className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1"
                   style={{ backgroundColor: '#FDCB6E', color: '#1A1D27' }}
                   title={`미해결 리테이크 ${totalOpenRevisions}개`}
-                >
-                  {totalOpenRevisions}
-                </span>
+                />
               )}
-              {item.id === 'compositing' && compositingErrorCount > 0 && (
-                <span
+              {item.id === 'compositing' && (
+                <CountBadge
+                  count={compositingErrorCount}
                   className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1"
                   style={{ backgroundColor: 'var(--status-error)', color: '#fff' }}
                   title={`오류 ${compositingErrorCount}개`}
-                >
-                  {compositingErrorCount}
-                </span>
+                />
               )}
             </span>
             <span

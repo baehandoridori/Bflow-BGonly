@@ -907,6 +907,8 @@ import {
 } from '@/utils/bulkOperations';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator, SlideToneLayers } from '@/components/ui/SlidingIndicator';
+import { SLIDE_LAYOUT_TRANSITION } from '@/utils/slidingIndicator';
 import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
 import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
 import { editingBeamClassName } from '@/utils/editingPresence';
@@ -2031,6 +2033,14 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
   'not-started': '미착수',
   'in-progress': '진행중',
   done: '완료',
+};
+
+/** 상태 필터 알약의 색 층(미끄러지는 표시 안에 겹쳐 두고 opacity 만 바꾼다). */
+const STATUS_FILTER_TONES: Record<StatusFilter, string> = {
+  all: 'bg-accent/20',
+  'not-started': 'bg-red-500/20',
+  'in-progress': 'bg-yellow-500/20',
+  done: 'bg-green-500/20',
 };
 
 const SORT_KEY_LABELS: Record<SortKey, string> = {
@@ -5443,7 +5453,7 @@ export function ScenesView() {
                         backgroundColor: accentColor,
                         boxShadow: `0 2px 8px ${accentColor}40`,
                       }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                      transition={SLIDE_LAYOUT_TRANSITION}
                     />
                   )}
                   <span className="relative z-10">전체</span>
@@ -5473,7 +5483,7 @@ export function ScenesView() {
                         backgroundColor: cfg.color,
                         boxShadow: `0 2px 8px ${cfg.color}40`,
                       }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                      transition={SLIDE_LAYOUT_TRANSITION}
                     />
                   )}
                   <span className="relative z-10">{cfg.shortLabel}</span>
@@ -5637,7 +5647,7 @@ export function ScenesView() {
               transition={{ duration: 0.2, ease: 'easeOut' }}
               className="relative overflow-visible"
             >
-              <div className="flex flex-wrap items-center gap-3 bg-bg-primary/30 rounded-lg px-3 py-2">
+              <div className="relative flex flex-wrap items-center gap-3 bg-bg-primary/30 rounded-lg px-3 py-2">
                 <GlassDropdown
                   options={assigneeOptions}
                   value={selectedAssignee ?? '__all__'}
@@ -5651,17 +5661,22 @@ export function ScenesView() {
 
                 <div className="w-px h-7 bg-bg-border" />
 
+                {/* 상태 필터 — 색 알약 하나가 미끄러지고 색은 겹친 층이 바뀐다(움직임 폴리싱 7번). */}
+                <SlidingIndicator activeKey={statusFilter} axis="both">
+                  <SlideToneLayers active={statusFilter} tones={STATUS_FILTER_TONES} className="rounded-lg" />
+                </SlidingIndicator>
                 {(['all', 'not-started', 'in-progress', 'done'] as StatusFilter[]).map((f) => (
                   <button
                     key={f}
+                    data-slide-key={f}
                     onClick={() => setStatusFilter(f)}
                     className={cn(
-                      'compact-label-container inline-flex min-w-0 shrink items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                      'relative compact-label-container inline-flex min-w-0 shrink items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                       statusFilter === f
-                        ? f === 'done' ? 'bg-green-500/20 text-green-400'
-                          : f === 'not-started' ? 'bg-red-500/20 text-red-400'
-                          : f === 'in-progress' ? 'bg-yellow-500/20 text-yellow-400'
-                          : 'bg-accent/20 text-accent'
+                        ? f === 'done' ? 'text-green-400'
+                          : f === 'not-started' ? 'text-red-400'
+                          : f === 'in-progress' ? 'text-yellow-400'
+                          : 'text-accent'
                       : 'text-text-secondary hover:text-text-primary'
                     )}
                   >

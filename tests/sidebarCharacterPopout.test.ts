@@ -48,7 +48,9 @@ test('팝아웃 클릭은 현재 화면을 바꾸지 않는다 (setView 미호�
   assert.ok(popoutStart > -1, '팝아웃 버튼은 showBoardPopout 이 참일 때만 렌더해야 한다');
   const popout = block.slice(popoutStart);
   assert.doesNotMatch(popout, /setView\(/);
-  assert.match(block, /\} else \{\s*setView\(item\.id\);\s*\}/);
+  // 움직임 폴리싱 7번: 메뉴 클릭은 goToView 를 거친다 — 선택 표시를 먼저 출발시키고 setView 는 다음 프레임에 부른다.
+  assert.match(block, /\} else \{\s*goToView\(item\.id\);\s*\}/);
+  assert.match(sidebar, /const goToView = useCallback\(\(view: ViewMode\) => \{[\s\S]*?setView\(view\);[\s\S]*?\}, \[cancelScheduledNav, currentView, setView\]\);/);
 });
 
 test('기존 앵커 보존: 사이드바 상수·현황판 헤더의 새 창 버튼', () => {

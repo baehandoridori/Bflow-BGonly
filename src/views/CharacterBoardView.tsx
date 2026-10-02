@@ -16,6 +16,7 @@ import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator, SlideToneLayers } from '@/components/ui/SlidingIndicator';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
 import { CharacterImageContextMenu } from '@/components/characters/CharacterImageContextMenu';
 import { TagPill } from '@/components/characters/TagChips';
@@ -41,6 +42,13 @@ const CHARACTER_STATUS_FILTER_LABELS: Record<CharacterStatusFilterValue, string>
   'in-progress': '진행중',
   done: '완료',
 };
+/** 상태 필터 알약의 색 층(미끄러지는 표시 안에 겹쳐 두고 opacity 만 바꾼다). */
+const CHARACTER_STATUS_FILTER_TONES: Record<CharacterStatusFilterValue, string> = {
+  all: 'bg-accent/20',
+  'not-started': 'bg-red-500/20',
+  'in-progress': 'bg-yellow-500/20',
+  done: 'bg-green-500/20',
+};
 
 /** 보기 방식 토글 옵션 (피드백 40). */
 const VIEW_MODE_OPTIONS: { mode: CharacterBoardViewMode; label: string; Icon: typeof LayoutGrid }[] = [
@@ -49,12 +57,14 @@ const VIEW_MODE_OPTIONS: { mode: CharacterBoardViewMode; label: string; Icon: ty
   { mode: 'list', label: '리스트 보기', Icon: List },
 ];
 
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function TabButton({ slideKey, active, onClick, children }: { slideKey: string; active: boolean; onClick: () => void; children: React.ReactNode }) {
+  // 선택 배경은 부모의 미끄러지는 알약이 맡는다(움직임 폴리싱 7번) — 여기서는 글자색만.
   return (
     <button
       type="button"
+      data-slide-key={slideKey}
       onClick={onClick}
-      className={cn('px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer', active ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/40')}
+      className={cn('relative px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer', active ? 'text-accent' : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/40')}
     >
       {children}
     </button>
@@ -465,19 +475,21 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
               role="group"
               aria-label="보기 방식"
               title={heightCompareMode ? '키 비교 보기 중에는 카드 보기로 고정돼요' : undefined}
-              className={cn('flex items-center rounded-lg border border-bg-border p-0.5 shrink-0', heightCompareMode && 'opacity-45')}
+              className={cn('relative flex items-center rounded-lg border border-bg-border p-0.5 shrink-0', heightCompareMode && 'opacity-45')}
             >
+              <SlidingIndicator activeKey={heightCompareMode ? null : viewMode} axis="both" className="rounded-md bg-accent/20" />
               {VIEW_MODE_OPTIONS.map(({ mode, label, Icon }) => (
                 <button
                   key={mode}
+                  data-slide-key={mode}
                   type="button"
                   aria-label={label}
                   title={heightCompareMode ? undefined : label}
                   disabled={heightCompareMode}
                   onClick={() => changeViewMode(mode)}
                   className={cn(
-                    'flex h-7 w-7 items-center justify-center rounded-md transition-colors cursor-pointer disabled:cursor-default',
-                    viewMode === mode && !heightCompareMode ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                    'relative flex h-7 w-7 items-center justify-center rounded-md transition-colors cursor-pointer disabled:cursor-default',
+                    viewMode === mode && !heightCompareMode ? 'text-accent' : 'text-text-secondary hover:text-text-primary',
                   )}
                 >
                   <Icon size={14} />
@@ -517,7 +529,7 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
           </div>
         </div>
         {/* 작업자/상태 필터 (피드백 48) — 씬 카드 필터와 같은 구성 */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex flex-wrap items-center gap-3">
           <GlassDropdown
             options={assigneeOptions}
             value={assigneeFilter ?? '__all__'}
@@ -529,18 +541,23 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
             minWidth={130}
           />
           <div className="w-px h-7 bg-bg-border" />
+          {/* 상태 필터 — 색 알약 하나가 미끄러지고 색은 겹친 층이 바뀐다(움직임 폴리싱 7번). */}
+          <SlidingIndicator activeKey={statusFilter} axis="both">
+            <SlideToneLayers active={statusFilter} tones={CHARACTER_STATUS_FILTER_TONES} className="rounded-lg" />
+          </SlidingIndicator>
           {(['all', 'not-started', 'in-progress', 'done'] as CharacterStatusFilterValue[]).map((f) => (
             <button
               key={f}
+              data-slide-key={f}
               type="button"
               onClick={() => setStatusFilter(f)}
               className={cn(
-                'inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
+                'relative inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
                 statusFilter === f
-                  ? f === 'done' ? 'bg-green-500/20 text-green-400'
-                    : f === 'not-started' ? 'bg-red-500/20 text-red-400'
-                    : f === 'in-progress' ? 'bg-yellow-500/20 text-yellow-400'
-                    : 'bg-accent/20 text-accent'
+                  ? f === 'done' ? 'text-green-400'
+                    : f === 'not-started' ? 'text-red-400'
+                    : f === 'in-progress' ? 'text-yellow-400'
+                    : 'text-accent'
                   : 'text-text-secondary hover:text-text-primary',
               )}
             >
@@ -753,9 +770,10 @@ export function CharacterBoardView() {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1.5 border-b border-bg-border pb-2">
-          <TabButton active={tab === 'board'} onClick={() => setTab('board')}>캐릭터 현황판</TabButton>
-          <TabButton active={tab === 'episode-assets'} onClick={() => setTab('episode-assets')}>에피소드 에셋</TabButton>
+        <div className="relative flex items-center gap-1.5 border-b border-bg-border pb-2">
+          <SlidingIndicator activeKey={tab} axis="both" className="rounded-lg bg-accent/20" />
+          <TabButton slideKey="board" active={tab === 'board'} onClick={() => setTab('board')}>캐릭터 현황판</TabButton>
+          <TabButton slideKey="episode-assets" active={tab === 'episode-assets'} onClick={() => setTab('episode-assets')}>에피소드 에셋</TabButton>
         </div>
       </div>
 

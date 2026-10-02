@@ -6894,11 +6894,17 @@ test('the event create backdrop dims the background like the calendar settings m
   );
 });
 
-test('CalendarGrid fades in the chip tooltip and limits chip hover to transform and filter', async () => {
+test('CalendarGrid pins the chip card above the bar and lights the bar without resizing it', async () => {
+  // 움직임 폴리싱 2번(tooltip-anchor): 카드는 막대에 들어온 순간의 막대 위에 고정되고(마우스를 따라오지 않음),
+  // 막대는 커지거나 밝아지는 대신 미리 그려 둔 테두리·그림자 층만 떠오른다. 등장 효과는 WAAPI(동작 줄이기면 투명도만)라
+  // 이 하네스에서는 그려지는 구조만 확인한다(실제 움직임은 갈래 화면 점검에서 확인).
   resetHarness();
   const clock = installScheduleFakeClock();
   const previousDocument = globalThis.document;
   globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {} } as unknown as Document;
+  const isCard = (node: ReactElement<Record<string, unknown>>) => (
+    typeof node.props.className === 'string' && node.props.className.includes('calendar-event-card')
+  );
 
   try {
     const events = [calendarListEvent({ id: 'tooltip-chip', title: '툴팁 대상' })];
@@ -6907,61 +6913,37 @@ test('CalendarGrid fades in the chip tooltip and limits chip hover to transform 
     assert.ok(chip, '월 그리드 칩이 있다');
 
     const chipClass = String(chip.props.className ?? '');
-    assert.match(
-      chipClass,
-      /transition-\[transform,filter\]/,
-      'hover 트랜지션은 transform과 filter로만 제한한다',
+    assert.doesNotMatch(chipClass, /scale-\[|brightness-|transition-all|transition-\[transform/, '마우스를 올려도 막대 크기·밝기를 바꾸지 않는다(작은 글씨가 번졌다)');
+    assert.equal(chip.props.onMouseMove, undefined, '마우스가 움직일 때마다 카드 자리를 다시 정하지 않는다');
+    assert.ok(
+      findElements(chip, (node) => String(node.props.className ?? '').includes('calendar-event-bar-ring')).length === 1,
+      '테두리·그림자 층이 미리 그려져 있다(투명도만 바뀐다)',
     );
-    assert.doesNotMatch(chipClass, /transition-all/, 'transition-all은 레이아웃 속성까지 애니메이션한다');
 
-    // 툴팁은 400ms 지연 뒤 나타난다.
-    (chip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
+    // 막대 rect 로 자리를 한 번 정하고, 400ms 뒤에 카드가 뜬다.
+    const rect = { left: 100, right: 300, top: 200, bottom: 226 };
+    (chip.props.onMouseEnter as (event: unknown) => void)({ clientX: 120, clientY: 210, currentTarget: { getBoundingClientRect: () => rect } });
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.equal(findElements(tree, isCard).length, 0, '400ms 전에는 카드가 없다');
     clock.advance(400);
     tree = await renderCalendarGrid(events, {}, true);
+    const card = findElements(tree, isCard)[0];
+    assert.ok(card, '400ms 뒤 카드가 나타난다');
+    assert.equal(card.props.role, 'tooltip');
+    assert.equal((card.props.style as { backdropFilter?: unknown }).backdropFilter, undefined, '카드 뒤 흐림은 쓰지 않는다');
+    assert.equal((card.props.style as { transform?: unknown }).transform, undefined, '자리는 바깥 상자가 transform 하나로 맡는다');
+    assert.match(textContent(card), /툴팁 대상/);
 
-    const tooltip = findElements(tree, (node) => (
-      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
-    ))[0];
-    assert.ok(tooltip, '400ms 뒤 툴팁이 나타난다');
-    assert.deepEqual(
-      tooltip.props.initial,
-      { opacity: 0, scale: 0.96, x: '-50%', y: '-100%' },
-      '툴팁은 사라진 상태에서 등장하고 커서 위 중앙 앵커를 유지한다',
-    );
-    assert.deepEqual(
-      tooltip.props.animate,
-      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
-      'framer가 transform을 직접 관리하므로 앵커도 motion value로 넘긴다',
-    );
-    assert.equal(
-      (tooltip.props.style as { transform?: unknown }).transform,
-      undefined,
-      'style의 정적 transform은 덮어써지므로 남겨 두지 않는다',
-    );
-    assert.deepEqual(
-      tooltip.props.transition,
-      { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
-      '툴팁 등장은 200ms 공용 이징을 쓴다',
-    );
-
-    // 동작 줄이기에서는 등장 애니메이션을 쓰지 않는다.
-    resetHarness();
-    let reducedTree = await renderCalendarGrid(events, { reduceMotion: true });
-    const reducedChip = findElements(reducedTree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
-    (reducedChip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
-    clock.advance(400);
-    reducedTree = await renderCalendarGrid(events, { reduceMotion: true }, true);
-    const reducedTooltip = findElements(reducedTree, (node) => (
-      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
-    ))[0];
-    assert.ok(reducedTooltip);
-    assert.equal(reducedTooltip.props.initial, false, '동작 줄이기에서는 등장 애니메이션을 건너뛴다');
-    assert.deepEqual(
-      reducedTooltip.props.animate,
-      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
-      '동작 줄이기에서도 앵커는 그대로다',
-    );
-    assert.deepEqual(reducedTooltip.props.transition, { duration: 0 });
+    // 떠난 뒤 바로 다른 막대에 들어오면(웜업) 기다리지 않는다.
+    const leaveTree = await renderCalendarGrid(events, {}, true);
+    const shownChip = findElements(leaveTree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    (shownChip.props.onMouseLeave as () => void)();
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.equal(findElements(tree, isCard).length, 0, '막대를 떠나면 카드가 사라진다');
+    const againChip = findElements(tree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    (againChip.props.onMouseEnter as (event: unknown) => void)({ clientX: 200, clientY: 210, currentTarget: { getBoundingClientRect: () => rect } });
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.ok(findElements(tree, isCard)[0], '숨긴 지 300ms 안이면 기다림 없이 바로 뜬다');
   } finally {
     calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
     globalThis.document = previousDocument;

@@ -33,6 +33,7 @@ import { EpisodeGroupSection } from './compositing/EpisodeGroupSection';
 import { ProgressKanbanSection } from './compositing/ProgressKanbanSection';
 import NewRevisionModal from './compositing/NewRevisionModal';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { RetakeSceneModalProvider } from './retake-hub/RetakeSceneModalProvider';
 
@@ -627,7 +628,9 @@ export default function CompositingView({
                 minWidth={132}
               />
             </div>
-            <div className="inline-flex min-h-[34px] bg-bg-primary rounded-lg p-1 gap-0.5 border border-bg-border/40 shrink-0">
+            <div className="relative inline-flex min-h-[34px] bg-bg-primary rounded-lg p-1 gap-0.5 border border-bg-border/40 shrink-0">
+              {/* 보기 전환 — 알약 하나가 미끄러진다(움직임 폴리싱 7번). */}
+              <SlidingIndicator activeKey={groupMode} axis="both" className="rounded-md bg-accent" />
               {([
                 { key: 'scene' as const, label: '씬 트리', icon: <List size={12} strokeWidth={2.4} /> },
                 { key: 'episode' as const, label: '에피소드별', icon: <Layers size={12} strokeWidth={2.4} /> },
@@ -635,10 +638,11 @@ export default function CompositingView({
               ]).map(({ key, label, icon }) => (
                 <button
                   key={key}
+                  data-slide-key={key}
                   onClick={() => setGroupMode(key)}
-                  className={`compact-label-container inline-flex min-w-0 shrink items-center justify-center px-3 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
+                  className={`relative compact-label-container inline-flex min-w-0 shrink items-center justify-center px-3 text-[11px] rounded-md font-medium transition-colors cursor-pointer ${
                     groupMode === key
-                      ? 'bg-accent text-white'
+                      ? 'text-white'
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
@@ -654,7 +658,8 @@ export default function CompositingView({
           {/* 필터 바 */}
           <div className="flex items-center gap-3 flex-wrap">
             {/* 상태 필터 */}
-            <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary/50">
+            <div className="relative flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary/50">
+              <SlidingIndicator activeKey={statusFilter} axis="both" className="rounded-md bg-accent/20 shadow-sm" />
               {([
                 { key: 'all' as const, label: '전체', icon: <Circle size={11} strokeWidth={2.4} /> },
                 { key: 'open' as const, label: '대기', icon: <Clock size={11} strokeWidth={2.4} /> },
@@ -664,10 +669,11 @@ export default function CompositingView({
               ]).map(({ key, label, icon }) => (
                 <button
                   key={key}
+                  data-slide-key={key}
                   onClick={() => setStatusFilter(key)}
-                  className={`compact-label-container inline-flex min-w-0 shrink items-center justify-center px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
+                  className={`relative compact-label-container inline-flex min-w-0 shrink items-center justify-center px-2.5 py-1 text-[11px] rounded-md font-medium transition-colors cursor-pointer ${
                     statusFilter === key
-                      ? 'bg-accent/20 text-accent shadow-sm'
+                      ? 'text-accent'
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >

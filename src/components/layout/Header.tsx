@@ -1,10 +1,11 @@
-import { ArrowLeft, RefreshCw, Sun, Moon, Database, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Sun, Moon, Database, FileSpreadsheet } from 'lucide-react';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { UserMenu } from '@/components/auth/UserMenu';
 import { NotificationBell } from '@/components/NotificationPanel';
 import { HeaderPointsBadge } from './HeaderPointsBadge';
+import { HeaderSyncStatus } from './HeaderSyncStatus';
 import { resolveHeaderTitle } from './headerTitle';
 
 interface HeaderProps {
@@ -13,25 +14,22 @@ interface HeaderProps {
 }
 
 export function Header({ activeView, onRefresh }: HeaderProps) {
-  const { colorMode, toggleColorMode } = useAppStore();
+  const colorMode = useAppStore((s) => s.colorMode);
+  const toggleColorMode = useAppStore((s) => s.toggleColorMode);
   const activeDataSource = useAppStore((s) => s.activeDataSource);
   const navigationBackTarget = useAppStore((s) => s.navigationBackStack[s.navigationBackStack.length - 1] ?? null);
   const goBackNavigation = useAppStore((s) => s.goBackNavigation);
   const episodeDashboardEp = useAppStore((s) => s.episodeDashboardEp);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const { isSyncing, lastSyncTime } = useDataStore();
 
   const headerTitle = resolveHeaderTitle(activeView, episodeDashboardEp, episodeTitles);
-
-  const lastSyncLabel = lastSyncTime
-    ? `마지막 동기화: ${new Date(lastSyncTime).toLocaleTimeString('ko-KR')}`
-    : '동기화 대기 중';
 
   return (
     // z-40: 본문의 sticky 헤더(z-30)보다 위여야 한다. 알림 패널이 이 헤더 안에 붙어 있어서,
     // 여기가 본문과 같은 z이면 패널이 z-[9999]여도 뒤에 그려진 본문에 가린다.
     // 모달 백드롭(z-40이지만 DOM상 뒤)과 설정 모달(z-50)은 여전히 헤더를 덮는다.
-    <header className="relative z-40 h-14 shrink-0 bg-bg-card border-b border-bg-border flex items-center justify-between px-6">
+    // data-tooltip-placement: 헤더 버튼 설명 말풍선은 버튼 아래로 — 종 아이콘과 빨간 배지(오른쪽 위)를 덮지 않는다.
+    <header className="relative z-40 h-14 shrink-0 bg-bg-card border-b border-bg-border flex items-center justify-between px-6" data-tooltip-placement="below">
       {/* 왼쪽: 현재 뷰 제목 */}
       <div className="flex min-w-0 items-center gap-3">
         {navigationBackTarget && (
@@ -67,36 +65,8 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
           </div>
         )}
 
-        {/* 동기화 상태 (인디케이터) */}
-        <div
-          className="flex items-center gap-2 text-xs text-text-secondary mr-1"
-          title={lastSyncLabel}
-        >
-          {isSyncing ? (
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-              동기화 중...
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 size={14} className="text-emerald-500" />
-              최신 상태
-            </span>
-          )}
-        </div>
-
-        {/* 새로고침 */}
-        <button
-          onClick={onRefresh}
-          disabled={isSyncing}
-          title="데이터 새로고침"
-          className={cn(
-            'bf-press p-2 rounded-lg hover:bg-bg-border/50 text-text-secondary hover:text-text-primary',
-            isSyncing && 'animate-spin text-accent'
-          )}
-        >
-          <RefreshCw size={18} />
-        </button>
+        {/* 동기화 상태 + 새로고침 (자동은 조용히, 직접 누른 새로고침만 아이콘이 돈다) */}
+        <HeaderSyncStatus onRefresh={onRefresh} />
 
         {/* 다크/라이트 모드 토글 */}
         <button

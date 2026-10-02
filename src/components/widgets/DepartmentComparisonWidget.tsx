@@ -1,6 +1,7 @@
-import { useMemo, useState, useRef, useCallback } from 'react';
+import { useMemo, useRef, useCallback } from 'react';
 import { GitCompareArrows } from 'lucide-react';
 import { Widget } from './Widget';
+import { ChartHoverTooltip, type ChartHoverTooltipHandle } from './ChartHoverTooltip';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { calcDashboardStats } from '@/utils/calcStats';
@@ -13,8 +14,6 @@ import { tooltipGlassStyle } from '@/utils/glassStyles';
 const SUPPORTED_CHARTS: ChartType[] = ['horizontal-bar', 'vertical-bar', 'donut'];
 
 interface TooltipInfo {
-  x: number;
-  y: number;
   label: string;
   stageLabel: string;
   done: number;
@@ -23,11 +22,30 @@ interface TooltipInfo {
   color: string;
 }
 
+function StageTooltipContent({ info }: { info: TooltipInfo }) {
+  return (
+    <>
+      <div className="flex items-center gap-2 font-semibold text-[13px] mb-1.5">
+        <span
+          className="inline-block w-2.5 h-2.5 rounded-full"
+          style={{ backgroundColor: info.color }}
+        />
+        <span className="text-text-primary">{info.label}</span>
+        <span className="text-text-secondary/50">·</span>
+        <span style={{ color: info.color }}>{info.stageLabel}</span>
+      </div>
+      <div className="text-[12px] text-text-secondary/85">
+        {info.total}씬 중 <span className="text-text-primary font-semibold">{info.done}씬</span> 완료 ({info.pct.toFixed(1)}%)
+      </div>
+    </>
+  );
+}
+
 export function DepartmentComparisonWidget() {
   const episodes = useDashboardEpisodes();
   const chartType = useAppStore((s) => s.chartTypes['dept-comparison']) ?? 'horizontal-bar';
-  const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  // 막대 말풍선은 따로 그려진다 — 마우스를 올리고 옮길 때 위젯 전체가 다시 그려지지 않게 show/hide 만 부른다.
+  const tooltipRef = useRef<ChartHoverTooltipHandle>(null);
 
   const deptStats = useMemo(
     () =>
@@ -39,29 +57,21 @@ export function DepartmentComparisonWidget() {
     [episodes]
   );
 
+  // 말풍선은 막대 바로 위 가운데에 고정한다(마우스를 따라다니지 않는다).
   const handleBarEnter = useCallback(
-    (e: React.MouseEvent, info: Omit<TooltipInfo, 'x' | 'y'>) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      setTooltip({
-        ...info,
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
+    (e: React.MouseEvent<HTMLElement>, info: TooltipInfo) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      tooltipRef.current?.show(
+        `${info.label}:${info.stageLabel}`,
+        `${info.done}/${info.total}`,
+        <StageTooltipContent info={info} />,
+        { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom },
+      );
     },
     []
   );
 
-  const handleBarMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (!containerRef.current || !tooltip) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      setTooltip((prev) => prev ? { ...prev, x: e.clientX - rect.left, y: e.clientY - rect.top } : null);
-    },
-    [tooltip]
-  );
-
-  const handleBarLeave = useCallback(() => setTooltip(null), []);
+  const handleBarLeave = useCallback(() => tooltipRef.current?.hide(), []);
 
   // 통합 진행률 (부서별 평균)
   const combinedPct = useMemo(() => {
@@ -163,7 +173,7 @@ export function DepartmentComparisonWidget() {
   // ── 기본: 가로 막대 ──
   return (
     <Widget title="부서별 비교" icon={<GitCompareArrows size={16} />}>
-      <div ref={containerRef} className="relative flex flex-col gap-4 justify-center h-full">
+      <div className="relative flex flex-col gap-4 justify-center h-full">
         {/* 통합 진행률 */}
         <div className="flex items-center gap-3 pb-3 border-b border-bg-border/50">
           <span className="text-xs font-medium text-text-secondary w-10 text-right">통합</span>
@@ -251,7 +261,6 @@ export function DepartmentComparisonWidget() {
                             color: d.config.stageColors[stage],
                           })
                         }
-                        onMouseMove={handleBarMove}
                         onMouseLeave={handleBarLeave}
                       />
                     );
@@ -265,31 +274,12 @@ export function DepartmentComparisonWidget() {
           })}
         </div>
 
-        {/* 글래스모피즘 툴팁 */}
-        {tooltip && (
-          <div
-            className="absolute z-[60] pointer-events-none px-4 py-3 rounded-2xl whitespace-nowrap"
-            style={{
-              ...tooltipGlassStyle,
-              left: tooltip.x,
-              top: tooltip.y - 8,
-              transform: 'translate(-50%, -100%)',
-            }}
-          >
-            <div className="flex items-center gap-2 font-semibold text-[13px] mb-1.5">
-              <span
-                className="inline-block w-2.5 h-2.5 rounded-full"
-                style={{ backgroundColor: tooltip.color }}
-              />
-              <span className="text-text-primary">{tooltip.label}</span>
-              <span className="text-text-secondary/50">·</span>
-              <span style={{ color: tooltip.color }}>{tooltip.stageLabel}</span>
-            </div>
-            <div className="text-[12px] text-text-secondary/85">
-              {tooltip.total}씬 중 <span className="text-text-primary font-semibold">{tooltip.done}씬</span> 완료 ({tooltip.pct.toFixed(1)}%)
-            </div>
-          </div>
-        )}
+        {/* 단계 막대 말풍선 — Portal, 막대 바로 위 가운데 */}
+        <ChartHoverTooltip
+          ref={tooltipRef}
+          className="px-4 py-3 rounded-2xl whitespace-nowrap"
+          style={tooltipGlassStyle}
+        />
       </div>
     </Widget>
   );

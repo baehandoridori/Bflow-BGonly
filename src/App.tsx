@@ -103,6 +103,7 @@ import {
   buildNotificationSceneDisplayLabelFromSceneKey,
 } from '@/utils/notificationEpisodeLabels';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
+import { createSyncQueue } from '@/utils/syncQueue';
 import { useRetakeNotifications } from '@/hooks/useRetakeNotifications';
 import { openRetakeInApp } from '@/utils/retakeNavigation';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
@@ -326,7 +327,7 @@ function resolveNewAssigneeCompletionFallback(
 
 export default function App() {
   const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setDataConnected, setGasConfig, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
-  const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
+  const { setEpisodes, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
     authReady, setAuthReady,
@@ -609,9 +610,9 @@ export default function App() {
   // 시간대별 인사말 토스트 (WelcomeToast 스타일로 하단 표시)
   const [greetingToast, setGreetingToast] = useState<string | null>(null);
 
-  // 데이터 로드 함수 — Supabase에서 데이터 읽기 (Sheets fallback)
-  const loadData = useCallback(async () => {
-    setSyncing(true);
+  // 데이터 로드 본체 — Supabase에서 데이터 읽기 (Sheets fallback).
+  // '동기화 중' 표시는 아래 syncQueue 가 맡는다(겹친 실행 수를 세고, 직접/자동을 구분).
+  const fetchAllData = useCallback(async () => {
     setSyncError(null);
     try {
       // Supabase 우선 시도
@@ -678,10 +679,20 @@ export default function App() {
     } catch (err) {
       console.error('[동기화 실패]', err);
       setSyncError(String(err));
-    } finally {
-      setSyncing(false);
     }
-  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setDataConnected, setActiveDataSource]);
+  }, [setEpisodes, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setDataConnected, setActiveDataSource]);
+
+  // 받아오기 조율 (움직임 폴리싱 3번): 자동(폴링·실시간 재로드·재연결)은 예전처럼 바로 돌고,
+  // 직접(새로고침 버튼·단축키)은 자동이 도는 중이면 무시하지 않고 끝난 뒤 한 번 더 받아온다.
+  // 헤더는 syncKind 가 'manual' 일 때만 새로고침 아이콘을 돌리고, 자동은 체크만 한 번 숨 쉰다.
+  const fetchAllDataRef = useRef(fetchAllData);
+  fetchAllDataRef.current = fetchAllData;
+  const [syncQueue] = useState(() => createSyncQueue(
+    () => fetchAllDataRef.current(),
+    ({ syncing, kind }) => useDataStore.getState().setSyncState(syncing, kind),
+  ));
+  const loadData = useCallback(() => syncQueue.request('auto'), [syncQueue]);
+  const refreshDataManually = useCallback(() => { void syncQueue.request('manual'); }, [syncQueue]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {
@@ -3016,7 +3027,7 @@ export default function App() {
   }, [authReady, currentUser, showSplash, welcomeUser]);
 
   // ── 글로벌 단축키 (Phase 8-2) ──
-  useGlobalShortcuts({ onReload: loadData });
+  useGlobalShortcuts({ onReload: refreshDataManually });
 
   useEffect(() => installEditableFocusRecovery(), []);
 
@@ -3240,7 +3251,7 @@ export default function App() {
     <>
       <SvgIconDefs />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-      <MainLayout activeView={safeCurrentView} onRefresh={loadData}>{renderView()}</MainLayout>
+      <MainLayout activeView={safeCurrentView} onRefresh={refreshDataManually}>{renderView()}</MainLayout>
       <PlaygroundEntryOverlay />
       <SpotlightSearch />
       <GlobalTooltipProvider />

@@ -9,6 +9,7 @@ import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 
 /* ────────────────────────────────────────────────
    그라데이션 프로그레스 바
@@ -452,27 +453,30 @@ export function EpisodeView() {
           </div>
         </div>
 
-        {/* 뷰 모드 토글 */}
-        <div className="flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+        {/* 뷰 모드 토글 — 알약 하나가 미끄러진다(움직임 폴리싱 7번). */}
+        <div className="relative flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+          <SlidingIndicator activeKey={viewMode} axis="both" className="rounded-md bg-accent/20" />
           <button
+            data-slide-key="card"
             onClick={() => setViewMode('card')}
             className={cn(
-              'px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
+              'relative px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
               'transition-colors duration-150',
               viewMode === 'card'
-                ? 'bg-accent/20 text-accent'
+                ? 'text-accent'
                 : 'text-text-secondary hover:text-text-primary',
             )}
           >
             카드
           </button>
           <button
+            data-slide-key="matrix"
             onClick={() => setViewMode('matrix')}
             className={cn(
-              'px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
+              'relative px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
               'transition-colors duration-150',
               viewMode === 'matrix'
-                ? 'bg-accent/20 text-accent'
+                ? 'text-accent'
                 : 'text-text-secondary hover:text-text-primary',
             )}
           >

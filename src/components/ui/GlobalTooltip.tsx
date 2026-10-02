@@ -1,44 +1,137 @@
 /**
- * 글로벌 리퀴드글래스 툴팁 — title 속성 자동 인터셉트
+ * 글로벌 툴팁 — title 속성 자동 인터셉트
  *
- * 앱 전체의 [title] 요소에 빠르고 세련된 글래스모피즘 툴팁을 적용한다.
- * 이벤트 위임으로 동작하므로 기존 코드 수정 없이 적용 가능.
+ * 앱 전체의 [title] 요소에 빠른 말풍선을 띄운다. 이벤트 위임으로 동작하므로 기존 코드 수정 없이 적용된다.
+ *
+ * 움직임 폴리싱 2번(tooltip-anchor, 2026-10):
+ * - 한솔 결정대로 마우스를 따라가되, 자리는 '커서 위 가운데'(위에 자리가 없으면 커서 아래)로 바로잡았다.
+ *   예전에는 framer 의 scale 애니메이션이 style.transform 을 덮어 가운데 정렬 이동이 한 번도 적용되지 않았고,
+ *   그래서 말풍선 왼쪽 위 모서리가 커서에 붙어 방금 가리킨 버튼을 덮었다.
+ * - 위치는 바깥 상자(posRef)가 transform 하나로 맡고, 등장·퇴장(투명도 + 0.92배→1)은 안쪽 상자(boxRef)가 맡는다.
+ *   바깥 상자는 화면 왼쪽 위(0,0)에 붙어 있어 폭이 화면 전체 기준으로 정해진다 — 오른쪽 끝에서 폭이 줄어
+ *   글자가 몇 자씩 접히던 문제가 없다. 가장자리 8px 안쪽으로 밀어 넣는다.
+ * - 마우스가 움직이면 React 상태를 바꾸지 않고 다음 프레임에 transform 만 고친다(앱 전체 재렌더 없음).
+ * - 웜업: 떠 있는 중이거나 숨긴 지 300ms 안에 옆 버튼으로 옮기면 기다림·등장 효과 없이 바로 그 위로
+ *   120ms 미끄러져 간다. 미끄러짐은 대상이 바뀌는 순간에만 켠다(상시로 켜 두면 따라가기가 끈적해진다).
+ * - 동작 줄이기: 등장·퇴장은 투명도만 100ms, 위치 이동은 즉시.
+ * - 헤더처럼 data-tooltip-placement="below" 안쪽 요소는 자리가 있으면 가리킨 버튼 아래에 띄운다
+ *   (버튼 아래 끝 + 6px, 가로는 커서를 따라감) — 종 아이콘과 그 빨간 배지를 덮지 않는다.
  */
 
-import { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-
-interface TooltipState {
-  text: string;
-  x: number;
-  y: number;
-  position: 'top' | 'bottom';
-}
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { animateEl, EASE_CSS, MOTION_MS } from '@/utils/motion';
+import { createTooltipWarmth, placeFollowTooltip, tooltipTransform } from '@/utils/tooltipPosition';
 
 const SHOW_DELAY = 120;  // ms — 네이티브(~500ms) 대비 훨씬 빠름
 const HIDE_DELAY = 60;
+/** 등장·퇴장 길이(빠름 박자). */
+const POP_MS = MOTION_MS.fast;
+/** 동작 줄이기: 투명도만 이 길이로. */
+const REDUCED_FADE_MS = 100;
+/** 웜업 때 다음 대상 위로 미끄러지는 길이. */
+const SLIDE_MS = MOTION_MS.fast;
+
+interface TipState {
+  text: string;
+  /** 보일 때마다 늘어난다 — 같은 글자로 다시 떠도 자리 잡기를 다시 한다. */
+  seq: number;
+  /** 웜업으로 뜨는지(기다림·등장 효과 없음). */
+  warm: boolean;
+}
+
+/** 안쪽 상자 기본 모습. 처음엔 투명 — 보이고 숨는 건 animateEl 과 style.opacity 로 직접 바꾼다(React 재렌더 없음). */
+const BOX_STYLE: CSSProperties = {
+  opacity: 0,
+  color: 'rgb(var(--color-tooltip-text))',
+  // 움직이는 말풍선 뒤의 흐림(backdrop-filter)은 움직일 때마다 다시 계산된다. 배경을 거의 불투명하게 해서 대신한다.
+  background: 'linear-gradient(135deg, rgb(var(--color-tooltip-bg) / 0.97) 0%, rgb(var(--color-tooltip-bg) / 0.99) 100%)',
+  border: '1px solid rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha))',
+  boxShadow: `
+    0 4px 16px rgb(var(--color-shadow) / var(--shadow-alpha)),
+    0 0 0 0.5px rgb(var(--color-glass-highlight) / 0.05) inset,
+    0 1px 0 rgb(var(--color-glass-highlight) / 0.06) inset
+  `,
+};
+
+const HIGHLIGHT_STYLE: CSSProperties = {
+  background: 'linear-gradient(180deg, rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) 0%, transparent 100%)',
+};
 
 export function GlobalTooltipProvider() {
-  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const { reduce } = useMotionPref();
+  const reduceRef = useRef(reduce);
+  reduceRef.current = reduce;
+
+  const [tip, setTip] = useState<TipState | null>(null);
+  const [warmth] = useState(createTooltipWarmth);
+
+  /** 위치를 맡는 바깥 상자(transform 만). */
+  const posRef = useRef<HTMLDivElement | null>(null);
+  /** 모양·등장을 맡는 안쪽 상자. 자리 잡기는 이 상자의 실측 크기로 한다. */
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
   const showTimer = useRef<ReturnType<typeof setTimeout>>();
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
+  const slideTimer = useRef<ReturnType<typeof setTimeout>>();
+  const frame = useRef(0);
+  const seq = useRef(0);
+  const visible = useRef(false);
+  const placedOnce = useRef(false);
+  const cursor = useRef({ x: 0, y: 0 });
+  const preferBelow = useRef(false);
+  /** 아래로 띄우는 영역(헤더)에서 가리킨 버튼의 아래 끝 — 말풍선이 버튼을 덮지 않게 그 아래로 내린다. */
+  const targetBottom = useRef<number | undefined>(undefined);
   const currentEl = useRef<HTMLElement | null>(null);
   const originalTitle = useRef<string>('');
 
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  // 화면 가장자리에서 잘리지 않게 실측 폭으로 가로 보정.
-  // (첫 프레임은 보정 전 위치로 그려지지만 진입 페이드(120ms, opacity 0 시작)에 가려 체감 없음)
-  const [shiftX, setShiftX] = useState(0);
-  useLayoutEffect(() => {
-    if (!tooltip) { setShiftX(0); return; }
-    const width = boxRef.current?.offsetWidth ?? 0;
-    if (!width) { setShiftX(0); return; }
-    const half = width / 2;
-    const minX = 8 + half;
-    const maxX = Math.max(minX, window.innerWidth - 8 - half);
-    const target = Math.max(minX, Math.min(tooltip.x, maxX));
-    setShiftX(target - tooltip.x);
-  }, [tooltip]);
+  const place = useCallback(() => {
+    const pos = posRef.current;
+    const box = boxRef.current;
+    if (!pos || !box) return;
+    const placement = placeFollowTooltip(
+      cursor.current,
+      { width: box.offsetWidth, height: box.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+      { preferBelow: preferBelow.current, targetBottom: targetBottom.current },
+    );
+    pos.style.transform = tooltipTransform(placement);
+    // 커서 쪽 가장자리에서 피어나도록.
+    box.style.transformOrigin = placement.below ? '50% 0%' : '50% 100%';
+  }, []);
+
+  const reveal = useCallback((warm: boolean) => {
+    const box = boxRef.current;
+    if (!box) return;
+    box.getAnimations?.().forEach((animation) => animation.cancel());
+    box.style.opacity = '1';
+    visible.current = true;
+    if (warm) return;
+    const r = reduceRef.current;
+    animateEl(
+      box,
+      [{ opacity: 0, transform: 'scale(0.92)' }, { opacity: 1, transform: 'scale(1)' }],
+      { duration: r ? REDUCED_FADE_MS : POP_MS, easing: EASE_CSS.snap },
+      r,
+    );
+  }, []);
+
+  const conceal = useCallback(() => {
+    if (!visible.current) return;
+    visible.current = false;
+    const box = boxRef.current;
+    if (!box) return;
+    const from = getComputedStyle(box).opacity;
+    box.getAnimations?.().forEach((animation) => animation.cancel());
+    box.style.opacity = '0';
+    const r = reduceRef.current;
+    animateEl(
+      box,
+      [{ opacity: from, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(0.92)' }],
+      { duration: r ? REDUCED_FADE_MS : POP_MS, easing: EASE_CSS.snap },
+      r,
+    );
+  }, []);
 
   const restoreTitle = useCallback(() => {
     if (currentEl.current && originalTitle.current) {
@@ -48,15 +141,52 @@ export function GlobalTooltipProvider() {
     originalTitle.current = '';
   }, []);
 
-  const hide = useCallback(() => {
-    clearTimeout(showTimer.current);
-    hideTimer.current = setTimeout(() => {
-      setTooltip(null);
-      restoreTitle();
-    }, HIDE_DELAY);
-  }, [restoreTitle]);
+  const show = useCallback((text: string, warm: boolean) => {
+    seq.current += 1;
+    setTip({ text, seq: seq.current, warm });
+  }, []);
+
+  // 새 글자가 그려진 직후(칠하기 전) 실측 크기로 자리를 잡고 보인다.
+  useLayoutEffect(() => {
+    if (!tip) return;
+    const pos = posRef.current;
+    if (!pos) return;
+    const slide = tip.warm && placedOnce.current && !reduceRef.current;
+    clearTimeout(slideTimer.current);
+    pos.style.transition = slide ? `transform ${SLIDE_MS}ms ${EASE_CSS.snap}` : '';
+    place();
+    placedOnce.current = true;
+    reveal(tip.warm);
+    if (slide) {
+      slideTimer.current = setTimeout(() => {
+        if (posRef.current) posRef.current.style.transition = '';
+      }, SLIDE_MS + 20);
+    }
+  }, [tip, place, reveal]);
 
   useEffect(() => {
+    const now = () => performance.now();
+
+    // 대상에서 벗어남 — 잠깐 기다렸다 숨긴다(옆 버튼으로 바로 옮기면 취소되고 웜업으로 이어진다).
+    const hide = () => {
+      clearTimeout(showTimer.current);
+      clearTimeout(hideTimer.current);
+      hideTimer.current = setTimeout(() => {
+        if (visible.current) warmth.markHidden(now());
+        conceal();
+        restoreTitle();
+      }, HIDE_DELAY);
+    };
+
+    // 스크롤·클릭 — 바로 닫고 웜업도 끊는다.
+    const dismiss = () => {
+      clearTimeout(showTimer.current);
+      clearTimeout(hideTimer.current);
+      warmth.reset();
+      conceal();
+      restoreTitle();
+    };
+
     const handleMouseOver = (e: MouseEvent) => {
       const target = (e.target as HTMLElement)?.closest?.('[title]') as HTMLElement | null;
       if (!target) return;
@@ -67,7 +197,6 @@ export function GlobalTooltipProvider() {
       // 이미 같은 요소 → 무시
       if (target === currentEl.current) return;
 
-      // 이전 타이머 정리
       clearTimeout(showTimer.current);
       clearTimeout(hideTimer.current);
 
@@ -79,18 +208,15 @@ export function GlobalTooltipProvider() {
       originalTitle.current = title;
       target.removeAttribute('title');
 
-      // 한솔 결정: 마우스 위치 따라가는 툴팁 (작업 진행 위젯과 동일 패턴)
-      const initialX = e.clientX;
-      const initialY = e.clientY;
-      showTimer.current = setTimeout(() => {
-        const showBelow = initialY < 120;
-        setTooltip({
-          text: title,
-          x: initialX,
-          y: showBelow ? initialY + 16 : initialY - 12,
-          position: showBelow ? 'bottom' : 'top',
-        });
-      }, SHOW_DELAY);
+      cursor.current = { x: e.clientX, y: e.clientY };
+      preferBelow.current = target.closest('[data-tooltip-placement="below"]') !== null;
+      targetBottom.current = preferBelow.current ? target.getBoundingClientRect().bottom : undefined;
+
+      if (visible.current || warmth.isWarm(now())) {
+        show(title, true);
+        return;
+      }
+      showTimer.current = setTimeout(() => show(title, false), SHOW_DELAY);
     };
 
     const handleMouseOut = (e: MouseEvent) => {
@@ -105,95 +231,54 @@ export function GlobalTooltipProvider() {
       }
     };
 
-    // 한솔 결정: 마우스 따라가는 툴팁 — currentEl 위에서 마우스 움직이면 위치 즉시 업데이트
+    // 한솔 결정: 마우스 따라가는 툴팁 — 상태는 그대로 두고 다음 프레임에 transform 만 고친다.
     const handleMouseMove = (e: MouseEvent) => {
       if (!currentEl.current) return;
       const target = (e.target as HTMLElement)?.closest?.('[title]') as HTMLElement | null;
       // 같은 currentEl 안이거나 자식 요소만 처리
       if (target !== currentEl.current && !currentEl.current.contains(e.target as Node)) return;
-      const x = e.clientX;
-      const y = e.clientY;
-      setTooltip((prev) => {
-        if (!prev) return prev;
-        const showBelow = y < 120;
-        return {
-          text: prev.text,
-          x,
-          y: showBelow ? y + 16 : y - 12,
-          position: showBelow ? 'bottom' : 'top',
-        };
+      cursor.current = { x: e.clientX, y: e.clientY };
+      if (!visible.current || frame.current) return;
+      frame.current = requestAnimationFrame(() => {
+        frame.current = 0;
+        if (visible.current) place();
       });
-    };
-
-    const handleScroll = () => {
-      clearTimeout(showTimer.current);
-      setTooltip(null);
-      restoreTitle();
     };
 
     document.addEventListener('mouseover', handleMouseOver, true);
     document.addEventListener('mouseout', handleMouseOut, true);
     document.addEventListener('mousemove', handleMouseMove, true);
-    document.addEventListener('scroll', handleScroll, true);
-    document.addEventListener('mousedown', handleScroll, true);
+    document.addEventListener('scroll', dismiss, true);
+    document.addEventListener('mousedown', dismiss, true);
 
     return () => {
       clearTimeout(showTimer.current);
       clearTimeout(hideTimer.current);
+      clearTimeout(slideTimer.current);
+      cancelAnimationFrame(frame.current);
+      frame.current = 0;
       restoreTitle();
       document.removeEventListener('mouseover', handleMouseOver, true);
       document.removeEventListener('mouseout', handleMouseOut, true);
       document.removeEventListener('mousemove', handleMouseMove, true);
-      document.removeEventListener('scroll', handleScroll, true);
-      document.removeEventListener('mousedown', handleScroll, true);
+      document.removeEventListener('scroll', dismiss, true);
+      document.removeEventListener('mousedown', dismiss, true);
     };
-  }, [hide, restoreTitle]);
+  }, [conceal, place, restoreTitle, show, warmth]);
 
   return (
-    <AnimatePresence>
-      {tooltip && (
-        <motion.div
-          // 한솔 결정: text 만 key 로 — 마우스 따라 x/y 변경 시 re-mount 안 되고 style 만 갱신 (깜빡임 X)
-          key={tooltip.text}
-          initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.92 }}
-          transition={{ duration: 0.12, ease: [0.2, 0, 0, 1] }}
-          className="fixed z-[99999] pointer-events-none"
-          style={{
-            left: tooltip.x + shiftX,
-            top: tooltip.y,
-            transform: `translateX(-50%) translateY(${tooltip.position === 'top' ? '-100%' : '0'})`,
-          }}
-        >
-          {/* 리퀴드글래스 컨테이너 — 라이트/다크 모두 테마 변수로 적응 */}
-          <div
-            ref={boxRef}
-            className="relative px-3 py-1.5 rounded-lg text-xs font-medium whitespace-normal [overflow-wrap:anywhere] max-w-[min(480px,80vw)] overflow-hidden"
-            style={{
-              color: 'rgb(var(--color-tooltip-text))',
-              background: 'linear-gradient(135deg, rgb(var(--color-tooltip-bg) / 0.94) 0%, rgb(var(--color-tooltip-bg) / 0.98) 100%)',
-              backdropFilter: 'blur(16px) saturate(1.6)',
-              WebkitBackdropFilter: 'blur(16px) saturate(1.6)',
-              border: '1px solid rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha))',
-              boxShadow: `
-                0 4px 16px rgb(var(--color-shadow) / var(--shadow-alpha)),
-                0 0 0 0.5px rgb(var(--color-glass-highlight) / 0.05) inset,
-                0 1px 0 rgb(var(--color-glass-highlight) / 0.06) inset
-              `,
-            }}
-          >
-            {/* 상단 하이라이트 (유리 반사) */}
-            <div
-              className="absolute inset-x-0 top-0 h-[40%] rounded-t-lg pointer-events-none"
-              style={{
-                background: 'linear-gradient(180deg, rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) 0%, transparent 100%)',
-              }}
-            />
-            <span className="relative">{tooltip.text}</span>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    // 위치 상자: 화면 왼쪽 위(0,0) 기준 transform 하나로 놓는다. 폭은 화면 전체 기준이라 오른쪽 끝에서도 줄지 않는다.
+    <div ref={posRef} className="fixed left-0 top-0 z-[99999] pointer-events-none">
+      {/* 말풍선 — 라이트/다크 모두 테마 변수로 적응 */}
+      <div
+        ref={boxRef}
+        className="relative px-3 py-1.5 rounded-lg text-xs font-medium whitespace-normal [overflow-wrap:anywhere] max-w-[min(480px,80vw)] overflow-hidden"
+        style={BOX_STYLE}
+      >
+        {/* 상단 하이라이트 (유리 반사) */}
+        <div className="absolute inset-x-0 top-0 h-[40%] rounded-t-lg pointer-events-none" style={HIGHLIGHT_STYLE} />
+        <span className="relative">{tip?.text ?? ''}</span>
+      </div>
+    </div>
   );
 }

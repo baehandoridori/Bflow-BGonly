@@ -15,6 +15,7 @@ import {
   Pin,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Scene, Stage, Department, ScenePhaseState } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
@@ -930,22 +931,29 @@ export function UnifiedSceneDetailModal({
                 </button>
               </div>
 
-              {/* 탭 (상세 / 리테이크·N / 파일 / 히스토리) */}
-              <div className="flex gap-1 px-5 border-b border-bg-border/40 shrink-0">
-                <TabButton active={tab === 'detail'} onClick={() => setTab('detail')}>
+              {/* 탭 (상세 / 리테이크·N / 파일 / 히스토리) — 밑줄 하나가 탭 폭에 맞춰 미끄러진다(움직임 폴리싱 7번). */}
+              <div className="relative flex gap-1 px-5 border-b border-bg-border/40 shrink-0">
+                <SlidingIndicator
+                  activeKey={tab}
+                  inset={{ x: 12 }}
+                  className="-bottom-px h-0.5 rounded-sm bg-accent"
+                  style={{ boxShadow: '0 0 8px rgb(var(--color-accent))' }}
+                />
+                <TabButton slideKey="detail" active={tab === 'detail'} onClick={() => setTab('detail')}>
                   상세
                 </TabButton>
                 <TabButton
+                  slideKey="revisions"
                   active={tab === 'revisions'}
                   onClick={() => setTab('revisions')}
                   badge={revisionTabBadge > 0 ? revisionTabBadge : undefined}
                 >
                   리테이크
                 </TabButton>
-                <TabButton active={tab === 'files'} onClick={() => setTab('files')}>
+                <TabButton slideKey="files" active={tab === 'files'} onClick={() => setTab('files')}>
                   파일
                 </TabButton>
-                <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
+                <TabButton slideKey="history" active={tab === 'history'} onClick={() => setTab('history')}>
                   히스토리
                 </TabButton>
               </div>
@@ -1281,11 +1289,14 @@ export function UnifiedSceneDetailModal({
 /* ── 탭 버튼 ── */
 
 function TabButton({
+  slideKey,
   active,
   onClick,
   badge,
   children,
 }: {
+  /** 미끄러지는 밑줄이 찾는 키(data-slide-key). */
+  slideKey: string;
   active: boolean;
   onClick: () => void;
   badge?: number;
@@ -1294,6 +1305,7 @@ function TabButton({
   return (
     <button
       type="button"
+      data-slide-key={slideKey}
       onClick={onClick}
       className={cn(
         'relative px-3 py-2.5 text-[12.5px] font-bold cursor-pointer flex items-center gap-1.5 transition-colors',
@@ -1305,13 +1317,6 @@ function TabButton({
         <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-accent/20 text-accent-sub">
           {badge}
         </span>
-      )}
-      {active && (
-        <span
-          aria-hidden
-          className="absolute left-3 right-3 -bottom-px h-0.5 rounded-sm bg-accent"
-          style={{ boxShadow: '0 0 8px rgb(var(--color-accent))' }}
-        />
       )}
     </button>
   );

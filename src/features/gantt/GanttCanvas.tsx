@@ -6,6 +6,7 @@ import { barGeometry, rebaseScroll, zoomScroll } from './geometry';
 import { GANTT_RULER_HEIGHT as RULER, monthStart, navigationRange, weekBands } from './dateAxis';
 import { rowDrop, type RowDrop, type RowDropPosition } from './rowDrag';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { barTooltipAnchor, type TooltipAnchor } from '@/utils/tooltipPosition';
 import { compactDuration, DISPLAY_OPTIONS_KEY, localDate, millisecondsUntilMidnight, readDisplayOptions, remainingDaysLabel, type GanttDisplayOptions } from './barLabels';
 export { localDate } from './barLabels';
 import { GanttTooltip, type GanttHover } from './GanttTooltip';
@@ -243,11 +244,12 @@ export function GanttCanvas(props: Props) {
     if(range.base===base&&range.end===extent.current){el.scrollLeft=range.scrollLeft;pendingScroll.current=null;syncVisibleDate();}
   };
   const moveMonth = (offset: number) => navigate(monthStart(moveDate(base,Math.floor((chart.current?.scrollLeft||0)/widthRef.current)),offset));
-  const showHover = (r: ChartRow, x: number, y: number, focusMemo=false) => {
+  // 설명 카드는 막대 위 가운데에 고정한다(anchor = 막대 위·아래 끝). 마우스가 움직일 때마다 다시 부르지 않는다.
+  const showHover = (r: ChartRow, anchor: TooltipAnchor, focusMemo=false) => {
     if (dragRef.current) return;
     const task=r.task || ({id:r.id,title:r.project.name,memo:r.project.memo,workers:[],allDay:true,...r.bounds} as unknown as GanttTask);
     const parent=r.task?.parentId?r.project.tasks.find(t=>t.id===r.task!.parentId):null;
-    setHover({task:{...task,...r.bounds},x,y,workers:task.workers.map(id=>names[id]||id).join(', '),
+    setHover({task:{...task,...r.bounds},x:anchor.x,y:anchor.top,anchorBottom:anchor.bottom,workers:task.workers.map(id=>names[id]||id).join(', '),
       typeLabel:!r.task?'프로젝트':task.kind==='group'?'그룹':task.kind==='milestone'?'마일스톤':'작업',
       context:r.task?[r.project.name,parent?.title].filter(Boolean).join(' › '):'',
       duration:r.bounds?durationLabel({...task,...r.bounds,kind:task.kind||'group'}):'',
@@ -336,7 +338,8 @@ export function GanttCanvas(props: Props) {
   const drop=rowDragging?.drop?.allowed?rowDragging.drop:null;
   let dropIndicatorId=drop?.taskId??drop?.project.id;
   if(drop?.position==='after'&&drop.taskId){const descendants=descendantIds(drop.project,drop.taskId);dropIndicatorId=rows.filter(r=>r.project.id===drop.project.id&&descendants.has(r.id)).at(-1)?.id??drop.taskId;}
-  const conflicts = new Map(projects.flatMap(project => taskConflicts(project).map(c => [c.id, c.message] as const)));
+  // 일정 충돌 검사는 프로젝트가 바뀔 때만 다시 한다(막대에 마우스를 올릴 때마다 전부 다시 훑지 않게).
+  const conflicts = useMemo(() => new Map(projects.flatMap(project => taskConflicts(project).map(c => [c.id, c.message] as const))), [projects]);
   const todayIndex=dayDiff(base,today);
   return <div className="gantt-canvas-wrap">
     <div className="gantt-caption gantt-navigation">
@@ -397,17 +400,22 @@ export function GanttCanvas(props: Props) {
           // The inline label is at most 360px wide (canvas.css), plus its 12px
           // gap. Date-axis padding before the scrolled viewport is not usable space.
           const inlineAfter=x-visibleScrollLeft<372;
+          // 막대에 들어온 순간 한 번만 카드 자리를 정한다. pointermove 는 아직 이 막대 카드가 아닐 때만
+          // (끌기·스크롤로 닫힌 뒤 막대 위에서 다시 움직이는 경우) — 움직일 때마다 차트 전체를 다시 그리지 않는다.
+          const enterBar=(e:React.PointerEvent<HTMLElement>)=>{if(hover?.task.id===r.id)return;showHover(r,barTooltipAnchor(e.currentTarget.getBoundingClientRect(),e.clientX));};
+          const barCenter=(rect:DOMRect):TooltipAnchor=>({x:(rect.left+rect.right)/2,top:rect.top,bottom:rect.bottom});
           const hoverEvents = {
-            onPointerMove:(e:React.PointerEvent<HTMLElement>)=>showHover(r,e.clientX,e.clientY),
+            onPointerEnter:enterBar,
+            onPointerMove:enterBar,
             onPointerLeave:()=>setHover(null),
-            onFocus:(e:React.FocusEvent<HTMLElement>)=>{const rect=e.currentTarget.getBoundingClientRect();showHover(r,(rect.left+rect.right)/2,rect.top);},
+            onFocus:(e:React.FocusEvent<HTMLElement>)=>showHover(r,barCenter(e.currentTarget.getBoundingClientRect())),
             onBlur:()=>setHover(null),
             'aria-describedby':hover?.task.id===r.id?'gantt-hover':undefined,
           };
           const nameKeys = (e:React.KeyboardEvent<HTMLElement>) => {
             if(e.target!==e.currentTarget)return;
             if(e.key==='Enter'){e.preventDefault();props.onSelect(r.project.id,t?.id||null);}
-            if(e.key==='F2'&&e.currentTarget.classList.contains('gantt-bar')){e.preventDefault();const popup=document.getElementById('gantt-hover');if(popup&&hover?.task.id===r.id)popup.focus();else{const rect=e.currentTarget.getBoundingClientRect();showHover(r,(rect.left+rect.right)/2,rect.top,true);}}
+            if(e.key==='F2'&&e.currentTarget.classList.contains('gantt-bar')){e.preventDefault();const popup=document.getElementById('gantt-hover');if(popup&&hover?.task.id===r.id)popup.focus();else showHover(r,barCenter(e.currentTarget.getBoundingClientRect()),true);}
             if(e.key==='ContextMenu'||e.shiftKey&&e.key==='F10'){e.preventDefault();const rect=e.currentTarget.getBoundingClientRect();setHover(null);props.onMenu(r.project,t,rect.left,rect.bottom);}
           };
           const label=<>

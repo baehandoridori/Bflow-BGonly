@@ -30,6 +30,7 @@ import { ChartTypeContextMenu, getWidgetSupportedCharts, useChartContextMenu } f
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
+import { SLIDE_LAYOUT_TRANSITION } from '@/utils/slidingIndicator';
 import { getPreset } from '@/themes';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
@@ -1029,7 +1030,7 @@ export function Dashboard() {
                     <motion.div
                       layoutId="ep-tab-indicator"
                       className="absolute inset-0 rounded-md bg-accent shadow-sm shadow-accent/25"
-                      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                      transition={SLIDE_LAYOUT_TRANSITION}
                     />
                   )}
                   <span className="relative z-10">통합</span>
@@ -1054,7 +1055,7 @@ export function Dashboard() {
                           layoutId="ep-tab-indicator"
                           className="absolute inset-0 rounded-md shadow-sm"
                           style={{ backgroundColor: cfg.color, boxShadow: `0 2px 8px ${cfg.color}40` }}
-                          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                          transition={SLIDE_LAYOUT_TRANSITION}
                         />
                       )}
                       <span className="relative z-10">{cfg.label} ({cfg.shortLabel})</span>
@@ -1109,7 +1110,7 @@ export function Dashboard() {
                   <motion.div
                     layoutId="tab-indicator"
                     className="absolute inset-0 rounded-md bg-accent shadow-sm shadow-accent/25"
-                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                    transition={SLIDE_LAYOUT_TRANSITION}
                   />
                 )}
                 <span className="relative z-10">통합</span>
@@ -1135,7 +1136,7 @@ export function Dashboard() {
                         layoutId="tab-indicator"
                         className="absolute inset-0 rounded-md shadow-sm"
                         style={{ backgroundColor: cfg.color, boxShadow: `0 2px 8px ${cfg.color}40` }}
-                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                        transition={SLIDE_LAYOUT_TRANSITION}
                       />
                     )}
                     <span className="relative z-10">{cfg.label} ({cfg.shortLabel})</span>
