@@ -143,7 +143,9 @@ test('패널 배선: 불러오는 중·실패·없음 구분, 처음 자리는 �
   assert.match(panel, /const dividerCommentId = listReady && readStateReady \?/);
   assert.match(panel, /if \(!listReady \|\| !readStateReady \|\| !firstUnreadCommentId \|\| !latestOtherUserCommentAt\) return;/);
   // 불러오지 못한 채 보낸 댓글은 저장 뒤 다시 불러와 기존 댓글과 함께 보인다
-  assert.match(panel, /await addComment\(targetSceneKey, comment\);\s*\/\/[^\n]*\s*if \(loadStatusRef\.current === 'error'\) loadComments\(\);/);
+  // (19번 comments-send-react 부터 저장 뒤 할 일은 '다시 보내기'와 같은 afterCommentDelivered 로 모였다)
+  assert.match(panel, /await addComment\(targetSceneKey, comment\);\s*finishCommentSend\(comment\.id\);\s*\/\/[^\n]*\s*afterCommentDelivered\(sendDraft\);/);
+  assert.match(panel, /const afterCommentDelivered = \(draft: UnsentCommentDraft\) => \{\s*\/\/[^\n]*\s*if \(loadStatusRef\.current === 'error'\) loadComments\(\);/);
   assert.match(panel, /\{loadStatus === 'error' \? \(\s*<CommentLoadFailedNotice onRetry=\{retryLoadComments\} \/>\s*\) : !listReady \? \(\s*<CommentListSkeleton \/>\s*\) : \(/);
   assert.match(panel, /댓글을 불러오지 못했어요/);
   assert.match(panel, /다시 불러오기/);

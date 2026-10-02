@@ -91,3 +91,97 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* ─── 19. comments-send-react — 댓글 보내기·이모지 반응 ───────────────────
+   transform·opacity 만 움직인다. 채움은 backwards(끝나면 애니메이션 값을 남기지 않음).
+   말풍선 떠오름(아래 8px → 제자리 220ms)과 반응 칩 빠짐(0.6배·140ms)은 framer(transform 문자열, src/utils/commentSendReact.ts).
+   동작 줄이기: 전역 규칙(index.css)이 아래 애니메이션·전환 길이를 0 으로 줄인다 — 이동·확대 없이 바로 나타난다. */
+
+/* 말풍선 — 저장이 0.4초를 넘길 때만 살짝 흐렸다가, 저장되면 0.2초에 걸쳐 또렷해진다.
+   기본 클래스가 늘 붙어 있어야 흐림이 풀릴 때도 전환이 돈다(상태 클래스만 붙었다 떨어진다). */
+.comment-send-bubble {
+  position: relative;
+  transition: opacity 200ms var(--ease-std);
+}
+.comment-send-bubble--slow {
+  opacity: 0.6;
+}
+
+/* 보내지 못함 — 미리 그린 빨간 테두리 층(1.5px #E17055)이 opacity 로만 나타난다(테두리 색을 전환하지 않음). */
+.comment-send-bubble--failed::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1.5px solid #E17055;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: comment-send-fade-in 200ms var(--ease-out) backwards;
+}
+
+/* 작은 시계·'보내지 못했어요' 줄 — 나타날 때 옅게. */
+.comment-send-clock {
+  animation: comment-send-fade-in 200ms var(--ease-out) backwards;
+}
+.comment-send-failed-notice {
+  animation: comment-send-fade-in var(--motion-base) var(--ease-out) backwards;
+}
+@keyframes comment-send-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 새 반응 칩만 '톡' — 0.4배에서 70% 지점 1.07배를 지나 제자리(190ms, 아케이드 2048 새 타일과 같은 곡선).
+   칩이 처음 그려질 때만 붙는다 — 패널을 열 때 이미 있던 칩에는 없다. */
+.reaction-chip-pop {
+  animation: reaction-chip-pop 190ms cubic-bezier(0.18, 0.88, 0.34, 1.28) backwards;
+}
+@keyframes reaction-chip-pop {
+  0% { opacity: 0; transform: scale(0.4); }
+  70% { opacity: 1; transform: scale(1.07); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* 반응 숫자 — 숫자마다 새 칸이 그려지며 한 번만 굴러 들어온다. 늘면 아래에서 위로, 줄면 위에서 아래로(150ms). */
+.reaction-count-window {
+  display: inline-flex;
+  overflow: hidden;
+}
+.reaction-count {
+  display: inline-block;
+}
+.reaction-count--up {
+  animation: reaction-count-up 150ms var(--ease-out) backwards;
+}
+.reaction-count--down {
+  animation: reaction-count-down 150ms var(--ease-out) backwards;
+}
+@keyframes reaction-count-up {
+  from { opacity: 0; transform: translateY(70%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes reaction-count-down {
+  from { opacity: 0; transform: translateY(-70%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 누른 사람 말풍선 — 2px 아래에서 옅게(120ms). 가운데 맞춤(-translate-x-1/2)은 바깥 상자가 맡고 안쪽만 움직인다. */
+.reaction-tooltip {
+  animation: reaction-tooltip-in var(--motion-fast) var(--ease-out) backwards;
+}
+@keyframes reaction-tooltip-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 이모지 창 — 스마일 버튼 쪽(transform-origin 은 인라인으로)에서 0.92배 → 제자리로 피어난다(140ms). 단색 카드라 확대해도 흐림 계산이 없다. */
+.emoji-picker-pop {
+  animation: emoji-picker-in 140ms var(--ease-out) backwards;
+}
+@keyframes emoji-picker-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+/* '더 많은 이모지' — 버튼 쪽 가장자리는 그대로, 펼친 이모지 묶음만 옅게 들어온다. */
+.emoji-picker-extra {
+  animation: comment-send-fade-in 140ms var(--ease-out) backwards;
+}
