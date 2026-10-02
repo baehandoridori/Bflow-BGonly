@@ -312,7 +312,7 @@ body.theme-ready,
 
 .bflow-continuity-live-root {
   transform-origin: top left;
-  will-change: transform, opacity, filter;
+  will-change: transform, opacity;
   overflow: hidden;
 }
 

@@ -117,6 +117,7 @@ type ScheduleGridProps = {
   showWeekends?: boolean;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
+  filterRevealAt?: number;
   onEventClick(event: ScheduleCalendarEvent): void;
   onDragStart(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
@@ -6796,7 +6797,8 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
     tagBarReducedMotion = false;
   }
 
-  // 필터가 바뀌면 결과 컨테이너는 다시 마운트되지 않고 짧게 페이드로 이어진다.
+  // 필터가 바뀌어도 결과 컨테이너는 다시 마운트되지 않고, 달력 전체가 옅어지지도 않는다(움직임 폴리싱 15번).
+  // 바뀌지 않은 일정까지 깜빡이던 것을 없애고, 필터를 바꾼 시각만 그리드에 넘겨 새로 보이게 된 막대만 떠오르게 한다.
   resetHarness();
   const clock = installScheduleFakeClock();
   const calendarBody = (tree: ReactNode) => findElements(tree, (node) => (
@@ -6822,50 +6824,45 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
       '보기 전환은 200ms를 유지하고 필터 페이드만 120ms를 쓴다',
     );
 
+    const revealAtBefore = scheduleGridProps.at(-1)?.filterRevealAt ?? 0;
+    clock.advance(50);
     calendarState.toggleTag('tag-meeting');
     tree = await renderScheduleView();
     await flushScheduleMountEffects();
     tree = await renderScheduleView();
     assert.equal(
       (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      0.55,
-      '필터가 바뀌면 결과가 잠깐 옅어진다',
+      1,
+      '필터가 바뀌어도 달력 전체가 옅어지지 않는다',
     );
     assert.equal(
       calendarBody(tree)?.props.key,
       body.props.key,
       '필터 변화는 컨테이너를 다시 마운트하지 않는다',
     );
+    const revealAt = scheduleGridProps.at(-1)?.filterRevealAt ?? 0;
+    assert.ok(revealAt > revealAtBefore, '필터를 바꾼 시각을 그리드에 넘겨 새로 생긴 막대만 떠오르게 한다');
 
     clock.advance(120);
     tree = await renderScheduleView();
     assert.equal(
-      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      1,
-      '120ms 뒤에는 원래 농도로 돌아온다',
+      scheduleGridProps.at(-1)?.filterRevealAt,
+      revealAt,
+      '필터가 그대로면 기준 시각도 그대로다(나중에 생긴 막대는 떠오르지 않는다)',
     );
 
-    // 페이드 도중 OS '동작 줄이기'가 켜져도 반투명으로 굳지 않는다.
+    // OS '동작 줄이기'면 기준 시각을 넘기지 않아 막대가 떠오르지 않고, 화면도 옅어지지 않는다.
+    scheduleReducedMotion = true;
     calendarState.toggleTag('tag-review');
     tree = await renderScheduleView();
     await flushScheduleMountEffects();
     tree = await renderScheduleView();
     assert.equal(
       (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      0.55,
-      '다시 페이드가 시작된다',
-    );
-
-    scheduleReducedMotion = true;
-    calendarState.toggleTag('tag-meeting');
-    tree = await renderScheduleView();
-    await flushScheduleMountEffects();
-    tree = await renderScheduleView();
-    assert.equal(
-      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
       1,
-      "페이드 중 '동작 줄이기'가 켜져도 화면이 반투명으로 굳지 않는다",
+      "'동작 줄이기'에서도 화면이 반투명해지지 않는다",
     );
+    assert.equal(scheduleGridProps.at(-1)?.filterRevealAt, 0, "'동작 줄이기'면 새 막대도 떠오르지 않는다");
   } finally {
     scheduleReducedMotion = false;
     clock.restore();

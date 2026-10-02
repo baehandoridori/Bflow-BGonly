@@ -81,6 +81,7 @@ export const CharacterCard = memo(function CharacterCard({
   return (
     <button
       type="button"
+      data-flip-id={character.id}
       draggable={!!onDragStartCard}
       onDragStart={onDragStartCard ? (e) => {
         e.dataTransfer.effectAllowed = 'move';

@@ -1,6 +1,6 @@
 // ─── 씬 행 (접기/펼치기) ────────────────────
 
-import { useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, CheckCircle2, Circle, MessageSquareText, Plus } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
@@ -14,6 +14,8 @@ import { buildFeedbackHubPartCollapseKey, type FeedbackHubEpisodeTree } from './
 import { RevisionCommentMarker, summarizeRevisionComments } from './RevisionCommentMarker';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { useGridFlip } from '@/hooks/useGridFlip';
+import { useMotionPref } from '@/hooks/useMotionPref';
 
 function statusColorMix(status: RevisionStatus, alpha: number): string {
   const color = STATUS_CONFIG[status]?.color ?? STATUS_CONFIG.open.color;
@@ -94,6 +96,11 @@ export function SceneRow({
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
   const isSceneResolved = revisions.length > 0 && openCount === 0;
+  // 리테이크를 완료해 순서가 바뀌면(미해결 먼저) 항목이 순간이동하지 않고 새 자리로 미끄러진다(움직임 폴리싱 15번).
+  // 새 항목은 RevisionItem 자기 등장 움직임이 있으므로 떠오름은 끈다.
+  const revisionListRef = useRef<HTMLDivElement>(null);
+  const { reduce } = useMotionPref();
+  useGridFlip(revisionListRef, sortedRevisions.map((revision) => revision.id).join('|'), { disabled: reduce, enter: false });
   const ambientStatuses = sortedRevisions.map((revision) => revision.status);
   const ambientLineStyle = buildAmbientLineStyle(ambientStatuses);
   const commentSummary = summarizeRevisionComments(revisions, commentCountByRev, commentSeenByRev);
@@ -221,7 +228,7 @@ export function SceneRow({
             className="overflow-hidden"
           >
             {/* 세로 가이드라인 + 리테이크 아이템들 */}
-            <div className="relative pb-2 ml-8">
+            <div ref={revisionListRef} className="relative pb-2 ml-8">
               {ambientLineStyle && (
                 <div
                   data-ambient-status-line="true"

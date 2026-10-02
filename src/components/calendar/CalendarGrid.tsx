@@ -37,6 +37,7 @@ import { layoutEventBars, visibleWeekDays, type EventBar } from '@/utils/calenda
 import { DayAddButton } from './DayAddButton';
 import { DragCreateGhost } from './DragCreateGhost';
 import { useProximityReveal } from '@/hooks/useProximityReveal';
+import { shouldRevealOnMount } from '@/utils/gridFlip';
 
 // 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
 export { layoutEventBars, type EventBar };
@@ -83,7 +84,7 @@ interface EventCardState {
 function EventBarChip({
   bar, columnCount, onClick, onDragStart, isDragging, isGhost,
   hoverStore, onContextMenu, tagNameById, calendarNameById,
-  isRealtimeHighlighted, reduceMotion,
+  isRealtimeHighlighted, reduceMotion, revealSince = 0,
 }: {
   bar: EventBar;
   /** 그 주에 실제로 그려지는 칸 수(주말을 숨기면 5). */
@@ -99,8 +100,15 @@ function EventBarChip({
   calendarNameById: Record<string, string>;
   isRealtimeHighlighted?: boolean;
   reduceMotion?: boolean;
+  /** 태그·캘린더 필터를 바꾼 시각. 그 직후에 새로 생긴 막대만 한 번 떠오른다(움직임 폴리싱 15번). */
+  revealSince?: number;
 }) {
   const ev = bar.event;
+  // 마운트될 때 한 번만 판정한다 — 클래스를 켰다 끄지 않으므로 이미 있던 막대는 다시 움직이지 않는다.
+  const revealOnMountRef = useRef<boolean | null>(null);
+  if (revealOnMountRef.current === null) {
+    revealOnMountRef.current = !reduceMotion && shouldRevealOnMount(revealSince, Date.now());
+  }
   const tags = useCalendarStore((state) => state.tags);
   const eventTags = resolveEventTags(ev, tags);
   const hex = eventTags[0]?.color || ev.color || EVENT_COLORS[0];
@@ -292,6 +300,7 @@ function EventBarChip({
           'h-full flex items-center px-2 text-xs font-medium truncate relative',
           bar.isStart ? 'rounded-l-md' : '',
           bar.isEnd ? 'rounded-r-md' : '',
+          revealOnMountRef.current && !isGhost && 'sf-cal-bar-reveal',
         )}
         style={{
           // 막대마다 backdrop-filter(흐림)를 걸면 막대 수만큼 합성 레이어·렌더 패스가 생겨
@@ -517,6 +526,7 @@ export function CalendarGrid({
   pulseDate,
   highlightedEventIdentities,
   reduceMotion = false,
+  filterRevealAt = 0,
   tagNameById,
   calendarNameById,
 }: {
@@ -552,6 +562,8 @@ export function CalendarGrid({
   pulseDate?: string | null;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
+  /** 태그·캘린더 필터를 바꾼 시각(0 이면 없음). 그 직후 새로 보이게 된 막대만 떠오른다. */
+  filterRevealAt?: number;
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
 }) {
@@ -795,6 +807,7 @@ export function CalendarGrid({
                     calendarNameById={calendarNameById}
                     isRealtimeHighlighted={highlightedEventIdentities?.has(calendarEventIdentityKey(bar.event))}
                     reduceMotion={reduceMotion}
+                    revealSince={filterRevealAt}
                   />
                 );
               })}

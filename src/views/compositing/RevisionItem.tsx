@@ -112,15 +112,17 @@ export function RevisionItem({
 
   return (
     <>
+      {/* 순서가 바뀔 때(완료 항목이 아래로) 자리 이동은 SceneRow 의 useGridFlip(WAAPI)이 맡는다 — framer layout 은
+          크기를 scale 로 맞춰 글자가 눌리고, transition-all 과 겹쳐 두 번 움직였다(움직임 폴리싱 15번). */}
       <motion.div
-        layout
-        initial={{ opacity: 0, x: -8 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -8 }}
+        initial={{ opacity: 0, transform: 'translateX(-8px)' }}
+        animate={{ opacity: 1, transform: 'translateX(0px)', transitionEnd: { transform: 'none' } }}
+        exit={{ opacity: 0, transform: ['translateX(0px)', 'translateX(-8px)'] }}
         transition={{ duration: 0.2 }}
         onClick={onSelect}
         data-revision-status={revision.status}
-        className={`relative flex items-start gap-3 pl-10 pr-4 py-2.5 rounded-lg border border-bg-border/35 bg-bg-primary/20 transition-all duration-200 group cursor-pointer overflow-hidden ${
+        data-flip-id={revision.id}
+        className={`relative flex items-start gap-3 pl-10 pr-4 py-2.5 rounded-lg border border-bg-border/35 bg-bg-primary/20 transition-colors duration-200 group cursor-pointer overflow-hidden ${
           isSelected ? 'ring-1 ring-accent/25 bg-bg-border/10' : 'hover:bg-bg-border/10'
         }`}
       >

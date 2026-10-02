@@ -103,6 +103,11 @@ import {
 import { saveAssigneeProgress } from '@/services/assigneeProgressActions';
 import { getSceneWorkLinkSlots, getUniqueSceneUuids } from '@/utils/sceneWorkLinks';
 import { SceneWorkLinkBadges } from '@/components/scenes/SceneWorkLinkBadges';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { useGridFlip } from '@/hooks/useGridFlip';
+import { useReflowLinger } from '@/hooks/useReflowLinger';
+import { holdLingeringItems, lingerHoldMs, shouldHoldForReflow, type LingerPhase } from '@/utils/reflowLinger';
+import { resolveDetailContext, type DetailTarget } from '@/utils/sceneFlip';
 
 type SceneHashTarget = Extract<HashTarget, { kind: 'scene' }>;
 
@@ -258,6 +263,11 @@ function sortMergedScenesForAssigneeFilter(
       : incompleteForMerged(b) - incompleteForMerged(a);
     return sortDir === 'asc' ? cmp : -cmp;
   });
+}
+
+/** 체크한 카드 붙잡기 키(움직임 폴리싱 15번) — 씬 uuid, 없으면 시트·씬 번호. 통합 카드는 BG·액팅 키 두 개를 가진다. */
+function reflowSceneKey(sheetName: string, scene: Scene): string {
+  return scene.id ? `uuid:${scene.id}` : `${sheetName}:${scene.sceneId}`;
 }
 
 /* ── 라쏘 드래그 선택 훅 ── */
@@ -528,9 +538,11 @@ interface SceneCardProps {
   onCelebrationEnd: () => void;
   onCtrlClick?: () => void;
   onShiftClick?: () => void;
+  /** 체크로 필터에서 빠질 카드가 잠깐 머무는 동안 — 'hold' 옅게(곧 빠짐), 'leaving' 사라지는 중 (움직임 폴리싱 15번). */
+  lingering?: LingerPhase | null;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, hasUnreadComments = false, revisionCount = 0, selectionId, sheetName, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onActPhaseStateClick, onActFeedbackRequest, onActRoundBump, onAssigneeStageToggle, onAssigneeActPhaseStateClick, onAssigneeActFeedbackRequest, onAssigneeActRoundBump, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, hasUnreadComments = false, revisionCount = 0, selectionId, sheetName, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onActPhaseStateClick, onActFeedbackRequest, onActRoundBump, onAssigneeStageToggle, onAssigneeActPhaseStateClick, onAssigneeActFeedbackRequest, onAssigneeActRoundBump, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick, lingering }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   // 실시간 편집 프레즌스 — 이 씬 파일을 지금 열어둔 다른 팀원(자기 제외). 단일 부서라 부서 모호성 없음.
@@ -607,6 +619,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   return (
     <motion.div
       data-scene-id={selectionId ?? scene.sceneId}
+      data-lingering={lingering ?? undefined}
       className={cn(
         'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer',
         'shadow-[0_2px_6px_rgba(0,0,0,0.08),0_8px_20px_rgba(0,0,0,0.12)]',
@@ -1834,6 +1847,28 @@ export function ScenesView() {
   const colorMode = useAppStore((s) => s.colorMode);
   const revisionCountByScene = useRevisionStore((s) => s.revisionCountByScene);
   const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
+  // 움직임 폴리싱 15번: 필터·정렬을 켠 채 체크한 카드를 잠깐 제자리에 붙잡아 두고(곧 빠짐), 바뀌는 카드는 미끄러뜨린다.
+  const { reduce: reduceMotion } = useMotionPref();
+  const reflowScope = JSON.stringify([
+    selectedEpisode, selectedPart, selectedDepartment, sceneViewMode, sceneGroupMode,
+    statusFilter, sortKey, sortDir, searchQuery, selectedAssignee,
+  ]);
+  const reflowLinger = useReflowLinger(reflowScope);
+  /** 지금 화면 순서(붙잡기 키 → 카드 순서)와 붙잡기 조건. 렌더마다 갱신 — 토글 핸들러가 최신 값을 읽는다. */
+  const reflowViewRef = useRef({ statusFilter, sortKey, sceneViewMode, order: new Map<string, number>() });
+  reflowViewRef.current.statusFilter = statusFilter;
+  reflowViewRef.current.sortKey = sortKey;
+  reflowViewRef.current.sceneViewMode = sceneViewMode;
+  const holdLinger = reflowLinger.hold;
+  /** 체크 직전(낙관 갱신 전)에 부른다. 카드 보기 + 상태 필터·진행률 정렬일 때만 붙잡는다. */
+  const holdSceneForReflow = useCallback((sheetName: string, scene: Scene, celebrating: boolean) => {
+    const view = reflowViewRef.current;
+    if (view.sceneViewMode !== 'card' || !shouldHoldForReflow(view.statusFilter, view.sortKey)) return;
+    const key = reflowSceneKey(sheetName, scene);
+    const order = view.order.get(key);
+    if (order === undefined) return;
+    holdLinger([key], order, lingerHoldMs(celebrating));
+  }, [holdLinger]);
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment, setDashboardDeptFilter } = useAppStore();
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
@@ -1987,6 +2022,7 @@ export function ScenesView() {
         ...(nextProgress ? { assigneeProgress: nextProgress } : {}),
       };
 
+      holdSceneForReflow(sheetName, scene, Boolean(completionMeta?.nextCompletedBy && completionMeta.nextCompletedAt));
       updateSceneByUuid(sceneUuid, phasePatch);
       if (completionMeta) {
         if (completionMeta.nextCompletedBy && completionMeta.nextCompletedAt) {
@@ -2097,7 +2133,7 @@ export function ScenesView() {
         }
       }
     },
-    [updateSceneByUuid, updateSceneFieldOptimistic, currentUser?.id, currentUser?.name, writeAssigneeProgressMetadata],
+    [updateSceneByUuid, updateSceneFieldOptimistic, currentUser?.id, currentUser?.name, writeAssigneeProgressMetadata, holdSceneForReflow],
   );
 
   const handleActFeedbackRequest = useCallback(
@@ -2274,6 +2310,7 @@ export function ScenesView() {
         });
       };
 
+      holdSceneForReflow(sheetName, scene, !wasFullyDone && willBeFullyDone);
       updateSceneByUuid(sceneUuid, patch);
       if (!wasFullyDone && willBeFullyDone) {
         setCelebratingTarget(buildCompletionTarget(sheetName, scene, sceneIndex));
@@ -2352,7 +2389,7 @@ export function ScenesView() {
         },
       });
     },
-    [currentUser?.name, enqueueAssigneeProgressWrite, updateSceneByUuid, updateSceneCompletionMeta],
+    [currentUser?.name, enqueueAssigneeProgressWrite, updateSceneByUuid, updateSceneCompletionMeta, holdSceneForReflow],
   );
 
   const handleAssigneeStageToggle = useCallback(
@@ -3186,12 +3223,34 @@ export function ScenesView() {
     loadArchived();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // #화·#파트 점프·뒤로 가기 시 열려 있는 씬 상세 모달을 닫는 신호(아래 effect 가 소비한다).
+  const closeSceneModalSignal = useAppStore((s) => s.closeSceneModalSignal);
+  // 마지막으로 소비한 signal 값을 추적해 "값이 실제로 증가(변경)" 했을 때만 닫는다.
+  // mount/remount 직후엔 ref===store값이라 닫지 않음 → 뷰 전환 remount 시 pending 점프 모달을 즉시 닫지 않는다.
+  const lastCloseSignalRef = useRef(closeSceneModalSignal);
+  // 닫기 신호를 받은 렌더부터 창이 다 닫힐 때까지 단일 상세 창은 직전에 보이던 씬을 그대로 가리킨다(리뷰 반영).
+  // 점프·뒤로 가기는 파트를 바꾸는 같은 갱신에서 신호를 보내므로, '지금 파트의 n번째'로 찾으면 가라앉는 동안 엉뚱한 씬이 보인다.
+  // - 신호를 소비하기 전 렌더: 값 비교(closeSceneModalSignal !== lastCloseSignalRef)로 안다.
+  // - 소비한 뒤 ~ onClose: closingDetailPinRef 로 안다(effect 의 setDetailContext 보다 먼저 다른 갱신이 그려져도 흔들리지 않게).
+  const detailPinRef = useRef<DetailTarget | null>(null);
+  const closingDetailPinRef = useRef<DetailTarget | null>(null);
+  if (detailSceneIndex === null) closingDetailPinRef.current = null; // 닫힌 뒤에는 고정할 것이 없다
+  const resolvedDetail = resolveDetailContext({
+    context: detailContext,
+    sceneIndex: detailSceneIndex,
+    currentSheetName: currentPart?.sheetName ?? null,
+    closePending: closeSceneModalSignal !== lastCloseSignalRef.current || closingDetailPinRef.current !== null,
+    pinned: closingDetailPinRef.current ?? detailPinRef.current,
+  });
+  detailPinRef.current = resolvedDetail.pin;
+  const shownDetailContext = resolvedDetail.context;
+
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   // detailContext가 있으면 해당 시트의 씬을, 없으면 기존 방식
   const detailScene = (() => {
-    if (detailContext) {
-      const part = allParts.find((p) => p.sheetName === detailContext.sheetName);
-      return part?.scenes[detailContext.sceneIndex] ?? null;
+    if (shownDetailContext) {
+      const part = allParts.find((p) => p.sheetName === shownDetailContext.sheetName);
+      return part?.scenes[shownDetailContext.sceneIndex] ?? null;
     }
     if (detailSceneIndex !== null) {
       return currentPart?.scenes[detailSceneIndex] ?? null;
@@ -3200,11 +3259,11 @@ export function ScenesView() {
   })();
 
   // 상세 모달의 sheetName / sceneIndex / department
-  const detailSheetName = detailContext?.sheetName ?? currentPart?.sheetName ?? '';
-  const detailSceneIdx = detailContext?.sceneIndex ?? detailSceneIndex;
+  const detailSheetName = shownDetailContext?.sheetName ?? currentPart?.sheetName ?? '';
+  const detailSceneIdx = shownDetailContext?.sceneIndex ?? detailSceneIndex;
   const detailDept: Department = (() => {
-    if (detailContext) {
-      const part = allParts.find((p) => p.sheetName === detailContext.sheetName);
+    if (shownDetailContext) {
+      const part = allParts.find((p) => p.sheetName === shownDetailContext.sheetName);
       return part?.department ?? 'bg';
     }
     return effectiveDept;
@@ -3224,6 +3283,8 @@ export function ScenesView() {
         (s.assignee || '').toLowerCase().includes(q)
     );
   }
+  // 방금 체크한 카드를 붙잡아 둘 때 쓰는 후보(상태 필터 전) — 움직임 폴리싱 15번
+  const lingerPoolScenes = scenes;
   // 상태 필터
   if (statusFilter !== 'all') {
     scenes = scenes.filter((s) => matchesAssigneeStatusFilter(s, statusFilter, selectedAssignee));
@@ -3247,6 +3308,14 @@ export function ScenesView() {
     }
     return sortDir === 'asc' ? cmp : -cmp;
   });
+  // 방금 체크해 필터·정렬에서 자리가 바뀐 카드는 잠깐 체크 전 자리에 (움직임 폴리싱 15번)
+  const heldSingleScenes = holdLingeringItems(
+    scenes,
+    lingerPoolScenes,
+    (scene) => [reflowSceneKey(currentPart?.sheetName ?? '', scene)],
+    reflowLinger.entries,
+  );
+  scenes = heldSingleScenes.items;
 
   // 레이아웃별 그룹핑 (P1-4)
   const layoutGroups = (() => {
@@ -3328,7 +3397,7 @@ export function ScenesView() {
     sortKey,
     sortDir,
   });
-  const mergedScenes = useMemo(
+  const sortedMergedScenes = useMemo(
     () => {
       const statusMatchedMergedScenes = selectedDepartment === 'all'
         ? searchFilteredMergedScenes.filter((merged) => mergedMatchesStatusFilter(merged, statusFilter, selectedAssignee))
@@ -3336,6 +3405,58 @@ export function ScenesView() {
       return sortMergedScenesForAssigneeFilter(statusMatchedMergedScenes, sortKey, sortDir, selectedAssignee);
     },
     [searchFilteredMergedScenes, selectedDepartment, statusFilter, selectedAssignee, sortKey, sortDir],
+  );
+  // 방금 체크한 통합 카드도 같은 방식으로 붙잡아 둔다 (움직임 폴리싱 15번)
+  const heldMergedScenes = useMemo(
+    () => holdLingeringItems(
+      sortedMergedScenes,
+      searchFilteredMergedScenes,
+      (merged) => [
+        ...(merged.bgScene ? [reflowSceneKey(bgPart?.sheetName ?? '', merged.bgScene)] : []),
+        ...(merged.actScene ? [reflowSceneKey(actPart?.sheetName ?? '', merged.actScene)] : []),
+      ],
+      reflowLinger.entries,
+    ),
+    [sortedMergedScenes, searchFilteredMergedScenes, bgPart?.sheetName, actPart?.sheetName, reflowLinger.entries],
+  );
+  const mergedScenes = heldMergedScenes.items;
+  // 화면 순서 기록 — 토글 핸들러가 '체크 전 자리'를 여기서 읽는다.
+  {
+    const order = new Map<string, number>();
+    if (selectedDepartment === 'all') {
+      mergedScenes.forEach((merged, index) => {
+        if (merged.bgScene) order.set(reflowSceneKey(bgPart?.sheetName ?? '', merged.bgScene), index);
+        if (merged.actScene) order.set(reflowSceneKey(actPart?.sheetName ?? '', merged.actScene), index);
+      });
+    } else {
+      scenes.forEach((scene, index) => order.set(reflowSceneKey(currentPart?.sheetName ?? '', scene), index));
+    }
+    reflowViewRef.current.order = order;
+  }
+  const singleLingerPhase = (scene: Scene): LingerPhase | null =>
+    (heldSingleScenes.leaving.has(scene)
+      ? reflowLinger.phaseOf([reflowSceneKey(currentPart?.sheetName ?? '', scene)])
+      : null);
+  const mergedLingerPhase = (merged: MergedScene): LingerPhase | null =>
+    (heldMergedScenes.leaving.has(merged)
+      ? reflowLinger.phaseOf([
+          ...(merged.bgScene ? [reflowSceneKey(bgPart?.sheetName ?? '', merged.bgScene)] : []),
+          ...(merged.actScene ? [reflowSceneKey(actPart?.sheetName ?? '', merged.actScene)] : []),
+        ])
+      : null);
+  // 필터·정렬을 바꾸거나 붙잡아 둔 카드가 빠질 때, 남는 카드는 새 자리로 미끄러지고 새 카드는 떠오른다.
+  // 검색어는 글자마다 바뀌므로 enterKey 로만 넘긴다 — 위치를 다시 재지 않고 새로 보이는 카드만 떠오른다.
+  // 체크 같은 데이터 변경은 키에 넣지 않는다(붙잡기가 맡는다). 파트·화면이 바뀌는 전환은 scope 로 건너뛴다.
+  const sceneListRef = useRef<HTMLDivElement>(null);
+  useGridFlip(
+    sceneListRef,
+    JSON.stringify([statusFilter, selectedAssignee, sortKey, sortDir, sceneGroupMode, reflowLinger.generation]),
+    {
+      enterKey: searchQuery,
+      scope: JSON.stringify([selectedEpisode, selectedPart, selectedDepartment, sceneViewMode]),
+      disabled: reduceMotion || sceneViewMode !== 'card' || lassoRect !== null,
+      idAttribute: 'data-scene-id',
+    },
   );
   // 'all' 모드: 화면에 실제 표시되는 병합 카드 기준 진행률
   const allModeScenes = useMemo(
@@ -3509,13 +3630,24 @@ export function ScenesView() {
   // navigateToSceneView({ closeModal: true }) 가 store 카운터를 올리면 감지해 두 상세 모달 상태를 비운다.
   // 두 onClose 핸들러(SceneDetailModal / UnifiedSceneDetailModal)와 동일하게 정리한다.
   // scene 점프는 modalRequest 경로라 이 신호를 보내지 않으므로(navigateToSceneView 가드) 충돌 없음.
-  const closeSceneModalSignal = useAppStore((s) => s.closeSceneModalSignal);
-  // 마지막으로 소비한 signal 값을 추적해 "값이 실제로 증가(변경)" 했을 때만 닫는다.
-  // mount/remount 직후엔 ref===store값이라 닫지 않음 → 뷰 전환 remount 시 pending 점프 모달을 즉시 닫지 않는다.
-  const lastCloseSignalRef = useRef(closeSceneModalSignal);
+  // (closeSceneModalSignal·lastCloseSignalRef 는 위 detailScene 계산 앞에 있다 — 닫히는 동안 대상 고정에 쓴다.)
+  // 움직임 폴리싱 14번: 상세 창이 떠 있으면 바로 지우지 않고 '닫아 달라'는 신호(sceneModalCloseToken)만 보낸다 →
+  // 창이 Esc·바깥 클릭과 같은 0.16초 가라앉음을 거친 뒤 자기 onClose 로 아래와 같은 상태를 비운다.
+  const [sceneModalCloseToken, setSceneModalCloseToken] = useState(0);
+  const sceneModalShownRef = useRef(false);
+  sceneModalShownRef.current = Boolean((detailScene && detailSceneIdx !== null) || (detailMerged && selectedDepartment === 'all'));
   useEffect(() => {
     if (closeSceneModalSignal === lastCloseSignalRef.current) return; // 변화 없으면 무시(remount 포함)
     lastCloseSignalRef.current = closeSceneModalSignal;
+    if (sceneModalShownRef.current) {
+      // 가라앉는 동안 단일 창이 보이는 씬을 고정한다(파트가 바뀌어도 '지금 파트의 n번째'로 다시 찾지 않게).
+      const pin = detailPinRef.current;
+      closingDetailPinRef.current = pin;
+      if (pin) setDetailContext((prev) => prev ?? pin);
+      setSceneModalCloseToken((n) => n + 1);
+      return;
+    }
+    closingDetailPinRef.current = null;
     setDetailSceneIndex(null);
     setDetailContext(null);
     setDetailMerged(null);
@@ -3806,6 +3938,9 @@ export function ScenesView() {
       }
       return null;
     })();
+
+    // 필터·정렬을 켠 채 체크하면 카드가 그 순간 빠지거나 순간이동하지 않게 잠깐 제자리에 둔다(움직임 폴리싱 15번).
+    holdSceneForReflow(sheetName, scene, Boolean(completionMeta?.nextCompletedBy && completionMeta.nextCompletedAt));
 
     // 낙관적 업데이트 — 즉시 UI 반영
     changedStages.forEach((changedStage) => {
@@ -5804,6 +5939,7 @@ export function ScenesView() {
       {/* ─── 'all' 모드: 통합 뷰 (카드/테이블/시트) ─── */}
       {selectedDepartment === 'all' ? (
         <div
+          ref={sceneListRef}
           className={cn(
             'relative flex-1 min-h-0 overflow-auto',
             isVisibleComplete && 'rounded-[28px] border border-bg-border/40 bg-bg-card/20',
@@ -5887,6 +6023,7 @@ export function ScenesView() {
                             bgSheetName={bgPart?.sheetName ?? null}
                             actSheetName={actPart?.sheetName ?? null}
                             celebrating={matchesMergedSceneCelebration(m, celebratingTarget, bgPart?.sheetName ?? null, actPart?.sheetName ?? null)}
+                            lingering={mergedLingerPhase(m)}
                             isHighlighted={matchesMergedSceneIdentity(m, highlightSceneId)}
                             isSelected={selectedSceneIds.has(`bg:${m.mergedKey}`) || selectedSceneIds.has(`act:${m.mergedKey}`)}
                             searchQuery={searchQuery}
@@ -5940,6 +6077,7 @@ export function ScenesView() {
                       bgSheetName={bgPart?.sheetName ?? null}
                       actSheetName={actPart?.sheetName ?? null}
                       celebrating={matchesMergedSceneCelebration(m, celebratingTarget, bgPart?.sheetName ?? null, actPart?.sheetName ?? null)}
+                      lingering={mergedLingerPhase(m)}
                       isHighlighted={matchesMergedSceneIdentity(m, highlightSceneId)}
                       isSelected={selectedSceneIds.has(`bg:${m.mergedKey}`) || selectedSceneIds.has(`act:${m.mergedKey}`)}
                       searchQuery={searchQuery}
@@ -5979,6 +6117,7 @@ export function ScenesView() {
       <>
       {/* 씬 목록 */}
       <div
+        ref={sceneListRef}
         className={cn(
           'relative flex-1 min-h-0 overflow-auto',
           isVisibleComplete && 'rounded-[28px] border border-bg-border/40 bg-bg-card/20'
@@ -6083,6 +6222,7 @@ export function ScenesView() {
                               sceneIndex={sIdx}
                               selectionId={selectionId}
                               celebrating={matchesSceneCelebration(currentPart?.sheetName, scene, sIdx, celebratingTarget)}
+                              lingering={singleLingerPhase(scene)}
                               department={effectiveDept}
                               isHighlighted={highlightSceneId === scene.sceneId}
                               isSelected={selectedSceneIds.has(selectionId)}
@@ -6155,6 +6295,7 @@ export function ScenesView() {
                     sceneIndex={sIdx}
                     selectionId={selectionId}
                     celebrating={matchesSceneCelebration(currentPart?.sheetName, scene, sIdx, celebratingTarget)}
+                    lingering={singleLingerPhase(scene)}
                     department={effectiveDept}
                     isHighlighted={highlightSceneId === scene.sceneId}
                     isSelected={selectedSceneIds.has(selectionId)}
@@ -6556,8 +6697,8 @@ export function ScenesView() {
       {detailScene && detailSceneIdx !== null && (() => {
         // 필터링된 씬 목록에서 현재/이전/다음 씬의 원본 인덱스를 계산
         const detailPartScenes = (() => {
-          if (detailContext) {
-            const part = allParts.find((p) => p.sheetName === detailContext.sheetName);
+          if (shownDetailContext) {
+            const part = allParts.find((p) => p.sheetName === shownDetailContext.sheetName);
             return part?.scenes ?? [];
           }
           return currentPart?.scenes ?? [];
@@ -6603,7 +6744,8 @@ export function ScenesView() {
             onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
             onAssigneeActFeedbackRequest={handleActFeedbackRequest}
             onAssigneeActRoundBump={handleAssigneeActRoundBump}
-            onClose={() => { setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
+            onClose={() => { closingDetailPinRef.current = null; setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
+            closeRequestToken={sceneModalCloseToken}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}
             focusCommentId={modalRouting?.focusCommentId}
@@ -6769,6 +6911,7 @@ export function ScenesView() {
             focusCommentId={modalRouting?.focusCommentId}
             focusRevisionCommentId={modalRouting?.focusRevisionCommentId}
             onClose={() => { setDetailMerged(null); setModalRouting(null); clearContinuitySource(); clearReference(); }}
+            closeRequestToken={sceneModalCloseToken}
             onSceneReference={openReference}
             onToggle={(sheet, id, stage, options) => handleToggleForSheet(sheet, id, stage, options)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}

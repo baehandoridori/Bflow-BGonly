@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react';
 import { toast as sonnerToast } from 'sonner';
-import { motion, AnimatePresence, useAnimationControls } from 'framer-motion';
+import { motion, AnimatePresence, type MotionProps } from 'framer-motion';
 import { formatStamp, formatTime } from '@/utils/formatTime';
 import {
   X,
@@ -54,6 +54,20 @@ import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { EditingPresenceBanner } from './EditingPresenceBanner';
 import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEditingPresenceStore';
 import { editingModalBeamClass } from '@/utils/editingPresence';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { useSceneFlip, useSavedFlash } from '@/hooks/useSceneFlip';
+import {
+  EMPTY_IMAGE_SAVE,
+  beginImageSave,
+  clearImageSave,
+  finishImageSave,
+  imageSaveView,
+  preloadImage,
+  sceneModalMotion,
+  showImageSavePreview,
+  tabShiftPx,
+  type ImageSaveState,
+} from '@/utils/sceneFlip';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -86,15 +100,6 @@ const SMA = {
 
 /** 부서 → 시각 색 (DEPARTMENT_CONFIGS 의 글로벌 부서 색 사용 — 다른 화면과 일관) */
 const deptVisualColor = (dept: Department): string => DEPARTMENT_CONFIGS[dept].color;
-
-/** 좌우 이동 슬라이드 — direction 1=다음(우→좌 슬라이드), -1=이전(좌→우 슬라이드)
- * 한솔 요청(2026-05-02): 더 길고 부드럽게 — 거리 ±48px, duration 0.45s.
- */
-const navVariants = {
-  enter: (dir: 1 | -1) => ({ x: dir > 0 ? 48 : -48, opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit:  (dir: 1 | -1) => ({ x: dir > 0 ? -48 : 48, opacity: 0 }),
-};
 
 export interface UnifiedSceneDetailModalProps {
   merged: MergedScene;
@@ -153,9 +158,12 @@ export interface UnifiedSceneDetailModalProps {
   onDockToggleSide?: (side: 'left' | 'right') => void;
   /** 4c PR2: dock 헤더 [메인으로] — 이 참조 패널을 메인 모달로 승격(부모가 처리). */
   onDockPromote?: () => void;
+  /** 바깥(#화·#파트 점프 등)에서 닫으라는 신호. 값이 바뀌면 Esc·바깥 클릭과 같은 부드러운 닫힘을 거친다. */
+  closeRequestToken?: number;
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
+const TAB_ORDER: readonly TabKey[] = ['detail', 'revisions', 'files', 'history'];
 
 export function UnifiedSceneDetailModal({
   merged,
@@ -195,9 +203,56 @@ export function UnifiedSceneDetailModal({
   referenceSide = 'right',
   onDockToggleSide,
   onDockPromote,
+  closeRequestToken,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
+  const { reduce } = useMotionPref();
+  const modalMotion = sceneModalMotion(reduce);
+
+  // ── 부드러운 닫힘 (움직임 폴리싱 14번) ──
+  // 부모가 바로 언마운트하면 안쪽 AnimatePresence 의 exit 이 돌지 않는다(framer 10 은 바깥 퇴장 신호가 안쪽 경계를
+  // 넘지 못함). 그래서 닫기 요청은 여기서 closing 으로 받아 창을 먼저 0.16초 가라앉히고, 다 끝나면 부모 onClose 를 부른다.
+  // Esc·바깥 클릭·닫기 버튼·삭제 후 닫기·바깥 닫기 신호(closeRequestToken)가 모두 이 길을 지난다.
+  // 부서 전환(handleDeptToggle)은 같은 컷을 곧바로 다시 여는 흐름이라 부모 onClose 를 바로 부른다.
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const closedRef = useRef(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  const finishClose = useCallback(() => {
+    if (!closingRef.current || closedRef.current) return;
+    closedRef.current = true;
+    onCloseRef.current();
+  }, []);
+  const requestClose = useCallback(() => {
+    if (dockMode !== 'modal') {
+      onCloseRef.current();
+      return;
+    }
+    if (closingRef.current) return;
+    closingRef.current = true;
+    // 가라앉는 0.16초 동안 창 안 클릭은 막는다(뒤 막은 클릭을 받아 흘려보내지 않는다 — 연타 무시).
+    if (shellRef.current) shellRef.current.style.pointerEvents = 'none';
+    setClosing(true);
+  }, [dockMode]);
+  useEffect(() => {
+    if (!closing) return;
+    // exit 완료 신호가 어떤 이유로 오지 않아도 반드시 닫힌다.
+    const timer = setTimeout(finishClose, 600);
+    return () => clearTimeout(timer);
+  }, [closing, finishClose]);
+  // 닫히는 도중에 부모가 먼저 언마운트해도(부서 전환 등) 부모 상태 정리는 빠뜨리지 않는다.
+  useEffect(() => () => finishClose(), [finishClose]);
+  const closeTokenRef = useRef(closeRequestToken);
+  useEffect(() => {
+    if (closeRequestToken === closeTokenRef.current) return;
+    closeTokenRef.current = closeRequestToken;
+    requestClose();
+  }, [closeRequestToken, requestClose]);
   // v1.23.3 (#2 한솔 보고): 토글 클릭 시 전역 부서 모드 변경 + 같은 컷 모달 자동 재오픈 ("판딩").
   //   v1.23.2 의 "닫고 다시 클릭하라" 보다 직관적. setPendingSceneModalRequest 로 ScenesView 가 자동 처리.
   const globalSelectedDepartment = useAppStore((s) => s.selectedDepartment);
@@ -304,6 +359,13 @@ export function UnifiedSceneDetailModal({
 
   // UI state — v1.18.0: initialTab 으로 외부에서 시작 탭 지정 가능 (알림 클릭 시 'revisions' 등)
   const [tab, setTab] = useState<TabKey>(initialTab ?? 'detail');
+  // 탭을 직접 눌러 바꿨을 때만 새 내용이 누른 탭 쪽(±8px)에서 0.15초 살며시 나타난다. 씬 넘김 때는 비운다.
+  const [tabShift, setTabShift] = useState<number | null>(null);
+  const selectTab = (next: TabKey) => {
+    if (next === tab) return;
+    setTabShift(tabShiftPx(TAB_ORDER, tab, next));
+    setTab(next);
+  };
   const [commentCount, setCommentCount] = useState(0);
   const [revisionCount, setRevisionCount] = useState(0);
   // 4c PR3: #칩 우클릭 메뉴 상태.
@@ -380,9 +442,15 @@ export function UnifiedSceneDetailModal({
     };
   }, [focusRevisionId, focusRevisionCommentId, tab]);
   const [showImageModal, setShowImageModal] = useState<null | 'storyboard' | 'guide'>(null);
-  const [imageLoading, setImageLoading] = useState<null | 'storyboard' | 'guide'>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<null | 'storyboard' | 'guide' | 'bg' | 'act' | 'both'>(null);
-  const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
+  // 칸마다 저장 상태(바로 보일 미리보기·저장 중·저장됨 시각)를 '어느 씬의 몇 번째 저장인지'와 함께 둔다.
+  // 붙여넣고 곧바로 다음 씬으로 넘기거나 거기서 또 붙여넣어도 앞 저장이 지금 씬의 표시를 건드리지 않는다(리뷰 반영).
+  const [imageSave, setImageSave] = useState<ImageSaveState>(EMPTY_IMAGE_SAVE);
+  const imageSaveTokenRef = useRef(0);
+  const imageSceneKey = bgScene ? `${bgSheetName ?? ''}:${bgScene.id || bgScene.no}` : '';
+  const storyboardSave = imageSaveView(imageSave, 'storyboard', imageSceneKey);
+  const guideSave = imageSaveView(imageSave, 'guide', imageSceneKey);
+  const imageLoading: null | 'storyboard' | 'guide' = storyboardSave.saving ? 'storyboard' : guideSave.saving ? 'guide' : null;
   const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
   const { persistLatestImageUrl } = useOptimisticSceneImageUrl('UnifiedSceneDetailModal');
   const addingRef = useRef<{ bg: boolean; acting: boolean }>({ bg: false, acting: false });
@@ -401,7 +469,7 @@ export function UnifiedSceneDetailModal({
       const previousUrl = imageType === 'storyboard' ? bgScene?.storyboardUrl : bgScene?.guideUrl;
 
       setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+      setImageSave((s) => clearImageSave(s, imageType, imageSceneKey));
 
       persistLatestImageUrl({
         sceneUuid,
@@ -413,15 +481,29 @@ export function UnifiedSceneDetailModal({
         },
       });
     },
-    [bgScene?.id, bgScene?.storyboardUrl, bgScene?.guideUrl, persistLatestImageUrl],
+    [bgScene?.id, bgScene?.storyboardUrl, bgScene?.guideUrl, persistLatestImageUrl, imageSceneKey],
   );
 
-  // 좌우 이동 슬라이드 방향 (1=다음, -1=이전). 키보드/버튼/도트 모두 handleNavigate 경유.
-  const [navDirection, setNavDirection] = useState<1 | -1>(1);
+  // ── 씬 넘김: 카드가 왼쪽·오른쪽으로 지나간다 (움직임 폴리싱 14번, 한솔 결정 2026-10-03) ──
+  // 창 틀(머리줄·탭·댓글 패널)은 제자리, 본문만 지나가고 씬 번호·제목은 같은 방향으로 짧게 굴러 바뀐다.
+  // 키보드/버튼/도트 모두 handleNavigate 경유.
+  const flipViewportRef = useRef<HTMLDivElement>(null);
+  const flipLayerRef = useRef<HTMLDivElement>(null);
+  const flipTitleRef = useRef<HTMLDivElement>(null);
+  const flip = useSceneFlip({
+    identity: `${currentMergedIndex}:${merged.sceneId}`,
+    reduce,
+    layerRef: flipLayerRef,
+    viewportRef: flipViewportRef,
+    titleRef: flipTitleRef,
+    hasPrev,
+    hasNext,
+  });
   const handleNavigate = useCallback((dir: 'prev' | 'next') => {
-    setNavDirection(dir === 'next' ? 1 : -1);
+    flip.prepare(dir === 'next' ? 1 : -1);
+    setTabShift(null);
     onNavigate?.(dir);
-  }, [onNavigate]);
+  }, [flip, onNavigate]);
 
   // 4c PR2: 모달 안에서 #씬 칩 클릭 → 점프 대신 좌/우 도킹 참조 패널로 연다.
   //   #파트/#화 및 onSceneReference 미연결 시에는 기존 점프(navigateToHashTarget) 유지.
@@ -433,22 +515,7 @@ export function UnifiedSceneDetailModal({
     setHashMenu({ target: t, x: e.clientX, y: e.clientY });
   }, []);
 
-  // 모달 박스 + 댓글 패널 wrapper 의 좌우 흔들림 (한솔 요청: "본체와 댓글 창 같이 옆으로 움직임")
-  // navigate 시 wrapper 가 ±36px 슬라이드 → 본체와 댓글이 함께 밀림.
-  const wrapperControls = useAnimationControls();
-  const isFirstNavRef = useRef(true);
-  useEffect(() => {
-    if (isFirstNavRef.current) {
-      isFirstNavRef.current = false;
-      return;
-    }
-    wrapperControls.start({
-      x: [navDirection > 0 ? -56 : 56, 0],
-      transition: { duration: 0.55, ease: [0.16, 1, 0.3, 1], times: [0, 1] },
-    });
-    // navDirection 도 deps 에 넣으면 같은 방향 연속 navigate 시 효과 안 발동 — currentMergedIndex 만 추적.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentMergedIndex]);
+  // (예전의 본체+댓글 창 통째 흔들림(±56px)은 없앴다 — 한솔 결정: 창 틀은 제자리, 본문 카드만 지나간다.)
 
   // 리테이크 탭 라벨용 — open 우선, 없으면 전체
   const revisionTabBadge = openRevCount > 0 ? openRevCount : (revisionCount > 0 ? revisionCount : 0);
@@ -557,21 +624,31 @@ export function UnifiedSceneDetailModal({
     if (dockMode !== 'modal') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
+      if (closingRef.current) return; // 가라앉는 중에는 단축키를 받지 않는다
       if (e.key === 'Escape') {
         if (showImageModal) { setShowImageModal(null); return; }
         if (deleteConfirm) { setDeleteConfirm(null); return; }
-        onClose();
+        requestClose();
         return;
       }
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (showImageModal) return;
-      if (e.key === 'ArrowLeft' && hasPrev) handleNavigate('prev');
-      if (e.key === 'ArrowRight' && hasNext) handleNavigate('next');
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (!onNavigate) return;
+      const dir = e.key === 'ArrowRight' ? 1 : -1;
+      // 맨 끝에서 더 넘기면 살짝 튕겨 돌아온다(누르고 있어도 한 번만).
+      if (!(dir > 0 ? hasNext : hasPrev)) {
+        if (!e.repeat) flip.bounce(dir);
+        return;
+      }
+      // 키를 누르고 있으면 약 0.14초마다 한 장씩 착착 넘긴다.
+      if (!flip.allowKey(e.repeat)) return;
+      handleNavigate(dir > 0 ? 'next' : 'prev');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dockMode, onClose, handleNavigate, hasPrev, hasNext, showImageModal, deleteConfirm]);
+  }, [dockMode, requestClose, handleNavigate, flip, onNavigate, hasPrev, hasNext, showImageModal, deleteConfirm]);
 
   // v1.30.1 (한솔 보고 2026-05-23): 클립보드 붙여넣기 UI/UX 강화.
   //   - 호버 중인 슬롯이 있으면 그 슬롯을 target. 없으면 빈 슬롯 자동 우선 (기존 동작).
@@ -603,11 +680,14 @@ export function UnifiedSceneDetailModal({
     return () => document.removeEventListener('keydown', onKey, true);
   }, [pinnedImageSlot]);
   // Ctrl+V 이미지 붙여넣기 (BG 만, 도킹 모드 제외)
+  // 아래 구독은 씬이 바뀌어도 그림 주소가 같으면(둘 다 빈 칸 등) 다시 걸리지 않는다 — 저장 함수는 늘 지금 씬 것을 ref 로 읽는다.
+  const uploadImageRef = useRef<(blob: Blob, imageType: 'storyboard' | 'guide') => Promise<boolean>>(async () => false);
   useEffect(() => {
     if (dockMode !== 'modal') return;
     if (!bgScene || !bgSheetName) return;
     const onPaste = async (e: ClipboardEvent) => {
       if (showImageModal) return;
+      if (closingRef.current) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       const items = e.clipboardData?.items;
@@ -629,7 +709,7 @@ export function UnifiedSceneDetailModal({
           setPinnedImageSlot(null);
           // 코덱스 2차 P2: uploadImage 가 boolean 반환 — 성공 시에만 success 토스트.
           //   실패 시 uploadImage 자체가 error 토스트 띄움. 이중 토스트 방지.
-          const ok = await uploadImage(blob, imageType);
+          const ok = await uploadImageRef.current(blob, imageType);
           if (ok) {
             const slotLabel = imageType === 'storyboard' ? '스토리보드' : '가이드';
             sonnerToast.success(`${slotLabel} 칸에 붙여넣어졌어요`);
@@ -650,13 +730,15 @@ export function UnifiedSceneDetailModal({
       sonnerToast.error('BG 씬이 없어 이미지를 저장할 수 없습니다.');
       return false;
     }
+    // 이 저장의 번호·대상 씬 — 끝날 때 더 새 저장이 칸을 차지했거나 씬이 바뀌었으면 표시를 건드리지 않는다.
+    const token = ++imageSaveTokenRef.current;
+    setImageSave((s) => beginImageSave(s, imageType, imageSceneKey, token));
     try {
-      setImageLoading(imageType);
       // v1.30.2 (코덱스 P1, 한솔 보고 2026-05-24): 주석 결과(PNG, 투명 배경) 가 JPEG 으로 재인코딩되며
       //   투명 픽셀이 검정 matte 되던 버그 fix — 입력 mime 이 PNG 면 PNG 로 유지.
       const isPng = blob.type === 'image/png';
       const base64 = await resizeBlob(blob, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
+      setImageSave((s) => showImageSavePreview(s, imageType, token, base64));
       const { saveImage: si } = await import('@/utils/imageUtils');
       const url = await si(
         base64,
@@ -666,17 +748,18 @@ export function UnifiedSceneDetailModal({
       );
       const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
       onFieldUpdate(bgSheetName, bgSceneIndex, field, url);
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+      // 저장된 그림을 미리 받아 그린 뒤에 미리보기를 걷는다 — 바꾸는 순간 칸이 비거나 덜컹이지 않게.
+      await preloadImage(url);
+      setImageSave((s) => finishImageSave(s, imageType, token, Date.now()));
       return true;
     } catch (err) {
       console.error('[UnifiedSceneDetailModal] 이미지 업로드 실패', err);
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+      setImageSave((s) => finishImageSave(s, imageType, token, null));
       sonnerToast.error(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
       return false;
-    } finally {
-      setImageLoading(null);
     }
-  }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate]);
+  }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate, imageSceneKey]);
+  uploadImageRef.current = uploadImage;
 
   const pickFile = useCallback((imageType: 'storyboard' | 'guide') => {
     const input = document.createElement('input');
@@ -694,9 +777,9 @@ export function UnifiedSceneDetailModal({
     const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
     onFieldUpdate(bgSheetName, bgSceneIndex, field, '');
     setLatestImageUrls((prev) => ({ ...prev, [imageType]: '' }));
-    setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+    setImageSave((s) => clearImageSave(s, imageType, imageSceneKey));
     setDeleteConfirm(null);
-  }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate]);
+  }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate, imageSceneKey]);
 
   const handleAddDept = useCallback(async (dept: Department) => {
     if (addingRef.current[dept]) return;
@@ -730,22 +813,29 @@ export function UnifiedSceneDetailModal({
     : 'h-[min(900px,92vh)]';
 
   // ── 본체 motion.div — modal/dock 모드 공통 ──
+  // modal: 떠오르기는 transform 문자열(합성 스레드). 카드에서 이어 열면(연결 확대) SceneContinuityTransition 이
+  //   같은 요소를 WAAPI 로 움직이므로 framer 는 손대지 않는다(동작 줄이기면 연결 확대를 건너뛰고 투명도만).
+  //   닫기는 본체 대신 창 묶음(본체+댓글 패널)에 shellExit 를 건다.
+  const continuityOpen = !!continuitySourceElement && !reduce;
+  const bodyMotionProps: MotionProps = dockMode !== 'modal'
+    ? {
+        initial: { opacity: 0, x: dockInitialX },
+        animate: { opacity: 1, scale: 1, y: 0, x: 0 },
+        exit: { opacity: 0, x: dockInitialX },
+        transition: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+      }
+    : continuityOpen
+      ? { initial: { opacity: 1 }, animate: { opacity: 1 } }
+      : {
+          initial: modalMotion.body.initial,
+          animate: modalMotion.body.animate,
+          transition: modalMotion.body.transition,
+        };
   const bodyEl = (
     <motion.div
       key="unified-modal-body"
       ref={modalMainRef}
-      initial={
-        dockMode !== 'modal'
-          ? { opacity: 0, x: dockInitialX }
-          : continuitySourceElement ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: 12 }
-      }
-      animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
-      exit={
-        dockMode !== 'modal'
-          ? { opacity: 0, x: dockInitialX }
-          : { opacity: 0, scale: 0.96, y: 6 }
-      }
-      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+      {...bodyMotionProps}
       className={cn(
         'relative flex flex-col bg-bg-card border border-bg-border overflow-hidden',
         bodyWidthClass,
@@ -755,7 +845,9 @@ export function UnifiedSceneDetailModal({
       )}
       style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
     >
-            {/* §3-1 배경 글로우 두 개 — 시그니처 */}
+            {/* §3-1 배경 글로우 두 개 — 시그니처.
+                움직임 폴리싱 14번: filter blur(40/50px) 는 창이 커지고 줄어드는 동안 매 프레임 다시 그려져서,
+                미리 부드럽게 퍼지는 그라데이션으로 같은 모양을 낸다(흐림 계산 없음). */}
             <div
               aria-hidden
               style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}
@@ -763,49 +855,40 @@ export function UnifiedSceneDetailModal({
               <div
                 style={{
                   position: 'absolute',
-                  top: -100,
-                  left: -100,
-                  width: 400,
-                  height: 400,
+                  top: -140,
+                  left: -140,
+                  width: 480,
+                  height: 480,
                   borderRadius: 999,
-                  background: `radial-gradient(circle, ${SMA.accentAlpha(0.19)} 0%, transparent 60%)`,
-                  filter: 'blur(40px)',
+                  background: `radial-gradient(circle, ${SMA.accentAlpha(0.17)} 0%, ${SMA.accentAlpha(0.1)} 28%, ${SMA.accentAlpha(0.035)} 50%, transparent 70%)`,
                 }}
               />
               <div
                 style={{
                   position: 'absolute',
-                  bottom: -150,
-                  right: -100,
-                  width: 500,
-                  height: 500,
+                  bottom: -200,
+                  right: -150,
+                  width: 600,
+                  height: 600,
                   borderRadius: 999,
-                  background: `radial-gradient(circle, ${SMA.accentSubAlpha(0.14)} 0%, transparent 60%)`,
-                  filter: 'blur(50px)',
+                  background: `radial-gradient(circle, ${SMA.accentSubAlpha(0.12)} 0%, ${SMA.accentSubAlpha(0.07)} 28%, ${SMA.accentSubAlpha(0.025)} 50%, transparent 70%)`,
                 }}
               />
             </div>
 
             {/* 본체 컨텐츠 — 글로우 위에 얹기 */}
             <div className="relative z-[1] flex flex-col h-full min-h-0">
-              {/* 헤더 (글래스) */}
+              {/* 헤더 — 창 틀이라 씬을 넘겨도 제자리.
+                  움직임 폴리싱 14번: 뒤 흐림(backdrop-filter 20px)은 창이 움직일 때마다 다시 계산되는데 배경이 거의
+                  불투명해 눈에 보이지 않아 뺐다(겉모습 같음). */}
               <div
                 className="flex items-center gap-3 px-5 py-3 border-b border-bg-border/40 shrink-0"
-                style={{
-                  background: 'rgba(255,255,255,0.015)',
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
-                }}
+                style={{ background: 'rgba(255,255,255,0.015)' }}
               >
-                <AnimatePresence mode="wait" custom={navDirection} initial={false}>
-                  <motion.div
-                    key={`hdr:${currentMergedIndex}:${unifiedSceneId}`}
-                    custom={navDirection}
-                    variants={navVariants}
-                    initial="enter"
-                    animate="center"
-                    exit="exit"
-                    transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                {/* 씬 번호·제목 — 본문과 같은 방향으로 짧게 굴러 바뀐다(useSceneFlip 이 고스트를 이 칸 안에 깐다). */}
+                <div className="sf-title-slot flex min-w-0">
+                  <div
+                    ref={flipTitleRef}
                     className="flex items-center gap-2 min-w-0"
                     data-continuity-target="title"
                   >
@@ -830,14 +913,16 @@ export function UnifiedSceneDetailModal({
                         {totalPct}%
                       </span>
                     )}
-                  </motion.div>
-                </AnimatePresence>
+                  </div>
+                </div>
 
-                {/* 네비게이션 — handleNavigate 경유 (방향 추적) */}
+                {/* 네비게이션 — handleNavigate 경유 (방향 추적). 마우스를 올리면 그쪽에 다음 카드 모서리가 비친다. */}
                 {(hasPrev || hasNext) && (
                   <div className="ml-auto flex items-center gap-1">
                     <button
                       onClick={() => handleNavigate('prev')}
+                      onMouseEnter={() => flip.peek('prev')}
+                      onMouseLeave={() => flip.peek(null)}
                       disabled={!hasPrev}
                       className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
                       title="이전 씬"
@@ -849,6 +934,8 @@ export function UnifiedSceneDetailModal({
                     </span>
                     <button
                       onClick={() => handleNavigate('next')}
+                      onMouseEnter={() => flip.peek('next')}
+                      onMouseLeave={() => flip.peek(null)}
                       disabled={!hasNext}
                       className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
                       title="다음 씬"
@@ -881,7 +968,7 @@ export function UnifiedSceneDetailModal({
                         key={d}
                         onClick={() => handleDeptToggle(d)}
                         className={cn(
-                          'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
+                          'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-colors whitespace-nowrap',
                           selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
                         )}
                         style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
@@ -902,7 +989,7 @@ export function UnifiedSceneDetailModal({
                           key={side}
                           onClick={() => onDockToggleSide?.(side)}
                           className={cn(
-                            'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
+                            'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-colors whitespace-nowrap',
                             dockMode === side ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
                           )}
                           style={dockMode === side ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
@@ -923,7 +1010,7 @@ export function UnifiedSceneDetailModal({
                 )}
 
                 <button
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer transition-colors shrink-0"
                   title="닫기"
                 >
@@ -939,37 +1026,36 @@ export function UnifiedSceneDetailModal({
                   className="-bottom-px h-0.5 rounded-sm bg-accent"
                   style={{ boxShadow: '0 0 8px rgb(var(--color-accent))' }}
                 />
-                <TabButton slideKey="detail" active={tab === 'detail'} onClick={() => setTab('detail')}>
+                <TabButton slideKey="detail" active={tab === 'detail'} onClick={() => selectTab('detail')}>
                   상세
                 </TabButton>
                 <TabButton
                   slideKey="revisions"
                   active={tab === 'revisions'}
-                  onClick={() => setTab('revisions')}
+                  onClick={() => selectTab('revisions')}
                   badge={revisionTabBadge > 0 ? revisionTabBadge : undefined}
                 >
                   리테이크
                 </TabButton>
-                <TabButton slideKey="files" active={tab === 'files'} onClick={() => setTab('files')}>
+                <TabButton slideKey="files" active={tab === 'files'} onClick={() => selectTab('files')}>
                   파일
                 </TabButton>
-                <TabButton slideKey="history" active={tab === 'history'} onClick={() => setTab('history')}>
+                <TabButton slideKey="history" active={tab === 'history'} onClick={() => selectTab('history')}>
                   히스토리
                 </TabButton>
               </div>
 
-              {/* 본체: 탭에 따라 분기 + 좌우 이동 슬라이드 애니메이션 */}
-              <div className="flex-1 min-h-0 relative overflow-hidden">
-                <AnimatePresence mode="wait" custom={navDirection} initial={false}>
-                  <motion.div
+              {/* 본체: 탭에 따라 분기 + 씬 넘김 카드(useSceneFlip).
+                  씬·탭이 바뀌면 key 로 새로 그려 스크롤·안쪽 상태가 처음부터 시작한다(예전과 같음).
+                  나가는 씬은 이 칸 뒤쪽에 고스트로 깔려 지나가고, 새 씬은 반대쪽에서 들어온다. */}
+              <div ref={flipViewportRef} className="sf-flip-viewport flex-1 min-h-0 overflow-hidden">
+                <div aria-hidden className="sf-peek sf-peek--prev" />
+                <div aria-hidden className="sf-peek sf-peek--next" />
+                  <div
                     key={`body:${tab}:${currentMergedIndex}`}
-                    custom={navDirection}
-                    variants={navVariants}
-                    initial="enter"
-                    animate="center"
-                    exit="exit"
-                    transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
-                    className="h-full overflow-auto"
+                    ref={flipLayerRef}
+                    className={cn('h-full overflow-auto', tabShift !== null && 'sf-tab-fade')}
+                    style={tabShift !== null ? ({ '--tab-dx': `${tabShift}px` } as CSSProperties) : undefined}
                   >
                     {tab === 'detail' && (
                       <>
@@ -982,8 +1068,9 @@ export function UnifiedSceneDetailModal({
                               <UnifiedImageSlot
                                 label="스토리보드"
                                 continuityTarget="storyboard"
-                                url={previewUrls.storyboard ?? latestImageUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
-                                loading={imageLoading === 'storyboard'}
+                                url={storyboardSave.preview ?? latestImageUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
+                                loading={storyboardSave.saving}
+                                savedAt={storyboardSave.savedAt}
                                 canEdit={!!bgScene && !!bgSheetName}
                                 onPick={() => pickFile('storyboard')}
                                 onRemove={() => setDeleteConfirm('storyboard')}
@@ -998,8 +1085,9 @@ export function UnifiedSceneDetailModal({
                               <UnifiedImageSlot
                                 label="가이드"
                                 continuityTarget="guide"
-                                url={previewUrls.guide ?? latestImageUrls.guide ?? bgScene?.guideUrl ?? ''}
-                                loading={imageLoading === 'guide'}
+                                url={guideSave.preview ?? latestImageUrls.guide ?? bgScene?.guideUrl ?? ''}
+                                loading={guideSave.saving}
+                                savedAt={guideSave.savedAt}
                                 canEdit={!!bgScene && !!bgSheetName}
                                 onPick={() => pickFile('guide')}
                                 onRemove={() => setDeleteConfirm('guide')}
@@ -1089,8 +1177,7 @@ export function UnifiedSceneDetailModal({
                     {tab === 'history' && (
                       <SceneHistoryTab activities={sceneActivities} />
                     )}
-                  </motion.div>
-                </AnimatePresence>
+                  </div>
               </div>
 
               {/* 하단 도트 인디케이터 — merged 단위 (상세 탭에서만) */}
@@ -1114,14 +1201,19 @@ export function UnifiedSceneDetailModal({
                         key={i}
                         onClick={() => {
                           const diff = i - currentMergedIndex;
+                          if (diff === 0 || !onNavigate) return;
                           const dir = diff < 0 ? 'prev' : 'next';
                           const steps = Math.abs(diff);
+                          // 여러 칸을 건너뛰어도 카드는 한 번만 넘긴다(마지막 칸에 도착할 때).
+                          flip.prepare(dir === 'next' ? 1 : -1, steps);
+                          setTabShift(null);
                           for (let j = 0; j < steps; j++) {
-                            setTimeout(() => handleNavigate(dir), j * 30);
+                            setTimeout(() => onNavigate(dir), j * 30);
                           }
                         }}
                         className={cn(
-                          'rounded-full transition-all duration-300 cursor-pointer',
+                          // 폭(w-1.5↔w-5)은 바로 바꾼다 — transition-all 이 되살아나 폭이 0.3초 늘어나며 줄을 밀었다.
+                          'rounded-full transition-colors cursor-pointer',
                           isCurrent ? 'w-5 h-1.5 bg-accent' : 'w-1.5 h-1.5 bg-text-secondary/30 hover:bg-text-secondary/50',
                         )}
                         style={isCurrent ? { boxShadow: '0 0 6px rgb(var(--color-accent))' } : undefined}
@@ -1136,30 +1228,34 @@ export function UnifiedSceneDetailModal({
   );
 
   return (
-    <AnimatePresence>
+    <>
+    <AnimatePresence onExitComplete={dockMode === 'modal' ? finishClose : undefined}>
       {dockMode === 'modal' ? (
-        /* ── 모달 모드: 풀스크린 backdrop + 댓글 사이드 패널 ── */
+        /* ── 모달 모드: 풀스크린 backdrop + 댓글 사이드 패널 ──
+           닫을 때(closing) 이 묶음이 빠지며 창이 가라앉고 뒤 화면이 밝아진다 → 끝나면 finishClose 가 부모 onClose. */
+        !closing && (
         <motion.div
           key="unified-modal-backdrop"
           data-no-lasso
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          exit={modalMotion.backdropExit}
+          transition={modalMotion.backdropTransition}
           className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
           onMouseDown={(e) => {
             backdropMouseDownRef.current = e.target === e.currentTarget;
           }}
           onClick={(e) => {
             if (backdropMouseDownRef.current && e.target === e.currentTarget) {
-              onClose();
+              requestClose();
             }
             backdropMouseDownRef.current = false;
           }}
         >
-          {/* flex 래퍼 — 본체 + 댓글 (+ 참조 도킹 패널) (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) */}
+          {/* flex 래퍼 — 본체 + 댓글 (+ 참조 도킹 패널). 닫을 때 다 같이 살짝 작아지며 가라앉는다. */}
           <motion.div
-            animate={wrapperControls}
+            ref={shellRef}
+            exit={modalMotion.shellExit}
             className="flex gap-3 items-stretch max-w-full max-h-full overflow-x-auto overflow-y-hidden pb-1"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1205,11 +1301,14 @@ export function UnifiedSceneDetailModal({
             )}
           </motion.div>
         </motion.div>
+        )
       ) : (
         /* ── 도킹 모드: 본체만 (backdrop/댓글 패널 없음, 부모가 위치 제어) ── */
         bodyEl
       )}
+    </AnimatePresence>
 
+    <AnimatePresence>
       {continuitySourceElement && (
         <SceneContinuityTransition
           sourceElement={continuitySourceElement}
@@ -1269,20 +1368,21 @@ export function UnifiedSceneDetailModal({
             } else if (deleteConfirm === 'bg' && bgSheetName) {
               onDeleteDept(bgSheetName, bgSceneIndex);
               setDeleteConfirm(null);
-              onClose();
+              requestClose();
             } else if (deleteConfirm === 'act' && actSheetName) {
               onDeleteDept(actSheetName, actSceneIndex);
               setDeleteConfirm(null);
-              onClose();
+              requestClose();
             } else if (deleteConfirm === 'both') {
               onDeleteBoth();
               setDeleteConfirm(null);
-              onClose();
+              requestClose();
             }
           }}
         />
       )}
     </AnimatePresence>
+    </>
   );
 }
 
@@ -1674,6 +1774,7 @@ function UnifiedImageSlot({
   continuityTarget,
   url,
   loading,
+  savedAt,
   canEdit,
   onPick,
   onRemove,
@@ -1686,7 +1787,10 @@ function UnifiedImageSlot({
   label: string;
   continuityTarget?: 'storyboard' | 'guide';
   url: string;
+  /** 저장 중. 그림(미리보기)이 있으면 그 그림을 살짝 어둡게 + 아래 얇은 줄, 없으면 저장 중 칸. */
   loading: boolean;
+  /** 저장이 끝난 시각 — '저장됨 ✓' 칩. */
+  savedAt?: number;
   canEdit: boolean;
   onPick: () => void;
   onRemove: () => void;
@@ -1701,6 +1805,9 @@ function UnifiedImageSlot({
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [hover, setHover] = useState(false);
+  const showSaved = useSavedFlash(savedAt);
+  // 저장 중에는 교체·삭제·끌어 놓기를 받지 않는다(그림은 미리보기로 바로 보인다).
+  const canReplace = canEdit && !loading;
   // 호버 상태 변경을 부모에 전달 (paste handler 가 어느 슬롯에 넣을지 결정에 사용)
   const handleEnter = () => {
     if (!canEdit) return;
@@ -1729,18 +1836,20 @@ function UnifiedImageSlot({
     if (file && file.type.startsWith('image/')) onDropBlob(file);
   };
 
+  // 칸 높이는 빈 칸·저장 중·그림 모두 h-40 으로 같다 — 붙여넣고 저장이 끝나도 아래 내용이 밀리지 않는다.
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[11px] text-text-secondary uppercase tracking-wider font-medium">{label}</span>
-      {loading ? (
+      {loading && !url ? (
         <div
           data-continuity-target-box={continuityTarget}
-          className="flex items-center justify-center h-32 bg-bg-primary rounded-lg border border-bg-border"
+          className="relative flex items-center justify-center h-40 bg-bg-primary rounded-lg border border-bg-border overflow-hidden"
         >
           <div className="flex items-center gap-2 text-xs text-text-secondary/60">
             <div className="w-3 h-3 border-2 border-accent/40 border-t-accent rounded-full animate-spin" />
             저장 중...
           </div>
+          <span role="progressbar" aria-label="이미지 저장 중" className="sf-upload-bar" />
         </div>
       ) : url ? (
         <div className="relative group">
@@ -1748,47 +1857,52 @@ function UnifiedImageSlot({
             data-continuity-target-box={continuityTarget}
             onMouseEnter={handleEnter}
             onMouseLeave={handleLeave}
-            onDragOver={canEdit ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
-            onDragLeave={canEdit ? (e) => {
+            onDragOver={canReplace ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
+            onDragLeave={canReplace ? (e) => {
               const rt = e.relatedTarget as Node | null;
               if (rt && e.currentTarget.contains(rt)) return;
               setDragOver(false);
             } : undefined}
-            onDrop={canEdit ? handleDrop : undefined}
+            onDrop={canReplace ? handleDrop : undefined}
             className={cn(
               'relative h-40 rounded-lg overflow-hidden border-2 bg-bg-primary transition-all',
               dragOver ? 'border-accent ring-4 ring-accent/25'
-                : hover && canEdit ? 'border-accent/40 shadow-[0_0_18px_rgba(108,92,231,0.22)]'
+                : hover && canReplace ? 'border-accent/40 shadow-[0_0_18px_rgba(108,92,231,0.22)]'
                 : 'border-transparent',
             )}
           >
             <img
               src={url}
               alt={label}
-              className={cn('w-full h-full object-contain rounded-lg transition-all', dragOver && 'brightness-50')}
+              className={cn('sf-img w-full h-full object-contain rounded-lg', loading && 'sf-img--saving', dragOver && 'brightness-50')}
               draggable={false}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
+            {loading && <span role="progressbar" aria-label="이미지 저장 중" className="sf-upload-bar" />}
+            {showSaved && <span key={savedAt} className="sf-saved-chip">저장됨 ✓</span>}
             {dragOver && (
               <div className="absolute inset-0 rounded-lg flex items-center justify-center pointer-events-none bg-accent/15 backdrop-blur-sm">
                 <span className="text-xs font-semibold text-accent">여기에 놓으면 교체</span>
               </div>
             )}
-            <div className="absolute inset-0 bg-overlay/0 group-hover:bg-overlay/40 transition-colors rounded-lg flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
-              <button onClick={onView} className="p-2 bg-white/20 hover:bg-white/35 rounded-md text-white backdrop-blur-sm" title="확대">
-                <Eye size={16} />
-              </button>
-              {canEdit && (
-                <>
-                  <button onClick={onPick} className="p-2 bg-white/20 hover:bg-white/35 rounded-md text-white backdrop-blur-sm" title="파일로 교체">
-                    <ImagePlus size={16} />
-                  </button>
-                  <button onClick={onRemove} className="p-2 bg-white/20 hover:bg-red-500/60 rounded-md text-white backdrop-blur-sm" title="삭제">
-                    <Trash2 size={16} />
-                  </button>
-                </>
-              )}
-            </div>
+            {/* 마우스를 올리면 0.15초에 버튼이 떠오른다 — 겹친 층의 투명도만 바꾼다(배경색·흐림 전환 없음). */}
+            {!loading && (
+              <div className="absolute inset-0 bg-overlay/40 rounded-lg flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                <button onClick={onView} className="p-2 bg-black/45 hover:bg-black/60 rounded-md text-white" title="확대">
+                  <Eye size={16} />
+                </button>
+                {canEdit && (
+                  <>
+                    <button onClick={onPick} className="p-2 bg-black/45 hover:bg-black/60 rounded-md text-white" title="파일로 교체">
+                      <ImagePlus size={16} />
+                    </button>
+                    <button onClick={onRemove} className="p-2 bg-black/45 hover:bg-red-500/60 rounded-md text-white" title="삭제">
+                      <Trash2 size={16} />
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ) : canEdit ? (
@@ -1805,7 +1919,8 @@ function UnifiedImageSlot({
           }}
           onDrop={handleDrop}
           className={cn(
-            'flex flex-col items-center justify-center gap-0.5 h-32 rounded-lg border-2 transition-all cursor-pointer',
+            // 버튼이라 테마 규칙에 막혀 있던 transition-all 이 되살아나 hover 빛(그림자)까지 움직였다 → 색만 전환.
+            'flex flex-col items-center justify-center gap-0.5 h-40 rounded-lg border-2 transition-colors cursor-pointer',
             // v1.30.2 (한솔 보고 2026-05-24): 핀 상태 시각 강조. 핀이 가장 진한 outline + 안내 변경.
             pinned
               ? 'border-accent bg-accent/12 shadow-[0_0_24px_rgba(108,92,231,0.35)]'
@@ -1842,7 +1957,7 @@ function UnifiedImageSlot({
       ) : (
         <div
           data-continuity-target-box={continuityTarget}
-          className="flex items-center justify-center h-32 rounded-lg border-2 border-dashed border-bg-border/50 bg-bg-primary/20 text-text-secondary/40 text-xs"
+          className="flex items-center justify-center h-40 rounded-lg border-2 border-dashed border-bg-border/50 bg-bg-primary/20 text-text-secondary/40 text-xs"
         >
           BG 씬이 필요합니다
         </div>

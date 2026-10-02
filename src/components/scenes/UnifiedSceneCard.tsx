@@ -83,6 +83,8 @@ interface UnifiedSceneCardProps {
   onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
+  /** 체크로 필터에서 빠질 카드가 잠깐 머무는 동안 — 'hold' 옅게(곧 빠짐), 'leaving' 사라지는 중 (움직임 폴리싱 15번). */
+  lingering?: 'hold' | 'leaving' | null;
 }
 
 export function UnifiedSceneCard({
@@ -112,6 +114,7 @@ export function UnifiedSceneCard({
   onAssigneeActPhaseStateClick,
   onAssigneeActFeedbackRequest,
   onAssigneeActRoundBump,
+  lingering = null,
 }: UnifiedSceneCardProps) {
   const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
@@ -298,6 +301,7 @@ export function UnifiedSceneCard({
     <motion.div
       data-scene-id={mergedKey}
       data-continuity-card
+      data-lingering={lingering ?? undefined}
       className={cn(
         'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer',
         'shadow-[0_2px_6px_rgba(0,0,0,0.08),0_8px_20px_rgba(0,0,0,0.12)]',

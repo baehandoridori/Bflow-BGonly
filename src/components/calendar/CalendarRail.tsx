@@ -10,6 +10,20 @@ import { groupCalendarsForRail } from '@/utils/calendarEventFilter';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { IcsSubscribeForm } from '@/components/calendar/IcsSubscribeForm';
 import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { animateEl, EASE_CSS } from '@/utils/motion';
+
+/**
+ * 캘린더 표시 체크 '톡' — 누른 네모만 0.16초 살짝 커졌다 돌아온다(움직임 폴리싱 15번).
+ * 누를 때만 WAAPI 로 한 번 돈다(처음 그릴 때는 움직이지 않는다). 동작 줄이기면 움직임이 빠져 아무것도 하지 않는다.
+ */
+function popRailCheck(target: EventTarget | null | undefined): void {
+  if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return;
+  animateEl(target, [
+    { transform: 'scale(1)' },
+    { transform: 'scale(1.22)', offset: 0.45 },
+    { transform: 'scale(1)' },
+  ], { duration: 160, easing: EASE_CSS.out });
+}
 
 export const GOOGLE_CALENDAR_ID = 'google';
 
@@ -54,7 +68,7 @@ function CalendarRow({
         type="button"
         aria-label={`${calendar.name} 표시`}
         aria-pressed={visible}
-        onClick={onToggleVisible}
+        onClick={(event) => { popRailCheck(event?.currentTarget); onToggleVisible(); }}
         className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] cursor-pointer"
         style={{ backgroundColor: calendar.color }}
       >
@@ -153,7 +167,7 @@ function IcsSubscriptionRow({
         type="button"
         aria-label={`${subscription.name} 표시`}
         aria-pressed={visible}
-        onClick={onToggleVisible}
+        onClick={(event) => { popRailCheck(event?.currentTarget); onToggleVisible(); }}
         className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] cursor-pointer"
         style={{ backgroundColor: subscription.color }}
       >
