@@ -1,10 +1,11 @@
-import { useRef } from 'react';
+import { useRef, type CSSProperties } from 'react';
 import { CheckCircle2, CheckSquare, Clock, PlayCircle } from 'lucide-react';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { Department, Scene, Stage } from '@/types';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { cn } from '@/utils/cn';
 import { useStageLabelDisplayMode } from './useStageLabelDisplayMode';
+import { useStageFillSteps } from './useStageFillSteps';
 
 export function stageIcon(stage: Stage, size = 12) {
   if (stage === 'lo') return <Clock size={size} strokeWidth={2.4} />;
@@ -37,6 +38,9 @@ export function StageSegmentToggle({
   const cfg = DEPARTMENT_CONFIGS[department];
   const pointerHandledRef = useRef(false);
   const { modeOf, setNode } = useStageLabelDisplayMode(cfg.stageLabels, compact, iconDisplay === 'auto');
+  // 움직임 폴리싱 6번: 여러 칸이 한 번에 바뀌면 LO→PNG(켤 때)·PNG→LO(끌 때) 순서로 40ms 씩 이어서.
+  const fillSteps = useStageFillSteps(STAGES.map((stage) => Boolean(scene[stage])));
+  const fillColorStyle = { '--stage-seg-color': cfg.color, '--stage-seg-glow': `${cfg.color}40` } as CSSProperties;
   const iconClassName =
     iconDisplay === 'never'
       ? 'hidden'
@@ -84,30 +88,31 @@ export function StageSegmentToggle({
               }
               onToggle(stage);
             }}
+            data-on={isDone}
+            // stage-seg: 누름(scale .94 → 톡) · transform/opacity/color 만 전환 · hover 바탕은 겹친 층의 opacity.
+            // 굵기는 고정(semibold) — 굵기가 바뀌면 글자 폭이 바뀌어 다시 배치된다.
             className={cn(
-              'compact-label-container flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-medium transition-all cursor-pointer',
+              'stage-seg compact-label-container flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-semibold cursor-pointer',
               'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
               compact ? 'px-1 py-1 text-[10px]' : 'px-1.5 py-2 text-[11px]',
-              !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
+              !isDone && 'text-text-secondary/60 hover:text-text-primary',
               extraClassName,
             )}
-            style={
-              isDone
-                ? isCurrent
-                  ? {
-                      backgroundColor: cfg.color,
-                      color: '#fff',
-                      fontWeight: 700,
-                      boxShadow: `0 2px 8px ${cfg.color}40`,
-                    }
-                  : {
-                      backgroundColor: `${cfg.color}20`,
-                      color: cfg.color,
-                    }
-                : undefined
-            }
+            style={{
+              '--stage-step': fillSteps[i] ?? 0,
+              ...(isDone ? { color: isCurrent ? '#fff' : cfg.color } : null),
+            } as CSSProperties}
             title={cfg.stageLabels[stage]}
           >
+            {/* 칸 색: 켜지면 왼쪽부터 scaleX 로 차오르고, 현재 단계면 13% → 100% 로 진해진다. */}
+            <span
+              aria-hidden="true"
+              className="stage-seg-fill"
+              data-on={isDone}
+              data-current={isCurrent}
+              data-glow={isCurrent}
+              style={fillColorStyle}
+            />
             <CompactIconLabel
               icon={stageIcon(stage, 12)}
               label={cfg.stageLabels[stage]}

@@ -1047,6 +1047,7 @@ export function SceneDetailModal({
                       <ScenePhaseToggle
                         scene={scene}
                         iconDisplay="always"
+                        roundBadgePlacement="above"
                         onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next)}
                         onRequestFeedback={() => onActFeedbackRequest(sheetName, scene.sceneId)}
                         onRoundBump={(kind, delta) => onActRoundBump(sheetName, scene.sceneId, kind, delta)}
