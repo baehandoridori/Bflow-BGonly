@@ -35,8 +35,10 @@
 
 /* ─── 컴포지팅: 카드 cascade 는 처음 들어왔을 때·↻ 직후에만 ──────
    EP 를 바꾸면 카드 영역 전체가 한 덩어리로 미끄러져 들어온다(useGroupSwapMotion) — 새로 생긴 카드만 따로 떠오르지 않게.
-   EP 가 바뀐 뒤로만 붙는 클래스라 연타 토글이 아니다(↻ 은 래퍼를 다시 만들어 새로 armed). */
-.bf-cascade-quiet .bf-cascade-item {
+   EP 가 바뀐 뒤로만 붙는 클래스라 연타 토글이 아니다(↻ 은 래퍼를 다시 만들어 새로 armed).
+   :not(.flashing) — cascade 등장만 끈다. 팀원이 단계를 바꿀 때 카드가 색으로 깜빡이는 표시
+   (.scene-card.flashing → bf-status-flash, index.css)는 그대로 돌아야 한다. */
+.bf-cascade-quiet .bf-cascade-item:not(.flashing) {
   animation: none;
 }
 

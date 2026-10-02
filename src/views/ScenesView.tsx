@@ -3578,6 +3578,8 @@ export function ScenesView() {
         const app = useAppStore.getState();
         return sceneDetailOpenRef.current || Boolean(app.pendingDeepLink || app.pendingSceneModalRequest);
       },
+      // 묶음 바로 바깥이 패딩 없는 스크롤 상자라, 오른쪽에서 들어오는 동안 가로 스크롤바가 번쩍이지 않게 잠깐 숨긴다.
+      overflowGuard: () => sceneGroupSwapRef.current?.parentElement ?? null,
     },
   );
 

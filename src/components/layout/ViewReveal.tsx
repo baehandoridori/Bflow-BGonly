@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
-import { VIEW_SPINNER_DELAY_MS } from '@/utils/viewTransitionMotion';
+import { VIEW_SPINNER_DELAY_MS, type PendingOpenRequests } from '@/utils/viewTransitionMotion';
 
 /*
  * 화면 전환 덮개 (움직임 폴리싱 12번).
@@ -43,8 +43,12 @@ export function DelayedViewSpinner() {
   );
 }
 
-/** 지금 store 에 알림·딥링크로 씬 창을 바로 여는 요청이 있는지(덮개 생략 판단용). */
-export function readPendingSceneOpen(): { pendingDeepLink: unknown; pendingSceneModalRequest: unknown } {
+/** 지금 store 에 들어가자마자 창을 여는 요청(알림 링크로 씬 창, 검색으로 캐릭터 상세)이 있는지(덮개 생략 판단용). */
+export function readPendingOpenRequests(): PendingOpenRequests {
   const s = useAppStore.getState();
-  return { pendingDeepLink: s.pendingDeepLink, pendingSceneModalRequest: s.pendingSceneModalRequest };
+  return {
+    pendingDeepLink: s.pendingDeepLink,
+    pendingSceneModalRequest: s.pendingSceneModalRequest,
+    pendingCharacterBoardRequest: s.pendingCharacterBoardRequest,
+  };
 }

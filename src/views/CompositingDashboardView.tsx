@@ -36,7 +36,7 @@ import { CompositingSceneModal } from './compositing-dashboard/modal/Compositing
 import { BulkActionBar } from './compositing-dashboard/BulkActionBar';
 import { buildCardScenes } from './compositing-dashboard/cardSceneHelpers';
 import { useGroupSwapMotion } from '@/hooks/useGroupSwapMotion';
-import { COMPOSITING_EP_SWAP, episodeDirection } from '@/utils/viewTransitionMotion';
+import { COMPOSITING_EP_SWAP, episodeDirection, nextCascadeArm, type CascadeArm } from '@/utils/viewTransitionMotion';
 
 export function CompositingDashboardView() {
   const episodes = useDataStore((s) => s.episodes);
@@ -75,15 +75,9 @@ export function CompositingDashboardView() {
 
   // 움직임 폴리싱 12번: 카드 cascade 는 처음 들어왔을 때(첫 EP)와 ↻ 직후에만 돈다.
   //   EP 를 바꾸면 카드 영역 전체가 한 덩어리로 미끄러져 들어오므로, 새로 생긴 카드만 따로 떠오르지 않게 한다.
-  const cascadeArmRef = useRef<{ key: number; ep: number | null; disarmed: boolean }>({ key: cascadeKey, ep: null, disarmed: false });
-  if (cascadeArmRef.current.key !== cascadeKey) {
-    cascadeArmRef.current = { key: cascadeKey, ep: episodeNumber, disarmed: false };
-  } else if (cascadeArmRef.current.ep === null) {
-    cascadeArmRef.current.ep = episodeNumber;
-  } else if (episodeNumber !== cascadeArmRef.current.ep) {
-    cascadeArmRef.current.disarmed = true;
-  }
-  const cascadeArmed = !cascadeArmRef.current.disarmed;
+  const cascadeArmRef = useRef<CascadeArm | null>(null);
+  cascadeArmRef.current = nextCascadeArm(cascadeArmRef.current, cascadeKey, episodeNumber);
+  const cascadeArmed = cascadeArmRef.current.armed;
   // EP 전환: 다음 EP 는 오른쪽에서, 이전 EP 는 왼쪽에서 16px · 240ms. 연타하면 마지막만 바로.
   const epSwapRef = useRef<HTMLDivElement>(null);
   useGroupSwapMotion(epSwapRef, episodeNumber === null ? null : String(episodeNumber), {

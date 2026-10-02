@@ -25,7 +25,7 @@ import {
   createMonthSlideVariants, MONTH_LAYER_STYLE, MONTH_STACK_STYLE, type MonthSlide,
 } from '@/components/calendar/monthSlideMotion';
 import { useMotionPref } from '@/hooks/useMotionPref';
-import { RAPID_SWAP_MS } from '@/utils/viewTransitionMotion';
+import { createRapidGate } from '@/utils/viewTransitionMotion';
 
 /* 달 넘김 — 캘린더 월 화면(CalendarGrid)과 같은 값: 나가는 달과 들어오는 달이 한 칸에 겹쳐 넘어간다.
    transform 문자열이라 합성 스레드에서 돈다(움직임 폴리싱 12번). */
@@ -293,13 +293,9 @@ export function VacationView() {
   const [direction, setDirection] = useState(0);
   // 달을 300ms 안에 연달아 넘기면 미끄러지지 않고 바로 바꾼다(캘린더 기간 넘김과 같은 규칙).
   const { reduce: reduceMotion } = useMotionPref();
-  const monthNavigatedAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const [monthNavGate] = useState(createRapidGate);
   const [rapidMonthNav, setRapidMonthNav] = useState(false);
-  const markMonthNavigation = () => {
-    const now = Date.now();
-    setRapidMonthNav(now - monthNavigatedAtRef.current < RAPID_SWAP_MS);
-    monthNavigatedAtRef.current = now;
-  };
+  const markMonthNavigation = () => setRapidMonthNav(monthNavGate.hit(performance.now()));
 
   const goToday = () => {
     const now = new Date();

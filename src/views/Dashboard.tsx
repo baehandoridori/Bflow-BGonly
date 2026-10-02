@@ -41,8 +41,10 @@ import { animateEl } from '@/utils/motion';
 import {
   DASHBOARD_CONTENT_KEYFRAMES,
   DASHBOARD_CONTENT_SWAP_MS,
-  RAPID_SWAP_MS,
+  INITIAL_SWAP_GATE,
   dashboardBoardIdentity,
+  stepSwapGate,
+  type SwapGate,
 } from '@/utils/viewTransitionMotion';
 
 import 'react-grid-layout/css/styles.css';
@@ -833,23 +835,16 @@ export function Dashboard() {
   const boardWidth = useMeasuredWidth(boardRef);
   const boardIdentity = dashboardBoardIdentity(isEpMode, dashboardFilter);
   const contentKey = `${isEpMode ? `ep-${episodeDashboardEp}` : 'main'}-${dashboardFilter}`;
-  const contentSwapRef = useRef<{ key: string | null; at: number; animations: Animation[] }>({
-    key: null,
-    at: Number.NEGATIVE_INFINITY,
-    animations: [],
-  });
+  const contentSwapRef = useRef<{ gate: SwapGate; animations: Animation[] }>({ gate: INITIAL_SWAP_GATE, animations: [] });
   useLayoutEffect(() => {
     const swap = contentSwapRef.current;
-    const prevKey = swap.key;
-    swap.key = contentKey;
-    if (prevKey === null || prevKey === contentKey) return; // 처음 들어올 때는 화면 덮개·첫 진입 연출 몫
-    const now = performance.now();
-    // 300ms 안에 다시 바꾸면(연타) 다시 드러나는 연출 없이 바로 바꾼다.
-    const rapid = now - swap.at < RAPID_SWAP_MS;
-    swap.at = now;
+    const step = stepSwapGate(swap.gate, contentKey, performance.now());
+    swap.gate = step.gate;
+    if (step.decision === 'none') return; // 처음 들어올 때는 화면 덮개·첫 진입 연출 몫
     for (const animation of swap.animations) animation.cancel();
     swap.animations = [];
-    if (rapid) return;
+    // 300ms 안에 다시 바꾸면(연타) 다시 드러나는 연출 없이 바로 바꾼다.
+    if (step.decision !== 'animate') return;
     boardRef.current?.querySelectorAll('[data-widget-body]').forEach((el) => {
       const animation = animateEl(el, DASHBOARD_CONTENT_KEYFRAMES, { duration: DASHBOARD_CONTENT_SWAP_MS });
       if (animation) swap.animations.push(animation);

@@ -1,10 +1,10 @@
 import { useMemo, useRef } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
-import { ViewRevealContext, readPendingSceneOpen, type ViewRevealApi } from './ViewReveal';
+import { ViewRevealContext, readPendingOpenRequests, type ViewRevealApi } from './ViewReveal';
 import type { ViewMode } from '@/stores/useAppStore';
 import { prefersReducedMotion } from '@/utils/motion';
-import { VIEW_REVEAL_KEYFRAMES, shouldSkipViewReveal, viewRevealTiming } from '@/utils/viewTransitionMotion';
+import { VIEW_REVEAL_KEYFRAMES, planViewReveal, viewRevealTiming } from '@/utils/viewTransitionMotion';
 
 interface MainLayoutProps {
   activeView: ViewMode;
@@ -23,19 +23,16 @@ export function MainLayout({ activeView, children, onRefresh }: MainLayoutProps)
   const revealApi = useMemo<ViewRevealApi>(() => ({
     onViewMounted(view) {
       const state = revealRef.current;
-      if (state.lastView === view) return; // StrictMode 이중 실행·같은 화면 재신호
-      const isFirstView = state.lastView === null;
+      const plan = planViewReveal(state.lastView, view, readPendingOpenRequests());
+      if (!plan) return; // StrictMode 이중 실행·같은 화면 재신호
       state.lastView = view;
       // 이전 화면 스크롤이 남아 새 화면이 중간부터 보이지 않게.
-      if (!isFirstView && mainRef.current) mainRef.current.scrollTop = 0;
-      if (shouldSkipViewReveal({ view, isFirstView, ...readPendingSceneOpen() })) {
-        state.animation?.cancel();
-        state.animation = null;
-        return;
-      }
+      if (plan.resetScroll && mainRef.current) mainRef.current.scrollTop = 0;
+      state.animation?.cancel();
+      state.animation = null;
+      if (!plan.reveal) return;
       const cover = coverRef.current;
       if (!cover || typeof cover.animate !== 'function') return;
-      state.animation?.cancel();
       // 첫 프레임부터 덮개가 덮인 상태(키프레임 1)로 그려진다 — layout effect 안이라 페인트 전이다.
       const animation = cover.animate(VIEW_REVEAL_KEYFRAMES, viewRevealTiming(prefersReducedMotion()));
       state.animation = animation;
