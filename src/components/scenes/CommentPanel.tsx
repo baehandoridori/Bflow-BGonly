@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, Reply, MessageSquareWarning, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, ArrowDown, CornerDownRight, Reply, MessageSquareWarning, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -62,6 +62,27 @@ import { createUuid } from '@/utils/createUuid';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { ThreadTodoSection } from './ThreadTodoSection';
 import { COMMENT_LIST_FOLLOW_CHECK_MS, commentListScrollAfterSectionGrow, shouldFollowCommentListToBottom } from '@/utils/commentListAnchor';
+import {
+  COMMENT_NEAR_BOTTOM_PX,
+  COMMENT_OPEN_PIN_WINDOW_MS,
+  COMMENT_READ_STATE_WAIT_MS,
+  COMMENT_STICK_BOTTOM_PX,
+  COMMENT_UNREAD_DIVIDER_FADE_DELAY_MS,
+  commentArrivalAction,
+  commentListDistanceFromBottom,
+  commentLoadStatusAfter,
+  commentOpenPinTarget,
+  commentOpenScrollTop,
+  isUnreadDividerRead,
+  newCommentsPillLabel,
+  nextUnreadDivider,
+  splitNewCommentIds,
+  type CommentLoadStatus,
+  type CommentOpenPinTarget,
+  type CommentScrollAnchor,
+  type UnreadDividerState,
+} from '@/utils/commentOpenCalm';
+import { useMotionPref } from '@/hooks/useMotionPref';
 import { toast as sonnerToast } from 'sonner';
 import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 import '@/styles/comment-panel.css';
@@ -296,6 +317,76 @@ function ThreadReplyButton({
   );
 }
 
+// ─── 댓글 칸 열기 (움직임 폴리싱 4번 comment-open-calm) ─────────
+
+/** 불러오는 동안의 회색 말풍선 자리. 0.15초 안에 오면 CSS animation-delay 로 아예 보이지 않는다. */
+function CommentListSkeleton() {
+  return (
+    <div className="comment-skeleton" role="status" aria-label="댓글을 불러오는 중">
+      <div className="comment-skeleton-bubble comment-skeleton-bubble--left comment-skeleton-bubble--h44" />
+      <div className="comment-skeleton-bubble comment-skeleton-bubble--right comment-skeleton-bubble--h60" />
+      <div className="comment-skeleton-bubble comment-skeleton-bubble--left comment-skeleton-bubble--h36" />
+    </div>
+  );
+}
+
+/** 조회 실패 — '의견 없음'과 구분한다. ThreadTodoSection 의 '다시 불러오기' 줄과 같은 말투. */
+function CommentLoadFailedNotice({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="comment-empty-arrive py-10 text-center text-xs text-text-secondary">
+      <span>댓글을 불러오지 못했어요</span>
+      <span className="mx-1.5 text-text-secondary/40" aria-hidden>·</span>
+      <button type="button" onClick={onRetry} className="font-semibold text-accent underline-offset-2 hover:underline cursor-pointer">
+        다시 불러오기
+      </button>
+    </div>
+  );
+}
+
+/** '새 댓글' 줄. 읽음 처리 4초 뒤 자리를 지킨 채 옅어진다(--fading 은 한 방향으로만 붙는다). */
+function UnreadCommentsDivider({ nodeRef, fading }: { nodeRef: (node: HTMLDivElement | null) => void; fading: boolean }) {
+  return (
+    <div
+      ref={nodeRef}
+      className={cn('comment-unread-divider flex items-center gap-2 py-1', fading && 'comment-unread-divider--fading')}
+      aria-label="새 댓글 시작"
+      aria-hidden={fading || undefined}
+    >
+      <span className="h-px flex-1 bg-accent/30" />
+      <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+        새 댓글
+      </span>
+      <span className="h-px flex-1 bg-accent/30" />
+    </div>
+  );
+}
+
+/** 본문 목록 안의 댓글 요소(스레드 옆 칸의 같은 id 는 제외). */
+function findMainListComment(root: HTMLElement | null, commentId: string): HTMLElement | null {
+  if (!root) return null;
+  const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(commentId) : commentId.replace(/"/g, '\\"');
+  return root.querySelector<HTMLElement>(`[data-comment-id="${escaped}"]`);
+}
+
+/** 스크롤 상자 내용 기준 위치. */
+function measureCommentAnchor(root: HTMLElement, node: HTMLElement): CommentScrollAnchor {
+  const rect = node.getBoundingClientRect();
+  return { top: rect.top - root.getBoundingClientRect().top + root.scrollTop, height: rect.height };
+}
+
+/** 가장 가까운 세로 스크롤 상자 하나만 움직인다(scrollIntoView 는 바깥 상자까지 움직인다 — tasks/lessons.md 2026-10-02). */
+function centerInScrollParent(node: HTMLElement, behavior: ScrollBehavior) {
+  let parent = node.parentElement;
+  while (parent) {
+    const overflowY = getComputedStyle(parent).overflowY;
+    if ((overflowY === 'auto' || overflowY === 'scroll') && parent.scrollHeight > parent.clientHeight) break;
+    parent = parent.parentElement;
+  }
+  if (!parent) return;
+  const top = commentOpenScrollTop(parent, measureCommentAnchor(parent, node));
+  parent.scrollTo({ top, behavior });
+}
+
 // ─── 메인 컴포넌트 ──────────────────────────
 
 export function CommentPanel({
@@ -347,6 +438,30 @@ export function CommentPanel({
 
   // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
+  // 움직임 폴리싱 4번: 첫 조회가 끝나기 전엔 '의견 없음'을 띄우지 않고, 실패는 '불러오지 못했어요'로 구분한다.
+  const [loadStatus, setLoadStatus] = useState<CommentLoadStatus>('loading');
+  const loadStatusRef = useRef<CommentLoadStatus>(loadStatus);
+  loadStatusRef.current = loadStatus;
+  const loadSeqRef = useRef(0);
+  const { reduce: reduceMotion } = useMotionPref();
+  const reduceMotionRef = useRef(reduceMotion);
+  reduceMotionRef.current = reduceMotion;
+  // 처음 자리(맨 아래·새 댓글 줄 가운데·찾아온 댓글) — 첫 ~1초는 반응·이미지로 높이가 늘어도 자리를 지킨다.
+  const openPinRef = useRef<{ target: CommentOpenPinTarget; until: number } | null>(null);
+  const openPinStartedRef = useRef(false);
+  // 바닥까지 거리(새 항목이 그려지기 '전' 값). 스크롤할 때·자리를 잡을 때 갱신한다.
+  const distanceFromBottomRef = useRef(0);
+  const knownCommentIdsRef = useRef<Set<string>>(new Set());
+  const knownEventCountRef = useRef(0);
+  // '새 댓글' 줄 — 패널마다 한 번 잡으면 자리를 지킨다(읽음 처리 4초 뒤 옅어짐).
+  const [unreadDivider, setUnreadDivider] = useState<UnreadDividerState | null>(null);
+  // 위를 읽는 중 화면 아래에 생긴 팀원 댓글 수 — '새 댓글 N개 ↓' 알약.
+  const [newBelowCount, setNewBelowCount] = useState(0);
+  const newBelowCountRef = useRef(0);
+  newBelowCountRef.current = newBelowCount;
+  const [listContentNode, setListContentNode] = useState<HTMLDivElement | null>(null);
+  const focusCommentIdRef = useRef<string | null>(focusCommentId ?? null);
+  focusCommentIdRef.current = focusCommentId ?? null;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   // v1.26.0: 이모지 리액션 — commentId → reactions
@@ -423,6 +538,8 @@ export function CommentPanel({
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(focusCommentId ?? null);
   const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [lastReadAt, setLastReadAt] = useState<string | null>(null);
+  // 읽음 기록을 받기 전에 목록을 그리면 '새 댓글' 줄이 맨 위 댓글에 잘못 붙었다가 옮겨 간다 — 받은 뒤에 처음 자리를 잡는다.
+  const [readStateReady, setReadStateReady] = useState(false);
   const readMarkedRef = useRef<string | null>(null);
   const unreadDividerRef = useRef<HTMLDivElement | null>(null);
   const [unreadDividerElement, setUnreadDividerElement] = useState<HTMLDivElement | null>(null);
@@ -635,20 +752,24 @@ export function CommentPanel({
   // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직).
   // 캐릭터 스레드 모드는 character 경로로만 로드하고 secondary 는 무시한다 (씬 키 경로 미사용).
   const loadComments = useCallback(() => {
+    // 실패를 '댓글 없음'과 구분해 받는다. 더 새 조회가 시작됐으면 늦게 온 옛 결과는 버린다.
+    const seq = ++loadSeqRef.current;
+    const readOptions = { throwOnError: true };
     const primaryPromise = characterId
-      ? getCommentsForCharacter(characterId).then((list) =>
+      ? getCommentsForCharacter(characterId, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: characterCommentKey ?? undefined })),
         )
-      : getComments(sceneKey).then((list) =>
+      : getComments(sceneKey, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
         );
     const secondaryPromise = !characterId && secondarySceneKey
-      ? getComments(secondarySceneKey).then((list) =>
+      ? getComments(secondarySceneKey, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: secondarySceneKey })),
         )
       : Promise.resolve([] as SceneCommentWithSource[]);
 
     Promise.all([primaryPromise, secondaryPromise]).then(([a, b]) => {
+      if (seq !== loadSeqRef.current) return;
       const merged = [...a, ...b].sort(
         (x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime(),
       );
@@ -659,14 +780,35 @@ export function CommentPanel({
         return true;
       });
       setComments(deduped);
+      setLoadStatus('ready');
       onCountChange?.(deduped.length);
       // v1.26.0: 댓글 로드 후 리액션도 함께 fetch
       const ids = deduped.map((c) => c.id);
-      fetchReactionsBulk(ids).then((map) => setReactionsByCommentId(map));
+      fetchReactionsBulk(ids).then((map) => {
+        if (seq === loadSeqRef.current) setReactionsByCommentId(map);
+      });
+    }).catch((err) => {
+      if (seq !== loadSeqRef.current) return;
+      console.warn('[댓글] 목록을 불러오지 못했습니다:', err);
+      // 이미 보여 준 목록은 실시간 재조회 실패로 지우지 않는다.
+      setLoadStatus((prev) => commentLoadStatusAfter(prev, 'failure'));
     });
   }, [sceneKey, secondarySceneKey, characterId, characterCommentKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { loadComments(); }, [loadComments]);
+  // 씬·캐릭터가 바뀌면(같은 패널을 다시 쓰는 경우) '불러오는 중'부터 다시 — 처음 자리·새 댓글 줄·알약도 새로 잡는다.
+  useEffect(() => {
+    setLoadStatus('loading');
+    openPinStartedRef.current = false;
+    openPinRef.current = null;
+    setUnreadDivider(null);
+    setNewBelowCount(0);
+    loadComments();
+  }, [loadComments]);
+
+  const retryLoadComments = useCallback(() => {
+    setLoadStatus('loading');
+    loadComments();
+  }, [loadComments]);
 
   // v1.28.0 (코덱스 2차 P1): 다른 클라이언트의 리액션 변경 broadcast 수신 → 해당 댓글만 재fetch.
   //   App.tsx 가 'bflow:comment-reaction-changed' window event 를 dispatch 한다.
@@ -754,6 +896,7 @@ export function CommentPanel({
   useEffect(() => {
     if (!currentUser?.id) {
       setLastReadAt(null);
+      setReadStateReady(true);
       return;
     }
 
@@ -761,6 +904,10 @@ export function CommentPanel({
     const load = () => {
       void getCommentReadStateForUser(currentUser.id).then((state) => {
         if (!cancelled) setLastReadAt(state[effectiveSceneThreadKey] ?? null);
+      }).catch((err) => {
+        console.warn('[댓글 읽음] 상태를 불러오지 못했습니다:', err);
+      }).finally(() => {
+        if (!cancelled) setReadStateReady(true);
       });
     };
 
@@ -825,7 +972,8 @@ export function CommentPanel({
       if (scrolled) return;
       const el = commentRefs.current.get(focusCommentId);
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 처음 자리 잡기가 이미 가운데에 두었으면 거의 움직이지 않는다. 가까운 스크롤 상자만 움직이고 동작 줄이기면 즉시.
+        centerInScrollParent(el, reduceMotionRef.current ? 'auto' : 'smooth');
         scrolled = true;
         clearTimer = setTimeout(() => setFocusedCommentId(null), 1700);
         return;
@@ -1355,6 +1503,8 @@ export function CommentPanel({
     try {
       // v1.24.0: 답글이면 targetSceneKey (부모 sourceKey) 로 저장 → 부모/답글이 같은 sheet 에 모임.
       await addComment(targetSceneKey, comment);
+      // 목록을 못 불러온 채('다시 불러오기' 안내) 보냈으면 저장된 지금 다시 불러와 내 댓글과 기존 댓글을 함께 보여 준다.
+      if (loadStatusRef.current === 'error') loadComments();
       if (prevReplyTarget) {
         markUnreadCommentsRead();
       }
@@ -1758,37 +1908,174 @@ export function CommentPanel({
     }
   }, [firstUnreadCommentId, comments]);
 
-  // 새 댓글 시 스크롤. 읽지 않은 댓글이 있으면 구분선으로 먼저 이동한다.
+  // ── 움직임 폴리싱 4번(comment-open-calm): 처음 자리 · '새 댓글' 줄 · 읽는 중 새 댓글 ──
+  // 목록은 댓글과 읽음 기록이 모두 도착한 뒤 처음 그린다(그 전엔 0.15초 뒤 회색 말풍선 자리).
+  // 읽음 기록만 오래 늦으면(서버 지연) 목록을 계속 가리지 않고 1.5초 뒤 줄 없이 먼저 보여 준다.
+  const [readStateWaitExpired, setReadStateWaitExpired] = useState(false);
   useEffect(() => {
-    if (firstUnreadCommentId) return;
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    // Codex R3 P2 (2026-05-03): inlineEvents 도 watch — system 활동만 도착해도 스크롤 따라가게.
-  }, [comments.length, inlineEvents?.length, firstUnreadCommentId]);
+    if (loadStatus !== 'ready' || readStateReady) return;
+    const timer = window.setTimeout(() => setReadStateWaitExpired(true), COMMENT_READ_STATE_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [loadStatus, readStateReady]);
+  const listReady = loadStatus === 'ready' && (readStateReady || readStateWaitExpired);
+  // 줄은 처음 잡은 자리(읽음 처리 뒤에도 유지)에, 아직 안 잡았으면 지금 첫 안 읽은 댓글에 붙인다.
+  // 읽음 기록 없이 붙이면 맨 위 댓글에 잘못 붙으므로 기록이 온 뒤에만.
+  const dividerCommentId = listReady && readStateReady ? (unreadDivider?.id ?? firstUnreadCommentId) : null;
+  const unreadDividerFading = !!unreadDivider?.fading;
 
   useEffect(() => {
-    if (!firstUnreadCommentId || !unreadDividerElement) return;
-    const timer = setTimeout(() => {
-      unreadDividerElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 150);
-    return () => clearTimeout(timer);
-  }, [firstUnreadCommentId, unreadDividerElement]);
+    if (!listReady || !readStateReady) return;
+    setUnreadDivider((current) => nextUnreadDivider(current, firstUnreadCommentId));
+  }, [listReady, readStateReady, firstUnreadCommentId]);
 
+  // 읽음 처리는 지금처럼 곧바로, 줄은 그 뒤 4초 동안 남았다가 자리를 지킨 채 옅어진다.
+  const unreadDividerRead = isUnreadDividerRead(unreadDivider, firstUnreadCommentId);
   useEffect(() => {
-    if (!firstUnreadCommentId || !latestOtherUserCommentAt || !unreadDividerElement) return;
-    const anchor = unreadDividerElement;
+    if (!unreadDividerRead) return;
+    const timer = window.setTimeout(() => {
+      setUnreadDivider((current) => (current ? { ...current, fading: true } : current));
+    }, COMMENT_UNREAD_DIVIDER_FADE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [unreadDividerRead]);
+
+  const applyOpenPin = useCallback(() => {
+    const el = scrollRef.current;
+    const pin = openPinRef.current;
+    if (!el || !pin) return;
+    let anchorNode: HTMLElement | null = null;
+    if (pin.target === 'focus' && focusCommentIdRef.current) anchorNode = findMainListComment(el, focusCommentIdRef.current);
+    else if (pin.target === 'divider') anchorNode = unreadDividerRef.current;
+    el.scrollTop = commentOpenScrollTop(el, anchorNode ? measureCommentAnchor(el, anchorNode) : null);
+    distanceFromBottomRef.current = commentListDistanceFromBottom(el);
+  }, []);
+
+  const endOpenPin = useCallback(() => {
+    openPinRef.current = null;
+  }, []);
+
+  const scrollListToBottom = useCallback((behavior?: ScrollBehavior) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const resolved = behavior ?? (reduceMotionRef.current ? 'auto' : 'smooth');
+    if (resolved === 'smooth') {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    } else {
+      el.scrollTop = el.scrollHeight;
+      distanceFromBottomRef.current = commentListDistanceFromBottom(el);
+    }
+    if (newBelowCountRef.current > 0) {
+      newBelowCountRef.current = 0;
+      setNewBelowCount(0);
+    }
+  }, []);
+
+  // 처음 그릴 때: 화면에 그리기 전에 맨 아래(또는 새 댓글 줄 가운데)에 둔다 — 맨 위에서 미끄러져 내려가지 않는다.
+  // 그 뒤에 생긴 항목: 바닥에 붙어 있었으면 그대로 붙이고, 위를 읽는 중이면 끌어내리지 않고 알약으로 알린다.
+  useLayoutEffect(() => {
+    if (!listReady) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const eventCount = inlineEvents?.length ?? 0;
+    if (!openPinStartedRef.current) {
+      openPinStartedRef.current = true;
+      knownCommentIdsRef.current = new Set(comments.map((c) => c.id));
+      knownEventCountRef.current = eventCount;
+      openPinRef.current = {
+        target: commentOpenPinTarget({ focusCommentId: focusCommentId ?? null, dividerCommentId }),
+        until: performance.now() + COMMENT_OPEN_PIN_WINDOW_MS,
+      };
+      applyOpenPin();
+      return;
+    }
+
+    const added = splitNewCommentIds(knownCommentIdsRef.current, comments, currentUser?.id);
+    knownCommentIdsRef.current = new Set(comments.map((c) => c.id));
+    const eventsGrew = eventCount > knownEventCountRef.current;
+    knownEventCountRef.current = eventCount;
+    if (added.mine.length === 0 && added.others.length === 0 && !eventsGrew) return;
+
+    if (openPinRef.current) {
+      if (performance.now() <= openPinRef.current.until) {
+        applyOpenPin();
+        return;
+      }
+      openPinRef.current = null;
+    }
+    const viewBottom = el.getBoundingClientRect().bottom;
+    const othersBelow = added.others.filter((id) => {
+      const node = findMainListComment(el, id);
+      return !!node && node.getBoundingClientRect().top >= viewBottom - 4;
+    }).length;
+    // 내가 단 답글(스레드 칸에서 보냄)은 부모 아래에 붙으므로 본문을 맨 아래로 끌고 가지 않는다.
+    const mineTopLevel = added.mine.filter((id) => !comments.find((c) => c.id === id)?.parentCommentId).length;
+    const action = commentArrivalAction({
+      mineAdded: mineTopLevel,
+      othersBelow,
+      distanceFromBottom: distanceFromBottomRef.current,
+    });
+    if (action === 'stick') scrollListToBottom('auto');
+    else if (action === 'follow') scrollListToBottom();
+    else if (action === 'pill') setNewBelowCount((count) => count + othersBelow);
+  }, [listReady, comments, inlineEvents?.length, currentUser?.id, focusCommentId, dividerCommentId, applyOpenPin, scrollListToBottom]);
+
+  // 반응 일괄 조회·이미지·팀 할 일 섹션으로 높이가 바뀌면: 첫 ~1초(손대기 전)는 처음 자리를 다시 맞추고,
+  // 그 뒤엔 바닥에 붙어 있을 때만 바닥에 다시 붙인다(움직임 없이).
+  useEffect(() => {
+    if (!listReady) return;
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const pin = openPinRef.current;
+      if (pin) {
+        if (performance.now() <= pin.until) {
+          applyOpenPin();
+          return;
+        }
+        openPinRef.current = null;
+      }
+      if (distanceFromBottomRef.current <= COMMENT_STICK_BOTTOM_PX) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
+    observer.observe(el);
+    if (listContentNode) observer.observe(listContentNode);
+    return () => observer.disconnect();
+  }, [listReady, listContentNode, applyOpenPin]);
+
+  const handleListScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = commentListDistanceFromBottom(el);
+    distanceFromBottomRef.current = distance;
+    if (distance < COMMENT_NEAR_BOTTOM_PX && newBelowCountRef.current > 0) {
+      newBelowCountRef.current = 0;
+      setNewBelowCount(0);
+    }
+  }, []);
+
+  // 읽음 처리: 첫 안 읽은 댓글(또는 그 위 '새 댓글' 줄)이 화면에 보이면 곧바로. 줄은 남아 있다가 위 타이머로 옅어진다.
+  useEffect(() => {
+    if (!listReady || !readStateReady || !firstUnreadCommentId || !latestOtherUserCommentAt) return;
     const root = scrollRef.current;
-    if (!root) return;
+    if (!root || typeof IntersectionObserver === 'undefined') return;
+    const onDivider = dividerCommentId === firstUnreadCommentId && !!unreadDividerElement;
+    const anchor = onDivider ? unreadDividerElement : findMainListComment(root, firstUnreadCommentId);
+    if (!anchor) return;
 
+    // 줄은 작아서 60% 가 보이면, 댓글은 길 수 있어 화면 절반을 채워도 본 것으로 친다.
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
+      const seen = entries.some((entry) => entry.isIntersecting && (
+        entry.intersectionRatio >= 0.6 || (!onDivider && entry.intersectionRect.height >= root.clientHeight * 0.5)
+      ));
+      if (seen) {
         markUnreadCommentsRead();
         observer.disconnect();
       }
-    }, { root, threshold: 0.6 });
+    }, { root, threshold: onDivider ? 0.6 : [0, 0.25, 0.5, 0.6, 0.75, 1] });
 
     observer.observe(anchor);
     return () => observer.disconnect();
-  }, [firstUnreadCommentId, latestOtherUserCommentAt, markUnreadCommentsRead, unreadDividerElement]);
+  }, [listReady, readStateReady, firstUnreadCommentId, latestOtherUserCommentAt, markUnreadCommentsRead, unreadDividerElement, dividerCommentId, comments]);
 
   const handleMentionClick = (userName: string) => {
     setHighlightUserName(userName);
@@ -1889,6 +2176,8 @@ export function CommentPanel({
             // 섹션이 늦게 커져도 맨 아래(최신 댓글)를 보던 화면이 밀리지 않게 — 판단은 commentListScrollAfterSectionGrow.
             const el = scrollRef.current;
             if (!el) return;
+            // 처음 연 직후(손대기 전)는 목록의 크기 감시가 처음 자리(맨 아래·새 댓글 줄)를 다시 맞춘다.
+            if (openPinRef.current) return;
             const decision = commentListScrollAfterSectionGrow({
               scrollHeight: el.scrollHeight,
               clientHeight: el.clientHeight,
@@ -1902,7 +2191,7 @@ export function CommentPanel({
               const startTop = el.scrollTop;
               window.setTimeout(() => {
                 if (shouldFollowCommentListToBottom({ startTop, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, grewBy })) {
-                  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                  el.scrollTo({ top: el.scrollHeight, behavior: reduceMotionRef.current ? 'auto' : 'smooth' });
                 }
               }, COMMENT_LIST_FOLLOW_CHECK_MS);
             }
@@ -1911,11 +2200,28 @@ export function CommentPanel({
       ) : null}
 
       {/* 댓글 목록 — 시스템 이벤트(inlineEvents)와 시간순 머지 + 새 항목 슬라이드 인 */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
+      {/* 움직임 폴리싱 4번: 불러오는 중(0.15초 뒤 회색 자리)·실패·없음을 구분하고, 처음엔 맨 아래(또는 새 댓글 줄 가운데)에서 시작한다.
+          바깥 relative 상자는 위를 읽는 중 새 댓글을 알리는 '새 댓글 N개 ↓' 알약 자리다. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollRef}
+        onScroll={handleListScroll}
+        onWheel={endOpenPin}
+        onPointerDown={endOpenPin}
+        onKeyDown={endOpenPin}
+        onTouchStart={endOpenPin}
+        className="flex-1 overflow-y-auto px-4 py-3 min-h-0 select-text"
+      >
+        {loadStatus === 'error' ? (
+          <CommentLoadFailedNotice onRetry={retryLoadComments} />
+        ) : !listReady ? (
+          <CommentListSkeleton />
+        ) : (
+        <div ref={setListContentNode} className="comment-list-arrive space-y-4">
         {/* 코덱스 P3 fix (9차, 2026-05-05): reOnly 시 inlineEvents 는 어차피 mergeFeed 에서 drop 되므로
             empty-state 판정에서도 inlineEvents 무시 → 리테이크 댓글 0 + inline 만 있을 때 빈 영역 방지. */}
         {visibleComments.length === 0 && visibleInlineEvents.length === 0 ? (
-          <div className="text-center py-10">
+          <div className="comment-empty-arrive text-center py-10">
             <p className="text-text-secondary text-xs">
               {reOnly ? '리테이크 댓글이 없습니다' : '아직 의견이 없습니다'}
             </p>
@@ -2043,26 +2349,17 @@ export function CommentPanel({
               const threadCollapsed = collapsedThreads.has(comment.id);
               const isOrphanReply = !!comment.parentCommentId;
               const showUnreadDivider =
-                firstUnreadCommentId != null
-                && comment.id === firstUnreadCommentId;
+                dividerCommentId != null
+                && comment.id === dividerCommentId;
               return (
               <Fragment key={comment.id}>
                 {showUnreadDivider && (
-                  <div
-                    ref={setUnreadDividerNode}
-                    className="flex items-center gap-2 py-1"
-                    aria-label="새 댓글 시작"
-                  >
-                    <span className="h-px flex-1 bg-accent/30" />
-                    <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                      새 댓글
-                    </span>
-                    <span className="h-px flex-1 bg-accent/30" />
-                  </div>
+                  <UnreadCommentsDivider nodeRef={setUnreadDividerNode} fading={unreadDividerFading} />
                 )}
               <motion.div
                 key={comment.id}
                 ref={(el) => { commentRefs.current.set(comment.id, el); }}
+                data-comment-id={comment.id}
                 onClick={markUnreadCommentsRead}
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -2256,8 +2553,8 @@ export function CommentPanel({
                       const replyMentionsMe = !!currentUser && (reply.mentions ?? []).includes(currentUser.name);
                       const replyIsFocused = focusedCommentId === reply.id;
                       const replyShowUnreadDivider =
-                        firstUnreadCommentId != null
-                        && reply.id === firstUnreadCommentId;
+                        dividerCommentId != null
+                        && reply.id === dividerCommentId;
                       const replyRevisionId = reply.revisionId ?? commentRevisionId;
                       const prevReplyRevisionId = ri > 0 ? replies[ri - 1].revisionId ?? commentRevisionId : null;
                       // 답글 묶음 — 답글 내부에서도 같은 사용자 연속이면 메타 숨김.
@@ -2266,20 +2563,11 @@ export function CommentPanel({
                       return (
                         <Fragment key={reply.id}>
                         {replyShowUnreadDivider && (
-                          <div
-                            ref={setUnreadDividerNode}
-                            className="flex items-center gap-2 py-1"
-                            aria-label="새 댓글 시작"
-                          >
-                            <span className="h-px flex-1 bg-accent/30" />
-                            <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                              새 댓글
-                            </span>
-                            <span className="h-px flex-1 bg-accent/30" />
-                          </div>
+                          <UnreadCommentsDivider nodeRef={setUnreadDividerNode} fading={unreadDividerFading} />
                         )}
                         <div
                           ref={(el) => { commentRefs.current.set(reply.id, el); }}
+                          data-comment-id={reply.id}
                           onClick={markUnreadCommentsRead}
                           className={cn(
                             'group/reply relative',
@@ -2420,6 +2708,21 @@ export function CommentPanel({
           })()}
         </AnimatePresence>
         )}
+        </div>
+        )}
+      </div>
+      {listReady && newBelowCount > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center">
+          <button
+            type="button"
+            onClick={() => scrollListToBottom()}
+            className="comment-new-pill pointer-events-auto inline-flex h-7 items-center gap-1 rounded-full bg-accent px-3 text-[12px] font-semibold text-white shadow-lg cursor-pointer"
+          >
+            {newCommentsPillLabel(newBelowCount)}
+            <ArrowDown size={12} strokeWidth={2.4} aria-hidden />
+          </button>
+        </div>
+      )}
       </div>
 
       {/* 입력 영역 — 떠있는 카드 (위 댓글 영역과 시각적 분리)

@@ -1,1 +1,93 @@
 /* 이 갈래 전용 움직임 CSS — motion-comments-notify (공통 토큰은 src/index.css :root 의 --motion-*·--ease-*, JS 는 src/utils/motion.ts) */
+
+/* ─── 4. comment-open-calm — 댓글 칸을 열 때 ─────────────────────────────
+   transform·opacity 만 움직인다. 채움은 backwards(끝나면 애니메이션 값을 남기지 않음).
+   전역 동작 줄이기 규칙(index.css)이 길이를 0 으로 줄이지만 animation-delay 는 남는다 — 자리표시의 0.15초 기다림은 그대로. */
+
+/* 불러오는 동안의 회색 말풍선 자리. 0.15초 안에 댓글이 오면 기다리는 동안 투명이라 아예 보이지 않는다. */
+.comment-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 4px;
+  animation: comment-skeleton-in var(--motion-base) var(--ease-out) 150ms backwards;
+}
+@keyframes comment-skeleton-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.comment-skeleton-bubble {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgb(var(--color-text-primary) / 0.04);
+}
+.comment-skeleton-bubble--left { align-self: flex-start; width: 68%; }
+.comment-skeleton-bubble--right { align-self: flex-end; width: 56%; }
+.comment-skeleton-bubble--h44 { height: 44px; }
+.comment-skeleton-bubble--h60 { height: 60px; }
+.comment-skeleton-bubble--h36 { height: 36px; width: 46%; }
+
+/* 빛 띠 — 미리 그린 띠를 transform 으로만 민다(매 프레임 다시 칠하지 않음). 불러오는 동안에만 있다.
+   동작 줄이기면 띠 없이 정적 회색. */
+@media (prefers-reduced-motion: no-preference) {
+  .comment-skeleton-bubble::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgb(var(--color-text-primary) / 0.06), transparent);
+    transform: translateX(-100%);
+    animation: comment-skeleton-sweep 1200ms ease-in-out infinite;
+  }
+}
+@keyframes comment-skeleton-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+/* 도착 — 목록이 이미 맨 아래(또는 새 댓글 줄 가운데)에 자리 잡은 채 opacity 0→1 180ms. */
+.comment-list-arrive {
+  animation: comment-list-arrive var(--motion-base) var(--ease-out) backwards;
+}
+@keyframes comment-list-arrive {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 정말 댓글이 없을 때·불러오지 못했을 때 안내 — opacity + translateY(4px→0) 180ms. */
+.comment-empty-arrive {
+  animation: comment-empty-arrive var(--motion-base) var(--ease-out) backwards;
+}
+@keyframes comment-empty-arrive {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* '새 댓글' 줄 — 읽음 처리 4초 뒤 300ms 에 걸쳐 옅어진다. 높이는 그대로라 아래 내용이 당겨지지 않는다. */
+.comment-unread-divider {
+  transition: opacity 300ms var(--ease-std);
+}
+.comment-unread-divider--fading {
+  opacity: 0;
+}
+
+/* 위를 읽는 중 새 댓글 — '새 댓글 N개 ↓' 알약이 8px 아래에서 160ms 에 떠오른다. */
+.comment-new-pill {
+  animation: comment-new-pill-in 160ms var(--ease-out) backwards;
+}
+@keyframes comment-new-pill-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 동작 줄이기: 안내·알약은 이동 없이 나타나기만. */
+@media (prefers-reduced-motion: reduce) {
+  .comment-empty-arrive,
+  .comment-new-pill {
+    animation-name: comment-fade-only;
+  }
+}
+@keyframes comment-fade-only {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
