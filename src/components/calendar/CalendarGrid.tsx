@@ -496,6 +496,14 @@ export function CalendarGrid({
     () => ({ direction: monthDirection, instant: instantMonthChange }),
     [instantMonthChange, monthDirection],
   );
+  // 같은 달로 금방 되돌아오면(A→B→A, A 가 아직 나가는 중) framer-motion 10 의 AnimatePresence 는
+  // 나가는 중인 키를 PresenceChild 없이 다시 들이고 그 기록을 남겨, 나중에 그 달이 나갈 때 오래된 화면이
+  // 잠깐 비친다. 넘길 때마다 새 키를 써서 나가는 중인 레이어를 다시 쓰지 않는다.
+  const monthLayerKeyRef = useRef({ monthKey, seq: 0 });
+  if (monthLayerKeyRef.current.monthKey !== monthKey) {
+    monthLayerKeyRef.current = { monthKey, seq: monthLayerKeyRef.current.seq + 1 };
+  }
+  const monthLayerKey = `${monthKey || 'default'}#${monthLayerKeyRef.current.seq}`;
 
   // 드래그 중이면 프리뷰 날짜로 이벤트를 대체해서 고스트 바 표시
   const displayEvents = useMemo(() => {
@@ -577,7 +585,7 @@ export function CalendarGrid({
       <div className="grid flex-1 min-h-0" style={MONTH_STACK_STYLE}>
       <AnimatePresence initial={false} custom={monthSlide}>
       <motion.div
-        key={monthKey || 'default'}
+        key={monthLayerKey}
         custom={monthSlide}
         variants={MONTH_SLIDE_VARIANTS}
         initial={monthSlide.instant ? false : 'enter'}

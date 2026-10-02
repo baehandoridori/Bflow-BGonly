@@ -9440,3 +9440,36 @@ test('ScheduleView period navigation keeps the same event state when the canonic
   assert.equal(after[0], before[0], '그대로인 일정은 같은 객체(편집기·메모가 흔들리지 않는다)');
   assert.equal(after[1].title, '동료가 바꾼 제목');
 });
+
+test('WeekScrollView ignores the inertial wheel that has just reached the end of the card list', async () => {
+  resetHarness();
+  const weekModule = await loadWeekScrollView();
+  const requested: number[] = [];
+  const tree = resolveComponents(weekModule.default({
+    currentMonth: 7,
+    currentYear: 2026,
+    events: [],
+    today: '2026-08-25',
+    onEventClick() {},
+    activeWeekIndex: 30,
+    onWeekChange: (index) => requested.push(index),
+  }));
+  const surface = findElements(tree, (element) => typeof element.props.onWheel === 'function')[0];
+  assert.ok(surface, 'the weekly card surface owns its wheel policy');
+  // 카드 안 일정 목록이 맨 아래에 닿아 있다.
+  const list = { scrollHeight: 800, clientHeight: 400, scrollTop: 400 };
+  const target = { closest: () => list };
+  const realNow = Date.now;
+  let now = 10_000;
+  Date.now = () => now;
+  try {
+    (surface.props.onScrollCapture as (event: unknown) => void)({ target });
+    (surface.props.onWheel as (event: unknown) => void)({ deltaY: 1, target });
+    assert.deepEqual(requested, [], '방금까지 목록이 움직였다면 끝에 닿은 관성 휠은 주를 넘기지 않는다');
+    now += 400;
+    (surface.props.onWheel as (event: unknown) => void)({ deltaY: 1, target });
+    assert.deepEqual(requested, [31], '잠깐 멈춘 뒤 다시 굴리면 다음 주로 넘어간다');
+  } finally {
+    Date.now = realNow;
+  }
+});

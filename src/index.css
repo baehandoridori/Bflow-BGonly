@@ -1597,6 +1597,10 @@ input[type="range"]::-webkit-slider-thumb {
   transition:
     opacity 0.38s cubic-bezier(0.16, 1, 0.3, 1),
     transform 0.38s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* 일간 칸 안쪽은 새로 생길 때(멀리 건너뛸 때) 투명에서 떠오른다(to = 인라인 값).
+   주간 줄은 넘길 때 새로 들어온 줄에만 useStackFlip 이 직접 페이드를 건다. */
+.calendar-day-col > .calendar-scroll-row {
   animation: calendarScrollRowIn 0.3s ease-out;
 }
 @keyframes calendarScrollRowIn {
@@ -1609,10 +1613,11 @@ input[type="range"]::-webkit-slider-thumb {
     width 0.4s cubic-bezier(0.16, 1, 0.3, 1),
     min-width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
+/* animation 은 여기서 건드리지 않는다 — none 으로 껐다가 연타가 끝나 되돌리면 animation-name 이
+   바뀐 것으로 보고 이미 떠 있던 줄마다 등장 애니메이션이 다시 돌아 한 번 깜빡인다. */
 .calendar-scroll-rows--instant .calendar-scroll-row,
 .calendar-scroll-rows--instant .calendar-day-col {
   transition: none;
-  animation: none;
 }
 /* 대시보드 캘린더 위젯 — 주 줄은 날짜 키로 그대로 두고 높이(flex-grow)·강조만 트랜지션한다.
    예전 framer layout 은 크기를 scale 로 맞춰 글자가 찌그러지고 매 프레임 메인 스레드를 썼다. */

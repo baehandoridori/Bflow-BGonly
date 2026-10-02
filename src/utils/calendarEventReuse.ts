@@ -43,7 +43,8 @@ export function reuseUnchangedCalendarEvents(
   previous: readonly CalendarEvent[],
   next: CalendarEvent[],
 ): CalendarEvent[] {
-  if (previous.length === 0) return next;
+  // 비어 있던 목록이 또 비어 있으면 그대로 둔다(빈 기간을 넘길 때도 다시 그리지 않게).
+  if (previous.length === 0) return next.length === 0 ? (previous as CalendarEvent[]) : next;
   const previousByIdentity = new Map<string, CalendarEvent>();
   for (const event of previous) previousByIdentity.set(calendarEventIdentityKey(event), event);
   let unchanged = previous.length === next.length;

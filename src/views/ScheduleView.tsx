@@ -1555,6 +1555,7 @@ export function ScheduleView() {
                 events={filteredEvents}
                 activeWeekStart={miniCalendarActiveWeekStart}
                 selectedDate={miniCalendarSelectedDate}
+                today={today}
               />
               {viewMode === 'today' ? (
                 <DaySidebar
@@ -1764,6 +1765,7 @@ export function ScheduleView() {
                 year={year}
                 highlightedEventIdentities={highlightedEventIdentities}
                 reduceMotion={reduce}
+                instantTransition={skipPeriodTransition}
               />
             ) : viewMode === 'week' && weekSubMode === 'timegrid' ? (
               <WeekTimeGridView

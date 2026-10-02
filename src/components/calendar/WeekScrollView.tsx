@@ -72,6 +72,8 @@ export interface WeekScrollViewProps {
 
 /* ── 상수 ────────────────────────────────────────────── */
 const DEBOUNCE_MS = 150;
+/** 목록이 방금까지 스크롤되고 있었다면, 끝에 닿은 관성 휠로 주가 넘어가지 않게 이만큼 쉰다. */
+const LIST_SCROLL_SETTLE_MS = 300;
 const VISIBLE_RANGE = 2; // 활성 주 ± 2주 표시
 const PRIMARY_TEXT = 'rgb(var(--color-text-primary))';
 const SECONDARY_TEXT = 'rgb(var(--color-text-secondary))';
@@ -143,6 +145,11 @@ export default function WeekScrollView({
 
   /* 휠 디바운스 */
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastListScrollAtRef = useRef(0);
+  // 카드 안 일정 목록이 움직인 시각. scroll 은 버블링되지 않아 캡처로 받는다.
+  const handleScrollCapture = useCallback((e: React.UIEvent) => {
+    if ((e.target as HTMLElement).closest?.('[data-scroll-events]')) lastListScrollAtRef.current = Date.now();
+  }, []);
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (wheelTimer.current) return;
@@ -154,6 +161,8 @@ export default function WeekScrollView({
         const atTop = scrollTop <= 0 && e.deltaY < 0;
         const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0;
         if (!atTop && !atBottom) return;
+        // 목록 끝에 막 닿은 관성 스크롤(트랙패드)이 그대로 주를 넘기지 않게 한 번 쉰다.
+        if (Date.now() - lastListScrollAtRef.current < LIST_SCROLL_SETTLE_MS) return;
       }
       const dir = e.deltaY > 0 ? 1 : -1;
       // 부모가 연도 경계를 소유한다. -1/length는 이전/다음 해로 넘길 sentinel이다.
@@ -169,6 +178,7 @@ export default function WeekScrollView({
     <div
       className="flex flex-col w-full select-none overflow-hidden flex-1 h-full justify-center"
       onWheel={handleWheel}
+      onScrollCapture={handleScrollCapture}
     >
       {/* 줄 묶음. 포커스 주 카드는 남은 높이 안에 들어가고(일정 목록은 카드 안에서 스크롤),
           위아래 주는 줄어들지 않는다 — 일정이 많아도 이웃 주와 목록 끝이 화면 밖으로 밀려나지 않는다. */}
@@ -197,11 +207,13 @@ export default function WeekScrollView({
               data-flip-id={weekKey}
               data-flip-anchor={isActive ? undefined : 'true'}
               data-flip-active={isActive ? 'true' : undefined}
-              className={isActive ? 'w-full flex flex-col' : 'w-full shrink-0'}
+              className={isActive ? 'w-full flex flex-col' : 'w-full min-h-0 overflow-hidden'}
               style={{
                 cursor: !isActive ? 'pointer' : undefined,
-                // 포커스 카드는 이 높이를 바닥으로 두고, 남는 높이가 모자라면 이만큼까지 줄어든다.
+                // 높이가 모자라면 포커스 카드가 먼저 줄어든다(바닥 50vh·2주 30vh). 줄어들 몫 비중을 크게 둬
+                // 이웃 주는 카드가 바닥에 닿은 뒤(창이 아주 낮을 때)에야 줄어든다 — 카드 아래가 잘리지 않게.
                 minHeight: isActive ? (is2Week ? '30vh' : '50vh') : undefined,
+                flex: isActive ? '0 1000 auto' : '0 1 auto',
               }}
               onClick={() => !isActive && onWeekChange(absIdx)}
             >

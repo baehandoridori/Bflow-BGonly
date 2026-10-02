@@ -273,6 +273,15 @@ export function CalendarWidget() {
   // 달 넘김 방향 — 나가는 달도 지금 방향을 따른다. '동작 줄이기'면 미끄러지지 않는다.
   const { reduce } = useMotionPref();
   const monthSlide = useMemo<MonthSlide>(() => ({ direction: monthDirection, instant: reduce }), [monthDirection, reduce]);
+  // 같은 달로 금방 되돌아오면(A→B→A, A 가 아직 나가는 중) framer-motion 10 의 AnimatePresence 는
+  // 나가는 중인 키를 PresenceChild 없이 다시 들이고 그 기록을 남겨, 나중에 그 달이 나갈 때 오래된 화면이
+  // 잠깐 비친다. 넘길 때마다 새 키를 써서 나가는 중인 레이어를 다시 쓰지 않는다.
+  const monthKey = `${year}-${month}`;
+  const monthLayerKeyRef = useRef({ monthKey, seq: 0 });
+  if (monthLayerKeyRef.current.monthKey !== monthKey) {
+    monthLayerKeyRef.current = { monthKey, seq: monthLayerKeyRef.current.seq + 1 };
+  }
+  const monthLayerKey = `month-${monthKey}#${monthLayerKeyRef.current.seq}`;
 
   // 선택 날짜 또는 오늘 일정
   const displayDate = selectedDate ?? today;
@@ -476,7 +485,7 @@ export function CalendarWidget() {
             <div className="grid flex-1 min-h-0" style={MONTH_STACK_STYLE}>
             <AnimatePresence initial={false} custom={monthSlide}>
             <motion.div
-              key={`month-${year}-${month}`}
+              key={monthLayerKey}
               custom={monthSlide}
               variants={WIDGET_MONTH_SLIDE_VARIANTS}
               initial={monthSlide.instant ? false : 'enter'}

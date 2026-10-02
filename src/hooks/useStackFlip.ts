@@ -14,7 +14,7 @@ import { useLayoutEffect, useRef, type RefObject } from 'react';
 
 type Axis = 'x' | 'y';
 
-type FlipRow = { start: number; index: number; anchor: boolean; active: boolean };
+type FlipRow = { start: number; index: number; anchor: boolean; active: boolean; element?: HTMLElement };
 type FlipSnapshot = { rows: Map<string, FlipRow>; activeIndex: number };
 
 export interface StackFlipOptions {
@@ -49,6 +49,7 @@ function measureRows(container: HTMLElement | null, axis: Axis): FlipSnapshot | 
       index,
       anchor: element.dataset.flipAnchor === 'true',
       active,
+      element,
     });
   });
   return { rows, activeIndex };
@@ -92,8 +93,13 @@ export function useStackFlip(
     snapshotRef.current = measureRows(containerRef.current, axis);
   }
 
+  // 커밋마다 돈다(의존성 없음). 키가 그대로인 커밋이면 그사이 화면이 바뀌었을 수 있으니
+  // 남아 있는 옛 측정값을 버린다 — 버려진 렌더가 잰 값이 나중 넘김에 섞이지 않게.
   useLayoutEffect(() => {
-    if (committedKeyRef.current === flipKey) return;
+    if (committedKeyRef.current === flipKey) {
+      snapshotRef.current = null;
+      return;
+    }
     committedKeyRef.current = flipKey;
     const before = snapshotRef.current;
     snapshotRef.current = null;
@@ -119,6 +125,12 @@ export function useStackFlip(
         [{ transform: `${translate}(${shift}px)` }, { transform: `${translate}(0px)` }],
         { duration, easing },
       );
+      // 바깥에서 새로 밀려 들어온 줄만 투명에서 떠오르게 한다. CSS 등장 애니메이션을 클래스로
+      // 켜고 끄면 연타가 끝날 때 이미 떠 있던 줄까지 다시 떠올라 깜빡이므로 여기서 직접 건다.
+      for (const [id, row] of after.rows) {
+        if (before.rows.has(id) || !row.element || typeof row.element.animate !== 'function') continue;
+        row.element.animate([{ opacity: 0 }, { opacity: 1 }], { duration: Math.round(duration * 0.8), easing: 'ease-out' });
+      }
       return;
     }
     // 이어지는 줄이 하나도 없을 만큼 건너뛰었다(미니 달력·사이드바로 멀리 이동 등).
@@ -130,7 +142,7 @@ export function useStackFlip(
       ],
       { duration: Math.round(duration * 0.8), easing },
     );
-  }, [axis, containerRef, flipKey]);
+  });
 
   useLayoutEffect(() => () => {
     animationRef.current?.cancel();

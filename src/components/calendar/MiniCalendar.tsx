@@ -14,6 +14,8 @@ export interface MiniCalendarProps {
   events: CalendarEvent[];
   activeWeekStart?: string; // YYYY-MM-DD (Sunday of the active week)
   selectedDate?: string;
+  /** 오늘(YYYY-MM-DD). memo 로 감싸 두었으니 날짜가 바뀌면 부모가 새 값을 넘겨 다시 그리게 한다. */
+  today?: string;
 }
 
 // ─── Utility functions ───────────────────────────
@@ -26,12 +28,13 @@ export const MiniCalendar = memo(function MiniCalendar({
   events,
   activeWeekStart,
   selectedDate,
+  today: todayProp,
 }: MiniCalendarProps) {
   // transform 문자열은 MotionConfig 의 '동작 줄이기'가 막지 못한다. 직접 끄고 투명도만 남긴다(예전과 같은 결과).
   const { reduce } = useMotionPref();
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
-  const today = fmtDate(new Date());
+  const today = todayProp ?? fmtDate(new Date());
 
   // Active week range (Sunday ~ Saturday)
   const activeWeekRange = useMemo(() => {

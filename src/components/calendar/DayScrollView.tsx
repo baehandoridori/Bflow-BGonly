@@ -39,10 +39,14 @@ export interface DayScrollViewProps {
   year: number;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
+  /** 연타 중(←→를 누르고 있을 때)이면 칸 너비를 기다리지 않고 바로 바꾼다 — 트랜지션이 계속 다시 겨눠지며 덜컹이지 않게. */
+  instantTransition?: boolean;
 }
 
 /* ── 상수 ────────────────────────────────────────────── */
 const DEBOUNCE_MS = 150;
+/** 목록이 방금까지 스크롤되고 있었다면, 끝에 닿은 관성 휠로 날짜가 넘어가지 않게 이만큼 쉰다. */
+const LIST_SCROLL_SETTLE_MS = 300;
 /**
  * 포커스 ±2일을 보여 주고, 그 바깥 ±3일은 너비 0인 대기 칸으로 둔다.
  * 하루씩 넘길 때 모든 칸이 그대로 남아(날짜 키) 너비만 CSS 트랜지션으로 바뀐다 —
@@ -80,6 +84,7 @@ export default function DayScrollView({
   year,
   highlightedEventIdentities,
   reduceMotion = false,
+  instantTransition = false,
 }: DayScrollViewProps) {
   const maxDay = daysInYear(year) - 1;
   const tags = useCalendarStore((state) => state.tags);
@@ -102,6 +107,11 @@ export default function DayScrollView({
 
   /* 휠 디바운스 */
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastListScrollAtRef = useRef(0);
+  // 카드 안 일정 목록이 움직인 시각. scroll 은 버블링되지 않아 캡처로 받는다.
+  const handleScrollCapture = useCallback((e: React.UIEvent) => {
+    if ((e.target as HTMLElement).closest?.('[data-scroll-events]')) lastListScrollAtRef.current = Date.now();
+  }, []);
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (wheelTimer.current) return;
@@ -113,6 +123,8 @@ export default function DayScrollView({
         const atTop = scrollTop <= 0 && e.deltaY < 0;
         const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0;
         if (!atTop && !atBottom) return; // 리스트 내 스크롤 우선
+        // 목록 끝에 막 닿은 관성 스크롤(트랙패드)이 그대로 날짜를 넘기지 않게 한 번 쉰다.
+        if (Date.now() - lastListScrollAtRef.current < LIST_SCROLL_SETTLE_MS) return;
       }
       const dir = e.deltaY > 0 ? 1 : -1;
       onActiveDayChange(activeDayIndex + dir);
@@ -136,10 +148,11 @@ export default function DayScrollView({
 
   return (
     <div
-      className={`flex items-stretch w-full select-none overflow-hidden flex-1 h-full${reduceMotion ? ' calendar-scroll-rows--instant' : ''}`}
+      className={`flex items-stretch w-full select-none overflow-hidden flex-1 h-full${reduceMotion || instantTransition ? ' calendar-scroll-rows--instant' : ''}`}
       // 포커스 카드 내용 너비(60cqw)의 기준 상자
       style={{ containerType: 'inline-size' }}
       onWheel={handleWheel}
+      onScrollCapture={handleScrollCapture}
     >
       {visibleDays.map(({ date, dateStr, absIdx }) => {
         const absDiff = Math.abs(absIdx - activeDayIndex);

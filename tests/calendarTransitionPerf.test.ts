@@ -8,7 +8,8 @@ import { reuseUnchangedCalendarEvents, isSameCalendarEventContent } from '../src
 import { pickStackFlipShift } from '../src/hooks/useStackFlip.ts';
 import type { CalendarEvent } from '../src/types/calendar.ts';
 
-const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+// 체크아웃 설정(autocrlf)에 따라 CRLF 로 올 수 있어, 여러 줄 정규식이 흔들리지 않게 LF 로 맞춘다.
+const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 function event(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   return {
@@ -76,6 +77,13 @@ test('같은 id 라도 저장소가 다르면(구글·B flow) 다른 일정으�
   const google = event({ id: 'dup', source: 'google', sourceCalendarId: 'primary', calendarId: undefined });
   const merged = reuseUnchangedCalendarEvents([bflow], [{ ...google }]);
   assert.notEqual(merged[0], bflow, '저장소가 다른 일정을 이전 객체로 덮으면 안 된다');
+});
+
+test('비어 있던 목록이 또 비어 있으면 이전 배열을 그대로 쓴다(빈 기간도 다시 그리지 않음)', () => {
+  const empty: CalendarEvent[] = [];
+  assert.equal(reuseUnchangedCalendarEvents(empty, []), empty);
+  const next = [event()];
+  assert.equal(reuseUnchangedCalendarEvents(empty, next), next);
 });
 
 test('Date 처럼 순수 객체가 아닌 값은 키 비교로 같다고 보지 않는다', () => {
@@ -222,6 +230,24 @@ test('2주 보기에서 한 주씩 넘기면 계속 포커스인 주를 기준�
   assert.equal(pickStackFlipShift(before, after), 300, 'w+1 카드가 옛 자리에서 이어진다');
 });
 
+test('미끄러짐 측정값은 키가 그대로인 커밋에서 버린다(버려진 렌더의 옛 측정이 섞이지 않게)', () => {
+  const flip = read('src/hooks/useStackFlip.ts');
+  // 의존성 없이 커밋마다 돌고, 키가 그대로면 남은 측정값을 비운다.
+  assert.match(flip, /if \(committedKeyRef\.current === flipKey\) \{\s*snapshotRef\.current = null;\s*return;\s*\}/);
+  assert.match(flip, /\n {2}\}\);\n\n {2}useLayoutEffect\(\(\) => \(\) => \{/, '첫 레이아웃 효과는 의존성 배열이 없어야 커밋마다 돈다');
+});
+
+test('같은 달로 금방 돌아와도 나가는 중인 달 레이어를 다시 쓰지 않는다(넘길 때마다 새 키)', () => {
+  for (const file of ['src/components/calendar/CalendarGrid.tsx', 'src/components/widgets/CalendarWidget.tsx']) {
+    const source = read(file);
+    assert.match(source, /monthLayerKeyRef\.current = \{ monthKey, seq: monthLayerKeyRef\.current\.seq \+ 1 \};/, file);
+    assert.match(source, /key=\{monthLayerKey\}/, file);
+  }
+  // 미니 달력은 memo 라 '오늘'을 부모에게서 받아야 날짜가 바뀌면 다시 그려진다.
+  assert.match(read('src/components/calendar/MiniCalendar.tsx'), /const today = todayProp \?\? fmtDate\(new Date\(\)\);/);
+  assert.match(read('src/views/ScheduleView.tsx'), /selectedDate=\{miniCalendarSelectedDate\}\n\s*today=\{today\}/);
+});
+
 test('이어지는 줄이 없으면(멀리 건너뜀) 되돌릴 거리를 정하지 않는다', () => {
   const before = snapshot([{ id: 'a', start: 100, anchor: true }, { id: 'b', start: 160, active: true }]);
   const after = snapshot([{ id: 'x', start: 100, anchor: true }, { id: 'y', start: 160, active: true }]);
@@ -238,7 +264,12 @@ test('주간 카드 보기는 framer layout(크기 scale) 대신 줄 묶음 하�
   // 포커스 카드는 남은 높이 안에 들어가고 일정 목록은 카드 안에서 스크롤된다.
   assert.match(week, /minHeight: isActive \? \(is2Week \? '30vh' : '50vh'\) : undefined/);
   assert.match(week, /flex-1 min-h-0 overflow-y-auto mt-2/, '목록이 줄어들 수 있어야 안에서 스크롤된다');
-  assert.match(week, /className=\{isActive \? 'w-full flex flex-col' : 'w-full shrink-0'\}/, '이웃 주는 줄어들지 않는다');
+  // 높이가 모자라면 포커스 카드가 먼저 줄고(바닥까지), 이웃 주는 그 뒤에야 줄어든다 — 낮은 창에서 카드 아래가 잘리지 않게.
+  assert.match(week, /className=\{isActive \? 'w-full flex flex-col' : 'w-full min-h-0 overflow-hidden'\}/);
+  assert.match(week, /flex: isActive \? '0 1000 auto' : '0 1 auto',/);
+  // 목록 끝에 막 닿은 관성 휠은 주를 넘기지 않는다.
+  assert.match(week, /if \(Date\.now\(\) - lastListScrollAtRef\.current < LIST_SCROLL_SETTLE_MS\) return;/);
+  assert.match(week, /onScrollCapture=\{handleScrollCapture\}/);
 });
 
 test('일간 보기는 날짜 키로 칸을 유지하고 바깥 대기 칸(너비 0)으로 들고 나간다', () => {
@@ -257,7 +288,21 @@ test('일간 보기는 날짜 키로 칸을 유지하고 바깥 대기 칸(너�
 test('넘김 강조와 카드 호버는 CSS 트랜지션이고 동작 줄이기·연타에서는 끈다', () => {
   const css = read('src/index.css');
   assert.match(css, /\.calendar-scroll-row \{[\s\S]*?transition:[\s\S]*?opacity 0\.38s[\s\S]*?transform 0\.38s/);
-  assert.match(css, /\.calendar-scroll-rows--instant \.calendar-scroll-row,\s*\.calendar-scroll-rows--instant \.calendar-day-col \{\s*transition: none;\s*animation: none;/);
+  // 연타 모드는 트랜지션만 끈다. animation 을 none 으로 껐다 되돌리면 이름이 바뀐 것으로 보고
+  // 이미 떠 있던 줄마다 등장 애니메이션이 다시 돌아, 연타가 끝나는 순간 묶음 전체가 한 번 깜빡인다.
+  const instantRule = css.match(/\.calendar-scroll-rows--instant \.calendar-scroll-row,\s*\.calendar-scroll-rows--instant \.calendar-day-col \{([^}]*)\}/);
+  assert.ok(instantRule, '연타 규칙을 찾지 못했다');
+  assert.match(instantRule[1], /transition: none;/);
+  assert.doesNotMatch(instantRule[1], /animation/, '연타 규칙에서 animation 을 바꾸면 끝날 때 깜빡인다');
+  const baseRow = css.match(/\.calendar-scroll-row \{([^}]*)\}/);
+  assert.ok(baseRow && !/animation/.test(baseRow[1]), '주간 줄 등장은 CSS 가 아니라 넘김 때 새로 생긴 줄에만(useStackFlip)');
+  assert.match(css, /\.calendar-day-col > \.calendar-scroll-row \{\s*animation: calendarScrollRowIn/);
+  const flip = read('src/hooks/useStackFlip.ts');
+  assert.match(flip, /if \(before\.rows\.has\(id\) \|\| !row\.element/, '넘김 때 새로 들어온 줄만 떠오르게 한다');
+  // 일간 보기도 연타(←→ 누르고 있기) 중에는 칸 너비를 바로 바꾼다.
+  const view = read('src/views/ScheduleView.tsx');
+  assert.match(view, /reduceMotion=\{reduce\}\n\s*instantTransition=\{skipPeriodTransition\}\n\s*\/>\n\s*\) : viewMode === 'week' && weekSubMode === 'timegrid'/);
+  assert.match(read('src/components/calendar/DayScrollView.tsx'), /reduceMotion \|\| instantTransition \? ' calendar-scroll-rows--instant' : ''/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.calendar-scroll-row,\s*\.calendar-day-col,\s*\.calendar-event-card \{/);
   const week = read('src/components/calendar/WeekScrollView.tsx');
   const day = read('src/components/calendar/DayScrollView.tsx');
