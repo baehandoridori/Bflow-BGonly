@@ -65,7 +65,7 @@ export function DonutChart({
               strokeDashoffset={arc.dashoffset}
               strokeLinecap="butt"
               transform={`rotate(-90 ${cx} ${cy})`}
-              className="bf-progress-arc"
+              className="bf-progress-arc bf-entry-ring"
             />
           ))}
         </svg>

@@ -52,7 +52,7 @@ export function StageBarsWidget() {
             </span>
             <div className="flex-1 h-5 bg-bg-primary rounded-full overflow-hidden">
               <div
-                className="h-full rounded-full transition-all duration-700 ease-out"
+                className="bf-entry-fill-x h-full rounded-full transition-all duration-700 ease-out"
                 style={{
                   width: `${stat.pct}%`,
                   backgroundColor: deptConfig.stageColors[stat.stage],

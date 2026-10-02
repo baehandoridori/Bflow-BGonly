@@ -25,7 +25,7 @@ export function StatCard({ value, label, subValue, color, pct }: StatCardProps) 
       {pct !== undefined && (
         <div className="w-32 h-2 bg-bg-primary rounded-full overflow-hidden mt-1">
           <div
-            className="bf-progress-bar h-full rounded-full"
+            className="bf-progress-bar bf-entry-fill-x h-full rounded-full"
             style={{
               width: `${pct}%`,
               backgroundColor: color ?? 'rgb(var(--color-accent))',

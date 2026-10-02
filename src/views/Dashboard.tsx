@@ -30,6 +30,7 @@ import { ChartTypeContextMenu, getWidgetSupportedCharts, useChartContextMenu } f
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
+import { useFirstDashboardEntry } from '@/hooks/useFirstDashboardEntry';
 import { getPreset } from '@/themes';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
@@ -847,6 +848,9 @@ export function Dashboard() {
   }, [widgetLayout, allWidgetLayout, episodeWidgetLayout, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, dashboardFilter, isEpMode]);
   removeWidgetRef.current = handleRemoveWidget;
 
+  // 앱 켠 뒤 첫 대시보드: 위젯이 왼쪽 위부터 차례로 또렷해지고 막대·원이 차오른다(움직임 폴리싱 13번).
+  const entryRanks = useFirstDashboardEntry(currentLayout);
+
   const handleAddWidget = useCallback((widgetId: string) => {
     const current = isEpMode
       ? (episodeWidgetLayout ?? EP_LAYOUT)
@@ -1193,6 +1197,7 @@ export function Dashboard() {
               return (
                 <div
                   key={item.i}
+                  data-entry-rank={entryRanks.get(item.i)}
                   className={cn(
                     'relative h-full',
                     isSettle && 'widget-settling',

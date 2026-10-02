@@ -218,10 +218,10 @@ export function OverallProgressWidget() {
                   strokeWidth={RING_STROKE}
                   strokeDasharray={`${reveal.length} ${RING_CIRCUMFERENCE}`}
                   transform={`rotate(-90 ${RING_CENTER} ${RING_CENTER})`}
-                  className="bf-progress-arc"
+                  className="bf-progress-arc bf-entry-ring"
                 />
                 <g
-                  className="bf-progress-cap"
+                  className="bf-progress-cap bf-entry-ring-cap"
                   data-visible={reveal.capVisible ? 'true' : 'false'}
                   style={{
                     transform: `rotate(${reveal.capDeg}deg)`,

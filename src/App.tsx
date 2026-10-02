@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useCallback, useState, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
+import { lazy, Suspense, useEffect, useCallback, useState, useRef, startTransition, Component, type ReactNode, type ErrorInfo } from 'react';
 import { createPortal } from 'react-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore } from '@/stores/useAppStore';
@@ -25,6 +25,7 @@ const PlaygroundView = lazy(() => import('@/views/PlaygroundView'));
 const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
+import { LoadingSplash } from '@/components/auth/LoadingSplash';
 const PasswordChangeModal = lazy(() => import('@/components/auth/PasswordChangeModal').then(m => ({ default: m.PasswordChangeModal })));
 const UserManagerModal = lazy(() => import('@/components/auth/UserManagerModal').then(m => ({ default: m.UserManagerModal })));
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
@@ -604,6 +605,29 @@ export default function App() {
   const [loadingSplashDone, setLoadingSplashDone] = useState(false);
   const [sessionRestoreError, setSessionRestoreError] = useState('');
   useEffect(() => { if (currentUser) setSessionRestoreError(''); }, [currentUser]);
+  // 첫 진입 덮개 (움직임 폴리싱 13번): 'Bflow.'·로그인 화면을 덮개로 남겨 둔 채 아래에 메인 화면을 미리 그리고,
+  // 클릭(또는 로그인 성공)하면 덮개가 걷히며 대시보드가 드러난다. 인사 말풍선은 덮개가 다 걷힌 뒤.
+  const [mainPrimed, setMainPrimed] = useState(false);
+  // 로그인 화면 덮개가 떠 있다 — 로그인 전부터 로그인 직후 다 걷힐 때까지. 사용자 정보가 들어오는 순간에도
+  // 덮개가 사라지지 않게 로그인 전(인증 준비 뒤 사용자 없음)에 미리 켜 둔다. 로그아웃하면 다시 켠다.
+  const [loginCurtain, setLoginCurtain] = useState(false);
+  useEffect(() => {
+    if (!authReady || currentUser) return;
+    setLoginCurtain(true);
+    setMainPrimed(false);
+  }, [authReady, currentUser]);
+  // 로딩 영상을 넘긴 뒤 다음 화면 위에서 0.2초 동안 걷히는 중
+  const [loadingSplashFading, setLoadingSplashFading] = useState(false);
+  // 메인 화면 미리 그리기 — 급하지 않은 갱신(startTransition)이라 끊어 그리며, 그동안 글자·빛·카드가 떠오르는
+  // 연출이 먼저 화면에 나간다. 대시보드 코드가 아직 없으면 받아질 때까지 덮개만 보인다(빙글이 없이).
+  const primeMain = useCallback(() => { startTransition(() => setMainPrimed(true)); }, []);
+  // 덮개가 다 걷혔다 — 첫 화면(splash)이든 로그인 직후든 덮개를 내린다. 바로 내린다(급하지 않은 갱신으로 미루면
+  // 투명해진 덮개의 배경 입자 그림이 그동안 계속 돌아 저사양에서 오히려 더 끊긴다 — cpu 4배 실측).
+  const finishEntryOverlay = useCallback(() => { setShowSplash(false); setLoginCurtain(false); }, []);
+  const skipLoadingSplash = useCallback(() => { setLoadingSplashFading(true); setLoadingSplashDone(true); }, []);
+  const finishLoadingSplashFade = useCallback(() => setLoadingSplashFading(false), []);
+  // 첫 화면 코드를 미리 받아 둔다 — 로그인 직후처럼 덮개 아래에서 바로 그려야 할 때 기다리지 않게.
+  useEffect(() => { if (authReady) void import('@/views/Dashboard'); }, [authReady]);
   // 환영 팝업: 로그인 직후에만 표시
   const [welcomeUser, setWelcomeUser] = useState<string | null>(null);
   // 시간대별 인사말 토스트 (WelcomeToast 스타일로 하단 표시)
@@ -3025,7 +3049,7 @@ export default function App() {
   // 다음 실행 시에도 영원히 안 뜨는 문제가 있었음 (한솔 v1.27.0 1차 보고).
   const updateToastShownRef = useRef(false);
   useEffect(() => {
-    if (showSplash || updateToastShownRef.current) return;
+    if (showSplash || loginCurtain || updateToastShownRef.current) return;
     updateToastShownRef.current = true; // 같은 세션에서 두 번 안 뜨도록 즉시 마킹
     let cancelled = false;
     (async () => {
@@ -3047,7 +3071,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [showSplash]);
+  }, [showSplash, loginCurtain]);
 
   // Ctrl+Alt+U: 관리자 모드 토글
   useEffect(() => {
@@ -3143,95 +3167,58 @@ export default function App() {
     );
   };
 
-  // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능
-  // 영상은 1회 재생 후 마지막 프레임에서 멈춤 (스플래시 아트처럼)
+  // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능.
+  // 넘기면 다음 화면 위에서 0.2초 동안 걷히며 짧게 겹친다(움직임 폴리싱 13번). 아래 모든 화면 묶음에 같은 key 로
+  // 들어 있어 영상이 다시 시작되지 않는다.
+  const loadingSplashOverlay = (!loadingSplashDone || loadingSplashFading) ? (
+    <LoadingSplash
+      key="loading-splash"
+      canSkip={authReady}
+      fading={loadingSplashDone}
+      onSkip={skipLoadingSplash}
+      onFaded={finishLoadingSplashFade}
+    />
+  ) : null;
   if (!loadingSplashDone) {
-    const canSkip = authReady;
-    return (
-      <div
-        className="flex items-center justify-center h-screen w-screen overflow-hidden cursor-pointer select-none"
-        style={{
-          backgroundColor: '#0F1117',
-          backgroundImage: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
-        }}
-        onClick={() => { if (canSkip) setLoadingSplashDone(true); }}
-      >
-        {/* 스플래시 영상 — loop 없이 1회 재생 후 마지막 프레임 고정 */}
-        <div className="relative" style={{ width: 'min(420px, 75vmin)', aspectRatio: '672 / 592' }}>
-          <video
-            autoPlay muted playsInline preload="auto"
-            src="./splash/opening_video.mp4"
-            className="absolute object-cover"
-            style={{
-              inset: '-10%', width: '120%', height: '120%',
-              animation: 'loadingSplashReveal 1.5s ease-out 0.3s forwards',
-              filter: 'blur(8px) brightness(0.6)',
-              transform: 'scale(1.05)',
-              WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
-              maskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
-              WebkitMaskComposite: 'destination-in' as never,
-              maskComposite: 'intersect' as never,
-            }}
-          />
-        </div>
-
-        {/* 하단 문구 */}
-        <div className="absolute bottom-6 flex flex-col items-center gap-1.5">
-          {canSkip ? (
-            <>
-              <span
-                className="text-sm text-accent/80 font-medium tracking-wide"
-                style={{ animation: 'fadeIn 0.5s ease-out' }}
-              >
-                로딩 완료
-              </span>
-              <span
-                className="text-xs text-white/40 tracking-wide"
-                style={{ animation: 'fadeIn 0.5s ease-out 0.2s both' }}
-              >
-                아무 곳이나 클릭하여 건너뛰기
-              </span>
-            </>
-          ) : (
-            <span className="text-sm text-white/30 animate-pulse tracking-wide">
-              로딩 중...
-            </span>
-          )}
-        </div>
-
-        <style>{`
-          @keyframes loadingSplashReveal {
-            to { filter: blur(0px) brightness(1); transform: scale(1); }
-          }
-          @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-        `}</style>
-      </div>
-    );
+    return <>{loadingSplashOverlay}</>;
   }
 
   // 인증 초기화 아직 미완료 (비정상 경로 — 위에서 splash가 처리하므로 거의 발생 안 함)
   if (!authReady) return null;
+
+  // 로그인·첫 화면 덮개 (움직임 폴리싱 13번). 아래 세 화면 묶음 모두에 같은 key 로 들어 있어,
+  // 로그인 → 메인 화면, 'Bflow.' → 메인 화면으로 바뀌어도 덮개가 새로 생기지 않고 그 자리에서 걷힌다.
+  const entryOverlayVisible = !currentUser || showSplash || loginCurtain;
+  const entryOverlay = entryOverlayVisible ? (
+    <LoginScreen
+      key="entry-overlay"
+      mode={!currentUser || loginCurtain ? 'login' : 'splash'}
+      restoreError={sessionRestoreError}
+      onPrimeMain={primeMain}
+      onComplete={finishEntryOverlay}
+    />
+  ) : null;
 
   // 로그인 화면 (비로그인 상태)
   if (!currentUser) {
     return (
       <>
         <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-        <LoginScreen restoreError={sessionRestoreError} />
+        {entryOverlay}
         <UpdateCenterModal />
+        {loadingSplashOverlay}
       </>
     );
   }
 
-  // 스플래시 랜딩 (로그인 상태에서도 앱 시작 시 표시)
-  if (showSplash) {
+  // 스플래시 랜딩 (로그인 상태에서도 앱 시작 시 표시)·막 로그인한 순간 — 메인을 미리 그리기 전까지는 덮개만.
+  // 글자가 다 나와 클릭을 기다리는 동안·로그인 직후 덮개가 primeMain 을 불러 아래 메인 묶음으로 넘어간다.
+  if (entryOverlayVisible && !mainPrimed) {
     return (
       <>
         <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-        <LoginScreen mode="splash" onComplete={() => setShowSplash(false)} />
+        {entryOverlay}
+        {loadingSplashOverlay}
       </>
     );
   }
@@ -3244,6 +3231,9 @@ export default function App() {
       <PlaygroundEntryOverlay />
       <SpotlightSearch />
       <GlobalTooltipProvider />
+      {/* 첫 진입 덮개·로딩 영상 교차 (움직임 폴리싱 13번) — 이 화면은 덮개 아래에서 미리 그려진다 */}
+      {entryOverlay}
+      {loadingSplashOverlay}
 
       {/* 비밀번호 변경 모달 */}
       {showPasswordChange && (
@@ -3287,8 +3277,8 @@ export default function App() {
         document.body,
       )}
 
-      {/* 환영 팝업 (로그인 직후) */}
-      {welcomeUser && (
+      {/* 환영 팝업 (로그인 직후) — 로그인 덮개가 다 걷힌 뒤 */}
+      {welcomeUser && !loginCurtain && (
         <WelcomeToast userName={welcomeUser} onDismiss={() => {
           setWelcomeUser(null);
           // 수동 로그인: "어서오세요" 사라진 후 시간대별 인사 표시

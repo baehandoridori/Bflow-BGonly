@@ -9,6 +9,15 @@ import { cn } from '@/utils/cn';
 import { useCapsLockWarning } from '@/hooks/useCapsLockWarning';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
+import { GradientBackdrop } from '@/components/common/GradientBackdrop';
+import { prefersReducedMotion } from '@/utils/motion';
+import {
+  ENTRY_CURTAIN_DELAY_MS,
+  ENTRY_CURTAIN_MS,
+  ENTRY_VIEW_WAIT_MAX_MS,
+  canLiftEntryCurtain,
+  entryCurtain,
+} from '@/utils/firstEntryMotion';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -446,20 +455,24 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
         }}
       >
         <h1 className="flex items-baseline text-5xl md:text-7xl font-bold tracking-tight">
-          {/* "B" — 항상 고정, 그래디언트 + 빛나는 글로우 */}
-          <motion.span
-            animate={{
-              filter: [
-                `drop-shadow(0 0 10px rgba(${accentCss},0.6)) drop-shadow(0 0 25px rgba(${accentCss},0.3)) drop-shadow(0 0 50px rgba(${accentSubCss},0.15))`,
-                `drop-shadow(0 0 16px rgba(${accentCss},0.8)) drop-shadow(0 0 40px rgba(${accentCss},0.45)) drop-shadow(0 0 70px rgba(${accentSubCss},0.2))`,
-                `drop-shadow(0 0 10px rgba(${accentCss},0.6)) drop-shadow(0 0 25px rgba(${accentCss},0.3)) drop-shadow(0 0 50px rgba(${accentSubCss},0.15))`,
-              ],
-            }}
-            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-            className="inline-block bg-gradient-to-br from-accent via-accent-sub to-[#74B9FF] bg-clip-text text-transparent"
-          >
-            B
-          </motion.span>
+          {/* "B" — 항상 고정, 그래디언트 + 빛나는 글로우.
+              숨쉬는 빛은 겹친 빛 층의 opacity 만 바꾼다(합성 스레드) — 대시보드를 뒤에서 미리 그리는 동안에도 멈칫하지 않게.
+              (예전: filter 를 매 프레임 메인 스레드에서 바꿔 다시 칠함) */}
+          <span className="relative inline-block">
+            <span
+              className="inline-block bg-gradient-to-br from-accent via-accent-sub to-[#74B9FF] bg-clip-text text-transparent"
+              style={{ filter: `drop-shadow(0 0 10px rgba(${accentCss},0.6)) drop-shadow(0 0 25px rgba(${accentCss},0.3)) drop-shadow(0 0 50px rgba(${accentSubCss},0.15))` }}
+            >
+              B
+            </span>
+            <span
+              aria-hidden="true"
+              className="bf-entry-glow pointer-events-none absolute inset-0 text-transparent"
+              style={{ textShadow: `0 0 16px rgba(${accentCss},0.55), 0 0 40px rgba(${accentCss},0.3), 0 0 70px rgba(${accentSubCss},0.15)` }}
+            >
+              B
+            </span>
+          </span>
 
           {/* 서픽스 컨테이너 — inline-grid로 baseline 정렬 유지 + 크로스페이드 */}
           <motion.span
@@ -530,7 +543,7 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
 
 // ─── 클릭 투 컨티뉴 ────────────────────────────────────────────
 
-function ClickPrompt() {
+function ClickPrompt({ exiting = false }: { exiting?: boolean }) {
   const themeId = useAppStore((s) => s.themeId);
   const customColors = useAppStore((s) => s.customThemeColors);
   const { aCss, sCss } = useMemo(() => {
@@ -540,34 +553,32 @@ function ClickPrompt() {
     return { aCss: a.split(' ').join(','), sCss: s.split(' ').join(',') };
   }, [themeId, customColors]);
 
+  // 숨쉬는 빛·화살표 흔들림은 CSS(opacity·transform, 합성 스레드)로 — 대시보드를 뒤에서 미리 그리는 동안
+  // 메인 스레드가 바빠도 멈칫하지 않는다(예전: textShadow 를 매 프레임 메인 스레드에서 바꿔 다시 칠함).
+  // 클릭하면(exiting) 'Bflow.' 글자와 같은 박자로 지연 없이 떠오르며 흐려진다.
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
+      exit={{ opacity: 0, transition: { duration: 0.2, delay: 0 } }}
       transition={{ delay: 0.4, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-      className="absolute bottom-20 left-0 right-0 flex justify-center z-10"
+      className={cn('absolute bottom-20 left-0 right-0 flex justify-center z-10', exiting && 'bf-entry-text-exit')}
     >
-      <motion.div
-        animate={{
-          opacity: [0.7, 1, 0.7],
-          textShadow: [
-            `0 0 8px rgba(${aCss},0.4), 0 0 24px rgba(${aCss},0.15)`,
-            `0 0 16px rgba(${aCss},0.7), 0 0 48px rgba(${aCss},0.3), 0 0 80px rgba(${sCss},0.15)`,
-            `0 0 8px rgba(${aCss},0.4), 0 0 24px rgba(${aCss},0.15)`,
-          ],
-        }}
-        transition={{ duration: 3.0, repeat: Infinity, ease: 'easeInOut' }}
-        className="flex items-center gap-2 text-sm text-accent tracking-[0.2em] uppercase font-light"
-      >
-        click anywhere to continue
-        <motion.span
-          animate={{ x: [0, 5, 0] }}
-          transition={{ duration: 2.0, repeat: Infinity, ease: 'easeInOut' }}
-        >
+      <div className="bf-entry-breathe relative flex items-center gap-2 text-sm text-accent tracking-[0.2em] uppercase font-light">
+        <span className="relative">
+          <span style={{ textShadow: `0 0 8px rgba(${aCss},0.4), 0 0 24px rgba(${aCss},0.15)` }}>click anywhere to continue</span>
+          <span
+            aria-hidden="true"
+            className="bf-entry-glow pointer-events-none absolute inset-0 text-transparent"
+            style={{ textShadow: `0 0 16px rgba(${aCss},0.7), 0 0 48px rgba(${aCss},0.3), 0 0 80px rgba(${sCss},0.15)` }}
+          >
+            click anywhere to continue
+          </span>
+        </span>
+        <span className="bf-entry-nudge">
           <ChevronRight size={14} />
-        </motion.span>
-      </motion.div>
+        </span>
+      </div>
     </motion.div>
   );
 }
@@ -623,8 +634,10 @@ function LoginForm({ onLogin, restoreError }: { onLogin: (name: string, pw: stri
     setLoading(true);
     setError('');
     const err = await onLogin(name.trim(), password, rememberMe);
+    // 성공하면 카드가 떠오르며 사라지는 동안 '로그인 중...' 을 그대로 둔다(버튼 글자가 깜빡 바뀌지 않게).
+    if (!err) return;
     setLoading(false);
-    if (err) setError(err);
+    setError(err);
   };
 
   return (
@@ -762,11 +775,21 @@ function LoginForm({ onLogin, restoreError }: { onLogin: (name: string, pw: stri
 
 interface LoginScreenProps {
   mode?: 'login' | 'splash';
+  /** 덮개가 다 걷혔다(첫 진입 연출 끝). 앱은 이때 덮개를 내린다. */
   onComplete?: () => void;
   restoreError?: string;
+  /**
+   * 덮개 아래에 메인 화면을 미리 그려 달라(움직임 폴리싱 13번).
+   * 'Bflow.' 글자가 다 나온 뒤 클릭을 기다리는 동안(ready), 클릭한 순간, 로그인에 성공한 순간에 부른다.
+   */
+  onPrimeMain?: () => void;
 }
 
-type Phase = 'landing' | 'ready' | 'transition' | 'login' | 'done';
+/**
+ * landing: 'Be the flow.' → 'Bflow.' 글자 연출 / ready: 클릭 대기 / transition: (로그인 모드) 글자 → 로그인 카드
+ * login: 로그인 카드 / exit: 첫 진입 — 글자(또는 카드)가 떠오르며 흐려지고 덮개가 걷힌다.
+ */
+type Phase = 'landing' | 'ready' | 'transition' | 'login' | 'exit';
 
 function isLocalBrowserPreview(): boolean {
   return document.documentElement.dataset.devElectronApi === 'installed';
@@ -776,10 +799,24 @@ function isCodexBrowserPreview(): boolean {
   return isLocalBrowserPreview() && new URLSearchParams(window.location.search).has('codex');
 }
 
-export function LoginScreen({ mode = 'login', onComplete, restoreError }: LoginScreenProps) {
-  const { setCurrentUser } = useAuthStore();
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+/**
+ * 로그인/첫 화면 덮개 (z-[9998], 불투명).
+ *
+ * 움직임 폴리싱 13번 — 아침 첫 진입:
+ * - 'Bflow.' 글자가 다 나와 클릭을 기다리는 동안 앱이 이 덮개 아래에 대시보드를 미리 그린다(onPrimeMain).
+ * - 클릭(로그인 모드는 로그인 성공)하는 즉시 글자·안내 문구가 위로 떠오르며 흐려지고(300ms),
+ *   150ms 뒤 — 그리고 대시보드가 그려진 뒤 — 덮개가 350ms 동안 걷힌다. 걷히기 시작하는 순간
+ *   html[data-entry-curtain='lifting'] 이 되어 멈춰 있던 위젯 등장·차오름이 흐른다(CSS).
+ * - 다 걷히면 onComplete — 앱이 덮개를 내리고 인사 말풍선을 띄운다.
+ * 이 컴포넌트 본문에서는 useLayoutEffect·외부 훅을 쓰지 않는다(tests/loginUpdateEntry.test.ts 가 함수로 직접 부른다).
+ */
+export function LoginScreen({ mode = 'login', onComplete, restoreError, onPrimeMain }: LoginScreenProps) {
+  const { currentUser, setCurrentUser } = useAuthStore();
   const updateInfo = useAppStore((s) => s.updateInfo);
   const setUpdateCenterOpen = useAppStore((s) => s.setUpdateCenterOpen);
+  const gradientEnabled = useAppStore((s) => s.plexusSettings?.globalGradientEnabled !== false);
   const hasRemoteUpdate = Boolean(
     updateInfo
     && updateInfo.latestVersion !== updateInfo.currentVersion
@@ -790,6 +827,18 @@ export function LoginScreen({ mode = 'login', onComplete, restoreError }: LoginS
   const [phase, setPhase] = useState<Phase>(() => (
     mode === 'login' && isLocalBrowserPreview() ? 'login' : 'landing'
   ));
+  const [exitFrom, setExitFrom] = useState<'hero' | 'form'>('hero');
+  const [lifting, setLifting] = useState(false);
+  const exitStartRef = useRef(0);
+  const completedRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // 첫 진입: 글자(또는 로그인 카드)를 떠오르게 하고 덮개를 걷을 준비를 한다.
+  const beginExit = useCallback((from: 'hero' | 'form') => {
+    exitStartRef.current = nowMs();
+    setExitFrom(from);
+    setPhase('exit');
+  }, []);
 
   useEffect(() => {
     if (mode !== 'login' || !isCodexBrowserPreview()) return;
@@ -801,77 +850,151 @@ export function LoginScreen({ mode = 'login', onComplete, restoreError }: LoginS
     return () => { cancelled = true; };
   }, [mode, setCurrentUser]);
 
-  // 텍스트 애니메이션 완료 콜백
-  const handleAnimationDone = useCallback(() => {
-    setPhase('ready');
+  // 로그인 모드에서 사용자가 들어왔다(로그인 성공) — 카드(또는 글자)가 떠오르며 사라지고 덮개를 걷는다.
+  // 앱은 이 덮개를 그대로 둔 채 아래에 메인 화면을 그린다(onPrimeMain).
+  useEffect(() => {
+    if (mode !== 'login' || !currentUser || phase === 'exit') return;
+    beginExit(phase === 'login' ? 'form' : 'hero');
+  }, [mode, currentUser, phase, beginExit]);
+
+  // 덮개가 떠 있는 동안 html[data-entry-curtain] — 아래에 미리 그린 대시보드의 등장 연출을 멈춰 둔다.
+  useEffect(() => {
+    entryCurtain.set('down');
+    return () => entryCurtain.set(null);
   }, []);
 
-  // 클릭으로 넘어가기 (landing 중이면 즉시 스킵, ready 면 트랜지션)
+  // 클릭을 기다리는 동안(ready)과 클릭·로그인한 순간(exit) 메인 화면을 덮개 아래에 미리 그린다.
+  useEffect(() => {
+    if (phase === 'exit' || (mode === 'splash' && phase === 'ready')) onPrimeMain?.();
+  }, [mode, phase, onPrimeMain]);
+
+  // 덮개 걷기: 클릭 뒤 150ms 가 지나고, 첫 화면이 대시보드면 그것이 그려진 뒤에.
+  useEffect(() => {
+    if (phase !== 'exit' || lifting) return;
+    const reduce = prefersReducedMotion();
+    const minDelayMs = reduce ? 0 : ENTRY_CURTAIN_DELAY_MS;
+    const startedAt = exitStartRef.current;
+    let settled = false;
+    const timers: number[] = [];
+    let unsubscribe = () => {};
+    const check = () => {
+      if (settled) return;
+      const elapsedMs = nowMs() - startedAt;
+      // 타이머는 performance.now 기준보다 조금 일찍 불릴 수 있다 — 모자란 만큼 다시 잡는다(안 그러면 최대 대기까지 멈춤).
+      if (elapsedMs < minDelayMs) {
+        timers.push(window.setTimeout(check, minDelayMs - elapsedMs + 1));
+        return;
+      }
+      const waitForView = useAppStore.getState().currentView === 'dashboard';
+      if (!canLiftEntryCurtain({ elapsedMs, minDelayMs, viewReady: entryCurtain.viewReady, waitForView })) return;
+      settled = true;
+      unsubscribe();
+      // 덮개 걷힘(클래스)과 위젯 등장(html 속성)을 같은 순간 DOM 에 적어 같은 프레임에 출발시킨다.
+      // React 의 다시 그리기를 기다리면 바쁜 PC 에서 그 사이 가려진 위젯이 먼저 흐르기 시작한다(cpu 4배 실측 130ms).
+      // className 에도 같은 클래스가 들어가므로(lifting) React 가 다시 그려도 그대로 남는다.
+      rootRef.current?.classList.add('bf-entry-curtain-lift');
+      entryCurtain.set('lifting');
+      setLifting(true);
+    };
+    unsubscribe = entryCurtain.subscribe(check);
+    timers.push(window.setTimeout(check, Math.max(0, ENTRY_VIEW_WAIT_MAX_MS - (nowMs() - startedAt))));
+    check();
+    return () => {
+      settled = true;
+      unsubscribe();
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [phase, lifting]);
+
+  const complete = useCallback(() => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    onComplete?.();
+  }, [onComplete]);
+
+  // animationend 가 오지 않는 경우(창이 가려져 있었음 등)를 위한 안전장치.
+  useEffect(() => {
+    if (!lifting) return;
+    const timer = window.setTimeout(complete, ENTRY_CURTAIN_MS + 300);
+    return () => window.clearTimeout(timer);
+  }, [lifting, complete]);
+
+  // 텍스트 애니메이션 완료 콜백 — 글자 연출 도중 클릭해 이미 넘어갔으면 그대로 둔다.
+  const handleAnimationDone = useCallback(() => {
+    setPhase((current) => (current === 'landing' ? 'ready' : current));
+  }, []);
+
+  // 클릭으로 넘어가기
+  // - 첫 화면(splash): 글자 연출 도중이든 다 나온 뒤든 바로 첫 진입(덮개 걷기)
+  // - 로그인 모드: landing 이면 즉시 스킵, ready 면 트랜지션 → 로그인 카드
   const handleClick = useCallback(() => {
+    if (phase === 'exit') return;
+    if (mode === 'splash') {
+      if (phase === 'landing' || phase === 'ready') beginExit('hero');
+      return;
+    }
     if (phase === 'landing') {
       // 애니메이션 스킵 → 즉시 트랜지션
       setPhase('transition');
-      setTimeout(() => {
-        if (mode === 'splash') {
-          setPhase('done');
-          onComplete?.();
-        } else {
-          setPhase('login');
-        }
-      }, 300);
+      setTimeout(() => setPhase((current) => (current === 'transition' ? 'login' : current)), 300);
       return;
     }
     if (phase !== 'ready') return;
     setPhase('transition');
-    setTimeout(() => {
-      if (mode === 'splash') {
-        setPhase('done');
-        onComplete?.();
-      } else {
-        setPhase('login');
-      }
-    }, 500);
-  }, [phase, mode, onComplete]);
+    setTimeout(() => setPhase((current) => (current === 'transition' ? 'login' : current)), 500);
+  }, [phase, mode, beginExit]);
 
   const handleLogin = useCallback(async (name: string, password: string, rememberMe: boolean): Promise<string | null> => {
     const result = await login(name, password, rememberMe);
     if (result.ok && result.user) {
+      // 덮개는 그대로 남아(카드만 떠오르며 사라짐) 앱이 아래에 메인 화면을 그린 뒤 걷힌다 — 위 사용자 효과.
       setCurrentUser(result.user);
       return null;
     }
     return result.error ?? '로그인에 실패했습니다.';
   }, [setCurrentUser]);
 
-  if (phase === 'done') return null;
+  const exiting = phase === 'exit';
+  const heroVisible = phase === 'landing' || phase === 'ready' || phase === 'transition' || (exiting && exitFrom === 'hero');
+  const formVisible = phase === 'login' || (exiting && exitFrom === 'form');
 
   return (
     <div
-      className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998] cursor-pointer"
-      // 배경: body의 --color-bg-primary가 깔려있고, 전역 GradientBackdrop이 그 위에 그라데이션을 렌더.
-      // 플렉서스 canvas(PlexusBackground)가 ON일 때는 canvas가 불투명으로 덮음.
+      ref={rootRef}
+      className={cn(
+        'fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998] bg-bg-primary',
+        exiting ? 'cursor-default' : 'cursor-pointer',
+        lifting && 'bf-entry-curtain-lift',
+      )}
+      // 불투명 덮개: 첫 화면을 보는 동안 아래에 메인 화면을 미리 그려 두므로 비치지 않게 바탕을 칠한다.
+      // 그라데이션은 전역 GradientBackdrop 과 같은 것을 덮개 안에 한 번 더 깐다(z -1 — 덮개 바탕 위, 내용 아래).
+      // 플렉서스 canvas(PlexusBackground)가 ON일 때는 canvas 가 그 위를 덮음.
       onClick={handleClick}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
+      onAnimationEnd={(e) => {
+        if (e.target === e.currentTarget && e.animationName === 'bf-entry-curtain-out') complete();
+      }}
       tabIndex={-1}
     >
-      {/* 그라데이션 배경은 App.tsx의 전역 GradientBackdrop이 담당 */}
+      <GradientBackdrop intensity="normal" enabled={gradientEnabled} />
       <LoginBackgroundArt />
 
       <AnimatePresence mode="wait">
-        {(phase === 'landing' || phase === 'ready' || phase === 'transition') && (
+        {heroVisible && (
           <motion.div
             key="hero"
             exit={{ opacity: 0, y: -30, scale: 0.98, filter: 'blur(6px)' }}
             transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
-            className="flex flex-col items-center"
+            className={cn('flex flex-col items-center', exiting && 'bf-entry-text-exit')}
           >
             <HeroText onAnimationDone={handleAnimationDone} />
           </motion.div>
         )}
 
-        {phase === 'login' && (
+        {formVisible && (
           <motion.div
             key="login"
-            className="flex flex-col items-center cursor-default"
+            className={cn('flex flex-col items-center cursor-default', exiting && 'bf-entry-text-exit')}
             onClick={(e) => e.stopPropagation()}
           >
             <LoginForm onLogin={handleLogin} restoreError={restoreError} />
@@ -879,9 +1002,9 @@ export function LoginScreen({ mode = 'login', onComplete, restoreError }: LoginS
         )}
       </AnimatePresence>
 
-      {/* 클릭 프롬프트 — ready 상태에서만 표시 */}
+      {/* 클릭 프롬프트 — ready 상태에서 표시, 첫 진입(exit)에서는 글자와 함께 떠오르며 흐려진다 */}
       <AnimatePresence>
-        {phase === 'ready' && <ClickPrompt />}
+        {(phase === 'ready' || (exiting && exitFrom === 'hero')) && <ClickPrompt exiting={exiting} />}
       </AnimatePresence>
 
       {mode === 'login' && (

@@ -234,8 +234,9 @@ test('대시보드 전체 진행률: 원 호 4개 항상 + 가림막, 명언은 
   assert.match(src, /RING_ARCS\.map\(\(arc\) => \(\s*<circle\s*key=\{arc\.key\}/);
   assert.match(src, /<mask id=\{ringMaskId\}/);
   assert.match(src, /<g mask=\{`url\(#\$\{ringMaskId\}\)`\}>/);
-  assert.match(src, /className="bf-progress-arc"/);
-  assert.match(src, /className="bf-progress-cap"/);
+  // 13번(first-entry)이 첫 진입 그리기 클래스(bf-entry-ring·bf-entry-ring-cap)를 덧붙인다 — 같은 박자 클래스는 그대로
+  assert.match(src, /className="bf-progress-arc(?: bf-entry-ring)?"/);
+  assert.match(src, /className="bf-progress-cap(?: bf-entry-ring-cap)?"/);
   assert.doesNotMatch(src, /strokeLinecap/, '둥근 끝은 끝점 원이 맡는다(경계에서 순간이동 X)');
   assert.match(src, /const bucket = progressBucket\(pct\);\n\s*const pool = useMemo\(\(\) => getMessagePool\(bucket\), \[bucket\]\);/);
   assert.doesNotMatch(src, /getMessagePool\(pct\)/);
@@ -248,10 +249,10 @@ test('대시보드 전체 진행률: 원 호 4개 항상 + 가림막, 명언은 
 
 test('숫자와 짝지은 막대·원은 같은 박자 클래스, 진행률 숫자는 모두 RollingNumber', () => {
   const statCard = read('src/components/widgets/charts/StatCard.tsx');
-  assert.match(statCard, /className="bf-progress-bar h-full rounded-full"/);
+  assert.match(statCard, /className="bf-progress-bar(?: bf-entry-fill-x)? h-full rounded-full"/);
   assert.match(statCard, /value: ReactNode/);
   const donut = read('src/components/widgets/charts/DonutChart.tsx');
-  assert.match(donut, /className="bf-progress-arc"/);
+  assert.match(donut, /className="bf-progress-arc(?: bf-entry-ring)?"/);
   assert.doesNotMatch(donut, /transition-all duration-700/);
 
   const dept = read('src/components/widgets/DepartmentComparisonWidget.tsx');
