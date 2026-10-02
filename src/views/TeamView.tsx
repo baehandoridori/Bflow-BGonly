@@ -155,10 +155,12 @@ function TeamMemberCard({
     <div
       ref={cardRef}
       className={cn(
-        'rounded-xl border overflow-hidden transition-all duration-300 ease-out',
+        // 정보 카드 hover: 테두리만 밝아짐. 카드 자체 전환은 찾아온 팀원 강조(테두리·고리)가 풀릴 때만 쓴다.
+        'rounded-xl border overflow-hidden bf-card-hover bf-card-hover--info',
+        'transition-[border-color,box-shadow] duration-slow ease-out-expo',
         highlighted
           ? 'border-accent shadow-lg shadow-accent/20 ring-2 ring-accent/30'
-          : 'border-bg-border/50 bg-bg-card hover:shadow-md hover:shadow-black/15 hover:border-bg-border/80',
+          : 'border-bg-border/50 bg-bg-card',
       )}
       style={highlighted ? {
         background: 'linear-gradient(135deg, rgb(var(--color-accent) / 0.08), rgb(var(--color-bg-card)))',

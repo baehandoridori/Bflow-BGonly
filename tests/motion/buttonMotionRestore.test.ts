@@ -42,10 +42,12 @@ test('opacity 만 전환하던 숨은 버튼도 hover 색 페이드를 잃지 �
   for (const [file, pattern] of cases) assert.match(read(file), pattern, file);
   // Tailwind 3 에 없는 transition-border 는 테두리 전환을 하나도 만들지 않는다.
   for (const file of ['src/views/AssigneeView.tsx', 'src/views/EpisodeView.tsx', 'src/views/CalendarView.tsx']) {
-    const source = read(file);
-    assert.doesNotMatch(source, /\btransition-border\b/, file);
-    assert.match(source, /transition-\[box-shadow,border-color\] duration-200 ease-out/, file);
+    assert.doesNotMatch(read(file), /\btransition-border\b/, file);
   }
+  assert.match(read('src/views/CalendarView.tsx'), /transition-\[box-shadow,border-color\] duration-200 ease-out/);
+  // 인원별·에피소드 카드는 바탕 A 의 카드 hover 공통 클래스로 옮겼다(tests/motion/foundation-FA-rest.test.ts).
+  assert.match(read('src/views/AssigneeView.tsx'), /'bf-card-hover bf-card-hover--info'/);
+  assert.match(read('src/views/EpisodeView.tsx'), /'bf-card-hover'/);
 });
 
 /* ─── 화살표 통일: 그림 바꿔 끼우기 → ▶ 하나를 90° 회전 ─── */

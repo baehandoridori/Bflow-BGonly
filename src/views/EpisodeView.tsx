@@ -99,18 +99,17 @@ function EpisodeCard({
   const isComplete = pct >= 100;
 
   return (
-    <motion.button
+    <button
+      type="button"
       onClick={() => onNavigate(episode)}
       onContextMenu={(e) => onContextMenu?.(e, episode)}
       className={cn(
         'relative w-full text-left rounded-xl p-5 cursor-pointer',
         'border border-bg-border/60 bg-bg-card',
-        'transition-[box-shadow,border-color] duration-200 ease-out',
-        'hover:shadow-md hover:shadow-black/20 hover:border-bg-border',
+        // 누를 수 있는 카드 hover: 2px 떠오름 + 테두리 밝아짐 + 그림자(미리 그린 층) — framer y 대신 CSS 공통 클래스
+        'bf-card-hover',
         isComplete && 'border-status-high/30',
       )}
-      whileHover={{ y: -2 }}
-      transition={{ duration: 0.2 }}
     >
       {/* 상단: 에피소드 제목 + 진행률 */}
       <div className="flex items-center justify-between mb-3">
@@ -200,7 +199,7 @@ function EpisodeCard({
           );
         })}
       </div>
-    </motion.button>
+    </button>
   );
 }
 

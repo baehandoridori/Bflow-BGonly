@@ -764,13 +764,14 @@ input[type="date"]::-webkit-inner-spin-button {
 }
 
 /* 씬 카드 공통 인터랙션 — transform/box-shadow/border-color 모두 부드럽게 보간.
-   !important 는 .scene-card-selected 의 !important box-shadow 와의 specificity 문제를 피하기 위함. */
+   !important 는 .scene-card-selected 의 !important box-shadow 와의 specificity 문제를 피하기 위함.
+   박자는 카드 hover 공통 반응(.bf-card-hover, motion-foundation.css)과 같은 보통 속도·들어오는 곡선. */
 .scene-card-interactive {
   transition:
-    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 300ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+    transform var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out),
+    background-color var(--motion-base) var(--ease-out) !important;
   will-change: transform, box-shadow;
 }
 
@@ -1490,12 +1491,14 @@ input[type="range"]::-webkit-slider-thumb {
   transform-origin: center bottom;
   /* 한솔 보고 (2026-05-21):
      - 카드 가장자리 호버 시 떨림 — transition 더 부드럽게 (cubic-bezier ease-out + 320ms).
-     - 핀 해제 시 사라짐 → animation 없이 box-shadow / transform 만 transition. */
+     - 핀 해제 시 사라짐 → animation 없이 box-shadow / transform 만 transition.
+     움직임 폴리싱(2026-10): 떨림의 뿌리는 PartCardRow 가 '들린 카드' 위치로 거리를 재던 되먹임이었다.
+     원래 자리 칸([data-scene-key])으로 재도록 분리한 뒤 공통 박자(느림 260ms·들어오는 곡선)로 맞춤. */
   transition:
-    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 220ms ease,
-    outline-color 220ms ease;
+    transform var(--motion-slow) var(--ease-out),
+    box-shadow var(--motion-slow) var(--ease-out),
+    border-color var(--motion-base) var(--ease-std),
+    outline-color var(--motion-base) var(--ease-std);
   position: relative;
   z-index: 1;
   will-change: transform;

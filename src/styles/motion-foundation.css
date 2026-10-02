@@ -1,1 +1,90 @@
 /* 이 갈래 전용 움직임 CSS — motion-foundation (공통 토큰은 src/index.css :root 의 --motion-*·--ease-*, JS 는 src/utils/motion.ts) */
+
+/* ─── 카드 hover 공통 반응 (움직임 폴리싱 바탕 A) ───────────────────────────
+   .bf-card-hover                       누를 수 있는 카드 — 2px 떠오름 + 테두리 밝아짐 + 그림자 깊어짐
+   .bf-card-hover.bf-card-hover--info   정보 카드(카드 전체를 누르지 않음) — 테두리만 밝아짐
+   - 움직이는 값은 떠오름(translate)과 미리 그려 둔 층(::after)의 opacity 뿐이다. box-shadow·border-color 를
+     직접 전환하지 않는다(전환 내내 카드를 다시 칠함). 떠오름은 개별 translate 속성이라 카드가 이미 쓰는
+     transform(Tailwind scale-*, 끌기 중 축소 등)과 겹쳐도 서로 덮지 않는다.
+   - 누를 수 있는 카드는 이 클래스가 transition 을 정하므로 같은 요소에 transition-* 유틸을 함께 쓰지 않는다.
+     밝은 테두리 층이 카드 테두리(1px) 위에 겹쳐 그려지므로 overflow:hidden 카드에는 --info 를 쓴다
+     (--info 는 안쪽 1px 고리라 잘리지 않는다).
+   - hover 판정과 들리는 요소를 분리한다: 카드가 2px 들리면 원래 자리의 아래 가장자리가 비어 커서가 그
+     줄에 있을 때 hover 가 풀렸다 걸렸다 떨린다(컴포지팅 카드에서 겪은 '가장자리 떨림'). hover 중에만
+     ::before 띠로 원래 아래 가장자리까지 판정 영역을 채운다. ::before 를 쓰는 편집 중 무지개 테두리
+     (.editing-beam)가 붙은 동안에는 그 테두리를 지키려고 띠를 뺀다. */
+:where(.bf-card-hover) {
+  position: relative;
+}
+.bf-card-hover {
+  --bf-card-lift: 2px;
+  --bf-card-ring: rgb(var(--color-accent) / 0.5);
+  /* 다크: 씬 카드와 같은 계열의 은은한 액센트 빛 */
+  --bf-card-shadow:
+    0 3px 8px rgb(var(--color-accent) / 0.2),
+    0 10px 24px rgb(var(--color-accent) / 0.22);
+}
+[data-color-mode='light'] .bf-card-hover {
+  --bf-card-shadow:
+    0 4px 10px rgb(0 0 0 / 0.1),
+    0 12px 28px rgb(0 0 0 / 0.16);
+}
+.bf-card-hover.bf-card-hover--info {
+  --bf-card-ring: rgb(var(--color-text-secondary) / 0.32);
+}
+
+.bf-card-hover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  /* 정보 카드: 안쪽 1px 고리 */
+  box-shadow: inset 0 0 0 1px var(--bf-card-ring);
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--ease-out);
+}
+.bf-card-hover:hover::after {
+  opacity: 1;
+}
+
+/* 누를 수 있는 카드 */
+.bf-card-hover:not(.bf-card-hover--info) {
+  transition-property: translate, transform, opacity, color, background-color, border-color;
+  transition-duration: var(--motion-base);
+  transition-timing-function: var(--ease-out);
+}
+.bf-card-hover:not(.bf-card-hover--info)::after {
+  /* 카드 테두리(1px)에 정확히 겹친 밝은 테두리 + 미리 그린 그림자 */
+  inset: -1px;
+  border: 1px solid var(--bf-card-ring);
+  box-shadow: var(--bf-card-shadow);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bf-card-hover:not(.bf-card-hover--info):hover {
+    translate: 0 calc(-1 * var(--bf-card-lift));
+  }
+
+  /* 판정 띠: 들린 카드의 아래 가장자리 → 원래 아래 가장자리(+1px). 씬 카드(.scene-card-interactive 의
+     hover:-translate-y-0.5 = 2px)도 같은 떠오름이라 함께 쓴다. */
+  :is(.bf-card-hover:not(.bf-card-hover--info), .scene-card-interactive):not(.editing-beam):hover::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: calc(var(--bf-card-lift, 2px) + 2px);
+  }
+}
+
+/* 동작 줄이기: 떠오름 없이 테두리·그림자 층만 바뀐다(전역 규칙이 전환 시간을 0 으로 만든다). */
+@media (prefers-reduced-motion: reduce) {
+  .bf-card-hover:hover {
+    translate: none;
+  }
+  /* 씬 카드의 Tailwind hover:-translate-y-0.5 도 떠오르지 않게 */
+  .scene-card-interactive:hover {
+    --tw-translate-y: 0px;
+  }
+}
