@@ -63,6 +63,8 @@ import './styles/motion-view-entry.css';
 import './styles/motion-comments-notify.css';
 import './styles/motion-chrome-popups.css';
 import './styles/motion-live-drag.css';
+import './styles/motion-popups-panels.css';
+import './styles/motion-view-transition.css';
 import { hasUsableElectronAPI, installDevElectronAPI } from './mocks/devElectronAPI';
 
 function shouldInstallBrowserElectronMock(): boolean {

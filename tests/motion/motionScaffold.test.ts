@@ -6,9 +6,9 @@ import { readFileSync } from 'node:fs';
 
 const read = (path: string) => readFileSync(path, 'utf-8').replace(/\r\n/g, '\n');
 
-test('갈래별 CSS 7개가 전역 CSS 뒤에 순서대로 import 된다', () => {
+test('갈래별 CSS 9개가 전역 CSS 뒤에 순서대로 import 된다', () => {
   const main = read('src/main.tsx');
-  const files = ['foundation', 'scene-check', 'scene-flow', 'view-entry', 'comments-notify', 'chrome-popups', 'live-drag'];
+  const files = ['foundation', 'scene-check', 'scene-flow', 'view-entry', 'comments-notify', 'chrome-popups', 'live-drag', 'popups-panels', 'view-transition'];
   const indexAt = main.indexOf("import './index.css';");
   assert.ok(indexAt >= 0);
   let previous = main.indexOf("import './styles/scene-effects.css';");
