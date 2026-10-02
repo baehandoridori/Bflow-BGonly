@@ -1,1 +1,58 @@
 /* 이 갈래 전용 움직임 CSS — motion-live-drag (공통 토큰은 src/index.css :root 의 --motion-*·--ease-*, JS 는 src/utils/motion.ts) */
+
+/* ═══ 5. 컴포지팅 카드 (compositing-card-fixes) ═══════════════════════════
+   - 단계가 바뀐 카드: 앞면 위 색 층의 opacity 만 0 → .28(25%) → 0, 0.9초. 배경색 애니메이션 X.
+     예전 .scene-card.flashing 은 셸의 차례 등장 animation 을 덮어써, 클래스가 빠질 때 카드가 다시 떠올랐다.
+     이제 물듦·배지·라벨은 각자 자기 요소에서만 돈다(셸 animation 은 건드리지 않는다).
+   - 보낸 사람 이름 동그라미: scale .6 → 1 '톡'(220ms) 나타났다가, highlight 가 끝나는 2.5초에 맞춰 조용히 사라진다.
+   - 선택 체크·핀 배지: 나타날 때 '톡'(220ms). 핀 카드의 단계 라벨: 옆에서 살짝 밀려 들어옴(160ms).
+   재생은 React key/마운트로만 한다(클래스로 animation:none 토글 금지 — 끝날 때 깜빡인다). */
+
+.bf-status-wash {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-status-wash 900ms ease-out forwards;
+}
+
+@keyframes bf-status-wash {
+  0% { opacity: 0; }
+  25% { opacity: 0.28; }
+  100% { opacity: 0; }
+}
+
+@keyframes bf-comp-pop-in {
+  from { opacity: 0; transform: scale(0.6); }
+}
+
+@keyframes bf-comp-label-in {
+  from { opacity: 0; transform: translateX(-4px); }
+}
+
+@keyframes bf-comp-fade-away {
+  to { opacity: 0; transform: scale(0.85); }
+}
+
+.bf-comp-pop-in {
+  animation: bf-comp-pop-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.bf-comp-label-in {
+  animation: bf-comp-label-in 160ms var(--ease-out);
+}
+
+/* 2200ms + 300ms = HIGHLIGHT_DURATION_MS(2500) — 배지가 사라지는 순간 언마운트된다. */
+.bf-comp-avatar {
+  animation:
+    bf-comp-pop-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    bf-comp-fade-away 300ms var(--ease-in) 2200ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 동작 줄이기: 물듦만 200ms 한 번(움직임이 없는 색 층). 배지·라벨·등장은 전역 규칙대로 즉시. */
+  .bf-status-wash {
+    animation-duration: 200ms !important;
+  }
+}

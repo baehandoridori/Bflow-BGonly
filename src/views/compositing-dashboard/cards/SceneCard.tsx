@@ -4,9 +4,14 @@
  * - 상단: sceneId + StatusDot
  * - 중단: 이미지 분할 (좌 storyboardUrl, 우 guideUrl)
  * - 하단: BG 담당자 / ACT 담당자
- * - 핀 / cascade / dock-lift / 단계 변경 색 펄스 + 보낸 사람 아바타 배지
+ * - 핀 / cascade / dock-lift / 단계 변경 앞면 물듦 + 보낸 사람 아바타 배지
  *
- * spec: 2026-05-21-compositing-dashboard-design.md (8.3~8.8, 13)
+ * 움직임(2026-10 폴리싱 5번): 단계가 바뀐 카드는 앞면 위 색 층(.bf-status-wash)이 한 번 물들었다 빠진다.
+ *   예전 .scene-card.flashing 은 같은 요소의 차례 등장 animation 을 덮어써, 2.5초 뒤 클래스가 빠지는 순간
+ *   카드가 꺼졌다가 처음 들어올 때처럼 다시 떠올랐다(색 자체는 불투명 앞면에 가려 보이지도 않았다).
+ *   물듦·배지·라벨은 자기 요소의 마운트 키프레임으로만 돌고, 셸의 차례 등장 animation 은 건드리지 않는다.
+ *
+ * spec: 2026-05-21-compositing-dashboard-design.md (8.3~8.8, 13), 2026-10-03-motion-polish-design.md (5)
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -77,7 +82,7 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
     return () => window.clearTimeout(t);
   }, [isPinned]);
 
-  // transientHighlight — 다른 사용자 변경 시 색 펄스 + 보낸 사람 아바타 배지.
+  // transientHighlight — 다른 사용자 변경 시 앞면 물듦(단계가 바뀐 경우만) + 보낸 사람 아바타 배지.
   //   하이라이트는 compositingKey(소문자) 로 등록되므로, 조회도 같은 정규화 키로(선택/핀용 sceneKey 는 raw 유지).
   const highlightKey = compositingKey(card.episodeNumber, card.sceneId);
   const highlight = useTransientHighlightStore((s) => selectHighlight(s, highlightKey));
@@ -126,10 +131,9 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
     <div
       ref={cardShellRef}
       className={cn(
+        // 전환 목록(transform·opacity 등)은 index.css .scene-card 가 정한다 — 핀 떠오름 320ms, 어두워짐 200ms.
         'scene-card bf-cascade-item relative rounded-lg text-left',
-        'transition-all duration-200',
         isPinned ? 'pinned' : '',
-        highlight ? 'flashing' : '',
         isPinned ? 'opacity-100' : (dimmed ? 'opacity-35' : (otherPinned ? 'opacity-55' : 'opacity-100')),
       )}
       style={{
@@ -143,9 +147,6 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
         animationDelay: `calc(var(--motion-cascade-stagger, 20ms) * ${staggerIndex})`,
         // 핀 해제 시에도 transition 끝까지 z-index 유지 (260ms) — flicker 방지
         zIndex: isPinned ? 20 : (unpinning ? 15 : (otherPinned ? 1 : 1)),
-        // bf-status-flash 용 변수
-        ['--current-status-color' as any]: `var(${tokenVar})`,
-        ['--current-status-color-bright' as any]: `color-mix(in srgb, var(${tokenVar}) 40%, transparent)`,
         // glow pulse 컬러 (PR 4 polish: 토큰 사용 — alpha 0.3 다듬어진 값)
         ['--card-glow' as any]: 'var(--comp-card-glow)',
       }}
@@ -172,7 +173,7 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
             {/* 핀 상태일 때만 단계 라벨을 풀로 표시 (정상 상태는 dot 만, 공간 절약) */}
             {isPinned && (
               <span
-                className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                className="bf-comp-label-in text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
                 style={{
                   color: `var(${tokenVar})`,
                   background: `color-mix(in srgb, var(${tokenVar}) 18%, transparent)`,
@@ -216,12 +217,22 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
             {COMPOSITING_ERROR_LABEL[errorKind] ?? ''}
           </span>
         )}
+
+        {/* 단계가 바뀐 순간 앞면 위로 새 단계 색이 한 번 물들었다 빠진다(0.9초). key 가 바뀌면 처음부터 다시. */}
+        {highlight?.washSeq != null && (
+          <span
+            key={highlight.washSeq}
+            className="bf-status-wash"
+            style={{ background: `var(${tokenVar})` }}
+            aria-hidden="true"
+          />
+        )}
       </button>
 
       {/* 일괄 선택 체크 — 카드 바깥 shell 에 붙여 clipping 없이 보이게 한다. */}
       {isMultiSelected && !isPinned && (
         <span
-          className="scene-card-selection-badge absolute -top-2 -left-2 w-7 h-7 rounded-full flex items-center justify-center shadow-lg"
+          className="scene-card-selection-badge bf-comp-pop-in absolute -top-2 -left-2 w-7 h-7 rounded-full flex items-center justify-center shadow-lg"
           style={{
             background: 'rgb(var(--color-accent))',
             color: '#fff',
@@ -236,7 +247,7 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
       {/* 핀 상태 배지 — 카드 shell 에 붙여 실제 카드 밖에 고정한다. */}
       {isPinned && (
         <span
-          className="scene-card-pin-badge pointer-events-none absolute -top-4 left-2 z-10 w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-[transform,opacity,box-shadow] duration-300"
+          className="scene-card-pin-badge bf-comp-pop-in pointer-events-none absolute -top-4 left-2 z-10 w-8 h-8 rounded-full flex items-center justify-center shadow-lg"
           style={{
             background: 'rgb(var(--color-accent))',
             color: '#fff',
@@ -248,14 +259,14 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
         </span>
       )}
 
-      {/* highlight: 보낸 사람 아바타 배지 (2.5초) */}
+      {/* highlight: 보낸 사람 아바타 배지 — '톡' 나타나 2.5초 뒤 조용히 사라진다(.bf-comp-avatar). */}
       {highlight && byUser && (
         <span
-          className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md"
+          key={highlight.seq}
+          className="bf-comp-avatar absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-md"
           style={{
             background: 'rgb(var(--color-accent))',
             boxShadow: '0 0 0 2px rgb(var(--color-bg-card)), 0 0 6px rgb(var(--color-accent) / 0.55)',
-            animation: 'fadeOut 2500ms ease-in forwards',
           }}
           title={`${byUser.name} 가 단계 변경`}
         >
