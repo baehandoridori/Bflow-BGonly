@@ -105,8 +105,8 @@ type WeekTimeGridModule = {
   clearWeekWheelGestureLock(gestureLock: { current: ReturnType<typeof setTimeout> | null }): void;
   getNonTodayCurrentLineStyle(): { background: string; height: number };
   getWeekendCellStyle(isWeekend: boolean): { backgroundImage?: string };
-  getTimeGridBlockMotion(args: { reduce: boolean; opacity: number; layoutIndex: number; isMoving: boolean; isSettling: boolean }): {
-    animate: { opacity: number; y: number; scale: number };
+  getTimeGridBlockMotion(args: { reduce: boolean; opacity: number; layoutIndex: number }): {
+    animate: { opacity: number; y: number; scale?: number };
     transition: { duration: number; delay?: number; ease?: number[] };
   };
 };
@@ -1079,19 +1079,21 @@ test('WeekTimeGridView: 외부 변경 ring은 종일·시간 블록에 표시하
   assert.doesNotMatch(staticMarkup, /class="[^"]*calendar-realtime-highlight [^"]*"/);
 });
 
-test('WeekTimeGridView: 이동 블록은 Framer Motion scale 1.02를 쓰고 안착은 0.45초 overshoot로 복귀한다', async () => {
+// 움직임 폴리싱 16번: 들림(1.02)은 CSS 개별 scale(.time-grid-lifted), 착지 '톡'은 DropLanding(WAAPI)으로 옮겼다.
+// framer 의 개별 scale 값은 메인 스레드가 매 프레임 계산하므로 등장(투명도·y)만 framer 에 남긴다.
+test('WeekTimeGridView: 블록 framer 모션은 등장만 맡고 들림·착지 scale 은 쓰지 않는다', async () => {
   const { getTimeGridBlockMotion } = await loadWeekTimeGridView();
 
-  assert.deepEqual(getTimeGridBlockMotion({ reduce: false, opacity: 1, layoutIndex: 0, isMoving: true, isSettling: false }), {
-    animate: { opacity: 1, y: 0, scale: 1.02 },
+  assert.deepEqual(getTimeGridBlockMotion({ reduce: false, opacity: 1, layoutIndex: 0 }), {
+    animate: { opacity: 1, y: 0 },
     transition: { duration: 0.18, delay: 0 },
   });
-  assert.deepEqual(getTimeGridBlockMotion({ reduce: false, opacity: 1, layoutIndex: 0, isMoving: false, isSettling: true }), {
-    animate: { opacity: 1, y: 0, scale: 1 },
-    transition: { duration: 0.45, ease: [0.34, 1.56, 0.64, 1] },
+  assert.deepEqual(getTimeGridBlockMotion({ reduce: false, opacity: 0.72, layoutIndex: 4 }), {
+    animate: { opacity: 0.72, y: 0 },
+    transition: { duration: 0.18, delay: 0.1 },
   });
-  assert.deepEqual(getTimeGridBlockMotion({ reduce: true, opacity: 1, layoutIndex: 0, isMoving: true, isSettling: true }), {
-    animate: { opacity: 1, y: 0, scale: 1 },
+  assert.deepEqual(getTimeGridBlockMotion({ reduce: true, opacity: 1, layoutIndex: 3 }), {
+    animate: { opacity: 1, y: 0 },
     transition: { duration: 0 },
   });
 });

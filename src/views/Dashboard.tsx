@@ -30,6 +30,8 @@ import { ChartTypeContextMenu, getWidgetSupportedCharts, useChartContextMenu } f
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { transformPreset } from '@/utils/motion';
 import { getPreset } from '@/themes';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
@@ -689,9 +691,22 @@ export function Dashboard() {
   // 드래그/리사이즈 상태
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
-  const [settlingId, setSettlingId] = useState<string | null>(null);
+  // 놓은 위젯의 안착(움직임 폴리싱 16번). seq 로 같은 위젯을 연달아 놓아도 링을 다시 튼다.
+  // 끌기는 제자리로 튕겨 안착(transform 450ms spring), 크기 조절은 언제나 바로 맞춘다(출렁이지 않음).
+  const [settling, setSettling] = useState<{ id: string; kind: 'drag' | 'resize'; seq: number } | null>(null);
+  const settleSeqRef = useRef(0);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const isActive = draggingId !== null || resizingId !== null;
+  const { reduce } = useMotionPref();
+  // 쓰레기통 등장·퇴장 — transform 문자열(합성 스레드). 올렸을 때 커지는 건 안쪽 CSS 하나가 맡는다.
+  const trashMotion = useMemo(() => transformPreset({ from: 'translateY(20px) scale(0.8)', duration: 200 }, reduce), [reduce]);
+
+  const startSettle = useCallback((id: string, kind: 'drag' | 'resize') => {
+    const seq = ++settleSeqRef.current;
+    setSettling({ id, kind, seq });
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => setSettling((current) => (current?.seq === seq ? null : current)), 450);
+  }, []);
 
   // 쓰레기통 드래그-투-딜리트
   const trashRef = useRef<HTMLDivElement>(null);
@@ -717,24 +732,30 @@ export function Dashboard() {
   }, [draggingId]);
 
   // 드래그 콜백
-  const handleDragStart = useCallback((_layout: Layout[], oldItem: Layout) => {
+  // 머리줄을 눌렀다 떼기만 한 클릭에는 안착 링을 띄우지 않는다.
+  const dragStartPointRef = useRef<{ x: number; y: number } | null>(null);
+  const handleDragStart = useCallback((_layout: Layout[], oldItem: Layout, _newItem: Layout, _placeholder: Layout, event: MouseEvent) => {
     setDraggingId(oldItem.i);
     setHoveredId(null);
+    dragStartPointRef.current = Number.isFinite(event?.clientX) ? { x: event.clientX, y: event.clientY } : null;
   }, []);
 
   const removeWidgetRef = useRef<(id: string) => void>(() => {});
-  const handleDragStop = useCallback((_layout: Layout[], oldItem: Layout) => {
-    // 쓰레기통 영역에 드롭 시 삭제
-    if (trashHoverRef.current) {
+  const handleDragStop = useCallback((_layout: Layout[], oldItem: Layout, _newItem: Layout, _placeholder: Layout, event: MouseEvent) => {
+    // 쓰레기통 영역에 드롭 시 삭제 — 즉시 사라진다(안착 표시 없음).
+    const dropped = trashHoverRef.current;
+    if (dropped) {
       skipNextLayoutChangeRef.current = true;
       removeWidgetRef.current(oldItem.i);
     }
     setDraggingId(null);
     setTrashHover(false);
-    setSettlingId(oldItem.i);
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    settleTimerRef.current = setTimeout(() => setSettlingId(null), 450);
-  }, []);
+    const start = dragStartPointRef.current;
+    dragStartPointRef.current = null;
+    const moved = !start || !Number.isFinite(event?.clientX)
+      || Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 4;
+    if (!dropped && moved) startSettle(oldItem.i, 'drag');
+  }, [startSettle]);
 
   // 리사이즈 콜백
   const handleResizeStart = useCallback((_layout: Layout[], oldItem: Layout) => {
@@ -744,10 +765,8 @@ export function Dashboard() {
 
   const handleResizeStop = useCallback((_layout: Layout[], oldItem: Layout) => {
     setResizingId(null);
-    setSettlingId(oldItem.i);
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    settleTimerRef.current = setTimeout(() => setSettlingId(null), 450);
-  }, []);
+    startSettle(oldItem.i, 'resize');
+  }, [startSettle]);
 
   // cleanup
   useEffect(() => () => { if (settleTimerRef.current) clearTimeout(settleTimerRef.current); }, []);
@@ -1177,6 +1196,9 @@ export function Dashboard() {
             isResizable
             resizeHandles={['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']}
             draggableHandle=".widget-drag-handle"
+            // 머리줄의 버튼(팝업 띄우기·보기 전환 등)을 누를 때는 끌기로 치지 않는다 — 누를 때마다 위젯이 들렸다
+            // 내려앉고 나머지가 어두워지는 일이 없게(움직임 폴리싱 16번).
+            draggableCancel="button, a, input, select, textarea"
             onLayoutChange={handleLayoutChange}
             onDragStart={handleDragStart}
             onDragStop={handleDragStop}
@@ -1188,15 +1210,21 @@ export function Dashboard() {
               const zone = edgeZones[item.i] ?? null;
               const isDrag = draggingId === item.i;
               const isResize = resizingId === item.i;
-              const isSettle = settlingId === item.i;
+              const settle = settling?.id === item.i ? settling : null;
               const isDimmed = isActive && !isDrag && !isResize;
               return (
                 <div
                   key={item.i}
                   className={cn(
                     'relative h-full',
-                    isSettle && 'widget-settling',
+                    settle && 'widget-settling',
+                    settle?.kind === 'resize' && 'is-resize',
                   )}
+                  // 잡은 위젯은 1.02배 들리고 그림자 층이 깔린다. 쓰레기통 위에서는 작아지고 흐려져 '곧 버려짐'을 보인다.
+                  // 나머지 위젯은 흐림 없이 어두운 덮개만 내려앉는다(widget-animations.css · motion-live-drag.css).
+                  data-lifted={isDrag ? 'true' : undefined}
+                  data-doomed={isDrag && trashHover ? 'true' : undefined}
+                  data-dimmed={isDimmed ? 'true' : undefined}
                   style={{ overflow: 'visible' }}
                   onMouseMove={(e) => {
                     if (isDrag || isActive) return;
@@ -1215,35 +1243,29 @@ export function Dashboard() {
                   }}
                   onContextMenu={(e) => handleChartContextMenu(e, item.i)}
                 >
-                  <WidgetIdContext.Provider value={item.i.startsWith('calendar-') ? 'calendar' : item.i}>
-                    {getWidgetComponent(item.i, isEpMode) ?? (
-                      <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
-                        위젯: {item.i}
-                      </div>
-                    )}
-                  </WidgetIdContext.Provider>
+                  {/* 들림 — 위젯과 테두리를 함께 1.02배(쓰레기통 위에서는 .92배). 그림자 층은 미리 그려 두고 opacity 만 바꾼다. */}
+                  <div className="widget-lift">
+                    <div className="widget-lift-shadow" aria-hidden="true" />
+                    <WidgetIdContext.Provider value={item.i.startsWith('calendar-') ? 'calendar' : item.i}>
+                      {getWidgetComponent(item.i, isEpMode) ?? (
+                        <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
+                          위젯: {item.i}
+                        </div>
+                      )}
+                    </WidgetIdContext.Provider>
+
+                    {/* 드래그 시 보더 — 깜빡이지 않고 고정(들린 느낌은 크기·그림자가 맡는다) */}
+                    {isDrag && <div className="widget-drag-ring" aria-hidden="true" />}
+                  </div>
 
                   {/* Edge Glow 시각 효과 */}
                   {!isDrag && !isActive && <EdgeGlow zone={zone} hovered={hoveredId === item.i} />}
-
-                  {/* 드래그 시 pulse glow 보더 */}
-                  {isDrag && (
-                    <div
-                      style={{
-                        position: 'absolute', inset: -1, borderRadius: 13,
-                        pointerEvents: 'none',
-                        border: '1.5px solid rgb(var(--color-accent) / 0.5)',
-                        boxShadow: '0 0 20px rgb(var(--color-accent) / 0.2), inset 0 0 20px rgb(var(--color-accent) / 0.06)',
-                        animation: 'glowPulse 1.5s ease-in-out infinite',
-                      }}
-                    />
-                  )}
 
                   {/* 리사이즈 시 보더 강조 */}
                   {isResize && (
                     <div
                       style={{
-                        position: 'absolute', inset: -1, borderRadius: 13,
+                        position: 'absolute', inset: -1, borderRadius: 17,
                         pointerEvents: 'none',
                         border: '1.5px solid rgb(var(--color-accent) / 0.45)',
                         boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgb(var(--color-accent) / 0.3)',
@@ -1251,35 +1273,11 @@ export function Dashboard() {
                     />
                   )}
 
-                  {/* 안착 flash */}
-                  {isSettle && (
-                    <div
-                      style={{
-                        position: 'absolute', inset: -1, borderRadius: 13,
-                        pointerEvents: 'none',
-                        border: '1.5px solid rgb(var(--color-accent) / 0.45)',
-                        animation: 'settleFlash 0.45s ease-out forwards',
-                      }}
-                    />
-                  )}
+                  {/* 안착 링 — 놓는 즉시 한 번. 같은 위젯을 또 놓으면 key 로 다시 튼다. */}
+                  {settle && <div key={settle.seq} className="widget-land-ring" aria-hidden="true" />}
 
-                  {/* 다른 위젯 dim 오버레이 */}
-                  <AnimatePresence>
-                    {isDimmed && (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-                        style={{
-                          position: 'absolute', inset: 0, borderRadius: 12,
-                          background: 'rgb(var(--color-bg-primary) / 0.5)',
-                          backdropFilter: 'blur(2px)',
-                          pointerEvents: 'none',
-                        }}
-                      />
-                    )}
-                  </AnimatePresence>
+                  {/* 다른 위젯 어둡게 — 흐림 없이 덮개 하나, 늘 그려 두고 opacity 만 바꾼다. */}
+                  <div className="widget-dim" aria-hidden="true" />
 
                 </div>
               );
@@ -1306,38 +1304,23 @@ export function Dashboard() {
         {draggingId && (
           <motion.div
             ref={trashRef}
-            initial={{ opacity: 0, scale: 0.8, y: 20 }}
-            animate={{ opacity: 1, scale: trashHover ? 1.08 : 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 20 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed bottom-6 right-6 z-50 flex flex-col items-center justify-center gap-1.5 rounded-2xl pointer-events-auto"
-            style={{
-              minWidth: 110,
-              height: 90,
-              padding: '16px 24px',
-              whiteSpace: 'nowrap' as const,
-              background: trashHover
-                ? 'rgba(255, 107, 107, 0.3)'
-                : 'rgb(var(--color-bg-card) / 0.85)',
-              border: trashHover
-                ? '2px dashed rgba(255, 107, 107, 0.7)'
-                : '2px dashed rgb(var(--color-bg-border) / 0.5)',
-              backdropFilter: 'blur(16px)',
-              boxShadow: trashHover
-                ? '0 8px 32px rgba(255, 107, 107, 0.25)'
-                : '0 4px 16px rgba(0,0,0,0.3)',
-              transition: 'background 0.15s, border 0.15s, box-shadow 0.15s, transform 0.15s',
-            }}
+            {...trashMotion}
+            // 맞닿음 판정은 이 바깥 상자로 — 안쪽이 커져도 판정 가장자리가 흔들리지 않는다.
+            className="fixed bottom-6 right-6 z-50 pointer-events-auto"
           >
-            <Trash2
-              size={22}
-              className={trashHover ? 'text-red-400' : 'text-text-secondary/50'}
-              style={{ transition: 'color 0.15s' }}
-            />
-            <span className={`text-[11px] font-medium ${trashHover ? 'text-red-400' : 'text-text-secondary/50'}`}
-              style={{ transition: 'color 0.15s' }}>
-              {trashHover ? '놓으면 삭제' : '삭제'}
-            </span>
+            {/* 커짐(1.08)은 이 안쪽 상자의 CSS 하나만, 빨간 상태는 겹친 층의 opacity 로 바꾼다(흐림 없음). */}
+            <div className={cn('dashboard-trash', trashHover && 'is-hot')}>
+              <span className="dashboard-trash-hot" aria-hidden="true" />
+              <Trash2
+                size={22}
+                className={cn('relative', trashHover ? 'text-red-400' : 'text-text-secondary/50')}
+                style={{ transition: 'color 0.15s' }}
+              />
+              <span className={`relative text-[11px] font-medium ${trashHover ? 'text-red-400' : 'text-text-secondary/50'}`}
+                style={{ transition: 'color 0.15s' }}>
+                {trashHover ? '놓으면 삭제' : '삭제'}
+              </span>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

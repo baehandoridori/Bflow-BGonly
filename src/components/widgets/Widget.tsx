@@ -71,7 +71,9 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
         'border border-bg-border/30 rounded-2xl flex flex-col h-full overflow-hidden',
         'shadow-sm',
         'hover:shadow-lg hover:border-bg-border/50',
-        'transition-all duration-200 ease-out',
+        // 테두리 색만 전환한다. transition-all 이면 크기 조절 중 폭·높이·그림자까지 따라 움직인다.
+        // 끌 때 들림(1.02배)은 대시보드의 바깥 래퍼(.widget-lift)가 맡는다(움직임 폴리싱 16번).
+        'transition-[border-color] duration-200 ease-out',
         className
       )}
       style={{

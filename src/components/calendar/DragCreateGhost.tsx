@@ -53,6 +53,7 @@ export function DragCreateGhost({
   showLabel,
   reduceMotion = false,
   dragging = false,
+  leaving = false,
 }: {
   /** 이 행에 그려지는 날짜들(주말 숨김이 적용된 실제 칸 순서) */
   week: string[];
@@ -65,6 +66,11 @@ export function DragCreateGhost({
   reduceMotion?: boolean;
   /** 끄는 중에만 표면 반사를 돌린다. 생성 폼을 채우는 동안 계속 돌면 낭비다. */
   dragging?: boolean;
+  /**
+   * '만들기'를 눌렀다 — 저장을 기다리는 동안 유리 막대는 녹아 사라지고(150ms) 같은 자리에 진짜 막대가 굳어진다.
+   * 저장에 실패해 생성 창이 그대로 남으면 다시 보인다. 투명도 전환만 쓴다(클래스로 animation 을 끄지 않는다).
+   */
+  leaving?: boolean;
 }) {
   const selected = week.map(isSelected);
   if (!selected.some(Boolean)) return null;
@@ -72,7 +78,7 @@ export function DragCreateGhost({
 
   return (
     <div
-      className={`pointer-events-none absolute inset-0 z-[3] grid${dragging ? ' is-dragging' : ''}`}
+      className={`calendar-drag-ghost-layer pointer-events-none absolute inset-0 z-[3] grid${dragging ? ' is-dragging' : ''}${leaving ? ' is-leaving' : ''}`}
       style={{ gridTemplateColumns }}
       aria-hidden
     >

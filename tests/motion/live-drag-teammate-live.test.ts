@@ -305,7 +305,8 @@ test('CSS: 빛·물듦은 opacity 만, 그림자·배경은 애니메이션하�
     const body = css.slice(at, css.indexOf('\n}', at));
     assert.doesNotMatch(body, /box-shadow|background|width|height|\btop\b|\bleft\b/, `${name} 은 transform/opacity 만`);
   }
-  const reduce = css.slice(css.lastIndexOf('@media (prefers-reduced-motion: reduce)'));
+  // 이 절(9번)의 동작 줄이기 블록 — 같은 파일 뒤쪽에 다른 항목(16번)의 블록이 이어 붙는다.
+  const reduce = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)', css.indexOf('.feed-row-new-wash {')));
   assert.match(reduce, /\.scene-remote-ring,[\s\S]*?animation: bf-remote-hold 1500ms linear forwards !important/);
   assert.doesNotMatch(css, /backdrop-filter/);
 });

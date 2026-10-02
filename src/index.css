@@ -1562,17 +1562,7 @@ input[type="range"]::-webkit-slider-thumb {
   from { opacity: 0; transform: scale(0.98); }
   to   { opacity: 1; transform: scale(1); }
 }
-/* 시간표 드롭 직후 해당 일정에만 적용한다. widget-animations.css는 Dashboard 전용이라 분리한다. */
-@keyframes timeGridSettleFlash {
-  0% { border-color: rgba(108, 92, 231, 0.95); box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.88); }
-  55% { border-color: rgba(162, 155, 254, 0.72); box-shadow: 0 0 0 5px rgba(108, 92, 231, 0.08); }
-  100% { border-color: transparent; box-shadow: 0 0 0 5px rgba(108, 92, 231, 0); }
-}
-
-.time-grid-settling {
-  border: 1px solid transparent;
-  animation: timeGridSettleFlash 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
+/* 시간표 드롭 직후의 착지 표시는 src/styles/motion-live-drag.css 의 .bf-land-ring(움직임 폴리싱 16번). */
 
 /* 다른 창에서 추가·수정된 일정을 2초 동안 원본 색 ring으로 알린다. */
 @keyframes calendarRealtimeHighlightPulse {
@@ -1589,7 +1579,6 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .time-grid-settling { animation: none; transition: none; }
   .calendar-realtime-highlight { animation: none; }
 }
 
@@ -1762,8 +1751,7 @@ input[type="range"]::-webkit-slider-thumb {
     0 10px 26px rgb(8 6 28 / 0.42),
     inset 0 1px 0 rgb(255 255 255 / 0.45),
     inset 0 -8px 16px rgb(var(--color-accent) / 0.28);
-  backdrop-filter: blur(14px) saturate(180%);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  /* backdrop-filter 없음 — 바탕이 70% 넘게 불투명해 흐림은 거의 안 보이는데, 늘어날 때마다 GPU 가 다시 그린다. */
   animation: calendarGhostIn 0.42s cubic-bezier(0.22, 1.2, 0.36, 1) both;
   will-change: transform;
 }

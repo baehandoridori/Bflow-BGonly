@@ -1,16 +1,16 @@
 /* ── 토스 스타일 위젯 인터랙션 애니메이션 ── */
+/* 들림·덮개·안착 링·쓰레기통은 src/styles/motion-live-drag.css '16. 끌어서 옮기기'(움직임 폴리싱 16번). */
 
-/* 기본 아이템: 부드러운 transition (밀려나는 위젯) */
+/* 기본 아이템: 부드러운 transition (밀려나는 위젯) — 크기·그림자는 움직이지 않는다 */
 .react-grid-item {
   transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.2s ease,
               opacity 0.2s ease !important;
 }
 
-/* 드래그 중인 아이템 */
-.react-grid-item.react-draggable-dragging {
+/* 드래그 중인 아이템 — 손을 그대로 따라온다(진하게, 반투명 X) */
+.react-draggable-dragging {
   z-index: 100 !important;
-  opacity: 0.95 !important;
+  opacity: 1 !important;
   transition: box-shadow 0.15s ease !important;
 }
 
@@ -19,19 +19,22 @@
   transition: none !important;
 }
 
-/* ── 드래그 시 pulse glow 애니메이션 ── */
-@keyframes glowPulse {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+/* ── 안착 spring bounce (끌어서 놓은 위젯이 칸에 튕기며 자리 잡음) ──
+   transform 만 — 'all' 이면 크기 조절을 놓을 때 폭·높이까지 출렁여 그때그때 달랐다. */
+.react-grid-item.widget-settling {
+  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
+              opacity 0.2s ease !important;
 }
 
-/* ── 안착 flash 애니메이션 ── */
-@keyframes settleFlash {
-  0% { opacity: 0.7; }
-  100% { opacity: 0; }
+/* 크기 조절을 놓으면 언제나 바로 맞춘다 */
+.react-grid-item.widget-settling.is-resize {
+  transition: none !important;
 }
 
-/* ── 안착 spring bounce (settle 후 위젯) ── */
-.widget-settling {
-  transition: all 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+/* 동작 줄이기 — 위 !important 규칙들이 전역 0.01ms 규칙보다 특이도가 높아 따로 끈다 */
+@media (prefers-reduced-motion: reduce) {
+  .react-grid-item,
+  .react-grid-item.widget-settling {
+    transition: none !important;
+  }
 }

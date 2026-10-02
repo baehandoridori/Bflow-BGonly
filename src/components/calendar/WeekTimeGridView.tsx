@@ -13,6 +13,8 @@ import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 import { layoutDayBlocks, minutesToTime, timeToMinutes } from '@/utils/timeGridLayout';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { clampStaggerDelay } from '@/components/widgets/my-tasks/motionUtils';
+import { DragSlideAnchor, DropLanding } from '@/components/ui/DragLanding';
+import type { SlideBox } from '@/utils/dragLanding';
 import {
   useTimeGridDnD,
   getTimeGridEventDragMode,
@@ -242,31 +244,25 @@ export function getTimeGridCreateGhostHeight(preview: Pick<TimeGridDragPreview, 
   return Math.max(0, ((endMinutes - startMinutes) / 60) * HOUR_PX);
 }
 
-/** 드래그 중인 블록은 Framer Motion transform으로만 확대해 inline transform과 충돌하지 않게 한다. */
+/**
+ * 블록 등장(투명도·살짝 올라옴)만 Framer Motion 이 맡는다.
+ * 끄는 중 들림(1.02)은 CSS .time-grid-lifted 의 개별 scale 속성, 놓을 때 '톡'은 DropLanding(WAAPI) 이 맡는다
+ * (움직임 폴리싱 16번) — framer 의 개별 scale 값은 메인 스레드가 매 프레임 계산한다.
+ */
 export function getTimeGridBlockMotion({
   reduce,
   opacity,
   layoutIndex,
-  isMoving,
-  isSettling,
 }: {
   reduce: boolean;
   opacity: number;
   layoutIndex: number;
-  isMoving: boolean;
-  isSettling: boolean;
 }): {
-  animate: { opacity: number; y: number; scale: number };
-  transition: { duration: number; delay?: number; ease?: number[] };
+  animate: { opacity: number; y: number };
+  transition: { duration: number; delay?: number };
 } {
-  const animate = { opacity, y: 0, scale: reduce ? 1 : (isMoving ? 1.02 : 1) };
+  const animate = { opacity, y: 0 };
   if (reduce) return { animate, transition: { duration: 0 } };
-  if (isSettling) {
-    return {
-      animate,
-      transition: { duration: 0.45, ease: [0.34, 1.56, 0.64, 1] },
-    };
-  }
   return {
     animate,
     transition: { duration: 0.18, delay: clampStaggerDelay(layoutIndex, false) },
@@ -388,6 +384,14 @@ export function WeekTimeGridView({
     onEventChange: onTimeGridEventChange,
   });
   const dragPreview = timeGridDragPreview ?? timeGridDnD.preview;
+  // 끄는 블록이 칸(요일·15분)을 넘으면 미끄러지게 — 끌기마다 새 자리 기록을 쓴다(움직임 폴리싱 16번).
+  const slidingIdentityKey = timeGridDnD.isDragActive && dragPreview?.mode !== 'create'
+    ? dragPreview?.identityKey ?? null
+    : null;
+  const slideRegistryRef = useRef<{ key: string | null; map: Map<string, SlideBox> }>({ key: null, map: new Map() });
+  if (slideRegistryRef.current.key !== slidingIdentityKey) {
+    slideRegistryRef.current = { key: slidingIdentityKey, map: new Map() };
+  }
 
   // 주말을 숨기면 토·일 칸 자체를 그리지 않는다. 주 배열은 7일 그대로 받고 여기서만 거른다.
   const dates = useMemo(() => visibleWeekDays(weekDays.slice(0, 7), showWeekends), [showWeekends, weekDays]);
@@ -649,7 +653,7 @@ export function WeekTimeGridView({
         </div>
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto" onWheel={handleWheel}>
+      <div ref={scrollRef} data-drag-slide-frame="" className="min-h-0 flex-1 overflow-y-auto" onWheel={handleWheel}>
         <TimeBand
           label="새벽 시간대"
           startMin={0}
@@ -668,6 +672,7 @@ export function WeekTimeGridView({
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
           timeGridDnD={timeGridDnD}
+          slideRegistry={slideRegistryRef.current.map}
           dragPreview={dragPreview}
           dragGhostEvent={dragGhostEvent}
           highlightedEventIdentities={highlightedEventIdentities}
@@ -689,6 +694,7 @@ export function WeekTimeGridView({
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
           timeGridDnD={timeGridDnD}
+          slideRegistry={slideRegistryRef.current.map}
           dragPreview={dragPreview}
           dragGhostEvent={dragGhostEvent}
           highlightedEventIdentities={highlightedEventIdentities}
@@ -711,6 +717,7 @@ export function WeekTimeGridView({
           onSlotClick={onSlotClick}
           tagNameById={tagNameById}
           timeGridDnD={timeGridDnD}
+          slideRegistry={slideRegistryRef.current.map}
           dragPreview={dragPreview}
           dragGhostEvent={dragGhostEvent}
           highlightedEventIdentities={highlightedEventIdentities}
@@ -739,6 +746,7 @@ function TimeBand({
   onSlotClick,
   tagNameById,
   timeGridDnD,
+  slideRegistry,
   dragPreview,
   dragGhostEvent,
   highlightedEventIdentities,
@@ -760,6 +768,8 @@ function TimeBand({
   onSlotClick: (date: string, startTime: string, endTime: string) => void;
   tagNameById: Record<string, string>;
   timeGridDnD: ReturnType<typeof useTimeGridDnD>;
+  /** 끄는 블록이 칸을 넘을 때 이전 자리를 이어 받는 기록(끌기마다 새로). */
+  slideRegistry: Map<string, SlideBox>;
   dragPreview: TimeGridDragPreview | null;
   dragGhostEvent: CalendarEvent | null;
   highlightedEventIdentities?: ReadonlySet<string>;
@@ -897,14 +907,13 @@ function TimeBand({
                 const isPreviewed = dragPreview?.identityKey === calendarEventIdentityKey(block.event);
                 const isMoving = isPreviewed && timeGridDnD.isDragActive;
                 const isSettling = timeGridDnD.isSettling(block.event);
+                const settleToken = timeGridDnD.settleToken?.(block.event) ?? null;
                 const isRealtimeHighlighted = highlightedEventIdentities?.has(calendarEventIdentityKey(block.event)) === true;
                 const canResizeEnd = !block.milestone && bandBlock.endMin === block.endMin;
                 const blockMotion = getTimeGridBlockMotion({
                   reduce,
                   opacity,
                   layoutIndex,
-                  isMoving,
-                  isSettling,
                 });
                 const isReadOnly = block.event.isReadOnly === true;
                 // 앞선 드롭의 저장이 확정되기 전에는 같은 블록을 다시 끌지 못하게 한다.
@@ -936,7 +945,7 @@ function TimeBand({
                     data-time-grid-milestone={block.milestone ? 'true' : undefined}
                     data-event-identity={calendarEventIdentityKey(block.event)}
                     data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
-                    className={`absolute z-10 overflow-hidden rounded ${block.milestone ? 'px-1.5 py-0 leading-[14px]' : canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary ${isMoving ? 'shadow-xl' : ''} ${isSettling ? 'time-grid-settling' : ''} ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
+                    className={`absolute z-10 overflow-hidden rounded ${block.milestone ? 'px-1.5 py-0 leading-[14px]' : canShowText ? 'px-1.5 py-1' : 'p-0'} text-left font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary time-grid-block ${isMoving ? 'shadow-xl time-grid-lifted' : ''} ${isRealtimeHighlighted ? reduce ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight' : ''}`}
                     style={{
                       ...eventBlockStyle(
                         layout,
@@ -953,7 +962,9 @@ function TimeBand({
                         boxShadow: `0 0 12px ${block.event.color}80`,
                       } : {}),
                     }}
-                    initial={reduce ? false : { opacity: 0, y: 4 }}
+                    // 끄는 중(다른 요일 열로 넘어가 새로 붙어도)·방금 놓은 블록은 투명에서 다시 떠오르지 않는다 —
+                    // 계속 진하게 손을 따라오고, 놓은 자리에서 바로 착지한다.
+                    initial={reduce || isPreviewed || isSettling ? false : { opacity: 0, y: 4 }}
                     animate={blockMotion.animate}
                     transition={blockMotion.transition}
                     onClick={(event) => {
@@ -983,6 +994,12 @@ function TimeBand({
                         className="absolute inset-x-0 bottom-0"
                         style={{ height: 8, cursor: 'ns-resize' }}
                       />
+                    )}
+                    {isMoving && (
+                      <DragSlideAnchor slideKey={bandBlock.layoutId} registry={slideRegistry} reduce={reduce} />
+                    )}
+                    {settleToken !== null && (
+                      <DropLanding key={`land-${settleToken}`} color={accent} className="time-grid-land-ring" />
                     )}
                   </motion.button>
                 );

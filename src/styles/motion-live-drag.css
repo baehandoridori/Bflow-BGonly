@@ -231,3 +231,321 @@
   0%, 99.9% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* ═══ 16. 끌어서 옮기기 — 잡았다 → 옮긴다 → 놓았다 (drag-landing) ═════════════════
+   - 잡았다: 끄는 막대·블록은 흐린 점선 대신 진하게 1.02배 들리고(개별 scale 속성 180ms), 밑에 미리 그린
+     그림자 층이 opacity 로 깔린다(그림자 자체는 움직이지 않는다). 월 보기는 원래 자리에 흐린 점선 흔적
+     (opacity .3, 1px dashed)이 남는다.
+   - 옮긴다: 칸을 넘을 때의 미끄러짐은 DragSlideAnchor(WAAPI translate 120ms, src/components/ui/DragLanding.tsx).
+   - 놓았다: DropLanding — 부모 '톡'(scale 1 → 1.03 → 1, WAAPI 420ms) + 아래 링(opacity .9 → 0, 450ms).
+     놓는 즉시 돌고 저장을 기다리지 않는다. 다시 틀 때는 React key 로 새로 붙인다(animation:none 토글 X).
+   - 만들기: 유리 막대 opacity 1 → 0 150ms, 같은 자리 진짜 막대 opacity 0 → 1 + scale .96 → 1 320ms,
+     빛 링 .8 → 0 600ms.
+   동작 줄이기: 들림·미끄러짐·톡·굳어짐 없이 테두리 링만(전역 0.01ms 규칙보다 특이도가 높은 규칙으로 살린다). */
+
+.bf-land-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 8px;
+  border: 2px solid var(--land-color, rgb(var(--color-accent)));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--land-color, rgb(var(--color-accent))) 55%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-land-ring 450ms var(--ease-std) forwards;
+}
+
+.bf-land-ring.is-born {
+  animation: bf-born-ring 600ms var(--ease-std) forwards;
+}
+
+@keyframes bf-land-ring {
+  from { opacity: 0.9; }
+  to { opacity: 0; }
+}
+
+@keyframes bf-born-ring {
+  from { opacity: 0.8; }
+  to { opacity: 0; }
+}
+
+/* 월 보기 일정 막대 — 호버 확대(transform)와 들림(scale)·미끄러짐(translate)·톡(scale, WAAPI)은 서로 다른 속성.
+   호버용 transform·filter 전환(Tailwind transition-[transform,filter] duration-150)에 들림 scale 만 덧붙인다. */
+.calendar-bar-motion {
+  transition-property: transform, filter, scale;
+  transition-duration: 150ms, 150ms, 180ms;
+  transition-timing-function: var(--ease-std), var(--ease-std), cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* 들렸을 때만 보이는 그림자 층. 막대가 반투명이라 카드색 바탕을 함께 깔아 진하게 보이게 한다. */
+.calendar-bar-motion::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 6px;
+  background: rgb(var(--color-bg-card));
+  box-shadow: 0 10px 22px rgb(0 0 0 / 0.38);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.calendar-bar-lifted {
+  scale: 1.02;
+}
+
+.calendar-bar-lifted::after {
+  opacity: 1;
+}
+
+/* 끄는 동안 원래 자리 흔적. 색은 인라인 borderColor(일정 색). */
+.calendar-bar-origin {
+  position: absolute;
+  z-index: 5;
+  height: 26px;
+  border: 1px dashed;
+  border-radius: 2px;
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.calendar-bar-origin.is-start {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+
+.calendar-bar-origin.is-end {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+/* 방금 만든 일정 — 굳어지듯 진해진다. 끝값이 평소 모습이라 클래스가 빠져도 깜빡이지 않는다. */
+.calendar-bar-born {
+  animation: bf-bar-born 320ms var(--ease-out) both;
+}
+
+@keyframes bf-bar-born {
+  from { opacity: 0; scale: 0.96; }
+}
+
+/* '만들기'를 누르면 유리 막대가 녹아 사라진다(저장에 실패해 창이 남으면 다시 보인다). */
+.calendar-drag-ghost-layer {
+  transition: opacity 150ms var(--ease-in);
+}
+
+.calendar-drag-ghost-layer.is-leaving {
+  opacity: 0;
+}
+
+/* 주 시간표 블록 — 들림은 개별 scale(framer 의 transform 과 섞이지 않는다). */
+.time-grid-block {
+  transition: scale 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.time-grid-block.time-grid-lifted {
+  z-index: 15;
+  scale: 1.02;
+}
+
+/* 블록은 overflow:hidden 이라 링을 안쪽에 그린다. */
+.time-grid-block > .bf-land-ring.time-grid-land-ring {
+  inset: 0;
+  border-radius: inherit;
+}
+
+/* 대시보드 위젯 — 잡으면 1.02배 + 깊은 그림자 층(opacity 0 → 1, 180ms), 나머지는 흐림 없이 어두운 덮개만(200ms).
+   쓰레기통 위에서는 .92배 + 흐려져(150ms) '곧 버려짐'을 보이고, 놓으면 즉시 사라진다.
+   칸으로 튕겨 안착하는 움직임·밀려나는 위젯은 widget-animations.css(transform 만). */
+.widget-lift {
+  position: relative;
+  height: 100%;
+  transition:
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 150ms var(--ease-std);
+}
+
+[data-lifted] > .widget-lift {
+  transform: scale(1.02);
+}
+
+[data-doomed] > .widget-lift {
+  transform: scale(0.92);
+  opacity: 0.7;
+  transition-duration: 150ms;
+}
+
+.widget-lift-shadow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 16px;
+  box-shadow: 0 28px 56px rgb(0 0 0 / 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[data-lifted] > .widget-lift > .widget-lift-shadow {
+  opacity: 1;
+}
+
+[data-doomed] > .widget-lift > .widget-lift-shadow {
+  opacity: 0;
+}
+
+/* 잡은 동안의 테두리 — 깜빡이지 않는다(예전 glowPulse 무한 반복 제거). */
+.widget-drag-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 17px;
+  border: 1.5px solid rgb(var(--color-accent) / 0.5);
+  box-shadow: 0 0 20px rgb(var(--color-accent) / 0.2), inset 0 0 20px rgb(var(--color-accent) / 0.06);
+  pointer-events: none;
+}
+
+/* 놓는 즉시 한 번 빛나는 안착 링. */
+.widget-land-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 17px;
+  border: 1.5px solid rgb(var(--color-accent) / 0.45);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-widget-land 450ms var(--ease-std) forwards;
+}
+
+@keyframes bf-widget-land {
+  from { opacity: 0.7; }
+  to { opacity: 0; }
+}
+
+/* 나머지 위젯 덮개 — 늘 그려 두고 opacity 만 바꾼다(흐림 없음). */
+.widget-dim {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background: rgb(var(--color-bg-primary) / 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease-std);
+}
+
+[data-dimmed] > .widget-dim {
+  opacity: 1;
+}
+
+/* 쓰레기통 — 커짐은 이 상자의 transform 하나(150ms), 빨간 상태는 겹친 층의 opacity. 흐림 없음. */
+.dashboard-trash {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 110px;
+  height: 90px;
+  padding: 16px 24px;
+  border-radius: 16px;
+  white-space: nowrap;
+  background: rgb(var(--color-bg-card) / 0.95);
+  border: 2px dashed rgb(var(--color-bg-border) / 0.5);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
+  transition: transform 150ms var(--ease-out);
+}
+
+.dashboard-trash.is-hot {
+  transform: scale(1.08);
+}
+
+.dashboard-trash-hot {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: rgb(255 107 107 / 0.3);
+  border: 2px dashed rgb(255 107 107 / 0.7);
+  box-shadow: 0 8px 32px rgb(255 107 107 / 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms var(--ease-std);
+}
+
+.dashboard-trash.is-hot .dashboard-trash-hot {
+  opacity: 1;
+}
+
+/* 타임라인 막대 — 손을 그대로 따라오는 막대(나머지 거리는 GanttCanvas 가 transform 으로 직접 적음),
+   들린 그림자(정적, 나타날 때만 opacity), 원래 자리 흐린 점선 흔적, 지금 놓으면 들어갈 칸 점선.
+   gantt.css 는 화면이 나중에 불러오므로 .gantt-canvas-wrap 으로 특이도를 올린다. */
+.gantt-canvas-wrap .gantt-bar-position.is-lifted {
+  z-index: 5;
+}
+
+.gantt-canvas-wrap .gantt-bar > .gantt-lift-shadow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 4px;
+  box-shadow:
+    0 8px 18px rgb(0 0 0 / 0.35),
+    0 0 0 1px color-mix(in srgb, var(--gantt-color) 45%, transparent);
+  pointer-events: none;
+  animation: bf-gantt-lift 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes bf-gantt-lift {
+  from { opacity: 0; }
+}
+
+.gantt-canvas-wrap .gantt-drop-slot {
+  position: absolute;
+  top: 8px;
+  height: 24px;
+  z-index: 1;
+  border-radius: 4px;
+  border: 1px dashed var(--gantt-color);
+  background: color-mix(in srgb, var(--gantt-color) 10%, transparent);
+  pointer-events: none;
+}
+
+.gantt-canvas-wrap .gantt-origin-trace {
+  position: absolute;
+  top: 10px;
+  height: 20px;
+  z-index: 1;
+  border-radius: 3px;
+  border: 1px dashed var(--gantt-color);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.gantt-canvas-wrap .gantt-bar > .bf-land-ring.gantt-land-ring {
+  --land-color: var(--gantt-color);
+  inset: -4px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 동작 줄이기: 들림·미끄러짐·톡·굳어짐·쓰레기통 커짐 없이 테두리 링만 남긴다. */
+  .bf-land-ring {
+    animation-duration: 450ms !important;
+  }
+
+  .bf-land-ring.is-born {
+    animation-duration: 600ms !important;
+  }
+
+  .widget-land-ring {
+    animation-duration: 450ms !important;
+  }
+
+  .calendar-bar-lifted,
+  .time-grid-block.time-grid-lifted {
+    scale: none;
+  }
+
+  [data-lifted] > .widget-lift,
+  [data-doomed] > .widget-lift,
+  .dashboard-trash.is-hot {
+    transform: none;
+  }
+}
