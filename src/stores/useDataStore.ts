@@ -10,6 +10,7 @@ import type {
 } from '@/types';
 import { SCENE_PHASE_ROUND_MIN, SCENE_PHASE_ROUND_MAX } from '@/types';
 import { calcDashboardStats } from '@/utils/calcStats';
+import type { SyncKind } from '@/utils/syncQueue';
 import { defaultEpisodeTitle } from '@/shared/episodeTitle';
 import { loadCompositingStates as svcLoadCompositingStates } from '@/services/supabaseService';
 
@@ -43,9 +44,12 @@ interface DataState {
 
   // 동기화 상태
   isSyncing: boolean;
+  /** 지금 받아오기가 직접 새로고침(manual)인지 자동(auto)인지 — 헤더가 직접일 때만 아이콘을 돌린다. */
+  syncKind: SyncKind | null;
   lastSyncTime: number | null;
   syncError: string | null;
   setSyncing: (v: boolean) => void;
+  setSyncState: (isSyncing: boolean, syncKind: SyncKind | null) => void;
   setLastSyncTime: (t: number) => void;
   setSyncError: (err: string | null) => void;
 
@@ -169,9 +173,11 @@ export const useDataStore = create<DataState>((set, get) => ({
   setEpisodeMemos: (memos) => set({ episodeMemos: memos }),
 
   isSyncing: false,
+  syncKind: null,
   lastSyncTime: null,
   syncError: null,
   setSyncing: (v) => set({ isSyncing: v }),
+  setSyncState: (isSyncing, syncKind) => set({ isSyncing, syncKind }),
   setLastSyncTime: (t) => set({ lastSyncTime: t }),
   setSyncError: (err) => set({ syncError: err }),
 

@@ -111,7 +111,8 @@ test('.bf-press: 색 전환은 지키고 누르는 동안 scale(.97) 120ms, 동�
 });
 
 test('헤더·사이드바 아이콘 버튼에 누름 반응을 붙이고, transition 유틸과 섞지 않는다', () => {
-  const header = read('src/components/layout/Header.tsx');
+  // 새로고침 버튼은 3번(header-sync-quiet)에서 HeaderSyncStatus 로 옮겨졌다 — 두 파일을 합쳐 센다.
+  const header = read('src/components/layout/Header.tsx') + read('src/components/layout/HeaderSyncStatus.tsx');
   assert.equal(header.match(/bf-press/g)?.length, 3, '돌아가기·새로고침·테마 버튼');
   assert.doesNotMatch(header, /transition-colors/);
 
