@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { useMemo, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Eye, Sparkles, Pencil, MessageSquare, RotateCw, Plus, Trash2, User, Grid3x3, Image as ImageIcon, ChevronRight, Hourglass, Play, Bell } from 'lucide-react';
 import { useActivityStore } from '@/stores/useActivityStore';
@@ -15,6 +15,9 @@ import {
 } from './feedNavigation';
 import { activityMatchesCell } from '../RecentActivityWidget';
 import { getRangeBoundary } from './timeRange';
+import { FEED_FRESH_KEEP_MS, FEED_SLIDE_MAX_PX, feedAnchorShift, pruneFreshIds, trackFreshActivities, type FeedFreshState } from './feedFreshness';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { animateEl, EASE_CSS, MOTION_MS } from '@/utils/motion';
 
 function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
   const props = { size };
@@ -109,9 +112,13 @@ interface FeedItemRowProps {
   /** v1.23.0: 셀 필터 적용 시 비매칭 dim */
   dimmed?: boolean;
   highlightRef?: React.Ref<HTMLDivElement>;
+  /** 방금 들어온 줄 — 스르륵 나타나고 옅은 보랏빛 바탕이 잠깐 남는다. */
+  fresh?: boolean;
+  /** 맨 위 새 줄 높이를 잴 때 찾는 key(최상위 줄만). */
+  feedKey?: string;
 }
 
-function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles, highlight, dimmed, highlightRef }: FeedItemRowProps) {
+function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles, highlight, dimmed, highlightRef, fresh, feedKey }: FeedItemRowProps) {
   const verb = getActivityVerb(activity);
   const displayLabel = formatActivitySceneLabel(activity.sceneLabel, activity.episodeNumber, episodeTitles);
   const navTarget = resolveActivitySceneNavigation(activity, episodes);
@@ -164,6 +171,7 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
   return (
     <div
       ref={highlightRef}
+      data-feed-key={feedKey}
       onClick={handleClick}
       role={canNavigate ? 'button' : undefined}
       tabIndex={canNavigate ? 0 : undefined}
@@ -177,8 +185,9 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
         canNavigate ? 'cursor-pointer' : ''
       } relative ${isSelf ? 'bg-accent/[0.04]' : ''} ${isInsideGroup ? 'pl-12' : ''} ${
         highlight ? 'bg-[#FDCB6E]/10 shadow-[inset_3px_0_0_#FFE5A0]' : ''
-      } ${dimmed ? 'opacity-30' : ''}`}
+      } ${dimmed ? 'opacity-30' : ''} ${fresh ? 'feed-row-new' : ''}`}
     >
+      {fresh && <span className="feed-row-new-wash" aria-hidden />}
       {isSelf && !isInsideGroup && (
         <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-sub" />
       )}
@@ -232,25 +241,34 @@ interface FeedGroupProps {
   dimmed?: boolean;
   highlightRef?: React.Ref<HTMLDivElement>;
   matches?: (a: Activity) => boolean;
+  /** 펼침 상태는 목록이 들고 있다 — 묶음에 새 항목이 붙어도 열린 채로 유지된다. 기본은 본인 묶음만 펼침. */
+  open: boolean;
+  onToggle: () => void;
+  /** 방금 들어온 항목 id(안쪽 줄 표시 + 묶음 바탕 물듦). */
+  freshIds: ReadonlyMap<string, number>;
+  feedKey: string;
 }
 
-function FeedGroup({ items, isSelf, episodes, episodeTitles, highlight, dimmed, highlightRef, matches }: FeedGroupProps) {
-  const [open, setOpen] = useState(isSelf); // 본인 그룹은 자동 펼침
+function FeedGroup({ items, isSelf, episodes, episodeTitles, highlight, dimmed, highlightRef, matches, open, onToggle, freshIds, feedKey }: FeedGroupProps) {
   const head = items[0];
+  // 묶음에 새 항목이 붙으면 묶음은 그대로 두고 'N건' 숫자만 바뀐다. 바탕만 잠깐 물든다(가장 최근 새 항목 id 로 다시 튼다).
+  const freshKey = items.find((it) => freshIds.has(it.id))?.id ?? null;
   const verb = getActivityVerb(head);
   const groupLabel = formatActivityGroupLabel(head, episodeTitles);
 
   return (
     <div
       ref={highlightRef}
+      data-feed-key={feedKey}
       className={`border-b border-bg-border/15 ${isSelf ? 'bg-accent/[0.04]' : ''} relative transition-all duration-200 ${
         highlight ? 'bg-[#FDCB6E]/10 shadow-[inset_3px_0_0_#FFE5A0]' : ''
       } ${dimmed ? 'opacity-30' : ''}`}
     >
+      {freshKey && <span key={freshKey} className="feed-row-new-wash" aria-hidden />}
       {isSelf && <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-sub" />}
       <div
         className="flex gap-2.5 py-2 px-3.5 cursor-pointer transition-colors hover:bg-bg-border/20"
-        onClick={() => setOpen((o) => !o)}
+        onClick={onToggle}
       >
         <Avatar name={head.userName} color={getUserColorFromId(head.userId)} />
         <div className="flex-1 min-w-0">
@@ -284,7 +302,8 @@ function FeedGroup({ items, isSelf, episodes, episodeTitles, highlight, dimmed, 
           <ChevronRight size={14} />
         </span>
       </div>
-      <AnimatePresence>
+      {/* initial={false}: 이미 펼쳐진 채로 처음 그려질 때 높이 0 에서 다시 펼치지 않는다. */}
+      <AnimatePresence initial={false}>
         {open && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
@@ -308,6 +327,7 @@ function FeedGroup({ items, isSelf, episodes, episodeTitles, highlight, dimmed, 
                   episodeTitles={episodeTitles}
                   highlight={innerMatch}
                   dimmed={innerDim}
+                  fresh={freshIds.has(it.id)}
                 />
               );
             })}
@@ -324,7 +344,18 @@ export function ActivityFeed() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const firstHighlightRef = useRef<HTMLDivElement>(null);
+  const { reduce } = useMotionPref();
+  // 묶음 펼침 상태 — 묶음 key 별로 목록이 들고 있다(없으면 본인 묶음만 펼침).
+  const [openGroups, setOpenGroups] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const toggleGroup = useCallback((key: string, fallbackOpen: boolean) => {
+    setOpenGroups((prev) => {
+      const next = new Map(prev);
+      next.set(key, !(prev.get(key) ?? fallbackOpen));
+      return next;
+    });
+  }, []);
 
   // 셀 필터 매칭 헬퍼 (codex 3차 P1: range 경계도 검증)
   const currentRange = useMemo(() => getRangeBoundary(timeUnit, rangeIdx), [timeUnit, rangeIdx]);
@@ -349,6 +380,65 @@ export function ActivityFeed() {
     if (!cellFilter) return false;
     return activityMatchesCell(a, timeUnit, cellFilter, currentRange);
   }, [cellFilter, timeUnit, currentRange]);
+
+  // 움직임 폴리싱 9번 — 방금 들어온 줄: 위에서 살짝 내려오며 나타나고 옅은 보랏빛 바탕이 잠깐 남는다.
+  //   처음 채우기·다시 불러오기·더 불러오기(isLoading 을 거친 변경)는 새 줄로 치지 않는다.
+  const [freshIds, setFreshIds] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const freshStateRef = useRef<FeedFreshState | null>(null);
+  const wasLoadingRef = useRef(isLoading);
+  const lastActivitiesRef = useRef<Activity[] | null>(null);
+  const prevTopsRef = useRef<ReadonlyMap<string, number> | null>(null);
+  useLayoutEffect(() => {
+    if (isLoading) wasLoadingRef.current = true;
+  }, [isLoading]);
+  useLayoutEffect(() => {
+    // 맨 위 몇 줄의 위치(목록 기준)를 기록해 둔다 — 다음 변경 때 '원래 있던 첫 줄'이 얼마나 밀렸는지 본다.
+    const list = listRef.current;
+    const keys = feedItems.map((item) => (item.type === 'item' ? item.activity.id : item.key));
+    const tops = new Map<string, number>();
+    if (list) {
+      for (const key of keys.slice(0, 12)) {
+        const row = list.querySelector<HTMLElement>(`[data-feed-key="${CSS.escape(key)}"]`);
+        if (row) tops.set(key, row.offsetTop);
+      }
+    }
+    const prevTops = prevTopsRef.current;
+    prevTopsRef.current = tops;
+    if (lastActivitiesRef.current === activities) return; // 필터·기간 칸만 바뀜 — 새 줄 아님
+    lastActivitiesRef.current = activities;
+    const reseed = isLoading || wasLoadingRef.current;
+    wasLoadingRef.current = isLoading;
+    const prevFresh = freshStateRef.current?.fresh;
+    const next = trackFreshActivities(freshStateRef.current, activities, { reseed, now: Date.now() });
+    freshStateRef.current = next;
+    setFreshIds(next.fresh);
+    const arrived = !!prevFresh && [...next.fresh.keys()].some((id) => !prevFresh.has(id));
+    if (!arrived) return;
+    // 맨 위(스크롤 0)일 때만 목록 전체를 '원래 있던 첫 줄이 밀린 만큼' 위에서 내려오게 한다.
+    // 한 줄이 묶음으로 바뀌기만 한 경우(밀림 0)는 움직이지 않는다. 스크롤이 내려가 있으면
+    // 브라우저의 스크롤 고정(scroll anchoring)이 보던 자리를 지킨다.
+    const scroller = containerRef.current;
+    if (!scroller || !list || scroller.scrollTop > 1) return;
+    const shift = feedAnchorShift(prevTops, tops, keys);
+    if (shift <= 0) return;
+    animateEl(list, [{ transform: `translateY(${-Math.min(shift, FEED_SLIDE_MAX_PX)}px)` }, { transform: 'translateY(0)' }], {
+      duration: MOTION_MS.slow,
+      easing: EASE_CSS.out,
+    }, reduce);
+  }, [feedItems, activities, isLoading, reduce]);
+  // 표시 시간이 지나면 새 줄 표시를 거둔다 — 나중에 묶음을 펼칠 때 안쪽 줄이 다시 물들지 않게.
+  useEffect(() => {
+    if (freshIds.size === 0) return;
+    const timer = setTimeout(() => {
+      const state = freshStateRef.current;
+      if (!state) return;
+      const pruned = pruneFreshIds(state.fresh, Date.now());
+      if (pruned === state.fresh) return;
+      freshStateRef.current = { ...state, fresh: pruned };
+      setFreshIds(pruned);
+    }, FEED_FRESH_KEEP_MS + 50);
+    return () => clearTimeout(timer);
+  }, [freshIds]);
 
   // 셀 필터 적용 시 첫 매칭 항목으로 자동 스크롤
   useEffect(() => {
@@ -426,6 +516,7 @@ export function ActivityFeed() {
 
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto">
+      <div ref={listRef}>
       {feedItems.map((item) => {
         if (item.type === 'item') {
           const isSelf = item.activity.userId === currentUser?.id;
@@ -441,6 +532,8 @@ export function ActivityFeed() {
               highlight={isMatch}
               dimmed={isDimmed}
               highlightRef={isMatch ? claimFirstMatch() : undefined}
+              fresh={freshIds.has(item.activity.id)}
+              feedKey={item.activity.id}
             />
           );
         } else {
@@ -460,6 +553,10 @@ export function ActivityFeed() {
               dimmed={groupDimmed}
               highlightRef={groupHasMatch ? claimFirstMatch() : undefined}
               matches={matches}
+              open={openGroups.get(item.key) ?? isSelf}
+              onToggle={() => toggleGroup(item.key, isSelf)}
+              freshIds={freshIds}
+              feedKey={item.key}
             />
           );
         }
@@ -472,6 +569,7 @@ export function ActivityFeed() {
           이전 활동은 자동 정리되었습니다
         </div>
       )}
+      </div>
     </div>
   );
 }

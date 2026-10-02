@@ -56,3 +56,178 @@
     animation-duration: 200ms !important;
   }
 }
+
+/* ═══ 9. 팀원이 바꾼 순간 (teammate-live) ═══════════════════════════════════
+   - 씬 카드: 테두리 링(1.5px 액센트 90%) opacity 0 → 1(15%) → 0, 1.5초(일괄 0.9초). 그림자는 고정값이고
+     움직이는 건 링의 opacity 뿐이다. 카드 위 가운데 이름표는 120ms 뒤 6px 위에서 내려오며(180ms) 나타나
+     2.2초에 220ms 동안 사라진다(일괄 판정이 뒤늦게 이름표를 거둘 때 보이기 전에 거둬지도록 120ms 늦춤).
+   - 시트: 씬번호 칸에 같은 박자의 옅은 물듦 + 왼쪽 막대, 이름표는 칸 위쪽 왼편.
+   - 담당자 카드: 바탕 아래 보라 18% 층 opacity 0 → 1(15%) → 0, 1.3초. 씬 완료 때만 '+N씬' 이 4px 아래에서
+     10px 위로 떠오르며 사라진다(1.1초).
+   - 최근 작업: 새 줄 opacity 250ms + 보라 12% 바탕이 1.6초 동안 남았다 빠진다(목록 내려오기는 WAAPI).
+   다시 틀 때는 React key 로 새로 붙인다 — 클래스로 animation 을 껐다 켜지 않는다. */
+
+.scene-remote-ring {
+  position: absolute;
+  inset: -1px;
+  z-index: 15;
+  border-radius: inherit;
+  border: 1.5px solid rgb(var(--color-accent) / 0.9);
+  box-shadow: 0 0 14px rgb(var(--color-accent) / 0.32);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-remote-glow 1500ms var(--ease-out) forwards;
+}
+
+.scene-remote-ring.is-bulk,
+.scene-remote-row-flash.is-bulk {
+  animation-duration: 900ms;
+}
+
+@keyframes bf-remote-glow {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.scene-remote-tag-anchor {
+  position: absolute;
+  top: -10px;
+  left: 0;
+  right: 0;
+  z-index: 21;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.scene-remote-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  max-width: calc(100% - 24px);
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--color-accent));
+  background: rgb(var(--color-bg-card));
+  color: rgb(var(--color-text-primary));
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.22);
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  animation:
+    bf-remote-tag-in 180ms var(--ease-out) 120ms both,
+    bf-remote-tag-out 220ms var(--ease-in) 2200ms forwards;
+}
+
+@keyframes bf-remote-tag-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+@keyframes bf-remote-tag-out {
+  to { opacity: 0; transform: translateY(-4px); }
+}
+
+/* 시트 씬번호 칸 — 칸 전체 옅은 물듦 + 왼쪽 막대(고정 그림자), opacity 만 움직인다. */
+.scene-remote-row-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgb(var(--color-accent) / 0.14);
+  box-shadow: inset 3px 0 0 rgb(var(--color-accent) / 0.9);
+  opacity: 0;
+  animation: bf-remote-glow 1500ms var(--ease-out) forwards;
+}
+
+/* 시트 이름표 — 씬번호 위쪽 왼편. 고정 머리줄(z-10) 아래로 지나간다. */
+.scene-remote-tag.scene-remote-tag--row {
+  position: absolute;
+  top: -11px;
+  left: 6px;
+  z-index: 5;
+  height: 18px;
+  max-width: none;
+  font-size: 10.5px;
+}
+
+/* 담당자 카드 — 카드(relative isolate) 바탕 바로 위, 글자 아래에 깔리는 층. */
+.assignee-flash {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: rgb(var(--color-accent) / 0.18);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-remote-glow 1300ms var(--ease-out) forwards;
+}
+
+.assignee-delta {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: 5px;
+  color: rgb(var(--color-accent-sub));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: inherit;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-assignee-delta 1100ms var(--ease-out) forwards;
+}
+
+@keyframes bf-assignee-delta {
+  0% { opacity: 0; transform: translateY(4px); }
+  25% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+
+/* 최근 작업 — 새 줄. */
+.feed-row-new {
+  animation: bf-feed-row-in 250ms var(--ease-out) both;
+}
+
+@keyframes bf-feed-row-in {
+  from { opacity: 0; }
+}
+
+.feed-row-new-wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgb(var(--color-accent) / 0.12);
+  opacity: 0;
+  animation: bf-feed-wash 1600ms var(--ease-in) forwards;
+}
+
+@keyframes bf-feed-wash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 동작 줄이기: 움직임 없이 1.5초 그대로 보였다가 사라진다(전역 0.01ms 규칙보다 특이도가 높다). */
+  .scene-remote-ring,
+  .scene-remote-row-flash,
+  .scene-remote-tag,
+  .assignee-flash,
+  .feed-row-new-wash {
+    animation: bf-remote-hold 1500ms linear forwards !important;
+  }
+
+  .assignee-delta {
+    animation: bf-remote-hold 1100ms linear forwards !important;
+  }
+}
+
+@keyframes bf-remote-hold {
+  0%, 99.9% { opacity: 1; }
+  100% { opacity: 0; }
+}
