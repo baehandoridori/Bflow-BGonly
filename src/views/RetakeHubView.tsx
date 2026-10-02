@@ -29,6 +29,7 @@ import { computeSetProgress } from '@/utils/revisionSet';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { isCompositorForCompositing } from '@/utils/compositingLabels';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 import { toast as sonnerToast } from 'sonner';
 import type { CompRevision, CompRevisionSet } from '@/types';
 import { RetakeHubItemTable, type HubTab } from './retake-hub/RetakeHubItemTable';
@@ -469,18 +470,20 @@ export default function RetakeHubView() {
               onDelete={handleDeleteSet}
             />
 
-            {/* 자동취합 탭 */}
-            <div className="shrink-0 px-5 pt-3 flex items-center gap-1.5 border-b border-bg-border/40">
+            {/* 자동취합 탭 — 밑줄 하나가 탭 폭에 맞춰 미끄러진다(움직임 폴리싱 7번). 각 탭의 투명 밑변 2px 은 높이용. */}
+            <div className="relative shrink-0 px-5 pt-3 flex items-center gap-1.5 border-b border-bg-border/40">
+              <SlidingIndicator activeKey={tab} className="bottom-0 h-0.5 bg-accent" />
               {TABS.map((t) => (
                 <button
                   key={t.id}
                   type="button"
+                  data-slide-key={t.id}
                   onClick={() => setTab(t.id)}
                   className={[
-                    'px-3 py-2 text-[12px] font-semibold rounded-t-lg transition-colors cursor-pointer border-b-2',
+                    'relative px-3 py-2 text-[12px] font-semibold rounded-t-lg transition-colors cursor-pointer border-b-2 border-transparent',
                     tab === t.id
-                      ? 'text-accent border-accent'
-                      : 'text-text-secondary/70 border-transparent hover:text-text-primary',
+                      ? 'text-accent'
+                      : 'text-text-secondary/70 hover:text-text-primary',
                   ].join(' ')}
                 >
                   {t.label}

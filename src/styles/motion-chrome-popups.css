@@ -16,3 +16,27 @@
 .calendar-event-bar[data-hovered='true'] > .calendar-event-bar-ring {
   opacity: 1;
 }
+
+/* ─── 미끄러지는 선택 표시 (움직임 폴리싱 7번 sliding-indicator) ───
+   표시 자체는 공용 SlidingIndicator(절대 위치 + transform)가 그린다. 여기에는 CSS 로만 모양을 정하는 곳만 둔다. */
+
+/* 타임라인 상태 필터(전체·진행 중·완료): 눌린 칸의 배경·테두리는 미끄러지는 알약이 맡는다.
+   gantt.css 는 화면을 열 때 늦게 불러오므로 순서로 못 이긴다 — .gantt 를 하나 더 붙여 특이도로 이긴다. */
+.gantt .gantt-status-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gantt .gantt-status-filter > button {
+  position: relative;
+}
+.gantt .gantt-status-filter > button[aria-pressed='true'] {
+  background: transparent;
+  border-color: transparent;
+}
+.gantt-status-filter-indicator {
+  border: 1px solid rgb(var(--color-accent) / 0.2);
+  border-radius: 6px;
+  background: rgb(var(--color-accent) / 0.14);
+}

@@ -22,6 +22,7 @@ import {
   isLocalMutationSnapshot,
   type LocalMutationRecovery,
 } from '@/utils/calendarLocalMutation';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 
 interface EventQuickEditProps {
   event: CalendarEvent;
@@ -428,25 +429,29 @@ export function EventQuickEdit({
           </p>
         )}
 
-        <div className="flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
+        {/* 탭 밑줄 하나가 미끄러진다(움직임 폴리싱 7번). 각 탭의 투명 밑변 2px 은 높이를 지키려고 남긴다. */}
+        <div className="relative flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
+          <SlidingIndicator activeKey={tab} className="bottom-0 h-0.5 bg-accent" />
           <button
+            data-slide-key="calendar"
             onClick={() => setTab('calendar')}
             className="flex-1 py-2.5 text-xs font-medium transition-colors cursor-pointer"
             style={{
               color: tab === 'calendar' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
-              borderBottom: tab === 'calendar' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
+              borderBottom: '2px solid transparent',
             }}
           >
             <Tags size={12} className="inline mr-1" /> 태그·캘린더
           </button>
           <button
+            data-slide-key="edit"
             disabled={!canWrite}
             aria-describedby={readOnlyDescriptionId}
             onClick={() => canWrite && setTab('edit')}
             className={`flex-1 py-2.5 text-xs font-medium transition-colors ${canWrite ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
             style={{
               color: tab === 'edit' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
-              borderBottom: tab === 'edit' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
+              borderBottom: '2px solid transparent',
             }}
           >
             <Pencil size={12} className="inline mr-1" /> 일정 편집

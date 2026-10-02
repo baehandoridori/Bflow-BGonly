@@ -8,6 +8,7 @@ import {
   CalendarDays, ChevronLeft, ChevronRight, Plus,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore, type ScheduleDateNavigationRequest } from '@/stores/useAppStore';
 import {
@@ -1637,16 +1638,18 @@ export function ScheduleView() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* 뷰 모드 */}
-          <div className="flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+          {/* 뷰 모드 — 보라 알약 하나가 선택한 칸으로 미끄러진다(움직임 폴리싱 7번). */}
+          <div className="relative flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+            <SlidingIndicator activeKey={viewMode} axis="both" className="rounded-md bg-accent/20" />
             {([['month', '월'], ['2week', '2주'], ['week', '주'], ['today', '오늘']] as const).map(([m, l]) => (
               <button
                 key={m}
+                data-slide-key={m}
                 onClick={() => changeViewMode(m)}
                 className={cn(
-                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
+                  'relative px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
                   viewMode === m
-                    ? 'bg-accent/20 text-accent'
+                    ? 'text-accent'
                     : 'text-text-secondary hover:text-text-primary',
                 )}
               >
@@ -1656,27 +1659,30 @@ export function ScheduleView() {
           </div>
 
           {viewMode === 'week' && (
-            <div className="flex rounded-lg border border-accent/35 bg-accent/5 p-0.5" aria-label="주간 보기 방식">
+            <div className="relative flex rounded-lg border border-accent/35 bg-accent/5 p-0.5" aria-label="주간 보기 방식">
+              <SlidingIndicator activeKey={weekSubMode} axis="both" className="rounded-md bg-accent/20" />
               <button
                 type="button"
+                data-slide-key="card"
                 aria-label="주간 카드 보기"
                 aria-pressed={weekSubMode === 'card'}
                 onClick={() => setWeekSubMode('card')}
                 className={cn(
-                  'rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
-                  weekSubMode === 'card' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                  'relative rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                  weekSubMode === 'card' ? 'text-accent' : 'text-text-secondary hover:text-text-primary',
                 )}
               >
                 카드
               </button>
               <button
                 type="button"
+                data-slide-key="timegrid"
                 aria-label="주간 시간표 보기"
                 aria-pressed={weekSubMode === 'timegrid'}
                 onClick={() => setWeekSubMode('timegrid')}
                 className={cn(
-                  'rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
-                  weekSubMode === 'timegrid' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                  'relative rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                  weekSubMode === 'timegrid' ? 'text-accent' : 'text-text-secondary hover:text-text-primary',
                 )}
               >
                 시간표
