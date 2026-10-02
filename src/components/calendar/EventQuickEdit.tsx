@@ -5,7 +5,7 @@ import { EventTagBadges } from './EventTagBadges';
 import { getEventTagIds, toggleEventTag } from './eventTagPresentation';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, useIsPresent } from 'framer-motion';
+import { useIsPresent } from 'framer-motion';
 import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -13,6 +13,7 @@ import { getTagCanonicalSnapshot, isOptimisticCalendarTagId, useCalendarStore } 
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { clampMenuToViewport, popClassName, popOriginFromPoint, popOriginStyle, type PopOrigin } from '@/utils/popupMotion';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 import { isGanttMilestone, isGanttProjection } from '@/utils/calendarGantt';
 import { CalendarDateRangePicker, CalendarTimeInput, CalendarDurationButtons } from './inputs';
@@ -70,7 +71,9 @@ export function EventQuickEdit({
     .filter((tag) => !isOptimisticCalendarTagId(tag.id))
     .sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
   const ref = useRef<HTMLDivElement>(null);
-  const [adjusted, setAdjusted] = useState(position);
+  // 고친 자리와 피어나는 기준점을 한 상태에 둔다(훅 순서를 바꾸지 않게).
+  const [adjusted, setAdjusted] = useState<{ x: number; y: number; origin?: PopOrigin }>(position);
+  const popOrigin = adjusted.origin ?? null;
   const [tab, setTab] = useState<TabKey>('calendar');
   const [title, setTitle] = useState(event.title);
   const [startDate, setStartDate] = useState(event.startDate);
@@ -144,23 +147,25 @@ export function EventQuickEdit({
     color: 'rgb(var(--color-text-primary))',
   } as const;
 
+  // 화면 밖으로 나가지 않게 자리를 고치고, 우클릭한 지점 쪽 모서리에서 피어나게 기준점을 정한다
+  // (움직임 폴리싱 8번 — 화면 끝에서 밀려나면 기준점도 반대 모서리로). 우클릭은 React 18 이 이 effect 를
+  // 그리기 전에 바로 실행하는 '즉시 입력'이라 첫 프레임부터 고친 자리·기준점으로 그려진다.
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
     const rect = element.getBoundingClientRect();
-    let { x, y } = position;
-    if (x + rect.width > window.innerWidth - 8) x = window.innerWidth - rect.width - 8;
-    if (y + rect.height > window.innerHeight - 8) y = window.innerHeight - rect.height - 8;
-    if (x < 4) x = 4;
-    if (y < 4) y = 4;
-    setAdjusted({ x, y });
+    const next = clampMenuToViewport(position, rect, { width: window.innerWidth, height: window.innerHeight });
+    setAdjusted({
+      ...next,
+      origin: popOriginFromPoint(position, { left: next.x, top: next.y, width: rect.width, height: rect.height }),
+    });
   }, [position]);
 
   useEffect(() => {
     /**
      * 닫히지 말아야 할 두 경우를 함께 막는다.
-     * ① exit 애니메이션(150ms) 중인 죽은 인스턴스의 리스너가 살아 있어, 새로 연 팝업의
-     *    첫 클릭을 그 인스턴스가 삼켜 버린다.
+     * ① 닫히는 중(presence 가 남은 동안)인 죽은 인스턴스의 리스너가 살아 있어, 새로 연 팝업의
+     *    첫 클릭을 그 인스턴스가 삼켜 버린다. (닫힘 움직임은 없앴지만 가드는 그대로 둔다.)
      * ② 저장·삭제가 진행 중일 때 닫으면 실패 안내를 띄울 곳이 사라진다.
      */
     const shouldIgnore = () => !isPresentRef.current || pendingMutationRef.current !== null;
@@ -393,18 +398,15 @@ export function EventQuickEdit({
     setPendingTag((current) => current?.requestId === requestId ? null : current);
   }, [canWrite, displayedTagIds, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate, tagSelectionPending, scopePrompt]);
 
-  // 자체 AnimatePresence 로 감싸면 부모 presence 의 exit 가 전파되지 않아 닫힘 애니가 죽는다
-  // (framer-motion 10.x). presence 는 ScheduleView 쪽 조건부 렌더가 소유한다.
+  // presence 는 ScheduleView 쪽 조건부 렌더(AnimatePresence)가 소유한다.
+  // 창 박자(움직임 폴리싱 8번): 우클릭한 지점 쪽 모서리에서 140ms 에 피어나고(.bf-pop), 닫힘은 바로 사라진다.
   return createPortal(
-      <motion.div
+      <div
         ref={ref}
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.15 }}
-        className="fixed z-[1000]"
+        className={`${popClassName(popOrigin)} fixed z-[1000]`}
         style={{
           ...floatingGlassStyle,
+          ...popOriginStyle(popOrigin),
           left: adjusted.x,
           top: adjusted.y,
           width: 340,
@@ -639,7 +641,7 @@ export function EventQuickEdit({
             </div>
           )}
         </div>
-      </motion.div>,
+      </div>,
     document.body,
   );
 }

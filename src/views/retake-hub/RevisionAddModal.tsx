@@ -6,12 +6,11 @@
  *   - 전반: 씬 미지정 → scene_id 없는 항목(허브 '전반' 그룹에만 표시).
  * 내용 = EntityAwareInput(@멘션·#씬태그) + 이미지 첨부. 담당/알림 = RevisionRecipientPicker(담당 승격).
  * 생성 = useRevisionStore.createRevision({ sceneKey, setId, ... }) — setId = 현재 세트.
- * 부서(BG/ACT)는 노출하지 않는다. 셸은 허브 모달(RevisionSetCreateModal) 패턴(createPortal + motion).
+ * 부서(BG/ACT)는 노출하지 않는다. 셸은 허브 모달(RevisionSetCreateModal) 패턴(createPortal + 공통 창 박자 CSS bf-scrim-in/bf-modal-in).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
 import { ClipboardList, ImagePlus, X } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import type { AppUser, CompRevisionSet, Episode, Part, Scene } from '@/types';
@@ -208,14 +207,11 @@ export function RevisionAddModal({ targetSet, episodes, episodeTitles, allUsers,
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4 bf-scrim-in"
       onClick={onClose}
     >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 8 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="w-full max-w-md max-h-[86vh] flex flex-col rounded-2xl border border-bg-border bg-bg-card shadow-2xl"
+      <div
+        className="bf-modal-in w-full max-w-md max-h-[86vh] flex flex-col rounded-2xl border border-bg-border bg-bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border/60 shrink-0">
@@ -403,7 +399,7 @@ export function RevisionAddModal({ targetSet, episodes, episodeTitles, allUsers,
             {submitting ? '만드는 중…' : '만들기'}
           </button>
         </div>
-      </motion.div>
+      </div>
     </div>,
     document.body,
   );

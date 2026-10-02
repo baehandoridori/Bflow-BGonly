@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { X, Palmtree, Loader2, Check } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
 import { grantDahyu, fetchAllEmployeeNames } from '@/services/vacationService';
@@ -79,23 +78,16 @@ export function DahyuGrantModal({ open, onClose, onSuccess }: DahyuGrantModalPro
   };
 
   return (
-    <AnimatePresence>
+    <>
       {open && (
-        <motion.div
-          className="fixed inset-0 z-[100] flex items-center justify-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-        >
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        // 창 박자(움직임 폴리싱 8번): 뒤 배경과 창이 각자 움직인다. 바깥 틀은 움직이지 않는다 —
+        // 흐림 창의 조상이 opacity 를 움직이면 그동안 흐림이 바깥을 못 봐 꺼졌다 켜지는 것처럼 보인다.
+        // 닫힘은 바로(퇴장 움직임 없음).
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm bf-scrim-in" onClick={onClose} />
 
-          <motion.div
-            className="relative bg-bg-card/95 backdrop-blur-xl border border-bg-border/40 rounded-2xl shadow-2xl w-[420px] max-h-[90vh] overflow-auto"
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            transition={{ duration: 0.15 }}
+          <div
+            className="bf-modal-in relative bg-bg-card/95 backdrop-blur-xl border border-bg-border/40 rounded-2xl shadow-2xl w-[420px] max-h-[90vh] overflow-auto"
           >
             {/* header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border/30">
@@ -197,9 +189,9 @@ export function DahyuGrantModal({ open, onClose, onSuccess }: DahyuGrantModalPro
                 )}
               </button>
             </div>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       )}
-    </AnimatePresence>
+    </>
   );
 }

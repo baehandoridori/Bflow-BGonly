@@ -181,13 +181,9 @@ function VacationDeleteListModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.15 }}
-        className="bg-bg-card border border-bg-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 backdrop-blur-sm bf-scrim-in" onClick={onClose}>
+      <div
+        className="bf-modal-in bg-bg-card border border-bg-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border/50">
@@ -247,7 +243,7 @@ function VacationDeleteListModal({
             </div>
           )}
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }
@@ -717,7 +713,7 @@ export function VacationView() {
                 <ChevronDown size={10} className={cn('transition-transform', dahyuDropdownOpen && 'rotate-180')} />
               </button>
               {dahyuDropdownOpen && (
-                <div className="absolute right-0 top-full mt-1 w-40 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[50]">
+                <div className="bf-pop absolute right-0 top-full mt-1 w-40 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[50]">
                   <button
                     onClick={() => { setShowDahyuModal(true); setDahyuDropdownOpen(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"

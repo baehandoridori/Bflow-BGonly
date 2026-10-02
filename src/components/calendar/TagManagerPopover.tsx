@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { getTagCanonicalSnapshot, useCalendarStore } from '@/stores/useCalendarStore';
 import { EVENT_COLORS, type CalendarTag } from '@/types/calendar';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { popClassName, popOriginFromAnchor, popOriginStyle, type PopOrigin } from '@/utils/popupMotion';
 
 interface TagManagerPopoverProps {
   anchorRect: DOMRect;
@@ -241,6 +242,8 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
   ));
   const [editing, setEditing] = useState<EditingTag | null>(null);
   const [localSaving, setSaving] = useState(false);
+  // 누른 '태그 관리' 버튼 쪽 모서리에서 피어나기(움직임 폴리싱 8번). 위로 뒤집혀 열리면 아래 모서리에서.
+  const [popOrigin, setPopOrigin] = useState<PopOrigin | null>(null);
   const renderedActorId = useRef(actorId);
   const actorChanged = renderedActorId.current !== actorId;
   if (actorChanged) renderedActorId.current = actorId;
@@ -283,11 +286,11 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
 
   const updatePosition = useCallback(() => {
     const rect = popoverRef.current?.getBoundingClientRect();
-    setPosition(calculatePosition(
-      anchorRect,
-      rect?.width ?? POPOVER_WIDTH,
-      rect?.height ?? ESTIMATED_HEIGHT,
-    ));
+    const width = rect?.width ?? POPOVER_WIDTH;
+    const height = rect?.height ?? ESTIMATED_HEIGHT;
+    const next = calculatePosition(anchorRect, width, height);
+    setPosition(next);
+    setPopOrigin(popOriginFromAnchor(anchorRect, { ...next, width, height }));
   }, [anchorRect]);
 
   useLayoutEffect(() => {
@@ -672,9 +675,10 @@ export function TagManagerPopover({ anchorRect, onClose }: TagManagerPopoverProp
       data-calendar-tag-manager="true"
       role="dialog"
       aria-label="태그 관리 팝오버"
-      className="fixed z-[1000] max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl border border-bg-border/70 p-3 text-text-primary"
+      className={`${popClassName(popOrigin)} fixed z-[1000] max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl border border-bg-border/70 p-3 text-text-primary`}
       style={{
         ...floatingGlassStyle,
+        ...popOriginStyle(popOrigin),
         left: position.left,
         top: position.top,
         width: POPOVER_WIDTH,

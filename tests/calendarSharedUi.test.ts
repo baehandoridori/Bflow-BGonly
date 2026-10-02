@@ -7444,9 +7444,10 @@ test('ScheduleView opens quick edit from a right click in the weekly, timetable 
   }
 });
 
-test('quick edit closing animation is owned by exactly one presence boundary', () => {
-  // framer-motion 10.x는 중첩 AnimatePresence로 exit를 전파하지 않는다. 빠른 편집이
-  // 자기 자신을 감싸면 닫힘 애니메이션이 죽으므로, presence는 ScheduleView가 소유한다.
+test('quick edit presence is owned by exactly one boundary and closes immediately', () => {
+  // framer-motion 10.x는 중첩 AnimatePresence로 exit를 전파하지 않는다. presence는 ScheduleView가 소유한다.
+  // 움직임 폴리싱 8번(창·메뉴 공통 박자): 우클릭한 지점 쪽 모서리에서 피어나고(.bf-pop), 닫힘은 바로 사라진다
+  // — 예전의 가운데에서 커지는 열림·0.15초 닫힘 움직임(exit)은 없앴다.
   const quickEditSource = readFileSync('src/components/calendar/EventQuickEdit.tsx', 'utf8');
   const scheduleSource = readFileSync('src/views/ScheduleView.tsx', 'utf8');
 
@@ -7455,11 +7456,9 @@ test('quick edit closing animation is owned by exactly one presence boundary', (
     /<AnimatePresence/,
     '빠른 편집은 자기 presence를 소유하지 않는다',
   );
-  assert.match(
-    quickEditSource,
-    /exit=\{\{ opacity: 0, scale: 0\.95 \}\}/,
-    '빠른 편집 motion.div는 exit 상태를 유지한다',
-  );
+  assert.doesNotMatch(quickEditSource, /\bexit=\{/, '빠른 편집은 닫힘 움직임을 두지 않는다');
+  assert.match(quickEditSource, /popClassName\(popOrigin\)/, '빠른 편집은 공통 메뉴 박자(.bf-pop)로 피어난다');
+  assert.match(quickEditSource, /popOriginFromPoint\(position,/, '피어나는 기준점은 우클릭한 지점');
   assert.match(
     scheduleSource,
     /<AnimatePresence>\s*\{quickEdit && \(/,

@@ -91,7 +91,7 @@ function CalendarRow({
         <div
           ref={menuRef}
           role="menu"
-          className="absolute right-0 top-7 z-30 w-36 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
+          className="bf-pop absolute right-0 top-7 z-30 w-36 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
         >
           <button
             type="button"
@@ -197,7 +197,7 @@ function IcsSubscriptionRow({
         <div
           ref={menuRef}
           role="menu"
-          className="absolute right-0 top-7 z-30 w-40 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
+          className="bf-pop absolute right-0 top-7 z-30 w-40 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
         >
           <button
             type="button"

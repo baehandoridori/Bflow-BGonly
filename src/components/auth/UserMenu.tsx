@@ -46,7 +46,7 @@ export function UserMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-52 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[100]">
+        <div className="bf-pop absolute right-0 top-full mt-1 w-52 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[100]">
           {/* 사용자 정보 */}
           <div className="px-3 py-2.5 border-b border-bg-border">
             <p className="text-sm text-text-primary font-medium">{currentUser.name}</p>
