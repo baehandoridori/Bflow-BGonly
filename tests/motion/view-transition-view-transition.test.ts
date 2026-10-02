@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   CARD_CASCADE_DURATION_MS,
+  CARD_CASCADE_WINDOW_MS,
   COMPOSITING_EP_SWAP,
   DASHBOARD_CONTENT_KEYFRAMES,
   DASHBOARD_CONTENT_SWAP_MS,
@@ -14,6 +15,7 @@ import {
   VIEW_REVEAL_MS,
   VIEW_REVEAL_REDUCED_MS,
   VIEW_SPINNER_DELAY_MS,
+  cardCascadeClass,
   cardCascadeDelayMs,
   cardCascadeStyle,
   compareSceneLocation,
@@ -447,12 +449,28 @@ test('화면 코드: 250ms 지연 동그라미 + 그려지는 순간 신호, hov
 test('카드 차례 등장(인원별·팀원·에피소드)은 CSS 한 번 — 메인 스레드 y·30ms 간격 지연이 남지 않는다', () => {
   for (const path of ['src/views/AssigneeView.tsx', 'src/views/TeamView.tsx', 'src/views/EpisodeView.tsx']) {
     const src = read(path);
-    assert.match(src, /className="bf-card-cascade" style=\{cardCascadeStyle\(i\)\}/, path);
+    // 통합: 정렬이 있는 인원별·팀원은 등장 창이 열려 있을 때만 클래스(cardCascadeClass) — 아래 테스트 참고.
+    assert.match(src, /className=(?:"bf-card-cascade"|\{cardCascadeClass\(cascading\)\}) style=\{cardCascadeStyle\(i\)\}/, path);
     assert.doesNotMatch(src, /delay: i \* 0\.0[34]/, path);
   }
   const css = stripCssComments(read('src/styles/motion-view-transition.css'));
   assert.match(css, /\.bf-card-cascade \{\s*animation: bf-card-cascade-in 200ms var\(--ease-out\) backwards;\s*\}/);
   assert.match(css, /from \{ opacity: 0; transform: translateY\(8px\); \}/);
+});
+
+test('통합: 정렬 미끄러짐(15번)이 있는 인원별·팀원은 차례 등장(12번)을 처음 그려질 때만 — 정렬 때 다시 돌지 않는다', () => {
+  // 브라우저는 DOM 에서 옮겨진 요소의 CSS 애니메이션을 처음부터 다시 튼다 → 옮겨진 카드가 지연 동안 투명해졌다.
+  assert.equal(CARD_CASCADE_WINDOW_MS, CARD_CASCADE_DURATION_MS + cardCascadeDelayMs(99) + 50, '마지막 카드 등장이 끝난 뒤에 닫힌다');
+  assert.equal(cardCascadeClass(true), 'bf-card-cascade');
+  assert.equal(cardCascadeClass(false), undefined);
+  for (const [path, list] of [['src/views/AssigneeView.tsx', 'assignees'], ['src/views/TeamView.tsx', 'teamData']] as const) {
+    const src = read(path);
+    assert.match(src, new RegExp(`const cascading = useCardCascadeWindow\\(${list}\\.length > 0\\);`), path);
+    assert.match(src, /data-flip-id=\{[^}]+\} className=\{cardCascadeClass\(cascading\)\}/, path);
+  }
+  const hook = read('src/hooks/useCardCascadeWindow.ts');
+  assert.match(hook, /if \(!ready \|\| !active\) return undefined;/);
+  assert.match(hook, /window\.setTimeout\(\(\) => setActive\(false\), CARD_CASCADE_WINDOW_MS\)/);
 });
 
 test('씬 목록 파트·에피소드: 묶음 하나만 미끄러지고, 시트 줄마다 따로 떠오르지 않는다', () => {

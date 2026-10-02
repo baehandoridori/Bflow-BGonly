@@ -9,7 +9,8 @@ import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Department, Stage, AppUser } from '@/types';
 import { cn } from '@/utils/cn';
-import { cardCascadeStyle } from '@/utils/viewTransitionMotion';
+import { cardCascadeClass, cardCascadeStyle } from '@/utils/viewTransitionMotion';
+import { useCardCascadeWindow } from '@/hooks/useCardCascadeWindow';
 import { getUserColor } from '@/utils/userColor';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { useGridFlip } from '@/hooks/useGridFlip';
@@ -377,6 +378,9 @@ export function TeamView() {
     return sorted;
   }, [users, episodes, episodeTitles, sortBy, sortAsc]);
 
+  // 차례 등장(12번)은 처음 그려질 때만 — 정렬(15번 미끄러짐)로 옮겨진 카드가 등장을 다시 틀지 않게(통합).
+  const cascading = useCardCascadeWindow(teamData.length > 0);
+
   const summary = useMemo(() => {
     const totalMembers = users.length;
     const activeMembers = teamData.filter((d) => d.totalScenes > 0).length;
@@ -462,7 +466,7 @@ export function TeamView() {
               const isHighlighted = highlightUserName === data.user.name;
               return (
                 // 움직임 폴리싱 12번: 차례 등장은 20ms 간격·최대 200ms 지연 — 마운트 때 한 번
-                <div key={data.user.id} data-flip-id={data.user.id} className="bf-card-cascade" style={cardCascadeStyle(i)}>
+                <div key={data.user.id} data-flip-id={data.user.id} className={cardCascadeClass(cascading)} style={cardCascadeStyle(i)}>
                   <TeamMemberCard
                     data={data}
                     highlighted={isHighlighted}

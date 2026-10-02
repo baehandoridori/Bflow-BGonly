@@ -7,7 +7,8 @@ import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Episode, Department, Stage } from '@/types';
 import { cn } from '@/utils/cn';
-import { cardCascadeStyle } from '@/utils/viewTransitionMotion';
+import { cardCascadeClass, cardCascadeStyle } from '@/utils/viewTransitionMotion';
+import { useCardCascadeWindow } from '@/hooks/useCardCascadeWindow';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { useGridFlip } from '@/hooks/useGridFlip';
 import { useMotionPref } from '@/hooks/useMotionPref';
@@ -286,6 +287,9 @@ export function AssigneeView() {
     return sorted;
   }, [episodes, episodeTitles, sortBy, sortAsc]);
 
+  // 차례 등장(12번)은 처음 그려질 때만 — 정렬(15번 미끄러짐)로 옮겨진 카드가 등장을 다시 틀지 않게(통합).
+  const cascading = useCardCascadeWindow(assignees.length > 0);
+
   const summary = useMemo(() => {
     const totalAssignees = assignees.filter((a) => a.name !== '미배정').length;
     const totalScenes = assignees.reduce((sum, a) => sum + a.totalScenes, 0);
@@ -366,7 +370,7 @@ export function AssigneeView() {
           <div ref={cardGridRef} className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {/* 움직임 폴리싱 12번: 차례 등장은 20ms 간격·최대 200ms 지연(20명이어도 0.4초면 모두 도착) — 마운트 때 한 번 */}
             {assignees.map((data, i) => (
-              <div key={data.name} data-flip-id={data.name} className="bf-card-cascade" style={cardCascadeStyle(i)}>
+              <div key={data.name} data-flip-id={data.name} className={cardCascadeClass(cascading)} style={cardCascadeStyle(i)}>
                 <AssigneeCard data={data} onClickScene={handleClickScene} />
               </div>
             ))}

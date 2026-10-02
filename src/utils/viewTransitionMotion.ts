@@ -100,6 +100,18 @@ export function cardCascadeStyle(index: number): { animationDelay: string } {
   return { animationDelay: `${cardCascadeDelayMs(index)}ms` };
 }
 
+/**
+ * 차례 등장이 모두 끝나는 시각(마지막 카드 지연 + 길이 + 여유). 정렬로 카드 순서가 바뀌는 화면(인원별·팀원)은
+ * 이 뒤로 .bf-card-cascade 를 뗀다 — 브라우저는 DOM 에서 옮겨진 요소의 CSS 애니메이션을 처음부터 다시 틀어서,
+ * 정렬할 때 옮겨진 카드가 지연 동안 투명해졌다가 다시 떠올랐다(통합: 12번 차례 등장 + 15번 정렬 미끄러짐).
+ */
+export const CARD_CASCADE_WINDOW_MS = CARD_CASCADE_MAX_DELAY_MS + CARD_CASCADE_DURATION_MS + 50;
+
+/** 등장 창이 열려 있을 때만 차례 등장 클래스. */
+export function cardCascadeClass(active: boolean): string | undefined {
+  return active ? 'bf-card-cascade' : undefined;
+}
+
 /* ─── 연타 판정 ──────────────────────────────────────────────── */
 
 /** 이 시간 안에 다시 바꾸면 연타로 보고 바로 바꾼다(캘린더 기간 넘김과 같은 값). */
