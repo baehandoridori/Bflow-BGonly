@@ -37,6 +37,7 @@ import { SheetAlertBadges } from './SheetAlertBadges';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { EditingNameLabels } from './EditingNameLabels';
+import { SceneRemoteFlash } from './SceneRemoteFlash';
 import { useEditingPresenceStore } from '@/stores/useEditingPresenceStore';
 import { editingBeamRowClass, hasSceneCollision, selectEditorsForScenes } from '@/utils/editingPresence';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
@@ -1205,6 +1206,8 @@ export function UnifiedSceneSheetView({
 
                   {/* 씬번호 */}
                   <td className="px-2 py-1.5 font-mono text-xs relative" style={{ overflow: 'visible' }}>
+                    {/* 팀원이 바꾼 순간 — 씬번호 칸 빛 + 이름표 */}
+                    <SceneRemoteFlash sceneUuids={[bgScene?.id, actScene?.id]} variant="row" />
                     {sheetWorkLinkBadgesVisible && (
                       <SceneWorkLinkBadges
                         bgSceneUuid={bgScene?.id}

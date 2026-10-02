@@ -123,9 +123,13 @@ export function groupActivities(items: Activity[]): FeedItem[] {
     if (buffer.length === 1) {
       result.push({ type: 'item', activity: buffer[0] });
     } else {
+      // 묶음 key 는 가장 오래된 항목 id — 같은 사람이 같은 작업을 또 해서 맨 위에 새 항목이 붙어도
+      // key 가 그대로라 묶음이 새로 만들어지지 않는다(펼친 묶음이 접히거나 다시 펼쳐지며 덜컹이지 않게).
+      // 5분 창은 최신 항목 기준이라, 창을 넘는 연속 활동에서는 가장 오래된 항목이 빠지며 key 가 바뀔 수 있다.
+      const oldest = buffer[buffer.length - 1];
       result.push({
         type: 'group',
-        key: `${buffer[0].userId}:${buffer[0].actionType}:${buffer[0].episodeNumber ?? 'na'}:${buffer[0].id}`,
+        key: `${oldest.userId}:${oldest.actionType}:${oldest.episodeNumber ?? 'na'}:${oldest.id}`,
         items: [...buffer],
       });
     }

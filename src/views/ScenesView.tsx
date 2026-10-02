@@ -494,6 +494,7 @@ import { cn } from '@/utils/cn';
 import { SlidingIndicator, SlideToneLayers } from '@/components/ui/SlidingIndicator';
 import { SLIDE_LAYOUT_TRANSITION } from '@/utils/slidingIndicator';
 import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
+import { SceneRemoteFlash } from '@/components/scenes/SceneRemoteFlash';
 import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
 import { editingBeamClassName } from '@/utils/editingPresence';
 import { Confetti } from '@/components/ui/Confetti';
@@ -669,6 +670,9 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         editors={editingUsers}
         className="absolute -top-3 left-3 z-20"
       />
+
+      {/* 팀원이 바꾼 순간 — 테두리 빛 + 위 가운데 이름표 */}
+      <SceneRemoteFlash sceneUuids={[scene.id]} variant="card" />
 
       <SceneWorkLinkBadges
         bgSceneUuid={department === 'bg' ? scene.id : null}

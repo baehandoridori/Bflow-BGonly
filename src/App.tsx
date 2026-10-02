@@ -54,6 +54,8 @@ import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
+import { remotePhaseFlash, remoteStageFlash, type RemoteSceneFlashContext, type RemoteSceneFlashSignal } from '@/utils/remoteSceneFlash';
+import { useSceneFlashStore } from '@/stores/sceneFlashStore';
 import { resolveVacationConnection, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
@@ -261,6 +263,30 @@ function isSceneAssignedToUser<T extends { assignee?: string | null }>(
   userName: string,
 ): scene is T {
   return Boolean(scene && parseAssigneeList(scene.assignee).includes(userName));
+}
+
+/** 움직임 폴리싱 9번 — 팀원이 바꾼 씬 카드 빛·이름표. 스토어 반영 '전에' 읽어야 실제 변화만 잡힌다. */
+function remoteSceneFlashContext(): RemoteSceneFlashContext {
+  const auth = useAuthStore.getState();
+  return {
+    myId: auth.currentUser?.id ?? null,
+    findScene: (uuid) => {
+      for (const ep of useDataStore.getState().episodes) {
+        for (const part of ep.parts) {
+          const scene = part.scenes.find((s) => s.id === uuid);
+          if (scene) return { scene, department: part.department };
+        }
+      }
+      return null;
+    },
+    nameOf: (userId) => auth.users.find((u) => u.id === userId)?.name ?? null,
+  };
+}
+
+function pulseRemoteSceneFlash(signal: RemoteSceneFlashSignal | null): void {
+  if (!signal) return;
+  const { pulse } = useSceneFlashStore.getState();
+  for (const change of signal.changes) pulse(signal.uuid, signal.byName, change);
 }
 
 function markLocalFeedbackJumpAsRead(payload: { kind?: string; notificationId?: string }) {
@@ -1881,8 +1907,18 @@ export default function App() {
       if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
         const delta = extractSceneDelta(payload.new);
         if (delta) {
+          // 일괄 변경은 이 경로로만 온다(보낸 사람 = updated_by). 방송으로 이미 반영된 변경은 값이 같아 빛나지 않는다.
+          const flash = remoteStageFlash(
+            remoteSceneFlashContext(),
+            delta.uuid,
+            (payload.new as { updated_by?: unknown }).updated_by,
+            delta.fields as Record<string, unknown>,
+          );
           const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
-          if (applied) return;
+          if (applied) {
+            pulseRemoteSceneFlash(flash);
+            return;
+          }
         }
       }
 
@@ -2544,7 +2580,9 @@ export default function App() {
         // 체크박스 토글 → UUID로 즉시 반영
         const { sceneUuid, stage, value, senderId } = data.payload as { sceneUuid: string; stage: string; value: boolean; senderId?: string };
         if (sceneUuid && stage != null && value != null) {
+          const flash = remoteStageFlash(remoteSceneFlashContext(), sceneUuid, senderId, { [stage]: value });
           useDataStore.getState().updateSceneByUuid(sceneUuid, { [stage]: value });
+          pulseRemoteSceneFlash(flash);
 
           // 알림: 타인이 내 씬을 변경한 경우
           const me = useAuthStore.getState().currentUser;
@@ -2580,11 +2618,17 @@ export default function App() {
           senderId?: string;
         };
         if (sceneUuid && sceneState) {
+          const flash = remotePhaseFlash(remoteSceneFlashContext(), sceneUuid, senderId, {
+            sceneState,
+            workRound: workRound ?? 0,
+            feedbackRound: feedbackRound ?? 0,
+          });
           useDataStore.getState().updateSceneByUuid(sceneUuid, {
             sceneState,
             workRound: workRound ?? 0,
             feedbackRound: feedbackRound ?? 0,
           });
+          pulseRemoteSceneFlash(flash);
           // 자기 자신이 보낸 변경은 알림 스킵 (이미 로컬 토스트 표시됨)
           const me = useAuthStore.getState().currentUser;
           if (me && senderId && senderId !== me.id) {

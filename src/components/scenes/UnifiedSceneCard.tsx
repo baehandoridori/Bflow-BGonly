@@ -35,6 +35,7 @@ import { RevisionCornerFlag } from './RevisionCornerFlag';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { EditingNameLabels } from './EditingNameLabels';
+import { SceneRemoteFlash } from './SceneRemoteFlash';
 import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEditingPresenceStore';
 import { editingBeamClass } from '@/utils/editingPresence';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
@@ -343,6 +344,9 @@ export function UnifiedSceneCard({
           editors={unionEditors}
           className="absolute -top-3 left-3 z-20"
         />
+
+        {/* 팀원이 바꾼 순간 — 테두리 빛 + 위 가운데 이름표(BG·ACT 중 최근 것) */}
+        <SceneRemoteFlash sceneUuids={[bgScene?.id, actScene?.id]} variant="card" />
 
         <SceneWorkLinkBadges
           bgSceneUuid={bgScene?.id}

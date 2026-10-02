@@ -38,6 +38,8 @@ import { DayAddButton } from './DayAddButton';
 import { DragCreateGhost } from './DragCreateGhost';
 import { useProximityReveal } from '@/hooks/useProximityReveal';
 import { shouldRevealOnMount } from '@/utils/gridFlip';
+import { DragSlideAnchor, DropLanding } from '@/components/ui/DragLanding';
+import type { LandingMark, SlideBox } from '@/utils/dragLanding';
 
 // 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
 export { layoutEventBars, type EventBar };
@@ -62,6 +64,35 @@ function countEventsOnDate(events: readonly CalendarEvent[], dateStr: string): n
    이벤트 바 컴포넌트 (리퀴드 글라스)
    ═══════════════════════════════════════════════════ */
 
+/** 주 줄 안에서 막대가 차지하는 자리. 막대와 '원래 자리' 흔적이 같은 식을 쓴다. */
+function eventBarBox(bar: EventBar, columnCount: number): Pick<React.CSSProperties, 'left' | 'width' | 'top'> {
+  return {
+    left: `calc(${(bar.startCol / columnCount) * 100}% + 2px)`,
+    width: `calc(${(bar.span / columnCount) * 100}% - 4px)`,
+    top: `${bar.row * 28 + 36}px`,
+  };
+}
+
+function eventBarColor(event: CalendarEvent, tags: Parameters<typeof resolveEventTags>[1]): string {
+  return resolveEventTags(event, tags)[0]?.color || event.color || EVENT_COLORS[0];
+}
+
+/**
+ * 끄는 동안 원래 자리에 남는 흐린 점선 흔적(움직임 폴리싱 16번) — '어디서 왔는지'를 보여 준다.
+ * 들린 막대보다 아래(z-5)에 깔리고 누를 수 없다.
+ */
+function EventBarOrigin({ bar, columnCount }: { bar: EventBar; columnCount: number }) {
+  const tags = useCalendarStore((state) => state.tags);
+  return (
+    <div
+      aria-hidden="true"
+      data-drag-origin="true"
+      className={cn('calendar-bar-origin', bar.isStart && 'is-start', bar.isEnd && 'is-end')}
+      style={{ ...eventBarBox(bar, columnCount), borderColor: eventBarColor(bar.event, tags) }}
+    />
+  );
+}
+
 /*
  * 일정 막대 설명 카드 (움직임 폴리싱 2번 tooltip-anchor)
  * - 처음 마우스를 올린 막대 위 가운데(막대 위 6px)에 고정한다 — 마우스를 따라 흔들리지 않는다.
@@ -82,17 +113,18 @@ interface EventCardState {
 }
 
 function EventBarChip({
-  bar, columnCount, onClick, onDragStart, isDragging, isGhost,
+  bar, columnCount, onClick, onDragStart, isDragging,
   hoverStore, onContextMenu, tagNameById, calendarNameById,
   isRealtimeHighlighted, reduceMotion, revealSince = 0,
+  slideKey, slideRegistry, landingToken, isBorn,
 }: {
   bar: EventBar;
   /** 그 주에 실제로 그려지는 칸 수(주말을 숨기면 5). */
   columnCount: number;
   onClick: (e: CalendarEvent) => void;
   onDragStart?: (event: CalendarEvent, mode: DragMode, anchorDate: string) => void;
+  /** 이 막대를 끄는 중 — 살짝 들리고(그림자) 손을 따라 칸 사이를 미끄러진다. */
   isDragging?: boolean;
-  isGhost?: boolean;
   /** 마우스가 올라간 일정(여러 주 조각이 함께 밝아진다). 바뀐 막대만 다시 그려진다. */
   hoverStore: HoverKeyStore;
   onContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
@@ -102,6 +134,13 @@ function EventBarChip({
   reduceMotion?: boolean;
   /** 태그·캘린더 필터를 바꾼 시각. 그 직후에 새로 생긴 막대만 한 번 떠오른다(움직임 폴리싱 15번). */
   revealSince?: number;
+  /** 끄는 동안 같은 조각을 가리키는 이름 — 주를 넘어 새로 붙어도 이전 자리에서 미끄러져 온다. */
+  slideKey?: string;
+  slideRegistry?: Map<string, SlideBox>;
+  /** 방금 놓은 막대 — 값이 바뀔 때마다 '톡' + 링을 새로 튼다. */
+  landingToken?: number | null;
+  /** 방금 만든 일정 — 굳어지듯 진해지며 한 번 빛난다. */
+  isBorn?: boolean;
 }) {
   const ev = bar.event;
   // 마운트될 때 한 번만 판정한다 — 클래스를 켰다 끄지 않으므로 이미 있던 막대는 다시 움직이지 않는다.
@@ -111,7 +150,7 @@ function EventBarChip({
   }
   const tags = useCalendarStore((state) => state.tags);
   const eventTags = resolveEventTags(ev, tags);
-  const hex = eventTags[0]?.color || ev.color || EVENT_COLORS[0];
+  const hex = eventBarColor(ev, tags);
   const identityKey = calendarEventIdentityKey(ev);
   const [isHovered, setIsHovered] = useState(() => hoverStore.get() === identityKey);
   useEffect(() => {
@@ -271,23 +310,23 @@ function EventBarChip({
       data-event-id={ev.id}
       data-event-identity={identityKey}
       data-realtime-highlight={isRealtimeHighlighted ? 'true' : undefined}
-      data-hovered={!isGhost && isHovered ? 'true' : undefined}
+      data-hovered={!isDragging && isHovered ? 'true' : undefined}
+      data-drag-lifted={isDragging ? 'true' : undefined}
+      // 끄는 막대는 흐린 점선 대신 진하게 들린다(그림자 층은 CSS ::after, 16번). 칸을 넘을 때의 미끄러짐은
+      // DragSlideAnchor 가 translate 로 — left·width 전환은 쓰지 않는다(매 프레임 레이아웃).
       className={cn(
-        'absolute text-left z-10 calendar-event-bar',
-        isGhost && 'pointer-events-none opacity-50',
-        // 마우스를 올리면 크기는 그대로 두고 테두리·그림자 층만 떠오른다(커지면 작은 글씨가 번졌다).
-        !isGhost && isHovered && 'z-20',
-        isDragging ? 'opacity-40' : '',
+        'absolute text-left calendar-event-bar calendar-bar-motion',
+        isDragging ? 'z-30 pointer-events-none calendar-bar-lifted' : 'z-10',
+        // 마우스를 올리면 크기는 그대로 두고 테두리·그림자 층만 떠오른다(커지면 작은 글씨가 번졌다, 2번).
+        !isDragging && isHovered && 'z-20',
+        isBorn && 'calendar-bar-born',
         isRealtimeHighlighted && (reduceMotion ? 'calendar-realtime-highlight-static' : 'calendar-realtime-highlight'),
         'group/bar',
       )}
       style={{
-        left: `calc(${(bar.startCol / columnCount) * 100}% + 2px)`,
-        width: `calc(${(bar.span / columnCount) * 100}% - 4px)`,
-        top: `${bar.row * 28 + 36}px`,
+        ...eventBarBox(bar, columnCount),
         height: '26px',
         cursor: ev.isReadOnly ? 'pointer' : isDragging ? 'grabbing' : 'grab',
-        transition: isGhost ? 'left 0.12s ease-out, width 0.12s ease-out, top 0.12s ease-out' : undefined,
         ...(isRealtimeHighlighted ? {
           outline: `2px solid ${hex}`,
           outlineOffset: '2px',
@@ -300,24 +339,22 @@ function EventBarChip({
           'h-full flex items-center px-2 text-xs font-medium truncate relative',
           bar.isStart ? 'rounded-l-md' : '',
           bar.isEnd ? 'rounded-r-md' : '',
-          revealOnMountRef.current && !isGhost && 'sf-cal-bar-reveal',
+          revealOnMountRef.current && !isDragging && 'sf-cal-bar-reveal',
         )}
         style={{
           // 막대마다 backdrop-filter(흐림)를 걸면 막대 수만큼 합성 레이어·렌더 패스가 생겨
           // 달 전환 때 매 프레임 GPU 가 다시 그린다. 칸 배경이 거의 단색이라 흐림은 눈에 띄지 않는다.
-          background: isGhost
-            ? `${hex}30`
-            : `linear-gradient(135deg, ${hex}40 0%, ${hex}25 100%)`,
-          borderTop: isGhost ? `1px dashed ${hex}80` : `1px solid ${hex}50`,
-          borderBottom: isGhost ? `1px dashed ${hex}80` : `1px solid ${hex}20`,
-          borderLeft: isGhost ? `1px dashed ${hex}80` : bar.isStart ? `3px solid ${hex}` : `1px solid ${hex}30`,
-          borderRight: isGhost ? `1px dashed ${hex}80` : bar.isEnd ? `1px solid ${hex}40` : 'none',
+          background: `linear-gradient(135deg, ${hex}40 0%, ${hex}25 100%)`,
+          borderTop: `1px solid ${hex}50`,
+          borderBottom: `1px solid ${hex}20`,
+          borderLeft: bar.isStart ? `3px solid ${hex}` : `1px solid ${hex}30`,
+          borderRight: bar.isEnd ? `1px solid ${hex}40` : 'none',
           color: 'rgb(var(--color-text-primary))',
           textShadow: undefined,
         }}
       >
         {/* 리사이즈 핸들 (왼쪽) */}
-        {bar.isStart && !isGhost && !ev.isReadOnly && (
+        {bar.isStart && !isDragging && !ev.isReadOnly && (
           <div className="absolute left-0 top-0 w-[12px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ backgroundColor: `${hex}40` }}
           />
@@ -329,22 +366,28 @@ function EventBarChip({
         <span className="ml-1 max-w-[55%] shrink min-w-0"><EventTagBadges event={ev} compact /></span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
-        {bar.isEnd && !isGhost && !ev.isReadOnly && (
+        {bar.isEnd && !isDragging && !ev.isReadOnly && (
           <div className="absolute right-0 top-0 w-[12px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ backgroundColor: `${hex}40` }}
           />
         )}
       </div>
       {/* 마우스를 올렸을 때 떠오르는 테두리·그림자 층(투명도만 바뀐다 — motion-chrome-popups.css) */}
-      {!isGhost && (
+      {!isDragging && (
         <span
           aria-hidden="true"
           className={cn('calendar-event-bar-ring', bar.isStart && 'rounded-l-md', bar.isEnd && 'rounded-r-md')}
         />
       )}
 
+      {slideKey && slideRegistry && (
+        <DragSlideAnchor slideKey={slideKey} registry={slideRegistry} reduce={reduceMotion === true} />
+      )}
+      {landingToken != null && <DropLanding key={`land-${landingToken}`} color={hex} />}
+      {isBorn && <DropLanding key="born" variant="born" color={hex} />}
+
       {/* 설명 카드 — Portal로 body에 직접 렌더 (부모 transform/overflow 무관). 바깥 상자가 자리, 안쪽 상자가 등장. */}
-      {card && !isDragging && !isGhost && createPortal(
+      {card && !isDragging && createPortal(
         <div ref={cardPos} className="pointer-events-none fixed left-0 top-0 z-[99999]">
           <div
             ref={cardBox}
@@ -529,6 +572,9 @@ export function CalendarGrid({
   filterRevealAt = 0,
   tagNameById,
   calendarNameById,
+  landing = null,
+  bornEventIdentities,
+  createGhostLeaving = false,
 }: {
   weeks: Date[][];
   events: CalendarEvent[];
@@ -566,6 +612,12 @@ export function CalendarGrid({
   filterRevealAt?: number;
   tagNameById: Record<string, string>;
   calendarNameById: Record<string, string>;
+  /** 방금 놓은 일정(identity key)과 착지 순번 — 놓는 즉시 '톡' + 링(저장을 기다리지 않는다). */
+  landing?: LandingMark | null;
+  /** 방금 만든 일정 — 굳어지듯 진해지며 한 번 빛난다. */
+  bornEventIdentities?: ReadonlySet<string>;
+  /** '만들기'를 눌렀다 — 유리 막대가 녹아 사라진다(저장에 실패하면 다시 보인다). */
+  createGhostLeaving?: boolean;
 }) {
   const [overflow, setOverflow] = useState<{ date: string; rect: DOMRect } | null>(null);
   // 마우스가 올라간 일정. 상태로 두면 막대에 올리고 뗄 때마다 달력 전체가 다시 그려지므로
@@ -597,6 +649,22 @@ export function CalendarGrid({
         : e,
     );
   }, [events, dragPreview, draggedEventIdentity]);
+
+  // 끄는 중인 일정. 막대가 칸을 넘으면 미끄러지게 끌기마다 새 자리 기록을 쓰고,
+  // 원래 자리에는 흐린 점선 흔적을 남긴다(움직임 폴리싱 16번).
+  const dragPreviewEventId = isDragging ? dragPreview?.eventId ?? null : null;
+  const isDraggedEvent = useCallback((event: CalendarEvent) => Boolean(
+    dragPreviewEventId
+    && event.id === dragPreviewEventId
+    && (draggedEventIdentity ? hasSameCalendarEventIdentity(event, draggedEventIdentity) : true),
+  ), [dragPreviewEventId, draggedEventIdentity]);
+  const draggedSlideKey = dragPreviewEventId
+    ? (draggedEventIdentity ? calendarEventIdentityKey(draggedEventIdentity) : `id:${dragPreviewEventId}`)
+    : null;
+  const slideRegistryRef = useRef<{ key: string | null; map: Map<string, SlideBox> }>({ key: null, map: new Map() });
+  if (slideRegistryRef.current.key !== draggedSlideKey) {
+    slideRegistryRef.current = { key: draggedSlideKey, map: new Map() };
+  }
 
   // 주말을 숨기면 토·일 칸 자체를 그리지 않는다. 주 배열 자체는 7일 그대로 두고
   // 렌더 직전에만 걸러, 주 경계·주차 계산은 손대지 않는다.
@@ -643,6 +711,24 @@ export function CalendarGrid({
       isCurrentWeek: dateStrs.includes(today),
     };
   }), [displayEvents, today, visibleWeeks]);
+
+  // 원래 자리 흔적 — 끌기가 시작될 때 한 번만 원래 배치로 계산한다(끄는 동안 events 는 그대로다).
+  const originBarsByWeek = useMemo(() => {
+    if (!dragPreviewEventId) return null;
+    return visibleWeeks.map((week) => layoutEventBars(events, week)
+      .filter((bar) => bar.row < maxVisibleBars && isDraggedEvent(bar.event)));
+  }, [dragPreviewEventId, events, isDraggedEvent, maxVisibleBars, visibleWeeks]);
+
+  // 끄는 막대의 주 조각 순번 — 아래 주로 옮겨도 '첫 조각'끼리 이어 미끄러진다.
+  const dragSegmentByWeek: number[] = [];
+  if (dragPreviewEventId) {
+    let segment = 0;
+    for (const model of weekModels) {
+      dragSegmentByWeek.push(
+        model.bars.some((bar) => bar.row < maxVisibleBars && isDraggedEvent(bar.event)) ? segment++ : -1,
+      );
+    }
+  }
 
   return (
     <div className="flex flex-col flex-1 h-full min-h-0" onWheel={onWheel}>
@@ -699,6 +785,7 @@ export function CalendarGrid({
                   showLabel={dateStrs.includes(createRange.startDate)}
                   reduceMotion={reduceMotion}
                   dragging={createRange.dragging}
+                  leaving={createGhostLeaving}
                 />
               )}
               {/* 날짜 셀 배경 */}
@@ -783,29 +870,33 @@ export function CalendarGrid({
                 );
               })}
 
+              {/* 끄는 동안 원래 자리 흔적 */}
+              {originBarsByWeek?.[wi]?.map((bar) => (
+                <EventBarOrigin key={`origin-${calendarEventIdentityKey(bar.event)}`} bar={bar} columnCount={columnCount} />
+              ))}
+
               {/* 이벤트 바 (오버레이) */}
               {bars.filter((b) => b.row < maxVisibleBars).map((bar) => {
-                const barIsDragging = Boolean(
-                  isDragging
-                  && dragPreview?.eventId === bar.event.id
-                  && (draggedEventIdentity
-                    ? hasSameCalendarEventIdentity(bar.event, draggedEventIdentity)
-                    : true),
-                );
+                const barIsDragging = isDraggedEvent(bar.event);
+                const identityKey = calendarEventIdentityKey(bar.event);
                 return (
                   <EventBarChip
-                    key={`${calendarEventIdentityKey(bar.event)}-w${wi}-c${bar.startCol}`}
+                    // 칸(col)은 key 에 넣지 않는다 — 넣으면 칸을 넘을 때마다 새로 붙어 미끄러지지 못하고 순간이동한다.
+                    key={`${identityKey}-w${wi}`}
                     bar={bar}
                     columnCount={columnCount}
                     onClick={onEventClick}
                     onDragStart={onDragStart}
                     isDragging={barIsDragging}
-                    isGhost={barIsDragging}
+                    slideKey={barIsDragging && draggedSlideKey ? `${draggedSlideKey}#${dragSegmentByWeek[wi]}` : undefined}
+                    slideRegistry={barIsDragging ? slideRegistryRef.current.map : undefined}
+                    landingToken={landing && landing.key === identityKey ? landing.seq : null}
+                    isBorn={bornEventIdentities?.has(identityKey) === true}
                     hoverStore={hoverStore}
                     onContextMenu={onEventContextMenu}
                     tagNameById={tagNameById}
                     calendarNameById={calendarNameById}
-                    isRealtimeHighlighted={highlightedEventIdentities?.has(calendarEventIdentityKey(bar.event))}
+                    isRealtimeHighlighted={highlightedEventIdentities?.has(identityKey)}
                     reduceMotion={reduceMotion}
                     revealSince={filterRevealAt}
                   />

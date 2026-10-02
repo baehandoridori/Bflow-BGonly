@@ -166,11 +166,12 @@
 }
 
 /* 위젯 유리 셸은 opacity 만(셸에 흐림이 있어 움직이면 매 프레임 다시 흐린다), 안쪽 내용만 6px 올라온다.
-   [data-entry-rank] > :first-child = 위젯 셸(Widget 루트), 그 > :last-child = 위젯 내용 칸. */
-html[data-dash-entry] [data-entry-rank] > :first-child {
+   위젯 칸 구조: [data-entry-rank] > .widget-lift(끌 때 들림, 16번) > .widget-lift-shadow + 위젯 셸(Widget 루트), 그 > :last-child = 위젯 내용 칸.
+   통합: 16번이 칸과 셸 사이에 들림 래퍼를 끼웠다 — 래퍼(셸의 조상)에 opacity 를 걸면 셸의 흐림이 등장 동안 꺼지므로 셸을 직접 집는다. */
+html[data-dash-entry] [data-entry-rank] > .widget-lift > .widget-lift-shadow + * {
   animation: bf-entry-widget-in 320ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
 }
-html[data-dash-entry] [data-entry-rank] > :first-child > :last-child {
+html[data-dash-entry] [data-entry-rank] > .widget-lift > .widget-lift-shadow + * > :last-child {
   animation: bf-entry-rise 320ms var(--ease-out) var(--bf-entry-delay, 0ms) backwards;
 }
 html[data-dash-entry] [data-entry-rank] .bf-entry-fill-x {
@@ -192,8 +193,8 @@ html[data-dash-entry] [data-entry-rank] .bf-entry-ring-cap {
 }
 
 /* 덮개가 내려가 있는 동안은 멈춰 둔다 — 걷히기 시작하면 그 자리(0)에서 흐른다. 클래스 토글이 아니라 재생 상태만 바꾼다. */
-html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] > :first-child,
-html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] > :first-child > :last-child,
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] > .widget-lift > .widget-lift-shadow + *,
+html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] > .widget-lift > .widget-lift-shadow + * > :last-child,
 html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] .bf-entry-fill-x,
 html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] .bf-entry-fill-sx,
 html[data-entry-curtain='down'][data-dash-entry] [data-entry-rank] .bf-entry-fill-y,
@@ -211,8 +212,8 @@ html[data-entry-curtain] .react-grid-layout .react-grid-item {
 /* 동작 줄이기: 덮개는 바로 걷히고(전역 규칙이 길이를 0.01ms 로), 위젯·막대·원은 처음부터 제자리.
    지연(animation-delay)은 전역 규칙이 지우지 않으므로 등장 연출을 통째로 끈다. */
 @media (prefers-reduced-motion: reduce) {
-  html[data-dash-entry] [data-entry-rank] > :first-child,
-  html[data-dash-entry] [data-entry-rank] > :first-child > :last-child,
+  html[data-dash-entry] [data-entry-rank] > .widget-lift > .widget-lift-shadow + *,
+  html[data-dash-entry] [data-entry-rank] > .widget-lift > .widget-lift-shadow + * > :last-child,
   html[data-dash-entry] [data-entry-rank] .bf-entry-fill-x,
   html[data-dash-entry] [data-entry-rank] .bf-entry-fill-sx,
   html[data-dash-entry] [data-entry-rank] .bf-entry-fill-y,

@@ -150,8 +150,9 @@ test('CSS: 위젯 지연 칸이 entryDelayMs 와 같고, 박자는 사양대로'
   assert.match(section, /\.bf-entry-text-exit \{\s*animation: bf-entry-text-out 300ms var\(--ease-in\) forwards;/, '지연 없음');
   assert.match(section, /\.bf-loading-splash-out \{\s*animation: bf-loading-splash-out 200ms ease forwards;/);
   assert.match(section, /@keyframes bf-entry-rise \{\s*from \{ transform: translateY\(6px\); \}/);
-  assert.match(section, /\[data-entry-rank\] > :first-child \{\s*animation: bf-entry-widget-in 320ms var\(--ease-out\) var\(--bf-entry-delay, 0ms\) backwards;/);
-  assert.match(section, /\[data-entry-rank\] > :first-child > :last-child \{\s*animation: bf-entry-rise 320ms var\(--ease-out\) var\(--bf-entry-delay, 0ms\) backwards;/);
+  // 통합: 16번(끌어서 옮기기)이 칸과 위젯 셸 사이에 .widget-lift 래퍼를 끼웠다 — 셸을 직접 집어야 셸 흐림이 유지된다.
+  assert.match(section, /\[data-entry-rank\] > \.widget-lift > \.widget-lift-shadow \+ \* \{\s*animation: bf-entry-widget-in 320ms var\(--ease-out\) var\(--bf-entry-delay, 0ms\) backwards;/);
+  assert.match(section, /\[data-entry-rank\] > \.widget-lift > \.widget-lift-shadow \+ \* > :last-child \{\s*animation: bf-entry-rise 320ms var\(--ease-out\) var\(--bf-entry-delay, 0ms\) backwards;/);
   for (const name of ['fill-x', 'fill-sx', 'fill-y']) {
     assert.match(section, new RegExp(`\\.bf-entry-${name} \\{[^}]*animation: bf-entry-${name} 700ms var\\(--ease-out\\) var\\(--bf-entry-delay, 0ms\\) backwards;`));
   }
@@ -162,8 +163,8 @@ test('CSS: 위젯 지연 칸이 entryDelayMs 와 같고, 박자는 사양대로'
 test('CSS: 첫 진입 연출은 html[data-dash-entry] 아래에서만, 덮개가 내려가 있는 동안은 멈춤, 동작 줄이기면 통째로 끔', () => {
   const rules = stripComments(entryCss());
   const animated = [
-    '[data-entry-rank] > :first-child',
-    '[data-entry-rank] > :first-child > :last-child',
+    '[data-entry-rank] > .widget-lift > .widget-lift-shadow + *',
+    '[data-entry-rank] > .widget-lift > .widget-lift-shadow + * > :last-child',
     '[data-entry-rank] .bf-entry-fill-x',
     '[data-entry-rank] .bf-entry-fill-sx',
     '[data-entry-rank] .bf-entry-fill-y',

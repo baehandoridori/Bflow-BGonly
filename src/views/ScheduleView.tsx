@@ -56,6 +56,7 @@ import { useSwapIn } from '@/hooks/useContentSwap';
 import { sidePanelPreset } from '@/utils/contentSwap';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
 import { reuseUnchangedCalendarEvents } from '@/utils/calendarEventReuse';
+import { BORN_KEEP_MS, LAND_CLEAR_MS, clearLandingIf, type LandingMark } from '@/utils/dragLanding';
 import { eventContentSnapshot, withCalendarPresentationForSnapshot } from '@/utils/calendarLocalMutation';
 
 type WeekSubMode = 'card' | 'timegrid';
@@ -258,6 +259,12 @@ export function ScheduleView() {
   const realtimeHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const realtimeHighlightExpiryRef = useRef(new Map<string, number>());
   const isInitialCalendarSyncRef = useRef(true);
+  // 끌어서 놓은 막대의 착지('톡' + 링)와 방금 만든 일정의 굳어짐(움직임 폴리싱 16번).
+  // 놓는 즉시·만들기를 누르는 즉시 시작한다 — 반짝임은 '저장 완료' 표시가 아니고, 실패하면 거둔다.
+  // 상태(useState)는 아래 기존 선언들 뒤(positionError 다음)에 둔다 — 테스트 하네스가 훅을 슬롯 순서로 흉내 낸다.
+  const dropLandingSeqRef = useRef(0);
+  const dropLandingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bornTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
@@ -415,6 +422,41 @@ export function ScheduleView() {
         : setTimeout(flushExpiredHighlights, Math.max(0, nextExpiry - Date.now()));
     };
     flushExpiredHighlights();
+  }, []);
+
+  const startDropLanding = useCallback((identity: CalendarEventIdentity): number => {
+    const seq = ++dropLandingSeqRef.current;
+    setDropLanding({ key: calendarEventIdentityKey(identity), seq });
+    if (dropLandingTimerRef.current) clearTimeout(dropLandingTimerRef.current);
+    dropLandingTimerRef.current = setTimeout(() => setDropLanding((current) => clearLandingIf(current, seq)), LAND_CLEAR_MS);
+    return seq;
+  }, []);
+
+  const cancelDropLanding = useCallback((seq: number) => {
+    setDropLanding((current) => clearLandingIf(current, seq));
+  }, []);
+
+  const markEventBorn = useCallback((identity: CalendarEventIdentity) => {
+    const key = calendarEventIdentityKey(identity);
+    setBornEventIdentities((previous) => (previous.has(key) ? previous : new Set(previous).add(key)));
+    const timers = bornTimersRef.current;
+    const existing = timers.get(key);
+    if (existing) clearTimeout(existing);
+    timers.set(key, setTimeout(() => {
+      timers.delete(key);
+      setBornEventIdentities((previous) => {
+        if (!previous.has(key)) return previous;
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
+    }, BORN_KEEP_MS));
+  }, []);
+
+  useEffect(() => () => {
+    if (dropLandingTimerRef.current) clearTimeout(dropLandingTimerRef.current);
+    for (const timer of bornTimersRef.current.values()) clearTimeout(timer);
+    bornTimersRef.current.clear();
   }, []);
 
   const applyCanonicalEvents = useCallback((
@@ -849,6 +891,9 @@ export function ScheduleView() {
         createdAt: new Date().toISOString(),
       };
       const optimisticIdentity = guardCreatedEvent(ev);
+      // 저장을 기다리지 않고 바로: 유리 막대는 녹고, 같은 자리에 붙는 진짜 막대는 굳어지며 한 번 빛난다.
+      markEventBorn(optimisticIdentity);
+      setCreateGhostLeaving(true);
       await addEvent(ev, {
         onPersistedIdentity: (identity) => {
           if (!hasSameCalendarEventIdentity(identity, optimisticIdentity)) {
@@ -861,8 +906,10 @@ export function ScheduleView() {
       resetCreatePrefill();
     } finally {
       isAddingRef.current = false;
+      // 실패해 생성 창이 그대로 남으면 유리 막대도 다시 보인다(성공이면 창과 함께 사라진다).
+      setCreateGhostLeaving(false);
     }
-  }, [guardCreatedEvent, guardPersistedCreatedEvent, resetCreatePrefill]);
+  }, [guardCreatedEvent, guardPersistedCreatedEvent, markEventBorn, resetCreatePrefill]);
 
   const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent, scope?: CalendarRecurrenceScope) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
@@ -953,6 +1000,8 @@ export function ScheduleView() {
         endDate: newEnd,
       }, 'update', eventBeforeUpdate)
       : undefined;
+    // 놓는 즉시(저장을 기다리기 전) 착지 '톡' + 링. 저장에 실패하면 막대는 원래 자리로 돌아가고 링도 거둔다.
+    const landingSeq = mutationIdentity ? startDropLanding(mutationIdentity) : null;
     try {
       await updateEvent(
         eventId,
@@ -963,10 +1012,11 @@ export function ScheduleView() {
       if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
       if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'failed');
+      if (landingSeq !== null) cancelDropLanding(landingSeq);
       throw error;
     }
     await reconcileEventMutation(mutationIdentity ?? undefined);
-  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalMutationGuard]);
+  }, [cancelDropLanding, events, guardLocalIdentity, reconcileEventMutation, settleLocalMutationGuard, startDropLanding]);
 
   const handleTimeGridEventChange = useCallback(async (
     eventId: string,
@@ -1462,6 +1512,10 @@ export function ScheduleView() {
 
   const [pendingPosition, setPendingPosition] = useState<{ event: CalendarEvent; patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>; actor: unknown } | null>(null);
   const [positionError, setPositionError] = useState<string | null>(null);
+  // 움직임 폴리싱 16번 — 착지·새 일정·유리 막대 녹기(설정 함수는 위 startDropLanding·markEventBorn·handleAddEvent 가 쓴다).
+  const [dropLanding, setDropLanding] = useState<LandingMark | null>(null);
+  const [bornEventIdentities, setBornEventIdentities] = useState<ReadonlySet<string>>(() => new Set());
+  const [createGhostLeaving, setCreateGhostLeaving] = useState(false);
   const cancelPosition = () => { pendingPositionRef.current = null; setPendingPosition(null); };
   const confirmPosition = async (scope: CalendarRecurrenceScope) => {
     const request = pendingPositionRef.current; if (!request) return;
@@ -1842,6 +1896,9 @@ export function ScheduleView() {
                 filterRevealAt={filterRevealAt}
                 tagNameById={tagNameById}
                 calendarNameById={calendarNameById}
+                landing={dropLanding}
+                bornEventIdentities={bornEventIdentities}
+                createGhostLeaving={createGhostLeaving}
                 onWheel={(e) => {
                   if (viewMode !== 'month') return;
                   // 디바운스된 월 이동 (휠 아래=다음달, 위=이전달)

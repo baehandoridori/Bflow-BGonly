@@ -292,8 +292,9 @@ test('토스트·대시보드 위젯의 !important 움직임은 no-preference �
   }
   const widget = stripComments(read('src/styles/widget-animations.css'));
   assert.match(widget, /@media \(prefers-reduced-motion: no-preference\) \{\s*\.react-grid-item \{\s*transition: transform/);
-  assert.match(widget, /\n\.react-grid-item\.react-draggable-dragging \{\s*z-index: 100 !important;\s*opacity: 0\.95 !important;\s*\}/);
-  assert.match(widget, /@media \(prefers-reduced-motion: no-preference\) \{\s*\.widget-settling \{/);
+  // 통합: 16번(끌어서 옮기기)이 잡은 위젯을 진하게(.95 → 1) 바꾸고 안착 규칙을 .react-grid-item.widget-settling 으로 좁혔다.
+  assert.match(widget, /\n\.react-grid-item\.react-draggable-dragging \{\s*z-index: 100 !important;\s*opacity: 1 !important;\s*\}/);
+  assert.match(widget, /@media \(prefers-reduced-motion: no-preference\) \{\s*\.react-grid-item\.widget-settling \{/);
 });
 
 /* ─── CSS: '최소'·'가볍게' ─── */

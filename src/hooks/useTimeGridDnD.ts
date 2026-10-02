@@ -9,6 +9,7 @@ import { computeEdgeScrollSpeed } from '@/utils/dragAutoScroll';
 import { minutesToTime, pxToMinutes, snapMinutes, timeToMinutes } from '@/utils/timeGridLayout';
 import { addDays, fmtDate, parseDate } from '@/utils/calendarDate';
 import { isGanttMilestone } from '@/utils/calendarGantt';
+import { LAND_CLEAR_MS, clearLandingIf, type LandingMark } from '@/utils/dragLanding';
 
 export type TimeGridDragMode = 'create' | 'move' | 'resize-end';
 
@@ -234,7 +235,10 @@ function getTimeGridCreatePreview(date: string, startMinutes: number, currentMin
 export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: UseTimeGridDnDOptions) {
   const [drag, setDrag] = useState<ActiveTimeGridDrag | null>(null);
   const [preview, setPreview] = useState<TimeGridDragPreview | null>(null);
-  const [settledIdentityKey, setSettledIdentityKey] = useState<string | null>(null);
+  // 놓는 즉시(저장을 기다리지 않고) 착지 '톡' + 링을 보인다(움직임 폴리싱 16번).
+  // seq 는 같은 블록을 또 놓아도 React key 로 다시 틀기 위한 순번이다. 저장에 실패하면 거둔다.
+  const [settle, setSettle] = useState<LandingMark | null>(null);
+  const settleSeqRef = useRef(0);
   // 저장이 끝나기 전에 같은 블록을 또 놓으면 두 요청이 겹쳐, 먼저 보낸 옛 위치가
   // 나중에 커밋되며 방금 옮긴 자리를 되돌릴 수 있다. 확정될 때까지 재드래그를 막는다.
   const [pendingIdentityKeys, setPendingIdentityKeys] = useState<ReadonlySet<string>>(() => new Set());
@@ -358,8 +362,13 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
   }, [cancelPreviewFrame]);
 
   const isSettling = useCallback((event: CalendarEvent): boolean => (
-    settledIdentityKey === calendarEventIdentityKey(event)
-  ), [settledIdentityKey]);
+    settle?.key === calendarEventIdentityKey(event)
+  ), [settle]);
+
+  /** 착지 순번 — 같은 블록을 다시 놓으면 바뀐다. 착지 중이 아니면 null. */
+  const settleToken = useCallback((event: CalendarEvent): number | null => (
+    settle?.key === calendarEventIdentityKey(event) ? settle.seq : null
+  ), [settle]);
 
   const isPersisting = useCallback((event: CalendarEvent): boolean => (
     pendingIdentityKeys.has(calendarEventIdentityKey(event))
@@ -435,19 +444,24 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
         } else if (onEventChangeRef.current) {
           const key = calendarEventIdentityKey(completion.identity);
           markIdentityPending(key, true);
+          // 착지는 놓는 즉시 — '반짝 = 저장 완료'가 아니다. 저장이 거부되면 블록은 원래 자리로 돌아가고 착지도 거둔다.
+          const seq = ++settleSeqRef.current;
+          setSettle({ key, seq });
+          if (settleTimer.current) clearTimeout(settleTimer.current);
+          settleTimer.current = setTimeout(() => setSettle((current) => clearLandingIf(current, seq)), LAND_CLEAR_MS);
+          const abandonSettle = () => setSettle((current) => clearLandingIf(current, seq));
           try {
             const changeResult = onEventChangeRef.current(completion.eventId, completion.identity, completion.patch);
             void Promise.resolve(changeResult).then(() => {
               markIdentityPending(key, false);
-              setSettledIdentityKey(key);
-              if (settleTimer.current) clearTimeout(settleTimer.current);
-              settleTimer.current = setTimeout(() => setSettledIdentityKey(null), 450);
             }).catch((error) => {
               markIdentityPending(key, false);
+              abandonSettle();
               console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
             });
           } catch (error) {
             markIdentityPending(key, false);
+            abandonSettle();
             console.warn('[Calendar] 시간표 일정 변경 저장 실패:', error);
           }
         }
@@ -523,6 +537,7 @@ export function useTimeGridDnD({ scrollContainerRef, onCreate, onEventChange }: 
     beginCreate,
     beginEventDrag,
     isSettling,
+    settleToken,
     isPersisting,
     shouldSuppressClick,
     cancelActiveDrag,

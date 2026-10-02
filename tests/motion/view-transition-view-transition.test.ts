@@ -492,28 +492,20 @@ test('컴포지팅 EP 전환: 카드 영역 한 덩어리 ±16px, cascade 는 �
   assert.match(src, /cascadeArmRef\.current = nextCascadeArm\(cascadeArmRef\.current, cascadeKey, episodeNumber\);\n\s*const cascadeArmed = cascadeArmRef\.current\.armed;/);
 });
 
-test('컴포지팅 cascade 끄기는 등장만 — 팀원 단계 변경 깜빡임(.scene-card.flashing)은 꺼지지 않는다', () => {
+test('컴포지팅 cascade 끄기는 등장만 — 팀원 단계 변경 물듦(.bf-status-wash)은 꺼지지 않는다', () => {
   const css = stripCssComments(read('src/styles/motion-view-transition.css'));
-  assert.match(css, /\.bf-cascade-quiet \.bf-cascade-item:not\(\.flashing\) \{\s*animation: none;\s*\}/);
-  // 이 갈래 CSS 는 index.css 뒤에 불려 같은 특이도면 이긴다. .bf-cascade-item 의 animation 을 끄는 규칙은 모두
-  // 깜빡이는 카드를 빼야 한다(.scene-card.flashing 은 0,2,0).
-  let checked = 0;
+  assert.match(css, /\.bf-cascade-quiet \.bf-cascade-item \{\s*animation: none;\s*\}/);
+  // 통합: 5번(컴포지팅 카드)이 셸 animation 을 덮어쓰던 .scene-card.flashing 을 없애고, 물듦을 셸 안의 별도 층으로 옮겼다.
+  // 그래서 셸 등장을 끄는 위 규칙이 물듦을 끌 수 없다 — 그 구조가 그대로인지 지킨다.
   for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    if (!/\.bf-cascade-item/.test(selector) || !/animation(-name)?:\s*none/.test(body)) continue;
-    for (const part of selector.split(',')) {
-      if (/\.bf-cascade-item/.test(part)) {
-        assert.match(part, /:not\(\.flashing\)/, part.trim());
-        checked += 1;
-      }
-    }
+    if (/animation(-name)?:\s*none/.test(body)) assert.doesNotMatch(selector, /bf-status-wash/, selector.trim());
   }
-  assert.ok(checked >= 1);
-  // 원본 깜빡임 규칙·카드 클래스가 그대로인지(이름·선택자가 바뀌면 위 :not 도 같이 바꿀 것).
   const index = read('src/index.css');
-  assert.match(index, /\.scene-card\.flashing \{\n\s*animation: bf-status-flash 1200ms ease-out;\n\}/);
+  assert.doesNotMatch(index, /\.scene-card\.flashing \{/);
   const card = read('src/views/compositing-dashboard/cards/SceneCard.tsx');
   assert.match(card, /'scene-card bf-cascade-item relative rounded-lg text-left'/);
-  assert.match(card, /highlight \? 'flashing' : ''/);
+  assert.match(card, /className="bf-status-wash"/);
+  assert.match(read('src/styles/motion-live-drag.css'), /\.bf-status-wash \{[^}]*animation: bf-status-wash/);
 });
 
 test('대시보드 탭: 판 제자리 — 탭마다 다시 만들지 않고, 판(유리)에는 opacity 를 걸지 않는다', () => {

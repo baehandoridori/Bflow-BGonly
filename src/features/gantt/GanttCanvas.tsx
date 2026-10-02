@@ -12,6 +12,9 @@ export { localDate } from './barLabels';
 import { GanttTooltip, type GanttHover } from './GanttTooltip';
 import type { GanttProject, GanttTask } from './types';
 import { linkedCalendarVisibleRange, type LinkedCalendarRange } from './linkedCalendarRecurrence';
+import { DropLanding } from '@/components/ui/DragLanding';
+import { animateEl, EASE_CSS } from '@/utils/motion';
+import { DRAG_SLIDE_MS, LAND_CLEAR_MS, clearLandingIf, residualOffset } from '@/utils/dragLanding';
 import './navigation.css';
 import './canvas.css';
 
@@ -23,8 +26,19 @@ interface ChartRow { id: string; project: GanttProject; task: GanttTask | null; 
 type Gesture = { pointer: number; target: HTMLElement; x: number; y: number; moved: boolean } & (
   | { kind: 'pan'; left: number; top: number }
   | { kind: 'row'; row: ChartRow; drop: RowDrop | null; lastX: number; lastY: number }
-  | { kind: 'edit' | 'create'; row: ChartRow; edge?: string; delta: number; first: number }
+  | { kind: 'edit' | 'create'; row: ChartRow; edge?: string; delta: number; first: number; lastDx?: number }
 );
+/*
+ * 끌어서 옮기기(움직임 폴리싱 16번): 일반 작업·마일스톤의 날짜 이동은 막대가 손을 그대로 따라온다.
+ * 화면은 하루 단위로 스냅된 자리를 그리고(날짜가 바뀔 때만 다시 그림), 손과의 나머지 거리만
+ * .gantt-bar-position 의 style.transform 에 직접 적는다 — 끄는 동안 차트 전체를 다시 그리지 않는다.
+ * 양끝 늘이기(진행률 막대가 찌그러지지 않게)와 그룹 이동은 하루 스냅을 유지한다.
+ */
+const followsPointer = (gesture: Gesture): boolean => gesture.kind === 'edit' && !gesture.edge && gesture.row.task?.kind !== 'group';
+const barPositionOf = (gesture: Gesture): HTMLElement | null => {
+  const node = (gesture.target as HTMLElement).closest?.('.gantt-bar-position') as HTMLElement | null | undefined;
+  return node && node.style ? node : null;
+};
 interface Props {
   projects: GanttProject[]; selected: string[]; statusFilter: 'all' | 'active' | 'completed'; worker: string;
   collapsed: string[]; onCollapse: (id: string) => void; names: Record<string, string>;
@@ -60,6 +74,14 @@ export function GanttCanvas(props: Props) {
   const [spaceHeld, setSpaceHeld] = useState(false), spaceRef = useRef(false), pointerOver = useRef(false);
   const [panning, setPanning] = useState(false);
   const [rowDragging, setRowDragging] = useState<{row: ChartRow; drop: RowDrop | null; x: number; y: number} | null>(null);
+  // 놓은 막대의 착지('톡' + 링). seq 로 같은 막대를 또 놓아도 key 로 다시 튼다. 저장 결과를 기다리지 않는다.
+  const [landing, setLanding] = useState<{ id: string; seq: number } | null>(null);
+  const landingSeq = useRef(0), landingTimer = useRef<ReturnType<typeof setTimeout>>();
+  // 화면에 그려진(스냅된) 이동 일수와, 손을 뗀 순간의 막대 자리(레이아웃 값 + 손을 따라오던 나머지 거리).
+  // 위치 비교는 transform 이 섞이지 않는 offsetLeft/offsetWidth 로 한다 — 동작 줄이기의 전역 0.01ms 전환이
+  // transform 해제를 한 프레임 늦춰도 착지 판정이 흔들리지 않게.
+  const renderedDelta = useRef(0);
+  const pendingDrop = useRef<{ el: HTMLElement; rowId: string; residual: number; left: number; width: number } | null>(null);
   const dragRef = useRef<Gesture | null>(null);
   const suppressClick = useRef(false), zoomFrame = useRef(0), goal = useRef(48), pointer = useRef(0);
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -158,6 +180,35 @@ export function GanttCanvas(props: Props) {
     if(Object.keys(increased).length){setProgressPulses(previous=>({...previous,...increased}));clearTimeout(pulseTimer.current);pulseTimer.current=setTimeout(()=>setProgressPulses({}),720);}
   },[progressSignature]);
   useEffect(()=>()=>clearTimeout(pulseTimer.current),[]);
+  useEffect(()=>()=>clearTimeout(landingTimer.current),[]);
+  // 날짜(스냅)가 바뀌어 다시 그려지면, 손과의 나머지 거리를 새 자리 기준으로 다시 적는다 — 한 프레임도 하루만큼 튀지 않게.
+  useLayoutEffect(() => {
+    renderedDelta.current = drag?.delta ?? 0;
+    const gesture = dragRef.current;
+    if (gesture?.kind === 'edit' && gesture.moved && followsPointer(gesture)) {
+      const position = barPositionOf(gesture);
+      if (position) position.style.transform = `translateX(${residualOffset(gesture.lastDx ?? 0, renderedDelta.current, widthRef.current)}px)`;
+    }
+  }, [drag]);
+  // 손을 뗀 뒤 첫 커밋: 보이던 자리에서 놓인 자리로 0.12초 미끄러지고(FLIP), 실제로 그 자리에 놓였으면 착지 '톡' + 링.
+  // 저장이 바로 반영되지 않는 경우(자동 일정 확인 창·거절)에는 원래 자리로 미끄러져 돌아가고 착지는 없다.
+  useLayoutEffect(() => {
+    const drop = pendingDrop.current;
+    if (!drop) return;
+    pendingDrop.current = null;
+    if (!drop.el.isConnected) return;
+    const moved = drop.el.offsetLeft - drop.left;
+    const dx = drop.residual - moved;
+    if (Math.abs(dx) > 0.5) {
+      animateEl(drop.el, [{ translate: `${dx}px 0px` }, { translate: '0px 0px' }], { duration: DRAG_SLIDE_MS, easing: EASE_CSS.out });
+    }
+    if (Math.abs(moved) < 1 && Math.abs(drop.el.offsetWidth - drop.width) < 1) {
+      const seq = ++landingSeq.current;
+      setLanding({ id: drop.rowId, seq });
+      clearTimeout(landingTimer.current);
+      landingTimer.current = setTimeout(() => setLanding(current => clearLandingIf(current, seq)), LAND_CLEAR_MS);
+    }
+  });
   const savedScroll = useRef({left:0,top:0}), hadRows = useRef(false);
   useLayoutEffect(() => {
     if (rows.length && !hadRows.current && chart.current && pendingScroll.current === null) {
@@ -197,6 +248,8 @@ export function GanttCanvas(props: Props) {
     if (!gesture || (pointerId !== undefined && gesture.pointer !== pointerId)) return;
     dragRef.current = null;
     suppressClick.current = gesture.moved;
+    // 손을 따라오던 나머지 거리를 지운다(취소면 원래 자리로 바로, 놓았으면 아래 착지 효과가 이어 받는다).
+    if (gesture.kind === 'edit') { const position = barPositionOf(gesture); if (position) position.style.transform = ''; }
     setDrag(null); setCreating(null); setPanning(false); setRowDragging(null);
     if (gesture.target.hasPointerCapture(gesture.pointer)) gesture.target.releasePointerCapture(gesture.pointer);
   }, []);
@@ -304,15 +357,29 @@ export function GanttCanvas(props: Props) {
     const d=dragRef.current;if(!d||d.pointer!==e.pointerId)return;
     const dx=e.clientX-d.x,dy=e.clientY-d.y;
     if(!d.moved&&Math.hypot(dx,dy)<4)return;
+    const first=!d.moved;
     d.moved=true;
     if(d.kind==='pan'){d.target.scrollLeft=Math.max(0,d.left-dx);d.target.scrollTop=Math.max(0,d.top-dy);syncVisibleDate();setPanning(true);return;}
     if(d.kind==='row'){d.lastX=e.clientX;d.lastY=e.clientY;d.drop=findRowDrop(d,e.clientX,e.clientY);setRowDragging({row:d.row,drop:d.drop,x:e.clientX,y:e.clientY});return;}
-    d.delta=Math.round(dx/widthRef.current);
-    if(d.kind==='create'){setCreating({id:d.row.id,first:d.first,last:Math.max(0,d.first+d.delta)});return;}
-    setDrag({id:d.row.id,projectId:d.row.project.id,delta:d.delta,edge:d.edge});
+    const delta=Math.round(dx/widthRef.current),changed=first||delta!==d.delta;
+    d.delta=delta;
+    // 날짜(스냅)가 바뀔 때만 다시 그린다. 그 사이 움직임은 막대 자리의 transform 만 고친다.
+    if(d.kind==='create'){if(changed)setCreating({id:d.row.id,first:d.first,last:Math.max(0,d.first+d.delta)});return;}
+    if(changed)setDrag({id:d.row.id,projectId:d.row.project.id,delta:d.delta,edge:d.edge});
+    if(followsPointer(d)){
+      d.lastDx=dx;
+      const position=barPositionOf(d);
+      if(position)position.style.transform=`translateX(${residualOffset(dx,renderedDelta.current,widthRef.current)}px)`;
+    }
   }
   function endDrag(e: React.PointerEvent) {
     const d=dragRef.current;if(!d||d.pointer!==e.pointerId)return;
+    // 손을 뗀 순간 막대가 보이던 자리 — 다음 커밋에서 놓인 자리로 미끄러지고 착지한다.
+    if(d.kind==='edit'&&d.moved&&d.delta){
+      const position=barPositionOf(d);
+      if(position&&Number.isFinite(position.offsetLeft))pendingDrop.current={el:position,rowId:d.row.id,left:position.offsetLeft,width:position.offsetWidth,
+        residual:followsPointer(d)?residualOffset(d.lastDx??0,renderedDelta.current,widthRef.current):0};
+    }
     cancelGesture(e.pointerId);
     if(d.kind==='row'){
       const destination=findRowDrop(d,d.lastX,d.lastY),current=projects.find(p=>p.id===d.row.project.id),target=projects.find(p=>p.id===destination?.project.id);
@@ -323,7 +390,7 @@ export function GanttCanvas(props: Props) {
       if(!rowDrop(current,task,target,anchor??null,destination.position,props.canEdit(current)&&props.canEdit(target)).allowed)return;
       props.onRelocate?.(current,task,target,destination.taskId,destination.position);return;
     }
-    if(d.kind==='pan'||!d.delta)return;
+    if(d.kind==='pan'||!d.delta){pendingDrop.current=null;return;}
     const current=projects.find(p=>p.id===d.row.project.id),task=current?.tasks.find(t=>t.id===d.row.task?.id);
     if(!current||current.revision!==d.row.project.revision||current.completed||!props.canEdit(current)||statusFilter==='completed'||(d.row.task&&(!task||isTaskComplete(current,task))))return;
     if(d.kind==='create'){const first=Math.min(d.first,d.first+d.delta),last=Math.max(d.first,d.first+d.delta);props.onAdd(d.row.project,d.row.task?.kind==='group'?d.row.id:d.row.task?.parentId||null,moveDate(base,Math.max(0,first)),moveDate(base,Math.max(0,last)));return;}
@@ -393,6 +460,9 @@ export function GanttCanvas(props: Props) {
           const geometry=b?barGeometry(b,t?.kind||'project',base,width):{left:0,width:0};
           let x=geometry.left,barWidth=geometry.width;
           if(drag?.id===r.id&&t?.kind!=='group'){if(drag.edge==='start'){x+=drag.delta*width;barWidth-=drag.delta*width}else if(drag.edge==='end')barWidth+=drag.delta*width;else x+=drag.delta*width;}
+          const lifted=drag?.id===r.id;
+          // 손을 따라오는 막대: 원래 자리 흐린 점선 흔적 + 지금 놓으면 들어갈 칸 점선.
+          const showsDropSlot=lifted&&!drag.edge&&!!t&&t.kind!=='group'&&t.kind!=='milestone';
           const color=t?resolveTaskColor(r.project,t):r.project.color;
           const title=t?.title||r.project.name;
           const duration=b?compactDuration({...b,kind:t?.kind||'group'}):'';
@@ -429,11 +499,15 @@ export function GanttCanvas(props: Props) {
           return <div key={r.id} data-row-id={r.id} data-project-id={r.project.id} data-parent-id={t?.parentId??''} className={`gantt-row ${!t?'project':t.kind==='group'?'group-row':''} ${returning?'returns-to-parent':''} ${r.completed?'completed':''} ${selected.includes(r.id)?'selected':''} ${rowDragging?.row.id===r.id?'row-drag-source':''} ${dropIndicatorId===r.id?`drop-${drop?.position}`:''}`} style={{'--gantt-color':color,'--gantt-depth':r.depth} as React.CSSProperties} onClick={e=>props.onSelect(r.project.id,t?.id||null,e.ctrlKey||e.metaKey)} onContextMenu={e=>{e.preventDefault();setHover(null);props.onMenu(r.project,t,e.clientX,e.clientY);}}>
             {layout==='list'&&<div className={`gantt-list-label gantt-name ${relocatable?'relocatable':''}`} style={{paddingLeft:10+r.depth*16}} tabIndex={0} onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)}><span className="gantt-tree-guides" aria-hidden="true">{Array.from({length:r.depth},(_,level)=><i key={level} style={{left:10+level*16}}/>)}</span>{label}</div>}
             <div className={`gantt-track ${creatable?'creatable':''}`} onPointerDown={e=>{if(e.target===e.currentTarget)startDrag(e,r,undefined,true);}} onDoubleClick={e=>{if(e.target!==e.currentTarget||!creatable||mode!=='create'||spaceRef.current)return;const day=Math.floor((e.clientX-e.currentTarget.getBoundingClientRect().left)/width);const date=moveDate(base,day);props.onAdd(r.project,t?.kind==='group'?t.id:t?.parentId||null,date,date);}}>
-              {b&&<div className={`gantt-bar-position ${conflicts.has(r.id)?'conflict':''}`} style={{left:x,width:Math.max(6,barWidth)}}>
+              {b&&showsDropSlot&&drag.delta!==0&&<div className="gantt-origin-trace" aria-hidden="true" style={{left:geometry.left,width:Math.max(6,geometry.width)}}/>}
+              {b&&showsDropSlot&&<div className="gantt-drop-slot" aria-hidden="true" style={{left:x,width:Math.max(6,barWidth)}}/>}
+              {b&&<div className={`gantt-bar-position ${conflicts.has(r.id)?'conflict':''} ${lifted?'is-lifted':''}`} style={{left:x,width:Math.max(6,barWidth)}}>
                 {layout==='beside'&&!inlineAfter&&<div className={`gantt-inline-name gantt-name ${relocatable?'relocatable':''}`} tabIndex={0} onKeyDown={nameKeys} onPointerDown={e=>startRowDrag(e,r)}>{label}</div>}
                 <button className={`gantt-bar ${group?'group':t?.kind||''} ${movable?'movable':''}`} aria-label={`${title}, ${durationLabel({...t,...b,kind:t?.kind||'group'} as GanttTask)}${r.completed?', 완료':''}`} data-gantt-hover-anchor={r.id} aria-keyshortcuts="F2" onPointerDown={e=>startDrag(e,r,(e.target as HTMLElement).dataset.edge)} {...hoverEvents} onKeyDown={nameKeys}>
                   {t?.kind!=='milestone'&&<><span className="gantt-progress" style={{width:`${progress}%`}}/>{movable&&!group&&<><span data-edge="start" className="gantt-resize start"/><span data-edge="end" className="gantt-resize end"/></>}</>}
                   {progressPulses[r.id]&&<span key={progressPulses[r.id]} className="gantt-progress-pulse" aria-hidden="true"/>}
+                  {lifted&&<span className="gantt-lift-shadow" aria-hidden="true"/>}
+                  {landing?.id===r.id&&<DropLanding key={`land-${landing.seq}`} className="gantt-land-ring"/>}
                 </button>
                 <div className="gantt-bar-tail">
                   <span className="gantt-duration">{barLabel}</span>

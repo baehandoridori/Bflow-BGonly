@@ -15,6 +15,7 @@ type DndModule = {
     beginCreate(event: unknown, target: unknown): void;
     beginEventDrag(event: unknown, source: unknown, mode: 'move' | 'resize-end', target: unknown): void;
     isSettling(event: unknown): boolean;
+    settleToken(event: unknown): number | null;
     isPersisting(event: unknown): boolean;
     shouldSuppressClick(): boolean;
     cancelActiveDrag(): void;
@@ -492,7 +493,8 @@ test('useTimeGridDnD DOM: mouseup은 대기 rAF의 최신 값을 완료하고 Es
   }
 });
 
-test('useTimeGridDnD DOM: 일정 이동 완료 강조는 저장이 성공한 뒤에만 보인다', async () => {
+// 움직임 폴리싱 16번: 착지('톡' + 링)는 놓는 즉시 보인다 — '반짝 = 저장 완료'가 아니다(예전엔 저장 성공 뒤에만 보였다).
+test('useTimeGridDnD DOM: 일정 이동 착지 강조는 놓는 즉시 보이고 저장을 기다리지 않는다', async () => {
   let resolveSave: (() => void) | undefined;
   const save = new Promise<void>((resolve) => {
     resolveSave = resolve;
@@ -509,12 +511,16 @@ test('useTimeGridDnD DOM: 일정 이동 완료 강조는 저장이 성공한 뒤
     harness.fire('mouseup', {});
 
     dnd = harness.render();
-    assert.equal(dnd.isSettling(source), false, '저장 결과를 기다리는 동안에는 완료 강조를 보이지 않는다');
+    assert.equal(dnd.isSettling(source), true, '놓는 즉시 착지를 보인다(저장 결과를 기다리지 않는다)');
+    const token = dnd.settleToken(source);
+    assert.equal(typeof token, 'number', '같은 블록을 다시 놓을 때 새로 틀 순번이 있어야 한다');
+    assert.equal(dnd.isPersisting(source), true, '저장이 끝나기 전에는 여전히 재드래그를 막는다');
 
     resolveSave?.();
     await Promise.resolve();
     dnd = harness.render();
-    assert.equal(dnd.isSettling(source), true, '저장이 성공하면 다음 렌더에서 완료 강조를 보인다');
+    assert.equal(dnd.isSettling(source), true, '저장이 성공해도 착지 표시는 정해진 시간까지 이어진다');
+    assert.equal(dnd.settleToken(source), token, '저장 성공은 착지를 다시 틀지 않는다');
   } finally {
     harness.restore();
   }
@@ -537,11 +543,11 @@ test('useTimeGridDnD DOM: mouseup에서 거부된 일정 변경 저장은 전역
     harness.fire('mouseup', {});
 
     dnd = harness.render();
-    assert.equal(dnd.isSettling(source), false, '저장이 거부되면 완료 강조를 보이지 않는다');
+    assert.equal(dnd.isSettling(source), true, '놓는 즉시 착지를 보인다 — 저장 결과는 아직 모른다');
 
     await new Promise<void>((resolve) => setImmediate(resolve));
     dnd = harness.render();
-    assert.equal(dnd.isSettling(source), false, '거부를 처리한 뒤에도 완료 강조를 보이지 않는다');
+    assert.equal(dnd.isSettling(source), false, '저장이 거부되면 블록이 원래 자리로 돌아가고 착지 표시도 거둔다');
     assert.deepEqual(warnings, [['[Calendar] 시간표 일정 변경 저장 실패:', persistenceError]]);
   } finally {
     harness.restore();

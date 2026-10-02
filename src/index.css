@@ -1519,23 +1519,18 @@ input[type="range"]::-webkit-slider-thumb {
    PR 4 의 polish 단계에서 prefers-reduced-motion 등 한 번 더 다듬을 예정.
 */
 
+/* 움직임 폴리싱 5번: '흐렸다 선명해지는' blur 를 뺐다 — 카드마다 매 프레임 흐림을 다시 계산하던 무게만 덜고
+   차례로 떠오르는 느낌은 그대로. 끝값(to)은 적지 않는다 — 카드의 지금 값(어두워짐 .55/.35·핀 위치)으로
+   이어져서, 걸러진 카드가 등장 끝에 1 → .35 로 '뚝' 바뀌지 않는다. */
 @keyframes bf-cascade-in {
   from {
     opacity: 0;
     transform: translateY(var(--motion-cascade-translate, 14px)) scale(0.92);
-    /* PR 4 polish: blur 3px → 2px (한솔 가이드 "blur 너무 짙지 않게"). */
-    filter: blur(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
 .bf-cascade-item {
   animation: bf-cascade-in var(--motion-cascade-duration, 560ms) cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
-  will-change: transform, opacity, filter;
 }
 
 @keyframes bf-wipe-in {
@@ -1558,10 +1553,13 @@ input[type="range"]::-webkit-slider-thumb {
      - 카드 가장자리 호버 시 떨림 — transition 더 부드럽게 (cubic-bezier ease-out + 320ms).
      - 핀 해제 시 사라짐 → animation 없이 box-shadow / transform 만 transition.
      움직임 폴리싱(2026-10): 떨림의 뿌리는 PartCardRow 가 '들린 카드' 위치로 거리를 재던 되먹임이었다.
-     원래 자리 칸([data-scene-key])으로 재도록 분리한 뒤 공통 박자(느림 260ms·들어오는 곡선)로 맞춤. */
+     원래 자리 칸([data-scene-key])으로 재도록 분리한 뒤 공통 박자(느림 260ms·들어오는 곡선)로 맞춤.
+     움직임 폴리싱 5번: 한 장을 띄우면 나머지가 .55 로, 단계 칩으로 거르면 .35 로 0.2초 동안 어두워진다
+     (이 목록이 SceneCard 의 transition 유틸을 덮으므로 opacity 를 여기 둔다). */
   transition:
     transform var(--motion-slow) var(--ease-out),
     box-shadow var(--motion-slow) var(--ease-out),
+    opacity 200ms ease,
     border-color var(--motion-base) var(--ease-std),
     outline-color var(--motion-base) var(--ease-std);
   position: relative;
@@ -1586,15 +1584,7 @@ input[type="range"]::-webkit-slider-thumb {
     0 0 42px rgb(var(--color-accent) / 0.18);
 }
 
-@keyframes bf-status-flash {
-  0%   { background-color: var(--current-status-color, transparent); }
-  50%  { background-color: var(--current-status-color-bright, transparent); }
-  100% { background-color: transparent; }
-}
-
-.scene-card.flashing {
-  animation: bf-status-flash 1200ms ease-out;
-}
+/* 단계 변경 물듦은 src/styles/motion-live-drag.css 의 .bf-status-wash (앞면 위 색 층의 opacity). */
 
 @keyframes bf-fade-out-25 {
   0%   { opacity: 1; }
@@ -1602,18 +1592,12 @@ input[type="range"]::-webkit-slider-thumb {
   100% { opacity: 0; }
 }
 
-/* SceneCard 의 highlight 아바타 배지 자동 fade-out (2.5초 후) */
-@keyframes fadeOut {
-  0%   { opacity: 1; transform: scale(1); }
-  80%  { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(0.85); }
-}
+/* SceneCard 의 highlight 아바타 배지 등장·퇴장은 src/styles/motion-live-drag.css 의 .bf-comp-avatar. */
 
 @media (prefers-reduced-motion: reduce) {
-  .bf-cascade-item,
+  /* 차례 등장(.bf-cascade-item)은 여기서 빼서 전역 규칙대로 즉시 나타난다(움직임 폴리싱 5번 — 등장 즉시). */
   .bf-wipe-in,
-  .scene-card.pinned,
-  .scene-card.flashing {
+  .scene-card.pinned {
     animation-duration: 200ms !important;
     animation-iteration-count: 1 !important;
   }
@@ -1627,9 +1611,9 @@ input[type="range"]::-webkit-slider-thumb {
     transition: none !important;
   }
   .bf-cascade-item {
-    /* cascade stagger 자체도 reduced-motion 에서는 0 — 한 번에 fade-in */
-    animation-delay: 0 !important;
-    filter: none !important;
+    /* cascade stagger 자체도 reduced-motion 에서는 0 — 한 번에 나타난다.
+       '0' 은 시간 값으로 무효라 규칙째 버려져 카드가 20ms 씩 늦게 하나씩 나타났었다 → 0s. */
+    animation-delay: 0s !important;
   }
 }
 
@@ -1646,17 +1630,7 @@ input[type="range"]::-webkit-slider-thumb {
   from { opacity: 0; transform: scale(0.98); }
   to   { opacity: 1; transform: scale(1); }
 }
-/* 시간표 드롭 직후 해당 일정에만 적용한다. widget-animations.css는 Dashboard 전용이라 분리한다. */
-@keyframes timeGridSettleFlash {
-  0% { border-color: rgba(108, 92, 231, 0.95); box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.88); }
-  55% { border-color: rgba(162, 155, 254, 0.72); box-shadow: 0 0 0 5px rgba(108, 92, 231, 0.08); }
-  100% { border-color: transparent; box-shadow: 0 0 0 5px rgba(108, 92, 231, 0); }
-}
-
-.time-grid-settling {
-  border: 1px solid transparent;
-  animation: timeGridSettleFlash 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
+/* 시간표 드롭 직후의 착지 표시는 src/styles/motion-live-drag.css 의 .bf-land-ring(움직임 폴리싱 16번). */
 
 /* 다른 창에서 추가·수정된 일정을 2초 동안 원본 색 ring으로 알린다. */
 @keyframes calendarRealtimeHighlightPulse {
@@ -1673,7 +1647,6 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .time-grid-settling { animation: none; transition: none; }
   .calendar-realtime-highlight { animation: none; }
 }
 
@@ -1846,8 +1819,7 @@ input[type="range"]::-webkit-slider-thumb {
     0 10px 26px rgb(8 6 28 / 0.42),
     inset 0 1px 0 rgb(255 255 255 / 0.45),
     inset 0 -8px 16px rgb(var(--color-accent) / 0.28);
-  backdrop-filter: blur(14px) saturate(180%);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  /* backdrop-filter 없음 — 바탕이 70% 넘게 불투명해 흐림은 거의 안 보이는데, 늘어날 때마다 GPU 가 다시 그린다. */
   animation: calendarGhostIn 0.42s cubic-bezier(0.22, 1.2, 0.36, 1) both;
   will-change: transform;
 }

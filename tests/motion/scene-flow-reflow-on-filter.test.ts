@@ -419,7 +419,8 @@ test('캘린더: 필터를 바꿔도 달력 전체를 옅게 하지 않고, 새�
   assert.match(schedule, /filterRevealAt=\{filterRevealAt\}/);
   const grid = read('src/components/calendar/CalendarGrid.tsx');
   assert.match(grid, /if \(revealOnMountRef\.current === null\) \{\n {4}revealOnMountRef\.current = !reduceMotion && shouldRevealOnMount\(revealSince, Date\.now\(\)\);/);
-  assert.match(grid, /revealOnMountRef\.current && !isGhost && 'sf-cal-bar-reveal'/);
+  // 통합: 16번(끌어서 옮기기)이 끄는 막대의 흐린 복제본(isGhost)을 없애고 진하게 들린 막대(isDragging)로 바꿨다.
+  assert.match(grid, /revealOnMountRef\.current && !isDragging && 'sf-cal-bar-reveal'/);
   const css = read('src/styles/motion-scene-flow.css');
   assert.match(css, /\.sf-cal-bar-reveal \{\n {2}animation: sf-cal-bar-reveal var\(--motion-base\) var\(--ease-out\) backwards;/);
   assert.match(css, /@keyframes sf-cal-bar-reveal \{\n {2}from \{\n {4}opacity: 0;\n {4}transform: translateY\(2px\);/);

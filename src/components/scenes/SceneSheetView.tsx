@@ -35,6 +35,7 @@ import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { SceneContextMenu } from './SceneContextMenu';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { EditingNameLabels } from './EditingNameLabels';
+import { SceneRemoteFlash } from './SceneRemoteFlash';
 import { useEditingPresenceStore } from '@/stores/useEditingPresenceStore';
 import { editingBeamRowClassName, selectEditorsForScenes } from '@/utils/editingPresence';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -960,6 +961,8 @@ export function SceneSheetView({
                   >
                   {/* 씬번호 */}
                   <td className="px-2 py-1.5 font-mono text-xs relative" style={{ overflow: 'visible' }}>
+                    {/* 팀원이 바꾼 순간 — 씬번호 칸 빛 + 이름표 */}
+                    <SceneRemoteFlash sceneUuids={[scene.id]} variant="row" />
                     {sheetWorkLinkBadgesVisible && (
                       <SceneWorkLinkBadges
                         bgSceneUuid={department === 'bg' ? scene.id : null}

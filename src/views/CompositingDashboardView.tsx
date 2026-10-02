@@ -13,7 +13,7 @@
  *   3. 카드 cascade 시작 (CSS animation)
  *
  * 다른 사용자의 단계 변경은 Realtime 으로 자동 수신 → updatedBy 본인 아니면
- * transientHighlight 트리거 (카드 색 펄스 + 보낸 사람 아바타 배지 2.5초).
+ * transientHighlight 트리거 (단계가 바뀐 카드 앞면 물듦 0.9초 + 보낸 사람 아바타 배지 2.5초).
  *
  * Presence (보는 사람 칩) / Broadcast 채널은 후속 polish — MVP 는 Realtime UPDATE 기반.
  */
@@ -23,7 +23,7 @@ import { toast as sonnerToast } from 'sonner';
 import { useDataStore, compositingKey } from '@/stores/useDataStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useTransientHighlightStore } from '@/stores/transientHighlightStore';
+import { useTransientHighlightStore, compositingStatusChanged } from '@/stores/transientHighlightStore';
 import { subscribeCompositingStatesRealtime, updateSceneFieldInSupabase } from '@/services/supabaseService';
 import { isCompositorForCompositing } from '@/utils/compositingLabels';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
@@ -124,10 +124,12 @@ export function CompositingDashboardView() {
         deleteCompositingState(key);
         return;
       }
+      // 덮어쓰기 전 값과 비교 — 단계가 실제로 바뀐 카드만 앞면이 물든다.
+      const previous = useDataStore.getState().compositingStates.get(key);
       setCompositingStateInStore(key, row);
-      // 본인이 아닐 때만 highlight 트리거 (색 펄스 + 아바타 배지)
+      // 본인이 아닐 때만 highlight 트리거 (단계가 바뀌었으면 앞면 물듦 + 아바타 배지)
       if (row.updatedBy && currentUser?.id && row.updatedBy !== currentUser.id) {
-        addHighlight(key, row.updatedBy);
+        addHighlight(key, row.updatedBy, { wash: compositingStatusChanged(previous, row) });
       }
     });
 

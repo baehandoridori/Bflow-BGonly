@@ -73,6 +73,7 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
         // shadow-*·hover:shadow-* 유틸은 효과가 없다. 테마 전환 때 바탕·테두리 색만 부드럽게 바뀐다.
         'bf-card-hover bf-card-hover--info',
         'transition-colors duration-base',
+        // 끌 때 들림(1.02배)은 대시보드의 바깥 래퍼(.widget-lift)가 맡는다(움직임 폴리싱 16번).
         className
       )}
       style={{
