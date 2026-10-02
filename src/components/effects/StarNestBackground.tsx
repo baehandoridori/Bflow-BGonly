@@ -2,6 +2,8 @@ import { type CSSProperties, useEffect, useRef } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
 import { DEFAULT_STAR_NEST_SETTINGS, normalizeStarNestSettings, type StarNestSettings } from '@/utils/starNestSettings';
 import { cn } from '@/utils/cn';
+import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
+import { createFrameLoop } from '@/utils/frameLoop';
 
 // Star Nest shader adapted for WebGL from ShipSwift SWStarNest and the original Star Nest shader by Pablo Roman Andrioli.
 // Source references:
@@ -292,7 +294,6 @@ export function StarNestBackground({
   style?: CSSProperties;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef(0);
   const storeSettings = useAppStore((s) => normalizeStarNestSettings(s.plexusSettings.starNest));
   const colorMode = useAppStore((s) => s.colorMode);
   const settings = normalizeStarNestSettings(settingsOverride ?? storeSettings);
@@ -300,6 +301,8 @@ export function StarNestBackground({
   const colorModeRef = useRef(colorMode);
   settingsRef.current = settings;
   colorModeRef.current = colorMode;
+  // 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다. 멈춘 동안 설정·밝기 모드가 바뀌면 한 장을 다시 그린다.
+  const { loopRef, stillRef } = useBackgroundLoopGate(`${colorMode}|${JSON.stringify(settings)}`);
 
   useEffect(() => {
     if (!enabled) return;
@@ -333,6 +336,8 @@ export function StarNestBackground({
       canvas.width = Math.max(1, Math.floor(rect.width * dpr));
       canvas.height = Math.max(1, Math.floor(rect.height * dpr));
       gl.viewport(0, 0, canvas.width, canvas.height);
+      // 크기를 바꾸면 캔버스가 지워진다 — 멈춘 상태면 한 장을 다시 그린다.
+      loopRef.current?.invalidate();
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -404,13 +409,14 @@ export function StarNestBackground({
       gl.uniform1f(locs.uLightBlur, 0.18);
       gl.uniform3f(locs.uOffset, offset.x, offset.y, offset.z);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-      rafRef.current = requestAnimationFrame(render);
     };
 
-    rafRef.current = requestAnimationFrame(render);
+    // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
+    const loop = createFrameLoop(render, { still: stillRef.current });
+    loopRef.current = loop;
     return () => {
-      cancelAnimationFrame(rafRef.current);
+      loop.dispose();
+      loopRef.current = null;
       window.removeEventListener('resize', resize);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseleave', onMouseLeave);

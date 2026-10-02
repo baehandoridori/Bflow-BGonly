@@ -10,6 +10,7 @@ import {
 } from '@/utils/characterTabGroups';
 import { loadPersistedGroupFolded, savePersistedGroupFolded, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { cn } from '@/utils/cn';
+import { prefersReducedMotion } from '@/utils/motion';
 
 /**
  * 커스텀 탭 본문 (피드백 41) — 그룹 섹션 + 미분류 + 카드 드래그 배치.
@@ -102,7 +103,8 @@ export function CharacterTabGroupsView({
   };
 
   const scrollToSection = (gid: string | null) => {
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    // 동작 줄이기·움직임 '최소'면 미끄러지지 않고 바로 맞춘다.
+    const reduced = prefersReducedMotion();
     const scroll = () => {
       sectionRefs.current.get(gid ?? '__ungrouped__')?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
     };

@@ -703,7 +703,12 @@ input[type="date"]::-webkit-inner-spin-button {
   background: rgb(var(--color-accent) / 0.06) !important;
   border: 2px dashed rgb(var(--color-accent) / 0.35) !important;
   border-radius: 12px !important;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+/* 움직임 폴리싱 바탕 B: !important 전환이 동작 줄이기 전역 규칙을 이기지 않게 동작 줄이기가 아닐 때만. */
+@media (prefers-reduced-motion: no-preference) {
+  .react-grid-item.react-grid-placeholder {
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
 }
 
 /* 리사이즈 핸들: 기본 스타일 전부 리셋 후 투명 히트 영역만 확보 */
@@ -935,11 +940,16 @@ input[type="range"]::-webkit-slider-thumb {
     0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset !important;
 }
 
-/* ─── 호버 시 스택 부드럽게 펼침 ─── */
-[data-sonner-toaster] [data-sonner-toast] {
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+/* ─── 호버 시 스택 부드럽게 펼침 ───
+   움직임 폴리싱 바탕 B: 아래 !important 전환·사라짐 애니메이션은 특이도가 높아 동작 줄이기 전역 규칙
+   (*, 0.01ms !important)을 이긴다. 그래서 동작 줄이기가 아닐 때만 적용한다('움직임: 최소'는
+   motion-foundation.css 의 ID 특이도 규칙이 이긴다). */
+@media (prefers-reduced-motion: no-preference) {
+  [data-sonner-toaster] [data-sonner-toast] {
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
 }
 
 /* 스르륵 슬라이드 인 */
@@ -952,8 +962,10 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* 닫힐 때 페이드 아웃 */
-[data-sonner-toast][data-removed="true"] {
-  animation: bflow-toast-fade-out 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+@media (prefers-reduced-motion: no-preference) {
+  [data-sonner-toast][data-removed="true"] {
+    animation: bflow-toast-fade-out 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+  }
 }
 @keyframes bflow-toast-fade-out {
   to { opacity: 0; transform: scale(0.95); }
@@ -969,7 +981,11 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 4px 12px !important;
   border-radius: 6px !important;
   white-space: nowrap !important;
-  transition: background 0.15s, border-color 0.15s !important;
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-sonner-toast] [data-button] {
+    transition: background 0.15s, border-color 0.15s !important;
+  }
 }
 [data-sonner-toast] [data-button]:hover {
   background: rgb(var(--color-accent) / 0.22) !important;
@@ -981,7 +997,11 @@ input[type="range"]::-webkit-slider-thumb {
   background: rgb(var(--color-bg-border) / 0.2) !important;
   border: 1px solid rgb(var(--color-bg-border) / 0.3) !important;
   color: rgb(var(--color-text-secondary)) !important;
-  transition: background 0.15s, color 0.15s !important;
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-sonner-toast] [data-close-button] {
+    transition: background 0.15s, color 0.15s !important;
+  }
 }
 [data-sonner-toast] [data-close-button]:hover {
   background: rgb(var(--color-bg-border) / 0.4) !important;

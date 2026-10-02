@@ -88,3 +88,110 @@
     --tw-translate-y: 0px;
   }
 }
+
+/* ═══ 움직임 설정 (움직임 폴리싱 바탕 B) ═══════════════════════════════════════
+   <html data-motion="full|lite|minimal"> — 값은 설정 › 효과 › 움직임(src/utils/motionLevel.ts).
+   - 'minimal'(최소): 윈도우 '애니메이션 효과 끄기'(동작 줄이기)와 같게. index.css 의 동작 줄이기 전역 규칙을
+     그대로 옮기고, 이 파일·index.css 의 동작 줄이기 전용 규칙도 함께 따른다.
+   - 'lite'(가볍게): 계속 반복되는 장식과 움직이는 흐림만 멈춘다. 창이 열리는 것 같은 짧은 반응은 남긴다.
+     '최소'와 OS 동작 줄이기에서도 같은 정지 모습을 쓴다(JS 쪽 useMotionPref().lite 와 같은 범위).
+   - 캔버스 배경·그래프 SMIL 처럼 CSS 로 못 멈추는 것은 useMotionPref().lite 로 컴포넌트가 직접 멈춘다. */
+
+/* '최소' 전역 규칙. :is(*, #bf-motion-minimal) 은 모든 요소에 맞으면서 특이도는 ID 1개라, 토스트·대시보드
+   위젯처럼 !important 로 전환을 지정한 규칙(클래스·속성 특이도)도 이긴다. */
+html[data-motion='minimal'],
+html[data-motion='minimal'] :is(*, #bf-motion-minimal),
+html[data-motion='minimal'] :is(*, #bf-motion-minimal)::before,
+html[data-motion='minimal'] :is(*, #bf-motion-minimal)::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* '최소': 동작 줄이기 전용 규칙과 같게 — 카드 떠오름·누름 축소를 뺀다. */
+html[data-motion='minimal'] .bf-card-hover:hover {
+  translate: none;
+}
+html[data-motion='minimal'] .scene-card-interactive:hover {
+  --tw-translate-y: 0px;
+}
+html[data-motion='minimal'] .bf-press:active:not(:disabled) {
+  transform: none;
+}
+
+/* '가볍게' 이상: 숨 쉬듯 계속 빛나는 장식을 멈춘다(동작 줄이기 블록과 같은 정지 모습).
+   배지·막대 자체는 그대로 보이고 깜빡임만 멈춘다. */
+:root:is([data-motion='lite'], [data-motion='minimal']) .comment-unread-badge,
+:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-peak-pulse,
+:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-update-progress-pulse,
+:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-update-latest-card::before,
+:root:is([data-motion='lite'], [data-motion='minimal']) .bell-glow-soft::after,
+:root:is([data-motion='lite'], [data-motion='minimal']) .bell-glow-mention::after,
+:root:is([data-motion='lite'], [data-motion='minimal']) .scene-num-glow-wrap::before,
+:root:is([data-motion='lite'], [data-motion='minimal']) .scene-num-glow-text,
+:root:is([data-motion='lite'], [data-motion='minimal']) .editing-beam::before,
+:root:is([data-motion='lite'], [data-motion='minimal']) .editing-beam-modal::before,
+:root:is([data-motion='lite'], [data-motion='minimal']) .editing-namelabel::before,
+:root:is([data-motion='lite'], [data-motion='minimal']) .editing-namelabel__dot,
+:root:is([data-motion='lite'], [data-motion='minimal']) tr.editing-beam-row > td:first-child::after {
+  animation: none !important;
+}
+/* 알림 종의 은은한 빛: 숨쉬기 중간 밝기로 멈춘다(그대로 두면 가장 밝은 빛이 계속 켜져 있다). */
+:root:is([data-motion='lite'], [data-motion='minimal']) .bell-glow-soft::after {
+  opacity: 0.6;
+}
+:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-badge-pulse {
+  animation: none !important;
+  box-shadow: 0 0 8px 2px rgba(253, 203, 110, 0.4);
+}
+:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-bulk-bar-pulse {
+  animation: none !important;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.45),
+    0 0 24px 4px rgb(var(--color-accent) / 0.3);
+}
+:root:is([data-motion='lite'], [data-motion='minimal']) tr.editing-beam-row {
+  animation: none !important;
+  box-shadow: inset 0 0 0 1.5px rgba(167, 139, 250, 0.55);
+}
+/* 진행 막대 위를 훑는 반사광은 멈추면 한쪽 끝에 얼룩처럼 남으니 숨긴다. */
+:root:is([data-motion='lite'], [data-motion='minimal']) .scene-top-progress-fill::after {
+  animation: none !important;
+  opacity: 0;
+}
+
+/* '가볍게' 이상: 움직이며 뜨는 알림 카드 뒤의 흐림을 뺀다(바탕이 92% 불투명이라 눈에는 거의 같다). */
+:root:is([data-motion='lite'], [data-motion='minimal']) [data-sonner-toaster] [data-sonner-toast].bflow-toast {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ─── 동기화 중 막대 (휴가 화면) ─────────────────────────────────────────────
+   얇은 막대가 왼쪽→오른쪽으로 훑는다. transform 만 움직여 합성 스레드에서 돈다(예전 framer x 값은 메인 스레드).
+   '가볍게'에서도 남긴다(장식이 아니라 기다리는 중이라는 표시). 동작 줄이기·'최소'는 가득 찬 옅은 막대로 멈춘다. */
+.bf-sync-sweep {
+  width: 40%;
+  height: 100%;
+  border-radius: 9999px;
+  transform: translateX(-100%);
+  animation: bf-sync-sweep 1.2s ease-in-out infinite;
+}
+@keyframes bf-sync-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bf-sync-sweep {
+    width: 100%;
+    transform: none;
+    opacity: 0.55;
+    animation: none;
+  }
+}
+html[data-motion='minimal'] .bf-sync-sweep {
+  width: 100%;
+  transform: none;
+  opacity: 0.55;
+  animation: none;
+}

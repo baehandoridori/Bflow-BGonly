@@ -6,6 +6,8 @@ import {
   type BflowStarNestSettings,
 } from '@/utils/starNestSettings';
 import { cn } from '@/utils/cn';
+import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
+import { createFrameLoop } from '@/utils/frameLoop';
 
 interface BflowStar {
   x: number;
@@ -74,7 +76,6 @@ export function BflowStarNestBackground({
   style?: CSSProperties;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef(0);
   const colorMode = useAppStore((s) => s.colorMode);
   const resolvedScheme = scheme ?? colorMode;
   const settings = normalizeBflowStarNestSettings(settingsOverride ?? DEFAULT_BFLOW_STAR_NEST_SETTINGS);
@@ -82,6 +83,8 @@ export function BflowStarNestBackground({
   const schemeRef = useRef(resolvedScheme);
   settingsRef.current = settings;
   schemeRef.current = resolvedScheme;
+  // 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다. 멈춘 동안 설정·밝기 모드가 바뀌면 한 장을 다시 그린다.
+  const { loopRef, stillRef } = useBackgroundLoopGate(`${resolvedScheme}|${JSON.stringify(settings)}`);
 
   useEffect(() => {
     if (!enabled) return;
@@ -121,6 +124,8 @@ export function BflowStarNestBackground({
           tint: i % 3,
         });
       }
+      // 크기를 바꾸면 캔버스가 지워진다 — 멈춘 상태면 한 장을 다시 그린다.
+      loopRef.current?.invalidate();
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -187,12 +192,10 @@ export function BflowStarNestBackground({
       lastPointerEvent = { x: event.clientX, y: event.clientY, time: now };
     };
 
-    const draw = (now: number) => {
+    const draw = (now: number): boolean => {
       const rect = canvas.getBoundingClientRect();
-      if (!rect.width || !rect.height) {
-        rafRef.current = requestAnimationFrame(draw);
-        return;
-      }
+      // 아직 크기가 없으면 '못 그림' — 멈춤 상태라도 루프가 다음 프레임에 다시 부른다.
+      if (!rect.width || !rect.height) return false;
 
       const current = settingsRef.current;
       const intensity = Math.pow(Math.max(0, Math.min(1, current.intensity)), 0.72);
@@ -479,7 +482,7 @@ export function BflowStarNestBackground({
       }
 
       ctx.globalCompositeOperation = 'source-over';
-      rafRef.current = requestAnimationFrame(draw);
+      return true;
     };
 
     const stopMouseFlow = () => {
@@ -500,10 +503,13 @@ export function BflowStarNestBackground({
     window.addEventListener('resize', resize);
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     window.addEventListener('mouseleave', stopMouseFlow);
-    rafRef.current = requestAnimationFrame(draw);
+    // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
+    const loop = createFrameLoop(draw, { still: stillRef.current });
+    loopRef.current = loop;
 
     return () => {
-      cancelAnimationFrame(rafRef.current);
+      loop.dispose();
+      loopRef.current = null;
       window.removeEventListener('resize', resize);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('mouseleave', stopMouseFlow);

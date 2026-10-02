@@ -1,17 +1,26 @@
 /* ── 토스 스타일 위젯 인터랙션 애니메이션 ── */
 
-/* 기본 아이템: 부드러운 transition (밀려나는 위젯) */
-.react-grid-item {
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.2s ease,
-              opacity 0.2s ease !important;
+/* 움직임 폴리싱 바탕 B: 아래 !important 전환은 특이도가 높아 동작 줄이기 전역 규칙(*, 0.01ms !important)을
+   이긴다. 그래서 전환은 동작 줄이기가 아닐 때만 적용한다('움직임: 최소'는 motion-foundation.css 의 ID 특이도
+   규칙이 이긴다). 겹침 순서·투명도처럼 움직임이 아닌 값은 그대로 둔다. */
+@media (prefers-reduced-motion: no-preference) {
+  /* 기본 아이템: 부드러운 transition (밀려나는 위젯) */
+  .react-grid-item {
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.2s ease,
+                opacity 0.2s ease !important;
+  }
+
+  /* 드래그 중인 아이템 */
+  .react-grid-item.react-draggable-dragging {
+    transition: box-shadow 0.15s ease !important;
+  }
 }
 
 /* 드래그 중인 아이템 */
 .react-grid-item.react-draggable-dragging {
   z-index: 100 !important;
   opacity: 0.95 !important;
-  transition: box-shadow 0.15s ease !important;
 }
 
 /* 리사이즈 중인 아이템 */
@@ -32,6 +41,8 @@
 }
 
 /* ── 안착 spring bounce (settle 후 위젯) ── */
-.widget-settling {
-  transition: all 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+@media (prefers-reduced-motion: no-preference) {
+  .widget-settling {
+    transition: all 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  }
 }

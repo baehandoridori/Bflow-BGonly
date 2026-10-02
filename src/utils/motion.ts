@@ -1,4 +1,5 @@
 import type { BezierDefinition, Target, TargetAndTransition, Transition } from 'framer-motion';
+import { isMinimalMotionInDom } from './motionLevel.ts';
 
 /* ═══════════════════════════════════════════════════════════════
    움직임 공통 박자 (움직임 폴리싱 바탕 A, 2026-10)
@@ -18,7 +19,8 @@ import type { BezierDefinition, Target, TargetAndTransition, Transition } from '
    - '동작 줄이기'는 MotionConfig 가 transform 문자열·WAAPI 를 막지 못한다. 프리셋을 고를 때
      useMotionPref().reduce 를 넘겨 opacity 만 쓰는 변형을 받는다.
 
-   node --test 가 그대로 import 하도록 런타임 의존이 없다(@/ 별칭·외부 패키지 X, 타입 import 만).
+   node --test 가 그대로 import 하도록 런타임 의존이 없다(@/ 별칭·외부 패키지 X — 같은 폴더의 .ts 상대 import 와
+   타입 import 만).
    ═══════════════════════════════════════════════════════════════ */
 
 export type MotionSpeed = 'fast' | 'base' | 'slow';
@@ -180,8 +182,12 @@ export function motionPreset(name: MotionPresetName, reduce: boolean): MotionPre
 
 /* ─── WAAPI 도우미 ────────────────────────────────────────────── */
 
-/** OS '동작 줄이기'. 창이 없는 환경(테스트·메인 프로세스)에서는 false. React 안에서는 useMotionPref 를 쓴다. */
+/**
+ * OS '동작 줄이기' 또는 앱 설정 '움직임: 최소'(<html data-motion="minimal">).
+ * 창이 없는 환경(테스트·메인 프로세스)에서는 false. React 안에서는 useMotionPref 를 쓴다.
+ */
 export function prefersReducedMotion(): boolean {
+  if (isMinimalMotionInDom()) return true;
   try {
     return typeof window !== 'undefined'
       && typeof window.matchMedia === 'function'

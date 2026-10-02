@@ -1,4 +1,5 @@
 import { useCallback, useRef, useEffect, useState } from 'react';
+import { useReducedMotion } from 'framer-motion';
 import { Sparkles, RotateCcw, ChevronDown, Shuffle } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { useAppStore } from '@/stores/useAppStore';
@@ -7,6 +8,11 @@ import { cn } from '@/utils/cn';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
 import { EffectLayoutDesigner } from './EffectLayoutDesigner';
+import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
+import { useMotionLevel } from '@/hooks/useMotionPref';
+import { createFrameLoop } from '@/utils/frameLoop';
+import { saveMotionLevel } from '@/services/motionLevelSync';
+import type { MotionLevel } from '@/utils/motionLevel';
 import {
   DEFAULT_BACKGROUND_ART,
   DEFAULT_BFLOW_STAR_NEST_SETTINGS,
@@ -120,7 +126,8 @@ interface PreviewProps {
 
 function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseForce, glowIntensity, connectionDist, dense }: PreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef(0);
+  // 실제 배경과 같게: 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다(설정을 바꾸면 다시 그림).
+  const { stillRef, loopRef } = useBackgroundLoopGate(`${particleCount}|${dense}|${glowIntensity}|${connectionDist}`);
   const particlesRef = useRef<MiniParticle[]>([]);
   const mouseRef = useRef({ x: -9999, y: -9999 });
   const settingsRef = useRef({ speed, mouseRadius, mouseForce, glowIntensity, connectionDist });
@@ -131,7 +138,7 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
   targetRef.current = Math.max(6, Math.min(Math.round(particleCount / factor), 100));
 
   useEffect(() => {
-    if (!enabled) { cancelAnimationFrame(rafRef.current); return; }
+    if (!enabled) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -162,7 +169,7 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
     let lastTime = 0;
     const TARGET_FRAME_MS = 1000 / 60;
 
-    const animate = (timestamp: number) => {
+    const animate = (timestamp: number): boolean => {
       const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
       lastTime = timestamp;
       const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3);
@@ -256,12 +263,16 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
         ctx.fill();
       }
 
-      rafRef.current = requestAnimationFrame(animate);
+      // 입자 수를 프레임마다 조금씩 맞추는 중이면 아직 다 그린 게 아니다(멈춤 상태라도 다음 프레임에 이어 그림).
+      return ps.length === target;
     };
 
-    rafRef.current = requestAnimationFrame(animate);
+    // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
+    const loop = createFrameLoop(animate, { still: stillRef.current });
+    loopRef.current = loop;
     return () => {
-      cancelAnimationFrame(rafRef.current);
+      loop.dispose();
+      loopRef.current = null;
       canvas.removeEventListener('mousemove', onMouseMove);
       canvas.removeEventListener('mouseleave', onMouseLeave);
     };
@@ -808,6 +819,7 @@ function SegmentedButton<T extends string>({
         <button
           key={option.value}
           type="button"
+          aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
             'px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer',
@@ -822,6 +834,19 @@ function SegmentedButton<T extends string>({
     </div>
   );
 }
+
+/* ── 움직임 설정 (움직임 폴리싱 바탕 B 2단계) ── */
+const MOTION_LEVEL_OPTIONS: Array<{ value: MotionLevel; label: string }> = [
+  { value: 'full', label: '기본' },
+  { value: 'lite', label: '가볍게' },
+  { value: 'minimal', label: '최소' },
+];
+
+const MOTION_LEVEL_HINTS: Record<MotionLevel, string> = {
+  full: '창이 열리고 카드가 자리 잡는 움직임과 배경 효과를 모두 보여줘요.',
+  lite: '대시보드 배경처럼 계속 움직이는 장식은 멈추고, 창이 열리는 것 같은 짧은 움직임만 남겨요. 느린 PC 에 좋아요.',
+  minimal: "움직임을 거의 끄고 바로 바뀌게 해요. 윈도우의 '애니메이션 효과' 끄기와 같아요.",
+};
 
 async function persistPlexus(plexus: typeof DEFAULTS) {
   const existing = await loadPreferences() ?? {};
@@ -851,6 +876,8 @@ export function EffectsSection() {
   const setPlexusSettings = useAppStore((s) => s.setPlexusSettings);
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const setCompletionTintEnabled = useAppStore((s) => s.setCompletionTintEnabled);
+  const motionLevel = useMotionLevel();
+  const osReducedMotion = useReducedMotion() === true;
   const [showAdvanced, setShowAdvanced] = useState(false);
   const allowLayoutDesigner = isCodexPreviewLayoutDraft();
   const [showLayoutDesigner, setShowLayoutDesigner] = useState(() => isCodexPreviewLayoutDraft());
@@ -1037,6 +1064,36 @@ export function EffectsSection() {
 
       {/* 전체 화면 그라데이션 배경 (모든 뷰 공통) */}
       <div className="mb-5 pb-4 border-b border-bg-border/30">
+        {/* 움직임: 기본 / 가볍게 / 최소 — 이 PC 에만 저장되고 열린 창(플로팅 위젯 포함)에 바로 적용된다 */}
+        <div className="flex items-center justify-between gap-4 mb-4 pb-4 border-b border-bg-border/30">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-text-primary">움직임</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">{MOTION_LEVEL_HINTS[motionLevel]}</p>
+            {osReducedMotion && motionLevel !== 'minimal' && (
+              <p className="text-[11px] text-text-secondary/60 mt-0.5">
+                지금 윈도우에서 애니메이션 효과가 꺼져 있어서 &lsquo;최소&rsquo;처럼 움직여요.
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2" role="group" aria-label="움직임">
+            {motionLevel !== 'full' && (
+              <button
+                type="button"
+                onClick={() => { void saveMotionLevel('full'); }}
+                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+                title="기본값 (기본)"
+              >
+                <RotateCcw size={11} />
+              </button>
+            )}
+            <SegmentedButton
+              value={motionLevel}
+              options={MOTION_LEVEL_OPTIONS}
+              onChange={(level) => { void saveMotionLevel(level); }}
+            />
+          </div>
+        </div>
+
         <div className="flex items-center justify-between gap-4 mb-4 pb-4 border-b border-bg-border/30">
           <div>
             <p className="text-sm font-medium text-text-primary">씬 완료 색상 표시</p>

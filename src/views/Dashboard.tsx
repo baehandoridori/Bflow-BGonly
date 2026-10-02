@@ -33,6 +33,8 @@ import { cn } from '@/utils/cn';
 import { getPreset } from '@/themes';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
+import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
+import { createFrameLoop } from '@/utils/frameLoop';
 import {
   normalizeDashboardStarNestBlurPx,
   normalizeDashboardStarNestOpacity,
@@ -58,6 +60,12 @@ function DashboardPlexus() {
   const plexusSettings = useAppStore((s) => s.plexusSettings);
   const dashEnabled = plexusSettings.dashboardEnabled;
   const ptCount = plexusSettings.dashboardParticleCount || DEFAULT_DASH_PT_COUNT;
+  // 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다. 멈춘 동안 색·모양 설정이 바뀌면 한 장을 다시 그린다.
+  const themeId = useAppStore((s) => s.themeId);
+  const customThemeColors = useAppStore((s) => s.customThemeColors);
+  const { stillRef, loopRef } = useBackgroundLoopGate(
+    `${themeId}|${customThemeColors ? JSON.stringify(customThemeColors) : ''}|${plexusSettings.glowIntensity}|${plexusSettings.connectionDist}`,
+  );
 
   // 커스텀 설정 ref (애니메이션 루프 재시작 없이 즉시 반영, 대시보드 기본값 대비 비례 스케일)
   const cfgRef = useRef({
@@ -111,6 +119,8 @@ function DashboardPlexus() {
           };
         });
       }
+      // 크기를 바꾸면 캔버스가 지워진다 — 멈춘 상태면 한 장을 다시 그린다.
+      loopRef.current?.invalidate();
     };
     resize();
     window.addEventListener('resize', resize);
@@ -119,12 +129,10 @@ function DashboardPlexus() {
     };
     window.addEventListener('mousemove', onMouse, { passive: true });
 
-    let running = true;
     let lastTime = 0;
     const TARGET_FRAME_MS = 1000 / 60;
 
     const animate = (timestamp: number) => {
-      if (!running) return;
       const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
       lastTime = timestamp;
       const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3);
@@ -198,10 +206,16 @@ function DashboardPlexus() {
         ctx.fillStyle = `rgba(${r},${g},${b},${glowAlpha * 0.9})`;
         ctx.fill();
       }
-      requestAnimationFrame(animate);
     };
-    requestAnimationFrame(animate);
-    return () => { running = false; window.removeEventListener('resize', resize); window.removeEventListener('mousemove', onMouse); };
+    // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
+    const loop = createFrameLoop(animate, { still: stillRef.current });
+    loopRef.current = loop;
+    return () => {
+      loop.dispose();
+      loopRef.current = null;
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('mousemove', onMouse);
+    };
   }, [dashEnabled, ptCount]);
 
   if (!dashEnabled) return null;
