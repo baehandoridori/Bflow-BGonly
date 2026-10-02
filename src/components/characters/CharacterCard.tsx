@@ -90,10 +90,11 @@ export const CharacterCard = memo(function CharacterCard({
       onContextMenu={(event) => onContextMenu(character.id, event, shown?.id)}
       style={{ ...(imageHeightPx ? { width: Math.round(imageHeightPx * 3 / 4) } : null), overflow: 'visible' }}
       className={cn(
-        'group relative text-left bg-bg-card border border-bg-border rounded-xl hover:border-accent/50 flex flex-col cursor-pointer',
+        'group relative text-left bg-bg-card border border-bg-border rounded-xl flex flex-col cursor-pointer',
         // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만, 복장 유니온). 씬 카드와 동일 패턴.
         editingBeamClass(presenceEditors.length > 0, presenceWarn),
-        'transition-[transform,opacity,border-color] duration-200 ease-out motion-reduce:transition-none',
+        // 누를 수 있는 카드 hover(2px 떠오름·밝은 테두리·그림자) + 끌기 축소·흐림·드롭 테두리 전환을 함께 정한다.
+        'bf-card-hover',
         // 드래그 중 소스는 살짝 작아지며 흐려져 "고스트로 들려 나갔다"는 느낌을 준다.
         dragging ? 'opacity-30 scale-[0.97] motion-reduce:scale-100' : 'scale-100',
         dropTarget && !dragging && 'border-accent/60',

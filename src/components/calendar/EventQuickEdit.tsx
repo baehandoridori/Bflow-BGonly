@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { getTagCanonicalSnapshot, isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
-import { floatingGlassStyle } from '@/utils/glassStyles';
+import { floatingSolidStyle } from '@/utils/glassStyles';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 import { isGanttMilestone, isGanttProjection } from '@/utils/calendarGantt';
 import { CalendarDateRangePicker, CalendarTimeInput, CalendarDurationButtons } from './inputs';
@@ -404,7 +404,7 @@ export function EventQuickEdit({
         transition={{ duration: 0.15 }}
         className="fixed z-[1000]"
         style={{
-          ...floatingGlassStyle,
+          ...floatingSolidStyle,
           left: adjusted.x,
           top: adjusted.y,
           width: 340,

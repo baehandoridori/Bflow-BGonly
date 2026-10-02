@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
 import type { Activity, ActionType, Episode } from '@/types';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { prefersReducedMotion } from '@/utils/motion';
 import { groupActivities, formatRelativeTime, getActivityVerb } from './utils';
 import { ACTION_TYPE_COLOR, ACTION_TYPE_TO_GROUP } from './constants';
 import {
@@ -355,7 +356,8 @@ export function ActivityFeed() {
     if (!cellFilter) return;
     // 다음 tick 에 scroll (DOM 그려진 후)
     const t = setTimeout(() => {
-      firstHighlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 동작 줄이기·움직임 '최소'면 미끄러지지 않고 바로 맞춘다(JS 의 behavior:'smooth' 는 CSS 전역 규칙이 못 막는다).
+      firstHighlightRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
     }, 80);
     return () => clearTimeout(t);
   }, [cellFilter, feedItems]);

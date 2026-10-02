@@ -135,8 +135,8 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
     <div
       className={cn(
         'rounded-xl border border-bg-border/50 bg-bg-card overflow-hidden',
-        'transition-[box-shadow,border-color] duration-200 ease-out',
-        'hover:shadow-md hover:shadow-black/15 hover:border-bg-border/80',
+        // 정보 카드 hover: 테두리만 밝아짐(카드 전체를 누르지 않고 안의 '씬 목록'만 누른다)
+        'bf-card-hover bf-card-hover--info',
       )}
     >
       {/* 헤더 */}

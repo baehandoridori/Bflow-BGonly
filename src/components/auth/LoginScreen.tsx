@@ -9,6 +9,8 @@ import { cn } from '@/utils/cn';
 import { useCapsLockWarning } from '@/hooks/useCapsLockWarning';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
+import { useBackgroundLoopGate } from '@/hooks/useBackgroundLoopGate';
+import { createFrameLoop, type FrameInfo } from '@/utils/frameLoop';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -106,13 +108,19 @@ function PlexusBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
   const mouseRef = useRef({ x: -9999, y: -9999 });
-  const rafRef = useRef(0);
   const sizeRef = useRef({ w: 0, h: 0 });
   const noiseRef = useRef<HTMLCanvasElement | null>(null);
 
   const plexusSettings = useAppStore((s) => s.plexusSettings);
   const loginEnabled = plexusSettings.loginEnabled;
   const particleCount = plexusSettings.loginParticleCount || DEFAULT_LOGIN_PARTICLE_COUNT;
+  // 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다. 멈춘 동안 색·모양 설정이 바뀌면 한 장을 다시 그린다.
+  const themeId = useAppStore((s) => s.themeId);
+  const colorMode = useAppStore((s) => s.colorMode);
+  const customThemeColors = useAppStore((s) => s.customThemeColors);
+  const { loopRef, loopOptions } = useBackgroundLoopGate(
+    `${themeId}|${colorMode}|${customThemeColors ? JSON.stringify(customThemeColors) : ''}|${plexusSettings.glowIntensity}|${plexusSettings.connectionDist}`,
+  );
 
   // 커스터마이징 가능한 설정을 ref로 관리 (애니메이션 루프 재시작 없이 즉시 반영)
   const plexusCfgRef = useRef({
@@ -171,6 +179,8 @@ function PlexusBackground() {
         particlesRef.current = Array.from({ length: particleCount }, () => createParticle(VIRTUAL_W, VIRTUAL_H, plexusColors));
       }
       // 리사이즈: 파티클 위치 변경 없음 — 창을 통해 보는 느낌
+      // 크기를 바꾸면 캔버스가 지워진다 — 멈춘 상태면 한 장을 다시 그린다.
+      loopRef.current?.invalidate();
     };
 
     resize();
@@ -179,15 +189,11 @@ function PlexusBackground() {
     const onMouse = (e: MouseEvent) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
     window.addEventListener('mousemove', onMouse, { passive: true });
 
-    let running = true;
-    let lastTime = 0;
     const TARGET_FRAME_MS = 1000 / 60;
 
-    const animate = (timestamp: number) => {
-      if (!running) return;
-      const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
-      lastTime = timestamp;
-      const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3); // cap at 3x (최소 ~20fps)
+    // info.dtMs: 실제 경과 × 움직임 배율(초당 30장 상한, 창을 떠나면 서서히 멈춤 — 루프 문지기)
+    const animate = (_now: number, info: FrameInfo) => {
+      const dtFactor = Math.min(info.dtMs / TARGET_FRAME_MS, 3); // cap at 3x
 
       // 매 프레임 최신 팔레트 조회 → 테마 변경 시 즉시 색 반영
       const palette = getPlexusColors();
@@ -325,13 +331,14 @@ function PlexusBackground() {
           }
         }
       }
-      rafRef.current = requestAnimationFrame(animate);
     };
 
-    rafRef.current = requestAnimationFrame(animate);
+    // 다음 프레임 예약은 루프가 맡는다(멈춤 상태면 이 한 장으로 끝).
+    const loop = createFrameLoop(animate, loopOptions());
+    loopRef.current = loop;
     return () => {
-      running = false;
-      cancelAnimationFrame(rafRef.current);
+      loop.dispose();
+      loopRef.current = null;
       window.removeEventListener('resize', resize);
       window.removeEventListener('mousemove', onMouse);
     };

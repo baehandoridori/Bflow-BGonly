@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useActivityStore } from '@/stores/useActivityStore';
+import { useMotionPref } from '@/hooks/useMotionPref';
 import { dayLabel, addGroupedCount, EMPTY_GROUPED_COUNT, type GroupedCount } from './utils';
 
 export interface BarHoverInfo {
@@ -220,6 +221,8 @@ function LineAreaChart({ mode, buckets, totals, max, peakIdx, onBarHover, toolti
   };
 
   const xLabels: number[] = mode === 'hour' ? [0, 6, 12, 18] : [0, 1, 2, 3, 4, 5, 6];
+  // 정점 펄스는 계속 반복되는 장식 — 동작 줄이기·움직임 '가볍게' 이상이면 은은한 빛 고리로 멈춘다(SMIL 은 CSS 로 못 막는다).
+  const { lite } = useMotionPref();
 
   return (
     <div className="relative" style={{ height: '160px' }}>
@@ -248,8 +251,12 @@ function LineAreaChart({ mode, buckets, totals, max, peakIdx, onBarHover, toolti
         {peakIdx >= 0 && totals[peakIdx] > 0 && (
           <g transform={`translate(${points[peakIdx].x.toFixed(1)},${points[peakIdx].y.toFixed(1)})`}>
             <circle r="6" fill="#FDCB6E" opacity="0.35">
-              <animate attributeName="r" values="6;14;6" dur="1.6s" repeatCount="indefinite" />
-              <animate attributeName="opacity" values="0.35;0.05;0.35" dur="1.6s" repeatCount="indefinite" />
+              {!lite && (
+                <>
+                  <animate attributeName="r" values="6;14;6" dur="1.6s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.35;0.05;0.35" dur="1.6s" repeatCount="indefinite" />
+                </>
+              )}
             </circle>
             <circle r="4.5" fill="#FFE5A0" stroke="#FDCB6E" strokeWidth="1.5" />
           </g>

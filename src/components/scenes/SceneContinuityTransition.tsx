@@ -1,5 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 
+import { prefersReducedMotion } from '@/utils/motion';
+
 interface SceneContinuityTransitionProps {
   sourceElement: HTMLElement | null;
   targetRootRef: RefObject<HTMLElement>;
@@ -33,9 +35,10 @@ export function SceneContinuityTransition({
 
   useEffect(() => {
     const targetRoot = targetRootRef.current;
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // 윈도우 동작 줄이기뿐 아니라 설정 › 효과 › 움직임 '최소'도 확대 전환을 건너뛴다(움직임 폴리싱 바탕 B).
+    const reduce = prefersReducedMotion();
 
-    if (!sourceElement || !targetRoot || prefersReducedMotion) {
+    if (!sourceElement || !targetRoot || reduce) {
       onComplete?.();
       return;
     }

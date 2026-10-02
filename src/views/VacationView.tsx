@@ -658,15 +658,10 @@ export function VacationView() {
       className="h-full flex flex-col overflow-hidden"
     >
       {/* ════════ 동기화 로딩 바 ════════ */}
+      {/* 훑는 움직임은 CSS(.bf-sync-sweep, motion-foundation.css) — 합성 스레드에서 돌고 동작 줄이기·'최소'면 멈춘다 */}
       {syncing && (
         <div className="shrink-0 h-0.5 w-full bg-bg-border/30 overflow-hidden">
-          <motion.div
-            className="h-full rounded-full"
-            style={{ background: VACATION_COLOR }}
-            initial={{ x: '-100%', width: '40%' }}
-            animate={{ x: '250%' }}
-            transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
-          />
+          <div className="bf-sync-sweep" style={{ background: VACATION_COLOR }} />
         </div>
       )}
 

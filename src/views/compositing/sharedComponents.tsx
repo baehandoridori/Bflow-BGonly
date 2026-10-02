@@ -6,7 +6,7 @@ import { ChevronDown, Clock, Circle, Check } from 'lucide-react';
 import { getUserColor } from '@/utils/userColor';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/constants/revision';
-import { floatingGlassStyle } from '@/utils/glassStyles';
+import { floatingSolidStyle } from '@/utils/glassStyles';
 import type { CompRevision, RevisionStatus, RevisionPriority } from '@/types';
 import { getInitials } from './utils';
 
@@ -144,7 +144,7 @@ export function StatusDropdown({
             exit={{ opacity: 0, y: -4, scale: 0.95 }}
             transition={{ duration: 0.15 }}
             className="absolute right-0 top-full mt-1 z-20 rounded-lg overflow-hidden border border-bg-border shadow-xl"
-            style={floatingGlassStyle}
+            style={floatingSolidStyle}
           >
             {options.filter(s => s !== currentStatus).map((s) => {
               const cfg = STATUS_CONFIG[s];

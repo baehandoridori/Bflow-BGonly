@@ -66,6 +66,8 @@ import './styles/motion-live-drag.css';
 import './styles/motion-popups-panels.css';
 import './styles/motion-view-transition.css';
 import { hasUsableElectronAPI, installDevElectronAPI } from './mocks/devElectronAPI';
+import { AppMotionConfig } from './components/common/AppMotionConfig';
+import { startMotionLevelSync } from './services/motionLevelSync';
 
 function shouldInstallBrowserElectronMock(): boolean {
   if (hasUsableElectronAPI(window.electronAPI)) return false;
@@ -81,6 +83,9 @@ async function bootstrap() {
     installDevElectronAPI();
   }
 
+  // 앱 설정 '움직임'(기본/가볍게/최소)을 <html data-motion> 에 맞추고 다른 창의 변경도 받는다.
+  startMotionLevelSync();
+
   // 해시로 위젯 팝업 모드 감지: #widget-popup/{widgetId}?key=val
   const hash = window.location.hash;
   const popupMatch = hash.match(/^#widget-popup\/([^?]+)(\?.*)?$/);
@@ -95,13 +100,16 @@ async function bootstrap() {
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      {popupMatch ? (
-        <WidgetPopup widgetId={decodeURIComponent(popupMatch[1])} extraParams={popupParams} />
-      ) : PreviewApp ? (
-        <PreviewApp />
-      ) : (
-        <App />
-      )}
+      {/* 움직임 폴리싱 바탕 B: 동작 줄이기(OS)·'움직임: 최소'를 framer 움직임 전체가 따르게 */}
+      <AppMotionConfig>
+        {popupMatch ? (
+          <WidgetPopup widgetId={decodeURIComponent(popupMatch[1])} extraParams={popupParams} />
+        ) : PreviewApp ? (
+          <PreviewApp />
+        ) : (
+          <App />
+        )}
+      </AppMotionConfig>
     </React.StrictMode>
   );
 }

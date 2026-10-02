@@ -522,7 +522,7 @@ export function WeekTimeGridView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-bg-border/40 bg-bg-primary/50">
-      <div className="sticky top-0 z-30 border-b border-bg-border/40 bg-bg-primary/95 backdrop-blur">
+      <div className="sticky top-0 z-30 border-b border-bg-border/40 bg-bg-primary/[0.97]">
         <div className="grid" style={{ gridTemplateColumns: dayColumns }}>
           <div aria-hidden="true" />
           {dates.map((date, index) => {

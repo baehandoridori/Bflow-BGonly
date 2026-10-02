@@ -69,9 +69,10 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
     <div
       className={cn(
         'border border-bg-border/30 rounded-2xl flex flex-col h-full overflow-hidden',
-        'shadow-sm',
-        'hover:shadow-lg hover:border-bg-border/50',
-        'transition-all duration-200 ease-out',
+        // 정보 카드 hover: 테두리만 밝아짐(미리 그린 고리의 opacity). 그림자는 아래 인라인 boxShadow 가 정하므로
+        // shadow-*·hover:shadow-* 유틸은 효과가 없다. 테마 전환 때 바탕·테두리 색만 부드럽게 바뀐다.
+        'bf-card-hover bf-card-hover--info',
+        'transition-colors duration-base',
         className
       )}
       style={{

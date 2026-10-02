@@ -6,6 +6,7 @@
 import type { WidgetLayoutItem } from '@/types';
 import type { ThemeConfig } from '@/themes';
 import type { BackgroundArt, BflowStarNestSettings, StarNestSettings } from '@/utils/starNestSettings';
+import type { MotionLevel } from '@/utils/motionLevel';
 
 const LAYOUT_FILE = 'layout.json';
 const ALL_LAYOUT_FILE = 'layout-all.json';
@@ -133,6 +134,9 @@ export interface UserPreferences {
     loginBflowStarNest?: Partial<BflowStarNestSettings>;
     dashboardBflowStarNest?: Partial<BflowStarNestSettings>;
   };
+
+  // 움직임 폴리싱(2026-10): 앱 안 '움직임' 설정. 'full'(기본) | 'lite'(가볍게) | 'minimal'(최소=동작 줄이기와 같게)
+  motionLevel?: MotionLevel;
 
   // Phase 8-4: 스플래시 건너뛰기
   skipLoadingSplash?: boolean;

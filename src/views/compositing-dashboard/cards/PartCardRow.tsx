@@ -6,6 +6,7 @@
  * - 그리드는 `flex-wrap` 으로 가로폭에 따라 자동 줄바꿈 — 가로 스크롤 X.
  * - 호버 dock-lift 는 마우스 (X, Y) 와 카드 중심 거리 (2D) 로 계산해 한 줄 안 인접 카드만 영향.
  *   여러 줄로 wrap 됐을 때 위/아래 줄 카드가 같이 들썩이는 누수 방지.
+ * - 거리는 들리지 않는 원래 자리 칸([data-scene-key])으로 잰다 — 들린 카드로 재면 떨린다(dockLift.ts).
  *
  * spec: 2026-05-21-compositing-dashboard-design.md (8.1~8.5, 13.2)
  */
@@ -13,21 +14,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CompositingState } from '@/types';
 import { isCompletedStatus } from '@/utils/compositingLabels';
+import { prefersReducedMotion } from '@/utils/motion';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { compositingKey } from '@/stores/useDataStore';
 import type { CardScene } from '../cardSceneHelpers';
 import { PartHeader } from './PartHeader';
 import { SceneCard } from './SceneCard';
-
-const DOCK_MAX_DIST = 200; // px — 마우스 중심에서 이 거리 안 카드만 lift (한솔 보고: 변화 폭 더 넓게 → 떨림 줄임)
-const DOCK_LIFT = -10; // px (이전 -14 → -10 으로 lift 폭 줄임, 떨림 안정)
-const DOCK_SCALE = 0.05; // scale = 1 + DOCK_SCALE * lift
-// 같은 행으로 인정하는 수직 허용치
-const SAME_ROW_Y_THRESHOLD = 110;
-// smoothstep — 거리 → lift 곡선을 부드럽게 (가장자리 효과 약화 → 떨림 fix)
-function smoothstep(t: number): number {
-  return t * t * (3 - 2 * t);
-}
+import { dockTransform } from './dockLift';
 
 interface PartCardRowProps {
   partId: string;
@@ -95,6 +88,8 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (rafRef.current !== null) return;
+    // 동작 줄이기: 카드가 커서를 따라 들썩이지 않게 dock-lift 자체를 쓰지 않는다.
+    if (prefersReducedMotion()) return;
     const x = e.clientX;
     const y = e.clientY;
     rafRef.current = requestAnimationFrame(() => {
@@ -104,21 +99,9 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
       const cards = row.querySelectorAll<HTMLElement>('.scene-card');
       cards.forEach((card) => {
         if (card.classList.contains('pinned')) return; // pinned 카드는 별도 transform
-        const rect = card.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
-        // 수직 거리가 임계치 이상이면 같은 행 아님 → lift 0
-        if (Math.abs(y - cy) > SAME_ROW_Y_THRESHOLD) {
-          card.style.transform = '';
-          return;
-        }
-        const distance = Math.abs(x - cx);
-        // smoothstep 으로 거리→lift 변환 — 가장자리 떨림 fix (한솔 보고 2026-05-21).
-        const raw = Math.max(0, 1 - distance / DOCK_MAX_DIST);
-        const lift = smoothstep(raw);
-        const dy = lift * DOCK_LIFT;
-        const scale = 1 + lift * DOCK_SCALE;
-        card.style.transform = `translateY(${dy}px) scale(${scale.toFixed(3)})`;
+        // 판정은 들리지 않는 원래 자리 칸으로 — 들린 카드 자신을 재면 오를수록 중심이 옮겨 가 떨린다.
+        const slot = card.closest<HTMLElement>('[data-scene-key]') ?? card;
+        card.style.transform = dockTransform(slot.getBoundingClientRect(), x, y);
       });
     });
   }, []);
