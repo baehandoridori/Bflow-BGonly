@@ -95,6 +95,21 @@ import {
 } from '@/utils/commentSendReact';
 import { toast as sonnerToast } from 'sonner';
 import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { showUndoToast } from '@/components/common/UndoToast';
+import { EASE_CSS, animateEl } from '@/utils/motion';
+import { notificationRowShifts } from '@/utils/notificationArrival';
+import {
+  COMMENT_DELETE_EXIT_KEYFRAMES,
+  COMMENT_DELETE_EXIT_MS,
+  COMMENT_REFLOW_ANIMATION_ID,
+  COMMENT_REFLOW_EASING,
+  COMMENT_REFLOW_MS,
+  commentRestoreFade,
+  insertCommentByTime,
+  measureFlipRows,
+  withoutPendingDeletes,
+  type UndoWindow,
+} from '@/utils/undoDelete';
 import '@/styles/comment-panel.css';
 
 // ─── 타입 ───────────────────────────────────
@@ -215,6 +230,23 @@ interface UnsentCommentDraft {
 }
 interface UnsentComment extends UnsentCommentDraft {
   status: CommentSendStatus;
+}
+
+/**
+ * 움직임 폴리싱 20번: 휴지통을 누른 댓글 — 5초 동안 '되돌리기'를 기다렸다가(waiting) 서버에서 지운다(deleting).
+ * 이 동안 다시 불러온 목록에서도 빼서 실시간 재조회로 되살아나지 않게 한다. 서버에서 지워지면 목록에서 뺀다.
+ */
+interface PendingCommentDelete {
+  comment: SceneCommentWithSource;
+  /** deleteComment 에 넘기는 저장 키. */
+  targetKey: string;
+  /** 밀려나는 말풍선과 그 움직임 — 0.15초 안에 되돌리면 제자리로. */
+  element: HTMLElement | null;
+  exit: Animation | null;
+  /** 밀려난 뒤 목록에서 빼는 타이머(0.15초). */
+  collapseTimer: ReturnType<typeof setTimeout> | null;
+  phase: 'waiting' | 'deleting';
+  undoWindow: UndoWindow | null;
 }
 
 function cleanupDraftImages(images: AttachedImage[], context: string) {
@@ -572,9 +604,18 @@ export function CommentPanel({
   const [sendStatusById, setSendStatusById] = useState<ReadonlyMap<string, 'slow' | 'failed'>>(() => new Map());
   const unsentCommentsRef = useRef<Map<string, UnsentComment>>(new Map());
   const slowSendTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // 움직임 폴리싱 20번: 휴지통을 누른 뒤 되돌리기를 기다리거나 서버에서 지우는 중인 댓글(id → 정보).
+  const pendingDeletesRef = useRef<Map<string, PendingCommentDelete>>(new Map());
+  // 되돌린 말풍선은 떠오르지 않고 제자리에서 다시 나타난다(이 id 들만 등장 모양을 바꾼다).
+  const restoredCommentIdsRef = useRef<Set<string>>(new Set());
+  // 지운 자리로 아래 말풍선이 올라오는(되돌리면 비켜 주는) 미끄러짐 — 바뀌기 직전 위치와, 그때 숨길 말풍선.
+  const reflowBeforeRef = useRef<Map<string, number> | null>(null);
+  const reflowHideRef = useRef<HTMLElement[]>([]);
   // 반응을 처음 다 불러온 뒤에만 새 칩을 '톡' 한다(패널을 열 때 이미 있던 칩은 가만히).
   const [reactionsReady, setReactionsReady] = useState(false);
   const bubbleRise = commentBubbleRise(reduceMotion);
+  // 움직임 폴리싱 20번: 되돌린 말풍선은 떠오르지 않고 제자리에서 다시 나타난다.
+  const commentRestore = commentRestoreFade(reduceMotion);
   const [listContentNode, setListContentNode] = useState<HTMLDivElement | null>(null);
   const focusCommentIdRef = useRef<string | null>(focusCommentId ?? null);
   focusCommentIdRef.current = focusCommentId ?? null;
@@ -896,7 +937,9 @@ export function CommentPanel({
       // 움직임 폴리싱 19번: 아직 서버에 없는 내 댓글(보내는 중·보내지 못함)은 다시 불러와도 남긴다.
       // 서버에 이미 있으면 저장된 것 — '보내지 못했어요'였어도 표시만 지운다(올린 첨부는 그 댓글 것이라 그대로).
       const unsent = [...unsentCommentsRef.current.values()];
-      const { list, saved } = mergeUnsentComments(deduped, unsent.map((entry) => entry.comment));
+      const { list: mergedList, saved } = mergeUnsentComments(deduped, unsent.map((entry) => entry.comment));
+      // 움직임 폴리싱 20번: 휴지통을 누른 댓글은 서버에서 지워질 때까지 다시 불러와도 빼 둔다(되돌리면 그때 다시 넣는다).
+      const list = withoutPendingDeletes(mergedList, pendingDeletesRef.current);
       for (const id of saved) {
         const entry = unsentCommentsRef.current.get(id);
         if (!entry || entry.status !== 'failed') continue; // 보내는 중이면 그 요청이 끝낼 때 정리한다.
@@ -1829,24 +1872,152 @@ export function CommentPanel({
     }
   };
 
-  // 댓글 삭제 (낙관적)
-  const handleDelete = async (commentId: string) => {
-    const target = comments.find((c) => c.id === commentId);
-    const targetKey = target?.storageKey ?? target?._sourceKey ?? primaryStorageKey;
-    const prevComments = [...comments];
-    const next = comments.filter(c => c.id !== commentId);
+  // ── 댓글 삭제 — 움직임 폴리싱 20번 '되돌리기' ──
+  // 휴지통 → 말풍선이 오른쪽 12px 로 밀리며 0.15초에 사라지고, 아래 말풍선들이 그 자리로 0.22초에 올라온다.
+  // 서버에서는 5초 뒤에 지운다('댓글을 지웠어요 · 되돌리기'). 그 사이 다른 씬으로 넘어가거나 패널을 닫거나
+  // 창을 숨기면(트레이·최소화) 기다리지 않고 바로 지운다. 답글이 달린 댓글을 지우면 답글은 지금처럼
+  // '원답글' 표시를 단 채 본문 흐름에 남는다(서버에서 지운 뒤와 같은 모양) — 되돌리면 다시 그 아래로 모인다.
 
-    setComments(next);
+  /** 목록이 바뀌기 직전 줄 위치를 잰다 — 바뀐 뒤(useLayoutEffect) 새 위치와 비교해 미끄러뜨린다. */
+  const captureCommentReflow = () => {
+    reflowBeforeRef.current = reduceMotionRef.current
+      ? null
+      : new Map(measureFlipRows(scrollRef.current, 'data-comment-flip').map((row) => [row.key, row.top]));
+  };
+
+  /** 지운 댓글을 시간 순서 제자리에 다시 넣는다(되돌리기·서버 삭제 실패). 새 댓글로 치지 않아 바닥으로 끌려가지 않는다. */
+  const reinsertComment = (comment: SceneCommentWithSource) => {
+    if (!mountedRef.current) return;
+    if (commentsRef.current.some((c) => c.id === comment.id)) return;
+    captureCommentReflow();
+    knownCommentIdsRef.current.add(comment.id);
+    restoredCommentIdsRef.current.add(comment.id);
+    const next = insertCommentByTime(commentsRef.current, comment);
+    setComments((current) => insertCommentByTime(current, comment));
     onCountChange?.(next.length);
+  };
 
-    try {
-      await deleteComment(targetKey, commentId);
-    } catch (err) {
-      console.error('[댓글 삭제 실패]', err);
-      setComments(prevComments);
-      onCountChange?.(prevComments.length);
+  /** 밀려난 말풍선을 목록에서 뺀다. 숨김은 다음 그림 직전에(useLayoutEffect) — 빈자리가 한 번 그려지지 않게. */
+  const collapseDeletedComment = (commentId: string, element: HTMLElement | null) => {
+    const entry = pendingDeletesRef.current.get(commentId);
+    if (entry) entry.collapseTimer = null;
+    if (!mountedRef.current) return;
+    if (!commentsRef.current.some((c) => c.id === commentId)) return;
+    captureCommentReflow();
+    if (element) reflowHideRef.current.push(element);
+    const next = commentsRef.current.filter((c) => c.id !== commentId);
+    setComments((current) => current.filter((c) => c.id !== commentId));
+    onCountChange?.(next.length);
+  };
+
+  /** 밀려나던 말풍선을 제자리로(0.15초 안에 되돌렸거나 서버 삭제 실패) — 목록에서 빼는 타이머도 멈춘다. */
+  const settleDeleteVisual = (entry: PendingCommentDelete) => {
+    if (entry.collapseTimer) {
+      clearTimeout(entry.collapseTimer);
+      entry.collapseTimer = null;
+    }
+    entry.exit?.cancel();
+    entry.exit = null;
+    if (entry.element) {
+      entry.element.style.pointerEvents = '';
+      entry.element.style.display = '';
+      const element = entry.element;
+      reflowHideRef.current = reflowHideRef.current.filter((el) => el !== element);
     }
   };
+
+  /** '되돌리기' — 서버에는 아직 그대로라 화면에만 다시 넣는다. */
+  const restoreDeletedComment = (commentId: string) => {
+    const entry = pendingDeletesRef.current.get(commentId);
+    if (!entry || entry.phase !== 'waiting') return;
+    pendingDeletesRef.current.delete(commentId);
+    settleDeleteVisual(entry);
+    reinsertComment(entry.comment);
+  };
+
+  /** 5초가 지났거나 바로 확정할 때 — 서버에서 지운다. 실패하면 말풍선을 제자리에 되돌려 놓고 알린다. */
+  const commitDeletedComment = (commentId: string) => {
+    const entry = pendingDeletesRef.current.get(commentId);
+    if (!entry || entry.phase !== 'waiting') return;
+    entry.phase = 'deleting';
+    deleteComment(entry.targetKey, commentId).then(() => {
+      pendingDeletesRef.current.delete(commentId);
+    }).catch((err) => {
+      pendingDeletesRef.current.delete(commentId);
+      console.error('[댓글 삭제 실패]', err);
+      sonnerToast.error('댓글을 지우지 못했어요 · 인터넷 연결을 확인해 주세요');
+      settleDeleteVisual(entry);
+      reinsertComment(entry.comment);
+    });
+  };
+
+  const handleDelete = (commentId: string) => {
+    if (pendingDeletesRef.current.has(commentId)) return;
+    const target = commentsRef.current.find((c) => c.id === commentId) ?? comments.find((c) => c.id === commentId);
+    if (!target) return;
+    const targetKey = target.storageKey ?? target._sourceKey ?? primaryStorageKey;
+    const element = commentRefs.current.get(commentId) ?? null;
+    const exit = animateEl(
+      element,
+      COMMENT_DELETE_EXIT_KEYFRAMES,
+      { duration: COMMENT_DELETE_EXIT_MS, easing: EASE_CSS.in, fill: 'forwards' },
+      reduceMotionRef.current,
+    );
+    // 밀려나는 동안 다시 누르지 못하게.
+    if (element) element.style.pointerEvents = 'none';
+    const entry: PendingCommentDelete = {
+      comment: target,
+      targetKey,
+      element,
+      exit,
+      collapseTimer: null,
+      phase: 'waiting',
+      undoWindow: null,
+    };
+    pendingDeletesRef.current.set(commentId, entry);
+    if (exit) entry.collapseTimer = setTimeout(() => collapseDeletedComment(commentId, element), COMMENT_DELETE_EXIT_MS);
+    else collapseDeletedComment(commentId, element);
+    entry.undoWindow = showUndoToast({
+      message: '댓글을 지웠어요',
+      onUndo: () => restoreDeletedComment(commentId),
+      onExpire: () => commitDeletedComment(commentId),
+    });
+  };
+
+  // 기다리지 않고 바로 지운다 — 창을 숨기거나(닫기 = 트레이로 숨기·최소화) 새로고침·종료 대기에 들어갈 때.
+  useEffect(() => {
+    const pending = pendingDeletesRef.current;
+    const flushAll = () => {
+      for (const entry of [...pending.values()]) entry.undoWindow?.expire();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flushAll();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flushAll);
+    window.addEventListener('beforeunload', flushAll);
+    const offSavingBeforeQuit = window.electronAPI?.onSavingBeforeQuit?.(flushAll);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flushAll);
+      window.removeEventListener('beforeunload', flushAll);
+      offSavingBeforeQuit?.();
+    };
+  }, []);
+
+  // 다른 씬으로 넘어가거나 패널이 닫히면 바로 지운다. 목록에서 빼는 타이머는 멈춘다(새 씬 목록·개수를 건드리지 않게).
+  useEffect(() => {
+    const pending = pendingDeletesRef.current;
+    return () => {
+      for (const entry of [...pending.values()]) {
+        if (entry.collapseTimer) {
+          clearTimeout(entry.collapseTimer);
+          entry.collapseTimer = null;
+        }
+        entry.undoWindow?.expire();
+      }
+    };
+  }, [primaryStorageKey, secondarySceneKey]);
 
   // @멘션 등 엔티티 자동완성은 useMentionAutocomplete 가 담당. 여기선 입력값만 반영(자라기는 useLayoutEffect).
   const handleInputChange = (text: string) => {
@@ -2201,6 +2372,38 @@ export function CommentPanel({
     else if (action === 'pill') setNewBelowCount((count) => count + othersBelow);
   }, [listReady, comments, inlineEvents?.length, currentUser?.id, focusCommentId, dividerCommentId, applyOpenPin, scrollListToBottom]);
 
+  // 움직임 폴리싱 20번: 지운 자리로 아래 말풍선들이 올라오고, 되돌리면 비켜 준다 — 바뀌기 직전 위치에서 제자리로 0.22초.
+  // (새 댓글이 붙을 때의 자리 잡기는 위 효과가 먼저 끝낸 뒤라 그 뒤 위치를 잰다.)
+  useLayoutEffect(() => {
+    const hide = reflowHideRef.current;
+    reflowHideRef.current = [];
+    // 밀려난 말풍선은 이 그림부터 자리를 비운다 — 나가는 동안 자리를 차지했다가 툭 당겨지지 않게.
+    hide.forEach((element) => { element.style.display = 'none'; });
+    const before = reflowBeforeRef.current;
+    reflowBeforeRef.current = null;
+    const root = scrollRef.current;
+    if (!before || !root) return;
+    // 바닥에 붙어 읽던 중이면 먼저 바닥에 다시 붙인 뒤 잰다(나중에 붙이면 미끄러짐이 그만큼 어긋난다).
+    if (distanceFromBottomRef.current <= COMMENT_STICK_BOTTOM_PX) root.scrollTop = root.scrollHeight;
+    const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-comment-flip]'));
+    // 앞서 미끄러지던 줄은 지금 보이는 자리(before 에 이미 담김)에서 새로 출발한다.
+    rows.forEach((row) => row.getAnimations?.().forEach((animation) => {
+      if (animation.id === COMMENT_REFLOW_ANIMATION_ID) animation.cancel();
+    }));
+    const shifts = notificationRowShifts(before, measureFlipRows(root, 'data-comment-flip'));
+    rows.forEach((row) => {
+      const shift = shifts.get(row.getAttribute('data-comment-flip') ?? '');
+      if (!shift) return;
+      const animation = animateEl(
+        row,
+        [{ transform: `translateY(${shift}px)` }, { transform: 'translateY(0px)' }],
+        { duration: COMMENT_REFLOW_MS, easing: COMMENT_REFLOW_EASING },
+        reduceMotionRef.current,
+      );
+      if (animation) animation.id = COMMENT_REFLOW_ANIMATION_ID;
+    });
+  }, [comments]);
+
   // 반응 일괄 조회·이미지·팀 할 일 섹션으로 높이가 바뀌면: 첫 ~1초(손대기 전)는 처음 자리를 다시 맞추고,
   // 그 뒤엔 바닥에 붙어 있을 때만 바닥에 다시 붙인다(움직임 없이).
   useEffect(() => {
@@ -2453,6 +2656,7 @@ export function CommentPanel({
                     key={`evt:${node.event.id}`}
                     // 움직임 폴리싱 19번: 새 항목은 목록 끝(입력칸 쪽)에 붙으니 아래에서 떠오른다.
                     {...bubbleRise}
+                    data-comment-flip={`e:${node.event.id}`}
                     className={cn(
                       'flex items-center gap-2 text-[10.5px] py-0.5',
                       isRevisionEvent
@@ -2545,6 +2749,9 @@ export function CommentPanel({
                 onClick={markUnreadCommentsRead}
                 // 움직임 폴리싱 19번: 보낸 말풍선은 입력칸 쪽(아래)에서 8px 떠오른다(예전엔 위에서 내려왔다).
                 {...bubbleRise}
+                // 20번: 되돌린 말풍선은 떠오르지 않고 제자리에서 다시 나타난다. 지운 자리 미끄러짐(FLIP) 표시.
+                {...(restoredCommentIdsRef.current.has(comment.id) ? commentRestore : {})}
+                data-comment-flip={`c:${comment.id}`}
                 className={cn(
                   'group relative',
                   mentionsMe && 'pl-2',
@@ -2770,6 +2977,8 @@ export function CommentPanel({
                           data-comment-id={reply.id}
                           onClick={markUnreadCommentsRead}
                           {...bubbleRise}
+                          {...(restoredCommentIdsRef.current.has(reply.id) ? commentRestore : {})}
+                          data-comment-flip={`c:${reply.id}`}
                           className={cn(
                             'group/reply relative',
                             replyMentionsMe && 'pl-1.5',

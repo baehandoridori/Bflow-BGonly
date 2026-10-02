@@ -6,7 +6,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
 import { useMotionPref } from '@/hooks/useMotionPref';
-import { EASE_CSS, animateEl, transformPreset } from '@/utils/motion';
+import { EASE_CSS, MOTION_MS, animateEl, transformPreset } from '@/utils/motion';
 import {
   BADGE_POP_EASING,
   BADGE_POP_KEYFRAMES,
@@ -52,6 +52,13 @@ import {
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { tokenizeGPaths } from '@/utils/pathLink';
 import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { UNDO_TOAST_CLASS, showUndoToast } from '@/components/common/UndoToast';
+import {
+  NOTIFICATION_CLEAR_FADE_MS,
+  NOTIFICATION_RESTORE_FADE_MS,
+  markNotificationRestoreFade,
+  takeNotificationRestoreFade,
+} from '@/utils/undoDelete';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
@@ -383,7 +390,7 @@ export function NotificationBell() {
 
 // ─── 드롭다운 패널 ───────────────────────────────────
 function NotificationDropdown() {
-  const { notifications, markAllAsRead, clearAll, setPanelOpen, unreadCount, removeNotification } = useNotificationStore();
+  const { notifications, markAllAsRead, setPanelOpen, unreadCount, removeNotification } = useNotificationStore();
   const ref = useRef<HTMLDivElement>(null);
   const showDevTools = isDevPreviewNotificationToolsEnabled();
   const { reduce } = useMotionPref();
@@ -443,6 +450,64 @@ function NotificationDropdown() {
     });
   }, [notifications, reduce]);
 
+  // 움직임 폴리싱 20번: '전체 삭제' — 줄들이 0.15초에 옅어진 뒤 비우고, 오른쪽 아래에 '알림을 모두 지웠어요 · 되돌리기'.
+  // 되돌리면 지운 알림이 그대로 돌아오고 줄들이 0.18초에 다시 나타난다. 창이 닫혀도 비우기는 끝까지 간다(타이머는 저장소만 건드린다).
+  const clearFadeRef = useRef<Animation | null>(null);
+  const clearingRef = useRef(false);
+  const handleClearAll = useCallback(() => {
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    const commit = () => {
+      clearingRef.current = false;
+      const state = useNotificationStore.getState();
+      const userId = state.activeUserId;
+      const removed = state.clearAll();
+      if (removed.length === 0) return;
+      showUndoToast({
+        message: '알림을 모두 지웠어요',
+        onUndo: () => {
+          markNotificationRestoreFade();
+          useNotificationStore.getState().restoreNotifications(removed, userId);
+        },
+        // 로컬 목록만 지우는 일이라 기다렸다 할 일이 없다 — 시간이 지나면 되돌릴 수 없게 될 뿐.
+        onExpire: () => {},
+      });
+    };
+    const fade = animateEl(
+      listRef.current,
+      [{ opacity: 1 }, { opacity: 0 }],
+      { duration: NOTIFICATION_CLEAR_FADE_MS, easing: EASE_CSS.in, fill: 'forwards' },
+      reduce,
+    );
+    if (!fade) {
+      commit();
+      return;
+    }
+    clearFadeRef.current = fade;
+    // 옅어지는 동안 줄을 다시 누르지 못하게.
+    if (listRef.current) listRef.current.style.pointerEvents = 'none';
+    window.setTimeout(commit, NOTIFICATION_CLEAR_FADE_MS);
+  }, [reduce]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    // 비운 뒤: 옅어진 채 멈춰 있던 목록 상자를 풀고 '알림이 없습니다'를 옅게 띄운다.
+    if (clearFadeRef.current && notifications.length === 0) {
+      clearFadeRef.current.cancel();
+      clearFadeRef.current = null;
+      if (list) list.style.pointerEvents = '';
+      animateEl(list, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION_MS.fast, easing: EASE_CSS.out }, reduce);
+      return;
+    }
+    // 되돌린 뒤(창이 열려 있으면): 줄들이 다시 나타난다.
+    if (notifications.length > 0 && takeNotificationRestoreFade()) {
+      clearFadeRef.current?.cancel();
+      clearFadeRef.current = null;
+      if (list) list.style.pointerEvents = '';
+      animateEl(list, [{ opacity: 0 }, { opacity: 1 }], { duration: NOTIFICATION_RESTORE_FADE_MS, easing: EASE_CSS.out }, reduce);
+    }
+  }, [notifications, reduce]);
+
   // v1.27.0: 패널 너비/높이 사용자 조절 + preferences 저장.
   const { width, height, commit, isUserOverride } = useNotificationPanelSize();
   // drag 중에는 disk 저장 없이 live 갱신.
@@ -475,6 +540,8 @@ function NotificationDropdown() {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dragAxis) return;
+      // 움직임 폴리싱 20번: '되돌리기' 카드를 누를 때는 닫지 않는다 — 되살아나는 알림을 그 자리에서 보게.
+      if ((e.target as Element | null)?.closest?.(`.${UNDO_TOAST_CLASS}`)) return;
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setPanelOpen(false);
       }
@@ -567,7 +634,7 @@ function NotificationDropdown() {
             )}
             {notifications.length > 0 && (
               <button
-                onClick={clearAll}
+                onClick={handleClearAll}
                 className="text-[10px] text-text-secondary/55 hover:text-red-400 flex items-center gap-1 cursor-pointer"
               >
                 <Trash2 size={11} />

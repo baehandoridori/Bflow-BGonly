@@ -250,3 +250,43 @@
   from { opacity: 1; }
   to { opacity: 0; }
 }
+
+/* ─── 20. safety-net — 되돌리기(알림 '전체 삭제'·댓글 휴지통) ──────────────
+   지운 줄·말풍선이 옅어지고 아래가 미끄러져 올라오는 움직임은 WAAPI(src/components/NotificationPanel.tsx,
+   src/components/scenes/CommentPanel.tsx, 값은 src/utils/undoDelete.ts). 여기는 '되돌리기' 알림 카드만 둔다. */
+
+/* 카드 왼쪽 색 막대 — 차분한 회색(지운 일의 확인이라 강조하지 않는다). */
+[data-sonner-toast].bflow-undo-toast {
+  --bflow-toast-tone: #8B8DA3;
+}
+
+/* 카드 아래 2px 막대 — 되돌릴 수 있는 5초 동안 왼쪽으로 줄어든다(transform 만, 끝나면 그대로 0).
+   길이는 인라인 --bflow-undo-ms(src/components/common/UndoToast.tsx). 카드가 position:absolute 라 그 안쪽 아래에 붙는다. */
+.bflow-undo-countdown {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(var(--color-accent) / 0.55);
+  transform-origin: left center;
+  pointer-events: none;
+  animation: bflow-undo-countdown var(--bflow-undo-ms, 5000ms) linear forwards;
+}
+@keyframes bflow-undo-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+/* 동작 줄이기: 막대는 줄지 않고 제자리에서 옅어지기만 한다(남은 시간은 그대로 알린다).
+   전역 동작 줄이기 규칙(길이 0.01ms !important)보다 구체적인 !important 라 이 길이가 남는다. */
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast] .bflow-undo-countdown {
+    animation: bflow-undo-countdown-calm var(--bflow-undo-ms, 5000ms) linear forwards !important;
+  }
+}
+@keyframes bflow-undo-countdown-calm {
+  from { opacity: 1; }
+  to { opacity: 0.15; }
+}

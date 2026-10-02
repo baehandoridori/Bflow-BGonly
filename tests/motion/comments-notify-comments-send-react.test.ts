@@ -213,7 +213,8 @@ test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 
   assert.match(after, /notifyCommentMentions\(draft\.comment, draft\.webhookSceneKey\);/);
   assert.equal([...panel.matchAll(/sendMentionWebhook\(\{/g)].length, 1, '멘션 알림은 한 곳에서만');
   // 실시간 재조회가 보내는 중·실패 말풍선을 지우지 않게, 서버에 있으면 저장된 것으로
-  assert.match(panel, /const \{ list, saved \} = mergeUnsentComments\(deduped, unsent\.map\(\(entry\) => entry\.comment\)\);/);
+  // (20번 safety-net: 합친 뒤 휴지통을 누른 댓글만 빼서 list 로 쓴다)
+  assert.match(panel, /const \{ list: mergedList, saved \} = mergeUnsentComments\(deduped, unsent\.map\(\(entry\) => entry\.comment\)\);[\s\S]{0,160}?const list = withoutPendingDeletes\(mergedList, pendingDeletesRef\.current\);/);
   assert.match(panel, /setComments\(list\);/);
   // 씬 이동·패널 닫기에서 실패 말풍선의 첨부 정리
   assert.match(panel, /forgetUnsentComments\('\[보내지 못한 댓글 scene 변경\]'\);\s*\}, \[primaryStorageKey\]\);/);
