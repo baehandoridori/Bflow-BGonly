@@ -311,6 +311,7 @@ export async function writeMetadataToSupabase(type: string, key: string, value: 
 import { useDataStore } from '../stores/useDataStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { waitForSceneUuidWithStore } from '../utils/sceneUuidPolling';
+import { buildPartMetadataMaps, type PartMetadataMaps } from '../utils/partMemoHelpers';
 
 const SCENE_COMPLETION_META_TYPE = 'scene-completion';
 
@@ -452,6 +453,13 @@ export async function writeMetadata(type: string, key: string, value: string): P
 export async function readMetadata(type: string, key: string): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
   const data = await window.electronAPI.supabaseReadMetadata(type, key);
   return data as { type: string; key: string; value: string; updatedAt: string } | null;
+}
+
+/** 파트 메모 · 릴 담당 · 표시 이름을 **한 번에** 읽는다 (sheetName → 값).
+ *  파트마다 readMetadata 를 부르지 마라 — partMemoHelpers 의 PART_METADATA_TYPES 주석(2026-10-02 사고) 참고. */
+export async function readPartMetadataMaps(): Promise<PartMetadataMaps> {
+  const rows = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
+  return buildPartMetadataMaps(rows);
 }
 
 /** 전체 에피소드 데이터 조회 */

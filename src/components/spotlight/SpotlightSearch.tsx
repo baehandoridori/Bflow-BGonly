@@ -11,7 +11,7 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
-import { readMetadata } from '@/services/supabaseService';
+import { readPartMetadataMaps } from '@/services/supabaseService';
 import type { CalendarEvent } from '@/types/calendar';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 
@@ -135,33 +135,24 @@ export function SpotlightSearch() {
   const [partMemos, setPartMemos] = useState<Record<string, string>>({});
   const [partReelWorkers, setPartReelWorkers] = useState<Record<string, string>>({});
   const [partLabels, setPartLabels] = useState<Record<string, string>>({});
-  // 파트 메모/릴 담당/표시 이름 로드
+  // 파트 메모/릴 담당/표시 이름 — 검색창을 **열 때** 한 번에 읽는다.
+  // 예전에는 episodes 가 바뀔 때마다(15초 새로고침·실시간 변경마다) 파트 수 × 3 건을 하나씩 읽어서,
+  // 검색창을 열지 않아도 모든 PC 가 공유 DB 를 두드렸다 (2026-10-02 DB 과부하 사고).
   useEffect(() => {
-    (async () => {
-      const memos: Record<string, string> = {};
-      const reelWorkers: Record<string, string> = {};
-      const labels: Record<string, string> = {};
-      for (const ep of episodes) {
-        for (const part of ep.parts) {
-          try {
-            const data = await readMetadata('part-memo', part.sheetName);
-            if (data?.value) memos[part.sheetName] = data.value;
-          } catch { /* 무시 */ }
-          try {
-            const data = await readMetadata('part-reel-worker', part.sheetName);
-            if (data?.value) reelWorkers[part.sheetName] = data.value;
-          } catch { /* 무시 */ }
-          try {
-            const data = await readMetadata('part-label', part.sheetName);
-            if (data?.value) labels[part.sheetName] = data.value;
-          } catch { /* 무시 */ }
-        }
-      }
-      setPartMemos(memos);
-      setPartReelWorkers(reelWorkers);
-      setPartLabels(labels);
-    })();
-  }, [episodes]);
+    if (!isOpen) return;
+    let cancelled = false;
+    readPartMetadataMaps()
+      .then((maps) => {
+        if (cancelled) return;
+        setPartMemos(maps.memos);
+        setPartReelWorkers(maps.reelWorkers);
+        setPartLabels(maps.labels);
+      })
+      .catch(() => { /* 무시 — 검색 결과에서 파트 메모·릴 담당·별칭만 빠진다 */ });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
   const {
     setView,
     setSelectedEpisode,

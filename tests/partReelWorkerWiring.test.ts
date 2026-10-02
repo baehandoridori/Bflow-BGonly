@@ -25,7 +25,7 @@ test('spotlight can find parts by reel worker metadata', async () => {
   const spotlight = await readRepoFile('src', 'components', 'spotlight', 'SpotlightSearch.tsx');
 
   assert.match(spotlight, /partReelWorkers/);
-  assert.match(spotlight, /readMetadata\('part-reel-worker'/);
+  assert.match(spotlight, /readPartMetadataMaps\(\)/);
   assert.match(spotlight, /fuzzyScore\(q, partReelWorkerText\)/);
   assert.match(spotlight, /id: `part-reel-worker-\$\{part\.sheetName\}`/);
   assert.match(spotlight, /릴 담당/);
