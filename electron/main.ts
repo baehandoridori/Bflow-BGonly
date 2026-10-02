@@ -95,6 +95,7 @@ import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy'
 import { compareVersions, readManifest } from './autoUpdate/manifest';
 import { resolveChildFolderPath } from './pathCreateFolder';
 import { parseFileNameWBuffer, imageMimeForPath } from './clipboardFiles';
+import { QUIT_FLUSHED_CHANNEL, waitForRendererQuitFlush } from './rendererQuitFlush';
 import {
   initVacation,
   isVacationConnected,
@@ -5517,6 +5518,20 @@ app.on('before-quit', (e) => {
     }
   }
 
+  // 창이 미뤄 둔 저장(5초 되돌리기를 기다리는 댓글 삭제 등)을 끝낼 시간 — 위 대기 작업과 상관없이 모든 창에 알린다.
+  // 창은 기다릴 일이 없으면 곧바로 답한다. 답이 없어도 최대 QUIT_FLUSH_TIMEOUT_MS 만 미룬다.
+  const rendererFlush = waitForRendererQuitFlush({
+    targets: [mainWindow, ...widgetWindows.values()]
+      .filter((win): win is BrowserWindow => !!win && !win.isDestroyed())
+      .map((win) => ({ id: win.webContents.id, send: (channel: string, token: string) => win.webContents.send(channel, token) })),
+    token: `quit-${Date.now()}`,
+    subscribeAck: (listener) => {
+      const handler = (event: Electron.IpcMainEvent, token: unknown) => listener(event.sender.id, token);
+      ipcMain.on(QUIT_FLUSHED_CHANNEL, handler);
+      return () => { ipcMain.removeListener(QUIT_FLUSHED_CHANNEL, handler); };
+    },
+  }).catch(() => 'timeout' as const);
+
   const watchWithTimeout = Promise.race([
     watchCleanup,
     new Promise<void>((r) => setTimeout(r, totalPending > 0 ? 5000 : 2000)),
@@ -5532,6 +5547,7 @@ app.on('before-quit', (e) => {
           personalTodoService.waitForIdle(15000),
           marketAccountService.waitForIdle(15000),
           calendarNotificationDrain.waitForNotificationIdle(15000),
+          rendererFlush,
         ]);
         if (!sheetsDone || !vacDone || !personalDone || !marketDone || !calendarNotificationDone) {
           console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
@@ -5544,6 +5560,7 @@ app.on('before-quit', (e) => {
           personalTodoService.waitForIdle(15000),
           marketAccountService.waitForIdle(15000),
           calendarNotificationDrain.waitForNotificationIdle(15000),
+          rendererFlush,
         ]);
       }
 

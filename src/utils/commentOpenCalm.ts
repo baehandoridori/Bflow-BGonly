@@ -107,22 +107,55 @@ export function splitNewCommentIds(
 export interface UnreadDividerState {
   /** 줄이 붙는 댓글(처음 안 읽은 댓글) id */
   id: string;
+  /** 그 댓글을 쓴 시각 — 읽음 기록이 이 시각에 닿으면 읽은 것 */
+  createdAt: string;
   /** 4초가 지나 옅어지는 중/옅어짐 — 자리는 그대로 둔다 */
   fading: boolean;
 }
 
 /**
- * '새 댓글' 줄은 패널마다 한 번 잡으면 그 자리에 남는다. 읽음 처리로 '처음 안 읽은 댓글'이 사라져도
- * 줄을 없애지 않는다(없애면 아래 내용이 한 줄 당겨지고, 그걸 따라 화면이 다시 움직였다).
+ * 패널마다 '새 댓글' 줄을 정했는지(captured)와 그 줄. 정하기 전엔 줄 자리를 아직 모른다.
+ * 처음 연 뒤 실시간으로 온 팀원 댓글에는 줄을 새로 만들지 않는다 — 4초 뒤 옅어진 빈 틈이 대화 중간에 남았다.
+ * (그런 댓글은 '새 댓글 N개 ↓' 알약·바닥 따라가기로 알리고, 읽음은 그 댓글 말풍선이 보이면 처리한다.)
  */
-export function nextUnreadDivider(current: UnreadDividerState | null, firstUnreadCommentId: string | null): UnreadDividerState | null {
-  if (current) return current;
-  return firstUnreadCommentId ? { id: firstUnreadCommentId, fading: false } : null;
+export interface UnreadDividerSlot {
+  captured: boolean;
+  divider: UnreadDividerState | null;
 }
 
-/** 줄이 붙은 댓글이 이미 읽음 처리됐는지(= 4초 뒤 옅어지기 시작할 때). */
-export function isUnreadDividerRead(current: UnreadDividerState | null, firstUnreadCommentId: string | null): boolean {
-  return !!current && !current.fading && current.id !== firstUnreadCommentId;
+export const UNREAD_DIVIDER_UNCAPTURED: UnreadDividerSlot = { captured: false, divider: null };
+
+/**
+ * '새 댓글' 줄은 처음 자리를 잡을 때(댓글·읽음 기록이 모두 왔을 때) 한 번만 정하고, 그 뒤엔 그 자리에 남는다.
+ * 읽음 처리로 '처음 안 읽은 댓글'이 사라져도 줄을 없애지 않는다(없애면 아래 내용이 한 줄 당겨지고, 그걸 따라 화면이 다시 움직였다).
+ * 그때 안 읽은 댓글이 없었으면 '줄 없음'으로 정해 두고, 나중에 온 댓글에도 줄을 만들지 않는다.
+ */
+export function captureUnreadDivider(
+  slot: UnreadDividerSlot,
+  firstUnread: { id: string; createdAt: string } | null,
+): UnreadDividerSlot {
+  if (slot.captured) return slot;
+  return {
+    captured: true,
+    divider: firstUnread ? { id: firstUnread.id, createdAt: firstUnread.createdAt, fading: false } : null,
+  };
+}
+
+/** 지금 줄을 붙일 댓글. 정하기 전(처음 그리는 순간)엔 지금 첫 안 읽은 댓글, 정한 뒤엔 정한 자리만(없으면 줄 없음). */
+export function unreadDividerCommentId(slot: UnreadDividerSlot, firstUnreadCommentId: string | null): string | null {
+  return slot.captured ? (slot.divider?.id ?? null) : firstUnreadCommentId;
+}
+
+/**
+ * 줄이 붙은 댓글을 읽었는지(= 4초 뒤 옅어지기 시작할 때) — 읽음 기록 시각이 그 댓글을 쓴 시각에 닿았을 때.
+ * '첫 안 읽은 댓글이 바뀌었는가'로 보면, 줄이 붙은 댓글이 읽기 전에 실시간으로 지워졌을 때도 옅어지기 시작했다.
+ */
+export function isUnreadDividerRead(divider: UnreadDividerState | null, lastReadAt: string | null): boolean {
+  if (!divider || divider.fading || !lastReadAt) return false;
+  const readMs = Date.parse(lastReadAt);
+  const createdMs = Date.parse(divider.createdAt);
+  if (!Number.isFinite(readMs) || !Number.isFinite(createdMs)) return false;
+  return readMs >= createdMs;
 }
 
 export function newCommentsPillLabel(count: number): string {

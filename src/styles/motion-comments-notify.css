@@ -95,7 +95,8 @@
 /* ─── 19. comments-send-react — 댓글 보내기·이모지 반응 ───────────────────
    transform·opacity 만 움직인다. 채움은 backwards(끝나면 애니메이션 값을 남기지 않음).
    말풍선 떠오름(아래 8px → 제자리 220ms)과 반응 칩 빠짐(0.6배·140ms)은 framer(transform 문자열, src/utils/commentSendReact.ts).
-   동작 줄이기: 전역 규칙(index.css)이 아래 애니메이션·전환 길이를 0 으로 줄인다 — 이동·확대 없이 바로 나타난다. */
+   동작 줄이기: 아래 CSS 움직임은 이동·확대 없는 opacity 키프레임으로 바꾸고(4번과 같은 방식), 길이는 전역 규칙(index.css)이
+   0 으로 줄여 바로 나타난다. framer 쪽(말풍선·칩 빠짐)은 opacity 만 120ms. */
 
 /* 말풍선 — 저장이 0.4초를 넘길 때만 살짝 흐렸다가, 저장되면 0.2초에 걸쳐 또렷해진다.
    기본 클래스가 늘 붙어 있어야 흐림이 풀릴 때도 전환이 돈다(상태 클래스만 붙었다 떨어진다). */
@@ -184,6 +185,17 @@
 /* '더 많은 이모지' — 버튼 쪽 가장자리는 그대로, 펼친 이모지 묶음만 옅게 들어온다. */
 .emoji-picker-extra {
   animation: comment-send-fade-in 140ms var(--ease-out) backwards;
+}
+
+/* 동작 줄이기: 칩 톡·숫자 굴림·툴팁·이모지 창은 이동·확대 없이 opacity 키프레임만(길이는 전역 규칙이 줄인다). */
+@media (prefers-reduced-motion: reduce) {
+  .reaction-chip-pop,
+  .reaction-count--up,
+  .reaction-count--down,
+  .reaction-tooltip,
+  .emoji-picker-pop {
+    animation-name: comment-send-fade-in;
+  }
 }
 
 /* ─── 18. notification-journey — 알림이 와서 → 열고 → 건너뛰어 → 도착하기까지 ──────

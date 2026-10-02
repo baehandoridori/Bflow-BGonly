@@ -72,15 +72,17 @@ import {
   commentListDistanceFromBottom,
   commentLoadStatusAfter,
   commentOpenPinTarget,
+  UNREAD_DIVIDER_UNCAPTURED,
+  captureUnreadDivider,
   commentOpenScrollTop,
   isUnreadDividerRead,
   newCommentsPillLabel,
-  nextUnreadDivider,
   splitNewCommentIds,
+  unreadDividerCommentId,
   type CommentLoadStatus,
   type CommentOpenPinTarget,
   type CommentScrollAnchor,
-  type UnreadDividerState,
+  type UnreadDividerSlot,
 } from '@/utils/commentOpenCalm';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import {
@@ -247,6 +249,20 @@ interface PendingCommentDelete {
   collapseTimer: ReturnType<typeof setTimeout> | null;
   phase: 'waiting' | 'deleting';
   undoWindow: UndoWindow | null;
+}
+
+// 앱 종료(트레이 '종료'·'지금 업데이트') — 되돌리기를 기다리는 댓글 삭제를 바로 확정하고, 메인이 종료를 잠시 미뤄 주는 동안
+// 서버 삭제가 끝나게 한다. 패널이 막 닫히며 확정한 삭제도 기다리도록 패널 밖(모듈)에 모은다.
+const commentDeleteFlushers = new Set<() => void>();
+const commentDeletesInFlight = new Set<Promise<void>>();
+let commentDeleteQuitFlushHooked = false;
+function hookCommentDeleteQuitFlush() {
+  if (commentDeleteQuitFlushHooked) return;
+  const off = window.electronAPI?.onBeforeQuitFlush?.(() => {
+    commentDeleteFlushers.forEach((flush) => flush());
+    return Promise.allSettled([...commentDeletesInFlight]).then(() => undefined);
+  });
+  commentDeleteQuitFlushHooked = typeof off === 'function';
 }
 
 function cleanupDraftImages(images: AttachedImage[], context: string) {
@@ -593,8 +609,10 @@ export function CommentPanel({
   const distanceFromBottomRef = useRef(0);
   const knownCommentIdsRef = useRef<Set<string>>(new Set());
   const knownEventCountRef = useRef(0);
-  // '새 댓글' 줄 — 패널마다 한 번 잡으면 자리를 지킨다(읽음 처리 4초 뒤 옅어짐).
-  const [unreadDivider, setUnreadDivider] = useState<UnreadDividerState | null>(null);
+  // '새 댓글' 줄 — 처음 자리를 잡을 때 패널마다 한 번만 정하고 그 자리를 지킨다(읽음 처리 4초 뒤 옅어짐).
+  // 그 뒤 실시간으로 온 댓글엔 줄을 만들지 않는다(알약·바닥 따라가기로 알린다).
+  const [unreadDividerSlot, setUnreadDividerSlot] = useState<UnreadDividerSlot>(UNREAD_DIVIDER_UNCAPTURED);
+  const unreadDivider = unreadDividerSlot.divider;
   // 위를 읽는 중 화면 아래에 생긴 팀원 댓글 수 — '새 댓글 N개 ↓' 알약.
   const [newBelowCount, setNewBelowCount] = useState(0);
   const newBelowCountRef = useRef(0);
@@ -611,6 +629,8 @@ export function CommentPanel({
   // 지운 자리로 아래 말풍선이 올라오는(되돌리면 비켜 주는) 미끄러짐 — 바뀌기 직전 위치와, 그때 숨길 말풍선.
   const reflowBeforeRef = useRef<Map<string, number> | null>(null);
   const reflowHideRef = useRef<HTMLElement[]>([]);
+  // 마지막 답글과 함께 숨긴 답글 묶음(접기 버튼·왼쪽 줄) — 나가는 0.12초 동안 자리를 차지했다가 툭 당겨지지 않게.
+  const hiddenReplyGroupsRef = useRef<HTMLElement[]>([]);
   // 반응을 처음 다 불러온 뒤에만 새 칩을 '톡' 한다(패널을 열 때 이미 있던 칩은 가만히).
   const [reactionsReady, setReactionsReady] = useState(false);
   const bubbleRise = commentBubbleRise(reduceMotion);
@@ -906,7 +926,7 @@ export function CommentPanel({
 
   // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직).
   // 캐릭터 스레드 모드는 character 경로로만 로드하고 secondary 는 무시한다 (씬 키 경로 미사용).
-  const loadComments = useCallback(() => {
+  const loadComments = useCallback((options?: { absorbNew?: boolean }) => {
     // 실패를 '댓글 없음'과 구분해 받는다. 더 새 조회가 시작됐으면 늦게 온 옛 결과는 버린다.
     const seq = ++loadSeqRef.current;
     const readOptions = { throwOnError: true };
@@ -940,6 +960,8 @@ export function CommentPanel({
       const { list: mergedList, saved } = mergeUnsentComments(deduped, unsent.map((entry) => entry.comment));
       // 움직임 폴리싱 20번: 휴지통을 누른 댓글은 서버에서 지워질 때까지 다시 불러와도 빼 둔다(되돌리면 그때 다시 넣는다).
       const list = withoutPendingDeletes(mergedList, pendingDeletesRef.current);
+      // 조용히 다시 불러올 때(상대 부서 키만 바뀜) 합쳐진 댓글은 새로 온 게 아니다 — 알약·바닥 따라가기를 하지 않는다.
+      if (options?.absorbNew) list.forEach((c) => knownCommentIdsRef.current.add(c.id));
       for (const id of saved) {
         const entry = unsentCommentsRef.current.get(id);
         if (!entry || entry.status !== 'failed') continue; // 보내는 중이면 그 요청이 끝낼 때 정리한다.
@@ -966,15 +988,23 @@ export function CommentPanel({
   }, [sceneKey, secondarySceneKey, characterId, characterCommentKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 씬·캐릭터가 바뀌면(같은 패널을 다시 쓰는 경우) '불러오는 중'부터 다시 — 처음 자리·새 댓글 줄·알약도 새로 잡는다.
+  // 상대 부서 키(secondarySceneKey)만 늦게 정해졌으면 보이던 목록·자리를 그대로 두고 조용히 다시 불러온다
+  // (그때 합쳐지는 상대 부서 댓글은 원래 있던 댓글이라 '새 댓글'로 치지 않는다).
+  const loadIdentityRef = useRef<string | null>(null);
   useEffect(() => {
-    setLoadStatus('loading');
-    setReactionsReady(false);
-    openPinStartedRef.current = false;
-    openPinRef.current = null;
-    setUnreadDivider(null);
-    setNewBelowCount(0);
-    loadComments();
-  }, [loadComments]);
+    if (loadIdentityRef.current !== primaryStorageKey) {
+      loadIdentityRef.current = primaryStorageKey;
+      setLoadStatus('loading');
+      setReactionsReady(false);
+      openPinStartedRef.current = false;
+      openPinRef.current = null;
+      setUnreadDividerSlot(UNREAD_DIVIDER_UNCAPTURED);
+      setNewBelowCount(0);
+      loadComments();
+      return;
+    }
+    loadComments({ absorbNew: true });
+  }, [loadComments, primaryStorageKey]);
 
   const retryLoadComments = useCallback(() => {
     setLoadStatus('loading');
@@ -1141,7 +1171,8 @@ export function CommentPanel({
 
     const tryScroll = () => {
       if (scrolled) return;
-      const el = commentRefs.current.get(focusCommentId);
+      // 본문 목록의 말풍선 먼저(commentRefs 는 스레드 칸과 같이 써서 그쪽 요소나, 스레드 칸이 닫힌 뒤 null 일 수 있다).
+      const el = findMainListComment(scrollRef.current, focusCommentId) ?? commentRefs.current.get(focusCommentId);
       if (el) {
         // 처음 자리 잡기가 이미 가운데에 두었으면 거의 움직이지 않는다. 가까운 스크롤 상자만 움직이고 동작 줄이기면 즉시.
         centerInScrollParent(el, reduceMotionRef.current ? 'auto' : 'smooth');
@@ -1904,7 +1935,18 @@ export function CommentPanel({
     if (!mountedRef.current) return;
     if (!commentsRef.current.some((c) => c.id === commentId)) return;
     captureCommentReflow();
-    if (element) reflowHideRef.current.push(element);
+    if (element) {
+      reflowHideRef.current.push(element);
+      // 묶음의 마지막 답글이면 답글 묶음(접기 버튼·왼쪽 줄)도 같은 그림에서 숨긴다 — 묶음이 0.12초 동안 옅어지며
+      // 자리를 차지하면 미끄러짐이 끝난 뒤 아래 줄이 그만큼 한 번 더 툭 당겨졌다.
+      const group = element.closest<HTMLElement>('[data-reply-group]');
+      const othersLeft = !!group && Array.from(group.querySelectorAll<HTMLElement>('[data-comment-id]'))
+        .some((row) => row !== element && row.style.display !== 'none');
+      if (group && !othersLeft) {
+        reflowHideRef.current.push(group);
+        hiddenReplyGroupsRef.current.push(group);
+      }
+    }
     const next = commentsRef.current.filter((c) => c.id !== commentId);
     setComments((current) => current.filter((c) => c.id !== commentId));
     onCountChange?.(next.length);
@@ -1940,7 +1982,8 @@ export function CommentPanel({
     const entry = pendingDeletesRef.current.get(commentId);
     if (!entry || entry.phase !== 'waiting') return;
     entry.phase = 'deleting';
-    deleteComment(entry.targetKey, commentId).then(() => {
+    // 앱 종료가 이 요청을 기다린다(hookCommentDeleteQuitFlush).
+    const deletion: Promise<void> = deleteComment(entry.targetKey, commentId).then(() => {
       pendingDeletesRef.current.delete(commentId);
     }).catch((err) => {
       pendingDeletesRef.current.delete(commentId);
@@ -1948,7 +1991,10 @@ export function CommentPanel({
       sonnerToast.error('댓글을 지우지 못했어요 · 인터넷 연결을 확인해 주세요');
       settleDeleteVisual(entry);
       reinsertComment(entry.comment);
+    }).finally(() => {
+      commentDeletesInFlight.delete(deletion);
     });
+    commentDeletesInFlight.add(deletion);
   };
 
   const handleDelete = (commentId: string) => {
@@ -1956,7 +2002,9 @@ export function CommentPanel({
     const target = commentsRef.current.find((c) => c.id === commentId) ?? comments.find((c) => c.id === commentId);
     if (!target) return;
     const targetKey = target.storageKey ?? target._sourceKey ?? primaryStorageKey;
-    const element = commentRefs.current.get(commentId) ?? null;
+    // 본문 목록의 말풍선을 직접 찾는다 — commentRefs 는 오른쪽 스레드 칸과 같이 써서, 스레드 칸이 열려 있으면 그쪽 요소를,
+    // 닫힌 뒤엔 null 을 가리킨다(그러면 밀려남·미끄러짐 없이 아래 줄이 툭 당겨졌다).
+    const element = findMainListComment(scrollRef.current, commentId);
     const exit = animateEl(
       element,
       COMMENT_DELETE_EXIT_KEYFRAMES,
@@ -1984,7 +2032,9 @@ export function CommentPanel({
     });
   };
 
-  // 기다리지 않고 바로 지운다 — 창을 숨기거나(닫기 = 트레이로 숨기·최소화) 새로고침·종료 대기에 들어갈 때.
+  // 기다리지 않고 바로 지운다 — 창을 숨기거나(닫기 = 트레이로 숨기·최소화) 새로고침할 때, 그리고 앱을 끌 때.
+  // 앱 종료(트레이 '종료'·'지금 업데이트')는 메인이 대기 작업이 없어도 보내는 신호로 받아, 서버 삭제가 끝날 때까지
+  // 종료를 잠시(최대 몇 초) 미룬다 — 예전처럼 신호가 대기 작업이 있을 때만 오면 지운 댓글이 남았다.
   useEffect(() => {
     const pending = pendingDeletesRef.current;
     const flushAll = () => {
@@ -1996,12 +2046,13 @@ export function CommentPanel({
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', flushAll);
     window.addEventListener('beforeunload', flushAll);
-    const offSavingBeforeQuit = window.electronAPI?.onSavingBeforeQuit?.(flushAll);
+    commentDeleteFlushers.add(flushAll);
+    hookCommentDeleteQuitFlush();
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', flushAll);
       window.removeEventListener('beforeunload', flushAll);
-      offSavingBeforeQuit?.();
+      commentDeleteFlushers.delete(flushAll);
     };
   }, []);
 
@@ -2232,7 +2283,7 @@ export function CommentPanel({
     [mainFlowComments, visibleInlineEvents],
   );
 
-  const firstUnreadCommentId = useMemo(() => {
+  const firstUnreadComment = useMemo(() => {
     if (!currentUser?.id || !hasUnreadComments) return null;
     const readMs = lastReadAt ? Date.parse(lastReadAt) : Number.NEGATIVE_INFINITY;
 
@@ -2240,11 +2291,12 @@ export function CommentPanel({
       if (comment.userId === currentUser.id) continue;
       const createdMs = Date.parse(comment.createdAt);
       if (!Number.isFinite(createdMs)) continue;
-      if (createdMs > readMs) return comment.id;
+      if (createdMs > readMs) return comment;
     }
 
     return null;
   }, [currentUser?.id, hasUnreadComments, lastReadAt, orderedVisibleComments]);
+  const firstUnreadCommentId = firstUnreadComment?.id ?? null;
 
   useEffect(() => {
     if (!firstUnreadCommentId) return;
@@ -2272,22 +2324,27 @@ export function CommentPanel({
     return () => window.clearTimeout(timer);
   }, [loadStatus, readStateReady]);
   const listReady = loadStatus === 'ready' && (readStateReady || readStateWaitExpired);
-  // 줄은 처음 잡은 자리(읽음 처리 뒤에도 유지)에, 아직 안 잡았으면 지금 첫 안 읽은 댓글에 붙인다.
+  // 줄은 처음 자리를 잡을 때 정한 자리(읽음 처리 뒤에도 유지)에만 붙인다. 정하기 전(처음 그리는 순간)엔 지금 첫 안 읽은 댓글.
   // 읽음 기록 없이 붙이면 맨 위 댓글에 잘못 붙으므로 기록이 온 뒤에만.
-  const dividerCommentId = listReady && readStateReady ? (unreadDivider?.id ?? firstUnreadCommentId) : null;
+  const dividerCommentId = listReady && readStateReady ? unreadDividerCommentId(unreadDividerSlot, firstUnreadCommentId) : null;
   const unreadDividerFading = !!unreadDivider?.fading;
 
+  // 처음 그린 그 순간의 첫 안 읽은 댓글로 한 번만 정한다 — 그 뒤 실시간으로 온 댓글엔 줄을 만들지 않는다.
   useEffect(() => {
     if (!listReady || !readStateReady) return;
-    setUnreadDivider((current) => nextUnreadDivider(current, firstUnreadCommentId));
-  }, [listReady, readStateReady, firstUnreadCommentId]);
+    setUnreadDividerSlot((slot) => captureUnreadDivider(
+      slot,
+      firstUnreadComment ? { id: firstUnreadComment.id, createdAt: firstUnreadComment.createdAt } : null,
+    ));
+  }, [listReady, readStateReady, firstUnreadComment]);
 
   // 읽음 처리는 지금처럼 곧바로, 줄은 그 뒤 4초 동안 남았다가 자리를 지킨 채 옅어진다.
-  const unreadDividerRead = isUnreadDividerRead(unreadDivider, firstUnreadCommentId);
+  // 읽음은 읽음 기록 시각으로 본다 — 줄이 붙은 댓글이 읽기 전에 실시간으로 지워져도 옅어지기 시작하지 않는다.
+  const unreadDividerRead = isUnreadDividerRead(unreadDivider, lastReadAt);
   useEffect(() => {
     if (!unreadDividerRead) return;
     const timer = window.setTimeout(() => {
-      setUnreadDivider((current) => (current ? { ...current, fading: true } : current));
+      setUnreadDividerSlot((slot) => (slot.divider ? { ...slot, divider: { ...slot.divider, fading: true } } : slot));
     }, COMMENT_UNREAD_DIVIDER_FADE_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [unreadDividerRead]);
@@ -2379,6 +2436,15 @@ export function CommentPanel({
     reflowHideRef.current = [];
     // 밀려난 말풍선은 이 그림부터 자리를 비운다 — 나가는 동안 자리를 차지했다가 툭 당겨지지 않게.
     hide.forEach((element) => { element.style.display = 'none'; });
+    // 함께 숨긴 답글 묶음은 나가는 동안(0.12초) 되돌리기·새 답글로 다시 들어오면 다시 보인다(다 나가면 목록에서 뺀다).
+    hiddenReplyGroupsRef.current = hiddenReplyGroupsRef.current.filter((group) => {
+      if (!group.isConnected) return false;
+      const visible = Array.from(group.querySelectorAll<HTMLElement>('[data-comment-id]'))
+        .some((row) => row.style.display !== 'none');
+      if (!visible) return true;
+      group.style.display = '';
+      return false;
+    });
     const before = reflowBeforeRef.current;
     reflowBeforeRef.current = null;
     const root = scrollRef.current;
@@ -2940,7 +3006,13 @@ export function CommentPanel({
                     움직임 폴리싱 19번: 첫 답글이 생기면 답글 묶음째 아래에서 떠오른다(처음 불러온 목록은 그대로). */}
                 <AnimatePresence initial={false}>
                 {replies.length > 0 && (
-                  <motion.div key="replies" {...bubbleRise} className="mt-1.5 ml-3 pl-3 border-l-2 border-accent/30 space-y-2">
+                  <motion.div
+                    key="replies"
+                    data-reply-group={comment.id}
+                    {...bubbleRise}
+                    {...(replies.every((reply) => restoredCommentIdsRef.current.has(reply.id)) ? commentRestore : {})}
+                    className="mt-1.5 ml-3 pl-3 border-l-2 border-accent/30 space-y-2"
+                  >
                     <button
                       onClick={() => toggleThread(comment.id)}
                       className="inline-flex items-center gap-1 text-[12px] font-semibold text-text-secondary hover:text-accent transition-colors"

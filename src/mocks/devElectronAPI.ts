@@ -2483,6 +2483,7 @@ export function installDevElectronAPI(): void {
     onSheetChanged: noop,
     onRetryNotify: noop,
     onSavingBeforeQuit: noop,
+    onBeforeQuitFlush: noop,
     ...previewUpdater,
 
     showNativeNotification: async (title: string, body: string) => {

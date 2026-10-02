@@ -30,6 +30,7 @@ import {
   arrivalRingKeyframes,
   badgeRollKeyframes,
   claimHighlightScroll,
+  highlightScrollKey,
   decideBellReaction,
   isCallingMeNotification,
   markLiveNotificationArrival,
@@ -347,14 +348,21 @@ test('강조 카드로 데려다주기는 같은 강조에 한 번 — 카드가
   assert.equal(claimHighlightScroll('a007', 101_000), true, '다른 씬 강조 → 데려다준다');
   assert.equal(claimHighlightScroll('a006', 102_000), true, '다른 강조를 거친 뒤엔 다시');
   assert.equal(claimHighlightScroll('a006', 102_000 + HIGHLIGHT_SCROLL_ONCE_MS), true, '강조가 끝난 뒤 같은 씬을 다시 강조 → 다시');
+  // 다른 파트의 같은 번호 씬은 다른 강조
+  const at = 200_000;
+  assert.equal(claimHighlightScroll(highlightScrollKey(['EP05_A_BG'], 'a001'), at), true);
+  assert.equal(claimHighlightScroll(highlightScrollKey(['EP05_B_BG'], 'a001'), at + 500), true, '다른 파트의 a001 → 데려다준다');
+  assert.equal(claimHighlightScroll(highlightScrollKey(['EP05_B_BG'], 'a001'), at + 800), false, '같은 파트의 같은 강조 → 그대로');
+  assert.notEqual(highlightScrollKey(['EP05_A_BG', null], 'a001'), highlightScrollKey([null, 'EP05_A_BG'], 'a001'));
 });
 
 test('씬 목록 강조 카드: 인라인 ref 콜백 대신 효과에서 한 번, 동작 줄이기면 바로', () => {
   // framer motion.div 는 처음 받은 ref 콜백만 쓰므로, 예전 방식은 이미 떠 있던 카드가 강조되면 데려가지 못했다.
   assert.doesNotMatch(scenesView, /ref=\{isHighlighted \? \(el\) => el\?\.scrollIntoView/);
   const card = bodyOf(scenesView, 'function SceneCard(');
-  assert.match(card, /if \(isHighlighted && !wasHighlightedRef\.current && claimHighlightScroll\(scene\.sceneId\)\) \{\n\s*highlightCardRef\.current\?\.scrollIntoView\(\{ behavior: prefersReducedMotion\(\) \? 'auto' : 'smooth', block: 'center' \}\);/);
+  // 열쇠에 파트(시트) 이름을 함께 — 다른 파트의 같은 번호 씬으로 이어 건너뛰어도 데려다준다(리뷰 반영)
+  assert.match(card, /if \(isHighlighted && !wasHighlightedRef\.current && claimHighlightScroll\(highlightScrollKey\(\[sheetName\], scene\.sceneId\)\)\) \{\n\s*highlightCardRef\.current\?\.scrollIntoView\(\{ behavior: prefersReducedMotion\(\) \? 'auto' : 'smooth', block: 'center' \}\);/);
   assert.match(card, /ref=\{highlightCardRef\}/);
-  assert.match(unifiedCard, /claimHighlightScroll\(primaryScene\?\.sceneId \?\? ''\)/);
+  assert.match(unifiedCard, /claimHighlightScroll\(highlightScrollKey\(\[bgSheetName, actSheetName\], primaryScene\?\.sceneId \?\? ''\)\)/);
   assert.match(unifiedCard, /cardRootRef\.current\?\.scrollIntoView\(\{ behavior: prefersReducedMotion\(\) \? 'auto' : 'smooth', block: 'center' \}\)/);
 });

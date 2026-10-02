@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { prefersReducedMotion } from '@/utils/motion';
-import { claimHighlightScroll } from '@/utils/notificationArrival';
+import { claimHighlightScroll, highlightScrollKey } from '@/utils/notificationArrival';
 import { createPortal } from 'react-dom';
 import { toast as sonnerToast } from 'sonner';
 import { useDataStore, legacyStagesFor } from '@/stores/useDataStore';
@@ -977,11 +977,11 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const highlightCardRef = useRef<HTMLDivElement>(null);
   const wasHighlightedRef = useRef(false);
   useEffect(() => {
-    if (isHighlighted && !wasHighlightedRef.current && claimHighlightScroll(scene.sceneId)) {
+    if (isHighlighted && !wasHighlightedRef.current && claimHighlightScroll(highlightScrollKey([sheetName], scene.sceneId))) {
       highlightCardRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
     }
     wasHighlightedRef.current = Boolean(isHighlighted);
-  }, [isHighlighted, scene.sceneId]);
+  }, [isHighlighted, scene.sceneId, sheetName]);
 
   const borderColor = pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
   const workLinkSlots = useMemo(

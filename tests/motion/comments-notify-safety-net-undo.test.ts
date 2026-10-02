@@ -322,7 +322,8 @@ test('댓글 패널: 휴지통은 바로 지우지 않고 5초 되돌리기, 확
   assert.match(del, /setTimeout\(\(\) => collapseDeletedComment\(commentId, element\), COMMENT_DELETE_EXIT_MS\)/);
   assert.match(del, /message: '댓글을 지웠어요',\s*onUndo: \(\) => restoreDeletedComment\(commentId\),\s*onExpire: \(\) => commitDeletedComment\(commentId\),/);
   const commit = bodyOf(comments, 'const commitDeletedComment = (commentId: string) =>');
-  assert.match(commit, /if \(!entry \|\| entry\.phase !== 'waiting'\) return;\s*entry\.phase = 'deleting';\s*deleteComment\(entry\.targetKey, commentId\)/);
+  // (리뷰 반영: 앱 종료가 기다릴 수 있게 요청을 모아 둔다 — comments-notify-review-fix.test.ts)
+  assert.match(commit, /if \(!entry \|\| entry\.phase !== 'waiting'\) return;\s*entry\.phase = 'deleting';\s*\/\/[^\n]*\s*const deletion: Promise<void> = deleteComment\(entry\.targetKey, commentId\)/);
   assert.match(commit, /sonnerToast\.error\('댓글을 지우지 못했어요/);
   assert.match(commit, /settleDeleteVisual\(entry\);\s*reinsertComment\(entry\.comment\);/, '실패하면 제자리로');
   const restore = bodyOf(comments, 'const restoreDeletedComment = (commentId: string) =>');
@@ -338,7 +339,9 @@ test('댓글 패널: 다른 씬·패널 닫기·창 숨김·새로고침·종료
   assert.match(comments, /if \(document\.visibilityState === 'hidden'\) flushAll\(\);/);
   assert.match(comments, /window\.addEventListener\('pagehide', flushAll\);/);
   assert.match(comments, /window\.addEventListener\('beforeunload', flushAll\);/);
-  assert.match(comments, /window\.electronAPI\?\.onSavingBeforeQuit\?\.\(flushAll\)/);
+  // 앱 종료는 대기 작업이 없어도 오는 신호로 받는다(리뷰 반영 — 예전 '저장 중' 신호는 대기 작업이 있을 때만 왔다)
+  assert.match(comments, /commentDeleteFlushers\.add\(flushAll\);\s*hookCommentDeleteQuitFlush\(\);/);
+  assert.doesNotMatch(comments, /onSavingBeforeQuit/);
   assert.match(comments, /entry\.undoWindow\?\.expire\(\);\s*\}\s*\};\s*\}, \[primaryStorageKey, secondarySceneKey\]\);/);
 });
 

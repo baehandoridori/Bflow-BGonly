@@ -205,7 +205,8 @@ test('CommentPanel can place the unread divider before a nested unread reply', (
   assert.match(commentPanel, /orderedVisibleComments/);
   assert.match(commentPanel, /replyShowUnreadDivider/);
   // 움직임 폴리싱 4번: 줄은 처음 잡은 자리(읽음 처리 뒤에도 유지)에, 아직 안 잡았으면 첫 안 읽은 댓글(답글 포함)에 붙는다.
-  assert.match(commentPanel, /const dividerCommentId = listReady && readStateReady \? \(unreadDivider\?\.id \?\? firstUnreadCommentId\) : null;/);
+  // (리뷰 반영: 처음 자리를 잡을 때 한 번만 정한다 — 정한 뒤엔 실시간으로 온 댓글에 새 줄을 만들지 않는다.)
+  assert.match(commentPanel, /const dividerCommentId = listReady && readStateReady \? unreadDividerCommentId\(unreadDividerSlot, firstUnreadCommentId\) : null;/);
   assert.match(commentPanel, /reply\.id === dividerCommentId/);
   assert.match(commentPanel, /buildCommentReplyTarget\(comments,\s*target\)/);
   assert.match(commentPanel, /next\.delete\(threadRootId\)/);

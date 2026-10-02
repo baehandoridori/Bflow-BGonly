@@ -19,11 +19,13 @@ import {
   commentListDistanceFromBottom,
   commentLoadStatusAfter,
   commentOpenPinTarget,
+  UNREAD_DIVIDER_UNCAPTURED,
+  captureUnreadDivider,
   commentOpenScrollTop,
   isUnreadDividerRead,
   newCommentsPillLabel,
-  nextUnreadDivider,
   splitNewCommentIds,
+  unreadDividerCommentId,
 } from '../../src/utils/commentOpenCalm.ts';
 
 const read = (path: string) => readFileSync(path, 'utf-8').replace(/\r\n/g, '\n');
@@ -94,19 +96,38 @@ test('새로 생긴 댓글: 이미 본 id 는 빼고 내 것/팀원 것으로 �
   assert.deepEqual(splitNewCommentIds(known, list, null), { mine: [], others: ['c', 'd', 'e'] });
 });
 
-test("'새 댓글' 줄: 한 번 잡으면 읽음 처리 뒤에도 자리를 지키고, 읽힌 뒤에만 옅어지기 시작한다", () => {
-  assert.equal(nextUnreadDivider(null, null), null);
-  const captured = nextUnreadDivider(null, 'c5');
-  assert.deepEqual(captured, { id: 'c5', fading: false });
+test("'새 댓글' 줄: 처음 자리를 잡을 때 한 번만 정하고, 읽음 처리 뒤에도 그 자리를 지킨다", () => {
+  // 정하기 전(처음 그리는 순간)엔 지금 첫 안 읽은 댓글에 붙는다
+  assert.equal(unreadDividerCommentId(UNREAD_DIVIDER_UNCAPTURED, 'c5'), 'c5');
+  const captured = captureUnreadDivider(UNREAD_DIVIDER_UNCAPTURED, { id: 'c5', createdAt: '2026-10-03T10:00:00.000Z' });
+  assert.deepEqual(captured, { captured: true, divider: { id: 'c5', createdAt: '2026-10-03T10:00:00.000Z', fading: false } });
   // 읽음 처리로 첫 안 읽은 댓글이 사라져도(null) 줄은 그대로
-  assert.equal(nextUnreadDivider(captured, null), captured);
+  assert.equal(captureUnreadDivider(captured, null), captured);
+  assert.equal(unreadDividerCommentId(captured, null), 'c5');
   // 그 뒤 새 댓글이 와도 처음 줄을 옮기지 않는다(옮기면 한 줄 당겨진다)
-  assert.equal(nextUnreadDivider(captured, 'c9'), captured);
-  assert.equal(isUnreadDividerRead(captured, 'c5'), false, '아직 안 읽음');
-  assert.equal(isUnreadDividerRead(captured, null), true, '읽음 → 4초 타이머 시작');
-  assert.equal(isUnreadDividerRead(captured, 'c9'), true, '줄 아래 새 댓글이 와도 타이머를 다시 시작하지 않는다');
-  assert.equal(isUnreadDividerRead({ id: 'c5', fading: true }, null), false, '이미 옅어짐');
-  assert.equal(isUnreadDividerRead(null, null), false);
+  assert.equal(captureUnreadDivider(captured, { id: 'c9', createdAt: '2026-10-03T10:05:00.000Z' }), captured);
+  assert.equal(unreadDividerCommentId(captured, 'c9'), 'c5');
+});
+
+test("'새 댓글' 줄: 안 읽은 댓글 없이 연 패널엔 그 뒤 실시간으로 온 팀원 댓글에도 줄을 만들지 않는다(옅어진 빈 틈이 남았다)", () => {
+  const none = captureUnreadDivider(UNREAD_DIVIDER_UNCAPTURED, null);
+  assert.deepEqual(none, { captured: true, divider: null });
+  // 실시간으로 온 팀원 댓글이 첫 안 읽은 댓글이 돼도 줄은 없다 — 알약·바닥 따라가기와 말풍선 노출 기반 읽음 처리로 둔다
+  assert.equal(captureUnreadDivider(none, { id: 'o9', createdAt: '2026-10-03T10:05:00.000Z' }), none);
+  assert.equal(unreadDividerCommentId(none, 'o9'), null);
+});
+
+test("'새 댓글' 줄: 읽음 기록이 줄이 붙은 댓글에 닿았을 때만 옅어지기 시작한다(그 댓글이 읽기 전에 지워져도 그대로)", () => {
+  const divider = { id: 'c5', createdAt: '2026-10-03T10:00:00.000Z', fading: false };
+  assert.equal(isUnreadDividerRead(divider, null), false, '읽음 기록 없음');
+  assert.equal(isUnreadDividerRead(divider, '2026-10-03T09:59:59.000Z'), false, '아직 안 읽음');
+  // 줄이 붙은 c5 가 읽기 전에 실시간으로 지워져 첫 안 읽은 댓글이 c6 으로 바뀌어도 읽음 기록은 그대로 → 옅어지지 않는다
+  assert.equal(isUnreadDividerRead(divider, '2026-10-03T09:59:59.000Z'), false);
+  assert.equal(isUnreadDividerRead(divider, '2026-10-03T10:00:00.000Z'), true, '읽음 → 4초 타이머 시작');
+  assert.equal(isUnreadDividerRead(divider, '2026-10-03T10:05:00+00:00'), true, '줄 아래 새 댓글까지 읽어도 그대로 읽음');
+  assert.equal(isUnreadDividerRead({ ...divider, fading: true }, '2026-10-03T10:05:00.000Z'), false, '이미 옅어짐');
+  assert.equal(isUnreadDividerRead(null, '2026-10-03T10:05:00.000Z'), false);
+  assert.equal(isUnreadDividerRead({ ...divider, createdAt: 'not-a-date' }, '2026-10-03T10:05:00.000Z'), false);
 });
 
 test("알약 글자: '새 댓글 N개'", () => {

@@ -138,7 +138,15 @@ export const HIGHLIGHT_SCROLL_ONCE_MS = 4000;
 let lastHighlightScroll: { key: string; at: number } | null = null;
 
 /**
- * 강조된 카드가 스크롤을 데려가도 되는지. 같은 강조(같은 씬)는 4초 안에 한 번만 — 카드가 다시 마운트돼도
+ * 강조 한 번을 가리는 열쇠 — 씬 번호만으로는 다른 파트의 같은 번호 씬(EP05_A 의 a001 → EP05_B 의 a001)을 같은 강조로 봐서
+ * 4초 안에 이어 건너뛰면 두 번째 카드로 데려다주지 않았다. 시트(파트) 이름을 함께 쓴다.
+ */
+export function highlightScrollKey(sheetNames: ReadonlyArray<string | null | undefined>, sceneId: string): string {
+  return `${sheetNames.map((name) => name ?? '').join('|')}::${sceneId}`;
+}
+
+/**
+ * 강조된 카드가 스크롤을 데려가도 되는지. 같은 강조(같은 파트의 같은 씬, highlightScrollKey)는 4초 안에 한 번만 — 카드가 다시 마운트돼도
  * (목록 다시 그리기·보기 전환) 사용자가 스크롤한 자리에서 다시 끌어당기지 않는다.
  */
 export function claimHighlightScroll(key: string, now: number = Date.now()): boolean {

@@ -170,7 +170,8 @@ test('패널 배선: 본문·답글·스레드 창 모두 아래에서 떠오르
   assert.match(panel, /const bubbleRise = commentBubbleRise\(reduceMotion\);/);
   // 활동 줄·본문 댓글·답글 묶음(첫 답글)·답글·스레드 창 메시지
   assert.equal([...panel.matchAll(/\{\.\.\.bubbleRise\}/g)].length, 5);
-  assert.match(panel, /<AnimatePresence initial=\{false\}>\s*\{replies\.length > 0 && \(\s*<motion\.div key="replies" \{\.\.\.bubbleRise\}/);
+  // (20번 리뷰 반영: 답글 묶음에 data-reply-group 이 붙었다 — 마지막 답글을 지울 때 묶음도 함께 숨긴다)
+  assert.match(panel, /<AnimatePresence initial=\{false\}>\s*\{replies\.length > 0 && \(\s*<motion\.div\s+key="replies"\s+data-reply-group=\{comment\.id\}\s+\{\.\.\.bubbleRise\}/);
   assert.match(panel, /<motion\.div\s+key=\{`evt:\$\{node\.event\.id\}`\}[\s\S]{0,200}?\{\.\.\.bubbleRise\}/);
   // 답글: 접힘 조건 안의 AnimatePresence initial={false} — 펼칠 때·처음 그릴 때는 움직이지 않음
   assert.match(panel, /\{!threadCollapsed && \(\s*<AnimatePresence initial=\{false\}>\s*\{replies\.map\(\(reply, ri\) => \{/);
