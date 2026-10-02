@@ -156,6 +156,8 @@ function TeamMemberCard({
       ref={cardRef}
       className={cn(
         // 정보 카드 hover: 테두리만 밝아짐. 카드 자체 전환은 찾아온 팀원 강조(테두리·고리)가 풀릴 때만 쓴다.
+        // box-shadow 전환은 '그림자는 겹친 층의 opacity 로' 규칙의 예외: 강조가 풀릴 때 한 번만 돌고(반복·hover 아님),
+        // overflow-hidden 카드라 바깥 고리·그림자를 안쪽 층(::before/자식)으로 옮기면 잘려서 같은 모습을 낼 수 없다.
         'rounded-xl border overflow-hidden bf-card-hover bf-card-hover--info',
         'transition-[border-color,box-shadow] duration-slow ease-out-expo',
         highlighted

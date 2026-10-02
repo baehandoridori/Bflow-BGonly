@@ -9,6 +9,7 @@ import {
   applyStoredMotionLevel,
   getMotionLevel,
   isMinimalMotionInDom,
+  motionLevelBroadcastPayload,
   motionLevelFromBroadcast,
   motionLevelWriteMark,
   normalizeMotionLevel,
@@ -109,6 +110,22 @@ test('방송: { motionLevel } 만 받아들이고 다른 설정 방송은 무시
   assert.equal(motionLevelFromBroadcast({ plexus: {} }), null);
   assert.equal(motionLevelFromBroadcast(null), null);
   assert.equal(motionLevelFromBroadcast('lite'), null);
+});
+
+test('방송 메아리: 내 창이 보낸 오래된 방송은 버리고(연타 깜빡임 방지), 마지막 요청·다른 창 방송은 따른다', () => {
+  const me = { from: 'win-a', seq: 2 };
+  // 가볍게(1) → 최소(2)를 빠르게 고름: 먼저 끝난 '가볍게' 방송이 뒤늦게 돌아와도 되돌아가지 않는다
+  assert.equal(motionLevelFromBroadcast(motionLevelBroadcastPayload('lite', { from: 'win-a', seq: 1 }), me), null);
+  assert.equal(motionLevelFromBroadcast(motionLevelBroadcastPayload('minimal', { from: 'win-a', seq: 2 }), me), 'minimal');
+  // 다른 창(플로팅 위젯 등)의 방송은 번호와 상관없이 따른다
+  assert.equal(motionLevelFromBroadcast(motionLevelBroadcastPayload('lite', { from: 'win-b', seq: 1 }), me), 'lite');
+  // 번호 없는 방송·내 창 표시를 넘기지 않은 경우는 그대로 따른다
+  assert.equal(motionLevelFromBroadcast({ motionLevel: 'lite', motionLevelFrom: 'win-a' }, me), 'lite');
+  assert.equal(motionLevelFromBroadcast(motionLevelBroadcastPayload('lite', { from: 'win-a', seq: 1 })), 'lite');
+  assert.deepEqual(
+    motionLevelBroadcastPayload('full', { from: 'w', seq: 3 }),
+    { motionLevel: 'full', motionLevelFrom: 'w', motionLevelSeq: 3 },
+  );
 });
 
 test("React 밖 판단(prefersReducedMotion·animateEl)도 '최소'를 동작 줄이기로 본다", () => {
@@ -232,7 +249,9 @@ function importantMotionOutsideReduceMedia(css: string): string[] {
     const match = decl.trim().match(/^(transition|transition-duration|animation|animation-duration)\s*:\s*([\s\S]*)!important$/);
     if (!match) return;
     const times = [...match[2].matchAll(/(\d*\.?\d+)(ms|s)\b/g)].map(([, n, unit]) => Number(n) * (unit === 's' ? 1000 : 1));
-    if (!times.some((ms) => ms >= 1)) return;
+    // 박자 토큰(var(--motion-base) 등)도 길이다. 곡선 토큰(--ease-*)만 빼고, 값에 var() 가 있으면 길이가 있다고 본다.
+    const varLengths = [...match[2].matchAll(/var\(\s*(--[\w-]+)/g)].filter(([, name]) => !name.startsWith('--ease'));
+    if (!times.some((ms) => ms >= 1) && varLengths.length === 0) return;
     if (stack.some((header) => header.includes('prefers-reduced-motion'))) return;
     found.push(`${stack.join(' > ')} :: ${decl.trim().slice(0, 90)}`);
   };
@@ -255,6 +274,12 @@ test('검사기 자체: 블록 밖 !important 는 잡고, no-preference 안·non
   assert.equal(importantMotionOutsideReduceMedia('.a { color: red; animation: x 1s infinite !important }').length, 1);
   assert.equal(importantMotionOutsideReduceMedia('@media (prefers-reduced-motion: no-preference) { .a { transition: opacity .2s !important; } }').length, 0);
   assert.equal(importantMotionOutsideReduceMedia('.a { transition: none !important; animation-duration: 0.01ms !important; }').length, 0);
+  // 박자 토큰으로 길이를 정해도 잡는다(곡선 토큰만 있고 길이 0 이면 통과)
+  assert.equal(importantMotionOutsideReduceMedia('.a { transition: opacity var(--motion-base) !important; }').length, 1);
+  assert.equal(importantMotionOutsideReduceMedia('.a { transition:\n    transform var(--motion-base) var(--ease-out),\n    color var(--motion-fast) var(--ease-out) !important; }').length, 1);
+  assert.equal(importantMotionOutsideReduceMedia('.a { transition-duration: var(--motion-slow) !important; }').length, 1);
+  assert.equal(importantMotionOutsideReduceMedia('@media (prefers-reduced-motion: no-preference) { .a { transition: opacity var(--motion-base) var(--ease-out) !important; } }').length, 0);
+  assert.equal(importantMotionOutsideReduceMedia('.a { transition: opacity 0ms var(--ease-out) !important; }').length, 0);
 });
 
 test('토스트·대시보드 위젯의 !important 움직임은 no-preference 안으로 옮겼다(겹침·투명도 같은 값은 밖에 남김)', () => {
@@ -295,10 +320,37 @@ test("'가볍게' 이상: 숨 쉬는 장식을 멈춘다", () => {
   const css = stripComments(read('src/styles/motion-foundation.css'));
   const lite = ":root:is([data-motion='lite'], [data-motion='minimal'])";
   // 바탕 C: 새 댓글·새 버전 배지·그래프 정점은 미리 그린 빛 층(::before/::after)의 opacity 로 숨 쉰다 — 층을 멈춘다.
-  for (const target of ['.comment-unread-badge::after', '.bflow-peak-pulse::after', '.bflow-badge-pulse::before', '.bflow-badge-pulse::after', '.bell-glow-soft::after', '.bell-glow-mention::after', '.scene-num-glow-wrap::before', '.editing-beam::before', '.scene-top-progress-fill::after', '.bflow-update-latest-card::before']) {
+  for (const target of ['.comment-unread-badge::before', '.bflow-peak-pulse::after', '.bflow-badge-pulse::before', '.bflow-badge-pulse::after', '.bell-glow-soft::after', '.bell-glow-mention::after', '.scene-num-glow-wrap::before', '.editing-beam::before', '.scene-top-progress-fill::after', '.bflow-update-latest-card::before']) {
     assert.ok(css.includes(`${lite} ${target}`), `가볍게 정지 대상 없음: ${target}`);
   }
-  // 바탕 C: 알림 카드는 흐림 자체를 뺐으므로(index.css) '가볍게' 전용 흐림 끄기 규칙이 필요 없다.
+});
+
+test("'가볍게' 이상: 뒤 흐림을 모두 끄고(인라인 흐림도 이김), 겹침 순서는 지키며, 다크 위젯 유리는 바탕을 올린다", () => {
+  const css = stripComments(read('src/styles/motion-foundation.css'));
+  const lite = ":root:is([data-motion='lite'], [data-motion='minimal'])";
+  const selectors = [
+    `${lite} :is(*, #bf-motion-lite),`,
+    `${lite} :is(*, #bf-motion-lite)::before,`,
+    `${lite} :is(*, #bf-motion-lite)::after {`,
+  ].join('\n');
+  const at = css.indexOf(selectors);
+  assert.ok(at >= 0, '모든 요소·가상 요소를 ID 특이도로 고르는 흐림 끄기 규칙');
+  const body = css.slice(css.indexOf('{', at) + 1, css.indexOf('}', at));
+  assert.match(body, /-webkit-backdrop-filter: none !important;/);
+  assert.match(body, /(^|\s)backdrop-filter: none !important;/);
+  // 흐림이 만들던 쌓임 맥락은 남긴다(인라인 style·Tailwind 로 흐림을 준 요소)
+  const isolate = `${lite} :is([style*='backdrop-filter: blur'], [style*='backdrop-filter: saturate'], [class*='backdrop-blur']) {`;
+  const isolateAt = css.indexOf(isolate);
+  assert.ok(isolateAt >= 0, '흐림 있던 요소의 쌓임 맥락 유지 규칙');
+  assert.match(css.slice(isolateAt, css.indexOf('}', isolateAt)), /isolation: isolate;/);
+  // 다크 위젯 유리: 흐림 없이 글자가 묻히지 않게 바탕을 올린다(라이트는 원래 .8 이라 그대로)
+  assert.match(css, /:root:not\(\[data-color-mode='light'\]\):is\(\[data-motion='lite'\], \[data-motion='minimal'\]\) \{\s*--glass-tint-alpha: 0\.72;/);
+  assert.match(read('src/components/widgets/Widget.tsx'), /background: 'rgb\(var\(--color-glass-tint\) \/ var\(--glass-tint-alpha\)\)'/);
+  // OS 동작 줄이기만 켠 경우의 흐림은 그대로(움직임이 아니라 무게 설정) — 흐림 끄기 선언은 위 규칙 하나뿐
+  assert.equal(css.split('backdrop-filter: none !important;').length - 1, 2, '-webkit- 포함 두 줄, 위 규칙 안에만');
+  // 설정 화면 안내도 흐림 끄기를 말한다
+  const effects = read('src/components/settings/EffectsSection.tsx');
+  assert.match(effects, /lite: '[^']*유리 효과도 꺼요/);
 });
 
 test('휴가 화면 동기화 막대: framer x 반복 대신 CSS transform 훑기, 동작 줄이기·최소는 멈춘 막대', () => {
@@ -335,7 +387,13 @@ test('useMotionPref: 기존 { reduce } 사용처 그대로 + lite·level, OS 값
 test('설정 저장·방송: preferences.json motionLevel, 다른 창은 방송으로 같은 값', () => {
   const sync = read('src/services/motionLevelSync.ts');
   assert.match(sync, /savePreferences\(\{ \.\.\.existing, motionLevel: level \}\)/);
-  assert.match(sync, /preferencesBroadcastChange\?\.\(\{ motionLevel: level \}\)/);
+  assert.match(sync, /preferencesBroadcastChange\?\.\(motionLevelBroadcastPayload\(level, \{ from: windowTag, seq \}\)\)/);
+  // 받는 쪽은 내 창의 오래된 방송을 버린다(연타 깜빡임 방지)
+  assert.match(sync, /motionLevelFromBroadcast\(payload, \{ from: windowTag, seq: lastRequestSeq \}\)/);
+  const save = sync.slice(sync.indexOf('export async function saveMotionLevel'));
+  assert.ok(save.indexOf('lastRequestSeq += 1;') >= 0, '요청 번호');
+  assert.ok(save.indexOf('lastRequestSeq += 1;') < save.indexOf('setMotionLevel(level);'), '요청 번호는 반영보다 먼저 올린다');
+  assert.ok(save.indexOf('setMotionLevel(level);') < save.indexOf('await savePreferences'), '저장보다 먼저 이 창에 반영');
   assert.match(sync, /onPreferencesChanged\?\.\(/);
   // 이 창에는 저장보다 먼저 반영(낙관적)
   assert.ok(sync.indexOf('setMotionLevel(level);') < sync.indexOf('await savePreferences'));
@@ -349,6 +407,8 @@ test('설정 › 효과 맨 위에 움직임 3칸(기본·가볍게·최소)', (
   const firstOtherRow = effects.indexOf('<p className="text-sm font-medium text-text-primary">씬 완료 색상 표시</p>');
   assert.ok(motionRow > 0 && motionRow < firstOtherRow, '움직임 줄이 효과 섹션 맨 위');
   assert.match(effects, /onChange=\{\(level\) => \{ void saveMotionLevel\(level\); \}\}/);
+  // 되돌리기 아이콘 버튼은 스크린리더용 이름이 있다
+  assert.match(effects, /onClick=\{\(\) => \{ void saveMotionLevel\('full'\); \}\}[\s\S]{0,200}aria-label="움직임 기본값으로"/);
 });
 
 test('계속 움직이는 배경(대시보드·로그인 플렉서스, StarNest 두 종, 설정 미리보기)은 루프 문지기를 거친다', () => {
@@ -381,4 +441,11 @@ test('그래프 정점 SMIL 펄스·활동 피드 미끄럼 스크롤·캐릭터
   assert.doesNotMatch(feed, /behavior: 'smooth'/);
   const groups = read('src/components/characters/CharacterTabGroupsView.tsx');
   assert.match(groups, /const reduced = prefersReducedMotion\(\);/);
+});
+
+test("씬 상세 확대 전환(WAAPI)은 '최소'도 동작 줄이기로 본다 — OS 값만 보는 matchMedia 직접 판정 금지", () => {
+  const transition = read('src/components/scenes/SceneContinuityTransition.tsx');
+  assert.match(transition, /import \{ prefersReducedMotion \} from '@\/utils\/motion';/);
+  assert.match(transition, /const reduce = prefersReducedMotion\(\);\s*if \(!sourceElement \|\| !targetRoot \|\| reduce\) \{\s*onComplete\?\.\(\);\s*return;/);
+  assert.doesNotMatch(transition, /matchMedia\(/);
 });

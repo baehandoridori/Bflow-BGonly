@@ -284,11 +284,13 @@ test('숨쉬는 장식 키프레임은 opacity·transform 만 움직인다(box-s
     for (const prop of props) assert.ok(prop === 'opacity' || prop === 'transform', `${name}: ${prop}`);
   }
   // 움직이는 층은 가상 요소다
-  for (const selector of ['.comment-unread-badge::after', '.bflow-peak-pulse::after', '.bflow-badge-pulse::before', '.bflow-badge-pulse::after', '.bflow-bulk-bar-pulse::after']) {
+  for (const selector of ['.comment-unread-badge::before', '.bflow-peak-pulse::after', '.bflow-badge-pulse::before', '.bflow-badge-pulse::after', '.bflow-bulk-bar-pulse::after']) {
     const at = css.indexOf(`${selector} {`);
     assert.ok(at >= 0, `${selector} 규칙 없음`);
   }
-  assert.match(css, /\.comment-unread-badge::after \{[^}]*animation: comment-unread-badge-pulse 2\.6s ease-in-out infinite;/);
+  // 새 댓글 배지는 ::before — 시트 배지 안 숫자 방울(absolute)보다 먼저 칠해져 빛 고리가 방울을 덮지 않는다.
+  assert.match(css, /\.comment-unread-badge::before \{[^}]*animation: comment-unread-badge-pulse 2\.6s ease-in-out infinite;/);
+  assert.ok(!css.includes('.comment-unread-badge::after'), '새 댓글 배지 빛 층은 ::after 가 아니다');
   assert.match(css, /\.bflow-peak-pulse::after \{[^}]*animation: bflow-peak-bar-pulse 1\.6s ease-in-out infinite;/);
   assert.match(css, /\.bflow-badge-pulse::after \{[^}]*animation: bflow-badge-pulse 2s ease-in-out infinite;/);
   // 일괄 작업 바: 나타날 때 두 번만
@@ -303,7 +305,7 @@ test('숨쉬는 장식 키프레임은 opacity·transform 만 움직인다(box-s
 
 test('동작 줄이기에서는 빛 층이 멈춘다', () => {
   const css = stripComments(read('src/index.css'));
-  for (const selector of ['.comment-unread-badge::after', '.bflow-bulk-bar-pulse::after']) {
+  for (const selector of ['.comment-unread-badge::before', '.bflow-bulk-bar-pulse::after']) {
     assert.ok(css.includes(`@media (prefers-reduced-motion: reduce) {\n  ${selector} {\n    animation: none !important;`), selector);
   }
   assert.ok(css.includes('@media (prefers-reduced-motion: reduce) {\n  .bflow-badge-pulse::before,\n  .bflow-badge-pulse::after {\n    animation: none !important;'));

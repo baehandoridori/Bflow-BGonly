@@ -2,7 +2,7 @@
    앱 안 '움직임' 설정 (움직임 폴리싱 바탕 B 2단계, 2026-10)
 
    - 'full'(기본)    : 지금 그대로.
-   - 'lite'(가볍게)  : 계속 반복되는 장식(대시보드 배경, 숨 쉬는 배지·빛, 그래프 정점 펄스 등)만 멈춘다.
+   - 'lite'(가볍게)  : 계속 반복되는 장식(대시보드 배경, 숨 쉬는 배지·빛, 그래프 정점 펄스 등)을 멈추고 뒤 흐림을 끈다(CSS).
                        창이 열리는 것 같은 짧은 반응은 남긴다. 저사양 PC 용.
    - 'minimal'(최소) : 윈도우 '애니메이션 효과 끄기'(동작 줄이기)와 같게.
 
@@ -116,10 +116,37 @@ export function subscribeMotionLevel(listener: Listener): () => void {
   };
 }
 
-/** 설정 변경 방송({ motionLevel }) 에서 값을 꺼낸다. 다른 설정의 방송이면 null. */
-export function motionLevelFromBroadcast(payload: unknown): MotionLevel | null {
+/**
+ * 방송에 함께 싣는 '누가 몇 번째로 보냈나'. 방송은 보낸 창에도 돌아오므로, 빠르게 연달아 고르면
+ * (가볍게 → 최소) 먼저 끝난 '가볍게' 방송이 뒤늦게 돌아와 잠깐 되돌아갔다 다시 바뀌는 깜빡임이 생긴다.
+ * 보낸 창은 자기 마지막 요청보다 오래된 자기 방송을 버린다(다른 창의 방송은 그대로 따른다).
+ */
+export interface MotionLevelBroadcastOrigin {
+  readonly from: string;
+  readonly seq: number;
+}
+
+/** 설정 화면이 보내는 방송 내용. */
+export function motionLevelBroadcastPayload(level: MotionLevel, origin: MotionLevelBroadcastOrigin) {
+  return { motionLevel: level, motionLevelFrom: origin.from, motionLevelSeq: origin.seq };
+}
+
+/**
+ * 설정 변경 방송({ motionLevel }) 에서 값을 꺼낸다. 다른 설정의 방송이면 null.
+ * self 를 넘기면, 이 창이 보낸 방송 중 마지막 요청(self.seq)보다 오래된 것도 null(이미 더 새 값을 골랐음).
+ */
+export function motionLevelFromBroadcast(payload: unknown, self?: MotionLevelBroadcastOrigin): MotionLevel | null {
   if (!payload || typeof payload !== 'object' || !('motionLevel' in payload)) return null;
-  return normalizeMotionLevel((payload as { motionLevel?: unknown }).motionLevel);
+  const message = payload as { motionLevel?: unknown; motionLevelFrom?: unknown; motionLevelSeq?: unknown };
+  if (
+    self
+    && message.motionLevelFrom === self.from
+    && typeof message.motionLevelSeq === 'number'
+    && message.motionLevelSeq < self.seq
+  ) {
+    return null;
+  }
+  return normalizeMotionLevel(message.motionLevel);
 }
 
 /** React 밖에서 읽는 '최소' 여부 — <html data-motion> 에 적힌 값을 본다. */

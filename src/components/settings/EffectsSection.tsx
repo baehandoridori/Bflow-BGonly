@@ -841,8 +841,8 @@ const MOTION_LEVEL_OPTIONS: Array<{ value: MotionLevel; label: string }> = [
 
 const MOTION_LEVEL_HINTS: Record<MotionLevel, string> = {
   full: '창이 열리고 카드가 자리 잡는 움직임과 배경 효과를 모두 보여줘요.',
-  lite: '대시보드 배경처럼 계속 움직이는 장식은 멈추고, 창이 열리는 것 같은 짧은 움직임만 남겨요. 느린 PC 에 좋아요.',
-  minimal: "움직임을 거의 끄고 바로 바뀌게 해요. 윈도우의 '애니메이션 효과' 끄기와 같아요.",
+  lite: '대시보드 배경처럼 계속 움직이는 장식은 멈추고 뒤가 흐리게 비치는 유리 효과도 꺼요. 창이 열리는 것 같은 짧은 움직임만 남겨요. 느린 PC 에 좋아요.',
+  minimal: "움직임을 거의 끄고 바로 바뀌게 해요. 윈도우의 '애니메이션 효과' 끄기와 같고, '가볍게'처럼 유리 효과도 꺼요.",
 };
 
 async function persistPlexus(plexus: typeof DEFAULTS) {
@@ -1079,6 +1079,7 @@ export function EffectsSection() {
                 onClick={() => { void saveMotionLevel('full'); }}
                 className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
                 title="기본값 (기본)"
+                aria-label="움직임 기본값으로"
               >
                 <RotateCcw size={11} />
               </button>

@@ -194,6 +194,18 @@ test('고유 hover 카드는 효과를 유지하고 박자만 공통 토큰으�
   assert.match(interactive, /transform var\(--motion-base\) var\(--ease-out\)/);
   assert.match(interactive, /box-shadow var\(--motion-base\) var\(--ease-out\)/);
   assert.doesNotMatch(interactive, /300ms/);
+  // !important 전환이라 동작 줄이기 전역 규칙을 이긴다 → no-preference 안에만(동작 줄이기·'최소'는 바로 바뀜)
+  const motionOkBlocks = [...css.matchAll(/@media \(prefers-reduced-motion: no-preference\) \{/g)]
+    .map((m) => mediaBlock(css.slice(m.index), 'prefers-reduced-motion: no-preference'));
+  assert.ok(
+    motionOkBlocks.some((block) => /\.scene-card-interactive \{\s*transition:[^}]*!important;/.test(block)),
+    '씬 카드 !important 전환은 no-preference 블록 안',
+  );
+  assert.doesNotMatch(
+    css.replace(/@media \(prefers-reduced-motion: no-preference\) \{\n  \.scene-card-interactive \{[^}]*\}\n\}/, ''),
+    /\.scene-card-interactive \{[^}]*transition/,
+    '블록 밖에 씬 카드 전환이 남지 않음',
+  );
 
   const compositing = ruleBody(css, '.scene-card');
   assert.match(compositing, /transform var\(--motion-slow\) var\(--ease-out\)/);
