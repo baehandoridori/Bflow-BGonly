@@ -9,6 +9,7 @@ import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
+import { cardCascadeStyle } from '@/utils/viewTransitionMotion';
 
 /* ────────────────────────────────────────────────
    그라데이션 프로그레스 바
@@ -502,14 +503,10 @@ export function EpisodeView() {
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {epData.map(({ ep, stats }, i) => (
-                  <motion.div
-                    key={ep.episodeNumber}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: i * 0.04 }}
-                  >
+                  // 움직임 폴리싱 12번: 차례 등장은 20ms 간격·최대 200ms 지연 — 마운트 때 한 번
+                  <div key={ep.episodeNumber} className="bf-card-cascade" style={cardCascadeStyle(i)}>
                     <EpisodeCard episode={ep} stats={stats} onNavigate={handleNavigate} onContextMenu={handleEpContextMenu} />
-                  </motion.div>
+                  </div>
                 ))}
               </div>
 

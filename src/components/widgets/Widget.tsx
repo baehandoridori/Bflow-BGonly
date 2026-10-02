@@ -106,8 +106,8 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
         </div>
       </div>
 
-      {/* 내용 */}
-      <div className="flex-1 overflow-auto p-4">{children}</div>
+      {/* 내용 — data-widget-body: 대시보드 탭을 바꿀 때 유리 셸은 그대로 두고 이 안쪽만 다시 드러낸다(움직임 폴리싱 12번) */}
+      <div data-widget-body className="flex-1 overflow-auto p-4">{children}</div>
     </div>
   );
 }

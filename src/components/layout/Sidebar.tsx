@@ -14,6 +14,7 @@ import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { VersionHoverTip, deriveHoverState } from './VersionHoverTip';
+import { prefetchView } from '@/views/viewLoaders';
 import * as gcalService from '@/services/googleCalendarService';
 
 const GCAL_AUTH_EVENT = 'bflow:gcal-auth-changed';
@@ -367,6 +368,10 @@ export function Sidebar() {
                 setView(item.id);
               }
             }}
+            // 움직임 폴리싱 12번: 마우스를 올리는(포커스하는) 순간 그 화면 코드를 미리 받아 둔다 —
+            //   누를 때 로딩 동그라미 없이 바로 그린다. 올린 항목만(전부 미리 받으면 입력이 막힌다).
+            onMouseEnter={() => prefetchView(item.id)}
+            onFocus={() => prefetchView(item.id)}
             title={isVisuallyExpanded ? undefined : item.label}
             className={cn(
               'flex items-center cursor-pointer w-full h-10 rounded-lg',

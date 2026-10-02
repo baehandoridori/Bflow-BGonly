@@ -35,6 +35,8 @@ import { PartCardRow } from './compositing-dashboard/cards/PartCardRow';
 import { CompositingSceneModal } from './compositing-dashboard/modal/CompositingSceneModal';
 import { BulkActionBar } from './compositing-dashboard/BulkActionBar';
 import { buildCardScenes } from './compositing-dashboard/cardSceneHelpers';
+import { useGroupSwapMotion } from '@/hooks/useGroupSwapMotion';
+import { COMPOSITING_EP_SWAP, episodeDirection } from '@/utils/viewTransitionMotion';
 
 export function CompositingDashboardView() {
   const episodes = useDataStore((s) => s.episodes);
@@ -70,6 +72,25 @@ export function CompositingDashboardView() {
 
   // ↻ 버튼용 — cascade 재생 트리거
   const [cascadeKey, setCascadeKey] = useState(0);
+
+  // 움직임 폴리싱 12번: 카드 cascade 는 처음 들어왔을 때(첫 EP)와 ↻ 직후에만 돈다.
+  //   EP 를 바꾸면 카드 영역 전체가 한 덩어리로 미끄러져 들어오므로, 새로 생긴 카드만 따로 떠오르지 않게 한다.
+  const cascadeArmRef = useRef<{ key: number; ep: number | null; disarmed: boolean }>({ key: cascadeKey, ep: null, disarmed: false });
+  if (cascadeArmRef.current.key !== cascadeKey) {
+    cascadeArmRef.current = { key: cascadeKey, ep: episodeNumber, disarmed: false };
+  } else if (cascadeArmRef.current.ep === null) {
+    cascadeArmRef.current.ep = episodeNumber;
+  } else if (episodeNumber !== cascadeArmRef.current.ep) {
+    cascadeArmRef.current.disarmed = true;
+  }
+  const cascadeArmed = !cascadeArmRef.current.disarmed;
+  // EP 전환: 다음 EP 는 오른쪽에서, 이전 EP 는 왼쪽에서 16px · 240ms. 연타하면 마지막만 바로.
+  const epSwapRef = useRef<HTMLDivElement>(null);
+  useGroupSwapMotion(epSwapRef, episodeNumber === null ? null : String(episodeNumber), {
+    direction: (prev, next) => episodeDirection(Number(prev), Number(next)),
+    distancePx: COMPOSITING_EP_SWAP.distancePx,
+    durationMs: COMPOSITING_EP_SWAP.durationMs,
+  });
 
   // ── 1. 마지막 본 EP 복원 ──
   useEffect(() => {
@@ -331,7 +352,11 @@ export function CompositingDashboardView() {
       <StatusLegend epStates={epStates} totalSceneCount={partGroups.reduce((n, g) => n + g.scenes.length, 0)} />
 
       <div className="flex-1 overflow-y-auto px-6 pb-12 pt-2">
-        <div key={`cascade-${cascadeKey}`}>
+        <div
+          key={`cascade-${cascadeKey}`}
+          ref={epSwapRef}
+          className={cascadeArmed ? undefined : 'bf-cascade-quiet'}
+        >
           <TimelinePanel
             episodeNumber={episodeNumber}
             partGroups={partGroups.map((g) => {

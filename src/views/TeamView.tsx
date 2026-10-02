@@ -9,6 +9,7 @@ import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Department, Stage, AppUser } from '@/types';
 import { cn } from '@/utils/cn';
+import { cardCascadeStyle } from '@/utils/viewTransitionMotion';
 import { getUserColor } from '@/utils/userColor';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 
@@ -450,19 +451,15 @@ export function TeamView() {
             {teamData.map((data, i) => {
               const isHighlighted = highlightUserName === data.user.name;
               return (
-                <motion.div
-                  key={data.user.id}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: i * 0.03 }}
-                >
+                // 움직임 폴리싱 12번: 차례 등장은 20ms 간격·최대 200ms 지연 — 마운트 때 한 번
+                <div key={data.user.id} className="bf-card-cascade" style={cardCascadeStyle(i)}>
                   <TeamMemberCard
                     data={data}
                     highlighted={isHighlighted}
                     cardRef={isHighlighted ? highlightRef : undefined}
                     onClickScene={handleClickScene}
                   />
-                </motion.div>
+                </div>
               );
             })}
           </div>
