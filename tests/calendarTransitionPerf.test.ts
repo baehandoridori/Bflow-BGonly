@@ -112,6 +112,16 @@ test('월 전환은 transform 문자열(합성 스레드)로 움직이고 끝나
   }
 });
 
+test('미니 달력 넘김은 합성 스레드로 돌고, 동작 줄이기에서는 미끄러지지 않는다', () => {
+  // transform 문자열은 ScheduleView 의 MotionConfig('동작 줄이기')가 막지 못한다 — 직접 꺼야 한다.
+  const mini = read('src/components/calendar/MiniCalendar.tsx');
+  assert.match(mini, /const \{ reduce \} = useMotionPref\(\);/);
+  assert.match(mini, /initial=\{reduce \? \{ opacity: 0 \} : \{ opacity: 0, transform: 'translateX\(20px\)' \}\}/);
+  assert.match(mini, /exit=\{reduce \? \{ opacity: 0 \} : \{ opacity: 0, transform: 'translateX\(-20px\)' \}\}/);
+  assert.match(mini, /transitionEnd: \{ transform: 'none' \}/);
+  assert.doesNotMatch(mini, /\bx: -?20\b/, 'x 는 메인 스레드가 매 프레임 계산한다');
+});
+
 test('대시보드 위젯의 주·하루 넘김도 framer layout·JS 크기 애니메이션을 쓰지 않는다', () => {
   const widget = read('src/components/widgets/CalendarWidget.tsx');
   assert.doesNotMatch(widget, /^\s*layout\s*$/m, '크기를 scale 로 맞추면 글자가 찌그러진다');

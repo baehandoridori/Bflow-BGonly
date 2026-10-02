@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import type { CalendarEvent } from '@/types/calendar';
 import { WEEKDAYS, fmtDate, addDays } from '@/utils/calendarDate';
+import { useMotionPref } from '@/hooks/useMotionPref';
 
 // ─── Props ───────────────────────────────────────
 export interface MiniCalendarProps {
@@ -26,6 +27,8 @@ export const MiniCalendar = memo(function MiniCalendar({
   activeWeekStart,
   selectedDate,
 }: MiniCalendarProps) {
+  // transform 문자열은 MotionConfig 의 '동작 줄이기'가 막지 못한다. 직접 끄고 투명도만 남긴다(예전과 같은 결과).
+  const { reduce } = useMotionPref();
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const today = fmtDate(new Date());
@@ -149,9 +152,9 @@ export const MiniCalendar = memo(function MiniCalendar({
       <AnimatePresence mode="wait">
         <motion.div
           key={monthKey}
-          initial={{ opacity: 0, transform: 'translateX(20px)' }}
-          animate={{ opacity: 1, transform: 'translateX(0px)', transitionEnd: { transform: 'none' } }}
-          exit={{ opacity: 0, transform: 'translateX(-20px)' }}
+          initial={reduce ? { opacity: 0 } : { opacity: 0, transform: 'translateX(20px)' }}
+          animate={reduce ? { opacity: 1 } : { opacity: 1, transform: 'translateX(0px)', transitionEnd: { transform: 'none' } }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, transform: 'translateX(-20px)' }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
           className="grid grid-cols-7 gap-px"
         >
