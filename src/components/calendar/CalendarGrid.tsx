@@ -4,6 +4,12 @@ import { resolveEventTags } from './eventTagPresentation';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  createMonthSlideVariants,
+  MONTH_LAYER_STYLE,
+  MONTH_STACK_STYLE,
+  type MonthSlide,
+} from './monthSlideMotion';
 import { X, Palmtree, CheckSquare, CalendarDays } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { CalendarEvent } from '@/types/calendar';
@@ -27,6 +33,21 @@ import { useProximityReveal } from '@/hooks/useProximityReveal';
 
 // 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
 export { layoutEventBars, type EventBar };
+
+/* 달 전환 — 합성 스레드 슬라이드·최신 방향 퇴장·한 칸 겹침(monthSlideMotion 참고) */
+const MONTH_SLIDE_VARIANTS = createMonthSlideVariants(
+  24,
+  { duration: 0.32, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.2, ease: 'easeOut' } },
+  { duration: 0.22, ease: [0.4, 0, 1, 1], opacity: { duration: 0.16, ease: 'easeIn' } },
+);
+
+function countEventsOnDate(events: readonly CalendarEvent[], dateStr: string): number {
+  let count = 0;
+  for (const event of events) {
+    if (event.startDate <= dateStr && event.endDate >= dateStr) count += 1;
+  }
+  return count;
+}
 
 
 /* ═══════════════════════════════════════════════════
@@ -55,7 +76,8 @@ function EventBarChip({
 }) {
   const ev = bar.event;
   const tags = useCalendarStore((state) => state.tags);
-  const hex = resolveEventTags(ev, tags)[0]?.color || ev.color || EVENT_COLORS[0];
+  const eventTags = resolveEventTags(ev, tags);
+  const hex = eventTags[0]?.color || ev.color || EVENT_COLORS[0];
   const isHovered = hoveredEventIdentity
     ? hasSameCalendarEventIdentity(hoveredEventIdentity, ev)
     : false;
@@ -207,11 +229,11 @@ function EventBarChip({
           bar.isEnd ? 'rounded-r-md' : '',
         )}
         style={{
+          // 막대마다 backdrop-filter(흐림)를 걸면 막대 수만큼 합성 레이어·렌더 패스가 생겨
+          // 달 전환 때 매 프레임 GPU 가 다시 그린다. 칸 배경이 거의 단색이라 흐림은 눈에 띄지 않는다.
           background: isGhost
             ? `${hex}30`
             : `linear-gradient(135deg, ${hex}40 0%, ${hex}25 100%)`,
-          backdropFilter: isGhost ? undefined : 'blur(8px)',
-          WebkitBackdropFilter: isGhost ? undefined : 'blur(8px)',
           borderTop: isGhost ? `1px dashed ${hex}80` : `1px solid ${hex}50`,
           borderBottom: isGhost ? `1px dashed ${hex}80` : `1px solid ${hex}20`,
           borderLeft: isGhost ? `1px dashed ${hex}80` : bar.isStart ? `3px solid ${hex}` : `1px solid ${hex}30`,
@@ -229,7 +251,7 @@ function EventBarChip({
         {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
         {ev.type === 'vacation' && <Palmtree size={10} className="shrink-0 mr-1 opacity-80" />}
         {calendarEventLinkedTodoId(ev) && <CheckSquare size={9} className="shrink-0 mr-1 opacity-70" />}
-        <span className="truncate min-w-[20px]">{formatEventChipText({ ...ev, tagIds: [], tagId: undefined }, tagNameById, resolveEventTags(ev, tags).length ? {} : calendarNameById)}</span>
+        <span className="truncate min-w-[20px]">{formatEventChipText({ ...ev, tagIds: [], tagId: undefined }, tagNameById, eventTags.length ? {} : calendarNameById)}</span>
         <span className="ml-1 max-w-[55%] shrink min-w-0"><EventTagBadges event={ev} compact /></span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
@@ -468,6 +490,20 @@ export function CalendarGrid({
 }) {
   const [overflow, setOverflow] = useState<{ date: string; rect: DOMRect } | null>(null);
   const [hoveredEventIdentity, setHoveredEventIdentity] = useState<CalendarEventIdentity | null>(null);
+  // 연타 중이거나 OS '동작 줄이기'면 미끄러지지 않고 바로 바꾼다.
+  const instantMonthChange = instantTransition || reduceMotion;
+  const monthSlide = useMemo<MonthSlide>(
+    () => ({ direction: monthDirection, instant: instantMonthChange }),
+    [instantMonthChange, monthDirection],
+  );
+  // 같은 달로 금방 되돌아오면(A→B→A, A 가 아직 나가는 중) framer-motion 10 의 AnimatePresence 는
+  // 나가는 중인 키를 PresenceChild 없이 다시 들이고 그 기록을 남겨, 나중에 그 달이 나갈 때 오래된 화면이
+  // 잠깐 비친다. 넘길 때마다 새 키를 써서 나가는 중인 레이어를 다시 쓰지 않는다.
+  const monthLayerKeyRef = useRef({ monthKey, seq: 0 });
+  if (monthLayerKeyRef.current.monthKey !== monthKey) {
+    monthLayerKeyRef.current = { monthKey, seq: monthLayerKeyRef.current.seq + 1 };
+  }
+  const monthLayerKey = `${monthKey || 'default'}#${monthLayerKeyRef.current.seq}`;
 
   // 드래그 중이면 프리뷰 날짜로 이벤트를 대체해서 고스트 바 표시
   const displayEvents = useMemo(() => {
@@ -514,6 +550,19 @@ export function CalendarGrid({
     return displayEvents.some((candidate) => candidate.startDate <= dateStr && candidate.endDate >= dateStr);
   })), [currentMonth, displayEvents, visibleWeeks]);
 
+  // 주별 막대 배치와 칸별 일정 수는 일정·주가 바뀔 때만 다시 계산한다.
+  // 막대에 마우스를 올릴 때마다(호버 상태) 42칸 × 전체 일정을 다시 훑지 않게 한다.
+  const weekModels = useMemo(() => visibleWeeks.map((week) => {
+    const dateStrs = week.map(fmtDate);
+    return {
+      week,
+      dateStrs,
+      bars: layoutEventBars(displayEvents, week),
+      dayEventCounts: dateStrs.map((dateStr) => countEventsOnDate(displayEvents, dateStr)),
+      isCurrentWeek: dateStrs.includes(today),
+    };
+  }), [displayEvents, today, visibleWeeks]);
+
   return (
     <div className="flex flex-col flex-1 h-full min-h-0" onWheel={onWheel}>
       {/* 요일 헤더 */}
@@ -531,15 +580,19 @@ export function CalendarGrid({
         ))}
       </div>
 
-      {/* 주별 행 — flex-1로 화면 꽉 채움, 동적 행 수에 따라 균등 분배 */}
-      <AnimatePresence mode="popLayout" initial={false}>
+      {/* 주별 행 — flex-1로 화면 꽉 채움, 동적 행 수에 따라 균등 분배.
+          나가는 달과 들어오는 달을 같은 격자 칸에 겹쳐 둔다(측정·절대 배치 없이 겹침). */}
+      <div className="grid flex-1 min-h-0" style={MONTH_STACK_STYLE}>
+      <AnimatePresence initial={false} custom={monthSlide}>
       <motion.div
-        key={monthKey || 'default'}
-        initial={instantTransition ? false : { opacity: 0, y: monthDirection > 0 ? 30 : -30 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={instantTransition ? undefined : { opacity: 0, y: monthDirection > 0 ? -30 : 30 }}
-        transition={instantTransition ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="relative flex flex-col flex-1 min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
+        key={monthLayerKey}
+        custom={monthSlide}
+        variants={MONTH_SLIDE_VARIANTS}
+        initial={monthSlide.instant ? false : 'enter'}
+        animate="center"
+        exit="exit"
+        className="relative flex flex-col min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
+        style={MONTH_LAYER_STYLE}
       >
         {eventsLoaded && !hasCurrentMonthEvent && (
           <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2">
@@ -548,11 +601,8 @@ export function CalendarGrid({
             <span className="text-[11px] text-text-secondary/60">날짜 옆 + 버튼을 눌러 새 일정을 만들어 보세요</span>
           </div>
         )}
-        {visibleWeeks.map((week, wi) => {
-          const bars = layoutEventBars(displayEvents, week);
-          const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
+        {weekModels.map(({ week, dateStrs, bars, dayEventCounts, isCurrentWeek }, wi) => {
           // 현재 주 하이라이트
-          const isCurrentWeek = week.some((d) => fmtDate(d) === today);
           return (
             <div
               key={wi}
@@ -561,25 +611,24 @@ export function CalendarGrid({
             >
               {createRange && (
                 <DragCreateGhost
-                  week={week.map((d) => fmtDate(d))}
+                  week={dateStrs}
                   isSelected={isInCreateRange}
                   gridTemplateColumns={gridTemplateColumns}
                   totalDays={createRange.days}
-                  showLabel={week.some((d) => fmtDate(d) === createRange.startDate)}
+                  showLabel={dateStrs.includes(createRange.startDate)}
                   reduceMotion={reduceMotion}
                   dragging={createRange.dragging}
                 />
               )}
               {/* 날짜 셀 배경 */}
               {week.map((day, di) => {
-                const dateStr = fmtDate(day);
+                const dateStr = dateStrs[di];
                 const isToday = dateStr === today;
                 const isCurMonth = day.getMonth() === currentMonth;
                 const dow = day.getDay();
 
                 // 이 날짜에 해당하는 이벤트 수
-                const dayEvents = displayEvents.filter((e) => e.startDate <= dateStr && e.endDate >= dateStr);
-                const overflowCount = dayEvents.length - maxVisibleBars;
+                const overflowCount = dayEventCounts[di] - maxVisibleBars;
 
                 // 드래그 중 hover 하이라이트
                 const isDropTarget = isDragging && dragPreview && (
@@ -686,6 +735,7 @@ export function CalendarGrid({
         })}
       </motion.div>
       </AnimatePresence>
+      </div>
 
       {/* 오버플로우 팝업 */}
       <AnimatePresence>

@@ -14,9 +14,32 @@ import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Widget } from './Widget';
 import { WEEKDAY_SHORT, fmtDate, parseDate, addDays, getISOWeekNumber } from '@/utils/calendarDate';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
+import { reuseUnchangedCalendarEvents } from '@/utils/calendarEventReuse';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import {
+  createMonthSlideVariants,
+  MONTH_LAYER_STYLE,
+  MONTH_STACK_STYLE,
+  type MonthSlide,
+} from '@/components/calendar/monthSlideMotion';
 
 // pending 휴가용 노란색 (amber-400)
 const PENDING_VACATION_COLOR = '#FBBF24';
+
+/** 위젯 달 넘김 — 캘린더 월 화면과 같은 합성 스레드 슬라이드(거리·시간만 위젯 크기에 맞춤). */
+const WIDGET_MONTH_SLIDE_VARIANTS = createMonthSlideVariants(
+  16,
+  { duration: 0.26, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.18, ease: 'easeOut' } },
+  { duration: 0.2, ease: [0.4, 0, 1, 1], opacity: { duration: 0.14, ease: 'easeIn' } },
+);
+
+/** 주 보기: 보이는 ±2주 + 양끝 높이 0 대기 줄(±3). */
+const WIDGET_WEEK_SLOTS = [-3, -2, -1, 0, 1, 2, 3] as const;
+/** 2주 보기: 보이는 -1~3주(0·1이 포커스) + 2주씩 넘기므로 양끝 대기 줄 2개씩. */
+const WIDGET_2WEEK_SLOTS = [-3, -2, -1, 0, 1, 2, 3, 4, 5] as const;
+
+type MonthDayEvents = { dayEventCount: number; dotEvents: CalendarEvent[]; startingHere: CalendarEvent[] };
+const EMPTY_DAY_EVENTS: MonthDayEvents = { dayEventCount: 0, dotEvents: [], startingHere: [] };
 
 /** Get Sunday-start week beginning for a date */
 function getWeekStart(d: Date): Date {
@@ -83,7 +106,8 @@ export function CalendarWidget() {
 
   useEffect(() => {
     let cancelled = false;
-    const refresh = async () => { const range = eventRangeRef.current; const result = await readCalendarWindowWithToday(getEvents, range, today, calendarEventIdentityKey); if (!cancelled && range === eventRangeRef.current) setEvents(result); };
+    // 내용이 같은 일정은 이전 객체를 쓴다 — 넘길 때마다 위젯 전체가 한 번 더 그려지지 않게.
+    const refresh = async () => { const range = eventRangeRef.current; const result = await readCalendarWindowWithToday(getEvents, range, today, calendarEventIdentityKey); if (!cancelled && range === eventRangeRef.current) setEvents((previous) => reuseUnchangedCalendarEvents(previous, result)); };
     // 초기 로드: 인증된 경우 전체 동기화 후 캐시 반영
     (async () => {
       try {
@@ -106,7 +130,7 @@ export function CalendarWidget() {
   useEffect(() => {
     if (previousEventRangeRef.current.from === eventRange.from && previousEventRangeRef.current.to === eventRange.to) return;
     previousEventRangeRef.current = eventRange; let cancelled = false;
-    void readCalendarWindowWithToday(getEvents, eventRange, today, calendarEventIdentityKey).then(result => { if (!cancelled) setEvents(result); });
+    void readCalendarWindowWithToday(getEvents, eventRange, today, calendarEventIdentityKey).then(result => { if (!cancelled) setEvents((previous) => reuseUnchangedCalendarEvents(previous, result)); });
     return () => { cancelled = true; };
   }, [eventRange, today]);
 
@@ -228,6 +252,36 @@ export function CalendarWidget() {
 
     return days;
   }, [year, month, today]);
+
+  // 날짜 칸마다의 점·연속 막대 재료는 일정·달이 바뀔 때만 다시 거른다(렌더마다 42칸 × 전체 일정을 훑지 않게).
+  const monthDayEvents = useMemo(() => {
+    const byDate = new Map<string, MonthDayEvents>();
+    for (const day of calendarDays) {
+      const dayEvents = filteredEvents.filter((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
+      byDate.set(day.dateStr, {
+        dayEventCount: dayEvents.length,
+        // 단일 이벤트만 도트 표시 (연속 이벤트는 오버레이 바로 표시)
+        dotEvents: dayEvents.filter((e) => e.startDate === e.endDate).slice(0, 3),
+        startingHere: filteredEvents.filter(
+          (e) => e.startDate !== e.endDate && (e.startDate === day.dateStr || (day.dow === 0 && e.startDate < day.dateStr && e.endDate >= day.dateStr)),
+        ),
+      });
+    }
+    return byDate;
+  }, [calendarDays, filteredEvents]);
+
+  // 달 넘김 방향 — 나가는 달도 지금 방향을 따른다. '동작 줄이기'면 미끄러지지 않는다.
+  const { reduce } = useMotionPref();
+  const monthSlide = useMemo<MonthSlide>(() => ({ direction: monthDirection, instant: reduce }), [monthDirection, reduce]);
+  // 같은 달로 금방 되돌아오면(A→B→A, A 가 아직 나가는 중) framer-motion 10 의 AnimatePresence 는
+  // 나가는 중인 키를 PresenceChild 없이 다시 들이고 그 기록을 남겨, 나중에 그 달이 나갈 때 오래된 화면이
+  // 잠깐 비친다. 넘길 때마다 새 키를 써서 나가는 중인 레이어를 다시 쓰지 않는다.
+  const monthKey = `${year}-${month}`;
+  const monthLayerKeyRef = useRef({ monthKey, seq: 0 });
+  if (monthLayerKeyRef.current.monthKey !== monthKey) {
+    monthLayerKeyRef.current = { monthKey, seq: monthLayerKeyRef.current.seq + 1 };
+  }
+  const monthLayerKey = `month-${monthKey}#${monthLayerKeyRef.current.seq}`;
 
   // 선택 날짜 또는 오늘 일정
   const displayDate = selectedDate ?? today;
@@ -427,20 +481,22 @@ export function CalendarWidget() {
               ))}
             </div>
 
-            <AnimatePresence mode="popLayout" initial={false}>
+            {/* 나가는 달과 들어오는 달을 한 칸에 겹쳐 합성 스레드에서 미끄러뜨린다(monthSlideMotion). */}
+            <div className="grid flex-1 min-h-0" style={MONTH_STACK_STYLE}>
+            <AnimatePresence initial={false} custom={monthSlide}>
             <motion.div
-              key={`month-${year}-${month}`}
-              initial={{ opacity: 0, y: monthDirection > 0 ? 20 : -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: monthDirection > 0 ? -20 : 20 }}
-              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="grid grid-cols-7 gap-px flex-1 relative">
+              key={monthLayerKey}
+              custom={monthSlide}
+              variants={WIDGET_MONTH_SLIDE_VARIANTS}
+              initial={monthSlide.instant ? false : 'enter'}
+              animate="center"
+              exit="exit"
+              className="grid grid-cols-7 gap-px relative"
+              style={MONTH_LAYER_STYLE}>
               {calendarDays.map((day, i) => {
-                const dayEvents = filteredEvents.filter((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
-                const hasEvents = dayEvents.length > 0;
+                const { dayEventCount, dotEvents, startingHere } = monthDayEvents.get(day.dateStr) ?? EMPTY_DAY_EVENTS;
+                const hasEvents = dayEventCount > 0;
                 const isSelected = selectedDate === day.dateStr;
-                // 단일 이벤트만 도트 표시 (연속 이벤트는 오버레이 바로 표시)
-                const dotEvents = dayEvents.filter((e) => e.startDate === e.endDate).slice(0, 3);
                 return (
                   <div
                     key={i}
@@ -471,9 +527,6 @@ export function CalendarWidget() {
                     )}
                     {/* 연속 이벤트 시작일에 바 표시 */}
                     {(() => {
-                      const startingHere = filteredEvents.filter(
-                        (e) => e.startDate !== e.endDate && (e.startDate === day.dateStr || (day.dow === 0 && e.startDate < day.dateStr && e.endDate >= day.dateStr)),
-                      );
                       if (startingHere.length === 0) return null;
                       return startingHere.slice(0, 2).map((ev, evIdx) => {
                         const isStart = ev.startDate === day.dateStr;
@@ -508,6 +561,7 @@ export function CalendarWidget() {
               })}
             </motion.div>
             </AnimatePresence>
+            </div>
           </>
         )}
 
@@ -533,23 +587,26 @@ export function CalendarWidget() {
 
         {/* ── 2주 뷰 (포커싱 스크롤) ── */}
         {viewMode === '2week' && (() => {
-          // 5개 주(활성 2주 + 위1 + 아래2)를 보여주되 가운데 2주만 강조
+          // 5개 주(활성 2주 + 위1 + 아래2)를 보여주되 가운데 2주만 강조.
+          // 한 번에 2주씩 넘기므로 양끝에 높이 0인 대기 줄을 2개씩 더 둔다 — 넘겨도 줄이 날짜 키로
+          // 그대로 남아 높이·강조만 CSS 트랜지션으로 바뀐다(예전 framer layout 의 글자 찌그러짐 없음).
           const baseDate = getWeekStart(new Date());
           const activeStart = addDays(baseDate, weekOffset * 14);
 
-          const weeks = Array.from({ length: 5 }, (_, i) => {
-            const ws = addDays(activeStart, (i - 1) * 7);
+          const weeks = WIDGET_2WEEK_SLOTS.map((slot) => {
+            const ws = addDays(activeStart, slot * 7);
             const wn = getISOWeekNumber(ws);
             const days = Array.from({ length: 7 }, (__, j) => {
               const d = addDays(ws, j);
               return { date: d, str: fmtDate(d), dow: j };
             });
-            const isActive = i >= 1 && i <= 2; // 가운데 2주
-            return { ws, wn, days, isActive, idx: i };
+            const isActive = slot === 0 || slot === 1; // 가운데 2주
+            const isStandby = slot < -1 || slot > 3;
+            return { ws, wn, days, isActive, isStandby };
           });
 
           const renderFocusWeekRow = (week: typeof weeks[0]) => {
-            const { wn, days, isActive } = week;
+            const { wn, days, isActive, isStandby } = week;
             const weekEndStr = days[6].str;
             const weekStartStr = days[0].str;
 
@@ -560,19 +617,21 @@ export function CalendarWidget() {
             const rows = packEventRows(weekEvents);
 
             return (
-              <motion.div
-                key={`2w-${wn}-${fmtDate(week.ws)}`}
-                layout
-                className="flex flex-col gap-0.5 rounded-lg px-1.5 py-0.5"
-                animate={{
-                  opacity: isActive ? 1 : 0.25,
-                  scale: isActive ? 1 : 0.97,
-                  flex: isActive ? 2 : 0.6,
-                  backgroundColor: isActive ? 'rgba(108, 92, 231, 0.06)' : 'rgba(0, 0, 0, 0)',
-                }}
-                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              <div
+                key={`2w-${fmtDate(week.ws)}`}
+                aria-hidden={isStandby || undefined}
+                className="calendar-widget-week-row flex flex-col gap-0.5 rounded-lg px-1.5"
                 style={{
                   minHeight: 0,
+                  flexGrow: isStandby ? 0 : isActive ? 2 : 0.6,
+                  flexShrink: 1,
+                  flexBasis: 0,
+                  overflow: isStandby ? 'hidden' : undefined,
+                  paddingTop: isStandby ? 0 : 2,
+                  paddingBottom: isStandby ? 0 : 2,
+                  opacity: isStandby ? 0 : isActive ? 1 : 0.25,
+                  transform: isActive ? undefined : 'scale(0.97)',
+                  backgroundColor: isActive ? 'rgba(108, 92, 231, 0.06)' : 'rgba(0, 0, 0, 0)',
                   borderLeft: isActive ? '2px solid rgba(108, 92, 231, 0.5)' : '2px solid transparent',
                 }}
               >
@@ -618,7 +677,7 @@ export function CalendarWidget() {
                     )}
                   </div>
                 )}
-              </motion.div>
+              </div>
             );
           };
 
@@ -631,23 +690,26 @@ export function CalendarWidget() {
 
         {/* ── 1주 뷰 (포커싱 스크롤) ── */}
         {viewMode === 'week' && (() => {
-          // 5개 주: 활성 1주(가운데) + 위아래 각 2주 (흐리게)
+          // 5개 주: 활성 1주(가운데) + 위아래 각 2주 (흐리게).
+          // 양끝에 높이 0인 대기 줄을 하나씩 더 둔다 — 한 주씩 넘겨도 줄이 날짜 키로 그대로 남아
+          // 높이·강조만 CSS 트랜지션으로 바뀐다(예전 framer layout 의 글자 찌그러짐 없음).
           const baseDate = getWeekStart(new Date());
 
-          const weeks = Array.from({ length: 5 }, (_, i) => {
-            const ws = addDays(baseDate, (weekOffset + i - 2) * 7);
+          const weeks = WIDGET_WEEK_SLOTS.map((slot) => {
+            const ws = addDays(baseDate, (weekOffset + slot) * 7);
             const wn = getISOWeekNumber(ws);
             const days = Array.from({ length: 7 }, (__, j) => {
               const d = addDays(ws, j);
               return { date: d, str: fmtDate(d), dow: j };
             });
-            const isActive = i === 2; // 정중앙
-            const dist = Math.abs(i - 2);
+            const isActive = slot === 0; // 정중앙
+            const dist = Math.abs(slot);
             return { ws, wn, days, isActive, dist };
           });
 
           const renderFocusWeek = (week: typeof weeks[0]) => {
             const { wn, days, isActive, dist } = week;
+            const isStandby = dist > 2;
             const weekEndStr = days[6].str;
             const weekStartStr = days[0].str;
 
@@ -659,19 +721,21 @@ export function CalendarWidget() {
             const todayEvents = isActive ? getEventsForDate(filteredEvents, today) : [];
 
             return (
-              <motion.div
-                key={`week-${wn}-${fmtDate(week.ws)}`}
-                layout
-                className="flex flex-col gap-0.5 rounded-lg px-1.5 py-1"
-                animate={{
-                  opacity: isActive ? 1 : dist === 1 ? 0.3 : 0.12,
-                  scale: isActive ? 1 : 1 - dist * 0.03,
-                  flex: isActive ? 3 : dist === 1 ? 0.8 : 0.4,
-                  backgroundColor: isActive ? 'rgba(108, 92, 231, 0.06)' : 'rgba(0, 0, 0, 0)',
-                }}
-                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              <div
+                key={`week-${fmtDate(week.ws)}`}
+                aria-hidden={isStandby || undefined}
+                className="calendar-widget-week-row flex flex-col gap-0.5 rounded-lg px-1.5"
                 style={{
                   minHeight: 0,
+                  flexGrow: isStandby ? 0 : isActive ? 3 : dist === 1 ? 0.8 : 0.4,
+                  flexShrink: 1,
+                  flexBasis: 0,
+                  overflow: isStandby ? 'hidden' : undefined,
+                  paddingTop: isStandby ? 0 : 4,
+                  paddingBottom: isStandby ? 0 : 4,
+                  opacity: isStandby ? 0 : isActive ? 1 : dist === 1 ? 0.3 : 0.12,
+                  transform: isActive ? undefined : `scale(${1 - Math.min(dist, 2) * 0.03})`,
+                  backgroundColor: isActive ? 'rgba(108, 92, 231, 0.06)' : 'rgba(0, 0, 0, 0)',
                   borderLeft: isActive ? '2px solid rgba(108, 92, 231, 0.5)' : '2px solid transparent',
                 }}
               >
@@ -745,7 +809,7 @@ export function CalendarWidget() {
                     </div>
                   </div>
                 )}
-              </motion.div>
+              </div>
             );
           };
 
@@ -767,12 +831,12 @@ export function CalendarWidget() {
           const nextStr = fmtDate(nextDate);
           const centerEvents = getEventsForDate(filteredEvents, centerStr);
 
+          // 날을 넘길 때의 등장은 CSS 키프레임 — 합성 스레드에서 돈다(예전 framer scale 은 메인 스레드).
           const renderSideCol = (d: Date, dateStr: string) => (
-            <motion.div
+            <div
               key={`side-${dateStr}`}
-              className="flex-1 flex flex-col items-center justify-center"
-              animate={{ opacity: 0.3, scale: 0.95 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="calendar-widget-day-side flex-1 flex flex-col items-center justify-center"
+              style={{ opacity: 0.3, transform: 'scale(0.95)' }}
             >
               <span className={cn(
                 'text-[18px] font-light tabular-nums',
@@ -786,7 +850,7 @@ export function CalendarWidget() {
               )}>
                 {WEEKDAY_SHORT[d.getDay()]}
               </span>
-            </motion.div>
+            </div>
           );
 
           return (
@@ -798,12 +862,9 @@ export function CalendarWidget() {
                 {renderSideCol(prevDate, prevStr)}
 
                 {/* Center (today / selected) */}
-                <motion.div
+                <div
                   key={`center-${centerStr}`}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                  className="flex-[2] flex flex-col items-center rounded-lg py-2 px-1 overflow-auto"
+                  className="calendar-widget-day-center flex-[2] flex flex-col items-center rounded-lg py-2 px-1 overflow-auto"
                   style={{
                     border: '1px solid #6C5CE730',
                     boxShadow: '0 0 12px #6C5CE715',
@@ -846,7 +907,7 @@ export function CalendarWidget() {
                       })}
                     </div>
                   )}
-                </motion.div>
+                </div>
 
                 {/* Next day */}
                 {renderSideCol(nextDate, nextStr)}

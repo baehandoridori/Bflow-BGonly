@@ -1586,6 +1586,88 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   주간 카드·일간 보기 넘김
+   - 줄 묶음 전체의 미끄러짐은 useStackFlip 이 WAAPI 로 돌린다.
+   - 줄마다의 강조(투명도·크기)는 여기 CSS 트랜지션 — 둘 다 합성 스레드에서 돈다.
+   - 새로 들어오는 줄은 투명에서 제 투명도로 떠오른다(to 키프레임 = 인라인 값).
+   - 연타 중(--instant)에는 기다리지 않고 바로 바꾼다.
+   ═══════════════════════════════════════════════════════════ */
+.calendar-scroll-row {
+  transform-origin: center;
+  transition:
+    opacity 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.38s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* 일간 칸 안쪽은 새로 생길 때(멀리 건너뛸 때) 투명에서 떠오른다(to = 인라인 값).
+   주간 줄은 넘길 때 새로 들어온 줄에만 useStackFlip 이 직접 페이드를 건다. */
+.calendar-day-col > .calendar-scroll-row {
+  animation: calendarScrollRowIn 0.3s ease-out;
+}
+@keyframes calendarScrollRowIn {
+  from { opacity: 0; }
+}
+/* 일간 칸 너비. 너비는 레이아웃 속성이라, 칸 안의 포커스 카드 내용은 최종 너비로 고정해
+   전환 중에 다시 줄바꿈되지 않게 한다(DayScrollView). */
+.calendar-day-col {
+  transition:
+    width 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    min-width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* animation 은 여기서 건드리지 않는다 — none 으로 껐다가 연타가 끝나 되돌리면 animation-name 이
+   바뀐 것으로 보고 이미 떠 있던 줄마다 등장 애니메이션이 다시 돌아 한 번 깜빡인다. */
+.calendar-scroll-rows--instant .calendar-scroll-row,
+.calendar-scroll-rows--instant .calendar-day-col {
+  transition: none;
+}
+/* 대시보드 캘린더 위젯 — 주 줄은 날짜 키로 그대로 두고 높이(flex-grow)·강조만 트랜지션한다.
+   예전 framer layout 은 크기를 scale 로 맞춰 글자가 찌그러지고 매 프레임 메인 스레드를 썼다. */
+.calendar-widget-week-row {
+  transition:
+    flex-grow 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    padding 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* 위젯 하루 넘김 — 가운데 카드는 살짝 커지며 나타나고, 양옆은 흐려지며 물러난다(to = 인라인 값). */
+.calendar-widget-day-center {
+  animation: calendarWidgetDayIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.calendar-widget-day-side {
+  animation: calendarWidgetDaySideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes calendarWidgetDayIn {
+  from { opacity: 0; transform: scale(0.95); }
+}
+@keyframes calendarWidgetDaySideIn {
+  from { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .calendar-widget-week-row,
+  .calendar-widget-day-center,
+  .calendar-widget-day-side {
+    transition: none;
+    animation: none;
+  }
+}
+/* 일정 카드 호버 확대 — 예전 framer whileHover 와 같은 1.01배 */
+.calendar-event-card {
+  transition: transform 0.15s ease-out;
+}
+.calendar-event-card:hover {
+  transform: scale(1.01);
+}
+@media (prefers-reduced-motion: reduce) {
+  .calendar-scroll-row,
+  .calendar-day-col,
+  .calendar-event-card {
+    transition: none;
+    animation: none;
+  }
+  .calendar-event-card:hover { transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════
    날짜 칸의 '일정 추가' 버튼 + 드래그 범위 고스트
    - 버튼은 평소 없는 것처럼 두고 커서가 가까울수록 드러난다.
      드러나는 정도(--reveal, 0~1)는 useProximityReveal 이 써 넣는다.
@@ -1602,8 +1684,8 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / calc(0.30 * var(--reveal))),
     0 6px 18px rgb(var(--color-accent) / calc(0.30 * var(--reveal)));
-  backdrop-filter: blur(calc(10px * var(--reveal))) saturate(160%);
-  -webkit-backdrop-filter: blur(calc(10px * var(--reveal))) saturate(160%);
+  /* backdrop-filter 는 두지 않는다. 숨어 있어도(--reveal: 0) 칸마다 합성 레이어·렌더 패스가 생겨
+     달 전환 때 수십 개를 매 프레임 다시 그린다. 칸 배경이 단색이라 흐림은 눈에 띄지 않는다. */
   opacity: var(--reveal);
   transform: scale(calc(0.55 + 0.45 * var(--reveal)));
   transition: color 0.14s linear, background 0.14s linear, box-shadow 0.14s linear, border-color 0.14s linear;
