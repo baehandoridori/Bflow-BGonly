@@ -410,104 +410,6 @@ function ensureGlowCss() {
 /* ── 진행률 기반 그라데이션 (중간값 추가로 밴딩 방지) ── */
 // progressGradient → @/utils/calcStats 에서 import
 
-/*
- * 보케 RGB 팔레트 — rgba() 사용으로 밴딩 방지
- * UI/UX Pro Max: Dark OLED + Financial Dashboard 팔레트 기반
- * 성취감 → 초록(#22C55E) + 골드(#CA8A04) + 프로젝트 액센트(#6C5CE7)
- */
-const BOKEH_PALETTE = [
-  [0, 184, 148],   // emerald
-  [34, 197, 94],    // green-500 (CTA)
-  [108, 92, 231],   // accent (프로젝트)
-  [162, 155, 254],  // lavender
-  [202, 138, 4],    // gold (achievement)
-  [116, 185, 255],  // sky
-  [253, 203, 110],  // amber
-] as const;
-
-/* ── 보케 오브 (rgba 기반, 밴딩 없음) ── */
-function BokehOrbs({ count, minR, maxR, baseAlpha, drift, speed }: {
-  count: number; minR: number; maxR: number; baseAlpha: number; drift: number; speed: number;
-}) {
-  const orbs = useMemo(() =>
-    Array.from({ length: count }, (_, i) => {
-      const r = minR + Math.random() * (maxR - minR);
-      const [cr, cg, cb] = BOKEH_PALETTE[i % BOKEH_PALETTE.length];
-      return {
-        id: i, r, cr, cg, cb,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        dur: speed * (0.8 + Math.random() * 0.6),
-        delay: Math.random() * speed * 0.5,
-        path: Array.from({ length: 3 }, () => [(Math.random() - 0.5) * drift, (Math.random() - 0.5) * drift] as const),
-      };
-    }), [count, minR, maxR, baseAlpha, drift, speed]
-  );
-
-  return (
-    <>
-      {orbs.map((o) => (
-        <motion.div
-          key={o.id}
-          className="absolute rounded-full will-change-transform"
-          style={{
-            width: o.r, height: o.r,
-            left: `${o.x}%`, top: `${o.y}%`,
-            /* radial-gradient with rgba → 부드러운 8비트 이상 블렌딩 */
-            background: `radial-gradient(circle at 38% 38%,
-              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha}) 0%,
-              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha * 0.5}) 35%,
-              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha * 0.15}) 60%,
-              rgba(${o.cr},${o.cg},${o.cb},0) 80%)`,
-            filter: o.r > 30 ? `blur(${Math.round(o.r / 10)}px)` : 'none',
-          }}
-          animate={{
-            x: [0, o.path[0][0], o.path[1][0], o.path[2][0], 0],
-            y: [0, o.path[0][1], o.path[1][1], o.path[2][1], 0],
-            scale: [1, 1.08, 0.96, 1.04, 1],
-          }}
-          transition={{ duration: o.dur, delay: o.delay, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      ))}
-    </>
-  );
-}
-
-/* ── 오로라 메시 (conic-gradient → radial 다중 레이어로 밴딩 제거) ── */
-function AuroraMesh({ isLight }: { isLight?: boolean }) {
-  // 라이트 모드에서는 알파값을 높여 흰색 배경 위에서도 오로라가 보이게
-  const m = isLight ? 3 : 1;
-  return (
-    <>
-      {/* 부드러운 radial 워시 2개 — conic보다 밴딩 없음 */}
-      <motion.div
-        className="absolute will-change-transform"
-        style={{
-          width: '140%', height: '140%', left: '-20%', top: '-20%',
-          background: `radial-gradient(ellipse at 30% 40%,
-            rgba(0,184,148,${0.06 * m}) 0%, rgb(var(--color-accent) / ${0.04 * m}) 40%, transparent 70%),
-            radial-gradient(ellipse at 70% 60%,
-            rgba(202,138,4,${0.05 * m}) 0%, rgb(var(--color-accent-sub) / ${0.03 * m}) 40%, transparent 70%)`,
-        }}
-        animate={{ x: [0, 30, -20, 0], y: [0, -20, 15, 0] }}
-        transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
-      />
-      <motion.div
-        className="absolute will-change-transform"
-        style={{
-          width: '120%', height: '120%', left: '-10%', top: '-10%',
-          background: `radial-gradient(ellipse at 60% 30%,
-            rgba(34,197,94,${0.05 * m}) 0%, rgba(116,185,255,${0.03 * m}) 40%, transparent 65%),
-            radial-gradient(ellipse at 40% 70%,
-            rgba(253,203,110,${0.04 * m}) 0%, rgba(0,184,148,${0.03 * m}) 40%, transparent 65%)`,
-        }}
-        animate={{ x: [0, -25, 20, 0], y: [0, 20, -15, 0] }}
-        transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
-      />
-    </>
-  );
-}
-
 function buildSceneControlsCollapseKey(
   episodeNumber: number | null,
   partId: string | null,
@@ -528,353 +430,6 @@ function formatCompletedMeta(iso: string | undefined, completedBy: string | unde
   };
 }
 
-/* ── 파트 완료 오버레이 ── */
-function PartCompleteOverlay({ completedMeta, onDismiss, onUndoLastAction }: {
-  completedMeta?: ReturnType<typeof formatCompletedMeta>;
-  onDismiss: () => void;
-  onUndoLastAction?: () => void;
-}) {
-  const colorMode = useAppStore((s) => s.colorMode);
-  const isLight = colorMode === 'light';
-  const flowRibbons = useMemo(() => [
-    {
-      top: '14%',
-      left: '-14%',
-      width: '58%',
-      height: 120,
-      rotate: -12,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(144,234,191,0.16) 26%, rgba(107,154,255,0.14) 60%, rgba(255,255,255,0) 100%)'
-        : 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(74,222,128,0.12) 26%, rgba(108,92,231,0.16) 60%, rgba(255,255,255,0) 100%)',
-      blur: 'blur(30px)',
-      duration: 9.5,
-      x: [0, 80, -20, 0],
-      y: [0, 18, -8, 0],
-      rotateFrames: [-12, -6, -14, -12],
-    },
-    {
-      top: '56%',
-      left: '28%',
-      width: '48%',
-      height: 108,
-      rotate: 16,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(125,211,252,0.12) 24%, rgba(196,181,253,0.16) 54%, rgba(255,255,255,0) 100%)'
-        : 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(56,189,248,0.10) 24%, rgba(167,139,250,0.14) 54%, rgba(255,255,255,0) 100%)',
-      blur: 'blur(28px)',
-      duration: 11,
-      x: [0, -56, 26, 0],
-      y: [0, -14, 10, 0],
-      rotateFrames: [16, 10, 18, 16],
-    },
-    {
-      top: '72%',
-      left: '-6%',
-      width: '42%',
-      height: 92,
-      rotate: -6,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(253,224,71,0.12) 26%, rgba(34,197,94,0.10) 56%, rgba(255,255,255,0) 100%)'
-        : 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(250,204,21,0.10) 26%, rgba(34,197,94,0.10) 56%, rgba(255,255,255,0) 100%)',
-      blur: 'blur(26px)',
-      duration: 10.5,
-      x: [0, 62, -18, 0],
-      y: [0, -12, 8, 0],
-      rotateFrames: [-6, -2, -8, -6],
-    },
-  ], [isLight]);
-  const flowTraces = useMemo(() => [
-    {
-      top: '26%',
-      left: '6%',
-      width: '34%',
-      rotate: 7,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.72), rgba(110,231,183,0.58), rgba(255,255,255,0))'
-        : 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.18), rgba(110,231,183,0.30), rgba(255,255,255,0))',
-      shadow: isLight ? '0 0 22px rgba(110,231,183,0.22)' : '0 0 20px rgba(110,231,183,0.14)',
-      duration: 5.8,
-      delay: 0.1,
-    },
-    {
-      top: '46%',
-      right: '4%',
-      width: '26%',
-      rotate: -11,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0), rgba(196,181,253,0.54), rgba(255,255,255,0.68), rgba(255,255,255,0))'
-        : 'linear-gradient(90deg, rgba(255,255,255,0), rgba(167,139,250,0.22), rgba(255,255,255,0.16), rgba(255,255,255,0))',
-      shadow: isLight ? '0 0 18px rgba(196,181,253,0.18)' : '0 0 16px rgba(167,139,250,0.12)',
-      duration: 6.4,
-      delay: 0.9,
-    },
-    {
-      bottom: '16%',
-      left: '18%',
-      width: '30%',
-      rotate: 3,
-      background: isLight
-        ? 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.68), rgba(125,211,252,0.56), rgba(255,255,255,0))'
-        : 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.16), rgba(125,211,252,0.24), rgba(255,255,255,0))',
-      shadow: isLight ? '0 0 18px rgba(125,211,252,0.18)' : '0 0 16px rgba(125,211,252,0.10)',
-      duration: 5.2,
-      delay: 1.4,
-    },
-  ], [isLight]);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
-      className="fixed inset-0 z-[60] pointer-events-none overflow-hidden rounded-[28px]"
-    >
-      <div
-        className="absolute inset-0 rounded-[inherit]"
-        style={{
-          background: isLight
-            ? 'radial-gradient(circle at 50% 45%, rgba(255,255,255,0.44) 0%, rgba(255,255,255,0.16) 42%, rgba(255,255,255,0) 78%), linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 100%)'
-            : 'radial-gradient(circle at 50% 45%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 42%, rgba(255,255,255,0) 78%), linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
-          boxShadow: isLight
-            ? 'inset 0 0 0 1px rgba(255,255,255,0.42), inset 0 24px 60px rgba(255,255,255,0.18)'
-            : 'inset 0 0 0 1px rgba(255,255,255,0.08), inset 0 20px 60px rgba(255,255,255,0.03)',
-          WebkitMaskImage: 'radial-gradient(circle at center, black 32%, rgba(0,0,0,0.92) 68%, transparent 100%)',
-          maskImage: 'radial-gradient(circle at center, black 32%, rgba(0,0,0,0.92) 68%, transparent 100%)',
-        }}
-      />
-
-      <AuroraMesh isLight={isLight} />
-
-      <div
-        className="absolute inset-0 rounded-[inherit]"
-        style={{
-          background: isLight
-            ? 'radial-gradient(circle at 18% 26%, rgba(108,92,231,0.09) 0%, transparent 28%), radial-gradient(circle at 82% 24%, rgba(34,197,94,0.08) 0%, transparent 24%), radial-gradient(circle at 50% 78%, rgba(253,203,110,0.08) 0%, transparent 20%)'
-            : 'radial-gradient(circle at 18% 26%, rgba(108,92,231,0.06) 0%, transparent 28%), radial-gradient(circle at 82% 24%, rgba(34,197,94,0.05) 0%, transparent 24%), radial-gradient(circle at 50% 78%, rgba(253,203,110,0.05) 0%, transparent 20%)',
-          filter: 'blur(20px)',
-        }}
-      />
-
-      {flowRibbons.map((ribbon, index) => (
-        <motion.div
-          key={`flow-ribbon-${index}`}
-          className="absolute rounded-full"
-          style={{
-            top: ribbon.top,
-            left: ribbon.left,
-            width: ribbon.width,
-            height: ribbon.height,
-            background: ribbon.background,
-            filter: ribbon.blur,
-            transform: `rotate(${ribbon.rotate}deg)`,
-            opacity: isLight ? 0.92 : 0.76,
-          }}
-          animate={{
-            x: ribbon.x,
-            y: ribbon.y,
-            rotate: ribbon.rotateFrames,
-            opacity: isLight ? [0.36, 0.72, 0.42, 0.36] : [0.24, 0.52, 0.3, 0.24],
-          }}
-          transition={{
-            duration: ribbon.duration,
-            repeat: Infinity,
-            ease: 'easeInOut',
-            delay: index * 0.4,
-          }}
-        />
-      ))}
-
-      {flowTraces.map((trace, index) => (
-        <motion.div
-          key={`flow-trace-${index}`}
-          className="absolute h-px rounded-full"
-          style={{
-            top: 'top' in trace ? trace.top : undefined,
-            right: 'right' in trace ? trace.right : undefined,
-            bottom: 'bottom' in trace ? trace.bottom : undefined,
-            left: 'left' in trace ? trace.left : undefined,
-            width: trace.width,
-            background: trace.background,
-            boxShadow: trace.shadow,
-            transform: `rotate(${trace.rotate}deg)`,
-            opacity: isLight ? 0.9 : 0.72,
-          }}
-          animate={{
-            x: [0, 22, -10, 0],
-            scaleX: [0.94, 1.04, 0.98, 0.94],
-            opacity: isLight ? [0.22, 0.88, 0.34, 0.22] : [0.14, 0.5, 0.22, 0.14],
-          }}
-          transition={{
-            duration: trace.duration,
-            repeat: Infinity,
-            ease: 'easeInOut',
-            delay: trace.delay,
-          }}
-        />
-      ))}
-
-      <BokehOrbs count={4} minR={60} maxR={120} baseAlpha={isLight ? 0.18 : 0.1} drift={44} speed={11} />
-      <BokehOrbs count={6} minR={18} maxR={44} baseAlpha={isLight ? 0.26 : 0.14} drift={34} speed={8} />
-      <BokehOrbs count={10} minR={4} maxR={12} baseAlpha={isLight ? 0.4 : 0.22} drift={20} speed={6} />
-
-      <div
-        className="absolute inset-0 rounded-[inherit]"
-        style={{
-          background: isLight
-            ? 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.18) 46%, rgba(255,255,255,0.04) 100%)'
-            : 'linear-gradient(180deg, rgba(255,255,255,0.01) 0%, rgba(255,255,255,0.05) 46%, rgba(255,255,255,0.01) 100%)',
-          opacity: isLight ? 0.9 : 0.7,
-        }}
-      />
-
-      <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6">
-        <motion.div
-          initial={{ opacity: 0, y: 18, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-          className="pointer-events-auto relative w-full max-w-[560px] overflow-hidden rounded-[30px] border px-5 py-5 text-center sm:px-7 sm:py-6"
-          style={{
-            background: isLight
-              ? 'linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(244,255,251,0.86) 100%)'
-              : 'linear-gradient(180deg, rgba(22,28,38,0.88) 0%, rgba(15,20,29,0.82) 100%)',
-            borderColor: isLight ? 'rgba(167, 243, 208, 0.92)' : 'rgba(52, 211, 153, 0.26)',
-            boxShadow: isLight
-              ? '0 28px 96px rgba(16, 185, 129, 0.20), 0 10px 26px rgba(15, 23, 42, 0.08)'
-              : '0 30px 98px rgba(16, 185, 129, 0.18), 0 12px 30px rgba(0, 0, 0, 0.28)',
-            backdropFilter: 'blur(20px)',
-          }}
-        >
-          <button
-            type="button"
-            aria-label="완료 안내 숨기기"
-            title="완료 안내 숨기기"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDismiss();
-            }}
-            className={cn(
-              'absolute right-3 top-3 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border transition-all',
-              isLight
-                ? 'border-emerald-200 bg-white/80 text-emerald-800 hover:bg-white'
-                : 'border-emerald-300/20 bg-white/8 text-emerald-100 hover:bg-white/12',
-            )}
-          >
-            <X size={15} />
-          </button>
-          <motion.div
-            className="absolute inset-y-0 -left-1/3 w-1/3"
-            style={{
-              background: isLight
-                ? 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.52) 52%, rgba(255,255,255,0) 100%)'
-                : 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.14) 52%, rgba(255,255,255,0) 100%)',
-              filter: 'blur(10px)',
-            }}
-            animate={{ x: ['0%', '360%'] }}
-            transition={{ duration: 4.8, repeat: Infinity, ease: 'linear' }}
-          />
-          <div
-            className="absolute inset-0 rounded-[inherit]"
-            style={{
-              background: isLight
-                ? 'linear-gradient(135deg, rgba(110,231,183,0.18) 0%, rgba(108,92,231,0.08) 42%, rgba(255,255,255,0) 100%)'
-                : 'linear-gradient(135deg, rgba(74,222,128,0.14) 0%, rgba(108,92,231,0.12) 42%, rgba(255,255,255,0) 100%)',
-            }}
-          />
-          <div className="relative flex flex-col items-center gap-4">
-            <div
-              className="inline-flex items-center rounded-full px-4 py-1.5 text-[11px] font-semibold tracking-[0.24em]"
-              style={{
-                color: isLight ? '#047857' : '#86EFAC',
-                background: isLight ? 'rgba(16, 185, 129, 0.10)' : 'rgba(16, 185, 129, 0.12)',
-                border: `1px solid ${isLight ? 'rgba(16, 185, 129, 0.18)' : 'rgba(134, 239, 172, 0.18)'}`,
-              }}
-            >
-              COMPLETE
-            </div>
-            <div className="space-y-2">
-              <p
-                className="text-[32px] font-semibold tracking-[-0.03em] sm:text-[36px]"
-                style={{ color: isLight ? '#064E3B' : '#ECFDF5' }}
-              >
-                고생하셨습니다!
-              </p>
-              <p
-                className="text-base font-medium sm:text-lg"
-                style={{ color: isLight ? 'rgba(6, 95, 70, 0.88)' : 'rgba(236, 253, 245, 0.90)' }}
-              >
-                현재 보고계신 파트는 완료되었습니다.
-              </p>
-              <p
-                className="mx-auto max-w-[28rem] text-sm leading-6"
-                style={{ color: isLight ? 'rgba(6, 95, 70, 0.74)' : 'rgba(209, 250, 229, 0.72)' }}
-              >
-                고생 많으셨습니다! 다음 작업 이어서 하시기 전에, 잠깐 쉬셔요~ 띵호와
-              </p>
-            </div>
-            {completedMeta && (
-              <div
-                className={cn(
-                  'flex w-full flex-col gap-2 rounded-2xl border px-4 py-3 text-left sm:flex-row sm:items-center sm:justify-between',
-                  isLight
-                    ? 'border-emerald-200/80 bg-white/70'
-                    : 'border-emerald-300/15 bg-white/6',
-                )}
-                title={`${completedMeta.completedBy}님 · ${completedMeta.full}`}
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="shrink-0 text-[11px] font-medium tracking-[0.18em] text-text-secondary/70">마지막 완료</span>
-                  <span className="min-w-0 truncate text-sm font-semibold text-text-primary">{completedMeta.completedBy}님</span>
-                </div>
-                <div className="flex min-w-0 items-center gap-2 sm:justify-end">
-                  <span className="shrink-0 text-[11px] font-medium tracking-[0.18em] text-text-secondary/70">완료 시각</span>
-                  <span className="min-w-0 truncate text-sm font-medium text-text-primary/90">{completedMeta.full}</span>
-                </div>
-              </div>
-            )}
-            {onUndoLastAction && (
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onUndoLastAction();
-                }}
-                className={cn(
-                  'pointer-events-auto inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all',
-                  isLight
-                    ? 'border border-emerald-200 bg-white/80 text-emerald-800 hover:bg-white'
-                    : 'border border-emerald-300/20 bg-white/8 text-emerald-100 hover:bg-white/12',
-                )}
-              >
-                <RotateCcw size={14} />
-                마지막 체크 취소
-              </button>
-            )}
-          </div>
-        </motion.div>
-      </div>
-    </motion.div>
-  );
-}
-
-function CompletionRestoreButton({ onClick }: { onClick: () => void }) {
-  const colorMode = useAppStore((s) => s.colorMode);
-  const isLight = colorMode === 'light';
-  return (
-    <button
-      type="button"
-      aria-label="완료 안내 다시 보기"
-      onClick={onClick}
-      className={cn(
-        'fixed bottom-5 left-1/2 z-[61] -translate-x-1/2 rounded-full border px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur-md transition-all hover:-translate-y-0.5',
-        isLight
-          ? 'border-emerald-200 bg-white/90 text-emerald-800 shadow-emerald-900/10 hover:bg-white'
-          : 'border-emerald-300/25 bg-bg-card/85 text-emerald-100 shadow-black/30 hover:bg-bg-card',
-      )}
-    >
-      완료 안내 다시 보기
-    </button>
-  );
-}
 import {
   updateCell,
   updateCellByUuid,
@@ -911,6 +466,9 @@ import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
 import { useSceneEditingPresence } from '@/stores/useEditingPresenceStore';
 import { editingBeamClassName } from '@/utils/editingPresence';
 import { Confetti } from '@/components/ui/Confetti';
+import { SceneCompletionFx } from '@/components/scenes/SceneCompletionFx';
+import { PartCompleteOverlay, CompletionRestoreButton } from '@/components/scenes/PartCompleteOverlay';
+import { readSeenPartCompletionKeys, rememberSeenPartCompletionKey } from '@/components/scenes/celebrateMotion';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { PanelLeftOpen } from 'lucide-react';
@@ -1054,6 +612,9 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
       } : {})}
     >
+      {/* 17번: 완료 초록빛 번짐·카드 '톡'(동작 줄이기면 완료 칸 빛) — 카드 루트의 첫 자식이어야 한다. */}
+      <SceneCompletionFx celebrating={celebrating} tinted={completionTintEnabled && isComplete} />
+
       {/* 하이라이트 배경 오버레이 */}
       {isHighlighted && <div className="scene-highlight-bg" />}
 
@@ -3153,6 +2714,8 @@ export function ScenesView() {
   const [continuitySourceElement, setContinuitySourceElement] = useState<HTMLElement | null>(null);
   const [lastCompletionUndoAction, setLastCompletionUndoAction] = useState<CompletionUndoAction | null>(null);
   const [dismissedCompletionOverlayKey, setDismissedCompletionOverlayKey] = useState<string | null>(null);
+  // 17번: 한 번 닫은(본) 파트 완료 화면은 기억해 두었다가 다시 열 때 카드만 작게 띄운다(localStorage, 실패해도 이번 실행 안에서는 기억).
+  const [seenCompletionOverlayKeys, setSeenCompletionOverlayKeys] = useState<string[]>(readSeenPartCompletionKeys);
   const clearContinuitySource = useCallback(() => {
     setContinuitySourceElement(null);
   }, []);
@@ -3863,6 +3426,32 @@ export function ScenesView() {
     && completionOverlayKey
     && completionOverlayKey === dismissedCompletionOverlayKey,
   );
+  // '본 완료 화면' 기억용 키 — 위 키는 에피소드·파트를 직접 고르기 전(처음 들어왔을 때)과 후에 값이 달라지므로,
+  // 실제로 보고 있는 에피소드·파트(시트) + 마지막 완료 기록으로 만든다. 다시 들어와도 같은 완료면 같은 키다.
+  const completionSeenKey = useMemo(() => {
+    if (!isVisibleComplete) return null;
+    return [
+      currentEp?.episodeNumber ?? '__episode__',
+      selectedDepartment === 'all' ? (currentPartId ?? '__part__') : (currentPart?.sheetName ?? '__part__'),
+      selectedDepartment,
+      partCompletionState.completedMeta?.completedBy ?? '__unknown__',
+      partCompletionState.completedMeta?.completedAt ?? '__time__',
+    ].join(':');
+  }, [
+    isVisibleComplete,
+    currentEp?.episodeNumber,
+    currentPartId,
+    currentPart?.sheetName,
+    selectedDepartment,
+    partCompletionState.completedMeta?.completedBy,
+    partCompletionState.completedMeta?.completedAt,
+  ]);
+  const completionOverlayCompact = completionSeenKey != null && seenCompletionOverlayKeys.includes(completionSeenKey);
+  const dismissCompletionOverlay = useCallback(() => {
+    if (!completionOverlayKey) return;
+    setDismissedCompletionOverlayKey(completionOverlayKey);
+    if (completionSeenKey) setSeenCompletionOverlayKeys(rememberSeenPartCompletionKey(completionSeenKey));
+  }, [completionOverlayKey, completionSeenKey]);
   const canUndoLastCompletionAction = useMemo(() => {
     if (!lastCompletionUndoAction) return false;
     const undoTarget: CompletionCelebrationTarget = {
@@ -5898,11 +5487,10 @@ export function ScenesView() {
           <AnimatePresence>
             {showCompletionOverlay && (
               <PartCompleteOverlay
+                key={completionSeenKey ?? 'part-complete'}
                 completedMeta={visibleCompletedMeta}
-                onDismiss={() => {
-                  if (!completionOverlayKey) return;
-                  setDismissedCompletionOverlayKey(completionOverlayKey);
-                }}
+                compact={completionOverlayCompact}
+                onDismiss={dismissCompletionOverlay}
                 onUndoLastAction={canUndoLastCompletionAction ? handleUndoLastCompletionAction : undefined}
               />
             )}
@@ -6075,11 +5663,10 @@ export function ScenesView() {
         <AnimatePresence>
           {showCompletionOverlay && (
             <PartCompleteOverlay
+              key={completionSeenKey ?? 'part-complete'}
               completedMeta={visibleCompletedMeta}
-              onDismiss={() => {
-                if (!completionOverlayKey) return;
-                setDismissedCompletionOverlayKey(completionOverlayKey);
-              }}
+              compact={completionOverlayCompact}
+              onDismiss={dismissCompletionOverlay}
               onUndoLastAction={canUndoLastCompletionAction ? handleUndoLastCompletionAction : undefined}
             />
           )}

@@ -117,7 +117,8 @@ test('widget actions use the current assignee, preserve the completion editor on
       useState: (initial: unknown) => {
         const index = cursor++;
         if (!(index in values)) values[index] = typeof initial === 'function' ? initial() : initial;
-        return [values[index], (next: unknown) => { values[index] = next; }];
+        // 함수형 갱신(prev => next)도 React 처럼 받는다 — 17번 '담당 완료' 줄 남김이 쓴다.
+        return [values[index], (next: unknown) => { values[index] = typeof next === 'function' ? (next as (prev: unknown) => unknown)(values[index]) : next; }];
       },
       useRef: (initial: unknown) => {
         const index = cursor++;
@@ -146,6 +147,10 @@ test('widget actions use the current assignee, preserve the completion editor on
     '@/utils/entityTokens': { stripEntityTokens: (text: string) => text },
     '@/utils/revisionGeneral': { isGeneralRevisionSceneKey: () => false },
     '@/utils/retakeNavigation': { openRetakeInApp: (...args: unknown[]) => calls.push(['navigate', ...args]) },
+    // 17번 움직임: 동작 줄이기 판정·줄 미끄러짐(DOM 측정)·동그란 체크는 이 시험에서 흉내만 낸다.
+    '@/hooks/useMotionPref': { useMotionPref: () => ({ reduce: false }) },
+    '@/hooks/useRowFlip': { useRowFlip: () => {} },
+    '@/components/ui/SuccessCheckCircle': { SuccessCheckCircle: 'SuccessCheckCircle' },
   };
   const bundle = await build({
     entryPoints: ['src/components/widgets/MyRetakesWidget.tsx'], bundle: true, write: false,
@@ -184,16 +189,27 @@ test('widget actions use the current assignee, preserve the completion editor on
   assert.deepEqual(editor(tree)?.props.notifyDefaultIds, ['requester']);
   editor(tree)?.props.onConfirm('G:\\결과.moho', []);
   assert.ok(editor(render()), 'optimistic completion must not unmount the completion draft');
+  assert.ok(flatten(render()).some((node) => node.type === 'SuccessCheckCircle'), '17번: 확인 즉시 그 줄에 초록 체크가 뜬다(낙관적)');
   resolveSave?.();
   await flush();
   assert.ok(editor(render()), 'rollback leaves the completion editor open');
+  assert.ok(button(render(), '담당 완료'), '17번: 되돌아온 줄은 남겨 둔 성공 표시 대신 원래 버튼으로 돌아온다');
+  assert.equal(flatten(render()).some((node) => node.type === 'SuccessCheckCircle'), false);
   assert.equal(errors.length, 1);
   assert.deepEqual(calls[1], ['complete', 'work', 'me', 'G:\\결과.moho', [], '담당자']);
 
   rollback = false;
   editor(render())?.props.onConfirm('수정 완료', ['requester']);
   await flush();
-  assert.equal(editor(render()), undefined);
+  // 17번: 저장이 끝나도 끝낸 줄은 초록 체크를 보여 준 뒤 메모 칸과 함께 사라진다(0.4초 + 0.15초).
+  tree = render();
+  assert.ok(flatten(tree).some((node) => node.type === 'SuccessCheckCircle' && node.props.checked === true), 'completed row shows the success check while leaving');
+  assert.ok(editor(tree), 'completion editor leaves together with its row');
+  assert.equal(button(tree, '담당 완료'), undefined, 'leaving row cannot be completed again');
+  await new Promise<void>((resolve) => setTimeout(resolve, 650));
+  tree = render();
+  assert.equal(editor(tree), undefined);
+  assert.equal(flatten(tree).some((node) => node.type === 'SuccessCheckCircle'), false, 'leaving row is removed after the fade');
   assert.equal(selectMyRetakes(rows, 'me').length, 0);
 
   rows = [revision('reassigned')];

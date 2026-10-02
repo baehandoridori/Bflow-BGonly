@@ -89,6 +89,8 @@ export function StageSegmentToggle({
               onToggle(stage);
             }}
             data-on={isDone}
+            // 17번: 마지막 칸(PNG)까지 켜졌으면 완료 칸 — 동작 줄이기에서 꽃가루 대신 이 칸 테두리가 한 번 빛난다.
+            data-celebrate-cell={isCurrent && i === STAGES.length - 1 ? true : undefined}
             // stage-seg: 누름(scale .94 → 톡) · transform/opacity/color 만 전환 · hover 바탕은 겹친 층의 opacity.
             // 굵기는 고정(semibold) — 굵기가 바뀌면 글자 폭이 바뀌어 다시 배치된다.
             className={cn(

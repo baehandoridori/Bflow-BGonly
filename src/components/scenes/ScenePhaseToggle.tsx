@@ -149,6 +149,7 @@ export function ScenePhaseToggle({
               ref={setNode(state)}
               data-continuity-stage-segment
               data-on={isActive}
+              data-celebrate-cell={isActive && state === 'done' ? true : undefined}
               role="radio"
               aria-checked={isActive}
               aria-disabled={disabled || undefined}

@@ -206,3 +206,219 @@
     transform: none;
   }
 }
+
+/* ═══ 17. 끝냈을 때의 보상 — 씬 완료 '톡'·번짐·꽃가루, 파트 완료, 할 일 완료 손맛 (celebrate-done) ═══
+   - 씬 완료: 카드 '톡'(WAAPI translate·scale)·꽃가루(WAAPI transform 문자열)는 JS 에서 건다
+     (src/components/scenes/SceneCompletionFx.tsx · src/components/ui/Confetti.tsx · 수치는 celebrateMotion.ts / confettiMotion.ts).
+     여기서는 초록 틴트 층의 opacity 번짐(0.4초)과 조각·빛 테두리의 바탕 모양만 정한다.
+   - 할 일 완료: 동그란 체크(.success-check) — 원은 초록 층 opacity, 체크는 scale 0→1 '톡'(300ms 살짝 넘치는 곡선).
+     팀 할 일 취소선은 늘 그어 두고 색만 투명↔글자색(0.22초).
+   - 내 리테이크: 누른 줄 보라 6% 바탕(층 opacity 0.15초), 메모 칸 떠오름(0.18초), 끝낸 줄 사라짐(0.15초).
+   - 동작 줄이기: 전역 규칙이 전환·애니메이션 길이를 0 으로 만든다. 아래 미디어 쿼리는 떠오름의 transform 만 뺀다. */
+
+/* 씬 완료 초록빛 — 그라데이션은 이어 바꿀 수 없어 카드 안쪽 층의 opacity 로 번진다.
+   카드 루트(will-change: transform)가 쌓임 맥락이라 z-index -1 이면 카드 바탕 위·내용 아래에 그려진다. */
+.scene-completion-tint-layer {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgb(16 185 129 / 0.20), rgb(var(--color-bg-card) / 0.96) 44%, rgb(34 197 94 / 0.10));
+  opacity: 0;
+  transition: opacity 400ms ease-out; /* 사양: 0.4초 ease-out — 0.4초 내내 번지게(expo 곡선은 0.15초 만에 다 차 버린다) */
+}
+.scene-completion-tint-layer[data-on='true'] {
+  opacity: 1;
+}
+:root[data-color-mode='light'] .scene-completion-tint-layer {
+  background: linear-gradient(135deg, rgb(209 250 229 / 0.88), rgb(255 255 255 / 0.96) 48%, rgb(220 252 231 / 0.72));
+}
+
+/* 동작 줄이기에서 꽃가루 대신 한 번 빛나는 완료 칸 테두리(opacity .7→0 은 WAAPI 가 건다). */
+.scene-celebrate-glow {
+  position: absolute;
+  z-index: 30;
+  pointer-events: none;
+  border: 2px solid #00B894;
+  box-shadow: 0 0 10px rgb(0 184 148 / 0.45);
+  opacity: 0;
+}
+
+/* 꽃가루 — 가운데 한 점에서 출발한다. 조각은 움직임 밖에서는 보이지 않는다(끝나면 opacity 0 으로 돌아감). */
+.bf-confetti {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 50;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.bf-confetti-piece {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+}
+
+/* 파트 완료 '완료 안내 다시 보기' 알약 — 아래에서 떠오른다(채움 없음 → 끝나면 hover 들림이 그대로 산다). */
+.part-complete-restore {
+  animation: part-complete-restore-in 200ms var(--ease-out);
+}
+@keyframes part-complete-restore-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 동그란 완료 체크 */
+.success-check {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 2px solid rgb(var(--color-text-secondary) / 0.5);
+  color: #fff;
+  transition: border-color var(--motion-fast) var(--ease-std);
+}
+.success-check--md {
+  width: 20px;
+  height: 20px;
+}
+.success-check--sm {
+  width: 16px;
+  height: 16px;
+  border-width: 1.5px;
+}
+button.success-check {
+  cursor: pointer;
+}
+button.success-check:disabled {
+  cursor: default;
+}
+button.success-check:not([data-on='true']):not(:disabled):hover {
+  border-color: rgb(var(--color-accent));
+}
+button.success-check:focus-visible {
+  outline: 2px solid rgb(var(--color-accent) / 0.6);
+  outline-offset: 2px;
+}
+/* 초록 원 — 테두리까지 덮는 층의 opacity 로 켠다(바탕·테두리색을 전환하지 않음). */
+.success-check-fill {
+  position: absolute;
+  inset: -2px;
+  z-index: -1;
+  border-radius: inherit;
+  background: #22C55E;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-std);
+}
+.success-check--sm .success-check-fill {
+  inset: -1.5px;
+}
+.success-check[data-on='true'] .success-check-fill {
+  opacity: 1;
+}
+/* 체크 — 끌 때는 작아지며 빠르게, 켤 때는 '톡'(300ms 살짝 넘치는 곡선). */
+.success-check-mark {
+  display: flex;
+  opacity: 0;
+  transform: scale(0);
+  transition:
+    transform var(--motion-fast) var(--ease-in),
+    opacity var(--motion-fast) var(--ease-in);
+}
+.success-check[data-on='true'] .success-check-mark {
+  opacity: 1;
+  transform: none;
+  transition:
+    transform 300ms var(--ease-spring),
+    opacity var(--motion-fast) var(--ease-std);
+}
+/* 켜진 채로 처음 나타나는 성공 표시(내 리테이크 '담당 완료')도 '톡'. */
+.success-check--pop-in[data-on='true'] .success-check-fill {
+  animation: success-check-fill-in var(--motion-fast) var(--ease-std) both;
+}
+.success-check--pop-in[data-on='true'] .success-check-mark {
+  animation: success-check-pop 300ms var(--ease-spring) both;
+}
+@keyframes success-check-fill-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes success-check-pop {
+  from { opacity: 0; transform: scale(0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 팀 할 일 글자 — 취소선은 늘 그어 두고 색만 바꾼다(글자색도 함께 흐려짐). */
+.thread-todo-text {
+  color: rgb(var(--color-text-primary));
+  text-decoration-line: line-through;
+  text-decoration-color: transparent;
+  transition:
+    color 220ms var(--ease-std),
+    text-decoration-color 220ms var(--ease-std);
+}
+.thread-todo-text[data-done='true'] {
+  color: rgb(var(--color-text-secondary) / 0.6);
+  text-decoration-color: currentColor;
+}
+
+/* 내 리테이크 줄 */
+.my-retake-row {
+  isolation: isolate;
+  transition: opacity 150ms var(--ease-in);
+}
+.my-retake-row[data-leaving='fade'] {
+  opacity: 0;
+}
+.my-retake-row-tint {
+  position: absolute;
+  inset: 4px -8px;
+  z-index: -1;
+  border-radius: 8px;
+  background: rgb(var(--color-accent) / 0.06);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms var(--ease-std);
+}
+.my-retake-row:first-child .my-retake-row-tint {
+  top: -6px;
+}
+.my-retake-row-tint[data-on='true'] {
+  opacity: 1;
+}
+.my-retake-note {
+  animation: my-retake-note-in var(--motion-base) var(--ease-out);
+}
+@keyframes my-retake-note-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.my-retake-state {
+  animation: my-retake-state-in 150ms var(--ease-std);
+}
+@keyframes my-retake-state-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .part-complete-restore,
+  .my-retake-note {
+    animation-name: scene-check-fade-only;
+  }
+  .success-check-mark,
+  .success-check[data-on='true'] .success-check-mark {
+    transform: none;
+  }
+}
+@keyframes scene-check-fade-only {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
