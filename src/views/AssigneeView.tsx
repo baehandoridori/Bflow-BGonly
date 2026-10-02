@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
@@ -8,6 +8,8 @@ import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Episode, Department, Stage } from '@/types';
 import { cn } from '@/utils/cn';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { useGridFlip } from '@/hooks/useGridFlip';
+import { useMotionPref } from '@/hooks/useMotionPref';
 
 /* ────────────────────────────────────────────────
    담당자별 통계
@@ -263,6 +265,10 @@ export function AssigneeView() {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const [sortBy, setSortBy] = useState<SortOption>('seniority');
   const [sortAsc, setSortAsc] = useState(false);
+  // 정렬을 바꾸면 카드가 순간이동하지 않고 새 자리로 미끄러진다(움직임 폴리싱 15번).
+  const cardGridRef = useRef<HTMLDivElement>(null);
+  const { reduce } = useMotionPref();
+  useGridFlip(cardGridRef, `${sortBy}:${sortAsc}`, { disabled: reduce, enter: false });
 
   const assignees = useMemo(() => {
     const data = buildAssigneeData(episodes, episodeTitles);
@@ -356,10 +362,11 @@ export function AssigneeView() {
             <p className="text-sm">담당자 데이터가 없습니다</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div ref={cardGridRef} className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {assignees.map((data, i) => (
               <motion.div
                 key={data.name}
+                data-flip-id={data.name}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, delay: i * 0.03 }}

@@ -142,3 +142,53 @@
   .sf-peek--next { transform: translateX(8px) !important; }
   .sf-peek--prev { transform: translateX(-8px) !important; }
 }
+
+/* ═══ 15. 필터·정렬을 켠 채 체크 / 바꿀 때 재배치 (reflow-on-filter) ══════════════════
+   미끄러짐·떠오름은 JS(src/hooks/useGridFlip.ts — WAAPI transform·opacity)가 맡는다.
+   여기는 '체크해서 필터에서 빠질 카드'가 잠깐 머무는 표시만 둔다:
+   머무는 동안 .65 로 옅게(곧 빠짐, 0.3초) → 시간이 다 되면 0.2초에 사라지고 → 나머지가 빈자리로 미끄러진다.
+   .scene-card-interactive 의 transition 목록(!important)에 opacity 를 더해야 하므로 같은 목록을 다시 적는다. */
+.scene-card-interactive[data-lingering] {
+  transition:
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 300ms var(--ease-std) !important;
+}
+.scene-card-interactive[data-lingering='hold'] {
+  opacity: 0.65;
+}
+.scene-card-interactive[data-lingering='leaving'] {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms var(--ease-in) !important;
+}
+/* 동작 줄이기: 머무름(곧 빠짐)은 그대로, 위 목록이 되살린 이동 전환은 빼고 투명도만 짧게. */
+@media (prefers-reduced-motion: reduce) {
+  .scene-card-interactive[data-lingering] {
+    transition: opacity 120ms var(--ease-std) !important;
+  }
+}
+
+/* 캘린더(월별): 태그·캘린더를 켜고 끌 때 새로 보이게 된 일정 막대만 0.18초 떠오른다.
+   막대가 '마운트될 때' 한 번만 붙는 클래스라(필터를 바꾼 직후 생긴 막대만) 기존 막대는 깜빡이지 않는다. */
+.sf-cal-bar-reveal {
+  animation: sf-cal-bar-reveal var(--motion-base) var(--ease-out) backwards;
+}
+@keyframes sf-cal-bar-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sf-cal-bar-reveal {
+    animation: none !important;
+  }
+}

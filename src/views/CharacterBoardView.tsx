@@ -31,6 +31,9 @@ import { effectiveHeightPx } from '@/utils/characterHeight';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { matchesCharacterStatusFilter, collectCharacterAssignees, type CharacterStatusFilterValue } from '@/utils/characterStatusFilter';
 import type { CharacterBoardTab } from '@/types';
+import { useGridFlip } from '@/hooks/useGridFlip';
+import { CARD_DROP_FLIP } from '@/utils/gridFlip';
+import { useMotionPref } from '@/hooks/useMotionPref';
 
 type BoardTab = 'board' | 'episode-assets';
 
@@ -394,6 +397,10 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
     setDraggingCardId(null);
     setDropTargetId(null);
   }, []);
+  // 내가 카드를 놓아 순서가 바뀐 순간만, 밀려난 카드들이 새 자리로 미끄러진다(움직임 폴리싱 15번).
+  // 팀원 쪽 순서 변경·검색 등은 그대로 바로 바뀐다. 카드가 40장을 넘으면 생략.
+  const cardGridRef = useRef<HTMLDivElement>(null);
+  const cardFlipArmedUntilRef = useRef(0);
   const handleCardDrop = useCallback((targetId: string) => {
     const dragId = draggingCardIdRef.current;
     draggingCardIdRef.current = null;
@@ -402,8 +409,15 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
     if (!dragId || dragId === targetId) return;
     // 전체 characters 배열 기준으로 이동 계산 — active/archived 가 같은 sort_order 공간을 쓰므로 전 구간 재부여로 중복 방지.
     const allIds = useCharacterBoardStore.getState().characters.map((c) => c.id);
+    cardFlipArmedUntilRef.current = Date.now() + CARD_DROP_FLIP.armMs;
     void reorderCharacters(moveCostumeInOrder(allIds, dragId, targetId));
   }, [reorderCharacters]);
+  const { reduce: reduceMotion } = useMotionPref();
+  useGridFlip(cardGridRef, cardOrderIds.join('|'), {
+    disabled: reduceMotion || Date.now() > cardFlipArmedUntilRef.current,
+    maxItems: CARD_DROP_FLIP.maxItems,
+    enter: false,
+  });
 
   if (!loaded) {
     if (loadError) {
@@ -615,7 +629,7 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
           </button>
         </div>
       ) : (
-        <div className={heightCompareMode
+        <div ref={cardGridRef} className={heightCompareMode
           ? 'flex flex-wrap items-end gap-4'
           : viewMode === 'list'
             ? 'flex flex-col gap-1.5'

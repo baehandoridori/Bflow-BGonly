@@ -11,6 +11,8 @@ import type { Scene, Department, Stage, AppUser } from '@/types';
 import { cn } from '@/utils/cn';
 import { getUserColor } from '@/utils/userColor';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { useGridFlip } from '@/hooks/useGridFlip';
+import { useMotionPref } from '@/hooks/useMotionPref';
 
 /* ────────────────────────────────────────────────
    팀원별 작업 통계
@@ -335,6 +337,10 @@ export function TeamView() {
 
   const [sortBy, setSortBy] = useState<SortOption>('seniority');
   const [sortAsc, setSortAsc] = useState(false);
+  // 정렬을 바꾸면 카드가 순간이동하지 않고 새 자리로 미끄러진다(움직임 폴리싱 15번).
+  const cardGridRef = useRef<HTMLDivElement>(null);
+  const { reduce } = useMotionPref();
+  useGridFlip(cardGridRef, `${sortBy}:${sortAsc}`, { disabled: reduce, enter: false });
 
   // 하이라이트 대상 ref
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -446,12 +452,13 @@ export function TeamView() {
             <p className="text-sm">등록된 팀원이 없습니다</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div ref={cardGridRef} className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             {teamData.map((data, i) => {
               const isHighlighted = highlightUserName === data.user.name;
               return (
                 <motion.div
                   key={data.user.id}
+                  data-flip-id={data.user.id}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: i * 0.03 }}

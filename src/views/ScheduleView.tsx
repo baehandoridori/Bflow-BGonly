@@ -593,24 +593,18 @@ export function ScheduleView() {
 
   // 통합 이벤트 (B flow + 연결된 휴가)와 캘린더∩태그 필터를 한 경로로 유지한다.
   const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
-  // 태그·캘린더 필터가 바뀌면 결과가 뚝 갈리므로 짧게 페이드로 이어 준다.
-  // 컨테이너를 다시 마운트하면 스크롤·드래그가 끊기므로 투명도만 잠깐 낮춘다.
+  // 태그·캘린더 필터가 바뀌면 달력 전체를 옅게 깜빡이지 않고(바뀌지 않은 일정까지 어두워졌다),
+  // 새로 보이게 된 일정 막대만 0.18초 떠오르게 한다(움직임 폴리싱 15번). 그 기준 시각만 여기서 정한다 —
+  // 막대는 '필터를 바꾼 직후에 생겼는지'를 자기가 마운트될 때 한 번만 판정한다(CalendarGrid).
   const filterSignature = useMemo(
     () => JSON.stringify([visibleCalendarIds, enabledTagIds]),
     [enabledTagIds, visibleCalendarIds],
   );
-  const [filterFadeOpacity, setFilterFadeOpacity] = useState(1);
-  const lastFilterSignatureRef = useRef(filterSignature);
-  useEffect(() => {
-    if (lastFilterSignatureRef.current === filterSignature) return;
-    lastFilterSignatureRef.current = filterSignature;
-    // 페이드 도중 OS '동작 줄이기'가 켜지면 cleanup이 복구 타이머를 지운 뒤 재실행이
-    // 그냥 빠져나가 화면이 반투명으로 굳는다. 되돌리고 나가야 한다.
-    if (reduce) { setFilterFadeOpacity(1); return; }
-    setFilterFadeOpacity(0.55);
-    const restore = setTimeout(() => setFilterFadeOpacity(1), 120);
-    return () => clearTimeout(restore);
-  }, [filterSignature, reduce]);
+  const filterRevealRef = useRef({ signature: filterSignature, at: 0 });
+  if (filterRevealRef.current.signature !== filterSignature) {
+    filterRevealRef.current = { signature: filterSignature, at: Date.now() };
+  }
+  const filterRevealAt = reduce ? 0 : filterRevealRef.current.at;
 
   const filteredEvents = useMemo(
     () => filterCalendarEvents(allEvents, {
@@ -1742,7 +1736,7 @@ export function ScheduleView() {
           <motion.div
             key={`${viewMode}:${weekSubMode}`}
             initial={reduce ? false : { opacity: 0, transform: 'translateY(8px)' }}
-            animate={{ opacity: filterFadeOpacity, transform: 'translateY(0px)', transitionEnd: { transform: 'none' } }}
+            animate={{ opacity: 1, transform: 'translateY(0px)', transitionEnd: { transform: 'none' } }}
             exit={reduce ? undefined : { opacity: 0, transform: 'translateY(-8px)' }}
             transition={reduce || skipPeriodTransition
               ? { duration: 0 }
@@ -1834,6 +1828,7 @@ export function ScheduleView() {
                 pulseDate={pulseDate}
                 highlightedEventIdentities={highlightedEventIdentities}
                 reduceMotion={reduce}
+                filterRevealAt={filterRevealAt}
                 tagNameById={tagNameById}
                 calendarNameById={calendarNameById}
                 onWheel={(e) => {
