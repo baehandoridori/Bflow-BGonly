@@ -1,1 +1,65 @@
 /* 이 갈래 전용 움직임 CSS — motion-view-entry (공통 토큰은 src/index.css :root 의 --motion-*·--ease-*, JS 는 src/utils/motion.ts) */
+
+/* ─── 10. 진행률 숫자 굴림 (rolling-numbers) ───────────────────────
+   숫자와 짝지은 막대·원은 숫자 카운트업과 같은 박자로 움직인다.
+   --motion-roll 은 src/utils/progressMotion.ts 의 ROLL_MS 와 같은 값(tests/motion/dash-entry-rolling-numbers.test.ts 가 묶는다).
+   !important 를 쓰지 않아 '동작 줄이기' 전역 규칙(전환 0.01ms)이 그대로 이긴다. */
+:root {
+  --motion-roll: 500ms;
+}
+
+/* 숫자 폭 고정 — 굴러가거나 세어 올라가는 동안 옆 글자가 흔들리지 않게 */
+.bf-roll {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 굴러가는 동안에만 생기는 자리 칸. 보이지 않는 숫자(ghost)가 폭·높이·기준선을 잡고,
+   그 위에 0~9 띠를 겹쳐 transform 으로만 움직인다.
+   overflow: clip — hidden 과 달리 스크롤 상자가 아니라 기준선이 그대로이고, clip-path 와 달리 40칸짜리 띠가
+   위젯 내용 칸의 스크롤 높이에 잡히지 않는다(굴러가는 동안 스크롤바가 생기지 않게). */
+.bf-roll-col {
+  position: relative;
+  display: inline-block;
+  overflow: clip;
+}
+
+.bf-roll-ghost {
+  visibility: hidden;
+}
+
+.bf-roll-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: block;
+  white-space: pre;
+  text-align: center;
+}
+
+/* 숫자와 함께 움직이는 막대 — 폭만 전환(그라데이션 배경은 보간되지 않으니 넣지 않는다) */
+.bf-progress-bar {
+  transition: width var(--motion-roll) var(--ease-out);
+}
+
+/* 숫자와 함께 움직이는 원 호 */
+.bf-progress-arc {
+  transition:
+    stroke-dasharray var(--motion-roll) var(--ease-out),
+    stroke-dashoffset var(--motion-roll) var(--ease-out),
+    stroke var(--motion-roll) var(--ease-out);
+}
+
+/* 진행률 원 끝의 둥근 머리 — 호 길이와 같은 박자로 돌아 늘 띠 끝에 붙어 있다.
+   0%로 내려갈 때는 호가 다 줄어든 뒤에 숨는다(나타날 때는 바로). */
+.bf-progress-cap {
+  transform-box: view-box;
+  transition:
+    transform var(--motion-roll) var(--ease-out),
+    opacity 0s linear var(--motion-roll);
+}
+
+.bf-progress-cap[data-visible='true'] {
+  transition-delay: 0s, 0s;
+}

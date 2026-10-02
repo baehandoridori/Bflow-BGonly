@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 interface DonutSegment {
   label: string;
   pct: number;
@@ -7,7 +9,8 @@ interface DonutSegment {
 interface DonutChartProps {
   segments: DonutSegment[];
   centerLabel?: string;
-  centerValue?: string;
+  /** 가운데 큰 숫자. 진행률이면 <RollingNumber /> 를 넘겨 호와 같은 박자로 굴린다. */
+  centerValue?: ReactNode;
   size?: number;
 }
 
@@ -62,7 +65,7 @@ export function DonutChart({
               strokeDashoffset={arc.dashoffset}
               strokeLinecap="butt"
               transform={`rotate(-90 ${cx} ${cy})`}
-              className="transition-all duration-700 ease-out"
+              className="bf-progress-arc"
             />
           ))}
         </svg>

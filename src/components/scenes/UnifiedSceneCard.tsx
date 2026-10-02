@@ -14,6 +14,7 @@ import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { Confetti } from '@/components/ui/Confetti';
+import { RollingNumber } from '@/components/ui/RollingNumber';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -401,7 +402,7 @@ export function UnifiedSceneCard({
               </span>
             )}
             <span className="bg-bg-primary/80 border border-bg-border/45 text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
-              {combinedPct}%
+              <RollingNumber value={combinedPct} suffix="%" countUp={false} />
             </span>
           </div>
         </div>
