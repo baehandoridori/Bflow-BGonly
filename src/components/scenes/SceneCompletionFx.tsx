@@ -22,7 +22,7 @@ interface SceneCompletionFxProps {
  * 씬 카드 완료 연출 (움직임 폴리싱 17번). 카드 루트의 첫 자식으로 둔다 — 부모 요소가 곧 카드다.
  *
  * - 초록 틴트: 그라데이션 바탕은 이어 바꿀 수 없어서, 카드 안쪽에 깐 층(z-index -1)의 opacity 를 0.4초 동안 올린다.
- *   (카드 루트는 will-change: transform 이라 쌓임 맥락이 생겨, 층은 카드 바탕 위·내용 아래에 그려진다.)
+ *   (카드 루트 .scene-card-interactive 는 isolation: isolate 로 쌓임 맥락이라, 층은 카드 바탕 위·내용 아래에 그려진다.)
  * - 카드 '톡': 축하가 켜지는 순간 카드에 개별 transform 속성(translate·scale) WAAPI 를 건다.
  *   hover 떠오름(transform)과 더해지므로 덜컹 내려앉지 않는다.
  * - 동작 줄이기: 톡 없이 완료 칸(data-celebrate-cell — PNG 칸·액팅 '완료' 칩, 없으면 카드 테두리)이 한 번 빛난다.

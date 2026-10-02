@@ -216,6 +216,12 @@
    - 내 리테이크: 누른 줄 보라 6% 바탕(층 opacity 0.15초), 메모 칸 떠오름(0.18초), 끝낸 줄 사라짐(0.15초).
    - 동작 줄이기: 전역 규칙이 전환·애니메이션 길이를 0 으로 만든다. 아래 미디어 쿼리는 떠오름의 transform 만 뺀다. */
 
+/* 카드는 늘 쌓임 맥락 — 아래 틴트 층(z-index -1)이 카드 바탕 위·내용 아래에 그려지게.
+   (지금은 .scene-card-interactive 의 will-change 로도 생기지만, 그 줄이 바뀌어도 틴트가 카드 뒤로 숨지 않게 못 박는다.) */
+.scene-card-interactive {
+  isolation: isolate;
+}
+
 /* 씬 완료 초록빛 — 그라데이션은 이어 바꿀 수 없어 카드 안쪽 층의 opacity 로 번진다.
    카드 루트(will-change: transform)가 쌓임 맥락이라 z-index -1 이면 카드 바탕 위·내용 아래에 그려진다. */
 .scene-completion-tint-layer {

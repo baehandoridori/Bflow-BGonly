@@ -154,6 +154,7 @@ test('초록빛은 그라데이션 바탕을 바꾸지 않고 겹친 층의 opac
   const css = stripComments(read('src/styles/motion-scene-check.css'));
   assert.match(css, /\.scene-completion-tint-layer \{[^}]*z-index: -1;[^}]*opacity: 0;[^}]*transition: opacity 400ms ease-out;/);
   assert.match(css, /\.scene-completion-tint-layer\[data-on='true'\] \{\s*opacity: 1;\s*\}/);
+  assert.match(css, /\.scene-card-interactive \{\s*isolation: isolate;\s*\}/, '틴트 층이 카드 뒤로 숨지 않게 카드는 늘 쌓임 맥락');
   assert.match(css, /:root\[data-color-mode='light'\] \.scene-completion-tint-layer \{/);
 });
 
