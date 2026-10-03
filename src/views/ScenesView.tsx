@@ -32,12 +32,20 @@ import {
   advanceAssigneeCarry,
   advancePhaseCarry,
   advanceStageCarry,
+  carriedSideBases,
   completionOf,
+  completionOvertaken,
+  inheritAssigneeBase,
+  inheritCompletion,
+  inheritPhaseBase,
+  judgeAssigneeProgressMap,
   judgePending,
   narrowStageWritesForRetry,
   phaseFieldsOf,
+  phaseGiveUpBase,
   planCompletionStampDrop,
   planPhaseGiveUp,
+  planSideFieldDrop,
   planStageGiveUp,
   restoreAssigneeEntry,
   sameAssigneeProgress,
@@ -51,7 +59,7 @@ import {
   type SavedStageResult,
   type StageSaveSlotCarry,
 } from '@/utils/sceneSaveCarry';
-import { holdPendingSceneValues, sceneSaveRetry } from '@/services/sceneSaveRetry';
+import { holdPendingSceneValues, sceneSaveRetry, sceneSaveSession } from '@/services/sceneSaveRetry';
 import { useStageSaveStatusStore } from '@/stores/useStageSaveStatusStore';
 import {
   assigneeCellId,
@@ -1970,11 +1978,12 @@ export function ScenesView() {
    * 담당자별 진행률 저장. 통째로 덮어쓰지 않고 서버 정본 위에 `changedNames` 항목만 얹는다
    * (같은 씬을 둘이 맡았을 때 상대 변경이 사라지는 것 방지 — saveAssigneeProgress 주석 참고).
    * 저장된 맵을 돌려주므로 호출자가 스토어를 한 번 더 맞출 수 있다.
+   * beforeWrite: 큐에서 차례를 기다리고 정본을 읽은 뒤, 쓰기 직전에 부른다(던지면 쓰지 않는다 — 자동 재전송의 로그인 세션 확인).
    */
   const writeAssigneeProgressMetadata = useCallback(
-    (sceneUuid: string, progress: SceneAssigneeProgressMap, changedNames: string[]) =>
+    (sceneUuid: string, progress: SceneAssigneeProgressMap, changedNames: string[], beforeWrite?: () => void) =>
       enqueueAssigneeProgressWrite(sceneUuid, () =>
-        saveAssigneeProgress(sceneUuid, progress, changedNames),
+        saveAssigneeProgress(sceneUuid, progress, changedNames, { beforeWrite }),
       ),
     [enqueueAssigneeProgressWrite],
   );
@@ -2101,9 +2110,13 @@ export function ScenesView() {
       // 20번 safety-net: 실패해도 바로 되돌리지 않고 자동으로 다시 보낸다. 칩을 또 누르면 마지막 값만 보내고,
       // 되돌릴 값은 저장 확인 전 맨 처음 값을 지킨다(carry). 앞 칩의 저장이 그 뒤에 닿으면 그 값으로 앞당긴다.
       const saveSlotKey = `${sceneUuid}|phase`;
+      // 클릭한 순간의 로그인 세션 — 바뀌면(로그아웃·다른 사용자) 다시 보내기도, 뒤따르는 기록도 보내지 않는다.
+      const saveSession = sceneSaveSession();
       const carried = sceneSaveRetry.pendingCarry<PhaseSaveSlotCarry>(saveSlotKey);
+      const minePhase: PhaseFields = { sceneState: newState, workRound, feedbackRound };
       const saveCarry: PhaseSaveSlotCarry = {
-        base: carried?.base ?? {
+        // 앞 칩의 단계가 아직 화면에 있을 때만 앞 저장의 처음 값을 잇는다(그 사이 남이 바꿨으면 지금 값이 새 기준).
+        base: inheritPhaseBase(carried, scene) ?? {
           sceneState: prevState,
           workRound: prevWork,
           feedbackRound: prevFb,
@@ -2114,11 +2127,12 @@ export function ScenesView() {
         },
         completion: completionMeta
           ? { completedBy: completionMeta.nextCompletedBy, completedAt: completionMeta.nextCompletedAt }
-          : carried?.completion ?? null,
+          : inheritCompletion(carried?.completion, completionOf(carried?.base ?? scene), scene, willBeFullyDone),
+        mine: minePhase,
+        mineAssigneeProgress: nextProgress ?? undefined,
       };
       const phaseCell = phaseCellId(newState);
       const saveStatus = useStageSaveStatusStore.getState();
-      const minePhase: PhaseFields = { sceneState: newState, workRound, feedbackRound };
       const phaseSubject: RollbackSubject = { kind: 'phase', label: SCENE_PHASE_LABELS_SHORT[newState] };
       const announcePhaseLoss = (kind: SaveFailureKind) => {
         setCelebratingTarget((current) => celebrationWithout(current, sheetName, sceneId, sceneUuid));
@@ -2133,7 +2147,10 @@ export function ScenesView() {
       };
       const phaseStillMine = () => {
         const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
-        return Boolean(latest) && samePhase(phaseFieldsOf(latest ?? {}), minePhase);
+        if (!latest || !samePhase(phaseFieldsOf(latest), minePhase)) return false;
+        // 담당자가 여럿이면 담당자별 진행이 다음 받아오기 때 단계를 정한다 — 그 진행을 그 사이 남이 바꿨으면(단계는 그대로여도)
+        // 이 단계로 덮지 않는다(다시 보내기 직전 · 받아오기 위에 다시 얹기 전 모두).
+        return !nextProgress || judgeAssigneeProgressMap(latest.assigneeProgress, nextProgress, saveCarry.base.assigneeProgress) !== 'other';
       };
       // 받아오기(15초 주기·새로고침·실시간 재로드·재연결)가 아직 내 저장을 모르는 서버 값, 곧 처음 단계를 읽어 와도
       // 내 단계를 다시 얹는다. 화면에서 이미 다른 값으로 바뀐 뒤라면(내 다른 버튼·팀원) 얹지 않는다.
@@ -2172,10 +2189,12 @@ export function ScenesView() {
           onGiveUp: (err, kind) => {
             console.error('[ScenesView] 단계 변경 실패:', err);
             saveStatus.clearRetrying(sceneUuid, 'phase');
-            // 그 사이 다른 값이 됐으면 그 값을 두고 되돌리지 않는다.
-            const restore = planPhaseGiveUp(useDataStore.getState().findSceneByUuid(sceneUuid), minePhase, saveCarry.base);
+            // 그 사이 다른 값이 됐으면 그 값을 두고 되돌리지 않는다. 함께 바꾼 완료 기록·담당자별 진행도 지금 값이
+            // 이 저장이 만든 값일 때만 되돌린다(그 사이 새 값이 왔으면 그 값을 둔다 — 단계 칸의 planStageGiveUp 과 같은 규칙).
+            const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
+            const restore = planPhaseGiveUp(latest, minePhase, phaseGiveUpBase(saveCarry, latest));
             if (!restore) return;
-            // 명시적 롤백 — sceneState/round 셋 + legacy 4개 + 완료 기록 + 담당자별 진행 모두 복원
+            // 명시적 롤백 — sceneState/round 셋 + legacy 4개 (+ 아직 이 저장의 값인 완료 기록·담당자별 진행)
             updateSceneByUuid(sceneUuid, restore);
             announcePhaseLoss(kind);
           },
@@ -2188,15 +2207,22 @@ export function ScenesView() {
         releasePendingPhase();
       }
       if (outcome !== 'saved') return;
+      // 로그인 세션이 바뀌었으면 뒤따르는 기록(담당자별 진행·완료 기록)도 보내지 않는다.
+      if (!saveSession.isCurrent()) return;
 
       // 늦게 저장됐을 수 있으니 최신 담당자 기록 위에 같은 변경을 다시 적용해 보낸다(그 사이 바뀐 값을 옛 값으로 덮지 않게).
-      // 그 사이 담당자가 한 명 이하가 됐으면 담당자별 기록은 보내지 않는다.
+      // 그 사이 담당자가 한 명 이하가 됐거나 담당자별 진행을 남이 바꿨으면 담당자별 기록은 보내지 않는다(그 값을 덮지 않는다).
       const latestScene = nextProgress ? useDataStore.getState().findSceneByUuid(sceneUuid) : undefined;
-      if (latestScene && hasMultiAssigneeProgress(latestScene)) {
+      if (
+        latestScene
+        && hasMultiAssigneeProgress(latestScene)
+        && judgeAssigneeProgressMap(latestScene.assigneeProgress, nextProgress, saveCarry.base.assigneeProgress) !== 'other'
+      ) {
         const progress = updateAllAssigneeProgressEntries(latestScene, phaseProgressUpdate, currentUser?.name);
         try {
-          await writeAssigneeProgressMetadata(sceneUuid, progress, Object.keys(progress));
+          await writeAssigneeProgressMetadata(sceneUuid, progress, Object.keys(progress), saveSession.assertCurrent);
         } catch (err) {
+          if (!saveSession.isCurrent()) return;
           console.error('[ScenesView] 담당자별 진행 저장 실패:', err);
           sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
           updateSceneByUuid(sceneUuid, { assigneeProgress: prevAssigneeProgress });
@@ -2204,7 +2230,12 @@ export function ScenesView() {
         }
       }
 
-      if (saveCarry.completion) {
+      // 완료 기록도 그 사이 남의 기록이 왔으면(팀원이 완료를 풀었다 다시 찍음 등) 덮지 않는다.
+      if (
+        saveCarry.completion
+        && saveSession.isCurrent()
+        && !completionOvertaken(useDataStore.getState().findSceneByUuid(sceneUuid), saveCarry.completion, completionOf(saveCarry.base))
+      ) {
         const { completedBy, completedAt } = saveCarry.completion;
         try {
           // 줄 번호는 그 사이 바뀌었을 수 있다 — 씬 UUID 로 바로 쓴다.
@@ -2354,9 +2385,26 @@ export function ScenesView() {
       // (앞 저장의 재전송은 취소) 되돌릴 값은 맨 처음 값을 지킨다(carry). 앞 저장이 그 뒤에 서버에 닿으면
       // 되돌릴 값을 그 결과로 앞당기므로, 되돌릴 때는 늘 saveCarry.prevScene 을 그때 읽는다.
       const saveSlotKey = `${sceneUuid}|a:${assigneeName}`;
+      // 클릭한 순간의 로그인 세션 — 바뀌면(로그아웃·다른 사용자) 다시 보내지도, 화면·완료 기록을 맞추지도 않는다.
+      const saveSession = sceneSaveSession();
       const carried = sceneSaveRetry.pendingCarry<AssigneeSaveSlotCarry>(saveSlotKey);
-      const baseScene = carried?.prevScene ?? prevScene;
-      const effectiveCompletion = completionMeta ?? carried?.completion ?? null;
+      const mine = nextProgress[assigneeName];
+      // 앞 버튼의 이 담당자 값이 아직 화면에 있을 때만 앞 저장의 처음 값·완료 기록을 잇는다(그 사이 남이 바꿨으면 지금 값이 새 기준).
+      const baseScene = inheritAssigneeBase(carried, scene.assigneeProgress?.[assigneeName]) ?? prevScene;
+      const carriedStamp = carried?.completion
+        ? inheritCompletion(
+            { completedBy: carried.completion.nextCompletedBy, completedAt: carried.completion.nextCompletedAt },
+            completionOf(carried.prevScene),
+            scene,
+            willBeFullyDone,
+          )
+        : null;
+      const effectiveCompletion = completionMeta
+        ?? (carriedStamp ? { nextCompletedBy: carriedStamp.completedBy, nextCompletedAt: carriedStamp.completedAt } : null);
+      /** 이 저장이 쓰는 완료 기록 — 뒤늦게 쓰거나 되돌릴 때 지금 화면 값이 이것일 때만 손댄다. */
+      const mineStamp: CompletionStamp | null = effectiveCompletion
+        ? { completedBy: effectiveCompletion.nextCompletedBy, completedAt: effectiveCompletion.nextCompletedAt }
+        : null;
       const clickCell = assigneeCellId(
         assigneeName,
         update.kind === 'stage' ? update.stage : update.kind === 'phase' ? phaseCellId(update.state) : 'round',
@@ -2368,8 +2416,8 @@ export function ScenesView() {
         prevScene: baseScene,
         completion: effectiveCompletion,
         cells: carriedCells.includes(clickCell) ? carriedCells : [...carriedCells, clickCell],
+        mineEntry: mine,
       };
-      const mine = nextProgress[assigneeName];
       const assigneeStillMine = () => {
         const current = useDataStore.getState().findSceneByUuid(sceneUuid)?.assigneeProgress?.[assigneeName];
         return Boolean(current && mine && sameAssigneeProgress(current, mine));
@@ -2430,8 +2478,11 @@ export function ScenesView() {
             savedCompletion = null;
             // 서버 정본 위에 내 항목만 얹어 저장하고, 그 결과로 화면을 다시 맞춘다.
             // 저장하는 동안 상대가 바꾼 값이 있으면 그것까지 함께 반영된다.
-            const merged = await saveAssigneeProgress(sceneUuid, nextProgress, [assigneeName]);
+            // 차례를 기다리거나 정본을 읽는 사이 로그인 세션이 바뀌었으면 쓰기 직전에 멈춘다(앞 사람의 진행을 다음 사람 세션에 쓰지 않게).
+            const merged = await saveAssigneeProgress(sceneUuid, nextProgress, [assigneeName], { beforeWrite: saveSession.assertCurrent });
             savedEntry = merged[assigneeName] ?? mine;
+            // 쓰는 사이 세션이 바뀌었으면 화면 맞추기·완료 기록도 하지 않는다(다음 사람 화면을 건드리지 않게).
+            saveSession.assertCurrent();
             // 완료 판정은 저장 전 내 화면 기준이었다. 병합으로 상대의 최신 값이 들어오면 결과가 달라질 수 있으므로
             // 실제 저장된 값으로 다시 판정한다. 어긋나면 완료 도장을 찍지 않고 이전 값을 되살린다.
             const latest = useDataStore.getState().findSceneByUuid(sceneUuid);
@@ -2440,7 +2491,8 @@ export function ScenesView() {
             const completionStillHolds = !effectiveCompletion || mergedFullyDone === willBeFullyDone;
             if (assigneeProgressMutationSeqRef.current.get(sceneUuid) === mutationSeq) {
               if (mergedPatch) updateSceneByUuid(sceneUuid, mergedPatch);
-              if (effectiveCompletion && !completionStillHolds) {
+              // 화면이 아직 이 클릭의 완료 기록일 때만 되살린다(그 사이 새 기록이 왔으면 그 값을 둔다).
+              if (effectiveCompletion && !completionStillHolds && mineStamp && sameCompletion(completionOf(latest ?? {}), mineStamp)) {
                 updateSceneByUuid(sceneUuid, {
                   completedBy: saveCarry.prevScene.completedBy ?? '',
                   completedAt: saveCarry.prevScene.completedAt ?? '',
@@ -2449,15 +2501,23 @@ export function ScenesView() {
             }
             if (effectiveCompletion && completionStillHolds) {
               const completion = { completedBy: effectiveCompletion.nextCompletedBy, completedAt: effectiveCompletion.nextCompletedAt };
-              try {
-                // 줄 번호는 그 사이 바뀌었을 수 있다 — 씬 UUID 로 바로 쓴다.
-                await updateSceneCompletionMetaByUuid(
-                  sceneUuid,
-                  completion.completedBy && completion.completedAt ? completion : null,
-                );
-                savedCompletion = completion;
-              } catch (metaErr) {
-                console.error('[담당자별 완료 메타 저장 실패]', metaErr);
+              // 늦게 나가는 기록은 그 사이 남의 완료 기록이 왔으면(팀원이 완료를 풀었다 다시 찍음 등) 덮지 않는다.
+              const stampOvertaken = completionOvertaken(
+                useDataStore.getState().findSceneByUuid(sceneUuid),
+                completion,
+                completionOf(saveCarry.prevScene),
+              );
+              if (!stampOvertaken) {
+                try {
+                  // 줄 번호는 그 사이 바뀌었을 수 있다 — 씬 UUID 로 바로 쓴다.
+                  await updateSceneCompletionMetaByUuid(
+                    sceneUuid,
+                    completion.completedBy && completion.completedAt ? completion : null,
+                  );
+                  savedCompletion = completion;
+                } catch (metaErr) {
+                  console.error('[담당자별 완료 메타 저장 실패]', metaErr);
+                }
               }
             }
           }),
@@ -2490,7 +2550,8 @@ export function ScenesView() {
               restoredProgress,
               department,
             );
-            if (effectiveCompletion) {
+            // 완료 기록도 지금 화면 값이 이 저장의 기록일 때만 되돌린다(그 사이 새 기록이 왔으면 그 값을 둔다).
+            if (mineStamp && sameCompletion(completionOf(latest), mineStamp)) {
               restorePatch.completedBy = base.completedBy ?? '';
               restorePatch.completedAt = base.completedAt ?? '';
             }
@@ -4155,19 +4216,23 @@ export function ScenesView() {
     // 앞 클릭의 저장이 그 뒤에 서버에 닿으면 되돌릴 값을 그 결과로 앞당긴다(onSupersededSaved).
     const sceneUuid = scene.id ?? null;
     const saveSlotKey = `${sceneUuid ?? `${sheetName}::${sceneId}`}|stages`;
+    // 클릭한 순간의 로그인 세션 — 바뀌면(로그아웃·다른 사용자) 다시 보내지도, 서버를 처음 값으로 돌리지도 않는다.
+    const saveSession = sceneSaveSession();
     const carried = sceneSaveRetry.pendingCarry<StageSaveSlotCarry>(saveSlotKey);
+    // 앞 클릭의 곁 값(완료 기록·액팅 단계·담당자별 진행)이 아직 화면에 있을 때만 앞 저장의 기준·완료 기록을 잇는다
+    // (그 사이 남이 바꿨으면 지금 값이 새 기준 — 칸의 mergePendingStageWrites 와 같은 규칙).
+    const carriedSides = carriedSideBases(carried, scene, {
+      acting: Boolean(actingPhaseSync),
+      completeAfterClick: isSequentialStageComplete(stagePatch),
+    });
     const saveCarry: StageSaveSlotCarry = {
       writes: mergePendingStageWrites(carried?.writes, scene, stagePatch, changedStages),
-      baseCompletion: carried?.baseCompletion ?? { completedBy: scene.completedBy ?? '', completedAt: scene.completedAt ?? '' },
-      basePhase: carried
-        ? carried.basePhase
-        : actingPhaseSync
-          ? { sceneState: scene.sceneState ?? 'wait', workRound: scene.workRound ?? 0, feedbackRound: scene.feedbackRound ?? 0 }
-          : null,
-      baseAssigneeProgress: carried ? carried.baseAssigneeProgress : prevAssigneeProgress,
+      baseCompletion: carriedSides.baseCompletion,
+      basePhase: carriedSides.basePhase,
+      baseAssigneeProgress: carriedSides.baseAssigneeProgress,
       completion: completionMeta
         ? { completedBy: completionMeta.nextCompletedBy, completedAt: completionMeta.nextCompletedAt }
-        : carried?.completion ?? null,
+        : carriedSides.completion,
       minePhase: actingPhaseSync
         ? { sceneState: actingPhaseSync.state, workRound: actingPhaseSync.workRound, feedbackRound: actingPhaseSync.feedbackRound }
         : carried?.minePhase ?? null,
@@ -4192,6 +4257,8 @@ export function ScenesView() {
       }
     };
     const writeStage = async (changedStage: Stage, value: boolean) => {
+      // 로그인 세션이 바뀌었으면 보내지 않는다 — 앞 사람의 값·작성자로 다음 사람 세션 중에 쓰지 않게(다시 보내기·서버 되돌리기 모두).
+      saveSession.assertCurrent();
       if (sceneUuid) {
         await updateCellByUuid(sceneUuid, changedStage, value, currentUser?.id);
       } else {
@@ -4240,7 +4307,8 @@ export function ScenesView() {
           reapply: (incoming) => {
             const current = findSceneForSave(sheetName, sceneId, sceneUuid);
             const repaint = current ? stageRepaintPatch(saveCarry, incoming, current, actingPhaseFields) : null;
-            if (repaint && assigneeUpdate && hasMultiAssigneeProgress(incoming)) {
+            // 다시 보내기 직전에 담당자별 진행을 뺐으면(그 사이 남이 바꿈) 다시 얹지 않는다.
+            if (repaint && assigneeUpdate && saveCarry.assigneeTouched && hasMultiAssigneeProgress(incoming)) {
               repaint.assigneeProgress = updateAllAssigneeProgressEntries(incoming, assigneeUpdate, currentUser?.name);
             }
             return repaint;
@@ -4261,8 +4329,11 @@ export function ScenesView() {
         }
         const saved: SavedStageResult = { stages: writes.stages, desired: writes.desired, completion: null, phase: null, assigneeProgress: null };
         savedResult = saved;
-        // 액팅 phase reverse dual-write — stage 저장 성공 후 새 컬럼도 동기화
-        if (actingPhaseSync && sceneUuid) {
+        // 액팅 phase reverse dual-write — stage 저장 성공 후 새 컬럼도 동기화.
+        // 다시 보낼 때 그 사이 남이 단계·차수를 바꿨으면 보내지 않는다(다시 보내기 직전에 saveCarry.minePhase 를 지운다 — 코덱스 2차 지적).
+        if (actingPhaseSync && sceneUuid && saveCarry.minePhase) {
+          // 아래 실패 처리가 삼키지 않게 try 밖에서 세션을 확인한다(이어지는 기록도 모두 멈춘다).
+          saveSession.assertCurrent();
           try {
             await updateScenePhaseInSupabase(
               sceneUuid,
@@ -4277,14 +4348,19 @@ export function ScenesView() {
           }
         }
         // 늦게 보낼 수 있으니 최신 담당자 기록 위에 같은 변경을 다시 적용해 보낸다(그 사이 바뀐 값을 클릭 때 값으로 덮지 않게).
-        // 그 사이 담당자가 한 명 이하가 됐으면 담당자별 기록은 보내지 않는다.
-        const latestForProgress = sceneUuid && assigneeUpdate ? findSceneForSave(sheetName, sceneId, sceneUuid) : undefined;
+        // 그 사이 담당자가 한 명 이하가 됐거나, 다시 보낼 때 남이 담당자별 진행을 바꿨으면 담당자별 기록은 보내지 않는다.
+        const latestForProgress = sceneUuid && assigneeUpdate && saveCarry.assigneeTouched
+          ? findSceneForSave(sheetName, sceneId, sceneUuid)
+          : undefined;
         if (sceneUuid && assigneeUpdate && latestForProgress && hasMultiAssigneeProgress(latestForProgress)) {
+          saveSession.assertCurrent();
           const progress = updateAllAssigneeProgressEntries(latestForProgress, assigneeUpdate, currentUser?.name);
           try {
-            await writeAssigneeProgressMetadata(sceneUuid, progress, Object.keys(progress));
+            await writeAssigneeProgressMetadata(sceneUuid, progress, Object.keys(progress), saveSession.assertCurrent);
             saved.assigneeProgress = progress;
           } catch (progressErr) {
+            // 세션이 바뀌어 멈췄으면 다음 사람 화면을 건드리지 않고 이 저장을 끝낸다.
+            if (!saveSession.isCurrent()) throw progressErr;
             console.error('[ScenesView] 담당자별 진행 저장 실패:', progressErr);
             sonnerToast.error('담당자별 진행 저장에 실패했습니다.');
             updateSceneByUuid(sceneUuid, { assigneeProgress: prevAssigneeProgress });
@@ -4292,6 +4368,7 @@ export function ScenesView() {
           }
         }
         if (saveCarry.completion) {
+          saveSession.assertCurrent();
           const { completedBy, completedAt } = saveCarry.completion;
           const completion = completedBy && completedAt ? { completedBy, completedAt } : null;
           try {
@@ -4313,14 +4390,25 @@ export function ScenesView() {
         const narrowed = narrowStageWritesForRetry(saveCarry.writes, latest);
         saveCarry.writes = narrowed.writes;
         // 남은 칸으로는 씬이 완료가 아니면 완료 도장을 쓰지 않는다 — 화면도 아직 내 도장이면 처음 값으로 돌리고 축하를 끈다.
+        // 그 사이 다른 완료 기록이 왔으면(팀원이 완료를 풀었다 다시 찍음 등) 씬이 아직 완료여도 내 기록으로 덮지 않는다.
         const stampDrop = planCompletionStampDrop(saveCarry, latest);
         if (stampDrop) {
           saveCarry.completion = null;
           if (stampDrop.screen) showCompletion(stampDrop.screen);
           setCelebratingTarget((current) => celebrationWithout(current, sheetName, sceneId, sceneUuid));
         }
-        if (narrowed.dropped.length > 0) {
-          announceSaveStopped({ toastId: `stage-rollback:${saveSlotKey}`, sceneId, subject: stageSubject(narrowed.dropped) });
+        // 함께 다시 쓰는 액팅 단계·차수와 담당자별 진행도 그 사이 남이 바꿨으면 덮지 않는다(코덱스 2차 지적 4172094264) —
+        // 칸 패턴이 그대로여도 팀원이 작업·피드백 차수만 올렸을 수 있다. 단계는 이번 재전송에서 빼고(끝내 실패해도 되돌리지 않음),
+        // 담당자가 여럿인 씬은 담당자별 진행이 다음 받아오기 때 모두에게 보일 값을 정하므로 칸만 따로 쓰지 않고 저장을 멈춘다.
+        const sideDrop = planSideFieldDrop(saveCarry, latest, assigneeUpdate?.kind === 'stagePatch' ? assigneeUpdate.patch : null);
+        if (sideDrop.phase) saveCarry.minePhase = null;
+        const stoppedCells = sideDrop.assigneeProgress ? [...saveCarry.writes.stages, ...narrowed.dropped] : narrowed.dropped;
+        if (sideDrop.assigneeProgress) {
+          saveCarry.assigneeTouched = false;
+          saveCarry.writes = { ...saveCarry.writes, stages: [] };
+        }
+        if (stoppedCells.length > 0) {
+          announceSaveStopped({ toastId: `stage-rollback:${saveSlotKey}`, sceneId, subject: stageSubject(stoppedCells) });
           if (saveCarry.writes.stages.length > 0) showRetrying();
         }
         return saveCarry.writes.stages.length > 0;

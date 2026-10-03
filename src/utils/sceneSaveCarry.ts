@@ -12,8 +12,13 @@
      값이면 얹지 않는다 — 다시 보내기 직전에 그 칸을 빼고 멈춘다.
    - 다시 보내기 직전(narrowStageWritesForRetry): 아직 내 값인 칸만 보낸다. 다른 값이 된 칸은 덮지 않는다.
      그 결과 씬이 완료가 아니면 완료 도장도 쓰지 않는다(planCompletionStampDrop).
+     함께 다시 쓰는 곁 값(완료 기록·액팅 단계와 차수·담당자별 진행)도 그 사이 남의 값이 됐으면 다시 쓰지 않는다
+     (planCompletionStampDrop · planSideFieldDrop — 코덱스 2차 지적 4172094264). 칸 패턴이 그대로여도 팀원이 작업·피드백
+     차수만 올렸을 수 있다.
    - 끝내 실패(plan*GiveUp): 아직 내 값일 때만 처음 값으로 되돌린다. 남의 값이면 아무것도 건드리지 않는다.
      함께 바꾼 완료 기록·액팅 단계·담당자별 진행도 지금 값이 이 저장이 만든 값일 때만 되돌린다.
+   - 넘겨받을 때(carriedSideBases·inheritPhaseBase·inheritCompletion): 앞 저장의 곁 값이 아직 화면에 있을 때만 앞 저장의
+     기준·완료 기록을 잇는다. 그 사이 남이 바꿨으면 지금 값이 새 기준이다(칸의 mergePendingStageWrites 와 같은 규칙).
 
    node --test 가 그대로 import 하도록 @/ 별칭·외부 패키지를 쓰지 않는다(공용 모듈은 .ts 확장자까지 적은 상대 경로).
    ═══════════════════════════════════════════════════════════════ */
@@ -55,6 +60,10 @@ export interface StageSaveSlotCarry {
 export interface PhaseSaveSlotCarry {
   base: Pick<Scene, 'sceneState' | 'workRound' | 'feedbackRound' | Stage | 'completedBy' | 'completedAt' | 'assigneeProgress'>;
   completion: CompletionStamp | null;
+  /** 이 저장이 화면에 맞춘 단계·차수 — 다음 칩이 넘겨받을 때 앞 저장의 처음 값을 이을지 본다. */
+  mine?: PhaseFields;
+  /** 이 저장이 화면에 얹은 담당자별 진행(담당자가 여럿일 때) — 뒤늦은 기록·끝내 실패에서 지금 값이 이것일 때만 손댄다. */
+  mineAssigneeProgress?: SceneAssigneeProgressMap;
 }
 
 /** 담당자 한 명의 버튼 묶음. */
@@ -62,6 +71,8 @@ export interface AssigneeSaveSlotCarry {
   prevScene: Scene;
   completion: { nextCompletedBy: string; nextCompletedAt: string } | null;
   cells: string[];
+  /** 이 저장이 화면에 얹은 이 담당자 값 — 다음 버튼이 넘겨받을 때 앞 저장의 처음 값을 이을지 본다. */
+  mineEntry?: SceneAssigneeProgress;
 }
 
 /* ─── 값 비교 ─── */
@@ -117,6 +128,50 @@ export function judgePending<T>(current: T | null | undefined, mine: T, base: T 
   return 'other';
 }
 
+/** 담당자별 진행 전체가 지금 어떤가(judgePending 과 같은 뜻). 진행이 아직 없는 것(undefined)도 하나의 값으로 본다. */
+export function judgeAssigneeProgressMap(
+  current: SceneAssigneeProgressMap | null | undefined,
+  mine: SceneAssigneeProgressMap | null | undefined,
+  base: SceneAssigneeProgressMap | null | undefined,
+): PendingVerdict {
+  if (sameAssigneeProgressMap(current, mine)) return 'mine';
+  if (sameAssigneeProgressMap(current, base)) return 'reverted';
+  return 'other';
+}
+
+/**
+ * 이 저장이 쓰려는 완료 기록(mine)을 그 사이 남의 기록이 앞질렀는가 — 지금 화면의 기록이 내 것도 처음 값(base)도 아니다
+ * (팀원이 완료를 풀었다 다시 찍음 등). 그러면 늦게 나가는 저장은 그 기록을 덮지 않는다.
+ */
+export function completionOvertaken(
+  current: { completedBy?: string | null; completedAt?: string | null } | null | undefined,
+  mine: CompletionStamp,
+  base: CompletionStamp,
+): boolean {
+  return judgePending(current ? completionOf(current) : null, mine, base, sameCompletion) === 'other';
+}
+
+/**
+ * 저장 확인 전에 같은 묶음을 또 눌렀다 — 새 클릭이 완료를 바꾸지 않으면 앞 저장이 정한 완료 기록(carried)을 이어 쓸지 정한다.
+ * 새 저장의 첫 요청은 이 기록을 확인 없이 쓰므로, 다음 둘 중 하나면 잇지 않는다(null):
+ * - 그 사이 남의 기록이 왔다(지금 화면 기록이 앞 저장의 것도 처음 값(base)도 아님).
+ * - 이 클릭 뒤 씬의 완료 여부와 맞지 않는다(도장인데 완료가 아님 · 지우기인데 완료임) — 앞 클릭 뒤에 남이 완료를 바꿨다는 뜻이다
+ *   (내 클릭으로 완료가 바뀌었으면 이 클릭이 새 기록을 정했을 것이다).
+ * completeAfterClick: 이번 클릭을 반영한 뒤 씬이 모두 완료인가.
+ */
+export function inheritCompletion(
+  carried: CompletionStamp | null | undefined,
+  base: CompletionStamp,
+  current: { completedBy?: string | null; completedAt?: string | null },
+  completeAfterClick: boolean,
+): CompletionStamp | null {
+  if (!carried) return null;
+  const stamp = Boolean(carried.completedBy && carried.completedAt);
+  const clear = !carried.completedBy && !carried.completedAt;
+  if ((stamp && !completeAfterClick) || (clear && completeAfterClick)) return null;
+  return completionOvertaken(current, carried, base) ? null : carried;
+}
+
 /* ─── 씬 단위 칸 ─── */
 
 /** 다시 보내기 직전 — 아직 내 값인 칸만 남긴다. 다른 값이 된 칸은 빼고(덮지 않는다) dropped 로 돌려준다. */
@@ -151,7 +206,8 @@ export function stageRepaintPatch(
   if (carry.completion && sameCompletion(completionOf(incoming), carry.baseCompletion)) {
     Object.assign(patch, carry.completion);
   }
-  if (phase && carry.basePhase && samePhase(phaseFieldsOf(incoming), carry.basePhase)) {
+  // 다시 보내기 직전에 액팅 단계를 뺐으면(carry.minePhase 를 지움 — 그 사이 남이 단계·차수를 바꿈) 다시 얹지 않는다.
+  if (phase && carry.minePhase && carry.basePhase && samePhase(phaseFieldsOf(incoming), carry.basePhase)) {
     Object.assign(patch, phase);
   }
   return patch;
@@ -190,19 +246,51 @@ export function planStageGiveUp(
 }
 
 /**
- * 다시 보내기 직전 — 지금 씬이 완료가 아니면 이 저장의 완료 도장(누가·언제 모두 완료)을 쓰지 않는다.
- * (칸을 빼고 남은 칸만 보낼 때, 또는 이 저장이 보내지 않는 칸이 그 사이 바뀌었을 때. 완료 기록은 저장의 맨 끝에 쓰므로
- * 다시 보낸다는 것은 이 저장이 아직 도장을 쓰지 않았다는 뜻이다.) 완료 해제('')는 그대로 둔다.
- * null: 그대로 · { screen }: 도장을 거둔다. screen 은 화면이 아직 내 도장일 때 되돌릴 완료 기록(남의 값이면 null — 건드리지 않는다).
+ * 다시 보내기 직전 — 이 저장의 완료 기록(도장 또는 지우기)을 그대로 쓸지 본다.
+ * - 그 사이 다른 완료 기록이 왔으면(지금 화면 기록이 내 것도 처음 값도 아님 — 팀원이 완료를 풀었다 다시 찍음 등) 씬이 아직
+ *   완료여도 쓰지 않는다. 화면도 그 값 그대로(코덱스 2차 지적 4172094264).
+ * - 도장(누가·언제 모두 완료)은 지금 씬이 완료가 아니면 쓰지 않는다(칸을 빼고 남은 칸만 보낼 때, 또는 이 저장이 보내지 않는
+ *   칸이 그 사이 바뀌었을 때). 완료 기록은 저장의 맨 끝에 쓰므로 다시 보낸다는 것은 아직 도장을 쓰지 않았다는 뜻이다.
+ * - 지우기('')는 지금 씬이 다시 완료면 쓰지 않는다(다른 사람이 다시 완료함 — 그 도장이 곧 온다).
+ * null: 그대로 · { screen }: 이 기록을 거둔다. screen 은 화면이 아직 내 도장일 때 되돌릴 완료 기록(남의 값이면 null — 건드리지 않는다).
  */
 export function planCompletionStampDrop(
   carry: StageSaveSlotCarry,
   scene: StageSceneNow,
 ): { screen: CompletionStamp | null } | null {
   const stamp = carry.completion;
-  if (!stamp || !stamp.completedBy || !stamp.completedAt) return null;
+  if (!stamp) return null;
+  if (completionOvertaken(scene, stamp, carry.baseCompletion)) return { screen: null };
+  if (!stamp.completedBy && !stamp.completedAt) return isSequentialStageComplete(scene) ? { screen: null } : null;
+  if (!stamp.completedBy || !stamp.completedAt) return null;
   if (isSequentialStageComplete(scene)) return null;
   return { screen: sameCompletion(completionOf(scene), stamp) ? carry.baseCompletion : null };
+}
+
+/**
+ * 다시 보내기 직전 — 이 저장이 함께 다시 쓰는 액팅 단계·차수와 담당자별 진행이 그 사이 남의 값이 되었는지 본다
+ * (완료 기록은 planCompletionStampDrop). 지금 값이 이 저장이 만든 값이거나 처음 값(받아오기가 아직 내 저장을 모르는
+ * 서버 값을 읽어 옴)이면 그대로 보낸다. 그 밖의 값이면 뺀다 — 단계 칸 패턴이 그대로여도(팀원이 작업·피드백 차수만 올림) 덮지 않는다.
+ * - phase: 액팅 단계·차수를 이번 재전송에서 뺀다(호출자가 carry.minePhase 를 지운다 — 끝내 실패해도 되돌리지 않고, 받아오기 위에도 얹지 않는다).
+ * - assigneeProgress: 담당자별 진행에 이 클릭의 변경을 더는 그대로 얹을 수 없다 — 진행을 남이 바꿨거나, 액팅 단계를 뺐거나,
+ *   BG 칸 패턴(assigneePattern)이 그 사이 달라졌다. 담당자가 여럿인 씬은 이 진행이 다음 받아오기 때 모두에게 보일 값을 정하므로
+ *   (칸은 담당자 진행에서 다시 계산된다) 호출자는 칸만 따로 쓰지 않고 이 저장을 멈춘다.
+ * assigneePattern: BG 씬이 담당자별 진행에 다시 적용할 칸 패턴(클릭 직후 화면 값). 액팅 씬(단계로 적용)·담당자 진행이 없으면 null.
+ */
+export function planSideFieldDrop(
+  carry: StageSaveSlotCarry,
+  scene: StageSceneNow,
+  assigneePattern: Partial<Record<Stage, boolean>> | null,
+): { phase: boolean; assigneeProgress: boolean } {
+  const phase = carry.minePhase !== null
+    && judgePending(phaseFieldsOf(scene), carry.minePhase, carry.basePhase, samePhase) === 'other';
+  if (!carry.assigneeTouched) return { phase, assigneeProgress: false };
+  // 액팅 씬의 담당자별 진행은 단계 그 자체다 — 단계를 이번에 뺐거나 이미 뺐으면 진행도 다시 쓰지 않는다.
+  const phaseGone = carry.basePhase !== null && (phase || carry.minePhase === null);
+  const patternStale = assigneePattern !== null
+    && (Object.keys(assigneePattern) as Stage[]).some((stage) => Boolean(scene[stage]) !== (assigneePattern[stage] === true));
+  const mapOther = judgeAssigneeProgressMap(scene.assigneeProgress, carry.mineAssigneeProgress, carry.baseAssigneeProgress) === 'other';
+  return { phase, assigneeProgress: phaseGone || patternStale || mapOther };
 }
 
 /** 앞 저장이 서버에 실제로 쓴 값. 쓰지 못한 부분은 null. */
@@ -232,6 +320,32 @@ export function advanceStageCarry(next: StageSaveSlotCarry, saved: SavedStageRes
   if (saved.assigneeProgress && next.assigneeTouched) next.baseAssigneeProgress = saved.assigneeProgress;
 }
 
+/**
+ * 저장 확인 전에 같은 칸 묶음을 또 눌렀다 — 새 저장의 되돌릴 기준(완료 기록·액팅 단계·담당자별 진행)과 이어 쓸 완료 기록을 정한다.
+ * 앞 저장의 값이 아직 화면에 있으면(지금 값 = 앞 저장이 만든 값) 앞 저장의 기준을 잇는다(끝내 실패하면 맨 처음 값까지 되돌린다).
+ * 그 사이 남이 바꿨거나 앞 저장이 다시 보내기 직전에 뺀 값이면 지금 값이 새 기준이다 — 칸(mergePendingStageWrites)과 같은 규칙.
+ * 이어 쓸 완료 기록(completion)은 새 클릭이 완료를 바꾸지 않을 때 쓴다 — 남의 기록이 왔거나 완료 여부와 맞지 않으면 잇지 않는다(inheritCompletion).
+ * scene: 이번 클릭을 화면에 반영하기 직전의 씬. acting: 액팅 씬(단계를 함께 맞춘다)인가. completeAfterClick: 이 클릭 뒤 모두 완료인가.
+ */
+export function carriedSideBases(
+  carried: StageSaveSlotCarry | undefined,
+  scene: StageSceneNow,
+  options: { acting: boolean; completeAfterClick: boolean },
+): Pick<StageSaveSlotCarry, 'baseCompletion' | 'basePhase' | 'baseAssigneeProgress' | 'completion'> {
+  const nowCompletion = completionOf(scene);
+  const nowPhase = phaseFieldsOf(scene);
+  return {
+    baseCompletion: carried?.completion && sameCompletion(nowCompletion, carried.completion) ? carried.baseCompletion : nowCompletion,
+    basePhase: options.acting
+      ? carried?.minePhase && carried.basePhase && samePhase(nowPhase, carried.minePhase) ? carried.basePhase : nowPhase
+      : null,
+    baseAssigneeProgress: carried?.assigneeTouched && sameAssigneeProgressMap(scene.assigneeProgress, carried.mineAssigneeProgress)
+      ? carried.baseAssigneeProgress
+      : scene.assigneeProgress,
+    completion: carried ? inheritCompletion(carried.completion, carried.baseCompletion, scene, options.completeAfterClick) : null,
+  };
+}
+
 /* ─── 액팅 단계 칩 ─── */
 
 /** 끝내 실패 — 지금 단계가 아직 내 값일 때만 처음 값(base)을 돌려준다. 다른 값이면 null(그대로 둔다). */
@@ -248,6 +362,38 @@ export function advancePhaseCarry(next: PhaseSaveSlotCarry, saved: PhaseFields &
   next.base = { ...next.base, ...saved };
 }
 
+/**
+ * 저장 확인 전에 같은 칩 묶음을 또 눌렀다 — 앞 저장의 단계가 아직 화면에 있으면 앞 저장의 처음 값(base)을 잇는다.
+ * 그 사이 남이 단계·차수를 바꿨으면 잇지 않는다(null — 호출자가 지금 값을 새 기준으로 삼는다. 끝내 실패해도 옛 값으로 되돌리지 않게).
+ * scene: 이번 클릭을 화면에 반영하기 직전의 씬.
+ */
+export function inheritPhaseBase(carried: PhaseSaveSlotCarry | undefined, scene: PhaseLike): PhaseSaveSlotCarry['base'] | null {
+  if (!carried) return null;
+  if (carried.mine && !samePhase(phaseFieldsOf(scene), carried.mine)) return null;
+  return carried.base;
+}
+
+/**
+ * 끝내 실패한 액팅 단계 칩 — 되돌릴 처음 값(base)에서, 같은 클릭이 함께 바꾼 완료 기록·담당자별 진행 중 지금 화면 값이
+ * 이 저장이 만든 값이 아닌 것(그 사이 새 값이 옴 — 받아오기·실시간·다른 담당자 버튼)은 뺀다. 이 저장이 바꾸지 않은 곁 값도 뺀다.
+ * 단계·차수·체크 4개는 planPhaseGiveUp 이 단계가 내 값일 때만 되돌린다.
+ */
+export function phaseGiveUpBase(
+  carry: PhaseSaveSlotCarry,
+  current: Partial<Pick<Scene, 'completedBy' | 'completedAt' | 'assigneeProgress'>> | null | undefined,
+): PhaseSaveSlotCarry['base'] {
+  const { completedBy, completedAt, assigneeProgress, ...phase } = carry.base;
+  const base: PhaseSaveSlotCarry['base'] = { ...phase };
+  if (current && carry.completion && sameCompletion(completionOf(current), carry.completion)) {
+    base.completedBy = completedBy;
+    base.completedAt = completedAt;
+  }
+  if (current && carry.mineAssigneeProgress && sameAssigneeProgressMap(current.assigneeProgress, carry.mineAssigneeProgress)) {
+    base.assigneeProgress = assigneeProgress;
+  }
+  return base;
+}
+
 /* ─── 담당자별 버튼 ─── */
 
 /** 끝내 실패 — 이 담당자 몫만 처음 값으로. 그 사이 저장된 다른 담당자의 값은 그대로 둔다. */
@@ -257,6 +403,20 @@ export function restoreAssigneeEntry(
   baseEntry: SceneAssigneeProgress | undefined,
 ): SceneAssigneeProgressMap {
   return { ...(latest ?? {}), [assigneeName]: baseEntry ?? {} };
+}
+
+/**
+ * 저장 확인 전에 같은 담당자 버튼을 또 눌렀다 — 앞 저장의 이 담당자 값이 아직 화면에 있으면 앞 저장의 처음 값(prevScene)을 잇는다.
+ * 그 사이 남이 이 담당자 값을 바꿨으면 잇지 않는다(null — 호출자가 지금 씬을 새 기준으로 삼는다. 끝내 실패해도 옛 값으로 되돌리지 않게).
+ * current: 이번 클릭을 화면에 반영하기 직전의 이 담당자 값.
+ */
+export function inheritAssigneeBase(
+  carried: AssigneeSaveSlotCarry | undefined,
+  current: SceneAssigneeProgress | undefined,
+): Scene | null {
+  if (!carried) return null;
+  if (carried.mineEntry && !(current && sameAssigneeProgress(current, carried.mineEntry))) return null;
+  return carried.prevScene;
 }
 
 /** 넘겨준 앞 저장이 서버에 닿았다 — 뒤 저장의 되돌릴 기준(이 담당자 몫·완료 기록)을 앞 저장이 쓴 값으로 앞당긴다. */

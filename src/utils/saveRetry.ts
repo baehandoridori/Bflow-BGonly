@@ -13,6 +13,8 @@
    - 다시 보내기 직전에 화면 값이 내가 보낸 값과 다르면(다른 사람이 실시간으로 바꿈) 덮지 않고 멈춘다('overtaken').
    - 앱을 끄기 직전(flushNow)에는 재전송을 기다리던 작업을 깨워 지금 한 번 보낸다. 그 사이 같은 칸이 또 바뀌면
      넘겨받은 새 저장의 요청까지 기다린다.
+   - 로그인 세션이 바뀌면(로그아웃·다른 사용자 로그인) 기다리던 작업을 모두 그만둔다(cancelAll). 다시 보내지 않고
+     콜백(되돌리기·안내·넘겨받기 알림)도 부르지 않는다 — 앞 사람의 값과 작성자가 다음 사람 세션에 쓰이지 않게.
 
    실패 분류는 오류 '문구'로 한다. 저장은 렌더러 → IPC → 메인 → Supabase 를 거치는데, 메인의 IPC 래퍼가
    오류를 문구 하나로 다시 던져서 코드·HTTP 상태가 사라진다. 그래서 메인이 HTTP 오류 상태를 문구 끝에
@@ -123,8 +125,9 @@ export function browserSaveRetryEnv(): SaveRetryEnv {
 /**
  * 'saved': 저장됨 · 'failed': 포기(onGiveUp 호출됨) · 'overtaken': 남의 값이 이겨서 멈춤
  * 'superseded': 같은 key 의 새 저장이 넘겨받음(이 작업의 콜백은 더 부르지 않는다).
+ * 'cancelled': 로그인 세션이 바뀌어 그만둠(cancelAll — 콜백을 하나도 부르지 않는다).
  */
-export type SaveRetryOutcome = 'saved' | 'failed' | 'overtaken' | 'superseded';
+export type SaveRetryOutcome = 'saved' | 'failed' | 'overtaken' | 'superseded' | 'cancelled';
 
 export interface SaveRetryJob<C = unknown> {
   /** 다음 저장이 넘겨받을 정보(되돌릴 기준값, 함께 보낼 칸 등). pendingCarry 로 읽는다. */
@@ -164,11 +167,42 @@ export interface SaveRetryController {
    * 깨운 요청과 보내는 중이던 요청이 끝나면(성공·실패 상관없이) 끝난다.
    */
   flushNow(): Promise<void>;
+  /**
+   * 로그인 세션이 바뀌었다(로그아웃·다른 사용자 로그인) — 기다리던 재전송을 모두 그만둔다. 다시 보내지 않고,
+   * 되돌리기·안내·넘겨받기 알림 같은 콜백도 부르지 않는다(이전 사람의 값·되돌림이 다음 사람 세션에 끼어들지 않게).
+   * 이미 나간 요청은 거둘 수 없어 끝까지 두되 그 결과도 알리지 않는다. 같은 key 의 다음 요청은 여전히 그 뒤에 선다.
+   * 돌려준 값: 그만둔 작업 수(넘겨준 뒤 앞 요청이 아직 나가 있던 작업 포함).
+   */
+  cancelAll(): number;
+}
+
+/**
+ * flushNow 를 최대 maxWaitMs 만 기다린다(로그아웃 직전 정리 — 끝나지 않은 요청 때문에 로그아웃이 붙들리지 않게).
+ * 'flushed': 깨운 요청까지 다 끝남 · 'timeout': 시간이 다 됨(남은 요청은 세션이 바뀌는 순간 cancelAll 로 그만둔다).
+ */
+export function flushNowWithin(
+  controller: Pick<SaveRetryController, 'flushNow'>,
+  maxWaitMs: number,
+  env: Pick<SaveRetryEnv, 'setTimer' | 'clearTimer'>,
+): Promise<'flushed' | 'timeout'> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: 'flushed' | 'timeout') => {
+      if (settled) return;
+      settled = true;
+      env.clearTimer(handle);
+      resolve(result);
+    };
+    const handle = env.setTimer(() => finish('timeout'), Math.max(0, maxWaitMs));
+    controller.flushNow().then(() => finish('flushed'), () => finish('flushed'));
+  });
 }
 
 interface Entry {
   job: SaveRetryJob<unknown>;
   superseded: boolean;
+  /** cancelAll 로 그만뒀다 — 어떤 콜백도 부르지 않는다. */
+  cancelled: boolean;
   retrying: boolean;
   /** 새 저장이 넘겨받았다 — 기다림을 끝내고 그만둔다. */
   cancelWait: (() => void) | null;
@@ -187,6 +221,8 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
   const offlineWaitMaxMs = options.offlineWaitMaxMs ?? SAVE_OFFLINE_WAIT_MAX_MS;
   const classify = options.classify ?? classifySaveFailure;
   const entries = new Map<string, Entry>();
+  /** 아직 끝나지 않은 모든 작업 — 넘겨준 뒤 앞 요청이 아직 나가 있는 작업까지(cancelAll 이 함께 멈춘다). */
+  const live = new Set<Entry>();
   /** key 마다 마지막으로 나간 요청(끝나면 지운다). 같은 key 의 다음 요청은 이 뒤에 선다. */
   const chains = new Map<string, Promise<void>>();
 
@@ -271,6 +307,8 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
         await attemptInOrder(key, job);
       } catch (error) {
         settleWaiters(entry);
+        // 로그인 세션이 바뀌어 그만뒀다 — 포기 되돌림·안내도 하지 않는다(다음 사람 화면을 건드리지 않게).
+        if (entry.cancelled) return 'cancelled';
         if (entry.superseded) return 'superseded';
         const kind = classify(error);
         if (kind === 'permanent' || retriesUsed >= delays.length) return giveUp(error, kind);
@@ -280,11 +318,13 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
         }
         const waited = await sleep(entry, delays[retriesUsed]);
         retriesUsed += 1;
+        if (entry.cancelled) return 'cancelled';
         if (!waited || entry.superseded) return 'superseded';
         if (!env.isOnline() && !entry.flushing) {
           const startedAt = env.now();
           const result = await waitOnline(entry, offlineBudgetMs);
           offlineBudgetMs = Math.max(0, offlineBudgetMs - (env.now() - startedAt));
+          if (entry.cancelled) return 'cancelled';
           if (result === 'cancelled' || entry.superseded) return 'superseded';
           if (result === 'timeout') return giveUp(error, 'transient');
         }
@@ -296,6 +336,8 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
         continue;
       }
       settleWaiters(entry);
+      // 그만둔 뒤 끝난 요청 — 저장됐어도 알리지 않는다(넘겨받은 저장이 다음 사람 것일 수 있다).
+      if (entry.cancelled) return 'cancelled';
       if (entry.superseded) {
         // 넘겨준 뒤 저장됐다 — 지금 이 key 를 맡은 저장이 끝내 실패해도 이 결과까지는 되돌리지 않게 알린다.
         job.onSupersededSaved?.(entries.get(key)?.job.carry);
@@ -319,6 +361,7 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
       const entry: Entry = {
         job: job as SaveRetryJob<unknown>,
         superseded: false,
+        cancelled: false,
         retrying: false,
         cancelWait: null,
         wakeWait: null,
@@ -336,9 +379,11 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
         previous.cancelWait?.();
       }
       entries.set(key, entry);
+      live.add(entry);
       try {
         return await runEntry(key, entry);
       } finally {
+        live.delete(entry);
         settleWaiters(entry);
       }
     },
@@ -351,6 +396,19 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
       }
       // 넘겨준 뒤 아직 보내는 중인 앞 요청은 따로 기다리지 않는다 — 넘겨받은 저장의 요청이 그 뒤에 서 있다.
       return Promise.all(waits).then(noop);
+    },
+    cancelAll() {
+      let stopped = 0;
+      for (const entry of live) {
+        if (entry.cancelled) continue;
+        entry.cancelled = true;
+        stopped += 1;
+        entry.cancelWait?.();
+        settleWaiters(entry);
+      }
+      // 다음 저장은 넘겨받을 것 없이 새로 시작한다(앞 사람의 되돌릴 기준·칸을 잇지 않는다).
+      entries.clear();
+      return stopped;
     },
   };
 }
