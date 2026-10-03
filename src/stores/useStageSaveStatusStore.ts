@@ -24,6 +24,8 @@ interface StageSaveStatusState {
   setRetrying: (sceneUuid: string, slot: string, cells: readonly string[]) => void;
   clearRetrying: (sceneUuid: string, slot: string) => void;
   flashRollback: (sceneUuid: string, cells: readonly string[]) => void;
+  /** 로그인 세션이 바뀌었다 — 그만둔 저장들은 표시를 지우러 오지 않으니 모두 지운다. */
+  resetAll: () => void;
 }
 
 let flashSeq = 0;
@@ -71,5 +73,11 @@ export const useStageSaveStatusStore = create<StageSaveStatusState>((set, get) =
         return { rollbacks: next };
       });
     }, ROLLBACK_FLASH_CLEAR_MS);
+  },
+
+  resetAll: () => {
+    const { retrying, rollbacks } = get();
+    if (Object.keys(retrying).length === 0 && Object.keys(rollbacks).length === 0) return;
+    set({ retrying: {}, rollbacks: {} });
   },
 }));

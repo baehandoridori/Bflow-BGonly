@@ -54,7 +54,7 @@ import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
-import { keepPendingSceneFields } from '@/services/sceneSaveRetry';
+import { keepPendingSceneFields, onSceneSaveSessionEnded } from '@/services/sceneSaveRetry';
 import { remotePhaseFlash, remoteStageFlash, type RemoteSceneFlashContext, type RemoteSceneFlashSignal } from '@/utils/remoteSceneFlash';
 import { useSceneFlashStore } from '@/stores/sceneFlashStore';
 import { resolveVacationConnection, connectVacation } from '@/services/vacationService';
@@ -3111,6 +3111,10 @@ export default function App() {
     }, 15_000);
     return () => clearInterval(timer);
   }, []);
+
+  // 로그인 세션이 바뀌어 씬 저장 재전송을 그만뒀으면(움직임 폴리싱 20번) 바로 다시 받아온다 —
+  // 앞 사람의 아직 저장 안 된 체크가 다음 사람 화면에 다음 폴링까지 남아 있지 않게.
+  useEffect(() => onSceneSaveSessionEnded(() => { void loadData(); }), [loadData]);
 
   // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (5초 간격)
   useEffect(() => {

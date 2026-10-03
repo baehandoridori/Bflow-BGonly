@@ -115,7 +115,8 @@ test('per-assignee progress metadata writes are serialized per scene', () => {
   assert.match(scenesView, /queues\.get\(sceneUuid\) \?\? Promise\.resolve\(\)/);
   assert.match(scenesView, /const run = previous\.catch\(\(\) => undefined\)\.then\(task\)/);
   // 늦게 보낼 수 있으니 최신 담당자 기록 위에 같은 변경을 다시 적용한 맵을 모든 담당자 이름으로 보낸다.
-  assert.match(scenesView, /writeAssigneeProgressMetadata\(sceneUuid, progress, Object\.keys\(progress\)\)/);
+  // 자동 재전송 경로는 쓰기 직전 로그인 세션 확인을 넷째 인자로 붙인다(움직임 폴리싱 20번).
+  assert.match(scenesView, /writeAssigneeProgressMetadata\(sceneUuid, progress, Object\.keys\(progress\)(?:, saveSession\.assertCurrent)?\)/);
   assert.match(scenesView, /assigneeProgressMutationSeqRef/);
 });
 

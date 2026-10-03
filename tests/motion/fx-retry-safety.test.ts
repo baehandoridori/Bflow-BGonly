@@ -493,6 +493,8 @@ test('stageRepaintPatch — 같은 클릭이 함께 바꾼 완료 기록·액팅
     completion: { completedBy: '배한솔', completedAt: 't1' },
     baseCompletion: { completedBy: '', completedAt: '' },
     basePhase: { sceneState: 'feedback', workRound: 0, feedbackRound: 1 },
+    // 화면 코드는 액팅 씬이면 늘 이 저장이 맞춘 단계를 carry 에 남긴다(다시 보내기 직전에 빼면 null — fx3).
+    minePhase: done,
   });
   const stale = scene('1110', { sceneState: 'feedback', workRound: 0, feedbackRound: 1 });
   assert.deepEqual(stageRepaintPatch(carry, stale, stages('1111'), done), {
@@ -647,8 +649,9 @@ test('세 경로가 포기·추월 때 남의 값을 지키는 판단을 거친�
   // 단계 칸: 다시 보내기 직전 — 다른 값이 된 칸은 빼고 보낸다.
   assert.match(view, /const narrowed = narrowStageWritesForRetry\(saveCarry\.writes, latest\);\n\s+saveCarry\.writes = narrowed\.writes;/);
   assert.match(view, /return saveCarry\.writes\.stages\.length > 0;/);
-  // 액팅 단계: 내 값일 때만 되돌리고, 저장이 안 됐으면 담당자 기록·완료 기록을 쓰지 않는다.
-  assert.match(view, /const restore = planPhaseGiveUp\(useDataStore\.getState\(\)\.findSceneByUuid\(sceneUuid\), minePhase, saveCarry\.base\);\n\s+if \(!restore\) return;/);
+  // 액팅 단계: 내 값일 때만 되돌리고(함께 바꾼 완료 기록·담당자 진행도 아직 내 값일 때만 — phaseGiveUpBase),
+  // 저장이 안 됐으면 담당자 기록·완료 기록을 쓰지 않는다.
+  assert.match(view, /const latest = useDataStore\.getState\(\)\.findSceneByUuid\(sceneUuid\);\n\s+const restore = planPhaseGiveUp\(latest, minePhase, phaseGiveUpBase\(saveCarry, latest\)\);\n\s+if \(!restore\) return;/);
   assert.match(view, /updateSceneByUuid\(sceneUuid, restore\);/);
   assert.match(view, /if \(outcome !== 'saved'\) return;/);
   // 담당자별: 내 값일 때만, 이 담당자 몫만 되돌린다.

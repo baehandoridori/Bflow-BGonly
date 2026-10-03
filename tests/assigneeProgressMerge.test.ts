@@ -120,8 +120,13 @@ test('담당자별 진행 저장은 서버 정본을 다시 읽어 병합한다'
 
 test('ScenesView 의 담당자별 진행 저장은 통째 덮어쓰기로 되돌아가지 않았다', () => {
   const src = read('src/views/ScenesView.tsx');
-  assert.match(src, /saveAssigneeProgress\(sceneUuid, progress, changedNames\)/, '큐 안에서 병합 저장을 써야 한다');
-  assert.match(src, /saveAssigneeProgress\(sceneUuid, nextProgress, \[assigneeName\]\)/, '담당자 1명 토글은 그 담당자만 바꿔야 한다');
+  // 움직임 폴리싱 20번: 쓰기 직전 확인(로그인 세션)은 넷째 인자로만 붙는다 — 병합 대상(changedNames)은 그대로.
+  assert.match(src, /saveAssigneeProgress\(sceneUuid, progress, changedNames(?:, \{ beforeWrite \})?\)/, '큐 안에서 병합 저장을 써야 한다');
+  assert.match(
+    src,
+    /saveAssigneeProgress\(sceneUuid, nextProgress, \[assigneeName\](?:, \{ beforeWrite: saveSession\.assertCurrent \})?\)/,
+    '담당자 1명 토글은 그 담당자만 바꿔야 한다',
+  );
   assert.doesNotMatch(
     src,
     /writeMetadata\(\s*SCENE_ASSIGNEE_PROGRESS_META_TYPE/,
@@ -134,7 +139,7 @@ test('ScenesView 의 담당자별 진행 저장은 통째 덮어쓰기로 되돌
   for (const call of writeCalls) {
     assert.match(
       call,
-      /,\s*Object\.keys\([A-Za-z.]+\)\)$/,
+      /,\s*Object\.keys\([A-Za-z.]+\)(?:,\s*saveSession\.assertCurrent)?\)$/,
       `changedNames 가 비었거나 빠진 호출 — 병합이 아무것도 반영하지 않는다: ${call}`,
     );
   }
