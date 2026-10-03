@@ -408,7 +408,10 @@ test('사이드바 화면 이동: 본문 위 덮개 한 장만 걷고, 본문(ma
   assert.match(layout, /cover\.animate\(VIEW_REVEAL_KEYFRAMES, viewRevealTiming\(prefersReducedMotion\(\)\)\)/);
   // 판단은 planViewReveal(위 단위 테스트) — 배선은 그 결과를 그대로 따른다.
   assert.match(layout, /const plan = planViewReveal\(state\.lastView, view, readPendingOpenRequests\(\)\);\n\s*if \(!plan\) return;/, 'StrictMode 이중 실행에도 한 번만');
-  assert.match(layout, /if \(plan\.resetScroll && mainRef\.current\) mainRef\.current\.scrollTop = 0;/, '새 화면은 맨 위부터');
+  assert.match(layout, /if \(plan\.resetScroll && mainRef\.current && mainScrolledRef\.current\) \{\s*mainScrolledRef\.current = false;\s*mainRef\.current\.scrollTop = 0;\s*\}/, '새 화면은 맨 위부터');
+  // 스크롤한 적이 없으면 scrollTop 을 쓰지 않는다(쓰기가 레이아웃을 강제) — 스크롤 여부는 값을 읽지 않고 이벤트로만 안다.
+  assert.match(layout, /const markScrolled = \(\) => \{ mainScrolledRef\.current = true; \};\s*main\.addEventListener\('scroll', markScrolled, \{ passive: true \}\);/);
+  assert.doesNotMatch(layout, /\.scrollTop(?! = 0;)/, '본문 scrollTop 을 읽지 않는다');
   assert.match(layout, /if \(!plan\.reveal\) return;\n\s*const cover = coverRef\.current;/);
   assert.doesNotMatch(layout, /mainRef\.current\.animate|main[^\n]*style=\{\{[^}]*(opacity|transform)/);
   const revealSrc = read('src/components/layout/ViewReveal.tsx');

@@ -40,6 +40,7 @@ import { SceneRemoteFlash } from './SceneRemoteFlash';
 import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEditingPresenceStore';
 import { editingBeamClass } from '@/utils/editingPresence';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
+import { useMotionArmed } from '@/hooks/useMotionArmed';
 import {
   persistLengthChangeAtomic,
   saveLengthChangeField,
@@ -141,6 +142,8 @@ export function UnifiedSceneCard({
   });
 
   const cardRootRef = useRef<HTMLDivElement>(null);
+  // 선택 체크는 선택될 때만 상자가 생긴다 — '톡'은 한 번 그려진 카드에서만(처음부터 선택된 채 그려지면 바로).
+  useMotionArmed(cardRootRef);
   const prevHighlightedRef = useRef(false);
 
   // 우클릭 컨텍스트 메뉴 상태
@@ -385,7 +388,7 @@ export function UnifiedSceneCard({
             openRevCount > 0 || resolvedRevCount > 0 ? 'top-9' : 'top-2.5',
           )}
         >
-          <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path className="scene-select-check-mark" d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </div>
 
         {/* ── 헤더: 씬 ID + 전체 진행률 배지 ── */}

@@ -8,6 +8,7 @@ import { shouldSkipClickAfterPointer } from '@/utils/pointerClickGuard';
 import { useStageLabelDisplayMode } from './useStageLabelDisplayMode';
 import { useStageFillSteps } from './useStageFillSteps';
 import { StageRollbackFlash, useStageSaveStatus } from './StageSaveStatus';
+import { useMotionArmed } from '@/hooks/useMotionArmed';
 
 export function stageIcon(stage: Stage, size = 12) {
   if (stage === 'lo') return <Clock size={size} strokeWidth={2.4} />;
@@ -40,6 +41,9 @@ export function StageSegmentToggle({
   const cfg = DEPARTMENT_CONFIGS[department];
   // pointerdown 이 이미 토글했고 그 누름의 click 이 아직 안 왔는지 — 타이머 없이 누름과 click 을 짝지운다(acc-scene-flow-6).
   const pointerHandledRef = useRef(false);
+  // 꺼진 칸 채움은 켜질 때만 상자가 생긴다 — 차오름은 한 번 그려진 묶음에서만(처음부터 켜진 칸은 바로 그린다).
+  const armRef = useRef<HTMLDivElement>(null);
+  useMotionArmed(armRef);
   const { modeOf, setNode } = useStageLabelDisplayMode(cfg.stageLabels, compact, iconDisplay === 'auto');
   // 움직임 폴리싱 6번: 여러 칸이 한 번에 바뀌면 LO→PNG(켤 때)·PNG→LO(끌 때) 순서로 40ms 씩 이어서.
   const fillSteps = useStageFillSteps(STAGES.map((stage) => Boolean(scene[stage])));
@@ -55,6 +59,7 @@ export function StageSegmentToggle({
 
   return (
     <div
+      ref={armRef}
       className={cn(
         'flex w-full rounded-lg bg-bg-primary/70 border border-bg-border/40',
         compact ? 'p-0.5 gap-0.5' : 'p-1 gap-0.5',

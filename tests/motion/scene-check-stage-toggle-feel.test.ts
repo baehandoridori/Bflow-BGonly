@@ -154,7 +154,7 @@ test('CSS: transform·opacity·color 만 전환, 사양 박자(눌림 .94/80ms �
   const fill = block('.stage-seg-fill');
   assert.match(fill, /transform: scaleX\(0\);/);
   assert.match(fill, /transform-origin: left center;/);
-  assert.match(fill, new RegExp(`transition-duration: ${STAGE_FILL_MS}ms, 160ms;`));
+  assert.match(fill, new RegExp(`transition-duration: ${STAGE_FILL_MS}ms, 160ms, ${STAGE_FILL_MS}ms;`));
   assert.match(fill, new RegExp(`calc\\(var\\(--stage-step, 0\\) \\* ${STAGE_FILL_STEP_MS}ms\\)`));
   assert.match(css, /\.stage-seg-fill\[data-on='true'\] \{\s*transform: scaleX\(1\);/);
   assert.match(css, /\.stage-seg-fill\[data-current='true'\] \{\s*opacity: 1;/);
@@ -175,6 +175,69 @@ test('CSS: transform·opacity·color 만 전환, 사양 박자(눌림 .94/80ms �
   assert.doesNotMatch(css, /backdrop-filter|infinite/);
   // 그림자는 미리 그린 층의 opacity 로만 — box-shadow 를 전환 목록에 넣지 않는다.
   assert.doesNotMatch(css, /transition[^;]*box-shadow/);
+});
+
+test('겹친 층은 쉬는 동안 상자 없음(display: none) — 사라질 땐 다 줄어든/흐려진 뒤, 나타날 땐 @starting-style 에서 (최종 성능 측정 지적)', () => {
+  // 카드 46장 × 칸 4개마다 hover 바탕·채움·빛·선택 체크 층이 늘 깔려 있으면 마우스 판정(HitTest)이 1.7→4.6ms 로 늘었다.
+  const css = stripComments(read('src/styles/motion-scene-check.css'));
+  const block = (selector: string) => {
+    const at = css.indexOf(`${selector} {`);
+    assert.ok(at >= 0, `${selector} 규칙 없음`);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  const hover = block('.stage-seg::before');
+  assert.match(hover, /display: none;/);
+  assert.match(hover, /transition: opacity var\(--motion-fast\) var\(--ease-std\), display var\(--motion-fast\) allow-discrete;/);
+  assert.match(block(".stage-seg[data-on='false']:not([aria-disabled='true']):hover::before"), /display: block;\s*opacity: 1;/);
+
+  const fill = block('.stage-seg-fill');
+  assert.match(fill, /display: none;/);
+  assert.match(fill, /transition-property: transform, opacity, display;/);
+  assert.match(fill, /transition-behavior: allow-discrete;/);
+  assert.match(css, /\.stage-seg-fill\[data-on='true'\] \{\s*transform: scaleX\(1\);\s*display: block;/);
+
+  const glow = css.slice(css.indexOf('.stage-seg-fill::after {'));
+  assert.match(glow, /^\.stage-seg-fill::after \{\s*display: none;\s*transition: opacity 160ms var\(--ease-std\), display 160ms allow-discrete;/);
+  assert.match(css, /\.stage-seg-fill\[data-glow='true'\]::after \{\s*display: block;/);
+  // 액팅 칩 알약 층의 빛은 그대로(늘 그려 둠)
+  assert.doesNotMatch(css, /\.stage-seg-pill-layer::after \{\s*display: none/);
+
+  assert.match(block('.scene-select-check'), /display var\(--motion-fast\) allow-discrete;/);
+  assert.match(css, /\.scene-select-check:not\(\[data-on='true'\]\) \{\s*display: none;/, 'Tailwind flex 보다 특이도가 높아야 덮는다');
+
+  // 출발 모습: hover 는 늘, 채움·빛·체크는 한 번 그려진 묶음(data-motion-armed)에서만 — 처음부터 켜진 칸이 차오르지 않게.
+  const at = css.indexOf('@starting-style {');
+  assert.ok(at >= 0, '@starting-style');
+  const starting = css.slice(at, css.indexOf('\n}', at));
+  assert.match(starting, /\.stage-seg\[data-on='false'\]:not\(\[aria-disabled='true'\]\):hover::before \{\s*opacity: 0;/);
+  assert.match(starting, /\[data-motion-armed\] \.stage-seg-fill\[data-on='true'\] \{\s*opacity: var\(--stage-seg-dim, 0\.125\);\s*transform: scaleX\(0\);/);
+  assert.match(starting, /\[data-motion-armed\] \.stage-seg-fill\[data-glow='true'\]::after \{\s*opacity: 0;/);
+  assert.match(starting, /\[data-motion-armed\] \.scene-select-check\[data-on='true'\] \{\s*opacity: 0;\s*transform: scale\(0\.4\);/);
+  assert.match(starting, /\[data-motion-armed\] \.scene-select-check\[data-on='true'\] \.scene-select-check-mark \{\s*stroke-dashoffset: 13;/, '태그가 아니라 클래스로(무장 때 아이콘 path 전체 재계산 방지)');
+  assert.doesNotMatch(starting, /\[data-motion-armed\][^{]*\s(path|svg|span|div|button)\s*\{/, '무장 조건 규칙의 대상은 클래스로만');
+  for (const file of ['src/components/scenes/UnifiedSceneCard.tsx', 'src/views/ScenesView.tsx']) {
+    assert.match(read(file), /<path className="scene-select-check-mark" d="M2 6l3 3 5-5"/, file);
+  }
+  assert.doesNotMatch(starting, /^\s*\.stage-seg-fill|^\s*\.scene-select-check/m, '무장 표시 없이 쓰면 카드가 그려질 때마다 차오른다');
+
+  // 무장: 묶음마다 한 번 그려진 뒤(크기 감시 첫 알림 → 다음 프레임) 붙는다. 감시는 하나를 같이 쓴다.
+  const hook = read('src/hooks/useMotionArmed.ts');
+  assert.match(hook, /export const MOTION_ARMED_ATTR = 'data-motion-armed';/);
+  assert.match(hook, /if \(width === 0 && height === 0\) continue;/, '숨은 채 마운트된 묶음은 보이게 된 뒤에');
+  assert.match(hook, /observer\.unobserve\(entry\.target\);\s*queued\.push\(entry\.target\);/);
+  assert.match(hook, /flushFrame = requestAnimationFrame\(flush\)/);
+  assert.equal(hook.match(/new ResizeObserver\(/g)?.length, 1, '감시 하나를 같이 쓴다');
+  for (const [file, refName] of [
+    ['src/components/scenes/StageSegmentToggle.tsx', 'armRef'],
+    ['src/components/scenes/AssigneeProgressStack.tsx', 'armRef'],
+    ['src/components/scenes/UnifiedSceneCard.tsx', 'cardRootRef'],
+    ['src/views/ScenesView.tsx', 'highlightCardRef'],
+  ] as const) {
+    const source = read(file);
+    assert.match(source, /import \{ useMotionArmed \} from '@\/hooks\/useMotionArmed';/, file);
+    assert.match(source, new RegExp(`useMotionArmed\\(${refName}\\);`), file);
+    assert.match(source, new RegExp(`ref=\\{${refName}\\}`), file);
+  }
 });
 
 test('CSS: 동작 줄이기면 눌림·채움·미끄러짐·지연 없이 색만 즉시', () => {

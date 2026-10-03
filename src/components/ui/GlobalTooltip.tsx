@@ -11,6 +11,9 @@
  *   바깥 상자는 화면 왼쪽 위(0,0)에 붙어 있어 폭이 화면 전체 기준으로 정해진다 — 오른쪽 끝에서 폭이 줄어
  *   글자가 몇 자씩 접히던 문제가 없다. 가장자리 8px 안쪽으로 밀어 넣는다.
  * - 마우스가 움직이면 React 상태를 바꾸지 않고 다음 프레임에 transform 만 고친다(앱 전체 재렌더 없음).
+ * - 말풍선 크기는 크기 감시(ResizeObserver)로만 안다. 새 글자가 들어오면 이번 프레임 레이아웃이 끝난 뒤(그리기 전)
+ *   오는 알림에서 재고 그때 자리 잡고 보인다 — offsetWidth 를 그 자리에서 읽으면 방금 누른 단계 버튼 등으로 바뀐
+ *   화면 전체의 레이아웃을 강제로 계산했다(최종 성능 측정 지적). 같은 프레임에 그려지므로 보이는 모습은 같다.
  * - 웜업: 떠 있는 중이거나 숨긴 지 300ms 안에 옆 버튼으로 옮기면 기다림·등장 효과 없이 바로 그 위로
  *   120ms 미끄러져 간다. 미끄러짐은 대상이 바뀌는 순간에만 켠다(상시로 켜 두면 따라가기가 끈적해진다).
  * - 동작 줄이기: 등장·퇴장은 투명도만 100ms, 위치 이동은 즉시.
@@ -73,6 +76,14 @@ export function GlobalTooltipProvider() {
   /** 모양·등장을 맡는 안쪽 상자. 자리 잡기는 이 상자의 실측 크기로 한다. */
   const boxRef = useRef<HTMLDivElement | null>(null);
 
+  /** 안쪽 상자의 실측 크기(테두리 상자) — 크기 감시 알림에서만 갱신한다. */
+  const boxSize = useRef<{ width: number; height: number } | null>(null);
+  /** 새 글자가 그려진 뒤 크기 감시 알림에서 할 일(자리 잡고 보이기). 숨기면 지운다. */
+  const pendingShow = useRef<{ warm: boolean; slide: boolean } | null>(null);
+  const sizeObserver = useRef<ResizeObserver | null>(null);
+  /** 등장·퇴장 애니메이션 — getAnimations()·계산된 스타일을 읽지 않고(스타일 재계산 강제) 직접 들고 있는다. */
+  const popAnimation = useRef<Animation | null>(null);
+
   const showTimer = useRef<ReturnType<typeof setTimeout>>();
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
   const slideTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -90,10 +101,11 @@ export function GlobalTooltipProvider() {
   const place = useCallback(() => {
     const pos = posRef.current;
     const box = boxRef.current;
-    if (!pos || !box) return;
+    const size = boxSize.current;
+    if (!pos || !box || !size) return;
     const placement = placeFollowTooltip(
       cursor.current,
-      { width: box.offsetWidth, height: box.offsetHeight },
+      size,
       { width: window.innerWidth, height: window.innerHeight },
       { preferBelow: preferBelow.current, targetBottom: targetBottom.current },
     );
@@ -105,12 +117,13 @@ export function GlobalTooltipProvider() {
   const reveal = useCallback((warm: boolean) => {
     const box = boxRef.current;
     if (!box) return;
-    box.getAnimations?.().forEach((animation) => animation.cancel());
+    popAnimation.current?.cancel();
+    popAnimation.current = null;
     box.style.opacity = '1';
     visible.current = true;
     if (warm) return;
     const r = reduceRef.current;
-    animateEl(
+    popAnimation.current = animateEl(
       box,
       [{ opacity: 0, transform: 'scale(0.92)' }, { opacity: 1, transform: 'scale(1)' }],
       { duration: r ? REDUCED_FADE_MS : POP_MS, easing: EASE_CSS.snap },
@@ -119,15 +132,21 @@ export function GlobalTooltipProvider() {
   }, []);
 
   const conceal = useCallback(() => {
+    // 아직 크기를 재기 전(그리기 전)에 숨기라는 신호가 오면 뜨지 않는다(클릭한 프레임에 말풍선이 뒤늦게 뜨지 않게).
+    pendingShow.current = null;
     if (!visible.current) return;
     visible.current = false;
     const box = boxRef.current;
     if (!box) return;
-    const from = getComputedStyle(box).opacity;
-    box.getAnimations?.().forEach((animation) => animation.cancel());
+    // 지금 보이는 투명도: 등장 중일 때만 계산된 값을 읽는다. 다 뜬 뒤(대부분)는 인라인 값 그대로 —
+    // 누르는 순간(mousedown) 계산된 스타일을 읽으면 화면 전체 스타일 재계산을 강제한다(최종 성능 측정 지적).
+    const running = popAnimation.current?.playState === 'running';
+    const from = running ? getComputedStyle(box).opacity : (box.style.opacity || '1');
+    popAnimation.current?.cancel();
+    popAnimation.current = null;
     box.style.opacity = '0';
     const r = reduceRef.current;
-    animateEl(
+    popAnimation.current = animateEl(
       box,
       [{ opacity: from, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(0.92)' }],
       { duration: r ? REDUCED_FADE_MS : POP_MS, easing: EASE_CSS.snap },
@@ -148,23 +167,62 @@ export function GlobalTooltipProvider() {
     setTip({ text, seq: seq.current, warm });
   }, []);
 
-  // 새 글자가 그려진 직후(칠하기 전) 실측 크기로 자리를 잡고 보인다.
-  useLayoutEffect(() => {
-    if (!tip) return;
+  /** 실측 크기로 자리를 잡고 보인다(웜업이면 다음 대상 위로 미끄러져 간다). */
+  const settle = useCallback((warm: boolean, slide: boolean) => {
     const pos = posRef.current;
     if (!pos) return;
-    const slide = tip.warm && placedOnce.current && !reduceRef.current;
     clearTimeout(slideTimer.current);
     pos.style.transition = slide ? `transform ${SLIDE_MS}ms ${EASE_CSS.snap}` : '';
     place();
     placedOnce.current = true;
-    reveal(tip.warm);
+    reveal(warm);
     if (slide) {
       slideTimer.current = setTimeout(() => {
         if (posRef.current) posRef.current.style.transition = '';
       }, SLIDE_MS + 20);
     }
-  }, [tip, place, reveal]);
+  }, [place, reveal]);
+
+  // 말풍선 크기 감시 — 레이아웃이 끝난 뒤(그리기 전) 알림이 온다. 새 글자를 기다리는 중이면 이때 자리 잡고 보인다.
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const border = entries[entries.length - 1]?.borderBoxSize?.[0];
+      boxSize.current = border
+        ? { width: border.inlineSize, height: border.blockSize }
+        : { width: box.offsetWidth, height: box.offsetHeight };
+      const pending = pendingShow.current;
+      if (!pending) return;
+      pendingShow.current = null;
+      settle(pending.warm, pending.slide);
+    });
+    sizeObserver.current = observer;
+    observer.observe(box);
+    return () => {
+      observer.disconnect();
+      if (sizeObserver.current === observer) sizeObserver.current = null;
+    };
+  }, [settle]);
+
+  // 새 글자가 그려졌다 — 크기 감시를 다시 걸어 이번 프레임 레이아웃이 끝난 뒤 알림에서 재고 자리 잡는다.
+  useLayoutEffect(() => {
+    if (!tip) return;
+    const pos = posRef.current;
+    const box = boxRef.current;
+    if (!pos || !box) return;
+    const slide = tip.warm && placedOnce.current && !reduceRef.current;
+    const observer = sizeObserver.current;
+    if (!observer) {
+      // 크기 감시가 없는 환경: 바로 잰다.
+      boxSize.current = { width: box.offsetWidth, height: box.offsetHeight };
+      settle(tip.warm, slide);
+      return;
+    }
+    pendingShow.current = { warm: tip.warm, slide };
+    observer.unobserve(box);
+    observer.observe(box);
+  }, [tip, settle]);
 
   useEffect(() => {
     const now = () => performance.now();
@@ -263,6 +321,7 @@ export function GlobalTooltipProvider() {
       clearTimeout(slideTimer.current);
       cancelAnimationFrame(frame.current);
       frame.current = 0;
+      pendingShow.current = null;
       restoreTitle();
       document.removeEventListener('mouseover', handleMouseOver, true);
       document.removeEventListener('mouseout', handleMouseOut, true);

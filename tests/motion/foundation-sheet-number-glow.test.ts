@@ -117,7 +117,7 @@ test('크기 조절 중(is-resizing): 애니메이션을 지우지 않고 멈춘
 
 test("'가볍게'·'최소': 테두리 회전은 빼고(밝아짐만), 이제 숨 쉬지 않는 글자는 정지 목록에서 뺐다", () => {
   const foundation = stripComments(read('src/styles/motion-foundation.css'));
-  const lite = ":root:is([data-motion='lite'], [data-motion='minimal'])";
+  const lite = ':root[data-motion-lite]';
   assert.ok(foundation.includes(`${lite} .scene-num-glow-wrap::before`));
   assert.ok(!foundation.includes(`${lite} .scene-num-glow-text`));
 });

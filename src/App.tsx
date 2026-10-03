@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useCallback, useState, useRef, startTransition, Component, type ReactNode, type ErrorInfo } from 'react';
+import { lazy, Suspense, useEffect, useCallback, useMemo, useState, useRef, startTransition, Component, type ReactNode, type ErrorInfo } from 'react';
 import { createPortal } from 'react-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore } from '@/stores/useAppStore';
@@ -369,6 +369,14 @@ function resolveNewAssigneeCompletionFallback(
   return latest;
 }
 
+/** 토스트 공통 모양 — 렌더마다 새 객체를 만들지 않는다(토스트 상자 재렌더 방지). */
+const TOASTER_OPTIONS = {
+  className: 'bflow-toast',
+  style: {
+    fontSize: '13px',
+  },
+};
+
 export default function App() {
   const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setDataConnected, setGasConfig, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
   const { setEpisodes, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
@@ -504,6 +512,23 @@ export default function App() {
   // 토스트 설정 (위치/시간) — 설정에서 로드
   const [toastPosition, setToastPosition] = useState<'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right'>('bottom-right');
   const [toastDuration, setToastDuration] = useState(3000);
+  // Sonner 토스트 — 대화상자가 #root를 inert 처리해도 알림은 body에서 유지.
+  // App 은 앱 가게 전체를 구독해 씬을 넘길 때마다 다시 그려진다. 토스트 상자는 설정이 바뀔 때만 다시 그린다 —
+  // sonner 는 그릴 때마다 문서 방향을 계산된 스타일로 읽어, 화면을 그리는 도중 스타일 재계산을 강제한다(최종 측정 지적).
+  const toasterTheme = colorMode === 'light' ? 'light' : 'dark';
+  const toasterPortal = useMemo(() => (typeof document !== 'undefined' ? createPortal(
+    <Toaster
+      theme={toasterTheme}
+      position={toastPosition}
+      duration={toastDuration}
+      toastOptions={TOASTER_OPTIONS}
+      gap={8}
+      visibleToasts={5}
+      expand={false}
+      closeButton
+    />,
+    document.body,
+  ) : null), [toasterTheme, toastPosition, toastDuration]);
 
   // 종료 대기 알림 수신 → 저장 중 오버레이
   const [savingBeforeQuit, setSavingBeforeQuit] = useState(false);
@@ -3337,24 +3362,7 @@ export default function App() {
       <UpdateCenterModal />
 
       {/* Sonner 토스트 — 대화상자가 #root를 inert 처리해도 알림은 body에서 유지 */}
-      {typeof document !== 'undefined' && createPortal(
-        <Toaster
-          theme={colorMode === 'light' ? 'light' : 'dark'}
-          position={toastPosition}
-          duration={toastDuration}
-          toastOptions={{
-            className: 'bflow-toast',
-            style: {
-              fontSize: '13px',
-            },
-          }}
-          gap={8}
-          visibleToasts={5}
-          expand={false}
-          closeButton
-        />,
-        document.body,
-      )}
+      {toasterPortal}
 
       {/* 환영 팝업 (로그인 직후) — 로그인 덮개가 다 걷힌 뒤 */}
       {welcomeUser && !loginCurtain && (

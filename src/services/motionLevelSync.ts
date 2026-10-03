@@ -9,6 +9,7 @@
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import {
   applyStoredMotionLevel,
+  createMotionLevelSaveQueue,
   motionLevelBroadcastPayload,
   motionLevelFromBroadcast,
   motionLevelWriteMark,
@@ -22,6 +23,8 @@ let started = false;
 /** 이 창의 방송 표시 — 방송은 보낸 창에도 돌아오므로, 자기 방송 중 오래된 것을 가려낸다. */
 const windowTag = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 let lastRequestSeq = 0;
+/** 저장은 한 줄로 — 빠르게 연달아 골라도 옛 저장이 새 값 뒤에 파일·다른 창을 되돌리지 않는다. */
+const saveQueue = createMotionLevelSaveQueue();
 
 export function startMotionLevelSync(): void {
   if (started) return;
@@ -40,13 +43,20 @@ export function startMotionLevelSync(): void {
   });
 }
 
-/** 설정 화면에서 고를 때. 이 창에 먼저 반영하고, 파일에 저장한 뒤 다른 창에 알린다. */
+/**
+ * 설정 화면에서 고를 때. 이 창에 먼저 반영하고, 파일에 저장한 뒤 다른 창에 알린다.
+ * 저장은 차례로 — 앞 저장이 끝나기 전에 또 고르면, 앞 저장이 끝난 뒤 마지막 값만 쓰고 방송한다.
+ */
 export async function saveMotionLevel(value: MotionLevel): Promise<void> {
   const level = normalizeMotionLevel(value);
   lastRequestSeq += 1;
   const seq = lastRequestSeq;
   setMotionLevel(level);
-  const existing = (await loadPreferences()) ?? {};
-  await savePreferences({ ...existing, motionLevel: level });
-  window.electronAPI?.preferencesBroadcastChange?.(motionLevelBroadcastPayload(level, { from: windowTag, seq }));
+  await saveQueue.enqueue(seq, async (isStale) => {
+    const existing = (await loadPreferences()) ?? {};
+    // 읽는 사이 더 새 값을 골랐으면 쓰지 않는다 — 다음 차례가 새 값을 쓰고 방송한다.
+    if (isStale()) return;
+    await savePreferences({ ...existing, motionLevel: level });
+    window.electronAPI?.preferencesBroadcastChange?.(motionLevelBroadcastPayload(level, { from: windowTag, seq }));
+  });
 }

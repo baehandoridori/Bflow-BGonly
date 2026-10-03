@@ -91,6 +91,10 @@
 
 /* ═══ 움직임 설정 (움직임 폴리싱 바탕 B) ═══════════════════════════════════════
    <html data-motion="full|lite|minimal"> — 값은 설정 › 효과 › 움직임(src/utils/motionLevel.ts).
+   CSS 는 값 대신 함께 붙는 '있다/없다' 표시로 고른다: data-motion-lite('가볍게' 이상, '최소' 포함)·data-motion-minimal('최소').
+   브라우저는 조상에 어떤 속성 '이름'이 있는지로 규칙을 미리 거르므로, 모든 요소에 걸리는 아래 규칙(흐림 끄기 등)이
+   기본 설정에서는 바로 걸러진다(값을 비교하는 :root:is([data-motion='lite'], …) 꼴은 요소마다 거슬러 올라가 확인했다 —
+   최종 성능 측정 지적). 특이도는 :root:is([…]) 와 :root[…] 가 같다.
    - 'minimal'(최소): 윈도우 '애니메이션 효과 끄기'(동작 줄이기)와 똑같게. 빌드 때 PostCSS 플러그인
      (scripts/postcss-motion-minimal.cjs)이 모든 CSS 의 @media (prefers-reduced-motion: reduce) 블록을 '최소' 짝으로
      복제하고, no-preference 블록은 '최소'에서 빠지게 한다. 짝은 원래 규칙과 특이도·순서가 같아서, 동작 줄이기에서
@@ -108,35 +112,35 @@
    일괄 작업 바는 나타날 때 두 번만 숨 쉬는 짧은 반응이라 '가볍게'에서도 남긴다.
    시트 씬 번호 테두리는 평소 멈춰 있고 마우스를 올린 줄만 돈다(scene-effects.css) — '가볍게'에서는 그 회전도 빼고
    밝아짐만 남긴다. 글자 빛은 더 이상 숨 쉬지 않아 목록에 없다. */
-:root:is([data-motion='lite'], [data-motion='minimal']) .comment-unread-badge::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-peak-pulse::after,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-badge-pulse::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-badge-pulse::after,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-update-progress-pulse,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bflow-update-latest-card::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bell-glow-soft::after,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bell-glow-mention::after,
-:root:is([data-motion='lite'], [data-motion='minimal']) .scene-num-glow-wrap::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) .editing-beam::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) .editing-beam-modal::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) .editing-namelabel::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) .editing-namelabel__dot,
-:root:is([data-motion='lite'], [data-motion='minimal']) tr.editing-beam-row > td:first-child::after,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bf-entry-breathe,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bf-entry-glow,
-:root:is([data-motion='lite'], [data-motion='minimal']) .bf-entry-nudge {
+:root[data-motion-lite] .comment-unread-badge::before,
+:root[data-motion-lite] .bflow-peak-pulse::after,
+:root[data-motion-lite] .bflow-badge-pulse::before,
+:root[data-motion-lite] .bflow-badge-pulse::after,
+:root[data-motion-lite] .bflow-update-progress-pulse,
+:root[data-motion-lite] .bflow-update-latest-card::before,
+:root[data-motion-lite] .bell-glow-soft::after,
+:root[data-motion-lite] .bell-glow-mention::after,
+:root[data-motion-lite] .scene-num-glow-wrap::before,
+:root[data-motion-lite] .editing-beam::before,
+:root[data-motion-lite] .editing-beam-modal::before,
+:root[data-motion-lite] .editing-namelabel::before,
+:root[data-motion-lite] .editing-namelabel__dot,
+:root[data-motion-lite] tr.editing-beam-row > td:first-child::after,
+:root[data-motion-lite] .bf-entry-breathe,
+:root[data-motion-lite] .bf-entry-glow,
+:root[data-motion-lite] .bf-entry-nudge {
   animation: none !important;
 }
 /* 알림 종의 은은한 빛: 숨쉬기 중간 밝기로 멈춘다(그대로 두면 가장 밝은 빛이 계속 켜져 있다). */
-:root:is([data-motion='lite'], [data-motion='minimal']) .bell-glow-soft::after {
+:root[data-motion-lite] .bell-glow-soft::after {
   opacity: 0.6;
 }
-:root:is([data-motion='lite'], [data-motion='minimal']) tr.editing-beam-row {
+:root[data-motion-lite] tr.editing-beam-row {
   animation: none !important;
   box-shadow: inset 0 0 0 1.5px rgba(167, 139, 250, 0.55);
 }
 /* 진행 막대 위를 훑는 반사광은 멈추면 한쪽 끝에 얼룩처럼 남으니 숨긴다. */
-:root:is([data-motion='lite'], [data-motion='minimal']) .scene-top-progress-fill::after {
+:root[data-motion-lite] .scene-top-progress-fill::after {
   animation: none !important;
   opacity: 0;
 }
@@ -149,16 +153,16 @@
      그대로이도록, 인라인·Tailwind 로 흐림을 준 요소에는 isolation 으로 쌓임 맥락만 남긴다.
    - 대시보드 위젯 유리(다크)는 바탕이 28% 만 불투명해 흐림 없이는 뒤 별자리·선이 또렷이 비친다 → '가볍게'에서만
      바탕을 72% 로 올려 글자가 묻히지 않게 한다(라이트는 원래 80% 라 그대로). */
-:root:is([data-motion='lite'], [data-motion='minimal']) :is(*, #bf-motion-lite),
-:root:is([data-motion='lite'], [data-motion='minimal']) :is(*, #bf-motion-lite)::before,
-:root:is([data-motion='lite'], [data-motion='minimal']) :is(*, #bf-motion-lite)::after {
+:root[data-motion-lite] :is(*, #bf-motion-lite),
+:root[data-motion-lite] :is(*, #bf-motion-lite)::before,
+:root[data-motion-lite] :is(*, #bf-motion-lite)::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-:root:is([data-motion='lite'], [data-motion='minimal']) :is([style*='backdrop-filter: blur'], [style*='backdrop-filter: saturate'], [class*='backdrop-blur']) {
+:root[data-motion-lite] :is([style*='backdrop-filter: blur'], [style*='backdrop-filter: saturate'], [class*='backdrop-blur']) {
   isolation: isolate;
 }
-:root:not([data-color-mode='light']):is([data-motion='lite'], [data-motion='minimal']) {
+:root:not([data-color-mode='light'])[data-motion-lite] {
   --glass-tint-alpha: 0.72;
 }
 

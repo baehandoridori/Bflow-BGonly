@@ -181,7 +181,7 @@ test('게이트 등록: 59 테스트가 test:ui 에 나열돼 있다', () => {
 // ── 구현 후 리뷰 반영: 섹션이 늦게 커져도 댓글 목록의 최신 댓글이 가려지지 않게 ──
 test('섹션 높이 증가 알림 → 댓글 패널이 스크롤 의도(맨 아래·댓글 이동)에 맞춰 보정', () => {
   assert.match(section, /<section ref=\{sectionRef\} aria-label="팀 할 일"/);
-  assert.match(section, /useLayoutEffect\(\(\) => \{\s*const height = sectionRef\.current\?\.offsetHeight \?\? 0;\s*const prev = heightRef\.current;\s*heightRef\.current = height;\s*const firstLoad = !loading && !firstLoadSeenRef\.current;\s*if \(firstLoad\) firstLoadSeenRef\.current = true;\s*const firstLoadAfterMs = firstLoad \? performance\.now\(\) - mountedAtRef\.current : null;\s*if \(prev !== null && height > prev\) onHeightGrowRef\.current\?\.\(height - prev, firstLoadAfterMs\);\s*\}\);/);
+  assert.match(section, /useLayoutEffect\(\(\) => \{\s*const height = sectionRef\.current\?\.offsetHeight \?\? 0;\s*const prev = heightRef\.current;\s*heightRef\.current = height;\s*const firstLoad = !loading && !firstLoadSeenRef\.current;\s*if \(firstLoad\) firstLoadSeenRef\.current = true;\s*const firstLoadAfterMs = firstLoad \? performance\.now\(\) - mountedAtRef\.current : null;\s*if \(prev !== null && height > prev\) onHeightGrowRef\.current\?\.\(height - prev, firstLoadAfterMs\);\s*\}, \[items, loading, notice, collapsed, draftTooLong\]\);/);
   assert.match(section, /onHeightGrowRef\.current = onHeightGrow;/);
   assert.match(commentPanel, /import \{ COMMENT_LIST_FOLLOW_CHECK_MS, commentListScrollAfterSectionGrow, shouldFollowCommentListToBottom \} from '@\/utils\/commentListAnchor';/);
   // 움직임 폴리싱 4번: 처음 연 직후(손대기 전)는 목록 크기 감시가 처음 자리를 맞추므로 건너뛰고, 부드러운 이어 주기는 동작 줄이기면 즉시.

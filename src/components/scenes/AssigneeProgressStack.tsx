@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useRef, type CSSProperties, type ReactNode } from 'react';
 import { CheckCircle2, CheckSquare, ChevronDown, ChevronUp, Clock, MessageSquareWarning, PlayCircle } from 'lucide-react';
 import type { Department, Scene, ScenePhaseState, Stage } from '@/types';
 import { DEPARTMENT_CONFIGS, SCENE_PHASES, SCENE_PHASE_COLORS, SCENE_PHASE_LABELS_SHORT, STAGES } from '@/types';
@@ -8,6 +8,7 @@ import { getAssigneeProgressEntries, sceneStateFromScene, type AssigneeProgressE
 import { useStageFillSteps } from './useStageFillSteps';
 import { StageRollbackFlash, useStageSaveStatus } from './StageSaveStatus';
 import { assigneeCellId, phaseCellId } from './stageSaveFeedback';
+import { useMotionArmed } from '@/hooks/useMotionArmed';
 import type { StageRollbackFlash as StageRollbackFlashState } from '@/stores/useStageSaveStatusStore';
 
 interface AssigneeProgressStackProps {
@@ -58,9 +59,13 @@ function AssigneeStageControls({
 }) {
   const cfg = DEPARTMENT_CONFIGS[department];
   const fillSteps = useStageFillSteps(STAGES.map((stage) => progress[stage] === true));
+  // 꺼진 칸 채움은 켜질 때만 상자가 생긴다 — 차오름은 한 번 그려진 묶음에서만(처음부터 켜진 칸은 바로 그린다).
+  const armRef = useRef<HTMLDivElement>(null);
+  useMotionArmed(armRef);
 
   return (
     <div
+      ref={armRef}
       className={cn(
         'grid min-w-0 grid-cols-4 rounded-md bg-bg-card/70 p-0.5',
         compact ? 'gap-0.5' : 'gap-1 border border-bg-border/35 p-1',

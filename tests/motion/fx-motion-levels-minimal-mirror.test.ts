@@ -27,12 +27,14 @@ const require = createRequire(import.meta.url);
 const postcss = require('postcss') as (plugins: unknown[]) => { process(css: string, opts: { from: string }): Promise<{ root: Root; css: string; warnings(): Array<{ text: string }> }> };
 const motionMinimal = require('../../scripts/postcss-motion-minimal.cjs') as (() => { postcssPlugin: string }) & {
   PLUGIN_NAME: string;
+  MINIMAL_ATTR: string;
   MINIMAL_ON: string;
   MINIMAL_OFF: string;
   withCondition(selector: string, condition: string): string;
+  minimalMirrorSelectors(selector: string): string[];
   classifyMedia(params: string): string | null;
 };
-const { MINIMAL_ON: ON, MINIMAL_OFF: OFF, withCondition, classifyMedia } = motionMinimal;
+const { MINIMAL_ATTR, MINIMAL_ON: ON, MINIMAL_OFF: OFF, withCondition, minimalMirrorSelectors, classifyMedia } = motionMinimal;
 
 const read = (file: string) => readFileSync(file, 'utf-8').replace(/\r\n/g, '\n');
 
@@ -116,6 +118,28 @@ test("선택자 변환: 첫 덩어리(결합자·가상 요소 앞)에 특이도
   assert.equal(classifyMedia('(min-width: 900px)'), null);
 });
 
+test("'최소' 짝 = html 자신 + html 안, 조건은 속성 이름(data-motion-minimal) — 기본 설정에서 브라우저가 미리 거른다 (최종 성능 측정 지적)", () => {
+  assert.equal(MINIMAL_ATTR, 'data-motion-minimal');
+  assert.equal(ON, ':where(html[data-motion-minimal])', '값 비교(data-motion=minimal)가 아니라 이름 — 조상 속성 이름으로 거르기');
+  assert.doesNotMatch(ON, / \*/, '조건 안에서 조상을 거슬러 오르지 않는다');
+  for (const input of ['.a', '.a .b', '*', '*::before', 'html[data-dash-entry] [data-entry-rank] > .widget-lift', '.stage-seg:active:not(:disabled)']) {
+    const [self, inside] = minimalMirrorSelectors(input);
+    assert.equal(self, withCondition(input, ON), `${input}: 첫 덩어리가 html 자신일 때`);
+    assert.equal(inside, `${ON} ${input}`, `${input}: html 안의 요소 — 조건이 맨 앞 조상 덩어리에 있어야 미리 걸러진다`);
+    assert.deepEqual(specificity(inside), specificity(input), `${input}: 특이도 그대로`);
+  }
+  // html 에 붙는 표시는 '최소' 설정 한 곳(writeDom)에서만 값과 함께 바뀐다.
+  const level = read('src/utils/motionLevel.ts');
+  assert.match(level, /if \(level === 'minimal'\) data\.motionMinimal = '';\s*else delete data\.motionMinimal;/);
+  assert.match(level, /if \(level === 'full'\) delete data\.motionLite;\s*else data\.motionLite = '';/);
+  // '가볍게' 규칙도 값 비교 대신 이름(:root[data-motion-lite]) — 특이도는 :root:is([…], […]) 와 같다.
+  const foundation = read('src/styles/motion-foundation.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(foundation, /\[data-motion=/, '값 비교 선택자 없음');
+  assert.ok(foundation.includes(':root[data-motion-lite] :is(*, #bf-motion-lite)::after {'));
+  // :root:is([a], [b]) 는 :is 안에서 가장 큰 것 하나만 센다 → (0,2,0). :root[data-motion-lite] 도 (0,2,0).
+  assert.deepEqual(specificity(':root[data-motion-lite] .x'), [0, 3, 0]);
+});
+
 test('플러그인: 동작 줄이기 블록은 바로 뒤에 같은 선언의 최소 짝, no-preference 블록은 최소에서 빠진다, 못 다루는 모양은 경고', async () => {
   const css = [
     '.a { animation: x 1s; }',
@@ -130,7 +154,7 @@ test('플러그인: 동작 줄이기 블록은 바로 뒤에 같은 선언의 �
   ].join('\n');
   const result = await postcss([motionMinimal()]).process(css, { from: 'x.css' });
   const out = result.css.replace(/\s+/g, ' ');
-  assert.ok(out.includes(`} .a${ON}, .b${ON}::after { animation: x 200ms forwards !important; opacity: 1; } .c {`), out);
+  assert.ok(out.includes(`} .a${ON}, ${ON} .a, .b${ON}::after, ${ON} .b::after { animation: x 200ms forwards !important; opacity: 1; } .c {`), out);
   assert.ok(out.includes(`.d:hover${OFF} { transform: scale(1.02); }`), out);
   assert.equal(result.warnings().length, 2, '중첩 @keyframes·섞인 조건은 경고');
 });
@@ -163,7 +187,7 @@ test('src 의 모든 CSS: 동작 줄이기 블록마다 같은 선언의 최소 
         for (const rule of rules) {
           while (sibling && sibling.type === 'comment') sibling = sibling.next();
           if (!sibling || sibling.type !== 'rule') { problems.push(`짝 없음: ${rule.selector}`); break; }
-          const expected = rule.selectors.map((s) => withCondition(s, ON));
+          const expected = rule.selectors.flatMap((s) => minimalMirrorSelectors(s));
           if (JSON.stringify(sibling.selectors) !== JSON.stringify(expected)) problems.push(`선택자 다름: ${rule.selector}`);
           if (JSON.stringify(decls(sibling)) !== JSON.stringify(decls(rule))) problems.push(`선언 다름: ${rule.selector}`);
           mirrored += 1;
@@ -204,7 +228,7 @@ test("'최소' 전역 규칙은 동작 줄이기 전역 규칙의 짝 하나뿐 
   let globalRule: Rule | undefined;
   index.root.walkRules((rule) => { if (!insideMedia(rule) && rule.selectors.includes(`*${ON}`)) globalRule = rule; });
   assert.ok(globalRule, 'index.css 전역 규칙의 최소 짝');
-  assert.deepEqual(globalRule!.selectors, [`*${ON}`, `*${ON}::before`, `*${ON}::after`]);
+  assert.deepEqual(globalRule!.selectors, [`*${ON}`, `${ON} *`, `*${ON}::before`, `${ON} *::before`, `*${ON}::after`, `${ON} *::after`]);
   assert.deepEqual(decls(globalRule!), [
     'animation-duration: 0.01ms !important',
     'animation-iteration-count: 1 !important',
@@ -212,7 +236,9 @@ test("'최소' 전역 규칙은 동작 줄이기 전역 규칙의 짝 하나뿐 
     'scroll-behavior: auto !important',
   ]);
   assert.deepEqual(specificity(`*${ON}`), [0, 0, 0]);
+  assert.deepEqual(specificity(`${ON} *`), [0, 0, 0]);
   assert.deepEqual(specificity(`*${ON}::after`), [0, 0, 1]);
+  assert.deepEqual(specificity(`${ON} *::after`), [0, 0, 1]);
 });
 
 /* 동작 줄이기에서 정적으로 남기는 정보 표시(9·5·16·14·20·13·6번) — '최소' 짝이 있고, 전역 0.01ms 규칙보다 특이도가 높다. */
@@ -241,13 +267,14 @@ test("정보 표시는 '최소'에서도 보인다: 동작 줄이기 정적 대�
     if (!built.has(info.file)) built.set(info.file, await build(info.file));
     const result = built.get(info.file)!;
     const target = withCondition(info.selector, ON);
+    const [, inside] = minimalMirrorSelectors(info.selector);
     let reduceHit = false;
     let minimalHit = false;
     result.root.walkRules((rule) => {
       const has = decls(rule).includes(info.decl);
       if (!has) return;
       if (insideMedia(rule) && rule.selectors.includes(info.selector)) reduceHit = true;
-      if (!insideMedia(rule) && rule.selectors.includes(target)) minimalHit = true;
+      if (!insideMedia(rule) && rule.selectors.includes(target) && rule.selectors.includes(inside)) minimalHit = true;
     });
     assert.ok(reduceHit, `${info.what}: 동작 줄이기 규칙(${info.selector} { ${info.decl} })`);
     assert.ok(minimalHit, `${info.what}: '최소' 짝`);
@@ -262,7 +289,7 @@ test("정보 표시는 '최소'에서도 보인다: 동작 줄이기 정적 대�
 
 test("'가볍게' 이상: 첫 화면 숨쉬기 3종도 멈추고, 헤더 자동 받아오기 체크 숨쉬기도 생략", () => {
   const css = read('src/styles/motion-foundation.css').replace(/\/\*[\s\S]*?\*\//g, '');
-  const lite = ":root:is([data-motion='lite'], [data-motion='minimal'])";
+  const lite = ':root[data-motion-lite]';
   const at = css.indexOf(`${lite} .bf-entry-breathe`);
   assert.ok(at >= 0, '첫 화면 숨쉬기');
   const block = css.slice(at, css.indexOf('}', at));

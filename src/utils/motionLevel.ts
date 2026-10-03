@@ -7,8 +7,8 @@
    - 'minimal'(최소) : 윈도우 '애니메이션 효과 끄기'(동작 줄이기)와 같게.
 
    값은 preferences.json 의 motionLevel 에 저장하고, 창마다 document.documentElement.dataset.motion 에 적는다.
-   CSS 는 html[data-motion='lite'|'minimal'] 로, React 는 useMotionPref() 로, React 밖은 prefersReducedMotion()
-   (src/utils/motion.ts) 으로 읽는다.
+   CSS 는 html[data-motion-lite]('가볍게' 이상)·html[data-motion-minimal]('최소') 로, React 는 useMotionPref() 로,
+   React 밖은 prefersReducedMotion()(src/utils/motion.ts) 으로 읽는다.
 
    node --test 가 그대로 import 하도록 런타임 의존이 없다(@/ 별칭·외부 패키지 X).
    ═══════════════════════════════════════════════════════════════ */
@@ -69,7 +69,15 @@ const listeners = new Set<Listener>();
 function writeDom(level: MotionLevel): void {
   try {
     if (typeof document !== 'undefined' && document.documentElement) {
-      document.documentElement.dataset.motion = level;
+      const data = document.documentElement.dataset;
+      data.motion = level;
+      // CSS 용 '있다/없다' 표시: data-motion-lite('가볍게' 이상 — '최소' 포함) · data-motion-minimal('최소').
+      // 브라우저는 조상에 어떤 속성 '이름'이 있는지로 규칙을 미리 거르므로(값은 못 본다), 모든 요소에 걸리는
+      // '가볍게'·'최소' 규칙이 기본일 때는 바로 걸러진다(최종 성능 측정 지적 — scripts/postcss-motion-minimal.cjs).
+      if (level === 'full') delete data.motionLite;
+      else data.motionLite = '';
+      if (level === 'minimal') data.motionMinimal = '';
+      else delete data.motionMinimal;
     }
   } catch {
     // 문서가 없는 환경(테스트·메인 프로세스)
@@ -147,6 +155,31 @@ export function motionLevelFromBroadcast(payload: unknown, self?: MotionLevelBro
     return null;
   }
   return normalizeMotionLevel(message.motionLevel);
+}
+
+/**
+ * 움직임 설정 저장(파일 읽기 → 쓰기 → 방송)을 한 줄로 세운다(코덱스 지적: 빠르게 두 번 고르면 두 저장이 엇갈려,
+ * 늦게 끝난 옛 저장이 새 값 뒤에 파일·다른 창을 옛 값으로 되돌렸다).
+ * - 앞 저장이 끝난 뒤에 다음 저장을 시작한다(앞 저장이 실패해도 줄은 이어진다).
+ * - 차례가 왔을 때 더 새 요청이 이미 들어와 있으면 그 저장은 건너뛴다 — 새 요청이 쓰고 방송한다.
+ * - run 은 isStale() 로 '그사이 더 새 요청이 들어왔는지'를 다시 볼 수 있다(읽기를 기다린 뒤 쓰기 전에).
+ */
+export interface MotionLevelSaveQueue {
+  enqueue(seq: number, run: (isStale: () => boolean) => Promise<void>): Promise<void>;
+}
+
+export function createMotionLevelSaveQueue(): MotionLevelSaveQueue {
+  let tail: Promise<void> = Promise.resolve();
+  let latest = 0;
+  return {
+    enqueue(seq, run) {
+      if (seq > latest) latest = seq;
+      const isStale = () => seq < latest;
+      const job = tail.then(() => (isStale() ? undefined : run(isStale)));
+      tail = job.catch(() => undefined);
+      return job;
+    },
+  };
 }
 
 /* ─── OS '동작 줄이기' ─────────────────────────────────────────── */

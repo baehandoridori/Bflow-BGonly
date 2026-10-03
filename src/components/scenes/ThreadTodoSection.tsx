@@ -83,8 +83,12 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
     return () => { mountedRef.current = false; };
   }, []);
 
+  const draftTooLong = threadTodoCharCount(sanitizeThreadTodoText(draft)) > THREAD_TODO_TEXT_MAX;
+
   // 구현 후 리뷰: 목록이 늦게 채워지거나 펼치면 섹션이 커지고, 바로 아래 댓글 목록은 그만큼 아래에서 잘린다.
   //   스크롤 의도(맨 아래 유지·안 읽은 댓글 이동)는 댓글 패널이 알므로, 여기서는 커진 높이만 그리기 전에 알린다.
+  //   높이를 바꾸는 값(목록·불러오는 중·안내 줄·접힘·글자 수 안내)이 바뀔 때만 잰다 — 렌더마다 재면 댓글 패널이
+  //   다시 그려질 때마다(씬 넘김 등) 레이아웃을 그 자리에서 강제한다(최종 성능 측정 지적).
   useLayoutEffect(() => {
     const height = sectionRef.current?.offsetHeight ?? 0;
     const prev = heightRef.current;
@@ -93,7 +97,7 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
     if (firstLoad) firstLoadSeenRef.current = true;
     const firstLoadAfterMs = firstLoad ? performance.now() - mountedAtRef.current : null;
     if (prev !== null && height > prev) onHeightGrowRef.current?.(height - prev, firstLoadAfterMs);
-  });
+  }, [items, loading, notice, collapsed, draftTooLong]);
 
   const load = useCallback(async () => {
     if (inFlightRef.current > 0) return; // 뮤테이션 중엔 그 finally 가 대신 읽는다 — 낙관 상태를 중간에 덮지 않는다
@@ -229,7 +233,6 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
 
   const openCount = items.filter((r) => r.done_at == null).length;
   const draftValid = isValidThreadTodoText(sanitizeThreadTodoText(draft));
-  const draftTooLong = threadTodoCharCount(sanitizeThreadTodoText(draft)) > THREAD_TODO_TEXT_MAX;
 
   return (
     <section ref={sectionRef} aria-label="팀 할 일" className="shrink-0 border-b border-bg-border px-3 pb-2">
