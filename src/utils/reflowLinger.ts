@@ -164,3 +164,43 @@ export function holdLingeringItems<T>(
   }
   return { items, leaving };
 }
+
+/* ─── 열린 상세 창의 이전/다음 목록 (검증 지적 acc-scene-flow-5) ─── */
+
+/** 열린 상세 창이 마지막으로 목록에서 보였던 자리. */
+export interface OpenDetailSlot {
+  key: string;
+  index: number;
+}
+
+export interface OpenDetailNav<T> {
+  /** 이전/다음·'n / m'·점(도트)에 쓰는 목록 — 열린 씬이 빠졌으면 그 자리에 끼워 둔 사본. */
+  list: readonly T[];
+  /** 열린 씬의 순번. 목록에서 찾지 못하고 기억한 자리도 없으면 -1. */
+  index: number;
+  /** 다음 렌더에 넘길 기억(slot). */
+  slot: OpenDetailSlot | null;
+}
+
+/**
+ * 상세 창이 보여 주는 씬은 창이 닫힐 때까지 이전/다음 목록에 남긴다.
+ * 필터를 켠 채 창 안에서 체크하면 그 씬은 머무름이 끝나는 순간(또는 단일 창이면 체크하는 순간) 필터 목록에서 빠진다.
+ * 그러면 순번이 -1 이 되어 화살표·'n / m'·점이 사라지고(단일 창은 ←/→ 먹통) 사용자가 아무것도 안 했는데 창이 바뀌었다.
+ * 마지막으로 보였던 자리(slot)에 그 씬을 끼워 두면 → 는 원래 다음 씬, ← 는 원래 이전 씬으로 간다.
+ * - 처음부터 목록에 없던 씬(알림으로 연 필터 밖 씬 등)은 기억한 자리가 없으니 예전처럼 -1.
+ * - 다른 씬으로 넘기면 그 씬 기준으로 다시 기억한다(빠졌던 씬은 목록에서 자연히 사라진다).
+ */
+export function keepOpenDetailInList<T>(
+  list: readonly T[],
+  openItem: T | null,
+  keyOf: (item: T) => string,
+  slot: OpenDetailSlot | null,
+): OpenDetailNav<T> {
+  if (openItem === null) return { list, index: -1, slot: null };
+  const key = keyOf(openItem);
+  const index = list.findIndex((item) => keyOf(item) === key);
+  if (index >= 0) return { list, index, slot: { key, index } };
+  if (!slot || slot.key !== key) return { list, index: -1, slot: null };
+  const at = Math.min(Math.max(0, slot.index), list.length);
+  return { list: [...list.slice(0, at), openItem, ...list.slice(at)], index: at, slot };
+}

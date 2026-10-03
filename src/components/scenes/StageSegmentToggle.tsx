@@ -4,6 +4,7 @@ import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { Department, Scene, Stage } from '@/types';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { cn } from '@/utils/cn';
+import { shouldSkipClickAfterPointer } from '@/utils/pointerClickGuard';
 import { useStageLabelDisplayMode } from './useStageLabelDisplayMode';
 import { useStageFillSteps } from './useStageFillSteps';
 import { StageRollbackFlash, useStageSaveStatus } from './StageSaveStatus';
@@ -37,6 +38,7 @@ export function StageSegmentToggle({
   dataContinuityTarget,
 }: StageSegmentToggleProps) {
   const cfg = DEPARTMENT_CONFIGS[department];
+  // pointerdown 이 이미 토글했고 그 누름의 click 이 아직 안 왔는지 — 타이머 없이 누름과 click 을 짝지운다(acc-scene-flow-6).
   const pointerHandledRef = useRef(false);
   const { modeOf, setNode } = useStageLabelDisplayMode(cfg.stageLabels, compact, iconDisplay === 'auto');
   // 움직임 폴리싱 6번: 여러 칸이 한 번에 바뀌면 LO→PNG(켤 때)·PNG→LO(끌 때) 순서로 40ms 씩 이어서.
@@ -79,14 +81,11 @@ export function StageSegmentToggle({
               e.stopPropagation();
               pointerHandledRef.current = true;
               onToggle(stage);
-              window.setTimeout(() => {
-                pointerHandledRef.current = false;
-              }, 600);
             }}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              if (pointerHandledRef.current) {
+              if (shouldSkipClickAfterPointer(pointerHandledRef.current, e.detail)) {
                 pointerHandledRef.current = false;
                 return;
               }

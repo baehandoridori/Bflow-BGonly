@@ -160,6 +160,10 @@ export interface UnifiedSceneDetailModalProps {
   onDockPromote?: () => void;
   /** 바깥(#화·#파트 점프 등)에서 닫으라는 신호. 값이 바뀌면 Esc·바깥 클릭과 같은 부드러운 닫힘을 거친다. */
   closeRequestToken?: number;
+  /** 가라앉기(닫힘)를 시작한 순간. 부모는 이때부터 onClose 까지 새 열기 요청을 미룬다(닫히는 창이 새 대상을 지우지 않게). */
+  onCloseStart?: () => void;
+  /** 아래 점(도트)으로 여러 칸 떨어진 씬에 한 번에 간다(목록 순번). 없으면 점은 한 칸씩만 넘긴다. */
+  onNavigateTo?: (index: number) => void;
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -204,11 +208,18 @@ export function UnifiedSceneDetailModal({
   onDockToggleSide,
   onDockPromote,
   closeRequestToken,
+  onCloseStart,
+  onNavigateTo,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
   const { reduce } = useMotionPref();
   const modalMotion = sceneModalMotion(reduce);
+  // 카드에서 이어 열렸는지(연결 확대)는 마운트할 때 한 번만 정한다(검증 지적 acc-comments-notify-1·acc-motion-settings-1).
+  //   확대가 끝나면 부모가 출발 카드(continuitySourceElement)를 비운다. 렌더마다 다시 계산하면 그 순간 본체 props 가
+  //   떠오르기(transform 목표)로 바뀌어, framer 가 'none' 을 scale(0) 으로 읽고 0.18초 동안 '펑' 다시 커졌다.
+  //   고정해 두면 확대가 끝난 뒤에도 본체는 투명도 1 그대로다(창 열림 움직임은 연결 확대 하나만 돈다).
+  const [continuityOpen] = useState(() => !!continuitySourceElement && !reduce);
 
   // ── 부드러운 닫힘 (움직임 폴리싱 14번) ──
   // 부모가 바로 언마운트하면 안쪽 AnimatePresence 의 exit 이 돌지 않는다(framer 10 은 바깥 퇴장 신호가 안쪽 경계를
@@ -220,9 +231,11 @@ export function UnifiedSceneDetailModal({
   const closedRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const onCloseStartRef = useRef(onCloseStart);
   useLayoutEffect(() => {
     onCloseRef.current = onClose;
-  }, [onClose]);
+    onCloseStartRef.current = onCloseStart;
+  }, [onClose, onCloseStart]);
   const finishClose = useCallback(() => {
     if (!closingRef.current || closedRef.current) return;
     closedRef.current = true;
@@ -235,6 +248,7 @@ export function UnifiedSceneDetailModal({
     }
     if (closingRef.current) return;
     closingRef.current = true;
+    onCloseStartRef.current?.();
     // 가라앉는 0.16초 동안 창 안 클릭은 막는다(뒤 막은 클릭을 받아 흘려보내지 않는다 — 연타 무시).
     if (shellRef.current) shellRef.current.style.pointerEvents = 'none';
     setClosing(true);
@@ -486,12 +500,15 @@ export function UnifiedSceneDetailModal({
 
   // ── 씬 넘김: 카드가 왼쪽·오른쪽으로 지나간다 (움직임 폴리싱 14번, 한솔 결정 2026-10-03) ──
   // 창 틀(머리줄·탭·댓글 패널)은 제자리, 본문만 지나가고 씬 번호·제목은 같은 방향으로 짧게 굴러 바뀐다.
-  // 키보드/버튼/도트 모두 handleNavigate 경유.
+  // 키보드/버튼은 handleNavigate, 도트는 목표 순번(onNavigateTo)으로 한 번에.
+  // 씬 정체는 목록 순번이 아니라 mergedKey 로 본다(검증 지적 acc-scene-flow-5) — 머무름이 끝나거나 팀원 변경으로
+  // 순번이 바뀌어도 같은 씬이면 본문을 다시 그리지 않는다(스크롤·쓰던 내용 유지, 넘김도 돌지 않음).
+  const sceneIdentity = merged.mergedKey || merged.sceneId;
   const flipViewportRef = useRef<HTMLDivElement>(null);
   const flipLayerRef = useRef<HTMLDivElement>(null);
   const flipTitleRef = useRef<HTMLDivElement>(null);
   const flip = useSceneFlip({
-    identity: `${currentMergedIndex}:${merged.sceneId}`,
+    identity: sceneIdentity,
     reduce,
     layerRef: flipLayerRef,
     viewportRef: flipViewportRef,
@@ -816,7 +833,7 @@ export function UnifiedSceneDetailModal({
   // modal: 떠오르기는 transform 문자열(합성 스레드). 카드에서 이어 열면(연결 확대) SceneContinuityTransition 이
   //   같은 요소를 WAAPI 로 움직이므로 framer 는 손대지 않는다(동작 줄이기면 연결 확대를 건너뛰고 투명도만).
   //   닫기는 본체 대신 창 묶음(본체+댓글 패널)에 shellExit 를 건다.
-  const continuityOpen = !!continuitySourceElement && !reduce;
+  //   연결 확대로 열렸는지(continuityOpen)는 마운트할 때 한 번만 정한다 — 위 선언 참고.
   const bodyMotionProps: MotionProps = dockMode !== 'modal'
     ? {
         initial: { opacity: 0, x: dockInitialX },
@@ -1052,7 +1069,7 @@ export function UnifiedSceneDetailModal({
                 <div aria-hidden className="sf-peek sf-peek--prev" />
                 <div aria-hidden className="sf-peek sf-peek--next" />
                   <div
-                    key={`body:${tab}:${currentMergedIndex}`}
+                    key={`body:${tab}:${sceneIdentity}`}
                     ref={flipLayerRef}
                     className={cn('h-full overflow-auto', tabShift !== null && 'sf-tab-fade')}
                     style={tabShift !== null ? ({ '--tab-dx': `${tabShift}px` } as CSSProperties) : undefined}
@@ -1203,12 +1220,15 @@ export function UnifiedSceneDetailModal({
                           const diff = i - currentMergedIndex;
                           if (diff === 0 || !onNavigate) return;
                           const dir = diff < 0 ? 'prev' : 'next';
-                          const steps = Math.abs(diff);
-                          // 여러 칸을 건너뛰어도 카드는 한 번만 넘긴다(마지막 칸에 도착할 때).
-                          flip.prepare(dir === 'next' ? 1 : -1, steps);
+                          // 여러 칸 떨어진 씬도 목표 순번으로 한 번에 가고 카드는 한 번만 넘긴다(검증 지적 acc-scene-flow-7).
+                          //   예전엔 onNavigate 를 칸 수만큼 불렀는데, 부모가 그 렌더의 순번을 닫아 두어 매번 같은 '다음'으로
+                          //   가서 한 칸만 움직이고 넘김도 돌지 않았다. 목표로 가는 길이 없으면 한 칸만 넘긴다.
                           setTabShift(null);
-                          for (let j = 0; j < steps; j++) {
-                            setTimeout(() => onNavigate(dir), j * 30);
+                          if (onNavigateTo) {
+                            flip.prepare(dir === 'next' ? 1 : -1);
+                            onNavigateTo(i);
+                          } else {
+                            handleNavigate(dir);
                           }
                         }}
                         className={cn(

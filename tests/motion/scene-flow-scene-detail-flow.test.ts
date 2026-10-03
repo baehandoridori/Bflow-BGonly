@@ -313,13 +313,18 @@ test('씬 넘김: 창 틀은 제자리(옛 통째 흔들림 제거), 본문 카�
     assert.match(src, /flip\.allowKey\(e\.repeat\)/);
     assert.match(src, /flip\.peek\('next'\)/);
     assert.match(src, /sf-peek sf-peek--next/);
-    // 도트로 여러 칸 건너뛰어도 카드는 한 번만 넘긴다
-    assert.match(src, /flip\.prepare\([^)]*,\s*(?:steps|currentSceneIndex - i|i - currentSceneIndex)\)/);
+    // 도트로 여러 칸 건너뛰어도 목표 순번으로 한 번에 가고 카드는 한 번만 넘긴다(검증 지적 acc-scene-flow-7 —
+    // 예전처럼 onNavigate 를 칸 수만큼 부르면 부모가 닫아 둔 순번 때문에 한 칸만 갔다).
+    assert.match(src, /if \(onNavigateTo\) \{\n\s+flip\.prepare\(dir === 'next' \? 1 : -1\);\n\s+onNavigateTo\(i\);/);
+    assert.doesNotMatch(src, /setTimeout\(\(\) => onNavigate\(/, '도트가 onNavigate 를 여러 번 부르지 않는다');
     // 도트 폭은 바로 바꾼다(되살아난 transition-all 이 폭을 0.3초 늘리던 것)
     assert.doesNotMatch(src, /'rounded-full transition-all duration-300 cursor-pointer'/);
   }
-  // 통합 창: 씬·탭이 바뀌면 key 로 새로 그려 스크롤·안쪽 상태가 처음부터(예전과 같음)
-  assert.match(UNIFIED, /key=\{`body:\$\{tab\}:\$\{currentMergedIndex\}`\}\n\s+ref=\{flipLayerRef\}/);
+  // 통합 창: 씬·탭이 바뀌면 key 로 새로 그려 스크롤·안쪽 상태가 처음부터(예전과 같음).
+  // 씬은 목록 순번이 아니라 정체(mergedKey)로 본다 — 머무름이 끝나 순번이 바뀌어도 다시 그리지 않는다(acc-scene-flow-5).
+  assert.match(UNIFIED, /key=\{`body:\$\{tab\}:\$\{sceneIdentity\}`\}\n\s+ref=\{flipLayerRef\}/);
+  assert.match(UNIFIED, /const sceneIdentity = merged\.mergedKey \|\| merged\.sceneId;/);
+  assert.match(UNIFIED, /useSceneFlip\(\{\n\s+identity: sceneIdentity,/);
 });
 
 test('넘김 훅: 고스트는 transform·opacity 만(WAAPI), 끝나면 지우고, 들어오는 쪽은 fill backwards 라 transform 이 남지 않는다', () => {
