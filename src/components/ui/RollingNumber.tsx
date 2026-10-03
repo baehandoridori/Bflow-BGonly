@@ -223,10 +223,19 @@ function readStripCell(strip: HTMLElement, fallback: number): number {
   return Number.isFinite(ty) ? -ty / cellPx : fallback;
 }
 
+/** 굴러가는 중이면 지금 보이는 칸을 애니메이션 진행도(곡선 적용 뒤)로 계산한다 — DOM 을 읽지 않는다. 모르면 null. */
+function rollingCellNow(anim: Animation | null, roll: { from: number; to: number } | null): number | null {
+  if (!anim || !roll) return null;
+  const progress = anim.effect?.getComputedTiming().progress;
+  return typeof progress === 'number' && Number.isFinite(progress) ? roll.from + (roll.to - roll.from) * progress : null;
+}
+
 function RollColumn({ digit, mountFrom, dir }: { digit: number; mountFrom: number; dir: RollDirection }) {
   const stripRef = useRef<HTMLSpanElement>(null);
   const targetRef = useRef<number | null>(null);
   const animRef = useRef<Animation | null>(null);
+  /** 지금 굴리는 칸 범위(진행도로 보이는 자리를 계산할 때 쓴다). */
+  const rollRef = useRef<{ from: number; to: number } | null>(null);
   const dirRef = useRef(dir);
   dirRef.current = dir;
   const mountFromRef = useRef(mountFrom);
@@ -236,7 +245,13 @@ function RollColumn({ digit, mountFrom, dir }: { digit: number; mountFrom: numbe
     if (!strip) return;
     const prevTarget = targetRef.current ?? mountFromRef.current;
     // 굴러가는 중이면 지금 보이는 자리에서 이어 감는다(애니메이션을 지우기 전에 읽는다).
-    const visual = targetRef.current === null ? prevTarget : readStripCell(strip, prevTarget);
+    // 보이는 자리는 애니메이션 진행도로 계산하고, 멈춰 있으면 마지막 목표가 곧 보이는 자리다. 띠의 높이·계산된 transform 을
+    // 읽으면 레이아웃을 강제로 다시 계산해서 단계 클릭마다 카드 목록 전체를 다시 쟀다(움직임 폴리싱 검증 지적 perf-6).
+    // 진행도를 얻지 못할 때만 띠를 읽는다.
+    const running = animRef.current?.playState === 'running';
+    const visual = targetRef.current === null || !running
+      ? prevTarget
+      : rollingCellNow(animRef.current, rollRef.current) ?? readStripCell(strip, prevTarget);
     const plan = planStripRoll(visual, prevTarget, digit, dirRef.current);
     targetRef.current = plan.to;
     const toTransform = cellTransform(plan.to);
@@ -248,6 +263,7 @@ function RollColumn({ digit, mountFrom, dir }: { digit: number; mountFrom: numbe
       [{ transform: cellTransform(plan.from) }, { transform: toTransform }],
       { duration: ROLL_MS, easing: EASE_CSS.out },
     );
+    rollRef.current = { from: plan.from, to: plan.to };
     // 언마운트 때 애니메이션을 따로 지우지 않는다 — 요소와 함께 사라지고, 개발 모드(StrictMode)의
     // '마운트 직후 한 번 떼었다 붙이기'에서 막 시작한 굴림이 지워지지 않게 한다(다시 붙을 때 지금 자리에서 이어 감는다).
   }, [digit]);

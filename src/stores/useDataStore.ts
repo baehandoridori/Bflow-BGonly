@@ -13,6 +13,7 @@ import { calcDashboardStats } from '@/utils/calcStats';
 import type { SyncKind } from '@/utils/syncQueue';
 import { defaultEpisodeTitle } from '@/shared/episodeTitle';
 import { loadCompositingStates as svcLoadCompositingStates } from '@/services/supabaseService';
+import { keepPendingSceneValues } from '@/services/sceneSaveRetry';
 
 /**
  * v1.30.0: 컴포지팅 단계 상태 Map 키 = `${episodeNumber}:${sceneId}`.
@@ -160,7 +161,8 @@ export const useDataStore = create<DataState>((set, get) => ({
   stats: calcDashboardStats([]),
   compositingStates: new Map<string, CompositingState>(),
 
-  setEpisodes: (episodes) => set(applyUpdate(get, episodes)),
+  // 받아오기 결과를 통째로 넣을 때, 저장을 다시 보내는 중인 내 값이 옛 서버 값에 덮이지 않게 다시 얹는다(움직임 폴리싱 20번).
+  setEpisodes: (episodes) => set(applyUpdate(get, keepPendingSceneValues(episodes))),
 
   episodeTitles: {},
   setEpisodeTitles: (titles) => set({ episodeTitles: titles }),
