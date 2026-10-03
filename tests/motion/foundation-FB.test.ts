@@ -465,7 +465,7 @@ test('설정 저장 줄: 빠르게 두 번 골라도 옛 저장이 새 값 뒤�
 
   const sync = read('src/services/motionLevelSync.ts');
   const body = sync.slice(sync.indexOf('export async function saveMotionLevel'));
-  assert.match(body, /await saveQueue\.enqueue\(seq, async \(isStale\) => \{\s*const existing = \(await loadPreferences\(\)\) \?\? \{\};[\s\S]*?if \(isStale\(\)\) return;\s*await savePreferences\(/, '읽은 뒤 쓰기 전에 낡은 요청을 버린다');
+  assert.match(body, /await saveQueue\.enqueue\(seq, async \(isStale\) => \{\s*const existing = \(await loadPreferences\(\)\) \?\? \{\};[\s\S]*?if \(isStale\(\)\) return;\s*const saved = await savePreferences\(/, '읽은 뒤 쓰기 전에 낡은 요청을 버린다');
 });
 
 test('설정 › 효과 맨 위에 움직임 3칸(기본·가볍게·최소)', () => {

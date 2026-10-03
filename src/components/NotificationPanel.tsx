@@ -57,6 +57,7 @@ import {
   NOTIFICATION_CLEAR_FADE_MS,
   NOTIFICATION_RESTORE_FADE_MS,
   markNotificationRestoreFade,
+  shownNotificationMarks,
   takeNotificationRestoreFade,
 } from '@/utils/undoDelete';
 
@@ -94,6 +95,13 @@ const panelSolidStyle: CSSProperties = {
   backdropFilter: 'none',
   WebkitBackdropFilter: 'none',
 };
+
+/** '전체 삭제'를 마친 뒤 — 옅어진 채 멈춰 있던 목록 상자를 풀고, 남은 줄(옅어지는 사이 새로 온 알림) 또는 '알림이 없습니다'를 옅게 띄운다. */
+function revealClearedList(fade: Animation | null, list: HTMLElement | null, reduce: boolean): void {
+  fade?.cancel();
+  if (list) list.style.pointerEvents = '';
+  animateEl(list, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION_MS.fast, easing: EASE_CSS.out }, reduce);
+}
 
 /** 알림 목록 안 움직이는 줄(낱개 줄·묶음·묶음 안 줄)의 지금 위치. */
 function measureNotificationRows(list: HTMLElement | null): NotificationRowPosition[] {
@@ -395,7 +403,7 @@ export function NotificationBell() {
 
 // ─── 드롭다운 패널 ───────────────────────────────────
 function NotificationDropdown() {
-  const { notifications, markAllAsRead, setPanelOpen, unreadCount, removeNotification } = useNotificationStore();
+  const { notifications, markAllAsRead, setPanelOpen, unreadCount } = useNotificationStore();
   const ref = useRef<HTMLDivElement>(null);
   const showDevTools = isDevPreviewNotificationToolsEnabled();
   const { reduce } = useMotionPref();
@@ -406,21 +414,29 @@ function NotificationDropdown() {
   const removingIdsRef = useRef(new Set<string>());
   const handleRemove = useCallback<RemoveNotificationRow>((id, row) => {
     if (removingIdsRef.current.has(id)) return;
+    // 누른 순간 보이던 그 알림만 지운다 — 밀려나는 사이 같은 알림에 새 내용이 오면(만든 시각이 바뀜) 지우지 않는다.
+    const { notifications: shown, activeUserId: userId } = useNotificationStore.getState();
+    const marks = shownNotificationMarks(shown.filter((n) => n.id === id));
+    if (marks.length === 0) return;
     removingIdsRef.current.add(id);
-    const commit = () => {
-      removingIdsRef.current.delete(id);
-      // 지우기 직전 위치를 잰다 — 지운 뒤(useLayoutEffect) 새 위치와 비교해 아래 줄을 되돌렸다 푼다.
-      rowShiftBeforeRef.current = reduce
-        ? null
-        : new Map(measureNotificationRows(listRef.current).map((position) => [position.key, position.top]));
-      removeNotification(id);
-    };
     const exit = animateEl(
       row,
       NOTIFICATION_ROW_EXIT_KEYFRAMES,
       { duration: NOTIFICATION_ROW_EXIT_MS, easing: EASE_CSS.in, fill: 'forwards' },
       reduce,
     );
+    const commit = () => {
+      removingIdsRef.current.delete(id);
+      // 지우기 직전 위치를 잰다 — 지운 뒤(useLayoutEffect) 새 위치와 비교해 아래 줄을 되돌렸다 푼다.
+      rowShiftBeforeRef.current = reduce
+        ? null
+        : new Map(measureNotificationRows(listRef.current).map((position) => [position.key, position.top]));
+      if (useNotificationStore.getState().removeShownNotifications(marks, userId).length > 0) return;
+      // 지우지 않았다(그사이 새 내용이 옴·이미 사라짐·계정 전환) — 목록이 그대로라 잰 위치는 버리고 밀려난 줄을 되돌린다.
+      rowShiftBeforeRef.current = null;
+      exit?.cancel();
+      if (row) row.style.pointerEvents = '';
+    };
     if (!exit || !row) {
       commit();
       return;
@@ -429,7 +445,7 @@ function NotificationDropdown() {
     row.style.pointerEvents = 'none';
     const duration = Number(exit.effect?.getTiming().duration) || NOTIFICATION_ROW_EXIT_MS;
     window.setTimeout(commit, duration);
-  }, [reduce, removeNotification]);
+  }, [reduce]);
 
   useLayoutEffect(() => {
     const before = rowShiftBeforeRef.current;
@@ -457,17 +473,30 @@ function NotificationDropdown() {
 
   // 움직임 폴리싱 20번: '전체 삭제' — 줄들이 0.15초에 옅어진 뒤 비우고, 오른쪽 아래에 '알림을 모두 지웠어요 · 되돌리기'.
   // 되돌리면 지운 알림이 그대로 돌아오고 줄들이 0.18초에 다시 나타난다. 창이 닫혀도 비우기는 끝까지 간다(타이머는 저장소만 건드린다).
+  // 지우는 것은 누른 순간 보이던 알림뿐이다(코덱스 2차 지적) — 옅어지는 사이 실시간으로 온 알림은 한 번도 보이지 못한 채
+  // 읽음 처리·삭제되면 안 된다. 그 알림은 남아 다시 나타나고, '되돌리기'도 실제로 지운 알림만 되살린다.
   const clearFadeRef = useRef<Animation | null>(null);
   const clearingRef = useRef(false);
+  /** 비우기를 마쳤다 — 다음 그림(목록이 바뀐 뒤)에서 옅어진 목록을 푼다. 남은 줄이 있어도 푼다. */
+  const clearCommittedRef = useRef(false);
   const handleClearAll = useCallback(() => {
     if (clearingRef.current) return;
+    const { notifications: shown, activeUserId: userId } = useNotificationStore.getState();
+    const marks = shownNotificationMarks(shown);
+    if (marks.length === 0) return;
     clearingRef.current = true;
     const commit = () => {
       clearingRef.current = false;
-      const state = useNotificationStore.getState();
-      const userId = state.activeUserId;
-      const removed = state.clearAll();
-      if (removed.length === 0) return;
+      // 옅어지는 중이었으면 목록이 바뀐 다음 그림(useLayoutEffect)에서 푼다.
+      clearCommittedRef.current = clearFadeRef.current !== null;
+      const removed = useNotificationStore.getState().removeShownNotifications(marks, userId);
+      if (removed.length === 0) {
+        // 지운 것이 없다(그사이 모두 사라짐·계정 전환) — 목록이 그대로라 다시 그려지지 않으니 여기서 푼다.
+        clearCommittedRef.current = false;
+        if (clearFadeRef.current) revealClearedList(clearFadeRef.current, listRef.current, reduce);
+        clearFadeRef.current = null;
+        return;
+      }
       showUndoToast({
         message: '알림을 모두 지웠어요',
         onUndo: () => {
@@ -496,12 +525,12 @@ function NotificationDropdown() {
 
   useLayoutEffect(() => {
     const list = listRef.current;
-    // 비운 뒤: 옅어진 채 멈춰 있던 목록 상자를 풀고 '알림이 없습니다'를 옅게 띄운다.
-    if (clearFadeRef.current && notifications.length === 0) {
-      clearFadeRef.current.cancel();
+    // 비운 뒤: 옅어진 채 멈춰 있던 목록 상자를 풀고 남은 줄(옅어지는 사이 새로 온 알림) 또는 '알림이 없습니다'를 옅게 띄운다.
+    // 옅어지는 동안 새 알림이 와서 다시 그려질 때는 풀지 않는다(아직 비우기 전).
+    if (clearFadeRef.current && clearCommittedRef.current) {
+      clearCommittedRef.current = false;
+      revealClearedList(clearFadeRef.current, list, reduce);
       clearFadeRef.current = null;
-      if (list) list.style.pointerEvents = '';
-      animateEl(list, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION_MS.fast, easing: EASE_CSS.out }, reduce);
       return;
     }
     // 되돌린 뒤(창이 열려 있으면): 줄들이 다시 나타난다.

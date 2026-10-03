@@ -295,7 +295,8 @@ test('알림 창: 전체 삭제 → 줄 옅어짐 뒤 비우고 되돌리기 카
   assert.doesNotMatch(panel, /onClick=\{clearAll\}/);
   const clear = bodyOf(panel, 'const handleClearAll = useCallback(() =>');
   assert.match(clear, /if \(clearingRef\.current\) return;/, '두 번 눌러도 한 번');
-  assert.match(clear, /const removed = state\.clearAll\(\);/);
+  // 누른 순간 보이던 알림만 지운다(코덱스 2차 지적 — tests/motion/fx3-misc-notification-clear.test.ts)
+  assert.match(clear, /const removed = useNotificationStore\.getState\(\)\.removeShownNotifications\(marks, userId\);/);
   assert.match(clear, /message: '알림을 모두 지웠어요',/);
   assert.match(clear, /markNotificationRestoreFade\(\);\s*useNotificationStore\.getState\(\)\.restoreNotifications\(removed, userId\);/);
   assert.match(clear, /\[\{ opacity: 1 \}, \{ opacity: 0 \}\],\s*\{ duration: NOTIFICATION_CLEAR_FADE_MS, easing: EASE_CSS\.in, fill: 'forwards' \}/);

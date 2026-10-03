@@ -3,6 +3,7 @@
  *
  * - 알림 '전체 삭제': 줄들이 0.15초에 옅어지고 빈 창이 된 뒤 오른쪽 아래에 '알림을 모두 지웠어요 · 되돌리기'.
  *   누르면 지운 알림이 그대로(읽음 표시까지) 돌아오고 줄들이 0.18초에 다시 나타난다. 로컬 목록만 되살린다.
+ *   지우는 것은 누른 순간 보이던 알림뿐이다 — 옅어지는 사이 실시간으로 온 알림은 남고, 되돌리기도 실제로 지운 알림만 되살린다.
  * - 댓글 휴지통: 말풍선이 오른쪽 12px 로 밀리며 0.15초에 사라지고, 아래 말풍선들이 그 자리로 0.22초에 올라온다.
  *   5초 동안 '댓글을 지웠어요 · 되돌리기'. 서버에서는 5초가 지나야 지운다. 그 사이 다른 씬으로 넘어가거나
  *   창을 닫으면(트레이로 숨기·최소화 포함) 기다리지 않고 바로 지운다.
@@ -101,6 +102,41 @@ export function createUndoWindow(options: UndoWindowOptions): UndoWindow {
       return outcome;
     },
   };
+}
+
+/* ─── 알림 지우기 대상 — 누른 순간 보이던 알림 ─────────────────── */
+
+/**
+ * 지우기(한 줄·전체 삭제)를 누른 순간 보이던 알림 하나 — id 와 만든 시각.
+ * 같은 id 에 새 내용이 오면(이모지 반응이 늘어 맨 위로 다시 올라옴 등) 만든 시각이 바뀌므로, 그 알림은 '아직 못 본 새 알림'으로 친다.
+ */
+export interface ShownNotificationMark {
+  id: string;
+  createdAt: string;
+}
+
+/** 누른 순간의 목록에서 지울 대상 표시를 뜬다. */
+export function shownNotificationMarks(list: readonly { id: string; createdAt: string }[]): ShownNotificationMark[] {
+  return list.map(({ id, createdAt }) => ({ id, createdAt }));
+}
+
+/**
+ * 지우기 확정(줄이 사라지는 움직임이 끝난 뒤) — 지금 목록을 '누른 순간 보이던 알림'(removed)과 나머지(kept)로 가른다.
+ * 그 사이 실시간으로 새로 온 알림, 같은 id 로 새 내용이 온 알림(만든 시각이 바뀜)은 kept — 보지도 못한 채 읽음 처리·삭제되지 않게.
+ * 그 사이 이미 사라진 알림은 어느 쪽에도 없다(되돌리기로 되살리지 않는다). 두 목록 모두 지금 순서를 지킨다.
+ */
+export function splitShownNotifications<T extends { id: string; createdAt: string }>(
+  current: readonly T[],
+  marks: readonly ShownNotificationMark[],
+): { kept: T[]; removed: T[] } {
+  const shownAt = new Map(marks.map((mark) => [mark.id, mark.createdAt]));
+  const kept: T[] = [];
+  const removed: T[] = [];
+  for (const item of current) {
+    if (shownAt.has(item.id) && shownAt.get(item.id) === item.createdAt) removed.push(item);
+    else kept.push(item);
+  }
+  return { kept, removed };
 }
 
 /* ─── 알림 '전체 삭제' 되돌리기 ───────────────────────────────── */

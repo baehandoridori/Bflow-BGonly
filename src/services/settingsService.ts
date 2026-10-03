@@ -213,11 +213,21 @@ export async function loadPreferences(): Promise<UserPreferences | null> {
   return null;
 }
 
-export async function savePreferences(prefs: UserPreferences): Promise<void> {
+/**
+ * 파일에 저장했으면 true. 실패는 예전처럼 기록만 하고 넘어간다 — 결과를 보지 않는 기존 호출처는 그대로다.
+ * 결과가 필요한 곳(움직임 설정: 실패하면 다른 창에 알리지 않고 되돌린다)만 false 를 본다.
+ */
+export async function savePreferences(prefs: UserPreferences): Promise<boolean> {
   try {
-    await window.electronAPI.writeSettings(PREFERENCES_FILE, prefs);
+    const written = await window.electronAPI.writeSettings(PREFERENCES_FILE, prefs);
+    if (written === false) {
+      console.error('[설정] 환경설정 저장 실패: 파일에 쓰지 못함');
+      return false;
+    }
+    return true;
   } catch (err) {
     console.error('[설정] 환경설정 저장 실패:', err);
+    return false;
   }
 }
 
