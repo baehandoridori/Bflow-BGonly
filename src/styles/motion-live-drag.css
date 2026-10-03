@@ -155,6 +155,13 @@
   font-size: 10.5px;
 }
 
+/* 고정 머리줄과 맞닿은 줄(맨 위 줄·스크롤 중 머리줄 바로 아래 줄)은 위쪽에 걸면 머리줄 밑에 가린다
+   — 칸 아래쪽에 건다(SceneRemoteFlash 가 붙는 순간 한 번 재서 정한다). */
+.scene-remote-tag.scene-remote-tag--row.is-below {
+  top: auto;
+  bottom: -11px;
+}
+
 /* 담당자 카드 — 카드(relative isolate) 바탕 바로 위, 글자 아래에 깔리는 층. */
 .assignee-flash {
   position: absolute;

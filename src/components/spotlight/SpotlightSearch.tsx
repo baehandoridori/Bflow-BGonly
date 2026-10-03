@@ -110,6 +110,10 @@ export function SpotlightSearch() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  /** 마지막 포인터 위치 — 키보드로 목록이 스크롤돼 커서 밑 줄만 바뀐 것(같은 자리)은 무시한다. */
+  const pointerAtRef = useRef<{ x: number; y: number } | null>(null);
+  /** ↓·↑ 로 옮기는 중 — 포인터 위치를 아직 모르면 처음 들어온 이동은 위치만 적고 고르지 않는다. */
+  const keyboardNavRef = useRef(false);
 
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
@@ -645,9 +649,11 @@ export function SpotlightSearch() {
     (e: React.KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        keyboardNavRef.current = true;
         setSelectedIndex((prev) => Math.min(prev + 1, flatResults.length - 1));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        keyboardNavRef.current = true;
         setSelectedIndex((prev) => Math.max(prev - 1, 0));
       } else if (e.key === 'Enter' && flatResults[selectedIndex]) {
         e.preventDefault();
@@ -761,7 +767,15 @@ export function SpotlightSearch() {
                             data-idx={idx}
                             data-slide-key={idx}
                             onClick={item.action}
-                            onMouseEnter={() => setSelectedIndex(idx)}
+                            // 마우스를 실제로 움직였을 때만 그 줄을 고른다. ↓·↑ 로 목록이 스크롤되면 가만히 있는 커서 밑으로
+                            // 다른 줄이 들어오는데, 그걸로 키보드 선택을 덮어쓰면 강조 막대가 앞뒤로 튄다.
+                            onMouseMove={(e) => {
+                              const last = pointerAtRef.current;
+                              pointerAtRef.current = { x: e.clientX, y: e.clientY };
+                              if (last ? last.x === e.clientX && last.y === e.clientY : keyboardNavRef.current) return;
+                              keyboardNavRef.current = false;
+                              setSelectedIndex(idx);
+                            }}
                             className={cn(
                               // 선택 배경·왼쪽 막대는 위의 미끄러지는 강조 막대가 맡는다(마우스를 올리면 그 줄이 선택된다).
                               'relative w-full flex items-center gap-3 px-5 py-2.5 text-left cursor-pointer',

@@ -413,7 +413,9 @@ export function EventQuickEdit({
           width: 340,
           maxHeight: 'calc(100vh - 32px)',
           overflowY: 'auto',
-          background: 'rgb(var(--color-bg-card) / 0.95)',
+          // 흐림이 없어 반투명이면 뒤 날짜·막대가 또렷한 잔상으로 비친다(95% 는 물론 98.5% 에서도 숫자가 보였다).
+          // 입력칸이 많은 창이라 카드색 그대로 불투명하게 칠한다(바탕 C).
+          background: 'rgb(var(--color-bg-card))',
           borderRadius: 12,
           boxShadow: '0 16px 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.28))',
         }}

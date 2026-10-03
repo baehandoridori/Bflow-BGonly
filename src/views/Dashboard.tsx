@@ -128,8 +128,10 @@ function DashboardPlexus() {
   // 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다. 멈춘 동안 색·모양 설정이 바뀌면 한 장을 다시 그린다.
   const themeId = useAppStore((s) => s.themeId);
   const customThemeColors = useAppStore((s) => s.customThemeColors);
+  // 'Bflow.' 첫 화면 덮개 아래에 미리 그려질 때는 덮개가 걷힐 때까지 첫 장만 그리고 쉰다(바탕 C).
   const { loopRef, loopOptions } = useBackgroundLoopGate(
     `${themeId}|${customThemeColors ? JSON.stringify(customThemeColors) : ''}|${plexusSettings.glowIntensity}|${plexusSettings.connectionDist}`,
+    { holdUnderEntryCurtain: true },
   );
 
   // 커스텀 설정 ref (애니메이션 루프 재시작 없이 즉시 반영, 대시보드 기본값 대비 비례 스케일)
@@ -295,6 +297,7 @@ function DashboardBackgroundArt() {
     return (
       <StarNestBackground
         enabled={plexusSettings.dashboardEnabled}
+        holdUnderEntryCurtain
         className="z-0"
         settings={plexusSettings.dashboardStarNest ?? plexusSettings.starNest}
         style={{
@@ -312,6 +315,7 @@ function DashboardBackgroundArt() {
     return (
       <BflowStarNestBackground
         enabled={plexusSettings.dashboardEnabled}
+        holdUnderEntryCurtain
         className="z-0"
         settings={plexusSettings.dashboardBflowStarNest ?? plexusSettings.bflowStarNest}
         style={{

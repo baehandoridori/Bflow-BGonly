@@ -576,6 +576,7 @@ export function CalendarGrid({
   calendarNameById,
   landing = null,
   bornEventIdentities,
+  bornEventAliases,
   createGhostLeaving = false,
 }: {
   weeks: Date[][];
@@ -618,6 +619,8 @@ export function CalendarGrid({
   landing?: LandingMark | null;
   /** 방금 만든 일정 — 굳어지듯 진해지며 한 번 빛난다. */
   bornEventIdentities?: ReadonlySet<string>;
+  /** 방금 만든 일정의 저장 id 키 → 낙관적 id 키. 저장이 끝나 id 가 바뀌어도 같은 막대(key)로 이어 그린다. */
+  bornEventAliases?: ReadonlyMap<string, string>;
   /** '만들기'를 눌렀다 — 유리 막대가 녹아 사라진다(저장에 실패하면 다시 보인다). */
   createGhostLeaving?: boolean;
 }) {
@@ -881,10 +884,14 @@ export function CalendarGrid({
               {bars.filter((b) => b.row < maxVisibleBars).map((bar) => {
                 const barIsDragging = isDraggedEvent(bar.event);
                 const identityKey = calendarEventIdentityKey(bar.event);
+                // 방금 만든 일정은 저장 응답으로 id 가 바뀌어도 낙관적 키로 그린다 — 막대가 다시 붙으면 굳어짐·빛 링이 끊긴다.
+                // (낙관적 행이 아직 따로 남아 있으면 key 가 겹치므로 별칭을 쓰지 않는다. 별칭은 새 일정 몇 개뿐이라 가볍다.)
+                const alias = bornEventAliases?.get(identityKey);
+                const barKey = alias && !events.some((event) => calendarEventIdentityKey(event) === alias) ? alias : identityKey;
                 return (
                   <EventBarChip
                     // 칸(col)은 key 에 넣지 않는다 — 넣으면 칸을 넘을 때마다 새로 붙어 미끄러지지 못하고 순간이동한다.
-                    key={`${identityKey}-w${wi}`}
+                    key={`${barKey}-w${wi}`}
                     bar={bar}
                     columnCount={columnCount}
                     onClick={onEventClick}
@@ -893,7 +900,7 @@ export function CalendarGrid({
                     slideKey={barIsDragging && draggedSlideKey ? `${draggedSlideKey}#${dragSegmentByWeek[wi]}` : undefined}
                     slideRegistry={barIsDragging ? slideRegistryRef.current.map : undefined}
                     landingToken={landing && landing.key === identityKey ? landing.seq : null}
-                    isBorn={bornEventIdentities?.has(identityKey) === true}
+                    isBorn={bornEventIdentities?.has(barKey) === true}
                     hoverStore={hoverStore}
                     onContextMenu={onEventContextMenu}
                     tagNameById={tagNameById}

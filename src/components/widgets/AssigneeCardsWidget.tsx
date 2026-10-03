@@ -50,7 +50,7 @@ export function AssigneeCardsWidget() {
                 <span className="relative text-xs text-text-secondary">
                   {a.completedScenes}/{a.totalScenes}씬
                   {flash && flash.delta > 0 && (
-                    <span key={`delta-${flash.seq}`} className="assignee-delta" aria-hidden>+{flash.delta}씬</span>
+                    <span key={`delta-${flash.deltaSeq}`} className="assignee-delta" aria-hidden>+{flash.delta}씬</span>
                   )}
                 </span>
                 <span className={`text-sm font-bold ${color}`}>{pct}%</span>

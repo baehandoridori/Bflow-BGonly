@@ -898,6 +898,13 @@ export function ScheduleView() {
         onPersistedIdentity: (identity) => {
           if (!hasSameCalendarEventIdentity(identity, optimisticIdentity)) {
             guardPersistedCreatedEvent(ev, identity);
+            // 저장이 끝나 id 가 서버 id 로 바뀌어도 같은 막대로 이어 그린다 — 다시 붙으면 굳어짐·빛 링이
+            // 중간에 끊기고 막대가 툭 진해진다(16번). 별칭은 이 화면이 떠 있는 동안 남긴다(만든 일정 수만큼, 작다).
+            const persistedKey = calendarEventIdentityKey(identity);
+            const optimisticKey = calendarEventIdentityKey(optimisticIdentity);
+            setBornEventAliases((previous) => (
+              previous.get(persistedKey) === optimisticKey ? previous : new Map(previous).set(persistedKey, optimisticKey)
+            ));
           }
         },
       });
@@ -1516,6 +1523,8 @@ export function ScheduleView() {
   const [dropLanding, setDropLanding] = useState<LandingMark | null>(null);
   const [bornEventIdentities, setBornEventIdentities] = useState<ReadonlySet<string>>(() => new Set());
   const [createGhostLeaving, setCreateGhostLeaving] = useState(false);
+  /** 방금 만든 일정의 저장 id 키 → 낙관적 id 키. 막대가 저장 응답 순간 다시 붙지 않게 같은 key 로 이어 그린다. */
+  const [bornEventAliases, setBornEventAliases] = useState<ReadonlyMap<string, string>>(() => new Map());
   const cancelPosition = () => { pendingPositionRef.current = null; setPendingPosition(null); };
   const confirmPosition = async (scope: CalendarRecurrenceScope) => {
     const request = pendingPositionRef.current; if (!request) return;
@@ -1898,6 +1907,7 @@ export function ScheduleView() {
                 calendarNameById={calendarNameById}
                 landing={dropLanding}
                 bornEventIdentities={bornEventIdentities}
+                bornEventAliases={bornEventAliases}
                 createGhostLeaving={createGhostLeaving}
                 onWheel={(e) => {
                   if (viewMode !== 'month') return;

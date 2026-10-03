@@ -286,12 +286,15 @@ export function StarNestBackground({
   fixed = true,
   settings: settingsOverride,
   style,
+  holdUnderEntryCurtain = false,
 }: {
   enabled?: boolean;
   className?: string;
   fixed?: boolean;
   settings?: Partial<StarNestSettings> | null;
   style?: CSSProperties;
+  /** 대시보드 배경 — 'Bflow.' 첫 화면 덮개 아래에 미리 그려지는 동안은 첫 장만 그리고 쉰다. 로그인 배경은 false. */
+  holdUnderEntryCurtain?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const storeSettings = useAppStore((s) => normalizeStarNestSettings(s.plexusSettings.starNest));
@@ -303,7 +306,7 @@ export function StarNestBackground({
   colorModeRef.current = colorMode;
   // 동작 줄이기·움직임 '가볍게' 이상이면 한 장만 그리고 멈춘다. 멈춘 동안 설정·밝기 모드가 바뀌면 한 장을 다시 그린다.
   // 초당 30장까지만, 다른 프로그램을 쓰는 동안·위젯을 끄는 동안은 서서히 멈춘다.
-  const { loopRef, loopOptions } = useBackgroundLoopGate(`${colorMode}|${JSON.stringify(settings)}`);
+  const { loopRef, loopOptions } = useBackgroundLoopGate(`${colorMode}|${JSON.stringify(settings)}`, { holdUnderEntryCurtain });
 
   useEffect(() => {
     if (!enabled) return;
