@@ -10,7 +10,7 @@ import {
   type AssigneeFlash,
 } from '../../src/components/widgets/assigneeFlash.ts';
 import { SCENE_FLASH_MERGE_MS } from '../../src/stores/sceneFlashStore.ts';
-import { GHOST_LEAVE_MS, createGhostLingerOnChange } from '../../src/utils/dragLanding.ts';
+import { GHOST_LEAVE_MS, GHOST_LINGER_MS, createGhostLingerOnChange } from '../../src/utils/dragLanding.ts';
 
 /* 움직임 폴리싱 검증 지적 수정 (갈래 fx-misc):
    acc-dash-1 · acc-dash-3 · review-correctness-3 · acc-live-drag-view-2/3/4 · acc-motion-settings-4 · acc-chrome-popups-2 */
@@ -193,13 +193,14 @@ test("'만들기': 저장이 녹는 시간보다 빨리 끝나 창이 닫혀도 
   has('const leavingRange: GhostRange | null = createGhostLeaving ? createRange ?? null : null;');
   // 범위가 사라지는 바로 그 렌더에서 정한다(효과에서 정하면 한 번 떼었다 다시 붙는다).
   assert.match(grid, /if \(leavingRangeSeen !== leavingRange\) \{\s*setGhostLinger\(createGhostLingerOnChange\(leavingRangeSeen, createRange \?\? null\)\);\s*setLeavingRangeSeen\(leavingRange\);\s*\}/);
-  assert.match(grid, /const timer = setTimeout\(\(\) => setGhostLinger\(null\), GHOST_LEAVE_MS\);\s*return \(\) => clearTimeout\(timer\);/);
+  assert.match(grid, /const timer = setTimeout\(\(\) => setGhostLinger\(null\), GHOST_LINGER_MS\);\s*return \(\) => clearTimeout\(timer\);/);
   has('const ghostRange = createRange ?? ghostLinger;');
   has('const ghostLeaving = createGhostLeaving || (!createRange && ghostLinger !== null);', '남기는 동안은 계속 녹는 중');
   // 같은 자리의 유리 막대를 그대로 이어 그린다(범위가 사라져도 떼지 않는다).
   assert.match(grid, /\{ghostRange && \(\s*<DragCreateGhost[\s\S]*?totalDays=\{ghostRange\.days\}[\s\S]*?leaving=\{ghostLeaving\}/);
   assert.doesNotMatch(grid, /\{createRange && \(\s*<DragCreateGhost/);
   assert.equal(GHOST_LEAVE_MS, 150);
+  assert.ok(GHOST_LINGER_MS > GHOST_LEAVE_MS, '녹는 전환이 다음 프레임에 시작해도 다 녹은 뒤에 거둔다');
   // 저장 처리 시간은 건드리지 않는다(기다리면 캘린더 하네스의 가짜 시계가 멈췄다).
   const view = read('src/views/ScheduleView.tsx');
   const handler = view.slice(view.indexOf('const handleAddEvent = useCallback('), view.indexOf('const handleDeleteEvent'));

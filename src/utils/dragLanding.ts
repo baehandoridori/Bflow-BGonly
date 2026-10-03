@@ -37,6 +37,12 @@ export const GHOST_LEAVE_MS = 150;
  * (거두는 건 부른 쪽의 타이머). 저장에 실패해 창이 남으면(범위가 그대로) 남기지 않는다 — 유리 막대가 다시 보인다.
  * 녹기 전에 창을 닫으면(취소) 녹던 범위가 없었으니 남기지 않는다.
  */
+/**
+ * 남긴 유리 막대를 거두는 시점(ms). 녹는 전환은 '녹는 중' 표시가 그려진 다음 프레임에 시작하는데, 저장이 같은 순간
+ * 끝나면 남기기 타이머가 그보다 먼저 시작될 수 있다 — 세 프레임쯤 여유를 둔다(다 녹은 뒤라 보이지 않는다).
+ */
+export const GHOST_LINGER_MS = GHOST_LEAVE_MS + 50;
+
 export function createGhostLingerOnChange<R>(previousLeavingRange: R | null, nextRange: R | null): R | null {
   return previousLeavingRange !== null && nextRange === null ? previousLeavingRange : null;
 }

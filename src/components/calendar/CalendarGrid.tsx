@@ -39,7 +39,7 @@ import { DragCreateGhost } from './DragCreateGhost';
 import { useProximityReveal } from '@/hooks/useProximityReveal';
 import { shouldRevealOnMount } from '@/utils/gridFlip';
 import { DragSlideAnchor, DropLanding } from '@/components/ui/DragLanding';
-import { GHOST_LEAVE_MS, createGhostLingerOnChange, type LandingMark, type SlideBox } from '@/utils/dragLanding';
+import { GHOST_LINGER_MS, createGhostLingerOnChange, type LandingMark, type SlideBox } from '@/utils/dragLanding';
 
 // 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
 export { layoutEventBars, type EventBar };
@@ -693,7 +693,7 @@ export function CalendarGrid({
   }
   useEffect(() => {
     if (!ghostLinger) return undefined;
-    const timer = setTimeout(() => setGhostLinger(null), GHOST_LEAVE_MS);
+    const timer = setTimeout(() => setGhostLinger(null), GHOST_LINGER_MS);
     return () => clearTimeout(timer);
   }, [ghostLinger]);
   const ghostRange = createRange ?? ghostLinger;
