@@ -130,9 +130,15 @@ test('담당자 카드 반짝: 400ms 안에 연달아 오르면 빛을 다시 �
   assert.ok(other.get('이혜민'));
   assert.equal(mergeAssigneeFlashes(flashes, [], 2000, seq), flashes, '오른 사람이 없으면 그대로');
 
-  const widget = read('src/components/widgets/AssigneeCardsWidget.tsx');
-  assert.match(widget, /<span key=\{flash\.seq\} className="assignee-flash" aria-hidden \/>/);
-  assert.match(widget, /key=\{`delta-\$\{flash\.deltaSeq\}`\}/);
+  // 대시보드 '담당자별 현황'과 에피소드 대시보드 'EP 담당자별 현황'이 같은 규칙(재검증 지적: EP 위젯이 seq 를 쓰면
+  // 묶인 오름에서 완료 씬이 늘어도 '+N씬' 이 다시 뜨지 않았다).
+  for (const path of ['src/components/widgets/AssigneeCardsWidget.tsx', 'src/components/widgets/episode/EpAssigneeCardsWidget.tsx']) {
+    const widget = read(path);
+    assert.match(widget, /useAssigneeFlashes\(/, `${path}: 묶음 판정 훅을 쓴다`);
+    assert.match(widget, /<span key=\{flash\.seq\} className="assignee-flash" aria-hidden \/>/, `${path}: 반짝은 묶음당 한 번`);
+    assert.match(widget, /key=\{`delta-\$\{flash\.deltaSeq\}`\}/, `${path}: '+N씬' 은 deltaSeq 로 다시 튼다`);
+    assert.doesNotMatch(widget, /key=\{`delta-\$\{flash\.seq\}`\}/, `${path}: '+N씬' 을 seq 로 묶지 않는다`);
+  }
 });
 
 /* ─── acc-live-drag-view-3: 시트 첫 줄 이름표가 고정 머리줄에 가리지 않는다 ─── */
