@@ -126,6 +126,11 @@
 .comment-send-failed-notice {
   animation: comment-send-fade-in var(--motion-base) var(--ease-out) backwards;
 }
+/* 라이트 모드: '보내지 못했어요' 빨강(#E17055)은 밝은 바탕에서 약 3:1 이라 11px 글자로는 읽기 어렵다.
+   본문 글자색을 섞어 같은 빨강 계열로 4.5:1 이상(약 5.6:1). 다크 모드는 그대로. */
+[data-color-mode='light'] .comment-send-failed-label {
+  color: color-mix(in srgb, #E17055 62%, rgb(var(--color-text-primary)));
+}
 @keyframes comment-send-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -301,4 +306,11 @@
 @keyframes bflow-undo-countdown-calm {
   from { opacity: 1; }
   to { opacity: 0.15; }
+}
+
+/* 라이트 모드: 알림 카드의 버튼 글자('되돌리기'·'씬 보기' 등) — 옅은 보조 보라(#A29BFE)는 밝은 카드에서 약 2:1 이라
+   5초 안에 눌러야 하는 '되돌리기'가 거의 안 보였다. 테마 강조색을 어둡게 섞어 4.5:1 이상(기본 보라 약 8:1, 초록·호박 테마 5:1 이상).
+   index.css 의 [data-sonner-toast] [data-button] 규칙(!important)보다 구체적이라 라이트 모드에서만 이 색이 남는다. 다크 모드는 그대로. */
+[data-color-mode='light'] [data-sonner-toast] [data-button] {
+  color: color-mix(in srgb, rgb(var(--color-accent)) 60%, black) !important;
 }

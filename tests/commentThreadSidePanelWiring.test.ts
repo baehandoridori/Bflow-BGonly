@@ -116,7 +116,9 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /threadSubmitRequestRef\.current = null/);
   // 움직임 폴리싱 19번: 실패하면 말풍선을 남겨 '다시 보내기·지우기'(지우기가 목록에서 뺀다). 남길 자리가 없을 때만 첨부 정리.
   assert.match(commentPanel, /const keptForRetry = sceneKeyRef\.current === panelSceneKey && failCommentSend\(comment\.id\)/);
-  assert.match(commentPanel, /cleanupDraftImages\(submittedThreadAttached, '\[스레드 댓글 전송 실패\]'\)/);
+  // 첨부는 서버에서 같은 id 를 지운 뒤에만 정리(저장됐는데 응답만 끊긴 댓글의 그림을 깨지 않게).
+  assert.match(commentPanel, /attached: submittedThreadAttached,/);
+  assert.match(commentPanel, /void dropUnsentComment\(sendDraft, '\[스레드 댓글 전송 실패\]'\)/);
   assert.match(commentPanel, /current\.filter\(\(c\) => c\.id !== commentId\)/);
   assert.doesNotMatch(commentPanel, /setThreadAttachedImages\(submittedThreadAttached\)/);
   assert.match(commentPanel, /parentCommentId: activeRevisionThreadId \? null : threadRoot!\.id/);

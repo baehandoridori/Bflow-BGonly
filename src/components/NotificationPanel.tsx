@@ -348,11 +348,16 @@ export function NotificationBell() {
     if (unreadCount > 0 && unreadCount < previous.count) rollBadgeNumber('down');
   }, [activeUserId, unreadCount, rollBadgeNumber]);
 
+  const bellLabel = hasMention ? `멘션 ${unreadMentionCount}개 포함 ${unreadCount}개 새 알림` : `${unreadCount}개 새 알림`;
+
   return (
     <div className="relative">
       <button
         onClick={togglePanel}
-        title={hasMention ? `멘션 ${unreadMentionCount}개 포함 ${unreadCount}개 새 알림` : `${unreadCount}개 새 알림`}
+        aria-label={bellLabel}
+        aria-expanded={panelOpen}
+        // 알림 창이 열려 있으면 설명 말풍선을 띄우지 않는다 — 종 아래로 뜨는 말풍선이 창 머리의 '모두 읽음·전체 삭제'를 덮었다.
+        title={panelOpen ? undefined : bellLabel}
         className={cn(
           'bf-press p-2 rounded-lg relative cursor-pointer',
           panelOpen

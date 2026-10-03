@@ -14,6 +14,10 @@ import { emojiPickerPlacement } from '@/utils/commentSendReact';
 
 export const QUICK_EMOJIS = ['✅', '👍', '❤️', '👀', '🎉', '🙏', '🔥'] as const;
 
+/** 창 너비 — 빠른 7개 / '더 많은 이모지'로 펼친 뒤. */
+const COLLAPSED_WIDTH = 220;
+const EXPANDED_WIDTH = 280;
+
 // 확장 이모지 — 핵심 + 추가 카테고리. v1.27 에서 emoji-mart 등 라이브러리 도입 검토.
 const EXTRA_EMOJIS = [
   '😀', '😂', '🤔', '😅', '😭', '😎', '🤝', '👏',
@@ -56,13 +60,15 @@ export function EmojiPicker({ open, onPick, onClose, anchorEl }: EmojiPickerProp
 
   // v1.26.1: Portal + anchor 기준 위치 계산 — 댓글 패널 overflow 에 잘리지 않게.
   // 위·아래는 접힌 높이로 한 번 정하고 버튼 쪽 가장자리를 고정한다 — 펼쳐도 반대쪽으로 튀지 않는다.
-  const width = showAll ? 280 : 220;
+  // 가로도 펼친 너비(280) 기준으로 처음부터 자리를 잡는다 — 오른쪽 끝 가까이서 펼쳐도 왼쪽으로 튀지 않는다.
+  const width = showAll ? EXPANDED_WIDTH : COLLAPSED_WIDTH;
   const rect = anchorEl?.getBoundingClientRect() ?? null;
   const placement = emojiPickerPlacement({
     anchor: rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width } : null,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
     width,
+    expandedWidth: EXPANDED_WIDTH,
   });
 
   return createPortal(

@@ -189,7 +189,9 @@ test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 
   // 본문 입력칸: 롤백(목록 되돌리기·입력칸 복원) 대신 실패 표시. 남길 자리가 없을 때만 첨부 정리 + 알림
   const submit = bodyOf(panel, 'const handleSubmit = async () =>');
   assert.match(submit, /beginCommentSend\(sendDraft\);\s*try \{[\s\S]*?await addComment\(targetSceneKey, comment\);\s*finishCommentSend\(comment\.id\);/);
-  assert.match(submit, /if \(failCommentSend\(comment\.id\)\) return;[\s\S]*?storageService\.deleteImage\(a\.uploadedUrl\)[\s\S]*?notifyLostComment\(\);/);
+  // (검증 지적 review-data-safety-6: 첨부는 서버에서 같은 id 를 지운 뒤에만 정리 — 저장됐는데 응답만 끊긴 댓글의 그림을 깨지 않게)
+  assert.match(submit, /if \(failCommentSend\(comment\.id\)\) return;[\s\S]*?void dropUnsentComment\(sendDraft, '\[댓글 전송 실패 \+ unmount\]'\);\s*notifyLostComment\(\);/);
+  assert.doesNotMatch(submit, /storageService\.deleteImage\(a\.uploadedUrl\)/);
   assert.doesNotMatch(submit, /setComments\(comments\)/, '실패해도 말풍선을 지우지 않는다');
   assert.doesNotMatch(submit, /setInput\(prevInput\)/, '같은 글이 입력칸과 말풍선에 두 번 보이지 않게');
   assert.match(submit, /webhookSceneKey: primaryStorageKey,/);
@@ -202,11 +204,11 @@ test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 
   const retry = bodyOf(panel, 'const retryUnsentComment = async (commentId: string) =>');
   assert.match(retry, /if \(!entry \|\| entry\.status !== 'failed'\) return;/);
   assert.match(retry, /beginCommentSend\(draft\);\s*try \{\s*await addComment\(draft\.targetSceneKey, draft\.comment\);\s*finishCommentSend\(commentId\);\s*afterCommentDelivered\(draft\);/);
-  assert.match(retry, /if \(!failCommentSend\(commentId\)\) \{\s*cleanupDraftImages\(draft\.attached, '\[댓글 다시 보내기 실패\]'\);/);
-  // 지우기: 서버에 없는 말풍선만 목록에서 빼고 올린 첨부 정리(서버 호출 없음)
+  assert.match(retry, /if \(!failCommentSend\(commentId\)\) \{\s*void dropUnsentComment\(draft, '\[댓글 다시 보내기 실패\]'\);/);
+  // 지우기: 말풍선은 바로 빼고, 서버에서 같은 id 를 지운 뒤에만 첨부 정리(검증 지적 review-data-safety-6). 실패하면 되돌려 놓는다.
   const discard = bodyOf(panel, 'const discardUnsentComment = (commentId: string) =>');
-  assert.match(discard, /cleanupDraftImages\(entry\.attached, '\[보내지 못한 댓글 지우기\]'\)/);
-  assert.doesNotMatch(discard, /deleteComment\(/);
+  assert.match(discard, /void dropUnsentComment\(entry, '\[보내지 못한 댓글 지우기\]'\)\.then\(\(dropped\) => \{/);
+  assert.doesNotMatch(discard, /cleanupDraftImages\(/, '첨부를 서버 확인 없이 지우지 않는다');
   // 저장 뒤 할 일 한 곳: 다시 불러오기·읽음·미리보기 정리·슬랙 멘션
   const after = bodyOf(panel, 'const afterCommentDelivered = (draft: UnsentCommentDraft) =>');
   assert.match(after, /if \(draft\.markReadOnSuccess\) markUnreadCommentsRead\(\);/);
@@ -223,14 +225,15 @@ test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 
 });
 
 test('패널 배선: 실패 말풍선은 세 곳 모두 반응 줄 대신 안내, 수정·삭제 버튼 숨김, 느릴 때만 시계', () => {
-  assert.match(panel, /<span className="font-semibold text-status-low">보내지 못했어요<\/span>/);
+  assert.match(panel, /<span className="comment-send-failed-label font-semibold text-status-low">보내지 못했어요<\/span>/);
   assert.match(panel, />\s*다시 보내기\s*</);
   assert.match(panel, />\s*지우기\s*</);
   assert.equal([...panel.matchAll(/<CommentSendFailedNotice/g)].length, 3, '본문·답글·스레드 창');
   assert.equal([...panel.matchAll(/onRetry=\{\(\) => \{ void retryUnsentComment\((comment|reply|message)\.id\); \}\}/g)].length, 3);
   assert.equal([...panel.matchAll(/onDiscard=\{\(\) => discardUnsentComment\((comment|reply|message)\.id\)\}/g)].length, 3);
-  assert.match(panel, /\{!isEditing && sendStatus !== 'failed' && \(/);
-  assert.match(panel, /\{!replyIsEditing && replySendStatus !== 'failed' && \(/);
+  // (검증 지적 acc-comments-notify-2: 보내는 중에도 지우기·수정·답글 줄을 띄우지 않는다)
+  assert.match(panel, /\{!isEditing && !sendStatus && \(/);
+  assert.match(panel, /\{!replyIsEditing && !replySendStatus && \(/);
   assert.match(panel, /\{!isEditing && sendStatus === 'slow' && <CommentSendClock \/>\}/);
   assert.match(panel, /\{!replyIsEditing && replySendStatus === 'slow' && <CommentSendClock \/>\}/);
   assert.match(panel, /\{messageSendStatus === 'slow' && <CommentSendClock \/>\}/);
@@ -244,7 +247,7 @@ test('패널 배선: 반응을 처음 다 불러온 뒤에만 새 칩 톡, 취�
   const area = bodyOf(panel, '}: ReactionsAreaProps) {');
   assert.match(area, /const freshEmojis = freshReactionEmojis\(armedRef\.current, seenEmojisRef\.current, emojis\);/);
   assert.match(area, /useEffect\(\(\) => \{\s*seenEmojisRef\.current = new Set\(emojis\);\s*armedRef\.current = animateNew;\s*\}\);/);
-  assert.match(area, /<AnimatePresence initial=\{false\}>\s*\{groups\.map\(\(g\) => \(\s*<motion\.span key=\{g\.emoji\} className="inline-flex" initial=\{false\} animate=\{REACTION_CHIP_REST\} exit=\{chipExit\}>/);
+  assert.match(area, /<AnimatePresence initial=\{false\}>\s*\{groups\.map\(\(g\) => \(\s*<motion\.span key=\{g\.emoji\} className="inline-flex" initial=\{REACTION_CHIP_START\} animate=\{REACTION_CHIP_REST\} exit=\{chipExit\}>/);
   assert.match(area, /pop=\{freshEmojis\.has\(g\.emoji\)\}/);
   assert.doesNotMatch(area, /transition-all/);
 });

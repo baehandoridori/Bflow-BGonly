@@ -234,11 +234,12 @@ test('알림 카드 클래스는 종류별(bflow-toast--<종류>)', () => {
 test('실시간 수신 경로만 종·배지에 신호를 준다 — 쌓인 알림 불러오기·놓친 알림 모으기는 신호 없음', () => {
   const dispatch = bodyOf(helper, 'export function dispatchNotification(');
   assert.match(dispatch, /const unreadBefore = store\.unreadCount;\n\s*const notificationId = store\.addNotification\(/);
-  assert.match(dispatch, /\}\);\n\s*noteLiveNotificationArrival\(payload\.type, unreadBefore\);/);
+  // 리테이크 알림은 metadata(revisionAction)로 나를 부른 것인지 가린다(검증 지적 acc-comments-notify-9).
+  assert.match(dispatch, /\}\);\n\s*noteLiveNotificationArrival\(payload\.type, unreadBefore, payload\.metadata\);/);
   const note = bodyOf(helper, 'export function noteLiveNotificationArrival(');
-  assert.match(note, /if \(state\.unreadCount > unreadBefore\) markLiveNotificationArrival\(type, state\.activeUserId\);/, '안 읽은 수가 늘었을 때만');
-  // 실시간 다시 알림·실시간 반응 알림
-  assert.match(retakeHook, /noteLiveNotificationArrival\('revision', unreadBefore\)/);
+  assert.match(note, /if \(state\.unreadCount > unreadBefore\) markLiveNotificationArrival\(type, state\.activeUserId, undefined, metadata\);/, '안 읽은 수가 늘었을 때만');
+  // 실시간 다시 알림·실시간 반응 알림 — 담당 지정·다시 알림은 나를 부른 알림
+  assert.match(retakeHook, /noteLiveNotificationArrival\('revision', unreadBefore, \{ revisionAction: isAssignment \? 'add' : 'reminder' \}\)/);
   assert.match(app, /noteLiveNotificationArrival\('comment_reaction', unreadBefore\)/);
   assert.equal(app.match(/noteLiveNotificationArrival\(/g)?.length, 1, 'App 의 놓친 알림 모으기(addNotification 직접)는 신호를 내지 않는다');
   const store = read('src/stores/useNotificationStore.ts');

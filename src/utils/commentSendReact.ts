@@ -69,6 +69,16 @@ export function mergeUnsentComments<T extends { id: string; createdAt: string }>
   return { list, saved };
 }
 
+/**
+ * '다시 보내기'가 '같은 id 가 이미 있다'(기본 키 중복)로 거절됐는지. 앞서 보낸 요청이 저장은 됐는데 응답만 끊긴 경우라
+ * 저장된 것으로 받아들인다(댓글 id 는 이 PC 가 만든 것이라 같은 id 는 같은 댓글이다).
+ * 메인 쪽 오류는 문구로만 넘어온다 — Postgres 문구('duplicate key value violates unique constraint "comments_pkey"')와 코드 23505 를 본다.
+ */
+export function isCommentAlreadySavedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : String((err as { message?: unknown } | null)?.message ?? '');
+  return /duplicate key|23505|comments_pkey/i.test(message);
+}
+
 /* ─── 말풍선 등장 ─────────────────────────────────────────────── */
 
 const BUBBLE_RISE_FULL: MotionPreset = (() => {
@@ -112,6 +122,13 @@ export const REACTION_CHIP_REST: TargetAndTransition = {
   transitionEnd: { transform: 'none' },
 };
 
+/**
+ * 칩 바깥 칸의 시작 모습 = 머무는 모습(transitionEnd 없이). 바깥 칸은 처음 그릴 때 움직이지 않는다 — '톡'은 안쪽 칩(CSS)만 한다.
+ * initial={false} 는 이미 그려진 말풍선 안에 나중에 생긴 칩에선 무시되고, 'none' 에서 출발해 scale(0)→1 로 0.3초 자라
+ * 안쪽 '톡'(0.4→1.07→1)을 덮었다. 시작 값을 머무는 값과 같게 두면 framer 가 움직일 게 없어 건너뛴다.
+ */
+export const REACTION_CHIP_START = { opacity: 1, transform: 'scale(1)' } as const;
+
 const CHIP_LEAVE_FULL: TargetAndTransition = {
   opacity: 0,
   // 'none' 에서 출발하면 framer 가 scale(0) 에서 출발시킨다 — 제자리 값을 명시한다.
@@ -143,6 +160,11 @@ export interface EmojiPickerPlacementInput {
   viewportHeight: number;
   /** 지금 창 너비(빠른 7개 220 / 더 보기 280). */
   width: number;
+  /**
+   * 펼쳤을 때 너비(더 보기 280). 주면 처음 열 때부터 펼친 너비도 화면 안에 들어갈 왼쪽 자리를 잡아 둔다 —
+   * 화면 오른쪽 끝 가까이서 '더 많은 이모지'를 눌러도 창이 왼쪽으로 튀지 않고 오른쪽으로만 넓어진다.
+   */
+  expandedWidth?: number;
   /** 위·아래를 정할 때 쓰는 접힌 창 높이 추정(빠른 7개). 펼쳐도 이 값으로 정해 창이 반대쪽으로 튀지 않는다. */
   collapsedHeight?: number;
   gap?: number;
@@ -175,7 +197,10 @@ export function emojiPickerPlacement(input: EmojiPickerPlacementInput): EmojiPic
   if (!anchor) {
     return { side: 'below', left: margin, top: margin, maxHeight: Math.max(0, viewportHeight - margin * 2), originX: 0 };
   }
-  let left = anchor.left;
+  const expandedWidth = Math.max(width, input.expandedWidth ?? width);
+  // 펼친 너비까지 화면 안에 들어갈 왼쪽 — 펼칠 때 왼쪽 끝이 그대로다. 단 버튼(오른쪽 끝까지)은 지금 창 폭 안에 둔다.
+  let left = Math.min(anchor.left, viewportWidth - expandedWidth - margin);
+  left = Math.max(left, anchor.left + anchor.width - width);
   if (left + width > viewportWidth - margin) left = viewportWidth - width - margin;
   if (left < margin) left = margin;
   const originX = Math.round(Math.min(width, Math.max(0, anchor.left + anchor.width / 2 - left)));

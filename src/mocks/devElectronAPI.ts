@@ -2714,6 +2714,10 @@ export function installDevElectronAPI(): void {
     supabaseFetchMissedMentions: async () => [],
     supabaseAddComment: async (commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId) => {
       const comments = getMockCommentRows();
+      // 라이브 DB 처럼 id 는 기본 키 — 같은 id 를 다시 넣으면 거절한다('다시 보내기'가 저장된 댓글을 알아보는 길).
+      if (comments.some((comment) => comment.id === commentId)) {
+        throw new Error('duplicate key value violates unique constraint "comments_pkey"');
+      }
       comments.push({
         id: commentId,
         // 캐릭터 댓글이면 part/scene 비우고 character_id 채움 (라이브 DB 동작 미러).
