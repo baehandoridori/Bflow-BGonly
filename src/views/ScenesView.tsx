@@ -126,6 +126,7 @@ import { saveAssigneeProgress } from '@/services/assigneeProgressActions';
 import { getSceneWorkLinkSlots, getUniqueSceneUuids } from '@/utils/sceneWorkLinks';
 import { SceneWorkLinkBadges } from '@/components/scenes/SceneWorkLinkBadges';
 import { useMotionPref } from '@/hooks/useMotionPref';
+import { useMotionArmed } from '@/hooks/useMotionArmed';
 import { useGridFlip } from '@/hooks/useGridFlip';
 import { useReflowLinger } from '@/hooks/useReflowLinger';
 import {
@@ -606,6 +607,8 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   // 강조된 카드로는 처음 한 번만 데려다준다(움직임 폴리싱 18번). 예전엔 인라인 ref 콜백이라 카드가 마운트될 때마다
   // (강조 4초 동안 목록이 다시 그려지면) 다시 끌어당겼고, 이미 떠 있던 카드가 강조되면 데려가지 못했다.
   const highlightCardRef = useRef<HTMLDivElement>(null);
+  // 선택 체크는 선택될 때만 상자가 생긴다 — '톡'은 한 번 그려진 카드에서만(처음부터 선택된 채 그려지면 바로).
+  useMotionArmed(highlightCardRef);
   const wasHighlightedRef = useRef(false);
   useEffect(() => {
     if (isHighlighted && !wasHighlightedRef.current && claimHighlightScroll(highlightScrollKey([sheetName], scene.sceneId))) {
@@ -747,7 +750,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
           revisionCount > 0 ? 'top-9' : 'top-1.5',
         )}
       >
-        <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path className="scene-select-check-mark" d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </div>
 
       {/* ── 상단: 씬 ID + 진행률 ── */}

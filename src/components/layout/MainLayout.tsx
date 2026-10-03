@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { ViewRevealContext, readPendingOpenRequests, type ViewRevealApi } from './ViewReveal';
@@ -17,6 +17,16 @@ export function MainLayout({ activeView, children, onRefresh }: MainLayoutProps)
   const mainRef = useRef<HTMLElement>(null);
   const coverRef = useRef<HTMLDivElement>(null);
   const revealRef = useRef<{ lastView: string | null; animation: Animation | null }>({ lastView: null, animation: null });
+  /** 마지막으로 맨 위로 되돌린 뒤 본문이 스크롤된 적이 있는지 — 값을 읽지 않고 scroll 이벤트로만 안다. */
+  const mainScrolledRef = useRef(false);
+
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return undefined;
+    const markScrolled = () => { mainScrolledRef.current = true; };
+    main.addEventListener('scroll', markScrolled, { passive: true });
+    return () => main.removeEventListener('scroll', markScrolled);
+  }, []);
 
   // 움직임 폴리싱 12번: 어느 메뉴로 가든 새 화면은 본문 위 덮개가 걷히며 0.18초 동안 드러난다.
   // 본문(main)에 opacity·transform 을 걸지 않는다 — 위젯 흐림이 꺼지고 fixed 자손 기준이 바뀐다.
@@ -26,8 +36,12 @@ export function MainLayout({ activeView, children, onRefresh }: MainLayoutProps)
       const plan = planViewReveal(state.lastView, view, readPendingOpenRequests());
       if (!plan) return; // StrictMode 이중 실행·같은 화면 재신호
       state.lastView = view;
-      // 이전 화면 스크롤이 남아 새 화면이 중간부터 보이지 않게.
-      if (plan.resetScroll && mainRef.current) mainRef.current.scrollTop = 0;
+      // 이전 화면 스크롤이 남아 새 화면이 중간부터 보이지 않게. 스크롤한 적이 없으면(이미 맨 위) 건드리지 않는다 —
+      // scrollTop 을 쓰면 방금 바뀐 화면 전체의 레이아웃을 그 자리에서 강제로 계산한다(최종 성능 측정 지적).
+      if (plan.resetScroll && mainRef.current && mainScrolledRef.current) {
+        mainScrolledRef.current = false;
+        mainRef.current.scrollTop = 0;
+      }
       state.animation?.cancel();
       state.animation = null;
       if (!plan.reveal) return;

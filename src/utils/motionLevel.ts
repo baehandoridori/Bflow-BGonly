@@ -7,8 +7,8 @@
    - 'minimal'(최소) : 윈도우 '애니메이션 효과 끄기'(동작 줄이기)와 같게.
 
    값은 preferences.json 의 motionLevel 에 저장하고, 창마다 document.documentElement.dataset.motion 에 적는다.
-   CSS 는 html[data-motion='lite'|'minimal'] 로, React 는 useMotionPref() 로, React 밖은 prefersReducedMotion()
-   (src/utils/motion.ts) 으로 읽는다.
+   CSS 는 html[data-motion-lite]('가볍게' 이상)·html[data-motion-minimal]('최소') 로, React 는 useMotionPref() 로,
+   React 밖은 prefersReducedMotion()(src/utils/motion.ts) 으로 읽는다.
 
    node --test 가 그대로 import 하도록 런타임 의존이 없다(@/ 별칭·외부 패키지 X).
    ═══════════════════════════════════════════════════════════════ */
@@ -69,7 +69,15 @@ const listeners = new Set<Listener>();
 function writeDom(level: MotionLevel): void {
   try {
     if (typeof document !== 'undefined' && document.documentElement) {
-      document.documentElement.dataset.motion = level;
+      const data = document.documentElement.dataset;
+      data.motion = level;
+      // CSS 용 '있다/없다' 표시: data-motion-lite('가볍게' 이상 — '최소' 포함) · data-motion-minimal('최소').
+      // 브라우저는 조상에 어떤 속성 '이름'이 있는지로 규칙을 미리 거르므로(값은 못 본다), 모든 요소에 걸리는
+      // '가볍게'·'최소' 규칙이 기본일 때는 바로 걸러진다(최종 성능 측정 지적 — scripts/postcss-motion-minimal.cjs).
+      if (level === 'full') delete data.motionLite;
+      else data.motionLite = '';
+      if (level === 'minimal') data.motionMinimal = '';
+      else delete data.motionMinimal;
     }
   } catch {
     // 문서가 없는 환경(테스트·메인 프로세스)

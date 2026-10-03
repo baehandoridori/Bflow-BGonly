@@ -31,8 +31,10 @@ const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '');
 // 빌드 때 '최소' 짝을 만드는 PostCSS 플러그인(scripts/postcss-motion-minimal.cjs)을 거친 CSS.
 const requireCjs = createRequire(import.meta.url);
 const postcss = requireCjs('postcss') as (plugins: unknown[]) => { process(css: string, opts: { from: string }): Promise<{ css: string }> };
-const motionMinimal = requireCjs('../../scripts/postcss-motion-minimal.cjs') as (() => unknown) & { MINIMAL_ON: string };
+const motionMinimal = requireCjs('../../scripts/postcss-motion-minimal.cjs') as (() => unknown) & { MINIMAL_ON: string; minimalMirrorSelectors(selector: string): string[] };
 const MINIMAL_ON = motionMinimal.MINIMAL_ON;
+/** 동작 줄이기 규칙 선택자 하나의 '최소' 짝(html 자신 + html 안) — 빌드된 CSS 의 선택자 목록 모양. */
+const minimalSel = (...selectors: string[]) => selectors.flatMap((sel) => motionMinimal.minimalMirrorSelectors(sel)).join(', ');
 async function buildMinimal(file: string): Promise<string> {
   const result = await postcss([motionMinimal()]).process(readFileSync(file, 'utf-8'), { from: file });
   return stripComments(result.css.replace(/\r\n/g, '\n'));
@@ -85,17 +87,24 @@ test('가게: 바꾸면 <html data-motion> 에 적고 구독자에게 한 번 �
     assert.equal(getMotionLevel(), 'full');
     assert.equal(setMotionLevel('lite'), 'lite');
     assert.equal(doc.documentElement.dataset.motion, 'lite');
+    // CSS 용 '있다/없다' 표시(가볍게 이상 · 최소) — 값과 함께 바뀐다.
+    assert.equal(doc.documentElement.dataset.motionLite, '');
+    assert.equal(doc.documentElement.dataset.motionMinimal, undefined);
     assert.equal(calls, 1);
     setMotionLevel('lite');
     assert.equal(calls, 1, '같은 값은 알리지 않는다');
     setMotionLevel('nonsense');
     assert.equal(getMotionLevel(), 'full');
     assert.equal(doc.documentElement.dataset.motion, 'full');
+    assert.equal(doc.documentElement.dataset.motionLite, undefined);
+    assert.equal(doc.documentElement.dataset.motionMinimal, undefined);
     assert.equal(calls, 2);
     off();
     setMotionLevel('minimal');
     assert.equal(calls, 2, '구독을 끊으면 더 알리지 않는다');
     assert.equal(isMinimalMotionInDom(), true);
+    assert.equal(doc.documentElement.dataset.motionMinimal, '');
+    assert.equal(doc.documentElement.dataset.motionLite, '', "'최소'는 '가볍게' 규칙도 함께 받는다");
     resetMotionLevelForTest();
   });
 });
@@ -317,22 +326,22 @@ test("'최소' 전역 규칙: 빌드 때 동작 줄이기 전역 규칙을 특�
   assert.doesNotMatch(css, /#bf-motion-minimal/);
   assert.ok(!css.includes("html[data-motion='minimal']"), "손으로 쓴 '최소' 짝 없음(플러그인이 만든다)");
   const index = await buildMinimal('src/index.css');
-  const at = index.indexOf(`*${MINIMAL_ON}, *${MINIMAL_ON}::before, *${MINIMAL_ON}::after {`);
+  const at = index.indexOf(`${minimalSel('*', '*::before', '*::after')} {`);
   assert.ok(at >= 0, '전역 규칙의 최소 짝(특이도 0)');
   const body = index.slice(at, index.indexOf('}', at));
   for (const decl of ['animation-duration: 0.01ms !important', 'animation-iteration-count: 1 !important', 'transition-duration: 0.01ms !important', 'scroll-behavior: auto !important']) {
     assert.ok(body.includes(decl), decl);
   }
   // 동작 줄이기 전용 규칙의 '최소' 짝 — 카드 떠오름·누름 축소 없음
-  assert.ok(index.includes(`.bf-press:active:not(:disabled)${MINIMAL_ON} { transform: none; }`), '누름 축소 없음');
+  assert.ok(index.includes(`${minimalSel('.bf-press:active:not(:disabled)')} { transform: none; }`), '누름 축소 없음');
   const foundation = (await buildMinimal('src/styles/motion-foundation.css')).replace(/\s+/g, ' ');
-  assert.ok(foundation.includes(`.bf-card-hover:hover${MINIMAL_ON} { translate: none; }`), '카드 떠오름 없음');
-  assert.ok(foundation.includes(`.scene-card-interactive:hover${MINIMAL_ON} { --tw-translate-y: 0px; }`), '씬 카드 떠오름 없음');
+  assert.ok(foundation.includes(`${minimalSel('.bf-card-hover:hover')} { translate: none; }`), '카드 떠오름 없음');
+  assert.ok(foundation.includes(`${minimalSel('.scene-card-interactive:hover')} { --tw-translate-y: 0px; }`), '씬 카드 떠오름 없음');
 });
 
 test("'가볍게' 이상: 숨 쉬는 장식을 멈춘다", () => {
   const css = stripComments(read('src/styles/motion-foundation.css'));
-  const lite = ":root:is([data-motion='lite'], [data-motion='minimal'])";
+  const lite = ':root[data-motion-lite]';
   // 바탕 C: 새 댓글·새 버전 배지·그래프 정점은 미리 그린 빛 층(::before/::after)의 opacity 로 숨 쉰다 — 층을 멈춘다.
   for (const target of ['.comment-unread-badge::before', '.bflow-peak-pulse::after', '.bflow-badge-pulse::before', '.bflow-badge-pulse::after', '.bell-glow-soft::after', '.bell-glow-mention::after', '.scene-num-glow-wrap::before', '.editing-beam::before', '.scene-top-progress-fill::after', '.bflow-update-latest-card::before']) {
     assert.ok(css.includes(`${lite} ${target}`), `가볍게 정지 대상 없음: ${target}`);
@@ -341,7 +350,7 @@ test("'가볍게' 이상: 숨 쉬는 장식을 멈춘다", () => {
 
 test("'가볍게' 이상: 뒤 흐림을 모두 끄고(인라인 흐림도 이김), 겹침 순서는 지키며, 다크 위젯 유리는 바탕을 올린다", () => {
   const css = stripComments(read('src/styles/motion-foundation.css'));
-  const lite = ":root:is([data-motion='lite'], [data-motion='minimal'])";
+  const lite = ':root[data-motion-lite]';
   const selectors = [
     `${lite} :is(*, #bf-motion-lite),`,
     `${lite} :is(*, #bf-motion-lite)::before,`,
@@ -358,7 +367,7 @@ test("'가볍게' 이상: 뒤 흐림을 모두 끄고(인라인 흐림도 이김
   assert.ok(isolateAt >= 0, '흐림 있던 요소의 쌓임 맥락 유지 규칙');
   assert.match(css.slice(isolateAt, css.indexOf('}', isolateAt)), /isolation: isolate;/);
   // 다크 위젯 유리: 흐림 없이 글자가 묻히지 않게 바탕을 올린다(라이트는 원래 .8 이라 그대로)
-  assert.match(css, /:root:not\(\[data-color-mode='light'\]\):is\(\[data-motion='lite'\], \[data-motion='minimal'\]\) \{\s*--glass-tint-alpha: 0\.72;/);
+  assert.match(css, /:root:not\(\[data-color-mode='light'\]\)\[data-motion-lite\] \{\s*--glass-tint-alpha: 0\.72;/);
   assert.match(read('src/components/widgets/Widget.tsx'), /background: 'rgb\(var\(--color-glass-tint\) \/ var\(--glass-tint-alpha\)\)'/);
   // OS 동작 줄이기만 켠 경우의 흐림은 그대로(움직임이 아니라 무게 설정) — 흐림 끄기 선언은 위 규칙 하나뿐
   assert.equal(css.split('backdrop-filter: none !important;').length - 1, 2, '-webkit- 포함 두 줄, 위 규칙 안에만');
@@ -375,7 +384,7 @@ test('휴가 화면 동기화 막대: framer x 반복 대신 CSS transform 훑�
   assert.match(css, /@keyframes bf-sync-sweep \{\s*from \{ transform: translateX\(-100%\); \}\s*to \{ transform: translateX\(250%\); \}/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.bf-sync-sweep \{[^}]*animation: none;/);
   const built = (await buildMinimal('src/styles/motion-foundation.css')).replace(/\s+/g, ' ');
-  assert.ok(built.includes(`.bf-sync-sweep${MINIMAL_ON} { width: 100%; transform: none; opacity: 0.55; animation: none; }`), "'최소' 짝");
+  assert.ok(built.includes(`${minimalSel('.bf-sync-sweep')} { width: 100%; transform: none; opacity: 0.55; animation: none; }`), "'최소' 짝");
 });
 
 /* ─── 배선 ─── */

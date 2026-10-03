@@ -8,7 +8,12 @@
      src/components/scenes/stageToggleMotion.ts 가 정하고, 글자색도 같은 순서로 바뀌어 빈 칸에 흰 글자가 먼저 뜨지 않는다.
    - 액팅 칩은 색 알약(.stage-seg-pill) 하나가 translateX 로 미끄러지고, 색은 4겹 층의 opacity 로 바뀐다.
    - 굵기(font-weight)는 고정 — 바뀌면 글자 폭이 바뀌어 다시 배치된다. 바탕(background)·그림자(box-shadow)는 전환하지 않는다.
-   - 동작 줄이기: 눌림·채움·미끄러짐 없이 색만 즉시(전역 규칙이 길이를 0 으로 만들고, 아래 미디어 쿼리가 지연·transform 을 뺀다). */
+   - 동작 줄이기: 눌림·채움·미끄러짐 없이 색만 즉시(전역 규칙이 길이를 0 으로 만들고, 아래 미디어 쿼리가 지연·transform 을 뺀다).
+   - 겹친 층(꺼진 칸 hover 바탕·꺼진 칸 채움·현재 단계 빛·선택 체크)은 쉬는 동안 상자를 만들지 않는다(display: none).
+     카드 수십 장 × 칸 4개마다 층이 늘 깔려 있으면 마우스를 움직일 때마다 하는 판정과 스타일 계산이 몇 배로 무거워졌다
+     (최종 성능 측정 지적). 사라질 땐 display 를 allow-discrete 로 전환해 다 줄어들거나 흐려진 뒤 빼고, 나타날 땐
+     @starting-style 에서 출발한다. 처음부터 켜져 있던 칸(카드가 처음 그려질 때)은 출발 모습 없이 바로 그려지도록,
+     출발 모습은 한 번 그려진 묶음(data-motion-armed — src/hooks/useMotionArmed.ts)에만 쓴다. */
 
 .stage-seg {
   position: relative;
@@ -26,9 +31,10 @@
   transition-timing-function: var(--ease-snap), var(--ease-std), var(--ease-std);
 }
 
-/* 꺼진 칸 hover 바탕 — 바탕색을 전환하지 않고 겹친 층의 opacity 로. */
+/* 꺼진 칸 hover 바탕 — 바탕색을 전환하지 않고 겹친 층의 opacity 로. 층은 마우스를 올린 동안만 있다. */
 .stage-seg::before {
   content: '';
+  display: none;
   position: absolute;
   inset: 0;
   z-index: -1;
@@ -36,14 +42,16 @@
   background: rgb(var(--color-bg-border) / var(--stage-seg-hover-alpha, 0.25));
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--motion-fast) var(--ease-std);
+  transition: opacity var(--motion-fast) var(--ease-std), display var(--motion-fast) allow-discrete;
 }
 .stage-seg[data-on='false']:not([aria-disabled='true']):hover::before {
+  display: block;
   opacity: 1;
 }
 
-/* 칸 채움 — 켜지면 왼쪽부터 scaleX 0→1(220ms), 현재 단계면 13% → 100%(160ms). */
+/* 칸 채움 — 켜지면 왼쪽부터 scaleX 0→1(220ms), 현재 단계면 13% → 100%(160ms). 꺼진 칸은 다 줄어든 뒤 상자를 뺀다. */
 .stage-seg-fill {
+  display: none;
   position: absolute;
   inset: 0;
   z-index: -1;
@@ -53,13 +61,15 @@
   transform: scaleX(0);
   transform-origin: left center;
   pointer-events: none;
-  transition-property: transform, opacity;
-  transition-duration: 220ms, 160ms;
-  transition-timing-function: var(--ease-out), var(--ease-std);
+  transition-property: transform, opacity, display;
+  transition-duration: 220ms, 160ms, 220ms;
+  transition-timing-function: var(--ease-out), var(--ease-std), linear;
   transition-delay: calc(var(--stage-step, 0) * 40ms);
+  transition-behavior: allow-discrete;
 }
 .stage-seg-fill[data-on='true'] {
   transform: scaleX(1);
+  display: block;
 }
 .stage-seg-fill[data-current='true'] {
   opacity: 1;
@@ -76,9 +86,17 @@
   opacity: 0;
   transition: opacity 160ms var(--ease-std);
 }
+/* 칸 채움의 빛 층은 빛나는 동안만 있다 — 꺼질 땐 다 흐려진 뒤 뺀다. */
+.stage-seg-fill::after {
+  display: none;
+  transition: opacity 160ms var(--ease-std), display 160ms allow-discrete;
+}
 .stage-seg-fill[data-glow='true']::after,
 .stage-seg-pill-layer[data-glow='true']::after {
   opacity: 1;
+}
+.stage-seg-fill[data-glow='true']::after {
+  display: block;
 }
 
 /* 액팅 칩 알약 — 칩 칸 하나 크기로, 고른 칩 자리까지 translateX(260ms, 살짝 넘쳤다 멈춤). */
@@ -148,14 +166,19 @@
   to { opacity: 1; transform: none; }
 }
 
-/* 카드 선택 체크 — '톡'(scale .4→1, 200ms spring) + 체크선 그리기(160ms, 60ms 뒤). 해제는 작아지며 120ms 에 사라짐. */
+/* 카드 선택 체크 — '톡'(scale .4→1, 200ms spring) + 체크선 그리기(160ms, 60ms 뒤). 해제는 작아지며 120ms 에 사라짐.
+   선택되지 않은 카드에는 상자를 두지 않는다(사라진 뒤 display: none — Tailwind flex 보다 특이도를 높여 덮는다). */
 .scene-select-check {
   opacity: 0;
   transform: scale(0.4);
   pointer-events: none;
   transition:
     transform var(--motion-fast) var(--ease-in),
-    opacity var(--motion-fast) var(--ease-in);
+    opacity var(--motion-fast) var(--ease-in),
+    display var(--motion-fast) allow-discrete;
+}
+.scene-select-check:not([data-on='true']) {
+  display: none;
 }
 .scene-select-check[data-on='true'] {
   opacity: 1;
@@ -173,6 +196,29 @@
 .scene-select-check[data-on='true'] path {
   stroke-dashoffset: 0;
   transition: stroke-dashoffset 160ms var(--ease-out) 60ms;
+}
+
+/* 나타날 때의 출발 모습 — 쉬는 동안 상자가 없던(display: none) 층이 켜질 때 여기서부터 전환한다(위 '꺼진 상태'와 같은 값).
+   채움·빛·선택 체크는 한 번 그려진 묶음(data-motion-armed)에서만 — 처음부터 켜져 있던 칸은 차오르지 않고 바로 그려진다. */
+@starting-style {
+  .stage-seg[data-on='false']:not([aria-disabled='true']):hover::before {
+    opacity: 0;
+  }
+  [data-motion-armed] .stage-seg-fill[data-on='true'] {
+    opacity: var(--stage-seg-dim, 0.125);
+    transform: scaleX(0);
+  }
+  [data-motion-armed] .stage-seg-fill[data-glow='true']::after {
+    opacity: 0;
+  }
+  [data-motion-armed] .scene-select-check[data-on='true'] {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  /* 체크선은 클래스로 고른다 — 태그(path)로 고르면 무장 표시가 붙을 때 카드 안 아이콘의 path 까지 모두 스타일을 다시 계산한다. */
+  [data-motion-armed] .scene-select-check[data-on='true'] .scene-select-check-mark {
+    stroke-dashoffset: 13;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -147,8 +147,17 @@ test('nearestScrollTop: 목록 상자 하나만 가장 적게 옮긴다(이미 �
 test('공용 훅: WAAPI transform 하나 + 인라인 쉬는 자리 — 클래스 토글·폭 애니메이션·animation:none 없음', () => {
   const hook = read('src/hooks/useSlidingIndicator.ts');
   assert.match(hook, /el\.animate\(plan\.frames, \{ duration: timing\.duration, easing: timing\.easing \}\)/);
-  assert.match(hook, /new ResizeObserver\(\(\) => placeRef\.current\(false\)\)/, '칸 크기 변화는 바로 맞춘다');
-  assert.match(hook, /blockSlide: state\.holdSlide \|\| Boolean\(opts\.reduce\)/, '동작 줄이기면 미끄러짐 없음');
+  assert.match(hook, /new ResizeObserver\(\(\) => \{\s*const state = stateRef\.current;\s*const pending = state\.pending;\s*state\.pending = null;\s*placeRef\.current\(pending \? pending\.slide && !pending\.block : false, pending\?\.block \?\? false\);/, '칸 크기 변화는 바로 맞추고, 적어 둔 선택 이동도 이 알림에서 한다');
+  assert.match(hook, /blockSlide: block \|\| state\.holdSlide \|\| Boolean\(opts\.reduce\)/, '동작 줄이기·목록 교체면 미끄러짐 없음');
+  // 최종 성능 측정 지적: 커밋 직후(layout effect)에 칸을 재면 바뀐 화면 전체의 레이아웃을 클릭 처리 안에서 강제한다.
+  // 키가 바뀐 effect 는 할 일만 적고 감시를 다시 걸어(observe) 레이아웃이 끝난 뒤 알림에서 잰다(감시가 없는 환경만 바로).
+  const keyEffectStart = hook.indexOf('const keyChanged = state.key !== key;');
+  const keyEffect = hook.slice(keyEffectStart, hook.indexOf('}, [key, options.resetKey, ...deps]);'));
+  assert.ok(keyEffectStart > 0 && keyEffect.length > 0, '키 effect');
+  assert.match(keyEffect, /state\.pending = \{ slide: \(pending\?\.slide \?\? false\) \|\| keyChanged, block: \(pending\?\.block \?\? false\) \|\| block \};/);
+  assert.match(keyEffect, /observer\.unobserve\(container\);\s*observer\.observe\(container\);/);
+  assert.equal(keyEffect.match(/placeRef\.current\(/g)?.length, 1, '바로 재는 건 크기 감시가 없는 환경 하나뿐');
+  assert.match(keyEffect, /if \(typeof ResizeObserver === 'undefined'\) \{\s*placeRef\.current\(keyChanged && !block, block\);\s*return;\s*\}/);
   assert.match(hook, /dataset\.slideKey === key/, '인덱스가 아니라 키로 찾는다');
   assert.doesNotMatch(hook, /classList\.(add|remove|toggle)|animation\s*[:=]\s*['"]?none|scrollIntoView/);
   const component = read('src/components/ui/SlidingIndicator.tsx');

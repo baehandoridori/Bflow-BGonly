@@ -25,6 +25,10 @@ import {
  *   단, 미끄러지는 중이면 보이는 자리에서 새 목표로 이어 간다.
  * - 처음 그릴 때, 표시가 숨어 있다 나타날 때, resetKey 가 바뀔 때(검색어 변경 등), 동작 줄이기면 바로 놓인다.
  * - 클래스를 넣었다 빼지 않는다(끝날 때 깜빡임). 쉬는 자리는 인라인 transform, 움직임은 WAAPI 하나.
+ * - 칸 자리를 재는 일(offset 읽기)은 커밋 직후(layout effect)에 하지 않는다. 그때 읽으면 방금 바뀐 화면 전체
+ *   (필터로 바뀐 카드 수십 장, 새 화면)의 스타일·레이아웃을 클릭 처리 안에서 강제로 계산한다(최종 성능 측정 지적).
+ *   대신 크기 감시를 다시 걸어, 브라우저가 이번 프레임의 레이아웃을 끝낸 뒤(그리기 전) 오는 알림에서 잰다 —
+ *   같은 프레임에 그려지므로 보이는 모습·박자는 그대로다.
  */
 export interface SlidingIndicatorOptions {
   axis?: SlideAxis;
@@ -49,6 +53,11 @@ interface SlideState {
   anim: Animation | null;
   /** resetKey 가 바뀐 프레임이 화면에 나가기 전까지 true. */
   holdSlide: boolean;
+  /**
+   * 다음 크기 감시 알림에서 할 자리 맞춤. 한 프레임 안의 여러 변경은 하나로 모은다 —
+   * 키가 한 번이라도 바뀌었으면 미끄러지고(slide), 목록 교체가 끼었으면 막는다(block).
+   */
+  pending: { slide: boolean; block: boolean } | null;
 }
 
 function findItem(container: HTMLElement, key: string): HTMLElement | null {
@@ -68,11 +77,12 @@ export function useSlidingIndicator<T extends HTMLElement = HTMLElement>(
   const ref = useRef<T>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
-  const stateRef = useRef<SlideState>({ key: null, resetKey: undefined, layout: null, shown: false, anim: null, holdSlide: false });
+  const stateRef = useRef<SlideState>({ key: null, resetKey: undefined, layout: null, shown: false, anim: null, holdSlide: false, pending: null });
+  const observerRef = useRef<ResizeObserver | null>(null);
   const key = activeKey === null || activeKey === undefined ? null : String(activeKey);
   const deps = options.deps ?? NO_DEPS;
 
-  const placeRef = useRef((animate: boolean) => {
+  const placeRef = useRef((animate: boolean, block = false) => {
     const el = ref.current;
     const container = el?.parentElement;
     if (!el || !container) return;
@@ -104,7 +114,7 @@ export function useSlidingIndicator<T extends HTMLElement = HTMLElement>(
       visual: running && previous ? visualSlideRect(getComputedStyle(el).transform, previous) : null,
       running: running !== null,
       keyMoved: animate,
-      blockSlide: state.holdSlide || Boolean(opts.reduce) || typeof el.animate !== 'function',
+      blockSlide: block || state.holdSlide || Boolean(opts.reduce) || typeof el.animate !== 'function',
     });
     if (plan.kind === 'keep') return;
 
@@ -125,32 +135,55 @@ export function useSlidingIndicator<T extends HTMLElement = HTMLElement>(
     state.anim = el.animate(plan.frames, { duration: timing.duration, easing: timing.easing });
   });
 
-  // 활성 칸·목록이 바뀌었을 때(그리기 전). 키가 바뀐 경우만 미끄러진다.
+  // 활성 칸·목록이 바뀌었을 때. 키가 바뀐 경우만 미끄러진다.
+  // 여기서는 재지 않고 할 일만 적어 둔 뒤 크기 감시를 다시 건다 — observe() 를 새로 걸면 이번 프레임의
+  // 레이아웃이 끝난 뒤(그리기 전) 알림이 한 번 온다. 목록이 바뀌어 감시를 새로 만드는 커밋이면 그 첫 알림이 대신한다.
   useLayoutEffect(() => {
     const state = stateRef.current;
     const keyChanged = state.key !== key;
     const resetChanged = state.resetKey !== options.resetKey;
     state.key = key;
     state.resetKey = options.resetKey;
+    const block = resetChanged || state.holdSlide;
     if (resetChanged && !state.holdSlide) {
       state.holdSlide = true;
       const release = () => { state.holdSlide = false; };
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(release);
       else setTimeout(release, 0);
     }
-    placeRef.current(keyChanged && !resetChanged);
+    if (typeof ResizeObserver === 'undefined') {
+      placeRef.current(keyChanged && !block, block);
+      return;
+    }
+    const pending = state.pending;
+    state.pending = { slide: (pending?.slide ?? false) || keyChanged, block: (pending?.block ?? false) || block };
+    const observer = observerRef.current;
+    const container = ref.current?.parentElement;
+    if (observer && container) {
+      observer.unobserve(container);
+      observer.observe(container);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, options.resetKey, ...deps]);
 
-  // 칸 크기·자리 변화(창 크기, 라벨 축약, 글꼴 로드, 사이드바 펼침) — 바로 맞춘다.
+  // 칸 크기·자리 변화(창 크기, 라벨 축약, 글꼴 로드, 사이드바 펼침) — 바로 맞춘다. 위에서 적어 둔 선택 이동도 여기서 한다.
   useLayoutEffect(() => {
     const el = ref.current;
     const container = el?.parentElement;
     if (!el || !container || typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(() => placeRef.current(false));
+    const observer = new ResizeObserver(() => {
+      const state = stateRef.current;
+      const pending = state.pending;
+      state.pending = null;
+      placeRef.current(pending ? pending.slide && !pending.block : false, pending?.block ?? false);
+    });
+    observerRef.current = observer;
     observer.observe(container);
     container.querySelectorAll('[data-slide-key]').forEach((item) => observer.observe(item));
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (observerRef.current === observer) observerRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
