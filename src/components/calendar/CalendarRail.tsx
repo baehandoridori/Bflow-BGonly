@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BellOff, Check, ChevronRight, Info, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
+import { AlertTriangle, BellOff, Check, Info, MoreHorizontal, Plus, RefreshCw, Settings, Trash2 } from 'lucide-react';
 import type { BflowCalendar } from '@/types/calendar';
 import type { IcsSubscription } from '@/shared/icsApiContract';
 import { icsCalendarId } from '@/shared/icsApiContract';
@@ -9,6 +9,21 @@ import { useCalendarStore } from '@/stores/useCalendarStore';
 import { groupCalendarsForRail } from '@/utils/calendarEventFilter';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { IcsSubscribeForm } from '@/components/calendar/IcsSubscribeForm';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { animateEl, EASE_CSS } from '@/utils/motion';
+
+/**
+ * 캘린더 표시 체크 '톡' — 누른 네모만 0.16초 살짝 커졌다 돌아온다(움직임 폴리싱 15번).
+ * 누를 때만 WAAPI 로 한 번 돈다(처음 그릴 때는 움직이지 않는다). 동작 줄이기면 움직임이 빠져 아무것도 하지 않는다.
+ */
+function popRailCheck(target: EventTarget | null | undefined): void {
+  if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return;
+  animateEl(target, [
+    { transform: 'scale(1)' },
+    { transform: 'scale(1.22)', offset: 0.45 },
+    { transform: 'scale(1)' },
+  ], { duration: 160, easing: EASE_CSS.out });
+}
 
 export const GOOGLE_CALENDAR_ID = 'google';
 
@@ -53,7 +68,7 @@ function CalendarRow({
         type="button"
         aria-label={`${calendar.name} 표시`}
         aria-pressed={visible}
-        onClick={onToggleVisible}
+        onClick={(event) => { popRailCheck(event?.currentTarget); onToggleVisible(); }}
         className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] cursor-pointer"
         style={{ backgroundColor: calendar.color }}
       >
@@ -82,7 +97,7 @@ function CalendarRow({
           event.stopPropagation();
           onToggleMenu();
         }}
-        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-opacity hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-[opacity,background-color] hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
       >
         <MoreHorizontal size={14} />
       </button>
@@ -90,7 +105,7 @@ function CalendarRow({
         <div
           ref={menuRef}
           role="menu"
-          className="absolute right-0 top-7 z-30 w-36 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
+          className="bf-pop absolute right-0 top-7 z-30 w-36 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
         >
           <button
             type="button"
@@ -152,7 +167,7 @@ function IcsSubscriptionRow({
         type="button"
         aria-label={`${subscription.name} 표시`}
         aria-pressed={visible}
-        onClick={onToggleVisible}
+        onClick={(event) => { popRailCheck(event?.currentTarget); onToggleVisible(); }}
         className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] cursor-pointer"
         style={{ backgroundColor: subscription.color }}
       >
@@ -188,7 +203,7 @@ function IcsSubscriptionRow({
           event.stopPropagation();
           onToggleMenu();
         }}
-        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-opacity hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+        className="shrink-0 rounded p-0.5 text-text-secondary opacity-0 transition-[opacity,background-color] hover:bg-bg-border/50 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
       >
         <MoreHorizontal size={14} />
       </button>
@@ -196,7 +211,7 @@ function IcsSubscriptionRow({
         <div
           ref={menuRef}
           role="menu"
-          className="absolute right-0 top-7 z-30 w-40 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
+          className="bf-pop absolute right-0 top-7 z-30 w-40 rounded-md border border-bg-border bg-bg-card p-1 shadow-lg"
         >
           <button
             type="button"
@@ -338,7 +353,7 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
             onClick={() => setAdminOverviewExpanded((expanded) => !expanded)}
             className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-[10px] font-semibold text-text-secondary hover:bg-bg-border/25 cursor-pointer"
           >
-            <ChevronRight size={12} className={adminOverviewExpanded ? 'rotate-90' : ''} />
+            <DisclosureChevron expanded={adminOverviewExpanded} size={12} />
             <span className="flex-1">관리자 전용 · 미공유 캘린더</span>
             <span>{groups.adminOverview.length}</span>
           </button>

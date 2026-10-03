@@ -6,6 +6,7 @@
 import type { WidgetLayoutItem } from '@/types';
 import type { ThemeConfig } from '@/themes';
 import type { BackgroundArt, BflowStarNestSettings, StarNestSettings } from '@/utils/starNestSettings';
+import type { MotionLevel } from '@/utils/motionLevel';
 
 const LAYOUT_FILE = 'layout.json';
 const ALL_LAYOUT_FILE = 'layout-all.json';
@@ -134,6 +135,9 @@ export interface UserPreferences {
     dashboardBflowStarNest?: Partial<BflowStarNestSettings>;
   };
 
+  // 움직임 폴리싱(2026-10): 앱 안 '움직임' 설정. 'full'(기본) | 'lite'(가볍게) | 'minimal'(최소=동작 줄이기와 같게)
+  motionLevel?: MotionLevel;
+
   // Phase 8-4: 스플래시 건너뛰기
   skipLoadingSplash?: boolean;
   skipLandingSplash?: boolean;
@@ -209,11 +213,21 @@ export async function loadPreferences(): Promise<UserPreferences | null> {
   return null;
 }
 
-export async function savePreferences(prefs: UserPreferences): Promise<void> {
+/**
+ * 파일에 저장했으면 true. 실패는 예전처럼 기록만 하고 넘어간다 — 결과를 보지 않는 기존 호출처는 그대로다.
+ * 결과가 필요한 곳(움직임 설정: 실패하면 다른 창에 알리지 않고 되돌린다)만 false 를 본다.
+ */
+export async function savePreferences(prefs: UserPreferences): Promise<boolean> {
   try {
-    await window.electronAPI.writeSettings(PREFERENCES_FILE, prefs);
+    const written = await window.electronAPI.writeSettings(PREFERENCES_FILE, prefs);
+    if (written === false) {
+      console.error('[설정] 환경설정 저장 실패: 파일에 쓰지 못함');
+      return false;
+    }
+    return true;
   } catch (err) {
     console.error('[설정] 환경설정 저장 실패:', err);
+    return false;
   }
 }
 

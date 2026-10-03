@@ -118,7 +118,7 @@ test('an unauthorized stale playground view is synchronously presented only as d
   const layout = readFileSync('src/components/layout/MainLayout.tsx', 'utf8');
   const header = readFileSync('src/components/layout/Header.tsx', 'utf8');
   assert.match(app, /switch \(safeCurrentView\)/);
-  assert.match(app, /<MainLayout activeView=\{safeCurrentView\} onRefresh=\{loadData\}>/);
+  assert.match(app, /<MainLayout activeView=\{safeCurrentView\} onRefresh=\{refreshDataManually\}>/);
   assert.match(layout, /const immersive = activeView === 'playground';/);
   assert.match(layout, /<Header activeView=\{activeView\} onRefresh=\{onRefresh\} \/>/);
   assert.match(header, /resolveHeaderTitle\(activeView, episodeDashboardEp, episodeTitles\)/);
@@ -154,7 +154,7 @@ test('sidebar, app and layout wire one global playground route', () => {
   );
   assert.match(app, /resolveAllowedView\(currentView, currentUser\)/);
   assert.match(app, /<PlaygroundView authorizedHansol=\{canAccessPlayground\(currentUser\)\} \/>/);
-  assert.match(app, /<MainLayout activeView=\{safeCurrentView\} onRefresh=\{loadData\}>/);
+  assert.match(app, /<MainLayout activeView=\{safeCurrentView\} onRefresh=\{refreshDataManually\}>/);
   assert.match(layout, /activeView:\s*ViewMode/);
   assert.match(layout, /const immersive = activeView === 'playground';/);
   assert.match(layout, /<Header activeView=\{activeView\} onRefresh=\{onRefresh\} \/>/);

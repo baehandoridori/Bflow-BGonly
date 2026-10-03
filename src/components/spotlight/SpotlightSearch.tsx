@@ -10,6 +10,8 @@ import { formatPartDisplayName } from '@/utils/partDisplayName';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
+import { revealInList } from '@/utils/slidingIndicator';
 import { getEvents } from '@/services/calendarService';
 import { readPartMetadataMaps } from '@/services/supabaseService';
 import type { CalendarEvent } from '@/types/calendar';
@@ -108,6 +110,10 @@ export function SpotlightSearch() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  /** 마지막 포인터 위치 — 키보드로 목록이 스크롤돼 커서 밑 줄만 바뀐 것(같은 자리)은 무시한다. */
+  const pointerAtRef = useRef<{ x: number; y: number } | null>(null);
+  /** ↓·↑ 로 옮기는 중 — 포인터 위치를 아직 모르면 처음 들어온 이동은 위치만 적고 고르지 않는다. */
+  const keyboardNavRef = useRef(false);
 
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
@@ -643,9 +649,11 @@ export function SpotlightSearch() {
     (e: React.KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        keyboardNavRef.current = true;
         setSelectedIndex((prev) => Math.min(prev + 1, flatResults.length - 1));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        keyboardNavRef.current = true;
         setSelectedIndex((prev) => Math.max(prev - 1, 0));
       } else if (e.key === 'Enter' && flatResults[selectedIndex]) {
         e.preventDefault();
@@ -655,10 +663,10 @@ export function SpotlightSearch() {
     [flatResults, selectedIndex],
   );
 
-  /* ── 선택 항목 스크롤 ── */
+  /* ── 선택 항목 스크롤 — 결과 상자 하나만, 즉시(꾹 누를 때도 막대와 어긋나지 않게). ── */
   useEffect(() => {
-    const el = resultsRef.current?.querySelector(`[data-idx="${selectedIndex}"]`);
-    el?.scrollIntoView({ block: 'nearest' });
+    const container = resultsRef.current;
+    revealInList(container, container?.querySelector<HTMLElement>(`[data-idx="${selectedIndex}"]`));
   }, [selectedIndex]);
 
   /* ── 쿼리 변경 시 선택 초기화 ── */
@@ -673,10 +681,9 @@ export function SpotlightSearch() {
           {/* ── 백드롭 ── */}
           <motion.div
             className="fixed inset-0 z-[9998]"
+            // 화면 전체 흐림은 열고 닫히는 동안 매 프레임 다시 계산된다 — 흐림 대신 조금 더 짙은 단색 막(움직임 폴리싱 바탕 C)
             style={{
-              backgroundColor: 'rgb(var(--color-overlay) / var(--overlay-alpha))',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
+              backgroundColor: 'rgb(var(--color-overlay) / calc(var(--overlay-alpha) + 0.08))',
             }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -698,7 +705,7 @@ export function SpotlightSearch() {
               <div
                 className="rounded-2xl overflow-hidden"
                 style={{
-                  backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
+                  backgroundColor: 'rgb(var(--color-bg-card) / 0.97)',
                   border: '1px solid rgb(var(--color-bg-border) / 0.5)',
                   boxShadow:
                     '0 24px 48px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5)) inset',
@@ -728,9 +735,18 @@ export function SpotlightSearch() {
                 {/* ── 결과 목록 ── */}
                 <div
                   ref={resultsRef}
-                  className="max-h-[340px] overflow-y-auto py-1.5"
+                  className="relative max-h-[340px] overflow-y-auto py-1.5"
                   style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,141,163,0.2) transparent' }}
                 >
+                  {/* 강조 막대 하나가 ↑↓·마우스를 0.12초 만에 따라간다(움직임 폴리싱 7번). 검색어가 바뀌면 바로 놓인다. */}
+                  <SlidingIndicator
+                    activeKey={flatResults.length > 0 ? selectedIndex : null}
+                    axis="y"
+                    timing="list"
+                    resetKey={query}
+                    deps={[flatResults]}
+                    className="left-0 right-0 bg-accent/15 border-l-2 border-accent"
+                  />
                   {flatResults.length === 0 && query.trim() && (
                     <div className="px-5 py-10 text-center text-text-secondary/70 text-sm">
                       검색 결과가 없습니다
@@ -749,14 +765,21 @@ export function SpotlightSearch() {
                           <button
                             key={item.id}
                             data-idx={idx}
+                            data-slide-key={idx}
                             onClick={item.action}
-                            onMouseEnter={() => setSelectedIndex(idx)}
+                            // 마우스를 실제로 움직였을 때만 그 줄을 고른다. ↓·↑ 로 목록이 스크롤되면 가만히 있는 커서 밑으로
+                            // 다른 줄이 들어오는데, 그걸로 키보드 선택을 덮어쓰면 강조 막대가 앞뒤로 튄다.
+                            onMouseMove={(e) => {
+                              const last = pointerAtRef.current;
+                              pointerAtRef.current = { x: e.clientX, y: e.clientY };
+                              if (last ? last.x === e.clientX && last.y === e.clientY : keyboardNavRef.current) return;
+                              keyboardNavRef.current = false;
+                              setSelectedIndex(idx);
+                            }}
                             className={cn(
-                              'w-full flex items-center gap-3 px-5 py-2.5 text-left cursor-pointer',
-                              'transition-all duration-100',
-                              isSelected
-                                ? 'bg-accent/15 border-l-2 border-accent pl-[18px]'
-                                : 'hover:bg-bg-border/15 border-l-2 border-transparent pl-[18px]',
+                              // 선택 배경·왼쪽 막대는 위의 미끄러지는 강조 막대가 맡는다(마우스를 올리면 그 줄이 선택된다).
+                              'relative w-full flex items-center gap-3 px-5 py-2.5 text-left cursor-pointer',
+                              'border-l-2 border-transparent pl-[18px]',
                             )}
                           >
                             <span

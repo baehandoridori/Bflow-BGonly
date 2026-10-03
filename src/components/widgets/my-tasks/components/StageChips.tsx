@@ -56,7 +56,7 @@ export function StageChips({ scene, deptCfg, onToggleStage, size = 'sm', reduce 
             aria-pressed={checked}
             className={cn(
               dim,
-              'rounded font-medium flex items-center justify-center transition-all',
+              'rounded font-medium flex items-center justify-center transition-colors',
               readOnly ? 'cursor-default' : 'cursor-pointer',
               !checked && 'text-text-secondary/40 border border-dashed border-bg-border/60',
               !checked && !readOnly && 'hover:text-text-secondary/80 hover:border-accent/40 hover:bg-bg-border/15',

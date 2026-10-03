@@ -9,7 +9,6 @@
 
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
 import { X, ListPlus } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import type { AppUser, Episode } from '@/types';
@@ -80,14 +79,11 @@ export function RevisionSetCreateModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4 bf-scrim-in"
       onClick={onClose}
     >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 8 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="w-full max-w-md rounded-2xl border border-bg-border bg-bg-card shadow-2xl"
+      <div
+        className="bf-modal-in w-full max-w-md rounded-2xl border border-bg-border bg-bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
@@ -174,7 +170,7 @@ export function RevisionSetCreateModal({
             {submitting ? '만드는 중…' : '세트 만들기'}
           </button>
         </div>
-      </motion.div>
+      </div>
     </div>,
     document.body,
   );

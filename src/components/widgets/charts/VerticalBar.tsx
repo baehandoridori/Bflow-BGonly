@@ -18,7 +18,7 @@ export function VerticalBar({ items, maxHeight = 80 }: VerticalBarProps) {
             {item.pct.toFixed(1)}%
           </span>
           <div
-            className="w-8 rounded-t-md transition-all duration-700 ease-out"
+            className="bf-entry-fill-y w-8 rounded-t-md transition-all duration-700 ease-out"
             style={{
               height: `${Math.max((item.pct / 100) * maxHeight, 4)}px`,
               backgroundColor: item.color,

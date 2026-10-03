@@ -452,7 +452,7 @@ export function ProfileSection() {
             <span className="text-[13px] font-semibold text-text-primary">나의 휴가 관리</span>
             <ChevronDown
               size={14}
-              className={cn('text-text-secondary/60 transition-transform group-hover:text-text-primary', vacationCollapsed && '-rotate-90')}
+              className={cn('text-text-secondary/60 transition-[transform,color] group-hover:text-text-primary', vacationCollapsed && '-rotate-90')}
             />
           </button>
           {!vacationCollapsed && vacationConnected && !vacLoading && (

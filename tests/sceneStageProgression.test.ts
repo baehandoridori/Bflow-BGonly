@@ -194,8 +194,13 @@ test('scene view uses sequential stage patches for single and bulk toggles', asy
   assert.match(scenesView, /buildSequentialStagePatch\(scene, stage\)/);
   assert.match(scenesView, /changedStages\.forEach\(\(changedStage\) => \{/);
   assert.match(scenesView, /setSceneStageValue\(sheetName, sceneId, changedStage, stagePatch\[changedStage\]\)/);
-  assert.match(scenesView, /persistSequentialStagePatchWithRollback\(/);
-  assert.match(scenesView, /updateCell\(sheetName, sceneIndex, changedStage, value/);
+  // 움직임 폴리싱 20번: 실패하면 바로 되돌리지 않고 자동으로 다시 보낸다 — 바뀐 칸을 모두 보내고,
+  // 끝내 실패하면 서버에도 처음 값을 다시 써 둔다(예전 persistSequentialStagePatchWithRollback 의 역할).
+  assert.match(scenesView, /mergePendingStageWrites\(carried\?\.writes, scene, stagePatch, changedStages\)/);
+  assert.match(scenesView, /for \(const changedStage of writes\.stages\) \{\r?\n\s+await writeStage\(changedStage, writes\.desired\[changedStage\] === true\);/);
+  assert.match(scenesView, /Promise\.allSettled\(plan\.rolled\.map\(\(s\) => writeStage\(s, baseline\[s\] === true\)\)\)/);
+  // 늦게 다시 보낼 수 있으니 줄 번호는 보낼 때 다시 찾는다(움직임 폴리싱 검증 지적 review-data-safety-4).
+  assert.match(scenesView, /updateCell\(sheetName, sceneIndexNow\(\), changedStage, value/);
   assert.doesNotMatch(scenesView, /toggleSceneStage\(sheetName, sceneId, stage\)/);
 
   assert.match(scenesView, /const stagePatchByUuid = new Map<string, Partial<Record<Stage, boolean>>>\(\)/);

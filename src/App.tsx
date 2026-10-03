@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useCallback, useState, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
+import { lazy, Suspense, useEffect, useCallback, useMemo, useState, useRef, startTransition, Component, type ReactNode, type ErrorInfo } from 'react';
 import { createPortal } from 'react-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore } from '@/stores/useAppStore';
@@ -8,23 +8,40 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { subscribeToActivityRealtime } from '@/services/supabaseService';
-// 뷰 lazy 로딩 — 초기 번들에서 제외
-const Dashboard = lazy(() => import('@/views/Dashboard').then(m => ({ default: m.Dashboard })));
-const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default: m.ScenesView })));
-const EpisodeView = lazy(() => import('@/views/EpisodeView').then(m => ({ default: m.EpisodeView })));
-const AssigneeView = lazy(() => import('@/views/AssigneeView').then(m => ({ default: m.AssigneeView })));
-const TeamView = lazy(() => import('@/views/TeamView').then(m => ({ default: m.TeamView })));
-const CalendarView = lazy(() => import('@/features/gantt/GanttView').then(m => ({ default: m.GanttView })));
-const ScheduleView = lazy(() => import('@/views/ScheduleView').then(m => ({ default: m.ScheduleView })));
-const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ default: m.VacationView })));
-const CompositingView = lazy(() => import('@/views/CompositingView')); // default export — 기존 리테이크 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
-const CompositingDashboardView = lazy(() => import('@/views/CompositingDashboardView')); // v1.30.0+ 새 현황 대시보드
-const RetakeHubView = lazy(() => import('@/views/RetakeHubView')); // 리테이크 허브 5단계 — 감독 세트 허브
-const CharacterBoardView = lazy(() => import('@/views/CharacterBoardView')); // 캐릭터 현황판
+import {
+  loadAssigneeView,
+  loadCharacterBoardView,
+  loadCompositingDashboardView,
+  loadCompositingView,
+  loadDashboardView,
+  loadEpisodeView,
+  loadGanttView,
+  loadRetakeHubView,
+  loadScenesView,
+  loadScheduleView,
+  loadSettingsView,
+  loadTeamView,
+  loadVacationView,
+} from '@/views/viewLoaders';
+import { DelayedViewSpinner, ViewReady } from '@/components/layout/ViewReveal';
+// 뷰 lazy 로딩 — 초기 번들에서 제외. 로드 함수는 사이드바 hover 미리 준비와 같이 쓴다(viewLoaders).
+const Dashboard = lazy(() => loadDashboardView().then(m => ({ default: m.Dashboard })));
+const ScenesView = lazy(() => loadScenesView().then(m => ({ default: m.ScenesView })));
+const EpisodeView = lazy(() => loadEpisodeView().then(m => ({ default: m.EpisodeView })));
+const AssigneeView = lazy(() => loadAssigneeView().then(m => ({ default: m.AssigneeView })));
+const TeamView = lazy(() => loadTeamView().then(m => ({ default: m.TeamView })));
+const CalendarView = lazy(() => loadGanttView().then(m => ({ default: m.GanttView })));
+const ScheduleView = lazy(() => loadScheduleView().then(m => ({ default: m.ScheduleView })));
+const VacationView = lazy(() => loadVacationView().then(m => ({ default: m.VacationView })));
+const CompositingView = lazy(loadCompositingView); // default export — 기존 리테이크 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
+const CompositingDashboardView = lazy(loadCompositingDashboardView); // v1.30.0+ 새 현황 대시보드
+const RetakeHubView = lazy(loadRetakeHubView); // 리테이크 허브 5단계 — 감독 세트 허브
+const CharacterBoardView = lazy(loadCharacterBoardView); // 캐릭터 현황판
 const PlaygroundView = lazy(() => import('@/views/PlaygroundView'));
-const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
+const SettingsView = lazy(() => loadSettingsView().then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
+import { LoadingSplash } from '@/components/auth/LoadingSplash';
 const PasswordChangeModal = lazy(() => import('@/components/auth/PasswordChangeModal').then(m => ({ default: m.PasswordChangeModal })));
 const UserManagerModal = lazy(() => import('@/components/auth/UserManagerModal').then(m => ({ default: m.UserManagerModal })));
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
@@ -37,6 +54,9 @@ import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
+import { keepPendingSceneFields, onSceneSaveSessionEnded } from '@/services/sceneSaveRetry';
+import { remotePhaseFlash, remoteStageFlash, type RemoteSceneFlashContext, type RemoteSceneFlashSignal } from '@/utils/remoteSceneFlash';
+import { useSceneFlashStore } from '@/stores/sceneFlashStore';
 import { resolveVacationConnection, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
@@ -76,7 +96,7 @@ import { useNotificationStore, type AppNotification } from '@/stores/useNotifica
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
-import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import { dispatchNotification, noteLiveNotificationArrival, type NotificationSettings } from '@/utils/notificationHelper';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
@@ -103,6 +123,7 @@ import {
   buildNotificationSceneDisplayLabelFromSceneKey,
 } from '@/utils/notificationEpisodeLabels';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
+import { createSyncQueue } from '@/utils/syncQueue';
 import { useRetakeNotifications } from '@/hooks/useRetakeNotifications';
 import { openRetakeInApp } from '@/utils/retakeNavigation';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
@@ -245,6 +266,30 @@ function isSceneAssignedToUser<T extends { assignee?: string | null }>(
   return Boolean(scene && parseAssigneeList(scene.assignee).includes(userName));
 }
 
+/** 움직임 폴리싱 9번 — 팀원이 바꾼 씬 카드 빛·이름표. 스토어 반영 '전에' 읽어야 실제 변화만 잡힌다. */
+function remoteSceneFlashContext(): RemoteSceneFlashContext {
+  const auth = useAuthStore.getState();
+  return {
+    myId: auth.currentUser?.id ?? null,
+    findScene: (uuid) => {
+      for (const ep of useDataStore.getState().episodes) {
+        for (const part of ep.parts) {
+          const scene = part.scenes.find((s) => s.id === uuid);
+          if (scene) return { scene, department: part.department };
+        }
+      }
+      return null;
+    },
+    nameOf: (userId) => auth.users.find((u) => u.id === userId)?.name ?? null,
+  };
+}
+
+function pulseRemoteSceneFlash(signal: RemoteSceneFlashSignal | null): void {
+  if (!signal) return;
+  const { pulse } = useSceneFlashStore.getState();
+  for (const change of signal.changes) pulse(signal.uuid, signal.byName, change);
+}
+
 function markLocalFeedbackJumpAsRead(payload: { kind?: string; notificationId?: string }) {
   const notificationId = typeof payload.notificationId === 'string' ? payload.notificationId.trim() : '';
   if (!notificationId) return;
@@ -324,9 +369,17 @@ function resolveNewAssigneeCompletionFallback(
   return latest;
 }
 
+/** 토스트 공통 모양 — 렌더마다 새 객체를 만들지 않는다(토스트 상자 재렌더 방지). */
+const TOASTER_OPTIONS = {
+  className: 'bflow-toast',
+  style: {
+    fontSize: '13px',
+  },
+};
+
 export default function App() {
   const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setDataConnected, setGasConfig, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
-  const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
+  const { setEpisodes, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
     authReady, setAuthReady,
@@ -459,6 +512,23 @@ export default function App() {
   // 토스트 설정 (위치/시간) — 설정에서 로드
   const [toastPosition, setToastPosition] = useState<'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right'>('bottom-right');
   const [toastDuration, setToastDuration] = useState(3000);
+  // Sonner 토스트 — 대화상자가 #root를 inert 처리해도 알림은 body에서 유지.
+  // App 은 앱 가게 전체를 구독해 씬을 넘길 때마다 다시 그려진다. 토스트 상자는 설정이 바뀔 때만 다시 그린다 —
+  // sonner 는 그릴 때마다 문서 방향을 계산된 스타일로 읽어, 화면을 그리는 도중 스타일 재계산을 강제한다(최종 측정 지적).
+  const toasterTheme = colorMode === 'light' ? 'light' : 'dark';
+  const toasterPortal = useMemo(() => (typeof document !== 'undefined' ? createPortal(
+    <Toaster
+      theme={toasterTheme}
+      position={toastPosition}
+      duration={toastDuration}
+      toastOptions={TOASTER_OPTIONS}
+      gap={8}
+      visibleToasts={5}
+      expand={false}
+      closeButton
+    />,
+    document.body,
+  ) : null), [toasterTheme, toastPosition, toastDuration]);
 
   // 종료 대기 알림 수신 → 저장 중 오버레이
   const [savingBeforeQuit, setSavingBeforeQuit] = useState(false);
@@ -604,14 +674,37 @@ export default function App() {
   const [loadingSplashDone, setLoadingSplashDone] = useState(false);
   const [sessionRestoreError, setSessionRestoreError] = useState('');
   useEffect(() => { if (currentUser) setSessionRestoreError(''); }, [currentUser]);
+  // 첫 진입 덮개 (움직임 폴리싱 13번): 'Bflow.'·로그인 화면을 덮개로 남겨 둔 채 아래에 메인 화면을 미리 그리고,
+  // 클릭(또는 로그인 성공)하면 덮개가 걷히며 대시보드가 드러난다. 인사 말풍선은 덮개가 다 걷힌 뒤.
+  const [mainPrimed, setMainPrimed] = useState(false);
+  // 로그인 화면 덮개가 떠 있다 — 로그인 전부터 로그인 직후 다 걷힐 때까지. 사용자 정보가 들어오는 순간에도
+  // 덮개가 사라지지 않게 로그인 전(인증 준비 뒤 사용자 없음)에 미리 켜 둔다. 로그아웃하면 다시 켠다.
+  const [loginCurtain, setLoginCurtain] = useState(false);
+  useEffect(() => {
+    if (!authReady || currentUser) return;
+    setLoginCurtain(true);
+    setMainPrimed(false);
+  }, [authReady, currentUser]);
+  // 로딩 영상을 넘긴 뒤 다음 화면 위에서 0.2초 동안 걷히는 중
+  const [loadingSplashFading, setLoadingSplashFading] = useState(false);
+  // 메인 화면 미리 그리기 — 급하지 않은 갱신(startTransition)이라 끊어 그리며, 그동안 글자·빛·카드가 떠오르는
+  // 연출이 먼저 화면에 나간다. 대시보드 코드가 아직 없으면 받아질 때까지 덮개만 보인다(빙글이 없이).
+  const primeMain = useCallback(() => { startTransition(() => setMainPrimed(true)); }, []);
+  // 덮개가 다 걷혔다 — 첫 화면(splash)이든 로그인 직후든 덮개를 내린다. 바로 내린다(급하지 않은 갱신으로 미루면
+  // 투명해진 덮개의 배경 입자 그림이 그동안 계속 돌아 저사양에서 오히려 더 끊긴다 — cpu 4배 실측).
+  const finishEntryOverlay = useCallback(() => { setShowSplash(false); setLoginCurtain(false); }, []);
+  const skipLoadingSplash = useCallback(() => { setLoadingSplashFading(true); setLoadingSplashDone(true); }, []);
+  const finishLoadingSplashFade = useCallback(() => setLoadingSplashFading(false), []);
+  // 첫 화면 코드를 미리 받아 둔다 — 로그인 직후처럼 덮개 아래에서 바로 그려야 할 때 기다리지 않게.
+  useEffect(() => { if (authReady) void import('@/views/Dashboard'); }, [authReady]);
   // 환영 팝업: 로그인 직후에만 표시
   const [welcomeUser, setWelcomeUser] = useState<string | null>(null);
   // 시간대별 인사말 토스트 (WelcomeToast 스타일로 하단 표시)
   const [greetingToast, setGreetingToast] = useState<string | null>(null);
 
-  // 데이터 로드 함수 — Supabase에서 데이터 읽기 (Sheets fallback)
-  const loadData = useCallback(async () => {
-    setSyncing(true);
+  // 데이터 로드 본체 — Supabase에서 데이터 읽기 (Sheets fallback).
+  // '동기화 중' 표시는 아래 syncQueue 가 맡는다(겹친 실행 수를 세고, 직접/자동을 구분).
+  const fetchAllData = useCallback(async () => {
     setSyncError(null);
     try {
       // Supabase 우선 시도
@@ -678,10 +771,20 @@ export default function App() {
     } catch (err) {
       console.error('[동기화 실패]', err);
       setSyncError(String(err));
-    } finally {
-      setSyncing(false);
     }
-  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setDataConnected, setActiveDataSource]);
+  }, [setEpisodes, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setDataConnected, setActiveDataSource]);
+
+  // 받아오기 조율 (움직임 폴리싱 3번): 자동(폴링·실시간 재로드·재연결)은 예전처럼 바로 돌고,
+  // 직접(새로고침 버튼·단축키)은 자동이 도는 중이면 무시하지 않고 끝난 뒤 한 번 더 받아온다.
+  // 헤더는 syncKind 가 'manual' 일 때만 새로고침 아이콘을 돌리고, 자동은 체크만 한 번 숨 쉰다.
+  const fetchAllDataRef = useRef(fetchAllData);
+  fetchAllDataRef.current = fetchAllData;
+  const [syncQueue] = useState(() => createSyncQueue(
+    () => fetchAllDataRef.current(),
+    ({ syncing, kind }) => useDataStore.getState().setSyncState(syncing, kind),
+  ));
+  const loadData = useCallback(() => syncQueue.request('auto'), [syncQueue]);
+  const refreshDataManually = useCallback(() => { void syncQueue.request('manual'); }, [syncQueue]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {
@@ -1830,8 +1933,21 @@ export default function App() {
       if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
         const delta = extractSceneDelta(payload.new);
         if (delta) {
-          const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
-          if (applied) return;
+          // 이 행은 바뀐 칸만이 아니라 서버 행 전체다 — 저장을 기다리는 내 칸이 옛 서버 값으로 풀리지 않게
+          // 받아오기와 같은 규칙으로 내 값을 다시 얹는다(처음 값으로 돌아간 칸만. 움직임 폴리싱 20번 safety-net).
+          const fields = keepPendingSceneFields(delta.uuid, useDataStore.getState().findSceneByUuid(delta.uuid), delta.fields);
+          // 일괄 변경은 이 경로로만 온다(보낸 사람 = updated_by). 방송으로 이미 반영된 변경은 값이 같아 빛나지 않는다.
+          const flash = remoteStageFlash(
+            remoteSceneFlashContext(),
+            delta.uuid,
+            (payload.new as { updated_by?: unknown }).updated_by,
+            fields as Record<string, unknown>,
+          );
+          const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, fields);
+          if (applied) {
+            pulseRemoteSceneFlash(flash);
+            return;
+          }
         }
       }
 
@@ -2493,7 +2609,9 @@ export default function App() {
         // 체크박스 토글 → UUID로 즉시 반영
         const { sceneUuid, stage, value, senderId } = data.payload as { sceneUuid: string; stage: string; value: boolean; senderId?: string };
         if (sceneUuid && stage != null && value != null) {
+          const flash = remoteStageFlash(remoteSceneFlashContext(), sceneUuid, senderId, { [stage]: value });
           useDataStore.getState().updateSceneByUuid(sceneUuid, { [stage]: value });
+          pulseRemoteSceneFlash(flash);
 
           // 알림: 타인이 내 씬을 변경한 경우
           const me = useAuthStore.getState().currentUser;
@@ -2529,11 +2647,17 @@ export default function App() {
           senderId?: string;
         };
         if (sceneUuid && sceneState) {
+          const flash = remotePhaseFlash(remoteSceneFlashContext(), sceneUuid, senderId, {
+            sceneState,
+            workRound: workRound ?? 0,
+            feedbackRound: feedbackRound ?? 0,
+          });
           useDataStore.getState().updateSceneByUuid(sceneUuid, {
             sceneState,
             workRound: workRound ?? 0,
             feedbackRound: feedbackRound ?? 0,
           });
+          pulseRemoteSceneFlash(flash);
           // 자기 자신이 보낸 변경은 알림 스킵 (이미 로컬 토스트 표시됨)
           const me = useAuthStore.getState().currentUser;
           if (me && senderId && senderId !== me.id) {
@@ -2774,6 +2898,7 @@ export default function App() {
         const me = useAuthStore.getState().currentUser;
         const n = payload?.notification;
         if (n && me && n.recipientId === me.id && n.actorId !== me.id) {
+          const unreadBefore = useNotificationStore.getState().unreadCount;
           useNotificationStore.getState().upsertCommentReaction({
             id: n.id,
             type: 'comment_reaction',
@@ -2789,6 +2914,8 @@ export default function App() {
             isRead: n.readAt !== null,
             createdAt: n.lastActionAt,
           });
+          // 움직임 폴리싱 18번: 실시간 반응 알림은 종 배지만 '톡'(나를 부른 알림이 아니라 종은 흔들지 않는다).
+          noteLiveNotificationArrival('comment_reaction', unreadBefore);
           // 코덱스 2차 P1: 실시간으로 받은 알림은 lastSeen 갱신.
           // 코덱스 6차 P2: monotonic max() 로 out-of-order broadcast 의 cursor 후퇴 차단.
           // 코덱스 15차 P2: lastSeen 을 composite "<lastActionAt>|<id>" 로 저장 → 같은 ts 행이
@@ -2985,6 +3112,10 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // 로그인 세션이 바뀌어 씬 저장 재전송을 그만뒀으면(움직임 폴리싱 20번) 바로 다시 받아온다 —
+  // 앞 사람의 아직 저장 안 된 체크가 다음 사람 화면에 다음 폴링까지 남아 있지 않게.
+  useEffect(() => onSceneSaveSessionEnded(() => { void loadData(); }), [loadData]);
+
   // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (5초 간격)
   useEffect(() => {
     if (!authReady) return;
@@ -3016,7 +3147,7 @@ export default function App() {
   }, [authReady, currentUser, showSplash, welcomeUser]);
 
   // ── 글로벌 단축키 (Phase 8-2) ──
-  useGlobalShortcuts({ onReload: loadData });
+  useGlobalShortcuts({ onReload: refreshDataManually });
 
   useEffect(() => installEditableFocusRecovery(), []);
 
@@ -3025,7 +3156,7 @@ export default function App() {
   // 다음 실행 시에도 영원히 안 뜨는 문제가 있었음 (한솔 v1.27.0 1차 보고).
   const updateToastShownRef = useRef(false);
   useEffect(() => {
-    if (showSplash || updateToastShownRef.current) return;
+    if (showSplash || loginCurtain || updateToastShownRef.current) return;
     updateToastShownRef.current = true; // 같은 세션에서 두 번 안 뜨도록 즉시 마킹
     let cancelled = false;
     (async () => {
@@ -3047,7 +3178,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [showSplash]);
+  }, [showSplash, loginCurtain]);
 
   // Ctrl+Alt+U: 관리자 모드 토글
   useEffect(() => {
@@ -3130,108 +3261,72 @@ export default function App() {
           return <Dashboard />;
       }
     })();
+    // 움직임 폴리싱 12번: 화면 코드가 도착해 처음 그려지는 순간(ViewReady) 본문 덮개를 걷는다.
+    // ViewReady 를 화면보다 앞에 둔다 — 본문 스크롤을 먼저 맨 위로 돌려 두고, 화면이 자기 layout effect 에서
+    // 하는 스크롤(강조 항목으로 이동 등)은 그 뒤에 그대로 살린다.
+    // 로딩 동그라미는 250ms 를 넘길 때만 보인다(DelayedViewSpinner).
     return (
       <LazyErrorBoundary key={currentView} name={`View:${currentView}`}>
-        <Suspense fallback={
-          <div className="flex items-center justify-center h-full w-full">
-            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-          </div>
-        }>
+        <Suspense fallback={<DelayedViewSpinner />}>
+          <ViewReady view={safeCurrentView} />
           {view}
         </Suspense>
       </LazyErrorBoundary>
     );
   };
 
-  // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능
-  // 영상은 1회 재생 후 마지막 프레임에서 멈춤 (스플래시 아트처럼)
+  // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능.
+  // 넘기면 다음 화면 위에서 0.2초 동안 걷히며 짧게 겹친다(움직임 폴리싱 13번). 아래 모든 화면 묶음에 같은 key 로
+  // 들어 있어 영상이 다시 시작되지 않는다.
+  const loadingSplashOverlay = (!loadingSplashDone || loadingSplashFading) ? (
+    <LoadingSplash
+      key="loading-splash"
+      canSkip={authReady}
+      fading={loadingSplashDone}
+      onSkip={skipLoadingSplash}
+      onFaded={finishLoadingSplashFade}
+    />
+  ) : null;
   if (!loadingSplashDone) {
-    const canSkip = authReady;
-    return (
-      <div
-        className="flex items-center justify-center h-screen w-screen overflow-hidden cursor-pointer select-none"
-        style={{
-          backgroundColor: '#0F1117',
-          backgroundImage: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
-        }}
-        onClick={() => { if (canSkip) setLoadingSplashDone(true); }}
-      >
-        {/* 스플래시 영상 — loop 없이 1회 재생 후 마지막 프레임 고정 */}
-        <div className="relative" style={{ width: 'min(420px, 75vmin)', aspectRatio: '672 / 592' }}>
-          <video
-            autoPlay muted playsInline preload="auto"
-            src="./splash/opening_video.mp4"
-            className="absolute object-cover"
-            style={{
-              inset: '-10%', width: '120%', height: '120%',
-              animation: 'loadingSplashReveal 1.5s ease-out 0.3s forwards',
-              filter: 'blur(8px) brightness(0.6)',
-              transform: 'scale(1.05)',
-              WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
-              maskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
-              WebkitMaskComposite: 'destination-in' as never,
-              maskComposite: 'intersect' as never,
-            }}
-          />
-        </div>
-
-        {/* 하단 문구 */}
-        <div className="absolute bottom-6 flex flex-col items-center gap-1.5">
-          {canSkip ? (
-            <>
-              <span
-                className="text-sm text-accent/80 font-medium tracking-wide"
-                style={{ animation: 'fadeIn 0.5s ease-out' }}
-              >
-                로딩 완료
-              </span>
-              <span
-                className="text-xs text-white/40 tracking-wide"
-                style={{ animation: 'fadeIn 0.5s ease-out 0.2s both' }}
-              >
-                아무 곳이나 클릭하여 건너뛰기
-              </span>
-            </>
-          ) : (
-            <span className="text-sm text-white/30 animate-pulse tracking-wide">
-              로딩 중...
-            </span>
-          )}
-        </div>
-
-        <style>{`
-          @keyframes loadingSplashReveal {
-            to { filter: blur(0px) brightness(1); transform: scale(1); }
-          }
-          @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-        `}</style>
-      </div>
-    );
+    return <>{loadingSplashOverlay}</>;
   }
 
   // 인증 초기화 아직 미완료 (비정상 경로 — 위에서 splash가 처리하므로 거의 발생 안 함)
   if (!authReady) return null;
+
+  // 로그인·첫 화면 덮개 (움직임 폴리싱 13번). 아래 세 화면 묶음 모두에 같은 key 로 들어 있어,
+  // 로그인 → 메인 화면, 'Bflow.' → 메인 화면으로 바뀌어도 덮개가 새로 생기지 않고 그 자리에서 걷힌다.
+  const entryOverlayVisible = !currentUser || showSplash || loginCurtain;
+  const entryOverlay = entryOverlayVisible ? (
+    <LoginScreen
+      key="entry-overlay"
+      mode={!currentUser || loginCurtain ? 'login' : 'splash'}
+      restoreError={sessionRestoreError}
+      onPrimeMain={primeMain}
+      onComplete={finishEntryOverlay}
+    />
+  ) : null;
 
   // 로그인 화면 (비로그인 상태)
   if (!currentUser) {
     return (
       <>
         <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-        <LoginScreen restoreError={sessionRestoreError} />
+        {entryOverlay}
         <UpdateCenterModal />
+        {loadingSplashOverlay}
       </>
     );
   }
 
-  // 스플래시 랜딩 (로그인 상태에서도 앱 시작 시 표시)
-  if (showSplash) {
+  // 스플래시 랜딩 (로그인 상태에서도 앱 시작 시 표시)·막 로그인한 순간 — 메인을 미리 그리기 전까지는 덮개만.
+  // 글자가 다 나와 클릭을 기다리는 동안·로그인 직후 덮개가 primeMain 을 불러 아래 메인 묶음으로 넘어간다.
+  if (entryOverlayVisible && !mainPrimed) {
     return (
       <>
         <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-        <LoginScreen mode="splash" onComplete={() => setShowSplash(false)} />
+        {entryOverlay}
+        {loadingSplashOverlay}
       </>
     );
   }
@@ -3240,10 +3335,13 @@ export default function App() {
     <>
       <SvgIconDefs />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
-      <MainLayout activeView={safeCurrentView} onRefresh={loadData}>{renderView()}</MainLayout>
+      <MainLayout activeView={safeCurrentView} onRefresh={refreshDataManually}>{renderView()}</MainLayout>
       <PlaygroundEntryOverlay />
       <SpotlightSearch />
       <GlobalTooltipProvider />
+      {/* 첫 진입 덮개·로딩 영상 교차 (움직임 폴리싱 13번) — 이 화면은 덮개 아래에서 미리 그려진다 */}
+      {entryOverlay}
+      {loadingSplashOverlay}
 
       {/* 비밀번호 변경 모달 */}
       {showPasswordChange && (
@@ -3268,27 +3366,10 @@ export default function App() {
       <UpdateCenterModal />
 
       {/* Sonner 토스트 — 대화상자가 #root를 inert 처리해도 알림은 body에서 유지 */}
-      {typeof document !== 'undefined' && createPortal(
-        <Toaster
-          theme={colorMode === 'light' ? 'light' : 'dark'}
-          position={toastPosition}
-          duration={toastDuration}
-          toastOptions={{
-            className: 'bflow-toast',
-            style: {
-              fontSize: '13px',
-            },
-          }}
-          gap={8}
-          visibleToasts={5}
-          expand={false}
-          closeButton
-        />,
-        document.body,
-      )}
+      {toasterPortal}
 
-      {/* 환영 팝업 (로그인 직후) */}
-      {welcomeUser && (
+      {/* 환영 팝업 (로그인 직후) — 로그인 덮개가 다 걷힌 뒤 */}
+      {welcomeUser && !loginCurtain && (
         <WelcomeToast userName={welcomeUser} onDismiss={() => {
           setWelcomeUser(null);
           // 수동 로그인: "어서오세요" 사라진 후 시간대별 인사 표시

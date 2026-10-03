@@ -1,19 +1,21 @@
 /**
  * 컴포지팅 대시보드 — 단계 변경 시 잠깐 표시되는 highlight 상태.
  *
- * 다른 사용자의 단계 변경이 Realtime 으로 들어왔을 때:
- *   1. 해당 씬 카드에 색 펄스 (background flash)
- *   2. 보낸 사람 아바타 배지 (작은 동그라미)
- * 이 둘을 2.5초 동안 표시 후 자동으로 사라진다.
+ * 다른 사용자의 변경이 Realtime 으로 들어왔을 때:
+ *   1. 단계(status)가 실제로 바뀌었으면 카드 앞면이 새 단계 색으로 한 번 물들었다 빠진다 (wash, 0.9초)
+ *   2. 보낸 사람 아바타 배지 (작은 동그라미) — '톡' 나타났다 조용히 사라진다
+ * highlight 는 2.5초 동안 유지된 뒤 자동으로 사라진다.
  *
  * 본인의 변경(낙관적 토글)은 highlight 대상이 아니다 — 수신측에서 본인 ID 비교 후 add 호출 여부 결정.
+ * EP 전환·첫 로드는 Realtime 이벤트가 아니므로 카드 수십 장이 한꺼번에 물드는 일은 없다.
  *
  * spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md (11.3)
+ *       docs/superpowers/specs/2026-10-03-motion-polish-design.md (5. compositing-card-fixes)
  */
 
 import { create } from 'zustand';
 
-/** highlight 표시 지속 시간 (ms). spec: 2.5초. */
+/** highlight 표시 지속 시간 (ms). spec: 2.5초. 아바타 배지의 퇴장 시점(CSS)도 이 값에 맞춘다. */
 export const HIGHLIGHT_DURATION_MS = 2500;
 
 export interface TransientHighlight {
@@ -22,6 +24,23 @@ export interface TransientHighlight {
 
   /** 시작 시각 (Date.now). 동일 키에 대해 재발생 시 갱신. */
   startedAt: number;
+
+  /** add 할 때마다 커지는 번호 — 아바타 배지를 처음부터 다시 틀 React key. */
+  seq: number;
+
+  /**
+   * 마지막으로 단계가 실제로 바뀐 add 의 seq — 카드 앞면 물듦(wash)의 React key.
+   * 단계가 그대로인 변경(오류 사유·메모만 바뀜)은 물들이지 않고, 이미 돌고 있는 물듦도 끊지 않는다.
+   * null 이면 이번 highlight 동안 단계 변화가 없었다.
+   */
+  washSeq: number | null;
+}
+
+export interface AddHighlightOptions {
+  /** 표시 시간(ms). 기본 HIGHLIGHT_DURATION_MS. */
+  durationMs?: number;
+  /** 단계가 실제로 바뀐 변경인지 — true 일 때만 카드 앞면이 물든다. */
+  wash?: boolean;
 }
 
 interface TransientHighlightState {
@@ -35,7 +54,7 @@ interface TransientHighlightState {
    * highlight 추가/갱신. duration 이후 자동 제거.
    * 동일 키 재호출 시 기존 타이머 cancel → 새 타이머로 reset.
    */
-  add: (key: string, by: string | null, durationMs?: number) => void;
+  add: (key: string, by: string | null, options?: AddHighlightOptions) => void;
 
   /** 강제 제거 (예: EP 전환 시 cleanup). */
   clear: (key: string) => void;
@@ -44,11 +63,22 @@ interface TransientHighlightState {
   clearAll: () => void;
 }
 
+/** 단계가 실제로 바뀌었는지. 행이 없던 씬은 '배치'로 보이므로 'batch' 와 비교한다. */
+export function compositingStatusChanged(
+  previous: { status: string } | null | undefined,
+  next: { status: string },
+): boolean {
+  return (previous?.status ?? 'batch') !== next.status;
+}
+
+let highlightSeq = 0;
+
 export const useTransientHighlightStore = create<TransientHighlightState>((set, get) => ({
   highlights: new Map(),
   _timers: new Map(),
 
-  add: (key, by, durationMs = HIGHLIGHT_DURATION_MS) => {
+  add: (key, by, options = {}) => {
+    const { durationMs = HIGHLIGHT_DURATION_MS, wash = false } = options;
     const { _timers } = get();
     // 동일 키에 활성 타이머가 있으면 cancel — 새 타이머가 timeout 책임을 인계받는다
     const existing = _timers.get(key);
@@ -67,8 +97,10 @@ export const useTransientHighlightStore = create<TransientHighlightState>((set, 
     }, durationMs);
 
     set((state) => {
+      const seq = ++highlightSeq;
+      const previous = state.highlights.get(key);
       const nextHi = new Map(state.highlights);
-      nextHi.set(key, { by, startedAt: Date.now() });
+      nextHi.set(key, { by, startedAt: Date.now(), seq, washSeq: wash ? seq : (previous?.washSeq ?? null) });
       const nextTimers = new Map(state._timers);
       nextTimers.set(key, timer);
       return { highlights: nextHi, _timers: nextTimers };

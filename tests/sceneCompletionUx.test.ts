@@ -8,8 +8,11 @@ const readRepoFile = (...segments: string[]) =>
 
 test('complete overlay can undo the exact last completion action', async () => {
   const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
+  // 움직임 폴리싱 17번: 파트 완료 화면은 src/components/scenes/PartCompleteOverlay.tsx 로 옮겼다.
+  const overlay = await readRepoFile('src', 'components', 'scenes', 'PartCompleteOverlay.tsx');
 
-  assert.match(scenesView, /마지막 체크 취소/);
+  assert.match(overlay, /마지막 체크 취소/);
+  assert.match(scenesView, /onUndoLastAction=\{canUndoLastCompletionAction \? handleUndoLastCompletionAction : undefined\}/);
   assert.match(scenesView, /lastCompletionUndoAction/);
   assert.match(scenesView, /skipCompletionUndoCapture/);
   assert.match(scenesView, /setLastCompletionUndoAction\(\{\s*kind: 'stage'/);
@@ -21,18 +24,21 @@ test('complete overlay can undo the exact last completion action', async () => {
 
 test('complete overlay stays centered in the viewport and can be hidden', async () => {
   const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
+  const overlay = await readRepoFile('src', 'components', 'scenes', 'PartCompleteOverlay.tsx');
 
   assert.match(scenesView, /dismissedCompletionOverlayKey/);
   assert.match(scenesView, /showCompletionRestoreButton/);
   assert.match(scenesView, /onDismiss/);
-  assert.match(scenesView, /className="fixed inset-0 z-\[60\] pointer-events-none/);
-  assert.match(scenesView, /items-center justify-center/);
-  assert.match(scenesView, /aria-label="완료 안내 숨기기"/);
-  assert.match(scenesView, /aria-label="완료 안내 다시 보기"/);
-  assert.match(scenesView, /완료 안내 다시 보기/);
+  assert.match(scenesView, /import \{ PartCompleteOverlay, CompletionRestoreButton \} from '@\/components\/scenes\/PartCompleteOverlay';/);
+  assert.match(overlay, /className="fixed inset-0 z-\[60\] pointer-events-none/);
+  assert.match(overlay, /items-center justify-center/);
+  assert.match(overlay, /aria-label="완료 안내 숨기기"/);
+  assert.match(overlay, /aria-label="완료 안내 다시 보기"/);
+  assert.match(overlay, /완료 안내 다시 보기/);
   assert.match(scenesView, /setDismissedCompletionOverlayKey\(completionOverlayKey\)/);
   assert.match(scenesView, /setDismissedCompletionOverlayKey\(null\)/);
   assert.doesNotMatch(scenesView, /completionOverlayFrameStyle/);
+  assert.doesNotMatch(overlay, /completionOverlayFrameStyle/);
   assert.doesNotMatch(scenesView, /className="sticky top-0 z-20 pointer-events-none overflow-hidden rounded-\[28px\]"/);
   assert.doesNotMatch(scenesView, /className="absolute bottom-4 left-4 right-4"/);
 });

@@ -410,10 +410,17 @@ export async function updateSceneCompletionMeta(
   rowIndex: number,
   completion: { completedBy: string; completedAt: string } | null,
 ): Promise<void> {
-  const uuid = resolveSceneUuid(sheetName, rowIndex);
+  await updateSceneCompletionMetaByUuid(resolveSceneUuid(sheetName, rowIndex), completion);
+}
+
+/** 씬 완료 메타 저장 (이미 알고 있는 UUID 로 직접). 늦게 다시 보내는 저장은 줄 번호가 바뀌었을 수 있어 이쪽을 쓴다. */
+export async function updateSceneCompletionMetaByUuid(
+  sceneUuid: string,
+  completion: { completedBy: string; completedAt: string } | null,
+): Promise<void> {
   await window.electronAPI.supabaseWriteMetadata(
     SCENE_COMPLETION_META_TYPE,
-    uuid,
+    sceneUuid,
     completion ? JSON.stringify(completion) : '',
   );
 }

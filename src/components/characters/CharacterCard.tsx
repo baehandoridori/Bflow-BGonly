@@ -9,6 +9,7 @@ import { cn } from '@/utils/cn';
 import { useCostumeEditingPresence, useCostumeCollisionWarn } from '@/stores/useEditingPresenceStore';
 import { editingBeamClass } from '@/utils/editingPresence';
 import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
+import type { SwapDirection } from '@/utils/contentSwap';
 
 // 복장 없는 캐릭터에 매 렌더 새 [] 를 만들면 memo 비교가 항상 실패한다 — 안정 참조 하나를 공유 (CQ-6).
 export const EMPTY_COSTUMES: CharacterCostume[] = [];
@@ -63,10 +64,13 @@ export const CharacterCard = memo(function CharacterCard({
   // (원래 휠로 넘겼으나 preventDefault 가 페이지 스크롤을 하이재킹해 카드가 많은 화면에서 충돌 — 버튼으로 교체.)
   const imaged = costumes.filter((c) => c.featuredImageUrl);
   const [activeIdx, setActiveIdx] = useState(0);
+  // 누른 쪽에서 새 그림이 겹쳐 떠오른다(‹ 는 왼쪽, › 는 오른쪽 — 움직임 폴리싱 11번).
+  const [swapDirection, setSwapDirection] = useState<SwapDirection>(0);
   useEffect(() => { if (activeIdx >= imaged.length) setActiveIdx(0); }, [imaged.length, activeIdx]);
   const shown = imaged[activeIdx] ?? imaged[0] ?? null;
 
   const stepCostume = (dir: 1 | -1) => {
+    setSwapDirection(dir);
     setActiveIdx((i) => {
       const count = imaged.length;
       if (count <= 1) return i;
@@ -77,6 +81,7 @@ export const CharacterCard = memo(function CharacterCard({
   return (
     <button
       type="button"
+      data-flip-id={character.id}
       draggable={!!onDragStartCard}
       onDragStart={onDragStartCard ? (e) => {
         e.dataTransfer.effectAllowed = 'move';
@@ -90,10 +95,11 @@ export const CharacterCard = memo(function CharacterCard({
       onContextMenu={(event) => onContextMenu(character.id, event, shown?.id)}
       style={{ ...(imageHeightPx ? { width: Math.round(imageHeightPx * 3 / 4) } : null), overflow: 'visible' }}
       className={cn(
-        'group relative text-left bg-bg-card border border-bg-border rounded-xl hover:border-accent/50 flex flex-col cursor-pointer',
+        'group relative text-left bg-bg-card border border-bg-border rounded-xl flex flex-col cursor-pointer',
         // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만, 복장 유니온). 씬 카드와 동일 패턴.
         editingBeamClass(presenceEditors.length > 0, presenceWarn),
-        'transition-[transform,opacity,border-color] duration-200 ease-out motion-reduce:transition-none',
+        // 누를 수 있는 카드 hover(2px 떠오름·밝은 테두리·그림자) + 끌기 축소·흐림·드롭 테두리 전환을 함께 정한다.
+        'bf-card-hover',
         // 드래그 중 소스는 살짝 작아지며 흐려져 "고스트로 들려 나갔다"는 느낌을 준다.
         dragging ? 'opacity-30 scale-[0.97] motion-reduce:scale-100' : 'scale-100',
         dropTarget && !dragging && 'border-accent/60',
@@ -120,6 +126,7 @@ export const CharacterCard = memo(function CharacterCard({
               background={shown.imageBackground}
               fit={shown.imageFit}
               className="w-full h-full"
+              swapDirection={swapDirection}
             />
           ) : (
             <ImageIcon size={28} className="text-text-secondary/40" />

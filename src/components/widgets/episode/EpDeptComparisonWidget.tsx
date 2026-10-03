@@ -8,6 +8,8 @@ import { DEPARTMENTS, DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import { HorizontalBar } from '../charts/HorizontalBar';
 import { VerticalBar } from '../charts/VerticalBar';
 import { DonutChart } from '../charts/DonutChart';
+import { RollingNumber } from '@/components/ui/RollingNumber';
+import { useDashboardRollKey } from '@/hooks/useDashboardRollKey';
 import type { Stage, ChartType } from '@/types';
 
 const SUPPORTED_CHARTS: ChartType[] = ['horizontal-bar', 'vertical-bar', 'donut'];
@@ -22,6 +24,7 @@ export function EpDeptComparisonWidget() {
     () => (epNum !== null ? calcEpisodeDetailStats(episodes, epNum) : null),
     [episodes, epNum],
   );
+  const rollKey = useDashboardRollKey();
 
   if (!stats || epNum === null) return null;
 
@@ -40,6 +43,9 @@ export function EpDeptComparisonWidget() {
     if (withScenes.length === 0) return 0;
     return withScenes.reduce((sum, d) => sum + d.pct, 0) / withScenes.length;
   })();
+
+  // 탭·에피소드를 바꾼 직후, 데이터가 처음 도착한 순간에는 숫자를 굴리지 않는다.
+  const resetKey = `${rollKey}|${deptData.some((d) => d.totalScenes > 0) ? 'ready' : 'empty'}`;
 
   const activeChart = SUPPORTED_CHARTS.includes(chartType) ? chartType : 'horizontal-bar';
 
@@ -98,7 +104,7 @@ export function EpDeptComparisonWidget() {
               pct: d.pct,
               color: d.config.color,
             }))}
-            centerValue={`${combinedPct.toFixed(1)}%`}
+            centerValue={<RollingNumber value={combinedPct} decimals={1} suffix="%" resetKey={resetKey} />}
             centerLabel="통합"
           />
           {/* 단계별 비교 미니 차트 */}
@@ -146,7 +152,7 @@ export function EpDeptComparisonWidget() {
               return (
                 <div
                   key={d.dept}
-                  className="h-full transition-all duration-700 ease-out first:rounded-l-full last:rounded-r-full"
+                  className="bf-progress-bar h-full first:rounded-l-full last:rounded-r-full"
                   style={{ width: `${d.pct}%`, backgroundColor: d.config.color, opacity: 0.8 }}
                   title={`${d.config.label}: ${d.pct.toFixed(1)}%`}
                 />
@@ -154,7 +160,7 @@ export function EpDeptComparisonWidget() {
             })}
           </div>
           <span className="text-sm font-bold text-text-primary w-14 text-right">
-            {combinedPct.toFixed(1)}%
+            <RollingNumber value={combinedPct} decimals={1} suffix="%" resetKey={resetKey} />
           </span>
         </div>
 
@@ -166,13 +172,13 @@ export function EpDeptComparisonWidget() {
             </span>
             <div className="flex-1 h-5 bg-bg-primary rounded-full overflow-hidden">
               <div
-                className="h-full rounded-full transition-all duration-700 ease-out"
+                className="bf-progress-bar h-full rounded-full"
                 style={{ width: `${d.pct}%`, backgroundColor: d.config.color }}
               />
             </div>
             <div className="flex flex-col items-end w-20">
               <span className="text-sm font-bold" style={{ color: d.config.color }}>
-                {d.pct.toFixed(1)}%
+                <RollingNumber value={d.pct} decimals={1} suffix="%" resetKey={resetKey} />
               </span>
               <span className="text-[11px] text-text-secondary">{d.totalScenes}씬</span>
             </div>

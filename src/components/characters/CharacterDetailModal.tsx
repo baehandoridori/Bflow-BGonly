@@ -6,6 +6,8 @@ import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHel
 import { applyDragGhost } from '@/utils/dragGhost';
 import { useDataStore } from '@/stores/useDataStore';
 import { useModalFocus } from '@/hooks/useModalFocus';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { useSwapFade } from '@/hooks/useContentSwap';
 import type { Character, CharacterCostume, CharacterImageFit } from '@/types';
 import { createAndLinkCharacterFolder } from '@/services/characterFolderService';
 import { cn } from '@/utils/cn';
@@ -191,7 +193,7 @@ const CostumeThumbCard = memo(function CostumeThumbCard({
           });
           if (ok) await onDelete(costume.id);
         }}
-        className="absolute top-1 right-1 rounded-md bg-black/40 p-1.5 text-white/80 opacity-0 transition-opacity hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
+        className="absolute top-1 right-1 rounded-md bg-black/40 p-1.5 text-white/80 opacity-0 transition-[opacity,color] hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 cursor-pointer"
       >
         <Trash2 size={13} />
       </button>
@@ -751,6 +753,11 @@ export function CharacterDetailModal({
   const [listQuery, setListQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // 왼쪽 목록에서 다른 캐릭터를 고르면 창 틀은 그대로, 오른쪽 상세 내용만 살짝 떠오르며 바뀐다(움직임 폴리싱 11번).
+  // 다시 그리지 않으므로(리마운트 X) 상세 안의 상태는 지금처럼 이어진다.
+  const detailMainRef = useRef<HTMLElement>(null);
+  const { reduce: reduceMotion } = useMotionPref();
+  useSwapFade(detailMainRef, selectedId, reduceMotion);
   const modalFocus = useModalFocus(dialogRef, { autoFocus: true });
 
   const [commentOpen, setCommentOpen] = useState(() => window.innerWidth >= 1440);
@@ -923,7 +930,7 @@ export function CharacterDetailModal({
           </aside>
 
           {/* 우측 상세 */}
-          <main className="relative z-[1] flex-1 min-w-0">
+          <main ref={detailMainRef} className="relative z-[1] flex-1 min-w-0">
             {selected && (
               <CharacterDetailPanel
                 character={selected}

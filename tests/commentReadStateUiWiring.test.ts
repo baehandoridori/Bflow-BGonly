@@ -204,7 +204,10 @@ test('CommentPanel does not mark canonical read state while merely loading comme
 test('CommentPanel can place the unread divider before a nested unread reply', () => {
   assert.match(commentPanel, /orderedVisibleComments/);
   assert.match(commentPanel, /replyShowUnreadDivider/);
-  assert.match(commentPanel, /reply\.id === firstUnreadCommentId/);
+  // 움직임 폴리싱 4번: 줄은 처음 잡은 자리(읽음 처리 뒤에도 유지)에, 아직 안 잡았으면 첫 안 읽은 댓글(답글 포함)에 붙는다.
+  // (리뷰 반영: 처음 자리를 잡을 때 한 번만 정한다 — 정한 뒤엔 실시간으로 온 댓글에 새 줄을 만들지 않는다.)
+  assert.match(commentPanel, /const dividerCommentId = listReady && readStateReady \? unreadDividerCommentId\(unreadDividerSlot, firstUnreadCommentId\) : null;/);
+  assert.match(commentPanel, /reply\.id === dividerCommentId/);
   assert.match(commentPanel, /buildCommentReplyTarget\(comments,\s*target\)/);
   assert.match(commentPanel, /next\.delete\(threadRootId\)/);
 });
@@ -250,6 +253,11 @@ test('CommentPanelResizable lets users resize from both the inner divider and ou
 test('CommentPanel reruns scroll and observer setup after the unread divider mounts', () => {
   assert.match(commentPanel, /setUnreadDividerNode/);
   assert.match(commentPanel, /unreadDividerElement/);
-  assert.match(commentPanel, /\[firstUnreadCommentId,\s*unreadDividerElement\]/);
-  assert.match(commentPanel, /\[firstUnreadCommentId,\s*latestOtherUserCommentAt,\s*markUnreadCommentsRead,\s*unreadDividerElement\]/);
+  // 움직임 폴리싱 4번: 처음 자리는 화면에 그리기 전(useLayoutEffect)에 줄 가운데로 잡고, 줄이 늦게 붙어 높이가 바뀌면
+  // 크기 감시(ResizeObserver)가 같은 자리 잡기를 다시 부른다(예전 150ms 뒤 scrollIntoView 대신).
+  assert.match(commentPanel, /else if \(pin\.target === 'divider'\) anchorNode = unreadDividerRef\.current;/);
+  assert.match(commentPanel, /new ResizeObserver\(\(\) => \{[\s\S]{0,200}?applyOpenPin\(\);/);
+  assert.doesNotMatch(commentPanel, /unreadDividerElement\.scrollIntoView/);
+  // 읽음 감시는 줄이 붙은 뒤 다시 설정된다.
+  assert.match(commentPanel, /\[listReady,\s*readStateReady,\s*firstUnreadCommentId,\s*latestOtherUserCommentAt,\s*markUnreadCommentsRead,\s*unreadDividerElement,\s*dividerCommentId,\s*comments\]/);
 });

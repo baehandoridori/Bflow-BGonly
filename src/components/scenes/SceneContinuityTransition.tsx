@@ -1,4 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
+import { continuityStartTransform } from '@/utils/sceneFlip';
+
+import { prefersReducedMotion } from '@/utils/motion';
 
 interface SceneContinuityTransitionProps {
   sourceElement: HTMLElement | null;
@@ -15,13 +18,13 @@ function readVisibleRect(element: HTMLElement) {
   return rect;
 }
 
+/**
+ * 카드 자리에서 창이 커지며 열리는 시작 모습.
+ * 움직임 폴리싱 14번: 가로·세로를 따로 늘리면(scale(x, y)) 카드와 창의 비율 차이 때문에 초반 글자가 납작하게
+ * 눌려 보였다 → 카드 폭에 맞춘 '균등' 확대 + 위 정렬로 바꾸고, 처음 30% 동안은 투명에서 떠오르게 한다.
+ */
 function buildStartTransform(sourceRect: DOMRect, targetRect: DOMRect) {
-  const scaleX = sourceRect.width / Math.max(targetRect.width, 1);
-  const scaleY = sourceRect.height / Math.max(targetRect.height, 1);
-  const translateX = sourceRect.left - targetRect.left;
-  const translateY = sourceRect.top - targetRect.top;
-
-  return `translate3d(${translateX}px, ${translateY}px, 0) scale(${scaleX}, ${scaleY})`;
+  return continuityStartTransform(sourceRect, targetRect);
 }
 
 export function SceneContinuityTransition({
@@ -33,9 +36,10 @@ export function SceneContinuityTransition({
 
   useEffect(() => {
     const targetRoot = targetRootRef.current;
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // 윈도우 동작 줄이기뿐 아니라 설정 › 효과 › 움직임 '최소'도 확대 전환을 건너뛴다(움직임 폴리싱 바탕 B).
+    const reduce = prefersReducedMotion();
 
-    if (!sourceElement || !targetRoot || prefersReducedMotion) {
+    if (!sourceElement || !targetRoot || reduce) {
       onComplete?.();
       return;
     }
@@ -77,27 +81,22 @@ export function SceneContinuityTransition({
       sourceElement.classList.add('bflow-continuity-source-dim');
       targetRoot.classList.add('bflow-continuity-live-root');
       targetRoot.style.transformOrigin = 'top left';
-      targetRoot.style.willChange = 'transform, opacity, filter';
+      targetRoot.style.willChange = 'transform, opacity';
       targetRoot.style.overflow = 'hidden';
       targetRoot.style.pointerEvents = 'none';
 
+      // filter 는 매 프레임 다시 그리게 하므로 쓰지 않는다. 끝값은 원래 모습(none)이라 끝난 뒤 transform 이
+      // 남지 않는다(fill both 로 identity 행렬이 남으면 창 안 fixed 요소의 기준 상자가 바뀐다).
       animation = targetRoot.animate(
         [
-          {
-            transform: buildStartTransform(sourceRect, targetRect),
-            opacity: 0.94,
-            filter: 'saturate(0.88) blur(0.2px)',
-          },
-          {
-            transform: 'translate3d(0, 0, 0) scale(1, 1)',
-            opacity: 1,
-            filter: 'saturate(1) blur(0px)',
-          },
+          { transform: buildStartTransform(sourceRect, targetRect), opacity: 0 },
+          { opacity: 1, offset: 0.3 },
+          { transform: 'none', opacity: 1 },
         ],
         {
           duration: DURATION_MS,
           easing: EASING,
-          fill: 'both',
+          fill: 'backwards',
         },
       );
 

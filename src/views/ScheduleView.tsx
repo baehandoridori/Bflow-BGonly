@@ -8,6 +8,7 @@ import {
   CalendarDays, ChevronLeft, ChevronRight, Plus,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore, type ScheduleDateNavigationRequest } from '@/stores/useAppStore';
 import {
@@ -51,8 +52,11 @@ import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays, formatWeekHeaderLabel } from '@/utils/calendarDate';
 import { calendarViewAnchor } from '@/utils/calendarViewAnchor';
 import { useMotionPref } from '@/hooks/useMotionPref';
+import { useSwapIn } from '@/hooks/useContentSwap';
+import { sidePanelPreset } from '@/utils/contentSwap';
 import { buildEventSnapshot, diffEventSnapshots, type CalendarEventSnapshot } from '@/utils/calendarEventDiff';
 import { reuseUnchangedCalendarEvents } from '@/utils/calendarEventReuse';
+import { BORN_KEEP_MS, LAND_CLEAR_MS, clearLandingIf, type LandingMark } from '@/utils/dragLanding';
 import { eventContentSnapshot, withCalendarPresentationForSnapshot } from '@/utils/calendarLocalMutation';
 
 type WeekSubMode = 'card' | 'timegrid';
@@ -255,9 +259,18 @@ export function ScheduleView() {
   const realtimeHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const realtimeHighlightExpiryRef = useRef(new Map<string, number>());
   const isInitialCalendarSyncRef = useRef(true);
+  // 끌어서 놓은 막대의 착지('톡' + 링)와 방금 만든 일정의 굳어짐(움직임 폴리싱 16번).
+  // 놓는 즉시·만들기를 누르는 즉시 시작한다 — 반짝임은 '저장 완료' 표시가 아니고, 실패하면 거둔다.
+  // 상태(useState)는 아래 기존 선언들 뒤(positionError 다음)에 둔다 — 테스트 하네스가 훅을 슬롯 순서로 흉내 낸다.
+  const dropLandingSeqRef = useRef(0);
+  const dropLandingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bornTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   // ─── 새 컴포넌트 상태 ───
   const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
+  // 열린 상세 창에서 다른 일정을 누르면 창 틀은 그대로, 내용만 바뀐다(움직임 폴리싱 11번).
+  const panelEventKey = panelEvent ? calendarEventIdentityKey(panelEvent) : null;
+  const panelSwapIn = useSwapIn(panelEventKey);
 
   // 월간 뷰 휠 — 디바운스 타이머
   const wheelTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -409,6 +422,41 @@ export function ScheduleView() {
         : setTimeout(flushExpiredHighlights, Math.max(0, nextExpiry - Date.now()));
     };
     flushExpiredHighlights();
+  }, []);
+
+  const startDropLanding = useCallback((identity: CalendarEventIdentity): number => {
+    const seq = ++dropLandingSeqRef.current;
+    setDropLanding({ key: calendarEventIdentityKey(identity), seq });
+    if (dropLandingTimerRef.current) clearTimeout(dropLandingTimerRef.current);
+    dropLandingTimerRef.current = setTimeout(() => setDropLanding((current) => clearLandingIf(current, seq)), LAND_CLEAR_MS);
+    return seq;
+  }, []);
+
+  const cancelDropLanding = useCallback((seq: number) => {
+    setDropLanding((current) => clearLandingIf(current, seq));
+  }, []);
+
+  const markEventBorn = useCallback((identity: CalendarEventIdentity) => {
+    const key = calendarEventIdentityKey(identity);
+    setBornEventIdentities((previous) => (previous.has(key) ? previous : new Set(previous).add(key)));
+    const timers = bornTimersRef.current;
+    const existing = timers.get(key);
+    if (existing) clearTimeout(existing);
+    timers.set(key, setTimeout(() => {
+      timers.delete(key);
+      setBornEventIdentities((previous) => {
+        if (!previous.has(key)) return previous;
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
+    }, BORN_KEEP_MS));
+  }, []);
+
+  useEffect(() => () => {
+    if (dropLandingTimerRef.current) clearTimeout(dropLandingTimerRef.current);
+    for (const timer of bornTimersRef.current.values()) clearTimeout(timer);
+    bornTimersRef.current.clear();
   }, []);
 
   const applyCanonicalEvents = useCallback((
@@ -593,24 +641,18 @@ export function ScheduleView() {
 
   // 통합 이벤트 (B flow + 연결된 휴가)와 캘린더∩태그 필터를 한 경로로 유지한다.
   const allEvents = useMemo(() => [...events, ...vacationEvents], [events, vacationEvents]);
-  // 태그·캘린더 필터가 바뀌면 결과가 뚝 갈리므로 짧게 페이드로 이어 준다.
-  // 컨테이너를 다시 마운트하면 스크롤·드래그가 끊기므로 투명도만 잠깐 낮춘다.
+  // 태그·캘린더 필터가 바뀌면 달력 전체를 옅게 깜빡이지 않고(바뀌지 않은 일정까지 어두워졌다),
+  // 새로 보이게 된 일정 막대만 0.18초 떠오르게 한다(움직임 폴리싱 15번). 그 기준 시각만 여기서 정한다 —
+  // 막대는 '필터를 바꾼 직후에 생겼는지'를 자기가 마운트될 때 한 번만 판정한다(CalendarGrid).
   const filterSignature = useMemo(
     () => JSON.stringify([visibleCalendarIds, enabledTagIds]),
     [enabledTagIds, visibleCalendarIds],
   );
-  const [filterFadeOpacity, setFilterFadeOpacity] = useState(1);
-  const lastFilterSignatureRef = useRef(filterSignature);
-  useEffect(() => {
-    if (lastFilterSignatureRef.current === filterSignature) return;
-    lastFilterSignatureRef.current = filterSignature;
-    // 페이드 도중 OS '동작 줄이기'가 켜지면 cleanup이 복구 타이머를 지운 뒤 재실행이
-    // 그냥 빠져나가 화면이 반투명으로 굳는다. 되돌리고 나가야 한다.
-    if (reduce) { setFilterFadeOpacity(1); return; }
-    setFilterFadeOpacity(0.55);
-    const restore = setTimeout(() => setFilterFadeOpacity(1), 120);
-    return () => clearTimeout(restore);
-  }, [filterSignature, reduce]);
+  const filterRevealRef = useRef({ signature: filterSignature, at: 0 });
+  if (filterRevealRef.current.signature !== filterSignature) {
+    filterRevealRef.current = { signature: filterSignature, at: Date.now() };
+  }
+  const filterRevealAt = reduce ? 0 : filterRevealRef.current.at;
 
   const filteredEvents = useMemo(
     () => filterCalendarEvents(allEvents, {
@@ -849,10 +891,20 @@ export function ScheduleView() {
         createdAt: new Date().toISOString(),
       };
       const optimisticIdentity = guardCreatedEvent(ev);
+      // 저장을 기다리지 않고 바로: 유리 막대는 녹고, 같은 자리에 붙는 진짜 막대는 굳어지며 한 번 빛난다.
+      markEventBorn(optimisticIdentity);
+      setCreateGhostLeaving(true);
       await addEvent(ev, {
         onPersistedIdentity: (identity) => {
           if (!hasSameCalendarEventIdentity(identity, optimisticIdentity)) {
             guardPersistedCreatedEvent(ev, identity);
+            // 저장이 끝나 id 가 서버 id 로 바뀌어도 같은 막대로 이어 그린다 — 다시 붙으면 굳어짐·빛 링이
+            // 중간에 끊기고 막대가 툭 진해진다(16번). 별칭은 이 화면이 떠 있는 동안 남긴다(만든 일정 수만큼, 작다).
+            const persistedKey = calendarEventIdentityKey(identity);
+            const optimisticKey = calendarEventIdentityKey(optimisticIdentity);
+            setBornEventAliases((previous) => (
+              previous.get(persistedKey) === optimisticKey ? previous : new Map(previous).set(persistedKey, optimisticKey)
+            ));
           }
         },
       });
@@ -861,8 +913,10 @@ export function ScheduleView() {
       resetCreatePrefill();
     } finally {
       isAddingRef.current = false;
+      // 실패해 생성 창이 그대로 남으면 유리 막대도 다시 보인다(성공이면 창과 함께 사라진다).
+      setCreateGhostLeaving(false);
     }
-  }, [guardCreatedEvent, guardPersistedCreatedEvent, resetCreatePrefill]);
+  }, [guardCreatedEvent, guardPersistedCreatedEvent, markEventBorn, resetCreatePrefill]);
 
   const handleDeleteEvent = useCallback(async (deletingEvent: CalendarEvent, scope?: CalendarRecurrenceScope) => {
     const mutationIdentity = snapshotCalendarEventIdentity(deletingEvent);
@@ -953,6 +1007,8 @@ export function ScheduleView() {
         endDate: newEnd,
       }, 'update', eventBeforeUpdate)
       : undefined;
+    // 놓는 즉시(저장을 기다리기 전) 착지 '톡' + 링. 저장에 실패하면 막대는 원래 자리로 돌아가고 링도 거둔다.
+    const landingSeq = mutationIdentity ? startDropLanding(mutationIdentity) : null;
     try {
       await updateEvent(
         eventId,
@@ -963,10 +1019,11 @@ export function ScheduleView() {
       if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'succeeded');
     } catch (error) {
       if (mutationIdentity && eventBeforeUpdate) settleLocalMutationGuard(localGuard, 'failed');
+      if (landingSeq !== null) cancelDropLanding(landingSeq);
       throw error;
     }
     await reconcileEventMutation(mutationIdentity ?? undefined);
-  }, [events, guardLocalIdentity, reconcileEventMutation, settleLocalMutationGuard]);
+  }, [cancelDropLanding, events, guardLocalIdentity, reconcileEventMutation, settleLocalMutationGuard, startDropLanding]);
 
   const handleTimeGridEventChange = useCallback(async (
     eventId: string,
@@ -1462,6 +1519,12 @@ export function ScheduleView() {
 
   const [pendingPosition, setPendingPosition] = useState<{ event: CalendarEvent; patch: Pick<CalendarEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>; actor: unknown } | null>(null);
   const [positionError, setPositionError] = useState<string | null>(null);
+  // 움직임 폴리싱 16번 — 착지·새 일정·유리 막대 녹기(설정 함수는 위 startDropLanding·markEventBorn·handleAddEvent 가 쓴다).
+  const [dropLanding, setDropLanding] = useState<LandingMark | null>(null);
+  const [bornEventIdentities, setBornEventIdentities] = useState<ReadonlySet<string>>(() => new Set());
+  const [createGhostLeaving, setCreateGhostLeaving] = useState(false);
+  /** 방금 만든 일정의 저장 id 키 → 낙관적 id 키. 막대가 저장 응답 순간 다시 붙지 않게 같은 key 로 이어 그린다. */
+  const [bornEventAliases, setBornEventAliases] = useState<ReadonlyMap<string, string>>(() => new Map());
   const cancelPosition = () => { pendingPositionRef.current = null; setPendingPosition(null); };
   const confirmPosition = async (scope: CalendarRecurrenceScope) => {
     const request = pendingPositionRef.current; if (!request) return;
@@ -1637,16 +1700,18 @@ export function ScheduleView() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* 뷰 모드 */}
-          <div className="flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+          {/* 뷰 모드 — 보라 알약 하나가 선택한 칸으로 미끄러진다(움직임 폴리싱 7번). */}
+          <div className="relative flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+            <SlidingIndicator activeKey={viewMode} axis="both" className="rounded-md bg-accent/20" />
             {([['month', '월'], ['2week', '2주'], ['week', '주'], ['today', '오늘']] as const).map(([m, l]) => (
               <button
                 key={m}
+                data-slide-key={m}
                 onClick={() => changeViewMode(m)}
                 className={cn(
-                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
+                  'relative px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
                   viewMode === m
-                    ? 'bg-accent/20 text-accent'
+                    ? 'text-accent'
                     : 'text-text-secondary hover:text-text-primary',
                 )}
               >
@@ -1656,27 +1721,30 @@ export function ScheduleView() {
           </div>
 
           {viewMode === 'week' && (
-            <div className="flex rounded-lg border border-accent/35 bg-accent/5 p-0.5" aria-label="주간 보기 방식">
+            <div className="relative flex rounded-lg border border-accent/35 bg-accent/5 p-0.5" aria-label="주간 보기 방식">
+              <SlidingIndicator activeKey={weekSubMode} axis="both" className="rounded-md bg-accent/20" />
               <button
                 type="button"
+                data-slide-key="card"
                 aria-label="주간 카드 보기"
                 aria-pressed={weekSubMode === 'card'}
                 onClick={() => setWeekSubMode('card')}
                 className={cn(
-                  'rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
-                  weekSubMode === 'card' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                  'relative rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                  weekSubMode === 'card' ? 'text-accent' : 'text-text-secondary hover:text-text-primary',
                 )}
               >
                 카드
               </button>
               <button
                 type="button"
+                data-slide-key="timegrid"
                 aria-label="주간 시간표 보기"
                 aria-pressed={weekSubMode === 'timegrid'}
                 onClick={() => setWeekSubMode('timegrid')}
                 className={cn(
-                  'rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
-                  weekSubMode === 'timegrid' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                  'relative rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer',
+                  weekSubMode === 'timegrid' ? 'text-accent' : 'text-text-secondary hover:text-text-primary',
                 )}
               >
                 시간표
@@ -1742,7 +1810,7 @@ export function ScheduleView() {
           <motion.div
             key={`${viewMode}:${weekSubMode}`}
             initial={reduce ? false : { opacity: 0, transform: 'translateY(8px)' }}
-            animate={{ opacity: filterFadeOpacity, transform: 'translateY(0px)', transitionEnd: { transform: 'none' } }}
+            animate={{ opacity: 1, transform: 'translateY(0px)', transitionEnd: { transform: 'none' } }}
             exit={reduce ? undefined : { opacity: 0, transform: 'translateY(-8px)' }}
             transition={reduce || skipPeriodTransition
               ? { duration: 0 }
@@ -1834,8 +1902,13 @@ export function ScheduleView() {
                 pulseDate={pulseDate}
                 highlightedEventIdentities={highlightedEventIdentities}
                 reduceMotion={reduce}
+                filterRevealAt={filterRevealAt}
                 tagNameById={tagNameById}
                 calendarNameById={calendarNameById}
+                landing={dropLanding}
+                bornEventIdentities={bornEventIdentities}
+                bornEventAliases={bornEventAliases}
+                createGhostLeaving={createGhostLeaving}
                 onWheel={(e) => {
                   if (viewMode !== 'month') return;
                   // 디바운스된 월 이동 (휠 아래=다음달, 위=이전달)
@@ -1880,17 +1953,26 @@ export function ScheduleView() {
         )}
       </AnimatePresence>
 
-      {/* ═══ 이벤트 사이드패널 ═══ */}
+      {/* ═══ 이벤트 사이드패널 ═══
+          바깥 셸(key 고정)은 처음 열릴 때·닫힐 때만 움직인다. 열린 채 다른 일정을 누르면 셸은 그대로 두고
+          안쪽 창만 일정 key 로 새로 그린다 — 편집 중이던 초안은 지금처럼 버려지고, 내용만 살짝 떠오르며 바뀐다. */}
       <AnimatePresence>
         {panelEvent && (
-          <EventSidePanel
-            key={`panel-${calendarEventIdentityKey(panelEvent)}`}
-            event={panelEvent}
-            onClose={() => setPanelEvent(null)}
-            onDelete={(_id, scope) => handleDeleteEvent(panelEvent, scope)}
-            onUpdate={(id, updates, scope) => handleUpdateEventDirect(panelEvent, id, updates, scope)}
-            onNavigate={handleNavigate}
-          />
+          <motion.div
+            key="event-side-panel"
+            {...sidePanelPreset(reduce)}
+            className="absolute right-0 top-0 bottom-0 w-[280px] z-40"
+          >
+            <EventSidePanel
+              key={`panel-${panelEventKey}`}
+              event={panelEvent}
+              swapIn={panelSwapIn}
+              onClose={() => setPanelEvent(null)}
+              onDelete={(_id, scope) => handleDeleteEvent(panelEvent, scope)}
+              onUpdate={(id, updates, scope) => handleUpdateEventDirect(panelEvent, id, updates, scope)}
+              onNavigate={handleNavigate}
+            />
+          </motion.div>
         )}
       </AnimatePresence>
 

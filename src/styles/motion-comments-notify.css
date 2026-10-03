@@ -1,0 +1,316 @@
+/* 이 갈래 전용 움직임 CSS — motion-comments-notify (공통 토큰은 src/index.css :root 의 --motion-*·--ease-*, JS 는 src/utils/motion.ts) */
+
+/* ─── 4. comment-open-calm — 댓글 칸을 열 때 ─────────────────────────────
+   transform·opacity 만 움직인다. 채움은 backwards(끝나면 애니메이션 값을 남기지 않음).
+   전역 동작 줄이기 규칙(index.css)이 길이를 0 으로 줄이지만 animation-delay 는 남는다 — 자리표시의 0.15초 기다림은 그대로. */
+
+/* 불러오는 동안의 회색 말풍선 자리. 0.15초 안에 댓글이 오면 기다리는 동안 투명이라 아예 보이지 않는다. */
+.comment-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 4px;
+  animation: comment-skeleton-in var(--motion-base) var(--ease-out) 150ms backwards;
+}
+@keyframes comment-skeleton-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.comment-skeleton-bubble {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgb(var(--color-text-primary) / 0.04);
+}
+.comment-skeleton-bubble--left { align-self: flex-start; width: 68%; }
+.comment-skeleton-bubble--right { align-self: flex-end; width: 56%; }
+.comment-skeleton-bubble--h44 { height: 44px; }
+.comment-skeleton-bubble--h60 { height: 60px; }
+.comment-skeleton-bubble--h36 { height: 36px; width: 46%; }
+
+/* 빛 띠 — 미리 그린 띠를 transform 으로만 민다(매 프레임 다시 칠하지 않음). 불러오는 동안에만 있다.
+   동작 줄이기면 띠 없이 정적 회색. */
+@media (prefers-reduced-motion: no-preference) {
+  .comment-skeleton-bubble::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgb(var(--color-text-primary) / 0.06), transparent);
+    transform: translateX(-100%);
+    animation: comment-skeleton-sweep 1200ms ease-in-out infinite;
+  }
+}
+@keyframes comment-skeleton-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+/* 도착 — 목록이 이미 맨 아래(또는 새 댓글 줄 가운데)에 자리 잡은 채 opacity 0→1 180ms. */
+.comment-list-arrive {
+  animation: comment-list-arrive var(--motion-base) var(--ease-out) backwards;
+}
+@keyframes comment-list-arrive {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 정말 댓글이 없을 때·불러오지 못했을 때 안내 — opacity + translateY(4px→0) 180ms. */
+.comment-empty-arrive {
+  animation: comment-empty-arrive var(--motion-base) var(--ease-out) backwards;
+}
+@keyframes comment-empty-arrive {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* '새 댓글' 줄 — 읽음 처리 4초 뒤 300ms 에 걸쳐 옅어진다. 높이는 그대로라 아래 내용이 당겨지지 않는다. */
+.comment-unread-divider {
+  transition: opacity 300ms var(--ease-std);
+}
+.comment-unread-divider--fading {
+  opacity: 0;
+}
+
+/* 위를 읽는 중 새 댓글 — '새 댓글 N개 ↓' 알약이 8px 아래에서 160ms 에 떠오른다. */
+.comment-new-pill {
+  animation: comment-new-pill-in 160ms var(--ease-out) backwards;
+}
+@keyframes comment-new-pill-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 동작 줄이기: 안내·알약은 이동 없이 나타나기만. */
+@media (prefers-reduced-motion: reduce) {
+  .comment-empty-arrive,
+  .comment-new-pill {
+    animation-name: comment-fade-only;
+  }
+}
+@keyframes comment-fade-only {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ─── 19. comments-send-react — 댓글 보내기·이모지 반응 ───────────────────
+   transform·opacity 만 움직인다. 채움은 backwards(끝나면 애니메이션 값을 남기지 않음).
+   말풍선 떠오름(아래 8px → 제자리 220ms)과 반응 칩 빠짐(0.6배·140ms)은 framer(transform 문자열, src/utils/commentSendReact.ts).
+   동작 줄이기: 아래 CSS 움직임은 이동·확대 없는 opacity 키프레임으로 바꾸고(4번과 같은 방식), 길이는 전역 규칙(index.css)이
+   0 으로 줄여 바로 나타난다. framer 쪽(말풍선·칩 빠짐)은 opacity 만 120ms. */
+
+/* 말풍선 — 저장이 0.4초를 넘길 때만 살짝 흐렸다가, 저장되면 0.2초에 걸쳐 또렷해진다.
+   기본 클래스가 늘 붙어 있어야 흐림이 풀릴 때도 전환이 돈다(상태 클래스만 붙었다 떨어진다). */
+.comment-send-bubble {
+  position: relative;
+  transition: opacity 200ms var(--ease-std);
+}
+.comment-send-bubble--slow {
+  opacity: 0.6;
+}
+
+/* 보내지 못함 — 미리 그린 빨간 테두리 층(1.5px #E17055)이 opacity 로만 나타난다(테두리 색을 전환하지 않음). */
+.comment-send-bubble--failed::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1.5px solid #E17055;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: comment-send-fade-in 200ms var(--ease-out) backwards;
+}
+
+/* 작은 시계·'보내지 못했어요' 줄 — 나타날 때 옅게. */
+.comment-send-clock {
+  animation: comment-send-fade-in 200ms var(--ease-out) backwards;
+}
+.comment-send-failed-notice {
+  animation: comment-send-fade-in var(--motion-base) var(--ease-out) backwards;
+}
+/* 라이트 모드: '보내지 못했어요' 빨강(#E17055)은 밝은 바탕에서 약 3:1 이라 11px 글자로는 읽기 어렵다.
+   본문 글자색을 섞어 같은 빨강 계열로 4.5:1 이상(약 5.6:1). 다크 모드는 그대로. */
+[data-color-mode='light'] .comment-send-failed-label {
+  color: color-mix(in srgb, #E17055 62%, rgb(var(--color-text-primary)));
+}
+@keyframes comment-send-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 새 반응 칩만 '톡' — 0.4배에서 70% 지점 1.07배를 지나 제자리(190ms, 아케이드 2048 새 타일과 같은 곡선).
+   칩이 처음 그려질 때만 붙는다 — 패널을 열 때 이미 있던 칩에는 없다. */
+.reaction-chip-pop {
+  animation: reaction-chip-pop 190ms cubic-bezier(0.18, 0.88, 0.34, 1.28) backwards;
+}
+@keyframes reaction-chip-pop {
+  0% { opacity: 0; transform: scale(0.4); }
+  70% { opacity: 1; transform: scale(1.07); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* 반응 숫자 — 숫자마다 새 칸이 그려지며 한 번만 굴러 들어온다. 늘면 아래에서 위로, 줄면 위에서 아래로(150ms). */
+.reaction-count-window {
+  display: inline-flex;
+  overflow: hidden;
+}
+.reaction-count {
+  display: inline-block;
+}
+.reaction-count--up {
+  animation: reaction-count-up 150ms var(--ease-out) backwards;
+}
+.reaction-count--down {
+  animation: reaction-count-down 150ms var(--ease-out) backwards;
+}
+@keyframes reaction-count-up {
+  from { opacity: 0; transform: translateY(70%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes reaction-count-down {
+  from { opacity: 0; transform: translateY(-70%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 누른 사람 말풍선 — 2px 아래에서 옅게(120ms). 가운데 맞춤(-translate-x-1/2)은 바깥 상자가 맡고 안쪽만 움직인다. */
+.reaction-tooltip {
+  animation: reaction-tooltip-in var(--motion-fast) var(--ease-out) backwards;
+}
+@keyframes reaction-tooltip-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 이모지 창 — 스마일 버튼 쪽(transform-origin 은 인라인으로)에서 0.92배 → 제자리로 피어난다(140ms). 단색 카드라 확대해도 흐림 계산이 없다. */
+.emoji-picker-pop {
+  animation: emoji-picker-in 140ms var(--ease-out) backwards;
+}
+@keyframes emoji-picker-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+/* '더 많은 이모지' — 버튼 쪽 가장자리는 그대로, 펼친 이모지 묶음만 옅게 들어온다. */
+.emoji-picker-extra {
+  animation: comment-send-fade-in 140ms var(--ease-out) backwards;
+}
+
+/* 동작 줄이기: 칩 톡·숫자 굴림·툴팁·이모지 창은 이동·확대 없이 opacity 키프레임만(길이는 전역 규칙이 줄인다). */
+@media (prefers-reduced-motion: reduce) {
+  .reaction-chip-pop,
+  .reaction-count--up,
+  .reaction-count--down,
+  .reaction-tooltip,
+  .emoji-picker-pop {
+    animation-name: comment-send-fade-in;
+  }
+}
+
+/* ─── 18. notification-journey — 알림이 와서 → 열고 → 건너뛰어 → 도착하기까지 ──────
+   종 '딩동'·배지 톡·숫자 굴림·지운 줄 밀어내기·아래 줄 미끄러짐·제목 비켜서기는 WAAPI(src/components/NotificationPanel.tsx,
+   src/components/layout/Header.tsx, 값은 src/utils/notificationArrival.ts). 여기는 상태로 정해지는 전환과 등장만 둔다.
+   종 주변 은은한 빛(notification-bell.css)은 그대로. */
+
+/* 알림 창 줄 — 읽으면 왼쪽 막대가 색은 그대로 둔 채 위아래로 접히듯 사라진다(scaleY + opacity 200ms). */
+.bf-noti-unread-bar {
+  transform-origin: 50% 50%;
+  transition: transform 200ms var(--ease-std), opacity 200ms var(--ease-std);
+}
+[data-noti-read="true"] > .bf-noti-unread-bar {
+  transform: scaleY(0);
+  opacity: 0;
+}
+
+/* 헤더 '← 돌아가기' — 생길 때 왼쪽 6px 에서 밀려 나온다(160ms). 채움 backwards 라 끝나면 누름 반응(.bf-press)을 막지 않는다. */
+.bf-back-in {
+  animation: bf-back-in 160ms var(--ease-out) backwards;
+}
+@keyframes bf-back-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* 리테이크 허브에 링크·알림으로 도착한 줄 — 2px 보라 테두리. 평소엔 투명, 도착할 때만 WAAPI 로 opacity 0→.9→0→.9→0(1.4초).
+   box-shadow 를 키프레임으로 바꾸지 않는다(매 프레임 다시 칠함) — 미리 그린 테두리 층의 opacity 만 움직인다. */
+.bf-arrive-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px rgb(var(--color-accent));
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 오른쪽 아래 알림 카드 — 종류별 왼쪽 3px 색 막대(index.css .bflow-toast 그림자 맨 앞 inset). 알림 창 아이콘과 같은 색.
+   나를 부른 알림(멘션·배정)은 보라, 피드백 요청은 노랑, 일정은 파랑. */
+[data-sonner-toast].bflow-toast--mention,
+[data-sonner-toast].bflow-toast--scene_assignment,
+[data-sonner-toast].bflow-toast--revision {
+  --bflow-toast-tone: rgb(var(--color-accent));
+}
+[data-sonner-toast].bflow-toast--acting_feedback { --bflow-toast-tone: #FDCB6E; }
+[data-sonner-toast].bflow-toast--calendar,
+[data-sonner-toast].bflow-toast--scene_change { --bflow-toast-tone: #74B9FF; }
+[data-sonner-toast].bflow-toast--milestone { --bflow-toast-tone: #00B894; }
+[data-sonner-toast].bflow-toast--comment,
+[data-sonner-toast].bflow-toast--comment_reaction,
+[data-sonner-toast].bflow-toast--system { --bflow-toast-tone: #8B8DA3; }
+
+/* 동작 줄이기: 알림 카드는 미끄러지지 않고 opacity 만(나타날 때·사라질 때 120ms).
+   sonner 의 동작 줄이기 규칙(animation:none !important)보다 구체적이라 이 페이드만 남는다. */
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toaster] [data-sonner-toast].bflow-toast[data-mounted="true"] {
+    animation: bflow-toast-fade-in 120ms var(--ease-std) !important;
+  }
+  [data-sonner-toaster] [data-sonner-toast].bflow-toast[data-removed="true"] {
+    animation: bflow-toast-calm-out 120ms var(--ease-in) forwards !important;
+  }
+}
+@keyframes bflow-toast-calm-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* ─── 20. safety-net — 되돌리기(알림 '전체 삭제'·댓글 휴지통) ──────────────
+   지운 줄·말풍선이 옅어지고 아래가 미끄러져 올라오는 움직임은 WAAPI(src/components/NotificationPanel.tsx,
+   src/components/scenes/CommentPanel.tsx, 값은 src/utils/undoDelete.ts). 여기는 '되돌리기' 알림 카드만 둔다. */
+
+/* 카드 왼쪽 색 막대 — 차분한 회색(지운 일의 확인이라 강조하지 않는다). */
+[data-sonner-toast].bflow-undo-toast {
+  --bflow-toast-tone: #8B8DA3;
+}
+
+/* 카드 아래 2px 막대 — 되돌릴 수 있는 5초 동안 왼쪽으로 줄어든다(transform 만, 끝나면 그대로 0).
+   길이는 인라인 --bflow-undo-ms(src/components/common/UndoToast.tsx). 카드가 position:absolute 라 그 안쪽 아래에 붙는다. */
+.bflow-undo-countdown {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(var(--color-accent) / 0.55);
+  transform-origin: left center;
+  pointer-events: none;
+  animation: bflow-undo-countdown var(--bflow-undo-ms, 5000ms) linear forwards;
+}
+@keyframes bflow-undo-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+/* 동작 줄이기: 막대는 줄지 않고 제자리에서 옅어지기만 한다(남은 시간은 그대로 알린다).
+   전역 동작 줄이기 규칙(길이 0.01ms !important)보다 구체적인 !important 라 이 길이가 남는다. */
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast] .bflow-undo-countdown {
+    animation: bflow-undo-countdown-calm var(--bflow-undo-ms, 5000ms) linear forwards !important;
+  }
+}
+@keyframes bflow-undo-countdown-calm {
+  from { opacity: 1; }
+  to { opacity: 0.15; }
+}
+
+/* 라이트 모드: 알림 카드의 버튼 글자('되돌리기'·'씬 보기' 등) — 옅은 보조 보라(#A29BFE)는 밝은 카드에서 약 2:1 이라
+   5초 안에 눌러야 하는 '되돌리기'가 거의 안 보였다. 테마 강조색을 어둡게 섞어 4.5:1 이상(기본 보라 약 8:1, 초록·호박 테마 5:1 이상).
+   index.css 의 [data-sonner-toast] [data-button] 규칙(!important)보다 구체적이라 라이트 모드에서만 이 색이 남는다. 다크 모드는 그대로. */
+[data-color-mode='light'] [data-sonner-toast] [data-button] {
+  color: color-mix(in srgb, rgb(var(--color-accent)) 60%, black) !important;
+}

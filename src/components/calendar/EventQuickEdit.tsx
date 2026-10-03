@@ -5,14 +5,15 @@ import { EventTagBadges } from './EventTagBadges';
 import { getEventTagIds, toggleEventTag } from './eventTagPresentation';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, useIsPresent } from 'framer-motion';
+import { useIsPresent } from 'framer-motion';
 import { CalendarDays, Copy, Pencil, Tags, Trash2 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getTagCanonicalSnapshot, isOptimisticCalendarTagId, useCalendarStore } from '@/stores/useCalendarStore';
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
-import { floatingGlassStyle } from '@/utils/glassStyles';
+import { floatingSolidStyle } from '@/utils/glassStyles';
+import { clampMenuToViewport, popClassName, popOriginFromPoint, popOriginStyle, type PopOrigin } from '@/utils/popupMotion';
 import { calendarEventIdentityKey } from '@/utils/calendarEventIdentity';
 import { isGanttMilestone, isGanttProjection } from '@/utils/calendarGantt';
 import { CalendarDateRangePicker, CalendarTimeInput, CalendarDurationButtons } from './inputs';
@@ -22,6 +23,7 @@ import {
   isLocalMutationSnapshot,
   type LocalMutationRecovery,
 } from '@/utils/calendarLocalMutation';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 
 interface EventQuickEditProps {
   event: CalendarEvent;
@@ -70,7 +72,9 @@ export function EventQuickEdit({
     .filter((tag) => !isOptimisticCalendarTagId(tag.id))
     .sort((left, right) => left.sortOrder - right.sortOrder), [tags]);
   const ref = useRef<HTMLDivElement>(null);
-  const [adjusted, setAdjusted] = useState(position);
+  // 고친 자리와 피어나는 기준점을 한 상태에 둔다(훅 순서를 바꾸지 않게).
+  const [adjusted, setAdjusted] = useState<{ x: number; y: number; origin?: PopOrigin }>(position);
+  const popOrigin = adjusted.origin ?? null;
   const [tab, setTab] = useState<TabKey>('calendar');
   const [title, setTitle] = useState(event.title);
   const [startDate, setStartDate] = useState(event.startDate);
@@ -144,23 +148,25 @@ export function EventQuickEdit({
     color: 'rgb(var(--color-text-primary))',
   } as const;
 
+  // 화면 밖으로 나가지 않게 자리를 고치고, 우클릭한 지점 쪽 모서리에서 피어나게 기준점을 정한다
+  // (움직임 폴리싱 8번 — 화면 끝에서 밀려나면 기준점도 반대 모서리로). 우클릭은 React 18 이 이 effect 를
+  // 그리기 전에 바로 실행하는 '즉시 입력'이라 첫 프레임부터 고친 자리·기준점으로 그려진다.
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
     const rect = element.getBoundingClientRect();
-    let { x, y } = position;
-    if (x + rect.width > window.innerWidth - 8) x = window.innerWidth - rect.width - 8;
-    if (y + rect.height > window.innerHeight - 8) y = window.innerHeight - rect.height - 8;
-    if (x < 4) x = 4;
-    if (y < 4) y = 4;
-    setAdjusted({ x, y });
+    const next = clampMenuToViewport(position, rect, { width: window.innerWidth, height: window.innerHeight });
+    setAdjusted({
+      ...next,
+      origin: popOriginFromPoint(position, { left: next.x, top: next.y, width: rect.width, height: rect.height }),
+    });
   }, [position]);
 
   useEffect(() => {
     /**
      * 닫히지 말아야 할 두 경우를 함께 막는다.
-     * ① exit 애니메이션(150ms) 중인 죽은 인스턴스의 리스너가 살아 있어, 새로 연 팝업의
-     *    첫 클릭을 그 인스턴스가 삼켜 버린다.
+     * ① 닫히는 중(presence 가 남은 동안)인 죽은 인스턴스의 리스너가 살아 있어, 새로 연 팝업의
+     *    첫 클릭을 그 인스턴스가 삼켜 버린다. (닫힘 움직임은 없앴지만 가드는 그대로 둔다.)
      * ② 저장·삭제가 진행 중일 때 닫으면 실패 안내를 띄울 곳이 사라진다.
      */
     const shouldIgnore = () => !isPresentRef.current || pendingMutationRef.current !== null;
@@ -393,24 +399,23 @@ export function EventQuickEdit({
     setPendingTag((current) => current?.requestId === requestId ? null : current);
   }, [canWrite, displayedTagIds, event.id, eventIdentityKey, ganttProjection, isCanonicalBflow, onUpdate, tagSelectionPending, scopePrompt]);
 
-  // 자체 AnimatePresence 로 감싸면 부모 presence 의 exit 가 전파되지 않아 닫힘 애니가 죽는다
-  // (framer-motion 10.x). presence 는 ScheduleView 쪽 조건부 렌더가 소유한다.
+  // presence 는 ScheduleView 쪽 조건부 렌더(AnimatePresence)가 소유한다.
+  // 창 박자(움직임 폴리싱 8번): 우클릭한 지점 쪽 모서리에서 140ms 에 피어나고(.bf-pop), 닫힘은 바로 사라진다.
   return createPortal(
-      <motion.div
+      <div
         ref={ref}
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.15 }}
-        className="fixed z-[1000]"
+        className={`${popClassName(popOrigin)} fixed z-[1000]`}
         style={{
-          ...floatingGlassStyle,
+          ...floatingSolidStyle,
+          ...popOriginStyle(popOrigin),
           left: adjusted.x,
           top: adjusted.y,
           width: 340,
           maxHeight: 'calc(100vh - 32px)',
           overflowY: 'auto',
-          background: 'rgb(var(--color-bg-card) / 0.95)',
+          // 흐림이 없어 반투명이면 뒤 날짜·막대가 또렷한 잔상으로 비친다(95% 는 물론 98.5% 에서도 숫자가 보였다).
+          // 입력칸이 많은 창이라 카드색 그대로 불투명하게 칠한다(바탕 C).
+          background: 'rgb(var(--color-bg-card))',
           borderRadius: 12,
           boxShadow: '0 16px 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.28))',
         }}
@@ -428,25 +433,29 @@ export function EventQuickEdit({
           </p>
         )}
 
-        <div className="flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
+        {/* 탭 밑줄 하나가 미끄러진다(움직임 폴리싱 7번). 각 탭의 투명 밑변 2px 은 높이를 지키려고 남긴다. */}
+        <div className="relative flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
+          <SlidingIndicator activeKey={tab} className="bottom-0 h-0.5 bg-accent" />
           <button
+            data-slide-key="calendar"
             onClick={() => setTab('calendar')}
             className="flex-1 py-2.5 text-xs font-medium transition-colors cursor-pointer"
             style={{
               color: tab === 'calendar' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
-              borderBottom: tab === 'calendar' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
+              borderBottom: '2px solid transparent',
             }}
           >
             <Tags size={12} className="inline mr-1" /> 태그·캘린더
           </button>
           <button
+            data-slide-key="edit"
             disabled={!canWrite}
             aria-describedby={readOnlyDescriptionId}
             onClick={() => canWrite && setTab('edit')}
             className={`flex-1 py-2.5 text-xs font-medium transition-colors ${canWrite ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
             style={{
               color: tab === 'edit' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
-              borderBottom: tab === 'edit' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
+              borderBottom: '2px solid transparent',
             }}
           >
             <Pencil size={12} className="inline mr-1" /> 일정 편집
@@ -639,7 +648,7 @@ export function EventQuickEdit({
             </div>
           )}
         </div>
-      </motion.div>,
+      </div>,
     document.body,
   );
 }

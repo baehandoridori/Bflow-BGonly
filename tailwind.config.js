@@ -57,6 +57,21 @@ module.exports = {
         // 대형 모달/사이드 패널 공용 radius — 임의값(rounded-[18px]) 대신 이 토큰 사용.
         modal: '18px',
       },
+      // 움직임 공통 박자 (움직임 폴리싱 바탕 A) — src/index.css 의 --motion-*·--ease-*, src/utils/motion.ts 와 같은 값.
+      // duration-fast(누름·화살표) · duration-base(창·내용 교체) · duration-slow(미끄러지는 표시·카드 이동)
+      transitionDuration: {
+        fast: '120ms',
+        base: '180ms',
+        slow: '260ms',
+      },
+      // ease-out-expo(들어올 때) · ease-in-quick(나갈 때) · ease-spring(톡) · ease-snap(화살표 회전·누름)
+      // 제자리 변화는 Tailwind 기본 ease-in-out(= --ease-std)을 그대로 쓴다.
+      transitionTimingFunction: {
+        'out-expo': 'cubic-bezier(.16,1,.3,1)',
+        'in-quick': 'cubic-bezier(.4,0,1,1)',
+        spring: 'cubic-bezier(.34,1.56,.64,1)',
+        snap: 'cubic-bezier(.2,0,0,1)',
+      },
       keyframes: {
         'slide-down': {
           '0%': { opacity: '0', transform: 'translate(-50%, -12px)' },

@@ -290,3 +290,6 @@ test('beside names remain visible after fit and choose placement from scrolled v
     h.wheel({deltaY:-50});h.frames();h.render();h.render();const space=h.geometry(h.task.title).left-h.chart.scrollLeft;assert.equal(h.inlineAfter(),space<372);assert.deepEqual(h.saved,[]);assert.deepEqual(h.shifted,[]);
   }finally{h.dispose();}
 });
+
+// 움직임 폴리싱 16번: 막대는 손을 그대로 따라오고(나머지 거리는 transform 으로 직접), 차트는 날짜(스냅)가 바뀔 때만 다시 그린다.
+test('date drag re-renders only when the snapped day changes and still saves the final day',async()=>{const h=await harness();try{h.down();h.move(405);const updates=h.stateUpdates();h.move(410);h.move(415);h.move(420);assert.equal(h.stateUpdates(),updates,'pointer moves inside the same day must not re-render the whole chart');h.move(430);assert.ok(h.stateUpdates()>updates,'crossing into the next day re-renders once');const crossed=h.stateUpdates();h.move(440);assert.equal(h.stateUpdates(),crossed);h.up();assert.deepEqual(h.saved,[{startDate:'2026-09-06',endDate:'2026-09-08'}]);}finally{h.dispose();}});

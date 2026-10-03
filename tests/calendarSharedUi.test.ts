@@ -117,6 +117,7 @@ type ScheduleGridProps = {
   showWeekends?: boolean;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
+  filterRevealAt?: number;
   onEventClick(event: ScheduleCalendarEvent): void;
   onDragStart(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
@@ -6796,7 +6797,8 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
     tagBarReducedMotion = false;
   }
 
-  // 필터가 바뀌면 결과 컨테이너는 다시 마운트되지 않고 짧게 페이드로 이어진다.
+  // 필터가 바뀌어도 결과 컨테이너는 다시 마운트되지 않고, 달력 전체가 옅어지지도 않는다(움직임 폴리싱 15번).
+  // 바뀌지 않은 일정까지 깜빡이던 것을 없애고, 필터를 바꾼 시각만 그리드에 넘겨 새로 보이게 된 막대만 떠오르게 한다.
   resetHarness();
   const clock = installScheduleFakeClock();
   const calendarBody = (tree: ReactNode) => findElements(tree, (node) => (
@@ -6822,50 +6824,45 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
       '보기 전환은 200ms를 유지하고 필터 페이드만 120ms를 쓴다',
     );
 
+    const revealAtBefore = scheduleGridProps.at(-1)?.filterRevealAt ?? 0;
+    clock.advance(50);
     calendarState.toggleTag('tag-meeting');
     tree = await renderScheduleView();
     await flushScheduleMountEffects();
     tree = await renderScheduleView();
     assert.equal(
       (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      0.55,
-      '필터가 바뀌면 결과가 잠깐 옅어진다',
+      1,
+      '필터가 바뀌어도 달력 전체가 옅어지지 않는다',
     );
     assert.equal(
       calendarBody(tree)?.props.key,
       body.props.key,
       '필터 변화는 컨테이너를 다시 마운트하지 않는다',
     );
+    const revealAt = scheduleGridProps.at(-1)?.filterRevealAt ?? 0;
+    assert.ok(revealAt > revealAtBefore, '필터를 바꾼 시각을 그리드에 넘겨 새로 생긴 막대만 떠오르게 한다');
 
     clock.advance(120);
     tree = await renderScheduleView();
     assert.equal(
-      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      1,
-      '120ms 뒤에는 원래 농도로 돌아온다',
+      scheduleGridProps.at(-1)?.filterRevealAt,
+      revealAt,
+      '필터가 그대로면 기준 시각도 그대로다(나중에 생긴 막대는 떠오르지 않는다)',
     );
 
-    // 페이드 도중 OS '동작 줄이기'가 켜져도 반투명으로 굳지 않는다.
+    // OS '동작 줄이기'면 기준 시각을 넘기지 않아 막대가 떠오르지 않고, 화면도 옅어지지 않는다.
+    scheduleReducedMotion = true;
     calendarState.toggleTag('tag-review');
     tree = await renderScheduleView();
     await flushScheduleMountEffects();
     tree = await renderScheduleView();
     assert.equal(
       (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      0.55,
-      '다시 페이드가 시작된다',
-    );
-
-    scheduleReducedMotion = true;
-    calendarState.toggleTag('tag-meeting');
-    tree = await renderScheduleView();
-    await flushScheduleMountEffects();
-    tree = await renderScheduleView();
-    assert.equal(
-      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
       1,
-      "페이드 중 '동작 줄이기'가 켜져도 화면이 반투명으로 굳지 않는다",
+      "'동작 줄이기'에서도 화면이 반투명해지지 않는다",
     );
+    assert.equal(scheduleGridProps.at(-1)?.filterRevealAt, 0, "'동작 줄이기'면 새 막대도 떠오르지 않는다");
   } finally {
     scheduleReducedMotion = false;
     clock.restore();
@@ -6894,11 +6891,17 @@ test('the event create backdrop dims the background like the calendar settings m
   );
 });
 
-test('CalendarGrid fades in the chip tooltip and limits chip hover to transform and filter', async () => {
+test('CalendarGrid pins the chip card above the bar and lights the bar without resizing it', async () => {
+  // 움직임 폴리싱 2번(tooltip-anchor): 카드는 막대에 들어온 순간의 막대 위에 고정되고(마우스를 따라오지 않음),
+  // 막대는 커지거나 밝아지는 대신 미리 그려 둔 테두리·그림자 층만 떠오른다. 등장 효과는 WAAPI(동작 줄이기면 투명도만)라
+  // 이 하네스에서는 그려지는 구조만 확인한다(실제 움직임은 갈래 화면 점검에서 확인).
   resetHarness();
   const clock = installScheduleFakeClock();
   const previousDocument = globalThis.document;
   globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {} } as unknown as Document;
+  const isCard = (node: ReactElement<Record<string, unknown>>) => (
+    typeof node.props.className === 'string' && node.props.className.includes('calendar-event-card')
+  );
 
   try {
     const events = [calendarListEvent({ id: 'tooltip-chip', title: '툴팁 대상' })];
@@ -6907,61 +6910,37 @@ test('CalendarGrid fades in the chip tooltip and limits chip hover to transform 
     assert.ok(chip, '월 그리드 칩이 있다');
 
     const chipClass = String(chip.props.className ?? '');
-    assert.match(
-      chipClass,
-      /transition-\[transform,filter\]/,
-      'hover 트랜지션은 transform과 filter로만 제한한다',
+    assert.doesNotMatch(chipClass, /scale-\[|brightness-|transition-all|transition-\[transform/, '마우스를 올려도 막대 크기·밝기를 바꾸지 않는다(작은 글씨가 번졌다)');
+    assert.equal(chip.props.onMouseMove, undefined, '마우스가 움직일 때마다 카드 자리를 다시 정하지 않는다');
+    assert.ok(
+      findElements(chip, (node) => String(node.props.className ?? '').includes('calendar-event-bar-ring')).length === 1,
+      '테두리·그림자 층이 미리 그려져 있다(투명도만 바뀐다)',
     );
-    assert.doesNotMatch(chipClass, /transition-all/, 'transition-all은 레이아웃 속성까지 애니메이션한다');
 
-    // 툴팁은 400ms 지연 뒤 나타난다.
-    (chip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
+    // 막대 rect 로 자리를 한 번 정하고, 400ms 뒤에 카드가 뜬다.
+    const rect = { left: 100, right: 300, top: 200, bottom: 226 };
+    (chip.props.onMouseEnter as (event: unknown) => void)({ clientX: 120, clientY: 210, currentTarget: { getBoundingClientRect: () => rect } });
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.equal(findElements(tree, isCard).length, 0, '400ms 전에는 카드가 없다');
     clock.advance(400);
     tree = await renderCalendarGrid(events, {}, true);
+    const card = findElements(tree, isCard)[0];
+    assert.ok(card, '400ms 뒤 카드가 나타난다');
+    assert.equal(card.props.role, 'tooltip');
+    assert.equal((card.props.style as { backdropFilter?: unknown }).backdropFilter, undefined, '카드 뒤 흐림은 쓰지 않는다');
+    assert.equal((card.props.style as { transform?: unknown }).transform, undefined, '자리는 바깥 상자가 transform 하나로 맡는다');
+    assert.match(textContent(card), /툴팁 대상/);
 
-    const tooltip = findElements(tree, (node) => (
-      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
-    ))[0];
-    assert.ok(tooltip, '400ms 뒤 툴팁이 나타난다');
-    assert.deepEqual(
-      tooltip.props.initial,
-      { opacity: 0, scale: 0.96, x: '-50%', y: '-100%' },
-      '툴팁은 사라진 상태에서 등장하고 커서 위 중앙 앵커를 유지한다',
-    );
-    assert.deepEqual(
-      tooltip.props.animate,
-      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
-      'framer가 transform을 직접 관리하므로 앵커도 motion value로 넘긴다',
-    );
-    assert.equal(
-      (tooltip.props.style as { transform?: unknown }).transform,
-      undefined,
-      'style의 정적 transform은 덮어써지므로 남겨 두지 않는다',
-    );
-    assert.deepEqual(
-      tooltip.props.transition,
-      { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
-      '툴팁 등장은 200ms 공용 이징을 쓴다',
-    );
-
-    // 동작 줄이기에서는 등장 애니메이션을 쓰지 않는다.
-    resetHarness();
-    let reducedTree = await renderCalendarGrid(events, { reduceMotion: true });
-    const reducedChip = findElements(reducedTree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
-    (reducedChip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
-    clock.advance(400);
-    reducedTree = await renderCalendarGrid(events, { reduceMotion: true }, true);
-    const reducedTooltip = findElements(reducedTree, (node) => (
-      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
-    ))[0];
-    assert.ok(reducedTooltip);
-    assert.equal(reducedTooltip.props.initial, false, '동작 줄이기에서는 등장 애니메이션을 건너뛴다');
-    assert.deepEqual(
-      reducedTooltip.props.animate,
-      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
-      '동작 줄이기에서도 앵커는 그대로다',
-    );
-    assert.deepEqual(reducedTooltip.props.transition, { duration: 0 });
+    // 떠난 뒤 바로 다른 막대에 들어오면(웜업) 기다리지 않는다.
+    const leaveTree = await renderCalendarGrid(events, {}, true);
+    const shownChip = findElements(leaveTree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    (shownChip.props.onMouseLeave as () => void)();
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.equal(findElements(tree, isCard).length, 0, '막대를 떠나면 카드가 사라진다');
+    const againChip = findElements(tree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    (againChip.props.onMouseEnter as (event: unknown) => void)({ clientX: 200, clientY: 210, currentTarget: { getBoundingClientRect: () => rect } });
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.ok(findElements(tree, isCard)[0], '숨긴 지 300ms 안이면 기다림 없이 바로 뜬다');
   } finally {
     calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
     globalThis.document = previousDocument;
@@ -7444,9 +7423,10 @@ test('ScheduleView opens quick edit from a right click in the weekly, timetable 
   }
 });
 
-test('quick edit closing animation is owned by exactly one presence boundary', () => {
-  // framer-motion 10.x는 중첩 AnimatePresence로 exit를 전파하지 않는다. 빠른 편집이
-  // 자기 자신을 감싸면 닫힘 애니메이션이 죽으므로, presence는 ScheduleView가 소유한다.
+test('quick edit presence is owned by exactly one boundary and closes immediately', () => {
+  // framer-motion 10.x는 중첩 AnimatePresence로 exit를 전파하지 않는다. presence는 ScheduleView가 소유한다.
+  // 움직임 폴리싱 8번(창·메뉴 공통 박자): 우클릭한 지점 쪽 모서리에서 피어나고(.bf-pop), 닫힘은 바로 사라진다
+  // — 예전의 가운데에서 커지는 열림·0.15초 닫힘 움직임(exit)은 없앴다.
   const quickEditSource = readFileSync('src/components/calendar/EventQuickEdit.tsx', 'utf8');
   const scheduleSource = readFileSync('src/views/ScheduleView.tsx', 'utf8');
 
@@ -7455,11 +7435,9 @@ test('quick edit closing animation is owned by exactly one presence boundary', (
     /<AnimatePresence/,
     '빠른 편집은 자기 presence를 소유하지 않는다',
   );
-  assert.match(
-    quickEditSource,
-    /exit=\{\{ opacity: 0, scale: 0\.95 \}\}/,
-    '빠른 편집 motion.div는 exit 상태를 유지한다',
-  );
+  assert.doesNotMatch(quickEditSource, /\bexit=\{/, '빠른 편집은 닫힘 움직임을 두지 않는다');
+  assert.match(quickEditSource, /popClassName\(popOrigin\)/, '빠른 편집은 공통 메뉴 박자(.bf-pop)로 피어난다');
+  assert.match(quickEditSource, /popOriginFromPoint\(position,/, '피어나는 기준점은 우클릭한 지점');
   assert.match(
     scheduleSource,
     /<AnimatePresence>\s*\{quickEdit && \(/,

@@ -151,7 +151,10 @@ test('섹션: IPC 직접 호출·변경 신호 구독·재로그인 재조회·�
   assert.match(section, /useEffect\(\(\) => \{ void load\(\); \}, \[load, currentUser\]\);/);
   assert.match(section, /cleanIpcErrorMessage\(/);
   assert.match(section, /const COLLAPSED_KEY = 'bflow_comment_todo_collapsed';/);
-  assert.match(section, /type="checkbox"/);
+  // 움직임 폴리싱 17번: 기본 네모 체크 상자 → 동그란 체크(role=checkbox 버튼, aria-checked·disabled 그대로).
+  assert.match(section, /import \{ SuccessCheckCircle \} from '@\/components\/ui\/SuccessCheckCircle';/);
+  assert.match(section, /<SuccessCheckCircle\s+checked=\{item\.done_at != null\}\s+disabled=\{busy\}\s+onToggle=\{\(\) => void toggleDone\(item\)\}\s+label=\{`\$\{item\.text\} 완료 표시`\}/);
+  assert.doesNotMatch(section, /type="checkbox"/);
   assert.match(section, /canDeleteThreadTodo\(item, currentUser\)/);
   // 신호 리스너 + 뮤테이션 finally 두 곳에서 "마지막 뮤테이션이 끝나면 다시 읽는다", load 자체도 뮤테이션 중엔 건너뛴다
   assert.equal((section.match(/if \(inFlightRef\.current === 0\) void load\(\);/g) ?? []).length, 2);
@@ -178,10 +181,11 @@ test('게이트 등록: 59 테스트가 test:ui 에 나열돼 있다', () => {
 // ── 구현 후 리뷰 반영: 섹션이 늦게 커져도 댓글 목록의 최신 댓글이 가려지지 않게 ──
 test('섹션 높이 증가 알림 → 댓글 패널이 스크롤 의도(맨 아래·댓글 이동)에 맞춰 보정', () => {
   assert.match(section, /<section ref=\{sectionRef\} aria-label="팀 할 일"/);
-  assert.match(section, /useLayoutEffect\(\(\) => \{\s*const height = sectionRef\.current\?\.offsetHeight \?\? 0;\s*const prev = heightRef\.current;\s*heightRef\.current = height;\s*const firstLoad = !loading && !firstLoadSeenRef\.current;\s*if \(firstLoad\) firstLoadSeenRef\.current = true;\s*const firstLoadAfterMs = firstLoad \? performance\.now\(\) - mountedAtRef\.current : null;\s*if \(prev !== null && height > prev\) onHeightGrowRef\.current\?\.\(height - prev, firstLoadAfterMs\);\s*\}\);/);
+  assert.match(section, /useLayoutEffect\(\(\) => \{\s*const height = sectionRef\.current\?\.offsetHeight \?\? 0;\s*const prev = heightRef\.current;\s*heightRef\.current = height;\s*const firstLoad = !loading && !firstLoadSeenRef\.current;\s*if \(firstLoad\) firstLoadSeenRef\.current = true;\s*const firstLoadAfterMs = firstLoad \? performance\.now\(\) - mountedAtRef\.current : null;\s*if \(prev !== null && height > prev\) onHeightGrowRef\.current\?\.\(height - prev, firstLoadAfterMs\);\s*\}, \[items, loading, notice, collapsed, draftTooLong\]\);/);
   assert.match(section, /onHeightGrowRef\.current = onHeightGrow;/);
   assert.match(commentPanel, /import \{ COMMENT_LIST_FOLLOW_CHECK_MS, commentListScrollAfterSectionGrow, shouldFollowCommentListToBottom \} from '@\/utils\/commentListAnchor';/);
-  assert.match(commentPanel, /const el = scrollRef\.current;\s*if \(!el\) return;\s*const decision = commentListScrollAfterSectionGrow\(\{\s*scrollHeight: el\.scrollHeight,\s*clientHeight: el\.clientHeight,\s*scrollTop: el\.scrollTop,\s*grewBy,\s*firstLoadAfterMs,\s*jumpingToComment: !!firstUnreadCommentId \|\| !!focusCommentId,\s*\}\);\s*if \(decision === 'auto'\) el\.scrollTo\(\{ top: el\.scrollHeight, behavior: 'auto' \}\);\s*if \(decision === 'follow'\) \{\s*const startTop = el\.scrollTop;\s*window\.setTimeout\(\(\) => \{\s*if \(shouldFollowCommentListToBottom\(\{ startTop, scrollTop: el\.scrollTop, scrollHeight: el\.scrollHeight, clientHeight: el\.clientHeight, grewBy \}\)\) \{\s*el\.scrollTo\(\{ top: el\.scrollHeight, behavior: 'smooth' \}\);\s*\}\s*\}, COMMENT_LIST_FOLLOW_CHECK_MS\);\s*\}/);
+  // 움직임 폴리싱 4번: 처음 연 직후(손대기 전)는 목록 크기 감시가 처음 자리를 맞추므로 건너뛰고, 부드러운 이어 주기는 동작 줄이기면 즉시.
+  assert.match(commentPanel, /const el = scrollRef\.current;\s*if \(!el\) return;\s*\/\/[^\n]*\s*if \(openPinRef\.current\) return;\s*const decision = commentListScrollAfterSectionGrow\(\{\s*scrollHeight: el\.scrollHeight,\s*clientHeight: el\.clientHeight,\s*scrollTop: el\.scrollTop,\s*grewBy,\s*firstLoadAfterMs,\s*jumpingToComment: !!firstUnreadCommentId \|\| !!focusCommentId,\s*\}\);\s*if \(decision === 'auto'\) el\.scrollTo\(\{ top: el\.scrollHeight, behavior: 'auto' \}\);\s*if \(decision === 'follow'\) \{\s*const startTop = el\.scrollTop;\s*window\.setTimeout\(\(\) => \{\s*if \(shouldFollowCommentListToBottom\(\{ startTop, scrollTop: el\.scrollTop, scrollHeight: el\.scrollHeight, clientHeight: el\.clientHeight, grewBy \}\)\) \{\s*el\.scrollTo\(\{ top: el\.scrollHeight, behavior: reduceMotionRef\.current \? 'auto' : 'smooth' \}\);\s*\}\s*\}, COMMENT_LIST_FOLLOW_CHECK_MS\);\s*\}/);
 });
 
 // ── 구현 후 리뷰(뮤테이션 테스트) 보강: 기존 앵커를 피해 가던 결함 중 동작 테스트로 잡을 수 없는 SQL·preload·섹션 줄 ──
@@ -203,7 +207,8 @@ test('preload: 변경 신호 구독 해제는 같은 채널에서 같은 리스�
 test('섹션: 완료 방향·체크 표시·뮤테이션 마무리·조회 순번·안내 해제·입력 비우기/복구·폐기 판정·빈 입력·삭제 롤백·구독 해제·디바운스', () => {
   assert.match(section, /const done = item\.done_at == null;/);
   assert.match(section, /checked=\{item\.done_at != null\}/);
-  assert.match(section, /className=\{cn\('block text-xs break-words', item\.done_at \? 'line-through text-text-secondary\/60' : 'text-text-primary'\)\}/);
+  // 17번: 취소선은 늘 그어 두고 색만 투명↔글자색(완료 여부는 data-done) — .thread-todo-text 는 motion-scene-check.css.
+  assert.match(section, /<span data-done=\{item\.done_at != null\} className="thread-todo-text block text-xs break-words">/);
   assert.match(section, /\} finally \{\s*inFlightRef\.current -= 1;\s*if \(mountedRef\.current\) \{\s*setBusyIds\(\(prev\) => \{ const next = new Set\(prev\); next\.delete\(id\); return next; \}\);/);
   assert.match(section, /const seq = \+\+loadSeqRef\.current;/);
   assert.match(section, /if \(loadPendingRef\.current\) \{\s*loadSeqRef\.current \+= 1;\s*loadPendingRef\.current = false;\s*\}\s*inFlightRef\.current \+= 1;/);

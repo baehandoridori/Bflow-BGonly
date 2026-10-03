@@ -174,6 +174,17 @@
   --motion-dock-scale:         1.07;
   --motion-glow-duration:    2000ms;
   --motion-wipe-duration:     800ms;
+
+  /* 공통 박자 (움직임 폴리싱 바탕 A) — src/utils/motion.ts · tailwind.config.js 와 같은 값.
+     빠름: 누름·화살표·작은 메뉴 / 보통: 창·팝오버·내용 교체 / 느림: 미끄러지는 표시·카드 이동 */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  --ease-out: cubic-bezier(.16,1,.3,1);        /* 들어올 때 — 빠르게 출발해 부드럽게 멈춤 */
+  --ease-in: cubic-bezier(.4,0,1,1);           /* 나갈 때 — 부드럽게 출발해 빠르게 사라짐 */
+  --ease-std: cubic-bezier(.4,0,.2,1);         /* 제자리 변화(색·크기) */
+  --ease-spring: cubic-bezier(.34,1.56,.64,1); /* 작은 보상 — 살짝 넘쳤다 돌아옴('톡') */
+  --ease-snap: cubic-bezier(.2,0,0,1);         /* 작은 반응 — 화살표 회전·누름 */
 }
 
 /* ─── 라이트 모드 오버라이드 ─── */
@@ -259,24 +270,37 @@ input, textarea, select, [contenteditable="true"] {
 
 /* ─── 라이트↔다크 전환 트랜지션 ───
    전역 * 트랜지션은 씬 시트/댓글 패널처럼 노드가 많은 화면에서 스타일 재계산을 크게 만든다.
-   테마 변경 때 체감상 필요한 큰 표면과 컨트롤만 부드럽게 전환한다. */
+   테마 변경 때 체감상 필요한 큰 표면과 컨트롤만 부드럽게 전환한다.
+   특이도는 :where() 로 0 에 둔다 — 요소가 스스로 transition 을 정했으면(Tailwind transition-*,
+   .calendar-day-add 같은 전용 클래스) 그쪽이 이기고, 아무것도 정하지 않은 요소만 이 색 페이드를 받는다.
+   v1.36.0~1.127.5 에는 `body.theme-ready button`(특이도 0,1,2)이 버튼·svg 의 transform/opacity 전환
+   150여 곳을 덮어 화살표 회전·hover 확대·숨은 버튼 페이드가 모두 '뚝' 바뀌었다. */
 body.theme-ready,
-body.theme-ready #root,
-body.theme-ready header,
-body.theme-ready aside,
-body.theme-ready main,
-body.theme-ready [role="dialog"],
-body.theme-ready button,
-body.theme-ready input,
-body.theme-ready textarea,
-body.theme-ready select,
-body.theme-ready svg {
+:where(body.theme-ready) :where(#root, header, aside, main, [role="dialog"], button, input, textarea, select, svg) {
   transition:
     background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     fill 0.18s cubic-bezier(0.4, 0, 0.2, 1),
     stroke 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── 누르는 동안 살짝 눌림 (움직임 폴리싱 1번) ───
+   헤더·사이드바 아이콘 버튼 공용. hover 색 전환은 그대로 두고 누름(transform)만 짧게 더한다.
+   이 클래스가 transition 을 통째로 정하므로 같은 요소에 transition-* 유틸을 함께 쓰지 않는다.
+   transform 유틸(-translate-* 등)로 자리를 잡은 버튼에는 붙이지 말 것 — :active 가 그 transform 을 덮는다. */
+.bf-press {
+  transition:
+    color var(--motion-base) var(--ease-std),
+    background-color var(--motion-base) var(--ease-std),
+    border-color var(--motion-base) var(--ease-std),
+    transform var(--motion-fast) var(--ease-snap);
+}
+.bf-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bf-press:active:not(:disabled) { transform: none; }
 }
 
 /* ─── 씬 카드 → 상세 모달 continuity transition ─── */
@@ -288,7 +312,7 @@ body.theme-ready svg {
 
 .bflow-continuity-live-root {
   transform-origin: top left;
-  will-change: transform, opacity, filter;
+  will-change: transform, opacity;
   overflow: hidden;
 }
 
@@ -331,11 +355,10 @@ body.theme-ready svg {
 }
 
 /* ─── 씬 완료 색상 표시 ─── */
+/* 초록 그라데이션 바탕은 카드 안쪽 층(.scene-completion-tint-layer, motion-scene-check.css)이 그린다 —
+   그라데이션은 이어 바꿀 수 없어 층의 opacity 로 0.4초 동안 번지게 한다(움직임 폴리싱 17번). */
 .scene-completion-tint-card {
   border-color: rgb(52 211 153 / 0.54) !important;
-  background:
-    linear-gradient(135deg, rgb(16 185 129 / 0.20), rgb(var(--color-bg-card) / 0.96) 44%, rgb(34 197 94 / 0.10)),
-    rgb(var(--color-bg-card));
   box-shadow:
     0 0 0 1px rgb(16 185 129 / 0.16),
     0 14px 36px rgb(16 185 129 / 0.10),
@@ -356,9 +379,6 @@ body.theme-ready svg {
 
 :root[data-color-mode="light"] .scene-completion-tint-card {
   border-color: rgb(5 150 105 / 0.34) !important;
-  background:
-    linear-gradient(135deg, rgb(209 250 229 / 0.88), rgb(255 255 255 / 0.96) 48%, rgb(220 252 231 / 0.72)),
-    rgb(var(--color-bg-card));
   box-shadow:
     0 0 0 1px rgb(5 150 105 / 0.12),
     0 14px 32px rgb(5 150 105 / 0.10);
@@ -433,25 +453,38 @@ body.theme-ready svg {
   }
 }
 
+/* 새 댓글 배지의 숨쉬는 빛 (움직임 폴리싱 바탕 C)
+   box-shadow 를 키프레임으로 바꾸면 배지가 보이는 동안 매 프레임 다시 칠한다(씬 목록에 배지가 많으면
+   목록 전체가 무거워짐). 쉬는 빛은 배지에 고정하고, 가장 밝은 빛을 ::before 에 미리 그려 opacity 만
+   움직인다(합성 스레드 — 알림 종 notification-bell.css 와 같은 방식). ::after 가 아니라 ::before 인 이유:
+   시트의 배지 안 숫자 방울(absolute)보다 먼저 칠해져야 빛 고리가 방울 위를 덮지 않는다(예전 box-shadow 처럼 아래). */
 @keyframes comment-unread-badge-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 0 rgb(var(--color-accent) / 0.22),
-      0 0 10px rgb(var(--color-accent) / 0.16);
-  }
-  50% {
-    box-shadow:
-      0 0 0 4px rgb(var(--color-accent) / 0),
-      0 0 16px rgb(var(--color-accent) / 0.28);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 
 .comment-unread-badge {
+  box-shadow: 0 0 10px rgb(var(--color-accent) / 0.16);
+}
+/* :where — 배지가 이미 absolute 등으로 자리를 잡았으면 그쪽이 이긴다 */
+:where(.comment-unread-badge) {
+  position: relative;
+}
+.comment-unread-badge::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px rgb(var(--color-accent) / 0.1),
+    0 0 16px rgb(var(--color-accent) / 0.28);
+  opacity: 0;
   animation: comment-unread-badge-pulse 2.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .comment-unread-badge {
+  .comment-unread-badge::before {
     animation: none !important;
   }
 }
@@ -679,7 +712,12 @@ input[type="date"]::-webkit-inner-spin-button {
   background: rgb(var(--color-accent) / 0.06) !important;
   border: 2px dashed rgb(var(--color-accent) / 0.35) !important;
   border-radius: 12px !important;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+/* 움직임 폴리싱 바탕 B: !important 전환이 동작 줄이기 전역 규칙을 이기지 않게 동작 줄이기가 아닐 때만. */
+@media (prefers-reduced-motion: no-preference) {
+  .react-grid-item.react-grid-placeholder {
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
 }
 
 /* 리사이즈 핸들: 기본 스타일 전부 리셋 후 투명 히트 영역만 확보 */
@@ -740,13 +778,20 @@ input[type="date"]::-webkit-inner-spin-button {
 }
 
 /* 씬 카드 공통 인터랙션 — transform/box-shadow/border-color 모두 부드럽게 보간.
-   !important 는 .scene-card-selected 의 !important box-shadow 와의 specificity 문제를 피하기 위함. */
+   !important 는 .scene-card-selected 의 !important box-shadow 와의 specificity 문제를 피하기 위함.
+   박자는 카드 hover 공통 반응(.bf-card-hover, motion-foundation.css)과 같은 보통 속도·들어오는 곡선.
+   !important 전환이라 동작 줄이기 전역 규칙(아래)을 이기므로 no-preference 안에만 둔다 — 동작 줄이기·'최소'에서는
+   떠오름 없이 색·그림자가 바로 바뀐다. */
+@media (prefers-reduced-motion: no-preference) {
+  .scene-card-interactive {
+    transition:
+      transform var(--motion-base) var(--ease-out),
+      box-shadow var(--motion-base) var(--ease-out),
+      border-color var(--motion-base) var(--ease-out),
+      background-color var(--motion-base) var(--ease-out) !important;
+  }
+}
 .scene-card-interactive {
-  transition:
-    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 300ms cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 300ms cubic-bezier(0.22, 1, 0.36, 1) !important;
   will-change: transform, box-shadow;
 }
 
@@ -895,40 +940,48 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
-/* ─── Sonner 토스트 — 테마 색상 연동 ─── */
+/* ─── Sonner 토스트 — 테마 색상 연동 ───
+   흐림 없음(움직임 폴리싱 바탕 C·18번): 쌓이고 밀려 올라가며 움직이는 카드라 뒤 흐림(backdrop-filter)을 두지 않는다
+   (움직일 때마다 흐림을 새로 계산). 흐림이 없으면 뒤 글자가 또렷이 비쳐 바탕 알파를 .985 로 올린다(바탕 C 의 .97 에서
+   18번이 한 번 더 올림 — 대시보드 글자가 비쳤다). 맨 앞 inset 3px 는 종류별 왼쪽 색 막대(--bflow-toast-tone, motion-comments-notify.css). */
 [data-sonner-toaster] [data-sonner-toast].bflow-toast {
-  --normal-bg: rgb(var(--color-bg-card) / 0.92);
+  --normal-bg: rgb(var(--color-bg-card) / 0.985);
   --normal-border: rgb(var(--color-bg-border) / 0.35);
   --normal-text: rgb(var(--color-text-primary));
-  background: rgb(var(--color-bg-card) / 0.92) !important;
+  background: rgb(var(--color-bg-card) / 0.985) !important;
   border: 1px solid rgb(var(--color-bg-border) / 0.35) !important;
   color: rgb(var(--color-text-primary)) !important;
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
   box-shadow:
+    inset 3px 0 0 0 var(--bflow-toast-tone, transparent),
     0 8px 32px rgb(var(--color-shadow) / var(--shadow-alpha)),
     0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset !important;
 }
 
-/* ─── 호버 시 스택 부드럽게 펼침 ─── */
-[data-sonner-toaster] [data-sonner-toast] {
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
+/* ─── 호버 시 스택 부드럽게 펼침 · 스르륵 슬라이드 인 ───
+   움직임 폴리싱 바탕 B·18번: 아래 !important 전환·사라짐 애니메이션은 특이도가 높아 동작 줄이기 전역 규칙
+   (*, 0.01ms !important)을 이긴다. 그래서 동작 줄이기가 아닐 때만 적용한다('움직임: 최소'도 빌드 때
+   이 블록에서 빠진다 — scripts/postcss-motion-minimal.cjs). 동작 줄이기면 opacity 만(motion-comments-notify.css). */
+@media (prefers-reduced-motion: no-preference) {
+  [data-sonner-toaster] [data-sonner-toast] {
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
 
-/* 스르륵 슬라이드 인 */
-[data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
-  animation: bflow-toast-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  [data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
+    animation: bflow-toast-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
 }
 @keyframes bflow-toast-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
-/* 닫힐 때 페이드 아웃 */
-[data-sonner-toast][data-removed="true"] {
-  animation: bflow-toast-fade-out 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+/* 닫힐 때 페이드 아웃 — sonner 가 0.2초 뒤에 카드를 지우므로 그 안에 끝낸다(18번: 0.25s → 0.2s). */
+@media (prefers-reduced-motion: no-preference) {
+  [data-sonner-toast][data-removed="true"] {
+    animation: bflow-toast-fade-out 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+  }
 }
 @keyframes bflow-toast-fade-out {
   to { opacity: 0; transform: scale(0.95); }
@@ -944,7 +997,11 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 4px 12px !important;
   border-radius: 6px !important;
   white-space: nowrap !important;
-  transition: background 0.15s, border-color 0.15s !important;
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-sonner-toast] [data-button] {
+    transition: background 0.15s, border-color 0.15s !important;
+  }
 }
 [data-sonner-toast] [data-button]:hover {
   background: rgb(var(--color-accent) / 0.22) !important;
@@ -956,7 +1013,11 @@ input[type="range"]::-webkit-slider-thumb {
   background: rgb(var(--color-bg-border) / 0.2) !important;
   border: 1px solid rgb(var(--color-bg-border) / 0.3) !important;
   color: rgb(var(--color-text-secondary)) !important;
-  transition: background 0.15s, color 0.15s !important;
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-sonner-toast] [data-close-button] {
+    transition: background 0.15s, color 0.15s !important;
+  }
 }
 [data-sonner-toast] [data-close-button]:hover {
   background: rgb(var(--color-bg-border) / 0.4) !important;
@@ -1307,66 +1368,95 @@ input[type="range"]::-webkit-slider-thumb {
     0 8px 18px rgb(var(--color-accent) / 0.12);
 }
 
-/* v1.23.3 (#4): 막대 차트 정점 펄스 — 노란색 글로우 + 살짝 깜빡 */
+/* v1.23.3 (#4): 막대 차트 정점 펄스 — 노란색 글로우 + 살짝 깜빡
+   움직임 폴리싱 바탕 C: box-shadow·filter 키프레임(매 프레임 다시 칠함) 대신, 쉬는 빛은 막대에 고정하고
+   가장 밝은 빛(+살짝 밝아짐)을 ::after 에 미리 그려 opacity 만 움직인다. */
 @keyframes bflow-peak-bar-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(253, 203, 110, 0.5), 0 0 12px rgba(253, 203, 110, 0.45);
-    filter: brightness(1);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgba(253, 203, 110, 0.18), 0 0 22px rgba(253, 203, 110, 0.7);
-    filter: brightness(1.15);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 .bflow-peak-pulse {
+  box-shadow: 0 0 12px rgba(253, 203, 110, 0.45);
+}
+.bflow-peak-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: rgb(255 255 255 / 0.1);
+  box-shadow: 0 0 0 4px rgba(253, 203, 110, 0.18), 0 0 22px rgba(253, 203, 110, 0.7);
+  opacity: 0;
   animation: bflow-peak-bar-pulse 1.6s ease-in-out infinite;
 }
 
-/* v1.27.0: 사이드바 새 버전 배지 — 노란색 펄스 + 사이드바 우측 contour 밖 돌출 */
+/* v1.27.0: 사이드바 새 버전 배지 — 노란색 펄스 + 사이드바 우측 contour 밖 돌출
+   움직임 폴리싱 바탕 C: box-shadow 키프레임(매 프레임 다시 칠함) 대신 미리 그린 층을 움직인다.
+   ::before = 배지 둘레로 퍼졌다 돌아오는 고리(예전 0→6px 번짐 = 12px 배지의 2배 크기), ::after = 진한 빛. */
 @keyframes bflow-badge-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(253, 203, 110, 0.6), 0 0 8px 2px rgba(253, 203, 110, 0.35);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(253, 203, 110, 0), 0 0 12px 4px rgba(253, 203, 110, 0.5);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+@keyframes bflow-badge-ring {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 0; transform: scale(2); }
 }
 .bflow-badge-pulse {
+  box-shadow: 0 0 8px 2px rgba(253, 203, 110, 0.35);
+}
+.bflow-badge-pulse::before,
+.bflow-badge-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+.bflow-badge-pulse::before {
+  background: rgba(253, 203, 110, 1);
+  animation: bflow-badge-ring 2s ease-in-out infinite;
+}
+.bflow-badge-pulse::after {
+  box-shadow: 0 0 12px 4px rgba(253, 203, 110, 0.5);
   animation: bflow-badge-pulse 2s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .bflow-badge-pulse {
+  .bflow-badge-pulse::before,
+  .bflow-badge-pulse::after {
     animation: none !important;
-    box-shadow: 0 0 8px 2px rgba(253, 203, 110, 0.4);
   }
 }
 
 /* v1.27.0: 카드뷰 하단 일괄 액션 바 — 사용자들이 존재를 잘 모름 (한솔 보고).
    액센트 색 외곽 글로우 + 잔잔한 pulse 로 시선을 끌되 정신없지 않게.
-   사이즈는 변하지 않고 box-shadow 만 호흡하듯 변동. */
+   움직임 폴리싱 바탕 C: 나타날 때 두 번만 숨 쉬고 멈춘다(계속 숨 쉬면 바가 떠 있는 내내 다시 칠함).
+   쉬는 빛은 바에 고정하고, 가장 밝은 빛을 ::after 에 미리 그려 opacity 만 움직인다.
+   ::after 는 바 바깥으로 빛을 내므로 바 자체에는 overflow 를 두지 않는다(가로 스크롤은 안쪽 줄이 맡는다). */
 @keyframes bflow-bulk-bar-pulse {
-  0%, 100% {
-    box-shadow:
-      0 12px 28px rgba(0, 0, 0, 0.45),
-      0 0 0 0 rgb(var(--color-accent) / 0.45),
-      0 0 22px 4px rgb(var(--color-accent) / 0.22);
-  }
-  50% {
-    box-shadow:
-      0 12px 28px rgba(0, 0, 0, 0.45),
-      0 0 0 8px rgb(var(--color-accent) / 0),
-      0 0 36px 10px rgb(var(--color-accent) / 0.35);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 .bflow-bulk-bar-pulse {
-  animation: bflow-bulk-bar-pulse 2.4s ease-in-out infinite;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.45),
+    0 0 22px 4px rgb(var(--color-accent) / 0.22);
+}
+.bflow-bulk-bar-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 4px rgb(var(--color-accent) / 0.14),
+    0 0 36px 10px rgb(var(--color-accent) / 0.28);
+  opacity: 0;
+  animation: bflow-bulk-bar-pulse 2.4s ease-in-out 2;
 }
 @media (prefers-reduced-motion: reduce) {
-  .bflow-bulk-bar-pulse {
+  .bflow-bulk-bar-pulse::after {
     animation: none !important;
-    box-shadow:
-      0 12px 28px rgba(0, 0, 0, 0.45),
-      0 0 24px 4px rgb(var(--color-accent) / 0.3);
   }
 }
 
@@ -1429,23 +1519,18 @@ input[type="range"]::-webkit-slider-thumb {
    PR 4 의 polish 단계에서 prefers-reduced-motion 등 한 번 더 다듬을 예정.
 */
 
+/* 움직임 폴리싱 5번: '흐렸다 선명해지는' blur 를 뺐다 — 카드마다 매 프레임 흐림을 다시 계산하던 무게만 덜고
+   차례로 떠오르는 느낌은 그대로. 끝값(to)은 적지 않는다 — 카드의 지금 값(어두워짐 .55/.35·핀 위치)으로
+   이어져서, 걸러진 카드가 등장 끝에 1 → .35 로 '뚝' 바뀌지 않는다. */
 @keyframes bf-cascade-in {
   from {
     opacity: 0;
     transform: translateY(var(--motion-cascade-translate, 14px)) scale(0.92);
-    /* PR 4 polish: blur 3px → 2px (한솔 가이드 "blur 너무 짙지 않게"). */
-    filter: blur(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 
 .bf-cascade-item {
   animation: bf-cascade-in var(--motion-cascade-duration, 560ms) cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
-  will-change: transform, opacity, filter;
 }
 
 @keyframes bf-wipe-in {
@@ -1466,12 +1551,17 @@ input[type="range"]::-webkit-slider-thumb {
   transform-origin: center bottom;
   /* 한솔 보고 (2026-05-21):
      - 카드 가장자리 호버 시 떨림 — transition 더 부드럽게 (cubic-bezier ease-out + 320ms).
-     - 핀 해제 시 사라짐 → animation 없이 box-shadow / transform 만 transition. */
+     - 핀 해제 시 사라짐 → animation 없이 box-shadow / transform 만 transition.
+     움직임 폴리싱(2026-10): 떨림의 뿌리는 PartCardRow 가 '들린 카드' 위치로 거리를 재던 되먹임이었다.
+     원래 자리 칸([data-scene-key])으로 재도록 분리한 뒤 공통 박자(느림 260ms·들어오는 곡선)로 맞춤.
+     움직임 폴리싱 5번: 한 장을 띄우면 나머지가 .55 로, 단계 칩으로 거르면 .35 로 0.2초 동안 어두워진다
+     (이 목록이 SceneCard 의 transition 유틸을 덮으므로 opacity 를 여기 둔다). */
   transition:
-    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 220ms ease,
-    outline-color 220ms ease;
+    transform var(--motion-slow) var(--ease-out),
+    box-shadow var(--motion-slow) var(--ease-out),
+    opacity 200ms ease,
+    border-color var(--motion-base) var(--ease-std),
+    outline-color var(--motion-base) var(--ease-std);
   position: relative;
   z-index: 1;
   will-change: transform;
@@ -1494,15 +1584,7 @@ input[type="range"]::-webkit-slider-thumb {
     0 0 42px rgb(var(--color-accent) / 0.18);
 }
 
-@keyframes bf-status-flash {
-  0%   { background-color: var(--current-status-color, transparent); }
-  50%  { background-color: var(--current-status-color-bright, transparent); }
-  100% { background-color: transparent; }
-}
-
-.scene-card.flashing {
-  animation: bf-status-flash 1200ms ease-out;
-}
+/* 단계 변경 물듦은 src/styles/motion-live-drag.css 의 .bf-status-wash (앞면 위 색 층의 opacity). */
 
 @keyframes bf-fade-out-25 {
   0%   { opacity: 1; }
@@ -1510,18 +1592,12 @@ input[type="range"]::-webkit-slider-thumb {
   100% { opacity: 0; }
 }
 
-/* SceneCard 의 highlight 아바타 배지 자동 fade-out (2.5초 후) */
-@keyframes fadeOut {
-  0%   { opacity: 1; transform: scale(1); }
-  80%  { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(0.85); }
-}
+/* SceneCard 의 highlight 아바타 배지 등장·퇴장은 src/styles/motion-live-drag.css 의 .bf-comp-avatar. */
 
 @media (prefers-reduced-motion: reduce) {
-  .bf-cascade-item,
+  /* 차례 등장(.bf-cascade-item)은 여기서 빼서 전역 규칙대로 즉시 나타난다(움직임 폴리싱 5번 — 등장 즉시). */
   .bf-wipe-in,
-  .scene-card.pinned,
-  .scene-card.flashing {
+  .scene-card.pinned {
     animation-duration: 200ms !important;
     animation-iteration-count: 1 !important;
   }
@@ -1535,9 +1611,9 @@ input[type="range"]::-webkit-slider-thumb {
     transition: none !important;
   }
   .bf-cascade-item {
-    /* cascade stagger 자체도 reduced-motion 에서는 0 — 한 번에 fade-in */
-    animation-delay: 0 !important;
-    filter: none !important;
+    /* cascade stagger 자체도 reduced-motion 에서는 0 — 한 번에 나타난다.
+       '0' 은 시간 값으로 무효라 규칙째 버려져 카드가 20ms 씩 늦게 하나씩 나타났었다 → 0s. */
+    animation-delay: 0s !important;
   }
 }
 
@@ -1554,17 +1630,7 @@ input[type="range"]::-webkit-slider-thumb {
   from { opacity: 0; transform: scale(0.98); }
   to   { opacity: 1; transform: scale(1); }
 }
-/* 시간표 드롭 직후 해당 일정에만 적용한다. widget-animations.css는 Dashboard 전용이라 분리한다. */
-@keyframes timeGridSettleFlash {
-  0% { border-color: rgba(108, 92, 231, 0.95); box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.88); }
-  55% { border-color: rgba(162, 155, 254, 0.72); box-shadow: 0 0 0 5px rgba(108, 92, 231, 0.08); }
-  100% { border-color: transparent; box-shadow: 0 0 0 5px rgba(108, 92, 231, 0); }
-}
-
-.time-grid-settling {
-  border: 1px solid transparent;
-  animation: timeGridSettleFlash 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
+/* 시간표 드롭 직후의 착지 표시는 src/styles/motion-live-drag.css 의 .bf-land-ring(움직임 폴리싱 16번). */
 
 /* 다른 창에서 추가·수정된 일정을 2초 동안 원본 색 ring으로 알린다. */
 @keyframes calendarRealtimeHighlightPulse {
@@ -1581,7 +1647,6 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .time-grid-settling { animation: none; transition: none; }
   .calendar-realtime-highlight { animation: none; }
 }
 
@@ -1688,7 +1753,10 @@ input[type="range"]::-webkit-slider-thumb {
      달 전환 때 수십 개를 매 프레임 다시 그린다. 칸 배경이 단색이라 흐림은 눈에 띄지 않는다. */
   opacity: var(--reveal);
   transform: scale(calc(0.55 + 0.45 * var(--reveal)));
-  transition: color 0.14s linear, background 0.14s linear, box-shadow 0.14s linear, border-color 0.14s linear;
+  /* 색만 전환한다. --reveal 은 커서가 움직일 때마다 바뀌므로 여기 걸린 전환은 매번 다시 시작된다.
+     box-shadow 는 칸 밖까지 번지는 흐린 그림자를 매 프레임 다시 그리고, opacity·transform 은 근접 노출을
+     커서보다 늦게 따라오게 만든다. (예전엔 테마 전환 규칙이 이 줄을 덮어 색만 돌았다 — v1.127.5 측정 기준) */
+  transition: color 0.14s linear, background-color 0.14s linear, border-color 0.14s linear;
 }
 
 .calendar-day-add:hover {
@@ -1751,8 +1819,7 @@ input[type="range"]::-webkit-slider-thumb {
     0 10px 26px rgb(8 6 28 / 0.42),
     inset 0 1px 0 rgb(255 255 255 / 0.45),
     inset 0 -8px 16px rgb(var(--color-accent) / 0.28);
-  backdrop-filter: blur(14px) saturate(180%);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  /* backdrop-filter 없음 — 바탕이 70% 넘게 불투명해 흐림은 거의 안 보이는데, 늘어날 때마다 GPU 가 다시 그린다. */
   animation: calendarGhostIn 0.42s cubic-bezier(0.22, 1.2, 0.36, 1) both;
   will-change: transform;
 }

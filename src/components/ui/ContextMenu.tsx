@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { clampMenuToViewport, popClassName, popOriginFromPoint, popOriginStyle, type PopOrigin } from '@/utils/popupMotion';
 
 export interface ContextMenuItem {
   label: string;
@@ -17,18 +18,17 @@ interface ContextMenuProps {
 export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [adjusted, setAdjusted] = useState(position);
+  const [origin, setOrigin] = useState<PopOrigin | null>(null);
 
-  // 화면 밖으로 나가지 않도록 위치 조정
-  useEffect(() => {
+  // 화면 밖으로 나가지 않도록 위치 조정 — 그리기 전에(useLayoutEffect) 맞춰야 첫 프레임이 엉뚱한 자리에 뜨지 않는다.
+  // 피어나는 기준점은 보정된 자리 기준으로 누른 지점(화면 끝에서 밀려나면 기준도 반대 모서리로 뒤집힌다).
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    let { x, y } = position;
-    if (x + rect.width > window.innerWidth - 8) x = window.innerWidth - rect.width - 8;
-    if (y + rect.height > window.innerHeight - 8) y = window.innerHeight - rect.height - 8;
-    if (x < 4) x = 4;
-    if (y < 4) y = 4;
-    setAdjusted({ x, y });
+    const next = clampMenuToViewport(position, rect, { width: window.innerWidth, height: window.innerHeight });
+    setAdjusted(next);
+    setOrigin(popOriginFromPoint(position, { left: next.x, top: next.y, width: rect.width, height: rect.height }));
   }, [position]);
 
   // 외부 클릭/ESC 닫기
@@ -50,13 +50,14 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   return (
     <div
       ref={ref}
-      className="fixed z-[999] min-w-[160px] py-1 rounded-lg shadow-xl border"
+      className={`${popClassName(origin)} fixed z-[999] min-w-[160px] py-1 rounded-lg shadow-xl border`}
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
       }}
       style={{
+        ...popOriginStyle(origin),
         left: adjusted.x,
         top: adjusted.y,
         background: 'rgb(var(--color-bg-card))',

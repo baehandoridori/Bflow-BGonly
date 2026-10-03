@@ -130,6 +130,13 @@ export function CompositingSceneModal({
     if (next < 0 || next >= cardCtx.all.length) return;
     setDetailScene(`${episodeNumber}:${cardCtx.all[next].sceneId}`);
   }, [cardCtx, episodeNumber, setDetailScene, sceneTarget]);
+  // 아래 점(도트)으로 여러 칸 떨어진 씬에 한 번에 간다(움직임 폴리싱 검증 지적 acc-scene-flow-7).
+  const navigateTo = useCallback((index: number) => {
+    if (!cardCtx || sceneTarget) return;
+    const target = cardCtx.all[index];
+    if (!target || target.sceneId === cardCtx.card.sceneId) return;
+    setDetailScene(`${episodeNumber}:${target.sceneId}`);
+  }, [cardCtx, episodeNumber, setDetailScene, sceneTarget]);
 
   const close = useCallback(() => { if (onClose) onClose(); else setDetailScene(null); }, [setDetailScene, onClose]);
 
@@ -455,6 +462,7 @@ export function CompositingSceneModal({
       onDeleteBoth={handleDeleteBoth}
       onAddDept={handleAddDept}
       onNavigate={navigate}
+      onNavigateTo={navigateTo}
       hasPrev={currentIdx > 0}
       hasNext={currentIdx >= 0 && currentIdx < all.length - 1}
       currentMergedIndex={currentIdx >= 0 ? currentIdx : 0}

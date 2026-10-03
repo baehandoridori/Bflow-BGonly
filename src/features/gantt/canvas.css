@@ -7,6 +7,7 @@
 .gantt-canvas-wrap .gantt-name:focus-visible{outline:2px solid rgb(var(--color-accent));outline-offset:-2px}
 .gantt-canvas-wrap .gantt-row-collapse{width:24px;height:26px;flex:none;padding:0;color:var(--g-text);border:1px solid var(--g-border);background:rgb(var(--color-bg-border)/.22);border-radius:5px}
 .gantt-canvas-wrap .gantt-row-collapse:hover{background:rgb(var(--color-accent)/.15);border-color:rgb(var(--color-accent)/.45)}
+.gantt-canvas-wrap .gantt-row-collapse svg{transition:transform .2s cubic-bezier(.2,0,0,1)}.gantt-canvas-wrap .gantt-row-collapse[aria-expanded=true] svg{transform:rotate(90deg)}
 .gantt-canvas-wrap .gantt-row-collapse-spacer{display:block;flex:none;width:24px;height:24px}
 .gantt-canvas-wrap .gantt-inline-name{max-width:360px}
 .gantt-canvas-wrap .gantt-bar-tail{position:absolute;left:calc(100% + 11px);top:0;height:40px;display:flex;align-items:center;gap:16px;white-space:nowrap}
@@ -23,7 +24,8 @@
 .gantt-canvas-wrap .gantt-progress-pulse{position:absolute;inset:-3px;border:1px solid var(--gantt-color);border-radius:5px;pointer-events:none;animation:gantt-progress-increase .68s ease-out both}
 @keyframes gantt-progress-increase{0%{opacity:0;box-shadow:0 0 0 0 transparent}24%{opacity:.95;box-shadow:0 0 0 2px color-mix(in srgb,var(--gantt-color) 28%,transparent)}100%{opacity:0;box-shadow:0 0 0 7px transparent}}
 .gantt-canvas-wrap .gantt-conflict-marker{position:absolute;left:-15px;top:10px;width:12px;line-height:20px;text-align:center;color:var(--g-warning);font-size:12px;font-weight:700}
-.gantt-hover.gantt-detail-hover{max-width:min(360px,calc(100vw - 16px));max-height:min(480px,calc(100vh - 16px));overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;pointer-events:auto;border-radius:12px;line-height:1.65}
+/* 막대 설명 카드의 등장·옆 막대로 미끄러지기는 GanttTooltip 이 직접 돌린다(웜업 때 등장을 건너뛰어야 해서 CSS 등장 효과를 끈다). */
+.gantt-hover.gantt-detail-hover{max-width:min(360px,calc(100vw - 16px));max-height:min(480px,calc(100vh - 16px));overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;pointer-events:auto;border-radius:12px;line-height:1.65;animation:none}
 .gantt-hover.gantt-detail-hover>div{opacity:1;font-size:11px;overflow-wrap:anywhere}
 .gantt-hover.gantt-detail-hover .gantt-hover-summary{margin-bottom:3px;opacity:.8}
 .gantt-hover.gantt-detail-hover p{display:block;-webkit-line-clamp:unset;-webkit-box-orient:initial;overflow:visible;max-height:none;white-space:pre-wrap;font-size:12px;line-height:1.7;opacity:1;margin:10px 0 0}
@@ -31,4 +33,4 @@
 .gantt-hover.gantt-detail-hover .gantt-hover-conflict{font-weight:600}
 .gantt-hover.gantt-detail-hover .gantt-hover-shortcut{display:block;font-size:10px;opacity:.7;margin-top:8px}
 .gantt-hover.gantt-detail-hover:focus-visible{outline:2px solid rgb(var(--color-accent));outline-offset:-2px}
-@media(prefers-reduced-motion:reduce){.gantt-canvas-wrap .gantt-row-grip,.gantt-canvas-wrap .gantt-progress,.gantt-canvas-wrap .gantt-row-progress-track>span{transition:none}.gantt-canvas-wrap .gantt-progress-pulse{animation:none;display:none}}
+@media(prefers-reduced-motion:reduce){.gantt-canvas-wrap .gantt-row-collapse svg,.gantt-canvas-wrap .gantt-row-grip,.gantt-canvas-wrap .gantt-progress,.gantt-canvas-wrap .gantt-row-progress-track>span{transition:none}.gantt-canvas-wrap .gantt-progress-pulse{animation:none;display:none}}

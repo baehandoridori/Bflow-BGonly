@@ -10,6 +10,10 @@ import {
 } from '@/utils/characterTabGroups';
 import { loadPersistedGroupFolded, savePersistedGroupFolded, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { cn } from '@/utils/cn';
+import { prefersReducedMotion } from '@/utils/motion';
+import { useGridFlip } from '@/hooks/useGridFlip';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { CARD_DROP_FLIP } from '@/utils/gridFlip';
 
 /**
  * 커스텀 탭 본문 (피드백 41) — 그룹 섹션 + 미분류 + 카드 드래그 배치.
@@ -102,7 +106,8 @@ export function CharacterTabGroupsView({
   };
 
   const scrollToSection = (gid: string | null) => {
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    // 동작 줄이기·움직임 '최소'면 미끄러지지 않고 바로 맞춘다.
+    const reduced = prefersReducedMotion();
     const scroll = () => {
       sectionRefs.current.get(gid ?? '__ungrouped__')?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
     };
@@ -130,10 +135,20 @@ export function CharacterTabGroupsView({
 
   const dragEnabled = viewMode !== 'list' && allowDrag;
 
+  // 내가 카드를 놓아 배치가 바뀐 순간만, 밀려난 카드들이 새 자리로 미끄러진다(움직임 폴리싱 15번). 40장 초과면 생략.
+  const cardFlipArmedUntilRef = useRef(0);
+  const { reduce: reduceMotion } = useMotionPref();
+  useGridFlip(
+    rootRef,
+    [...tab.groups.map((g) => `${g.id}:${g.characterIds.join(',')}`), `~:${ungrouped.map((c) => c.id).join(',')}`].join('|'),
+    { disabled: reduceMotion || Date.now() > cardFlipArmedUntilRef.current, maxItems: CARD_DROP_FLIP.maxItems, enter: false },
+  );
+
   const dropOnGroup = (groupId: string | null) => {
     const dragId = draggingIdRef.current;
     if (!dragId) return;
     setDragging(null);
+    cardFlipArmedUntilRef.current = Date.now() + CARD_DROP_FLIP.armMs;
     onUpdateGroups(moveCharacterToGroup(tab.groups, dragId, groupId));
   };
   const dropOnCard = (groupId: string | null, targetId: string) => {
@@ -141,6 +156,7 @@ export function CharacterTabGroupsView({
     if (!dragId) return;
     setDragging(null);
     if (dragId === targetId) return;
+    cardFlipArmedUntilRef.current = Date.now() + CARD_DROP_FLIP.armMs;
     if (groupId === null) {
       onUpdateGroups(moveCharacterToGroup(tab.groups, dragId, null));
       return;

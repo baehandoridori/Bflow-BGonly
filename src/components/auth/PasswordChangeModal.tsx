@@ -40,10 +40,10 @@ export function PasswordChangeModal() {
   }, [currentUser, currentPw, newPw, confirmPw, setCurrentUser, setUsers, setShowPasswordChange]);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/60">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/60 bf-scrim-in">
       <form
         onSubmit={handleSubmit}
-        className="w-80 bg-bg-card border border-bg-border rounded-2xl p-6 flex flex-col gap-4 shadow-2xl"
+        className="w-80 bg-bg-card border border-bg-border rounded-2xl p-6 flex flex-col gap-4 shadow-2xl bf-modal-in"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-text-primary">비밀번호 변경</h2>

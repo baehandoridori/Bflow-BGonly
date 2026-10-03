@@ -22,6 +22,8 @@ import { EVENT_COLORS, type BflowCalendar, type CalendarMember } from '@/types/c
 import { avatarColor } from '@/utils/avatarColor';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { sidePanelPreset } from '@/utils/contentSwap';
+import { prefersReducedMotion } from '@/utils/motion';
 
 interface CalendarSettingsModalProps {
   calendar?: BflowCalendar;
@@ -791,14 +793,15 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
         role="dialog"
         aria-modal="true"
         aria-label={isCreate ? '새 캘린더' : '캘린더 설정'}
-        initial={{ opacity: 0, x: 40 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 40 }}
-        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        // 옆 상세 창과 같은 박자(움직임 폴리싱 11번) — 오른쪽 24px 에서 250ms, 닫힐 때 180ms.
+        {...sidePanelPreset(prefersReducedMotion())}
         className="absolute bottom-0 right-0 top-0 z-50 flex w-[29rem] max-w-full flex-col overflow-hidden"
         style={{
           ...floatingGlassStyle,
-          background: 'rgb(var(--color-bg-card) / 0.97)',
+          // 움직이는 창이라 흐림은 끈다. 흐림 없이 뒤 글자가 비치지 않게 배경은 불투명하게.
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          background: 'rgb(var(--color-bg-card))',
           borderLeft: '1px solid rgb(var(--color-bg-border) / 0.52)',
           boxShadow: '-14px 0 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.22))',
         }}

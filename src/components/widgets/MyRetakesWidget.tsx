@@ -14,6 +14,10 @@ import { stripEntityTokens } from '@/utils/entityTokens';
 import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { openRetakeInApp } from '@/utils/retakeNavigation';
 import type { CompRevision } from '@/types';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { useRowFlip } from '@/hooks/useRowFlip';
+import { SuccessCheckCircle } from '@/components/ui/SuccessCheckCircle';
+import { RETAKE_DONE_HOLD_MS, remainingLeaveMs, withLeavingRows, type LeavingRow } from './myRetakesMotion';
 
 function useMyRetakes() {
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -92,28 +96,43 @@ export function MyRetakesWidget() {
   const { currentUser, revisions, userId, items, summary } = useMyRetakes();
   const isPopup = useContext(IsPopupContext);
   const isLoading = useRevisionStore((state) => state.isLoading);
+  const { reduce } = useMotionPref();
   const [now, setNow] = useState(Date.now);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  // 17번: 막 '담당 완료'한 줄 — 초록 체크를 보여 주고 사라질 때까지 원래 자리에 남겨 둔다.
+  const [leaving, setLeaving] = useState<LeavingRow<CompRevision>[]>([]);
   const savingRef = useRef(false);
+  const leaveTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>[]>());
+  const listRef = useRef<HTMLDivElement>(null);
   const editingRevision = editingId ? revisions.find((revision) => revision.id === editingId) : undefined;
   const completionRecipients = useMemo(() => buildRevisionAssigneeCompletionNotifyUserIds({
     notifyUserIds: editingRevision?.notifyUserIds,
     requesterId: editingRevision?.requesterId,
     completerId: userId,
   }), [editingRevision?.notifyUserIds, editingRevision?.requesterId, userId]);
+  const rows = useMemo(() => withLeavingRows(items, leaving), [items, leaving]);
+  const leavingIds = useMemo(() => new Set(leaving.map((entry) => entry.item.id)), [leaving]);
+  // 줄이 빠지거나 메모 칸이 열리고 닫힐 때 아래 줄이 미끄러져 자리 잡는다.
+  useRowFlip(listRef, `${rows.map((row) => row.item.id).join('|')}#${editingId ?? ''}`, { disabled: reduce });
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => () => {
+    leaveTimersRef.current.forEach((timers) => timers.forEach(clearTimeout));
+    leaveTimersRef.current.clear();
+  }, []);
+
   useEffect(() => { setEditingId(null); }, [userId]);
   useEffect(() => {
-    if (editingId && !savingRef.current && (!editingRevision || !getMyRetakeState(editingRevision, userId))) {
+    // 끝낸 줄이 사라지는 동안에는 메모 칸을 그 줄과 함께 두었다가 같이 닫는다.
+    if (editingId && !savingRef.current && !leavingIds.has(editingId) && (!editingRevision || !getMyRetakeState(editingRevision, userId))) {
       setEditingId(null);
     }
-  }, [editingId, editingRevision, userId, savingId]);
+  }, [editingId, editingRevision, userId, savingId, leavingIds]);
 
   // 본체는 앱의 공용 리테이크 구독을 사용한다. 팝업은 독립 renderer이므로 직접 갱신한다.
   useEffect(() => {
@@ -121,33 +140,82 @@ export function MyRetakesWidget() {
     return installMyRetakesPopupRefresh();
   }, [isPopup, userId]);
 
-  const applyState = async (id: string, action: 'start' | 'complete', note = '', notifyIds?: string[]) => {
-    if (savingRef.current) return;
+  /** 저장이 확인되면 true. onStart 는 검사를 통과해 낙관적 반영 직전에 한 번 불린다(바뀌기 전 리테이크를 넘긴다). */
+  const applyState = async (
+    id: string,
+    action: 'start' | 'complete',
+    note = '',
+    notifyIds?: string[],
+    onStart?: (revision: CompRevision) => void,
+  ): Promise<boolean> => {
+    if (savingRef.current) return false;
     const actor = useAuthStore.getState().currentUser;
     const store = useRevisionStore.getState();
     const revision = store.revisions.find((item) => item.id === id);
-    if (!actor || actor.id !== userId || !revision || !getMyRetakeState(revision, actor.id)) return;
-    if (action === 'start' && getMyRetakeState(revision, actor.id) !== 'pending') return;
+    if (!actor || actor.id !== userId || !revision || !getMyRetakeState(revision, actor.id)) return false;
+    if (action === 'start' && getMyRetakeState(revision, actor.id) !== 'pending') return false;
     if (isPopup) setRevisionsSheetsMode(useAppStore.getState().dataConnected);
     savingRef.current = true;
     setSavingId(id);
+    onStart?.(revision);
     try {
       if (action === 'start') await store.startAssignee(revision, actor.id);
       else await store.completeAssignee(revision, actor.id, note, notifyIds, actor.name);
-      if (useAuthStore.getState().currentUser?.id !== actor.id) return;
+      if (useAuthStore.getState().currentUser?.id !== actor.id) return false;
       const saved = useRevisionStore.getState().revisions.find((item) => item.id === id);
       const expected = action === 'start' ? 'in_progress' : 'done';
-      if (saved?.assigneeStates?.[actor.id]?.state === expected) {
-        if (action === 'complete') setEditingId(null);
-      } else {
-        toast.error('진행 상태가 저장되지 않았어요. 현재 상태를 확인한 뒤 다시 시도해주세요.');
-      }
+      if (saved?.assigneeStates?.[actor.id]?.state === expected) return true;
+      toast.error('진행 상태가 저장되지 않았어요. 현재 상태를 확인한 뒤 다시 시도해주세요.');
     } catch {
       toast.error('진행 상태를 저장하지 못했어요. 다시 시도해주세요.');
     } finally {
       savingRef.current = false;
       setSavingId(null);
     }
+    return false;
+  };
+
+  const clearLeaveTimers = (id: string) => {
+    leaveTimersRef.current.get(id)?.forEach(clearTimeout);
+    leaveTimersRef.current.delete(id);
+  };
+  const dropLeaving = (id: string) => {
+    clearLeaveTimers(id);
+    setLeaving((prev) => prev.filter((entry) => entry.item.id !== id));
+  };
+
+  /**
+   * '담당 완료' 확인: 그 줄에 초록 체크 → 0.4초 뒤 줄이 스르륵 사라짐 → 아래 줄이 미끄러져 올라옴.
+   * 저장이 실패하면 남겨 둔 줄을 바로 거두고(실제 줄이 같은 자리로 돌아온다) 메모 칸은 그대로 둔다.
+   */
+  const confirmComplete = async (id: string, note: string, notifyIds?: string[]) => {
+    const index = items.findIndex((item) => item.id === id);
+    const started = { at: 0 };
+    const ok = await applyState(id, 'complete', note, notifyIds, (revision) => {
+      started.at = Date.now();
+      clearLeaveTimers(id);
+      setLeaving((prev) => [...prev.filter((entry) => entry.item.id !== id), { item: revision, index: Math.max(0, index), fading: false }]);
+      leaveTimersRef.current.set(id, [setTimeout(() => {
+        setLeaving((prev) => prev.map((entry) => (entry.item.id === id ? { ...entry, fading: true } : entry)));
+      }, RETAKE_DONE_HOLD_MS)]);
+    });
+    if (!started.at) return;
+    if (!ok) {
+      dropLeaving(id);
+      return;
+    }
+    const finish = () => {
+      dropLeaving(id);
+      setEditingId((current) => (current === id ? null : current));
+    };
+    const wait = remainingLeaveMs(started.at, Date.now());
+    if (wait === 0) {
+      finish();
+      return;
+    }
+    const timers = leaveTimersRef.current.get(id) ?? [];
+    timers.push(setTimeout(finish, wait));
+    leaveTimersRef.current.set(id, timers);
   };
 
   return (
@@ -159,33 +227,55 @@ export function MyRetakesWidget() {
             <span>진행중 <strong className="font-semibold tabular-nums text-text-primary">{summary.inProgress}</strong></span>
           </div>
           <p className="text-[11px] leading-relaxed text-text-secondary/75">수정을 시작하거나 마쳤다면 진행 상태를 확인해주세요.</p>
-          {editingRevision && editingRevision.assigneeIds?.includes(userId) && !editingRevision.finalResolvedAt && editingRevision.status !== 'resolved' && (
-            <fieldset disabled={savingId !== null} className="min-w-0 disabled:opacity-60">
-              <legend className="text-xs font-medium text-text-primary">{sceneLabel(editingRevision)} · {revisionNoToLabel(editingRevision.revisionNo)} 담당 완료</legend>
-              <CompletionNoteInput key={`${editingRevision.id}:${userId}`} initialValue={editingRevision.assigneeStates?.[userId]?.note ?? ''} notifyDefaultIds={completionRecipients}
-                onConfirm={(note, notifyIds) => { void applyState(editingRevision.id, 'complete', note, notifyIds); }} onCancel={() => setEditingId(null)} />
-            </fieldset>
-          )}
-          {items.length === 0 ? (
+          {rows.length === 0 ? (
             <p className="py-5 text-center text-xs text-text-secondary">{savingId ? '진행 상태를 저장하는 중이에요.' : isLoading ? '리테이크를 불러오는 중이에요.' : '지금 담당 중인 미완료 리테이크가 없어요.'}</p>
           ) : (
-            <div className="divide-y divide-bg-border/35">
-              {items.map((revision) => {
-                const state = getMyRetakeState(revision, userId)!;
+            <div ref={listRef} className="divide-y divide-bg-border/35">
+              {rows.map(({ item: revision, leaving: leavingRow }) => {
+                const state = getMyRetakeState(revision, userId) ?? 'in_progress';
+                const isEditing = editingId === revision.id;
+                const noteRevision = isEditing ? (leavingRow ? revision : editingRevision) : undefined;
+                const showNote = !!noteRevision && (!!leavingRow || (
+                  !!noteRevision.assigneeIds?.includes(userId) && !noteRevision.finalResolvedAt && noteRevision.status !== 'resolved'
+                ));
                 return (
-                  <div key={revision.id} className="space-y-2 py-3 first:pt-0">
+                  <div
+                    key={revision.id}
+                    data-flip-id={revision.id}
+                    data-leaving={leavingRow ? (leavingRow.fading ? 'fade' : 'done') : undefined}
+                    className="my-retake-row relative space-y-2 py-3 first:pt-0"
+                  >
+                    {/* '담당 완료'를 누른 줄 — 보라 6% 바탕이 0.15초에 켜진다(겹친 층의 opacity). */}
+                    <span aria-hidden="true" className="my-retake-row-tint" data-on={isEditing && !leavingRow} />
                     <button type="button" onClick={() => openRetakeInApp(revision.id, { fromPopup: isPopup })} className="group block w-full text-left cursor-pointer">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-text-secondary">
                         <span className="font-medium">{sceneLabel(revision)} · {revisionNoToLabel(revision.revisionNo)}</span>
-                        <span style={{ color: ASSIGNEE_STATE_CONFIG[state].color }}>{ASSIGNEE_STATE_CONFIG[state].label}</span>
+                        {/* 상태가 바뀌면 새 글자가 0.15초에 떠오른다(key 로 다시 그림). */}
+                        <span key={state} className="my-retake-state" style={{ color: ASSIGNEE_STATE_CONFIG[state].color }}>{ASSIGNEE_STATE_CONFIG[state].label}</span>
                       </div>
                       <p className="mt-1 line-clamp-2 break-words text-xs leading-relaxed text-text-primary group-hover:text-accent">{stripEntityTokens(revision.description) || '리테이크 내용 확인'}</p>
                     </button>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="mr-auto inline-flex items-center gap-1 text-[10px] text-text-secondary/70"><Clock size={10} />{formatRetakeElapsed(revision.createdAt, now)}</span>
-                      {state === 'pending' && <button type="button" disabled={savingId !== null} onClick={() => { void applyState(revision.id, 'start'); }} className="inline-flex items-center gap-1 rounded-md border border-bg-border/50 px-2 py-1 text-[11px] text-text-secondary hover:bg-bg-border/30 disabled:opacity-40 cursor-pointer"><Play size={11} />진행중</button>}
-                      <button type="button" disabled={savingId !== null} onClick={() => setEditingId(revision.id)} className="inline-flex items-center gap-1 rounded-md bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent hover:bg-accent/20 disabled:opacity-40 cursor-pointer"><Check size={11} />담당 완료</button>
+                      {leavingRow ? (
+                        <span className="inline-flex items-center gap-1.5 px-1 py-0.5 text-[11px] font-medium text-emerald-500">
+                          <SuccessCheckCircle checked popIn size="sm" />
+                          담당 완료
+                        </span>
+                      ) : (
+                        <>
+                          {state === 'pending' && <button type="button" disabled={savingId !== null} onClick={() => { void applyState(revision.id, 'start'); }} className="inline-flex items-center gap-1 rounded-md border border-bg-border/50 px-2 py-1 text-[11px] text-text-secondary hover:bg-bg-border/30 disabled:opacity-40 cursor-pointer"><Play size={11} />진행중</button>}
+                          <button type="button" disabled={savingId !== null} onClick={() => setEditingId(revision.id)} className="inline-flex items-center gap-1 rounded-md bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent hover:bg-accent/20 disabled:opacity-40 cursor-pointer"><Check size={11} />담당 완료</button>
+                        </>
+                      )}
                     </div>
+                    {showNote && noteRevision && (
+                      <fieldset disabled={savingId !== null || !!leavingRow} className="my-retake-note min-w-0 disabled:opacity-60">
+                        <legend className="text-xs font-medium text-text-primary">{sceneLabel(noteRevision)} · {revisionNoToLabel(noteRevision.revisionNo)} 담당 완료</legend>
+                        <CompletionNoteInput key={`${noteRevision.id}:${userId}`} initialValue={noteRevision.assigneeStates?.[userId]?.note ?? ''} notifyDefaultIds={completionRecipients}
+                          onConfirm={(note, notifyIds) => { void confirmComplete(noteRevision.id, note, notifyIds); }} onCancel={() => setEditingId(null)} />
+                      </fieldset>
+                    )}
                   </div>
                 );
               })}

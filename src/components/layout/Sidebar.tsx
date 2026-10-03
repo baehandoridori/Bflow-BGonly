@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Gamepad2, Settings, PanelLeft, ExternalLink } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
@@ -10,10 +11,13 @@ import { canAccessPlayground } from '@/features/playground/featureFlag';
 import { originFromActivation } from '@/features/playground/transition/dotWipeMath';
 import { usePlaygroundEntryStore } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
+import { CountBadge } from '@/components/ui/CountBadge';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { VersionHoverTip, deriveHoverState } from './VersionHoverTip';
+import { prefetchView } from '@/views/viewLoaders';
 import * as gcalService from '@/services/googleCalendarService';
 
 const GCAL_AUTH_EVENT = 'bflow:gcal-auth-changed';
@@ -101,7 +105,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       title="B flow — 스플래시 보기"
-      className="group relative w-10 h-10 rounded-xl mb-4 cursor-pointer transition-transform duration-300 hover:scale-110 active:scale-95"
+      className="group relative w-10 h-10 rounded-xl mb-4 cursor-pointer transition-transform duration-300 ease-out-expo hover:scale-110 active:scale-95 active:duration-fast motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
       style={{ perspective: '200px' }}
     >
       {/* 외부 글로우 */}
@@ -113,7 +117,8 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
         }}
       />
 
-      {/* 메인 글래스 레이어 */}
+      {/* 메인 글래스 레이어 — backdrop-filter 는 두지 않는다. hover 확대가 살아난 뒤로는 흐림 층까지 함께
+          확대·재계산되는데, 뒤가 사이드바 단색 배경이라 흐림은 눈에 보이지 않는다(움직임 폴리싱 1번). */}
       <div
         className="relative w-full h-full rounded-xl overflow-hidden"
         style={{
@@ -121,8 +126,6 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
             radial-gradient(circle at ${lightX}% ${lightY}%, rgba(255,255,255,0.18) 0%, transparent 60%),
             linear-gradient(135deg, rgba(${ac}, 0.35) 0%, rgba(${acSub}, 0.2) 50%, rgba(${ac}, 0.1) 100%)
           `,
-          backdropFilter: 'blur(20px) saturate(1.5)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
           border: '1px solid rgba(255, 255, 255, 0.2)',
           boxShadow: `
             0 0 0 0.5px rgba(255,255,255,0.1) inset,
@@ -302,6 +305,47 @@ export function Sidebar() {
     };
   }, []);
 
+  // 누르자마자 선택 표시가 출발하게(움직임 폴리싱 7번): 표시는 이 사이드바 안 상태로 먼저 그리고(flushSync),
+  //   무거운 새 화면 그리기(setView)는 그 프레임이 화면에 나간 다음(rAF → setTimeout)으로 미룬다.
+  //   표시는 합성 스레드에서 미끄러지므로 새 화면을 그리는 동안에도 멈추지 않는다.
+  //   단축키·알림 링크처럼 클릭 없이 바뀐 화면은 currentView 를 그대로 따라간다(from 이 달라지면 무시).
+  const [pendingNav, setPendingNav] = useState<{ view: ViewMode; from: ViewMode } | null>(null);
+  const shownView = pendingNav && pendingNav.from === currentView ? pendingNav.view : currentView;
+  const navScheduleRef = useRef<{ frame: number | null; timers: ReturnType<typeof setTimeout>[] }>({ frame: null, timers: [] });
+  const cancelScheduledNav = useCallback(() => {
+    const schedule = navScheduleRef.current;
+    if (schedule.frame !== null) cancelAnimationFrame(schedule.frame);
+    schedule.timers.forEach((timer) => clearTimeout(timer));
+    schedule.frame = null;
+    schedule.timers = [];
+  }, []);
+  useEffect(() => cancelScheduledNav, [cancelScheduledNav]);
+  const goToView = useCallback((view: ViewMode) => {
+    cancelScheduledNav();
+    if (view === currentView) {
+      setPendingNav(null);
+      setView(view);
+      return;
+    }
+    flushSync(() => setPendingNav({ view, from: currentView }));
+    const schedule = navScheduleRef.current;
+    let applied = false;
+    const apply = () => {
+      if (applied) return;
+      applied = true;
+      cancelScheduledNav();
+      // 같은 작업 안의 두 갱신은 한 번에 그려진다 — 화면과 표시가 함께 확정된다.
+      setView(view);
+      setPendingNav(null);
+    };
+    schedule.frame = requestAnimationFrame(() => {
+      schedule.frame = null;
+      schedule.timers.push(setTimeout(apply, 0));
+    });
+    // 창이 가려져 rAF 가 멈춘 경우에도 화면은 바뀌어야 한다.
+    schedule.timers.push(setTimeout(apply, 120));
+  }, [cancelScheduledNav, currentView, setView]);
+
   const handleToggle = useCallback(async () => {
     toggleSidebarExpanded();
     const next = !sidebarExpanded;
@@ -352,12 +396,23 @@ export function Sidebar() {
           <LiquidGlassLogo onClick={() => setShowSplash(true)} />
         </div>
 
-        {/* 네비게이션 */}
+        {/* 네비게이션 — 선택 표시(보라 알약)는 하나만 두고 활성 메뉴로 세로로 미끄러진다(움직임 폴리싱 7번).
+            가로 자리는 CSS(left-2 right-2)라 사이드바 펼침(폭 350ms)과 겹쳐도 따로 놀지 않는다. */}
+        <SlidingIndicator
+          activeKey={shownView}
+          axis="y"
+          timing="rail"
+          deps={[navItems]}
+          className="left-2 right-2 rounded-lg bg-accent/20"
+        />
         {navItems.map((item) => {
           const navButton = (
           <button
+            data-slide-key={item.id}
             onClick={(event) => {
               if (item.id === 'playground') {
+                cancelScheduledNav();
+                setPendingNav(null);
                 requestPlaygroundEntry(originFromActivation(
                   event.clientX,
                   event.clientY,
@@ -365,15 +420,21 @@ export function Sidebar() {
                   event.currentTarget.getBoundingClientRect(),
                 ));
               } else {
-                setView(item.id);
+                goToView(item.id);
               }
             }}
-            title={isVisuallyExpanded ? undefined : item.label}
+            // 설명 말풍선(title) 없음: 접힌 사이드바는 마우스를 올리는 순간 펼쳐져 같은 이름이 옆에 나타난다.
+            // title 을 두면 펼쳐지는 이름 위에 같은 글자의 말풍선이 겹쳐 떴다(움직임 폴리싱 2번).
+            // 움직임 폴리싱 12번: 마우스를 올리는(포커스하는) 순간 그 화면 코드를 미리 받아 둔다 —
+            //   누를 때 로딩 동그라미 없이 바로 그린다. 올린 항목만(전부 미리 받으면 입력이 막힌다).
+            onMouseEnter={() => prefetchView(item.id)}
+            onFocus={() => prefetchView(item.id)}
             className={cn(
               'flex items-center cursor-pointer w-full h-10 rounded-lg',
-              'transition-colors duration-200',
-              currentView === item.id
-                ? 'bg-accent/20 text-accent'
+              'bf-press',
+              // 배경은 위의 미끄러지는 표시가 맡는다 — 여기서는 글자색만.
+              shownView === item.id
+                ? 'text-accent'
                 : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50 group-hover/nav:text-text-primary group-hover/nav:bg-bg-border/50',
             )}
           >
@@ -399,23 +460,22 @@ export function Sidebar() {
                   <span className="sr-only">{getCalendarAuthLabel(calendarAuthState)}</span>
                 </span>
               )}
-              {item.id === 'compositing-revisions' && totalOpenRevisions > 0 && (
-                <span
+              {/* 숫자 배지: 늘면 '톡', 0 이 되면 작게 줄며 사라진다(움직임 폴리싱 7번). */}
+              {item.id === 'compositing-revisions' && (
+                <CountBadge
+                  count={totalOpenRevisions}
                   className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1"
                   style={{ backgroundColor: '#FDCB6E', color: '#1A1D27' }}
                   title={`미해결 리테이크 ${totalOpenRevisions}개`}
-                >
-                  {totalOpenRevisions}
-                </span>
+                />
               )}
-              {item.id === 'compositing' && compositingErrorCount > 0 && (
-                <span
+              {item.id === 'compositing' && (
+                <CountBadge
+                  count={compositingErrorCount}
                   className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1"
                   style={{ backgroundColor: 'var(--status-error)', color: '#fff' }}
                   title={`오류 ${compositingErrorCount}개`}
-                >
-                  {compositingErrorCount}
-                </span>
+                />
               )}
             </span>
             <span
@@ -460,7 +520,7 @@ export function Sidebar() {
         <div className="mt-auto flex flex-col items-center gap-1.5 w-16 shrink-0 overflow-visible">
           <button
             onClick={handleToggle}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary/40 hover:text-text-primary hover:bg-bg-border/50 transition-all duration-200 cursor-pointer"
+            className="bf-press w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary/40 hover:text-text-primary hover:bg-bg-border/50 cursor-pointer"
             title={isExpanded ? '사이드바 접기' : '사이드바 펼치기'}
           >
             <PanelLeft

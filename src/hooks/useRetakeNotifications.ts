@@ -5,6 +5,7 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { getCanonicalRevision, getCanonicalRevisions, reportRetakeDeliveryFailure, setRevisionsSheetsMode } from '@/services/revisionService';
 import { openRetakeInApp } from '@/utils/retakeNavigation';
+import { noteLiveNotificationArrival, notificationToastDecor } from '@/utils/notificationHelper';
 import { toast } from 'sonner';
 import type { RetakeDeliveryEvent, RetakeReminderPayload } from '@/shared/retakeNotifications';
 
@@ -75,6 +76,7 @@ export function useRetakeNotifications(): void {
       if (seenReminders.current.size > 200) seenReminders.current.delete(seenReminders.current.values().next().value!);
       const isAssignment = payload.kind === 'assignment';
       const title = isAssignment ? '새 담당 리테이크가 있습니다' : '리테이크 진행 상태를 확인해주세요';
+      const unreadBefore = useNotificationStore.getState().unreadCount;
       const notificationId = useNotificationStore.getState().addNotification({
         type: 'revision', title,
         body: `${payload.senderName}님의 ${isAssignment ? '담당 지정' : '다시 알림'} · ${payload.description}`,
@@ -82,7 +84,10 @@ export function useRetakeNotifications(): void {
         metadata: { revisionId: payload.revisionId, revisionAction: isAssignment ? 'add' : 'reminder',
           revisionEventId: payload.eventId, retakeHubSetId: payload.setId ?? undefined },
       });
+      // 나를 담당으로 지정했거나 다시 알려 준 것 — 나를 직접 부른 알림이라 종이 '딩동' 흔들린다.
+      noteLiveNotificationArrival('revision', unreadBefore, { revisionAction: isAssignment ? 'add' : 'reminder' });
       toast(title, {
+        ...notificationToastDecor('revision'),
         description: payload.description,
         action: { label: '리테이크 확인하기', onClick: () => {
           if (useAuthStore.getState().currentUser?.id !== userId

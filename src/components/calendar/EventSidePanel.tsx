@@ -5,7 +5,6 @@ import { EventTagBadges } from './EventTagBadges';
 import { getEventTagIds, toggleEventTag } from './eventTagPresentation';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { CalendarDateRangePicker, CalendarTimeInput, CalendarDurationButtons } from './inputs';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
   Pencil,
@@ -31,7 +30,8 @@ import {
 import { EntityAwareInput } from '@/components/common/EntityAwareInput';
 import { EntityText } from '@/components/common/EntityText';
 import { DEPARTMENT_CONFIGS } from '@/types';
-import { floatingGlassStyle } from '@/utils/glassStyles';
+import { floatingSolidStyle } from '@/utils/glassStyles';
+import { swapInClassName } from '@/utils/contentSwap';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { parseDate } from '@/utils/calendarDate';
 import { calendarEventIdentityKey, calendarEventLinkedTodoId } from '@/utils/calendarEventIdentity';
@@ -90,20 +90,13 @@ interface EventSidePanelProps {
   onDelete: (id: string, scope?: CalendarEditScope) => void | Promise<void>;
   onUpdate: (id: string, updates: Partial<CalendarEvent>, scope?: CalendarEditScope) => void | Promise<void>;
   onNavigate: (ev: CalendarEvent) => void;
+  /**
+   * 이미 열린 창에서 다른 일정으로 바뀌어 새로 그려졌는가(움직임 폴리싱 11번).
+   * 켜지면 제목·날짜·메모만 살짝 떠오르며 바뀐다(색 띠는 바로 새 색). 창이 들어오고 나가는 움직임은
+   * 부모의 바깥 셸이 맡는다 — 이 창은 일정마다 key 로 새로 그려져 편집 중이던 초안은 지금처럼 버려진다.
+   */
+  swapIn?: boolean;
 }
-
-// ─── 슬라이드 트랜지션 ────────────────────────────
-
-const panelVariants = {
-  initial: { x: 300, opacity: 0 },
-  animate: { x: 0, opacity: 1 },
-  exit: { x: 300, opacity: 0 },
-};
-
-const panelTransition = {
-  duration: 0.25,
-  ease: [0.16, 1, 0.3, 1],
-};
 
 // ─── 컴포넌트 ──────────────────────────────────────
 
@@ -113,6 +106,7 @@ export function EventSidePanel({
   onDelete,
   onUpdate,
   onNavigate,
+  swapIn = false,
 }: EventSidePanelProps) {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const setView = useAppStore((s) => s.setView);
@@ -433,17 +427,15 @@ export function EventSidePanel({
   );
 
   return (
-    <motion.div
-      key={event.id}
-      variants={panelVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
-      transition={panelTransition}
+    <div
       className="absolute right-0 top-0 bottom-0 w-[280px] z-40 flex flex-col"
       style={{
-        ...floatingGlassStyle,
-        background: 'rgb(var(--color-bg-card) / 0.95)',
+        ...floatingSolidStyle,
+        // 열리고 닫힐 때 움직이는 창이라 흐림을 끈다(움직이는 동안 매 프레임 다시 계산).
+        // 흐림이 없으면 뒤 일정 글자가 비쳐 보이므로 배경은 불투명하게 — 흐린 유리와 눈에는 같다.
+        backdropFilter: 'none',
+        WebkitBackdropFilter: 'none',
+        background: 'rgb(var(--color-bg-card))',
         borderLeft: '1px solid rgb(var(--color-bg-border) / 0.4)',
         boxShadow: '-12px 0 32px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.2))',
       }}
@@ -456,7 +448,7 @@ export function EventSidePanel({
       />
 
       {/* ── 헤더 ── */}
-      <div className="flex items-start gap-2 px-4 pt-3 pb-2 shrink-0">
+      <div className={`flex items-start gap-2 px-4 pt-3 pb-2 shrink-0 ${swapInClassName(swapIn)}`}>
         <div
           className="w-2.5 h-2.5 rounded-full shrink-0 mt-1.5"
           style={{ backgroundColor: event.color }}
@@ -493,7 +485,7 @@ export function EventSidePanel({
       </div>
 
       {/* ── 스크롤 바디 ── */}
-      <div className="flex-1 overflow-y-auto px-4 pb-4 flex flex-col gap-3">
+      <div className={`flex-1 overflow-y-auto px-4 pb-4 flex flex-col gap-3 ${swapInClassName(swapIn)}`}>
         {/* 정보 카드 */}
         <div className="bg-bg-primary/55 rounded-lg border border-bg-border/55 p-3 flex flex-col gap-2.5">
           {/* 날짜 */}
@@ -796,6 +788,6 @@ export function EventSidePanel({
           </div>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }

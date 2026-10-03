@@ -316,7 +316,7 @@ export function EpisodeTreeNav({
                   {/* 에피소드 관리 버튼 */}
                   <button
                     onClick={(e) => { e.stopPropagation(); onEpisodeEdit(ep.episodeNumber); }}
-                    className="p-0.5 opacity-0 group-hover:opacity-100 text-text-secondary/40 hover:text-text-primary transition-opacity shrink-0"
+                    className="p-0.5 opacity-0 group-hover:opacity-100 text-text-secondary/40 hover:text-text-primary transition-[opacity,color] shrink-0"
                     title="에피소드 관리"
                   >
                     <MoreVertical size={12} />
@@ -565,7 +565,7 @@ function ArchivedSection({
                 </div>
                 <button
                   onClick={() => onUnarchive(archived.episodeNumber)}
-                  className="p-0.5 opacity-0 group-hover/arc:opacity-100 text-text-secondary/30 hover:text-accent transition-opacity shrink-0"
+                  className="p-0.5 opacity-0 group-hover/arc:opacity-100 text-text-secondary/30 hover:text-accent transition-[opacity,color] shrink-0"
                   title="아카이빙 해제 (복원)"
                 >
                   <RotateCcw size={11} />

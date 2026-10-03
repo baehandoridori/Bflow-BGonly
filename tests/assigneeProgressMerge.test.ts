@@ -120,8 +120,13 @@ test('담당자별 진행 저장은 서버 정본을 다시 읽어 병합한다'
 
 test('ScenesView 의 담당자별 진행 저장은 통째 덮어쓰기로 되돌아가지 않았다', () => {
   const src = read('src/views/ScenesView.tsx');
-  assert.match(src, /saveAssigneeProgress\(sceneUuid, progress, changedNames\)/, '큐 안에서 병합 저장을 써야 한다');
-  assert.match(src, /saveAssigneeProgress\(sceneUuid, nextProgress, \[assigneeName\]\)/, '담당자 1명 토글은 그 담당자만 바꿔야 한다');
+  // 움직임 폴리싱 20번: 쓰기 직전 확인(로그인 세션)은 넷째 인자로만 붙는다 — 병합 대상(changedNames)은 그대로.
+  assert.match(src, /saveAssigneeProgress\(sceneUuid, progress, changedNames(?:, \{ beforeWrite \})?\)/, '큐 안에서 병합 저장을 써야 한다');
+  assert.match(
+    src,
+    /saveAssigneeProgress\(sceneUuid, nextProgress, \[assigneeName\](?:, \{ beforeWrite: saveSession\.assertCurrent \})?\)/,
+    '담당자 1명 토글은 그 담당자만 바꿔야 한다',
+  );
   assert.doesNotMatch(
     src,
     /writeMetadata\(\s*SCENE_ASSIGNEE_PROGRESS_META_TYPE/,
@@ -134,7 +139,7 @@ test('ScenesView 의 담당자별 진행 저장은 통째 덮어쓰기로 되돌
   for (const call of writeCalls) {
     assert.match(
       call,
-      /,\s*Object\.keys\([A-Za-z.]+\)\)$/,
+      /,\s*Object\.keys\([A-Za-z.]+\)(?:,\s*saveSession\.assertCurrent)?\)$/,
       `changedNames 가 비었거나 빠진 호출 — 병합이 아무것도 반영하지 않는다: ${call}`,
     );
   }
@@ -195,9 +200,11 @@ test('씬 뷰와 씬 단위 토글이 같은 액팅 단계 역산을 쓴다', ()
 
 test('완료 도장은 병합 결과와 어긋나면 찍지 않는다', () => {
   const src = read('src/views/ScenesView.tsx');
-  assert.match(src, /const completionStillHolds = !completionMeta \|\| mergedFullyDone === willBeFullyDone;/);
-  assert.match(src, /if \(completionMeta && completionStillHolds\) \{/, '조건 없이 완료 메타를 쓰면 미완료 씬에 완료자가 남는다');
-  assert.match(src, /completedBy: prevCompletedBy, completedAt: prevCompletedAt/, '도장을 건너뛰면 화면도 되돌려야 한다');
+  // 움직임 폴리싱 20번: 저장 확인 전 같은 담당자를 또 누르면 앞 클릭의 완료 판정을 넘겨받는다(effectiveCompletion),
+  // 되돌릴 값은 저장 확인 전 맨 처음 값(saveCarry.prevScene — 앞 클릭이 서버에 닿으면 그 결과로 앞당겨진다)이다.
+  assert.match(src, /const completionStillHolds = !effectiveCompletion \|\| mergedFullyDone === willBeFullyDone;/);
+  assert.match(src, /if \(effectiveCompletion && completionStillHolds\) \{/, '조건 없이 완료 메타를 쓰면 미완료 씬에 완료자가 남는다');
+  assert.match(src, /completedBy: saveCarry\.prevScene\.completedBy \?\? '',\r?\n\s+completedAt: saveCarry\.prevScene\.completedAt \?\? '',/, '도장을 건너뛰면 화면도 되돌려야 한다');
 });
 
 test('에피소드 이름 저장 실패는 롤백하고 알린다', () => {

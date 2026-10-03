@@ -103,7 +103,9 @@ test('고스트는 이어진 구간마다 요소 하나 — 칸마다 그리지 
 test('고스트 범위는 한 소스에서 나오고 날짜 이동과 완전히 분리된다', () => {
   const grid = read('src/components/calendar/CalendarGrid.tsx');
   assert.match(grid, /createRange\?: \{ startDate: string; endDate: string; days: number; dragging: boolean \} \| null;/);
-  assert.match(grid, /totalDays=\{createRange\.days\}/, '라벨 일수가 화면 칸 수에서 나오면 주말 숨김에서 어긋난다');
+  // 고스트는 createRange(다 녹을 때까지 남기는 동안은 그 직전 범위)에서 그린다 — 움직임 폴리싱 16번 재검증 지적.
+  assert.match(grid, /const ghostRange = createRange \?\? ghostLinger;/);
+  assert.match(grid, /totalDays=\{ghostRange\.days\}/, '라벨 일수가 화면 칸 수에서 나오면 주말 숨김에서 어긋난다');
 
   const view = read('src/views/ScheduleView.tsx');
   assert.match(view, /const createRange = useMemo/);
