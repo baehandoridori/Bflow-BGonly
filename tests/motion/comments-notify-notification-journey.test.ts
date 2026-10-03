@@ -285,7 +285,8 @@ test('알림 창 줄: 읽음 막대는 색 고정 + 클래스로 접힘, 지우�
   const dropdown = bodyOf(panel, 'function NotificationDropdown(');
   assert.match(dropdown, /animateEl\(\n\s*row,\n\s*NOTIFICATION_ROW_EXIT_KEYFRAMES,\n\s*\{ duration: NOTIFICATION_ROW_EXIT_MS, easing: EASE_CSS\.in, fill: 'forwards' \},\n\s*reduce,\n\s*\)/);
   assert.match(dropdown, /window\.setTimeout\(commit, duration\)/);
-  assert.match(dropdown, /removeNotification\(id\);/);
+  // 누른 순간 보이던 그 알림만 지운다(코덱스 2차 지적 — tests/motion/fx3-misc-notification-clear.test.ts)
+  assert.match(dropdown, /useNotificationStore\.getState\(\)\.removeShownNotifications\(marks, userId\)/);
   assert.match(dropdown, /notificationRowShifts\(before, measureNotificationRows\(list\)\)/);
   assert.match(dropdown, /\{ duration: NOTIFICATION_ROW_SHIFT_MS, easing: EASE_CSS\.out \}/);
   assert.match(dropdown, /className="overflow-y-auto overflow-x-hidden p-1\.5 space-y-0\.5"/, '밀려나는 동안 가로 스크롤바 없음');
