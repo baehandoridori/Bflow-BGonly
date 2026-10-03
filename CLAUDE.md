@@ -64,7 +64,13 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 텍스트: #E8E8EE | 텍스트 약: #8B8DA3 | 액센트: #6C5CE7
 
 단계: LO=#74B9FF  완료=#A29BFE  검수=#FDCB6E  PNG=#00B894
+
+모션: 빠름 120ms / 보통 180ms / 느림 260ms (--motion-fast/base/slow)
+      곡선 --ease-out(.16,1,.3,1) · --ease-in · --ease-std · --ease-spring · --ease-snap
+      JS 는 src/utils/motion.ts (motionPreset·transformPreset·animateEl)
 ```
+
+**움직임 규칙 (v1.128.0)**: 움직임은 transform/opacity 중심(framer 는 transform 문자열 + `transitionEnd: { transform: 'none' }`), 반복·움직이는 요소에 backdrop-filter 금지, 레이아웃 속성·무한 paint 애니메이션 금지. 설정 '움직임: 최소'(`html[data-motion='minimal']`)와 OS 동작 줄이기는 같게 처리하되 **정보를 알려 주는 표시는 정적 대체로 남긴다**(useMotionPref → { reduce, lite, level }). 전역 전환 규칙은 `:where()` 로 특이도 0 — 컴포넌트 전환을 덮지 않게. 상세: tasks/lessons.md 2026-10-02·2026-10-03.
 
 ---
 
@@ -147,5 +153,5 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 ---
 
-*문서 버전: 2026-05-08*
+*문서 버전: 2026-10-03*
 *작성: Claude × 한솔 (Studio JBBJ)*
