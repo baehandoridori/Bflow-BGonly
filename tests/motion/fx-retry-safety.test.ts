@@ -262,7 +262,9 @@ function stageCarry(writes: PendingStageWrites, extra: Partial<StageSaveSlotCarr
     basePhase: null,
     baseAssigneeProgress: undefined,
     completion: null,
+    minePhase: null,
     assigneeTouched: false,
+    mineAssigneeProgress: undefined,
     ...extra,
   };
 }
@@ -389,13 +391,25 @@ test('planStageGiveUp — 아직 내 값인 칸만 되돌리고, 하나도 없�
     completion: { completedBy: '배한솔', completedAt: 't' },
     baseCompletion: { completedBy: '', completedAt: '' },
     basePhase: { sceneState: 'work', workRound: 2, feedbackRound: 0 },
+    minePhase: { sceneState: 'done', workRound: 0, feedbackRound: 0 },
     assigneeTouched: true,
     baseAssigneeProgress: { 김: { lo: true } },
+    mineAssigneeProgress: { 김: { ...stages('1111'), sceneState: null } },
   });
+  // 이 저장이 만든 곁 값(완료 도장·단계·담당자 진행)이 그대로인 화면.
+  const mineNow = {
+    ...stages('1111'),
+    completedBy: '배한솔',
+    completedAt: 't',
+    sceneState: 'done' as const,
+    workRound: 0,
+    feedbackRound: 0,
+    assigneeProgress: { 김: { ...stages('1111'), sceneState: null, updatedAt: 'later' } },
+  };
 
-  assert.equal(planStageGiveUp(carry, stages('1000')), null, '팀원이 모두 되돌렸으면 완료 기록·단계·담당자 진행도 덮지 않는다');
+  assert.equal(planStageGiveUp(carry, { ...mineNow, ...stages('1000') }), null, '팀원이 모두 되돌렸으면 완료 기록·단계·담당자 진행도 덮지 않는다');
 
-  const all = planStageGiveUp(carry, stages('1111'));
+  const all = planStageGiveUp(carry, mineNow);
   assert.ok(all);
   assert.deepEqual(all.rolled, ['done', 'review', 'png']);
   assert.deepEqual(all.patch, {
@@ -410,7 +424,7 @@ test('planStageGiveUp — 아직 내 값인 칸만 되돌리고, 하나도 없�
     assigneeProgress: { 김: { lo: true } },
   });
 
-  const partly = planStageGiveUp(carry, stages('1110'));
+  const partly = planStageGiveUp(carry, { ...mineNow, ...stages('1110') });
   assert.ok(partly);
   assert.deepEqual(partly.rolled, ['done', 'review'], 'PNG 는 그 사이 다른 값이 됐으니 그대로');
   assert.equal('png' in partly.patch, false);

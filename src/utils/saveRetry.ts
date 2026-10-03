@@ -11,7 +11,8 @@
    - 같은 key 의 요청은 차례로 보낸다. 앞 요청이 끝나야 다음 요청이 나간다(뒤 요청이 먼저 실패해 되돌린 다음
      앞 요청이 저장되는 일을 막는다).
    - 다시 보내기 직전에 화면 값이 내가 보낸 값과 다르면(다른 사람이 실시간으로 바꿈) 덮지 않고 멈춘다('overtaken').
-   - 앱을 끄기 직전(flushNow)에는 재전송을 기다리던 작업을 깨워 지금 한 번 보낸다.
+   - 앱을 끄기 직전(flushNow)에는 재전송을 기다리던 작업을 깨워 지금 한 번 보낸다. 그 사이 같은 칸이 또 바뀌면
+     넘겨받은 새 저장의 요청까지 기다린다.
 
    실패 분류는 오류 '문구'로 한다. 저장은 렌더러 → IPC → 메인 → Supabase 를 거치는데, 메인의 IPC 래퍼가
    오류를 문구 하나로 다시 던져서 코드·HTTP 상태가 사라진다. 그래서 메인이 HTTP 오류 상태를 문구 끝에
@@ -315,10 +316,6 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
     },
     async run<C>(key: string, job: SaveRetryJob<C>) {
       const previous = entries.get(key);
-      if (previous) {
-        previous.superseded = true;
-        previous.cancelWait?.();
-      }
       const entry: Entry = {
         job: job as SaveRetryJob<unknown>,
         superseded: false,
@@ -328,6 +325,16 @@ export function createSaveRetryController(env: SaveRetryEnv, options: SaveRetryO
         flushing: false,
         attemptWaiters: [],
       };
+      if (previous) {
+        previous.superseded = true;
+        // 앱 종료 직전 정리(flushNow)가 앞 저장을 기다리는 중에 같은 칸이 또 바뀌었다 — 그 정리가 새 저장의 요청까지
+        // 기다리도록 정리 상태와 대기자를 넘긴다(앞 저장이 끝났다고 정리가 끝나면 마지막 클릭이 보내지지 않은 채 꺼진다).
+        if (previous.attemptWaiters.length > 0) {
+          entry.flushing = true;
+          entry.attemptWaiters = previous.attemptWaiters.splice(0);
+        }
+        previous.cancelWait?.();
+      }
       entries.set(key, entry);
       try {
         return await runEntry(key, entry);
