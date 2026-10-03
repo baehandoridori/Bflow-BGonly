@@ -959,8 +959,8 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* ─── 호버 시 스택 부드럽게 펼침 · 스르륵 슬라이드 인 ───
    움직임 폴리싱 바탕 B·18번: 아래 !important 전환·사라짐 애니메이션은 특이도가 높아 동작 줄이기 전역 규칙
-   (*, 0.01ms !important)을 이긴다. 그래서 동작 줄이기가 아닐 때만 적용한다('움직임: 최소'는
-   motion-foundation.css 의 ID 특이도 규칙이 이긴다). 동작 줄이기면 opacity 만(motion-comments-notify.css). */
+   (*, 0.01ms !important)을 이긴다. 그래서 동작 줄이기가 아닐 때만 적용한다('움직임: 최소'도 빌드 때
+   이 블록에서 빠진다 — scripts/postcss-motion-minimal.cjs). 동작 줄이기면 opacity 만(motion-comments-notify.css). */
 @media (prefers-reduced-motion: no-preference) {
   [data-sonner-toaster] [data-sonner-toast] {
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),

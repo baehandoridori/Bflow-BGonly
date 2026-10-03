@@ -149,6 +149,45 @@ export function motionLevelFromBroadcast(payload: unknown, self?: MotionLevelBro
   return normalizeMotionLevel(message.motionLevel);
 }
 
+/* ─── OS '동작 줄이기' ─────────────────────────────────────────── */
+
+const OS_REDUCE_QUERY = '(prefers-reduced-motion: reduce)';
+
+function osReduceMedia(): MediaQueryList | null {
+  try {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return null;
+    return window.matchMedia(OS_REDUCE_QUERY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 지금 OS '동작 줄이기'가 켜져 있는지(창·matchMedia 가 없는 환경은 false). */
+export function readOsReducedMotion(): boolean {
+  return osReduceMedia()?.matches === true;
+}
+
+/**
+ * OS '동작 줄이기'가 바뀌면 알린다 — 앱을 쓰는 도중 윈도우 설정을 바꿔도 오래 떠 있는 화면(사이드바·헤더 등)이
+ * 다시 시작하지 않고 따라가게. 끊는 함수를 돌려준다.
+ */
+export function subscribeOsReducedMotion(listener: Listener): () => void {
+  const media = osReduceMedia();
+  if (!media) return () => {};
+  if (typeof media.addEventListener === 'function') {
+    media.addEventListener('change', listener);
+    return () => media.removeEventListener('change', listener);
+  }
+  // 옛 MediaQueryList(addListener 만 있음)
+  media.addListener?.(listener);
+  return () => media.removeListener?.(listener);
+}
+
+/** 지금 판단(OS 값 + 앱 설정). */
+export function readMotionPref(): MotionPref {
+  return resolveMotionPref(readOsReducedMotion(), current);
+}
+
 /** React 밖에서 읽는 '최소' 여부 — <html data-motion> 에 적힌 값을 본다. */
 export function isMinimalMotionInDom(): boolean {
   try {

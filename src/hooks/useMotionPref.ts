@@ -4,15 +4,16 @@
  * - lite:   '움직임: 가볍게' 이상(최소·동작 줄이기 포함). 계속 반복되는 장식(배경 루프·펄스)을 멈춘다.
  * - level:  앱 설정값('full' | 'lite' | 'minimal').
  * 기존 사용처의 `const { reduce } = useMotionPref()` 는 그대로 동작한다.
- * OS 값의 초기 null 은 기본 모션으로 다루고, 명시적으로 true 일 때만 줄인다.
+ * OS 값은 matchMedia 를 직접 구독한다 — framer 의 useReducedMotion 은 처음 그릴 때 한 번만 읽어서, 앱을 쓰는 도중
+ * 윈도우 '애니메이션 효과'를 바꾸면 오래 떠 있는 사이드바·헤더·말풍선이 앱을 다시 켤 때까지 옛 값을 썼다.
  * 같은 조합이면 같은 객체를 돌려준다.
  */
 import { useEffect, useState } from 'react';
-import { useReducedMotion } from 'framer-motion';
 import {
   getMotionLevel,
-  resolveMotionPref,
+  readMotionPref,
   subscribeMotionLevel,
+  subscribeOsReducedMotion,
   type MotionLevel,
   type MotionPref,
 } from '@/utils/motionLevel';
@@ -31,8 +32,21 @@ export function useMotionLevel(): MotionLevel {
   return level;
 }
 
+/**
+ * 앱 설정과 OS '동작 줄이기'를 함께 구독한다. 상태 하나·effect 하나 — 사용처의 훅 순서(테스트 하네스가 칸 번호로
+ * 상태·effect 를 집는다)가 예전과 같게 둔다.
+ */
 export function useMotionPref(): MotionPref {
-  const osReduce = useReducedMotion() === true;
-  const level = useMotionLevel();
-  return resolveMotionPref(osReduce, level);
+  const [pref, setPref] = useState<MotionPref>(readMotionPref);
+  useEffect(() => {
+    const sync = () => setPref(readMotionPref());
+    sync();
+    const offLevel = subscribeMotionLevel(sync);
+    const offOs = subscribeOsReducedMotion(sync);
+    return () => {
+      offLevel();
+      offOs();
+    };
+  }, []);
+  return pref;
 }

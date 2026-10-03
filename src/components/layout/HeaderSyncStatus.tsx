@@ -27,7 +27,7 @@ export function HeaderSyncStatus({ onRefresh }: { onRefresh: () => void }) {
   const isSyncing = useDataStore((s) => s.isSyncing);
   const syncKind = useDataStore((s) => s.syncKind);
   const lastSyncTime = useDataStore((s) => s.lastSyncTime);
-  const { reduce } = useMotionPref();
+  const { reduce, lite } = useMotionPref();
 
   const iconRef = useRef<SVGSVGElement>(null);
   const checkRef = useRef<SVGSVGElement>(null);
@@ -36,6 +36,9 @@ export function HeaderSyncStatus({ onRefresh }: { onRefresh: () => void }) {
   const prevKindRef = useRef<typeof syncKind>(null);
   const reduceRef = useRef(reduce);
   reduceRef.current = reduce;
+  // '가볍게' 이상(최소·동작 줄이기 포함)은 반복 장식을 멈춘다 — 자동 받아오기 체크 숨쉬기도 그중 하나.
+  const liteRef = useRef(lite);
+  liteRef.current = lite;
   const lastSyncRef = useRef(lastSyncTime);
   lastSyncRef.current = lastSyncTime;
   // 아이콘이 돌거나 멈추는 중 — 멈춤이 끝나야 '최신 상태'로 바뀌며 체크가 '톡' 나타난다.
@@ -93,8 +96,9 @@ export function HeaderSyncStatus({ onRefresh }: { onRefresh: () => void }) {
       return;
     }
 
-    // 자동 받아오기: 문구·버튼은 그대로, 체크만 한 번 숨쉬기. 15초마다 반복되는 장식이라 '동작 줄이기'면 생략.
-    if (change.breathe && !spinRef.current && !reduceRef.current && lastSyncRef.current !== null) {
+    // 자동 받아오기: 문구·버튼은 그대로, 체크만 한 번 숨쉬기. 15초마다 반복되는 장식이라 '가볍게' 이상
+    // (최소·동작 줄이기 포함)이면 생략.
+    if (change.breathe && !spinRef.current && !liteRef.current && lastSyncRef.current !== null) {
       animateEl(checkRef.current, CHECK_BREATH_KEYFRAMES, CHECK_BREATH_TIMING, false);
     }
   }, [syncKind]);
