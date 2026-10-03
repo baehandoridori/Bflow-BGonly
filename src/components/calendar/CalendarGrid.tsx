@@ -144,9 +144,11 @@ function EventBarChip({
 }) {
   const ev = bar.event;
   // 마운트될 때 한 번만 판정한다 — 클래스를 켰다 끄지 않으므로 이미 있던 막대는 다시 움직이지 않는다.
+  // 끄는 중에 새로 붙은 조각(주를 넘어 생긴 조각)은 처음부터 떠오르지 않는다. 판정 뒤에 끄기 여부로 클래스를
+  // 뗐다 붙이면 놓는 순간 떠오름이 처음부터 다시 돌아 막대가 투명해졌다가 나타났다(검증 지적 acc-scene-flow-1).
   const revealOnMountRef = useRef<boolean | null>(null);
   if (revealOnMountRef.current === null) {
-    revealOnMountRef.current = !reduceMotion && shouldRevealOnMount(revealSince, Date.now());
+    revealOnMountRef.current = !reduceMotion && !isDragging && shouldRevealOnMount(revealSince, Date.now());
   }
   const tags = useCalendarStore((state) => state.tags);
   const eventTags = resolveEventTags(ev, tags);
@@ -339,7 +341,7 @@ function EventBarChip({
           'h-full flex items-center px-2 text-xs font-medium truncate relative',
           bar.isStart ? 'rounded-l-md' : '',
           bar.isEnd ? 'rounded-r-md' : '',
-          revealOnMountRef.current && !isDragging && 'sf-cal-bar-reveal',
+          revealOnMountRef.current && 'sf-cal-bar-reveal',
         )}
         style={{
           // 막대마다 backdrop-filter(흐림)를 걸면 막대 수만큼 합성 레이어·렌더 패스가 생겨

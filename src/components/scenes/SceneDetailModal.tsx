@@ -106,6 +106,10 @@ interface SceneDetailModalProps {
   focusRevisionCommentId?: string;
   /** 바깥(#화·#파트 점프 등)에서 닫으라는 신호. 값이 바뀌면 Esc·바깥 클릭과 같은 부드러운 닫힘을 거친다. */
   closeRequestToken?: number;
+  /** 가라앉기(닫힘)를 시작한 순간. 부모는 이때부터 onClose 까지 새 열기 요청을 미룬다(닫히는 창이 새 대상을 지우지 않게). */
+  onCloseStart?: () => void;
+  /** 아래 점(도트)으로 여러 칸 떨어진 씬에 한 번에 간다(목록 순번). 없으면 점은 한 칸씩만 넘긴다. */
+  onNavigateTo?: (index: number) => void;
 }
 
 // ─── 속성 행 컴포넌트 ──────────────────────────────
@@ -513,6 +517,8 @@ export function SceneDetailModal({
   focusCommentId,
   focusRevisionCommentId,
   closeRequestToken,
+  onCloseStart,
+  onNavigateTo,
 }: SceneDetailModalProps) {
   const [showImageModal, setShowImageModal] = useState(false);
   const { reduce } = useMotionPref();
@@ -527,9 +533,11 @@ export function SceneDetailModal({
   const closedRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const onCloseStartRef = useRef(onCloseStart);
   useLayoutEffect(() => {
     onCloseRef.current = onClose;
-  }, [onClose]);
+    onCloseStartRef.current = onCloseStart;
+  }, [onClose, onCloseStart]);
   const finishClose = useCallback(() => {
     if (!closingRef.current || closedRef.current) return;
     closedRef.current = true;
@@ -538,6 +546,7 @@ export function SceneDetailModal({
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
+    onCloseStartRef.current?.();
     // 가라앉는 동안 창 안 클릭은 막는다(뒤 막이 클릭을 받아 흘려보내지 않는다 — 연타 무시).
     if (shellRef.current) shellRef.current.style.pointerEvents = 'none';
     setClosing(true);
@@ -1234,17 +1243,16 @@ export function SceneDetailModal({
                       <button
                         key={i}
                         onClick={() => {
-                          // 여러 칸을 건너뛰어도 카드는 한 번만 넘긴다(마지막 칸에 도착할 때).
-                          if (i < currentSceneIndex && onNavigate) {
-                            flip.prepare(-1, currentSceneIndex - i);
-                            for (let j = 0; j < currentSceneIndex - i; j++) {
-                              setTimeout(() => onNavigate('prev'), j * 30);
-                            }
-                          } else if (i > currentSceneIndex && onNavigate) {
-                            flip.prepare(1, i - currentSceneIndex);
-                            for (let j = 0; j < i - currentSceneIndex; j++) {
-                              setTimeout(() => onNavigate('next'), j * 30);
-                            }
+                          if (i === currentSceneIndex || !onNavigate) return;
+                          const dir = i < currentSceneIndex ? 'prev' : 'next';
+                          // 여러 칸 떨어진 씬도 목표 순번으로 한 번에 가고 카드는 한 번만 넘긴다(검증 지적 acc-scene-flow-7).
+                          //   예전엔 onNavigate 를 칸 수만큼 불렀는데, 부모가 그 렌더의 순번을 닫아 두어 매번 같은 '다음'으로
+                          //   가서 한 칸만 움직이고 넘김도 돌지 않았다. 목표로 가는 길이 없으면 한 칸만 넘긴다.
+                          if (onNavigateTo) {
+                            flip.prepare(dir === 'next' ? 1 : -1);
+                            onNavigateTo(i);
+                          } else {
+                            navigate(dir);
                           }
                         }}
                         className={cn(

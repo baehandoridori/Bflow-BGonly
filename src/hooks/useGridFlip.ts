@@ -25,6 +25,7 @@ import {
  *   새로 보이는 카드만 떠오르게 한다(남는 카드는 바로 제자리).
  * - 진행 중이던 움직임은 끊고 다시 잰다(옛 측정은 움직이던 '보이는 자리'라 이어서 미끄러진다).
  * - 새로 보이는 항목은 8px 아래·투명에서 떠오른다(지연 min(i×12,150)ms). enter:false 면 생략.
+ *   enterFade:false 면 투명도 없이 떠오르기만 한다(카드가 많은 격자 — gridFlip.ts enterKeyframes 설명).
  * - 항목이 maxItems 를 넘거나, disabled(동작 줄이기·끌어 고르는 중 등)거나, scope 가 바뀌었으면
  *   (파트·화면 전환 — 그건 다른 전환이 맡는다) 움직이지 않고 바로 바뀐다.
  */
@@ -36,6 +37,8 @@ export interface GridFlipOptions {
   idAttribute?: string;
   maxItems?: number;
   enter?: boolean;
+  /** false 면 새 카드가 투명도 없이 8px 아래에서 떠오르기만 한다(격자 전체 스타일 재계산 방지, perf-2). 기본 true. */
+  enterFade?: boolean;
   moveMs?: number;
   enterMs?: number;
 }
@@ -121,7 +124,7 @@ export function useGridFlip(
   else if (measureMode === 'enter-only') snapshotRef.current = measureIds(containerRef.current, attr, maxItems);
 
   useLayoutEffect(() => {
-    const { scope, enterKey, disabled, enter = true, moveMs = GRID_FLIP.moveMs, enterMs = GRID_FLIP.enterMs } = optionsRef.current;
+    const { scope, enterKey, disabled, enter = true, enterFade = true, moveMs = GRID_FLIP.moveMs, enterMs = GRID_FLIP.enterMs } = optionsRef.current;
     const scopeChanged = committedScopeRef.current !== scope;
     committedScopeRef.current = scope;
     const keyChanged = committedKeyRef.current !== flipKey;
@@ -171,7 +174,7 @@ export function useGridFlip(
       const element = elements.get(item.id);
       if (!element || typeof element.animate !== 'function') continue;
       // backwards: 지연 동안에도 투명하게 기다린다(먼저 보였다가 사라지는 깜빡임 방지).
-      running.push(element.animate(enterKeyframes(), {
+      running.push(element.animate(enterKeyframes(GRID_FLIP.enterOffsetPx, enterFade), {
         duration: enterMs,
         delay: item.delay,
         easing: GRID_FLIP_EASING,

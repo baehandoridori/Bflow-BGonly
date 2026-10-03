@@ -220,8 +220,19 @@ export function moveKeyframes(dx: number, dy: number): Keyframe[] {
   ];
 }
 
-/** 새로 보이는 카드: 8px 아래·투명에서 떠오른다. */
-export function enterKeyframes(offsetPx: number = GRID_FLIP.enterOffsetPx): Keyframe[] {
+/**
+ * 새로 보이는 카드: 8px 아래·투명에서 떠오른다.
+ * fade=false 면 투명도 없이 8px 아래에서 떠오르기만 한다 — 씬 목록처럼 카드가 많고 무거운 격자용(검증 지적 perf-2).
+ *   격자 바로 아래 카드에 opacity 애니메이션을 한 번 돌리고 나면, 다음 필터 변경 때 격자 안 모든 카드의 스타일을
+ *   통째로 다시 계산했다(카드 46장 = 요소 6613개, CPU 4배에서 약 0.2초). transform 만 쓰면 바뀐 카드(268개)만 다시 계산한다.
+ */
+export function enterKeyframes(offsetPx: number = GRID_FLIP.enterOffsetPx, fade = true): Keyframe[] {
+  if (!fade) {
+    return [
+      { transform: `translateY(${offsetPx}px)` },
+      { transform: 'translateY(0px)' },
+    ];
+  }
   return [
     { opacity: 0, transform: `translateY(${offsetPx}px)` },
     { opacity: 1, transform: 'translateY(0px)' },

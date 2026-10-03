@@ -108,7 +108,14 @@ import { SceneWorkLinkBadges } from '@/components/scenes/SceneWorkLinkBadges';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { useGridFlip } from '@/hooks/useGridFlip';
 import { useReflowLinger } from '@/hooks/useReflowLinger';
-import { holdLingeringItems, lingerHoldMs, shouldHoldForReflow, type LingerPhase } from '@/utils/reflowLinger';
+import {
+  holdLingeringItems,
+  keepOpenDetailInList,
+  lingerHoldMs,
+  shouldHoldForReflow,
+  type LingerPhase,
+  type OpenDetailSlot,
+} from '@/utils/reflowLinger';
 import { resolveDetailContext, type DetailTarget } from '@/utils/sceneFlip';
 
 type SceneHashTarget = Extract<HashTarget, { kind: 'scene' }>;
@@ -510,6 +517,18 @@ import {
   savePersistedLastEpisode,
   loadPersistedTreeOpen, savePersistedTreeOpen,
 } from '@/utils/scenesViewPersist';
+
+/** 통합 상세 창이 화면에 보여 주는 이름·순번 — 가라앉는 동안에는 직전 값을 그대로 쓴다(acc-scene-flow-3). */
+interface UnifiedDetailView {
+  bgSheetName: string | null;
+  actSheetName: string | null;
+  partLabel: string | undefined;
+  episodeLabel: string | undefined;
+  hasPrev: boolean;
+  hasNext: boolean;
+  currentMergedIndex: number;
+  totalMerged: number;
+}
 
 // ─── 씬 카드 (요약 카드 — 클릭으로 상세 모달 열기) ──────────────
 
@@ -3261,6 +3280,12 @@ export function ScenesView() {
   });
   detailPinRef.current = resolvedDetail.pin;
   const shownDetailContext = resolvedDetail.context;
+  // 상세 창이 가라앉기 시작한 순간(Esc·바깥 클릭·닫기 신호)부터 onClose 까지 true (검증 지적 acc-scene-flow-3·8).
+  // - 그동안 통합 창은 보던 씬·시트명·파트 이름을 그대로 둔다(점프·돌아가기로 파트가 바뀌어도 뚝 사라지지 않게).
+  // - 그동안 새 열기 요청(알림 등)은 미뤘다가 창이 다 닫힌 뒤 처리한다(닫히는 창의 onClose 가 새 대상을 지우지 않게).
+  const sceneModalClosingRef = useRef(false);
+  const markSceneModalClosing = useCallback(() => { sceneModalClosingRef.current = true; }, []);
+  const unifiedClosePending = closeSceneModalSignal !== lastCloseSignalRef.current || sceneModalClosingRef.current;
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   // detailContext가 있으면 해당 시트의 씬을, 없으면 기존 방식
@@ -3413,7 +3438,22 @@ export function ScenesView() {
     mergedScenePartId,
     sortKey,
     sortDir,
+    holdDetail: unifiedClosePending,
   });
+  // 상세 창이 하나도 없으면 고정할 것도 미룰 것도 없다(닫힘이 onClose 없이 끝난 경우의 안전장치).
+  const sceneDetailOpen = Boolean(detailMerged) || detailSceneIndex !== null;
+  if (!sceneDetailOpen) sceneModalClosingRef.current = false;
+  // 통합 창이 가라앉는 동안 보여 줄 시트명·파트 이름·순번(acc-scene-flow-3). 닫히지 않는 동안 렌더마다 갱신한다.
+  const unifiedViewPinRef = useRef<UnifiedDetailView | null>(null);
+  if (!detailMerged) unifiedViewPinRef.current = null;
+  // 부서가 '전체'가 아니게 바뀌어도(점프) 가라앉는 동안은 통합 창을 그대로 그린다.
+  const unifiedModalShown = Boolean(detailMerged)
+    && (selectedDepartment === 'all' || (unifiedClosePending && unifiedViewPinRef.current !== null));
+  // 열린 상세 창의 씬이 필터 목록에서 빠져도 이전/다음 목록에 남겨 둘 자리(acc-scene-flow-5).
+  const unifiedNavSlotRef = useRef<OpenDetailSlot | null>(null);
+  const singleNavSlotRef = useRef<OpenDetailSlot | null>(null);
+  if (!detailMerged) unifiedNavSlotRef.current = null;
+  if (detailSceneIndex === null) singleNavSlotRef.current = null;
   const sortedMergedScenes = useMemo(
     () => {
       const statusMatchedMergedScenes = selectedDepartment === 'all'
@@ -3470,6 +3510,9 @@ export function ScenesView() {
     JSON.stringify([statusFilter, selectedAssignee, sortKey, sortDir, sceneGroupMode, reflowLinger.generation]),
     {
       enterKey: searchQuery,
+      // 새로 보이는 카드는 투명도 없이 8px 아래에서 떠오르기만 한다(검증 지적 perf-2). 카드 루트에 opacity 를 돌리고 나면
+      // 다음 필터 변경 때 격자 안 모든 카드의 스타일을 통째로 다시 계산해(46장 = 요소 6613개) 멈춤이 길어졌다.
+      enterFade: false,
       scope: JSON.stringify([selectedEpisode, selectedPart, selectedDepartment, sceneViewMode]),
       disabled: reduceMotion || sceneViewMode !== 'card' || lassoRect !== null,
       idAttribute: 'data-scene-id',
@@ -3567,6 +3610,10 @@ export function ScenesView() {
   // 먼저 selectedEpisode/selectedPart 를 변경 → 다음 render 의 새 currentPart/mergedScenes 로 매칭.
   useEffect(() => {
     if (!pendingReq) return;
+    // 상세 창이 가라앉는 0.16초 사이에 온 요청은 창이 다 닫힌 뒤 처리한다(검증 지적 acc-scene-flow-8).
+    // 지금 처리하면 새 대상이 닫히는 창에 그려졌다가 그 창의 onClose 가 지워 버려 요청이 사라졌다.
+    // 닫히면 sceneDetailOpen 이 바뀌어 이 effect 가 다시 돈다.
+    if (sceneModalClosingRef.current) return;
     const detail = pendingReq;
 
     // v1.24.0: forceDeptFilter — 점프 시 부서 토글 강제 (최근 작업 위젯 → 'all').
@@ -3641,7 +3688,7 @@ export function ScenesView() {
       console.warn('[ScenesView] pending scene modal request target not found:', detail);
       setPendingReq(null);
     }
-  }, [pendingReq, selectedDepartment, selectedEpisode, selectedPart, allMergedScenes, currentPart, setDetailMerged, setPendingReq, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setDashboardDeptFilter]);
+  }, [pendingReq, selectedDepartment, selectedEpisode, selectedPart, allMergedScenes, currentPart, setDetailMerged, setPendingReq, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setDashboardDeptFilter, sceneDetailOpen]);
 
   // #화·#파트 점프 시 열려 있는 씬 상세 모달 닫기 (4c, 코덱스 4차 P2).
   // navigateToSceneView({ closeModal: true }) 가 store 카운터를 올리면 감지해 두 상세 모달 상태를 비운다.
@@ -3652,11 +3699,13 @@ export function ScenesView() {
   // 창이 Esc·바깥 클릭과 같은 0.16초 가라앉음을 거친 뒤 자기 onClose 로 아래와 같은 상태를 비운다.
   const [sceneModalCloseToken, setSceneModalCloseToken] = useState(0);
   const sceneModalShownRef = useRef(false);
-  sceneModalShownRef.current = Boolean((detailScene && detailSceneIdx !== null) || (detailMerged && selectedDepartment === 'all'));
+  sceneModalShownRef.current = Boolean((detailScene && detailSceneIdx !== null) || unifiedModalShown);
   useEffect(() => {
     if (closeSceneModalSignal === lastCloseSignalRef.current) return; // 변화 없으면 무시(remount 포함)
     lastCloseSignalRef.current = closeSceneModalSignal;
     if (sceneModalShownRef.current) {
+      // 통합 창도 onClose 까지 보던 씬·이름을 고정한다(unifiedViewPinRef, useUnifiedScenes holdDetail — acc-scene-flow-3).
+      sceneModalClosingRef.current = true;
       // 가라앉는 동안 단일 창이 보이는 씬을 고정한다(파트가 바뀌어도 '지금 파트의 n번째'로 다시 찾지 않게).
       const pin = detailPinRef.current;
       closingDetailPinRef.current = pin;
@@ -6721,12 +6770,26 @@ export function ScenesView() {
           return currentPart?.scenes ?? [];
         })();
         const detailFilteredScenes = filterAndSortScenes(detailPartScenes);
-        const filteredIndices = detailFilteredScenes
-          .map((s) => detailPartScenes.indexOf(s))
-          .filter((i) => i >= 0);
-        const posInFiltered = filteredIndices.indexOf(detailSceneIdx);
+        // 창 안에서 체크해 이 씬이 필터에서 빠져도 창이 닫힐 때까지 이전/다음 목록의 원래 자리에 둔다(acc-scene-flow-5).
+        const singleNav = keepOpenDetailInList(
+          detailFilteredScenes
+            .map((s) => detailPartScenes.indexOf(s))
+            .filter((i) => i >= 0),
+          detailSceneIdx,
+          (index) => `${detailSheetName}:${index}`,
+          singleNavSlotRef.current,
+        );
+        singleNavSlotRef.current = singleNav.slot;
+        const filteredIndices = singleNav.list;
+        const posInFiltered = singleNav.index;
         const hasPrev = posInFiltered > 0;
         const hasNext = posInFiltered >= 0 && posInFiltered < filteredIndices.length - 1;
+        const goToFilteredPos = (pos: number) => {
+          if (pos < 0 || pos >= filteredIndices.length || pos === posInFiltered) return;
+          const newIdx = filteredIndices[pos];
+          setDetailSceneIndex(newIdx);
+          if (detailContext) setDetailContext({ ...detailContext, sceneIndex: newIdx });
+        };
         const counterpart = (() => {
           const currentDetailPart = allParts.find((p) => p.sheetName === detailSheetName);
           if (!currentDetailPart) return null;
@@ -6761,7 +6824,8 @@ export function ScenesView() {
             onAssigneeActPhaseStateClick={handleAssigneeActPhaseStateClick}
             onAssigneeActFeedbackRequest={handleActFeedbackRequest}
             onAssigneeActRoundBump={handleAssigneeActRoundBump}
-            onClose={() => { closingDetailPinRef.current = null; setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
+            onClose={() => { closingDetailPinRef.current = null; setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); sceneModalClosingRef.current = false; }}
+            onCloseStart={markSceneModalClosing}
             closeRequestToken={sceneModalCloseToken}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}
@@ -6773,21 +6837,49 @@ export function ScenesView() {
             currentSceneIndex={posInFiltered >= 0 ? posInFiltered : 0}
             onNavigate={(dir) => {
               if (posInFiltered < 0) return;
-              const nextPos = dir === 'prev' ? posInFiltered - 1 : posInFiltered + 1;
-              if (nextPos >= 0 && nextPos < filteredIndices.length) {
-                const newIdx = filteredIndices[nextPos];
-                setDetailSceneIndex(newIdx);
-                if (detailContext) setDetailContext({ ...detailContext, sceneIndex: newIdx });
-              }
+              goToFilteredPos(dir === 'prev' ? posInFiltered - 1 : posInFiltered + 1);
             }}
+            onNavigateTo={goToFilteredPos}
           />
         );
       })()}
 
-      {detailMerged && selectedDepartment === 'all' && (() => {
-        const curIdx = mergedScenes.findIndex((m) => m.mergedKey === detailMerged.mergedKey);
-        const hasPrev = curIdx > 0;
-        const hasNext = curIdx >= 0 && curIdx < mergedScenes.length - 1;
+      {detailMerged && unifiedModalShown && (() => {
+        // 창 안에서 체크해 이 씬이 필터에서 빠져도(머무름이 끝나도) 창이 닫힐 때까지 이전/다음 목록의 원래 자리에 둔다
+        // — 화살표·'n / m'·점이 그대로고 본문도 다시 그려지지 않는다(acc-scene-flow-5).
+        const unifiedNav = keepOpenDetailInList(
+          mergedScenes,
+          detailMerged,
+          (m) => m.mergedKey || m.sceneId,
+          unifiedNavSlotRef.current,
+        );
+        unifiedNavSlotRef.current = unifiedNav.slot;
+        const navScenes = unifiedNav.list;
+        const curIdx = unifiedNav.index;
+        // 가라앉는 동안(닫기 신호 ~ onClose)은 직전에 보이던 시트명·파트 이름·순번을 그대로 쓴다(acc-scene-flow-3).
+        //   점프·돌아가기는 파트를 바꾸는 같은 갱신에서 닫기 신호를 보내므로, 지금 값을 쓰면 머리줄 파트 이름이
+        //   목적지 파트로 바뀌고 화살표·순번이 사라진 채 가라앉는다.
+        const liveView: UnifiedDetailView = {
+          bgSheetName: bgPart?.sheetName ?? null,
+          actSheetName: actPart?.sheetName ?? null,
+          partLabel: currentPartId
+            ? formatPartDisplayName(
+                currentPartId,
+                getPartLabelText(buildPartContextMenuTarget(currentPartId)?.sheetNames ?? []),
+              )
+            : undefined,
+          episodeLabel: selectedEpisode != null ? `EP ${selectedEpisode}` : undefined,
+          hasPrev: curIdx > 0,
+          hasNext: curIdx >= 0 && curIdx < navScenes.length - 1,
+          currentMergedIndex: curIdx >= 0 ? curIdx : 0,
+          totalMerged: navScenes.length,
+        };
+        const view = unifiedClosePending && unifiedViewPinRef.current ? unifiedViewPinRef.current : liveView;
+        unifiedViewPinRef.current = view;
+        const goToMergedPos = (pos: number) => {
+          if (pos < 0 || pos >= navScenes.length || pos === curIdx) return;
+          setDetailMerged(navScenes[pos]);
+        };
         // 4c PR2: 참조 도킹 패널 — 핀마다 참조 씬 자체의 시트명/파트로 편집(메인 씬 절대 미침).
         const referencePanelNode = activeReferencePin ? (
           <div className="flex h-full min-h-0 flex-col gap-2" data-reference-pin-count={referencePins.length}>
@@ -6910,24 +7002,27 @@ export function ScenesView() {
             merged={detailMerged}
             referencePanel={referencePanelNode}
             referenceSide={referenceSide}
-            bgSheetName={bgPart?.sheetName ?? null}
-            actSheetName={actPart?.sheetName ?? null}
-            partLabel={currentPartId
-              ? formatPartDisplayName(
-                  currentPartId,
-                  getPartLabelText(buildPartContextMenuTarget(currentPartId)?.sheetNames ?? []),
-                )
-              : undefined}
-            episodeLabel={selectedEpisode != null ? `EP ${selectedEpisode}` : undefined}
-            hasPrev={hasPrev}
-            hasNext={hasNext}
-            currentMergedIndex={curIdx >= 0 ? curIdx : 0}
-            totalMerged={mergedScenes.length}
+            bgSheetName={view.bgSheetName}
+            actSheetName={view.actSheetName}
+            partLabel={view.partLabel}
+            episodeLabel={view.episodeLabel}
+            hasPrev={view.hasPrev}
+            hasNext={view.hasNext}
+            currentMergedIndex={view.currentMergedIndex}
+            totalMerged={view.totalMerged}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}
             focusCommentId={modalRouting?.focusCommentId}
             focusRevisionCommentId={modalRouting?.focusRevisionCommentId}
-            onClose={() => { setDetailMerged(null); setModalRouting(null); clearContinuitySource(); clearReference(); }}
+            onClose={() => {
+              sceneModalClosingRef.current = false;
+              unifiedViewPinRef.current = null;
+              setDetailMerged(null);
+              setModalRouting(null);
+              clearContinuitySource();
+              clearReference();
+            }}
+            onCloseStart={markSceneModalClosing}
             closeRequestToken={sceneModalCloseToken}
             onSceneReference={openReference}
             onToggle={(sheet, id, stage, options) => handleToggleForSheet(sheet, id, stage, options)}
@@ -6978,11 +7073,9 @@ export function ScenesView() {
             }}
             onNavigate={(dir) => {
               if (curIdx < 0) return;
-              const nextIdx = dir === 'prev' ? curIdx - 1 : curIdx + 1;
-              if (nextIdx >= 0 && nextIdx < mergedScenes.length) {
-                setDetailMerged(mergedScenes[nextIdx]);
-              }
+              goToMergedPos(dir === 'prev' ? curIdx - 1 : curIdx + 1);
             }}
+            onNavigateTo={goToMergedPos}
             onActPhaseStateClick={handleActPhaseStateClick}
             onActFeedbackRequest={handleActFeedbackRequest}
             onActRoundBump={handleActRoundBump}

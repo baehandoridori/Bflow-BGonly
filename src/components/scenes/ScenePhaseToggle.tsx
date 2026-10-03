@@ -19,6 +19,7 @@ import type { Scene, ScenePhaseState } from '@/types';
 import { SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { cn } from '@/utils/cn';
+import { shouldSkipClickAfterPointer } from '@/utils/pointerClickGuard';
 import { useStageLabelDisplayMode } from './useStageLabelDisplayMode';
 import { StageRollbackFlash, useStageSaveStatus } from './StageSaveStatus';
 import { phaseCellId } from './stageSaveFeedback';
@@ -66,6 +67,7 @@ export function ScenePhaseToggle({
   // v1.25.7: 작업중일 때만 차수 헤더 노출. 리테이크/대기/완료는 차수 숨김.
   const showWorkRound = activeState === 'work';
   const workRound = scene.workRound ?? 1;
+  // pointerdown 이 이미 토글했고 그 누름의 click 이 아직 안 왔는지 — 타이머 없이 누름과 click 을 짝지운다(acc-scene-flow-6).
   const pointerHandledRef = useRef(false);
   const { modeOf, setNode } = useStageLabelDisplayMode(SCENE_PHASE_LABELS_SHORT, compact, iconDisplay === 'auto');
   // 20번: 저장이 실패해 다시 보내는 중인 칩(점선·흐림)과 끝내 되돌린 칩(도리도리·빨간 테두리).
@@ -99,9 +101,6 @@ export function ScenePhaseToggle({
       event.stopPropagation();
       pointerHandledRef.current = true;
       handleChipClick(target);
-      window.setTimeout(() => {
-        pointerHandledRef.current = false;
-      }, 600);
     },
     [handleChipClick],
   );
@@ -169,7 +168,7 @@ export function ScenePhaseToggle({
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (pointerHandledRef.current) {
+                if (shouldSkipClickAfterPointer(pointerHandledRef.current, e.detail)) {
                   pointerHandledRef.current = false;
                   return;
                 }
