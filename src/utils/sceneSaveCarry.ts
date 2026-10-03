@@ -11,13 +11,16 @@
      옛 서버 값, 곧 처음 값을 읽어 오면 내 값을 다시 얹는다(마지막에 보낸 사람이 이긴다). 처음 값도 내 값도 아닌
      값이면 얹지 않는다 — 다시 보내기 직전에 그 칸을 빼고 멈춘다.
    - 다시 보내기 직전(narrowStageWritesForRetry): 아직 내 값인 칸만 보낸다. 다른 값이 된 칸은 덮지 않는다.
+     그 결과 씬이 완료가 아니면 완료 도장도 쓰지 않는다(planCompletionStampDrop).
    - 끝내 실패(plan*GiveUp): 아직 내 값일 때만 처음 값으로 되돌린다. 남의 값이면 아무것도 건드리지 않는다.
+     함께 바꾼 완료 기록·액팅 단계·담당자별 진행도 지금 값이 이 저장이 만든 값일 때만 되돌린다.
 
    node --test 가 그대로 import 하도록 @/ 별칭·외부 패키지를 쓰지 않는다(공용 모듈은 .ts 확장자까지 적은 상대 경로).
    ═══════════════════════════════════════════════════════════════ */
 
 import type { Scene, SceneAssigneeProgress, SceneAssigneeProgressMap, ScenePhaseState, Stage } from '../types';
 import {
+  isSequentialStageComplete,
   stagesRevertedToBaseline,
   stagesStillMine,
   type PendingStageWrites,
@@ -41,7 +44,11 @@ export interface StageSaveSlotCarry {
   baseAssigneeProgress: Scene['assigneeProgress'];
   /** 마지막으로 정한 완료 기록(묶음 안에서 한 번이라도 바뀌었으면). */
   completion: CompletionStamp | null;
+  /** 이 저장이 화면에 맞춘 액팅 단계(액팅 씬만) — 끝내 실패할 때 지금 단계가 이 값일 때만 되돌린다. */
+  minePhase: PhaseFields | null;
   assigneeTouched: boolean;
+  /** 이 저장이 화면에 얹은 담당자별 진행 — 끝내 실패할 때 지금 값이 이것과 같을 때만 되돌린다. */
+  mineAssigneeProgress: SceneAssigneeProgressMap | undefined;
 }
 
 /** 액팅 단계 칩 묶음. */
@@ -85,6 +92,16 @@ export function sameCompletion(a: CompletionStamp, b: CompletionStamp): boolean 
 export function sameAssigneeProgress(a: SceneAssigneeProgress, b: SceneAssigneeProgress): boolean {
   return (['lo', 'done', 'review', 'png', 'sceneState', 'workRound', 'feedbackRound'] as const)
     .every((key) => (a[key] ?? null) === (b[key] ?? null));
+}
+
+/** 담당자별 진행 전체가 같은가(담당자마다 sameAssigneeProgress). 한쪽에만 있는 담당자는 빈 진행과 비교한다. */
+export function sameAssigneeProgressMap(
+  a: SceneAssigneeProgressMap | null | undefined,
+  b: SceneAssigneeProgressMap | null | undefined,
+): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  const names = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...names].every((name) => sameAssigneeProgress(a[name] ?? {}, b[name] ?? {}));
 }
 
 export type PendingVerdict = 'mine' | 'reverted' | 'other';
@@ -140,24 +157,52 @@ export function stageRepaintPatch(
   return patch;
 }
 
+/** 끝내 실패·다시 보내기 직전에 보는 지금 씬 — 단계 칸과 함께 바꾼 완료 기록·액팅 단계·담당자별 진행. */
+export type StageSceneNow = SequentialStageSnapshot &
+  Partial<Pick<Scene, 'completedBy' | 'completedAt' | 'sceneState' | 'workRound' | 'feedbackRound' | 'assigneeProgress'>>;
+
 /**
  * 끝내 실패 — 아직 내 값인 칸만 되돌린다. 내 칸이 하나도 없으면(모두 다른 값) null: 아무것도 건드리지 않는다.
+ * 같은 클릭이 함께 바꾼 완료 기록·액팅 단계·담당자별 진행도 지금 값이 이 저장이 만든 값과 같을 때만 되돌린다
+ * (그 사이 받아오기·실시간이 새 값을 가져왔으면 그 값을 덮지 않는다).
  * rolled: 되돌리는 칸(서버에도 처음 값을 다시 쓴다) · shown: 그중 화면 값이 실제로 바뀌는 칸(표시·안내용) · patch: 화면에 얹을 값.
  */
 export function planStageGiveUp(
   carry: StageSaveSlotCarry,
-  scene: SequentialStageSnapshot,
+  scene: StageSceneNow,
 ): { rolled: Stage[]; shown: Stage[]; patch: Partial<Scene> } | null {
   const rolled = stagesStillMine(carry.writes, scene);
   if (rolled.length === 0) return null;
   const { baseline, expected } = carry.writes;
   const patch: Partial<Scene> = {};
   for (const stage of rolled) patch[stage] = baseline[stage] === true;
-  if (carry.completion) Object.assign(patch, carry.baseCompletion);
-  if (carry.basePhase) Object.assign(patch, carry.basePhase);
-  if (carry.assigneeTouched) patch.assigneeProgress = carry.baseAssigneeProgress;
+  if (carry.completion && sameCompletion(completionOf(scene), carry.completion)) {
+    Object.assign(patch, carry.baseCompletion);
+  }
+  if (carry.basePhase && carry.minePhase && samePhase(phaseFieldsOf(scene), carry.minePhase)) {
+    Object.assign(patch, carry.basePhase);
+  }
+  if (carry.assigneeTouched && sameAssigneeProgressMap(scene.assigneeProgress, carry.mineAssigneeProgress)) {
+    patch.assigneeProgress = carry.baseAssigneeProgress;
+  }
   const changed = rolled.filter((stage) => expected[stage] !== (baseline[stage] === true));
   return { rolled, shown: changed.length > 0 ? changed : rolled, patch };
+}
+
+/**
+ * 다시 보내기 직전 — 지금 씬이 완료가 아니면 이 저장의 완료 도장(누가·언제 모두 완료)을 쓰지 않는다.
+ * (칸을 빼고 남은 칸만 보낼 때, 또는 이 저장이 보내지 않는 칸이 그 사이 바뀌었을 때. 완료 기록은 저장의 맨 끝에 쓰므로
+ * 다시 보낸다는 것은 이 저장이 아직 도장을 쓰지 않았다는 뜻이다.) 완료 해제('')는 그대로 둔다.
+ * null: 그대로 · { screen }: 도장을 거둔다. screen 은 화면이 아직 내 도장일 때 되돌릴 완료 기록(남의 값이면 null — 건드리지 않는다).
+ */
+export function planCompletionStampDrop(
+  carry: StageSaveSlotCarry,
+  scene: StageSceneNow,
+): { screen: CompletionStamp | null } | null {
+  const stamp = carry.completion;
+  if (!stamp || !stamp.completedBy || !stamp.completedAt) return null;
+  if (isSequentialStageComplete(scene)) return null;
+  return { screen: sameCompletion(completionOf(scene), stamp) ? carry.baseCompletion : null };
 }
 
 /** 앞 저장이 서버에 실제로 쓴 값. 쓰지 못한 부분은 null. */

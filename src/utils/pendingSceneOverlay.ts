@@ -7,7 +7,9 @@
 
    그래서 받아오기 결과를 스토어에 넣기 직전에, 저장을 기다리는 칸 묶음마다 reapply 를 불러 내 값을 다시 얹는다.
    reapply 는 받아온 값이 처음 값(내 클릭 전 값)일 때만 패치를 돌려준다 — 처음 값도 내 값도 아니면 그대로 둔다.
-   팀원의 실시간 변경(씬 하나씩 바로 반영)은 이 길을 거치지 않는다.
+   실시간으로 받은 씬 한 개의 행(scenes UPDATE)도 같은 규칙을 거친다(overlayPendingSceneFields). 그 행은 바뀐 칸만이
+   아니라 서버 행 전체를 싣고 와서, 내 저장의 일부만 닿았을 때의 메아리나 팀원이 같은 씬의 메모만 고친 행에도 옛 단계 값이 실린다.
+   팀원이 칸 하나만 바꾸는 방송(scene-update)은 이 길을 거치지 않는다 — 그 값은 팀원이 정말 바꾼 값이다.
 
    node --test 가 그대로 import 하도록 @/ 별칭·외부 패키지를 쓰지 않는다.
    ═══════════════════════════════════════════════════════════════ */
@@ -55,4 +57,27 @@ export function overlayPendingScenes(episodes: Episode[], overlays: Iterable<Pen
     return { ...episode, parts };
   });
   return changedAny ? next : episodes;
+}
+
+/**
+ * 실시간으로 받은 씬 한 개의 행(서버 행 전체)에, 저장을 기다리는 내 값을 같은 규칙으로 다시 얹는다.
+ * current: 지금 화면의 씬(행을 얹기 전) · fields: 받은 행. 돌려준 값을 그대로 화면에 얹는다(얹을 것이 없으면 받은 fields 그대로).
+ */
+export function overlayPendingSceneFields(
+  sceneUuid: string,
+  current: Scene | undefined,
+  fields: Partial<Scene>,
+  overlays: Iterable<PendingSceneOverlay>,
+): Partial<Scene> {
+  if (!current) return fields;
+  let incoming: Scene = { ...current, ...fields };
+  let out = fields;
+  for (const overlay of overlays) {
+    if (overlay.sceneUuid !== sceneUuid) continue;
+    const patch = overlay.reapply(incoming);
+    if (!patch || Object.keys(patch).length === 0) continue;
+    incoming = { ...incoming, ...patch };
+    out = { ...out, ...patch };
+  }
+  return out;
 }

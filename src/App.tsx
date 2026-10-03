@@ -54,6 +54,7 @@ import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
+import { keepPendingSceneFields } from '@/services/sceneSaveRetry';
 import { remotePhaseFlash, remoteStageFlash, type RemoteSceneFlashContext, type RemoteSceneFlashSignal } from '@/utils/remoteSceneFlash';
 import { useSceneFlashStore } from '@/stores/sceneFlashStore';
 import { resolveVacationConnection, connectVacation } from '@/services/vacationService';
@@ -1907,14 +1908,17 @@ export default function App() {
       if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
         const delta = extractSceneDelta(payload.new);
         if (delta) {
+          // 이 행은 바뀐 칸만이 아니라 서버 행 전체다 — 저장을 기다리는 내 칸이 옛 서버 값으로 풀리지 않게
+          // 받아오기와 같은 규칙으로 내 값을 다시 얹는다(처음 값으로 돌아간 칸만. 움직임 폴리싱 20번 safety-net).
+          const fields = keepPendingSceneFields(delta.uuid, useDataStore.getState().findSceneByUuid(delta.uuid), delta.fields);
           // 일괄 변경은 이 경로로만 온다(보낸 사람 = updated_by). 방송으로 이미 반영된 변경은 값이 같아 빛나지 않는다.
           const flash = remoteStageFlash(
             remoteSceneFlashContext(),
             delta.uuid,
             (payload.new as { updated_by?: unknown }).updated_by,
-            delta.fields as Record<string, unknown>,
+            fields as Record<string, unknown>,
           );
-          const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
+          const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, fields);
           if (applied) {
             pulseRemoteSceneFlash(flash);
             return;

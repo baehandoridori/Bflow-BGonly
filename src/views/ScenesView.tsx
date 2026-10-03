@@ -36,6 +36,7 @@ import {
   judgePending,
   narrowStageWritesForRetry,
   phaseFieldsOf,
+  planCompletionStampDrop,
   planPhaseGiveUp,
   planStageGiveUp,
   restoreAssigneeEntry,
@@ -44,6 +45,7 @@ import {
   samePhase,
   stageRepaintPatch,
   type AssigneeSaveSlotCarry,
+  type CompletionStamp,
   type PhaseFields,
   type PhaseSaveSlotCarry,
   type SavedStageResult,
@@ -4163,7 +4165,11 @@ export function ScenesView() {
       completion: completionMeta
         ? { completedBy: completionMeta.nextCompletedBy, completedAt: completionMeta.nextCompletedAt }
         : carried?.completion ?? null,
+      minePhase: actingPhaseSync
+        ? { sceneState: actingPhaseSync.state, workRound: actingPhaseSync.workRound, feedbackRound: actingPhaseSync.feedbackRound }
+        : carried?.minePhase ?? null,
       assigneeTouched: Boolean(nextAssigneeProgress) || Boolean(carried?.assigneeTouched),
+      mineAssigneeProgress: nextAssigneeProgress ?? carried?.mineAssigneeProgress,
     };
     // '아직 내 값인가'는 클릭을 다 반영한 뒤 화면 값으로 본다(액팅 씬은 단계 상태가 체크를 다시 맞춘다).
     const afterClick = findSceneForSave(sheetName, sceneId, sceneUuid);
@@ -4172,6 +4178,15 @@ export function ScenesView() {
     const sceneIndexNow = () => {
       const part = useDataStore.getState().episodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === sheetName);
       return part ? findCompletionSceneIndex(part.scenes, { sceneId, sceneUuid, sceneIndex }) : -1;
+    };
+    /** 화면의 완료 기록만 바꾼다(되돌리거나 거둘 때). */
+    const showCompletion = (stamp: CompletionStamp) => {
+      if (sceneUuid) {
+        updateSceneByUuid(sceneUuid, stamp);
+      } else {
+        updateSceneFieldOptimistic(sheetName, sceneIndexNow(), 'completedBy', stamp.completedBy);
+        updateSceneFieldOptimistic(sheetName, sceneIndexNow(), 'completedAt', stamp.completedAt);
+      }
     };
     const writeStage = async (changedStage: Stage, value: boolean) => {
       if (sceneUuid) {
@@ -4294,6 +4309,13 @@ export function ScenesView() {
         if (!latest) return false;
         const narrowed = narrowStageWritesForRetry(saveCarry.writes, latest);
         saveCarry.writes = narrowed.writes;
+        // 남은 칸으로는 씬이 완료가 아니면 완료 도장을 쓰지 않는다 — 화면도 아직 내 도장이면 처음 값으로 돌리고 축하를 끈다.
+        const stampDrop = planCompletionStampDrop(saveCarry, latest);
+        if (stampDrop) {
+          saveCarry.completion = null;
+          if (stampDrop.screen) showCompletion(stampDrop.screen);
+          setCelebratingTarget((current) => celebrationWithout(current, sheetName, sceneId, sceneUuid));
+        }
         if (narrowed.dropped.length > 0) {
           announceSaveStopped({ toastId: `stage-rollback:${saveSlotKey}`, sceneId, subject: stageSubject(narrowed.dropped) });
           if (saveCarry.writes.stages.length > 0) showRetrying();
@@ -4315,10 +4337,8 @@ export function ScenesView() {
           updateSceneByUuid(sceneUuid, plan.patch);
         } else {
           plan.rolled.forEach((s) => setSceneStageValue(sheetName, sceneId, s, baseline[s] === true));
-          if (saveCarry.completion) {
-            updateSceneFieldOptimistic(sheetName, sceneIndexNow(), 'completedBy', saveCarry.baseCompletion.completedBy);
-            updateSceneFieldOptimistic(sheetName, sceneIndexNow(), 'completedAt', saveCarry.baseCompletion.completedAt);
-          }
+          // 완료 기록은 지금 값이 이 저장의 도장일 때만 계획에 들어 있다(그 사이 새 값이 왔으면 그대로).
+          if ('completedBy' in plan.patch) showCompletion(saveCarry.baseCompletion);
         }
         // 일부 칸만 저장됐을 수 있으니 서버도 처음 값으로 돌려 둔다(이것도 실패하면 다음 동기화가 맞춘다).
         void runInToggleQueue(async () => {
