@@ -84,7 +84,8 @@ export function useRetakeNotifications(): void {
         metadata: { revisionId: payload.revisionId, revisionAction: isAssignment ? 'add' : 'reminder',
           revisionEventId: payload.eventId, retakeHubSetId: payload.setId ?? undefined },
       });
-      noteLiveNotificationArrival('revision', unreadBefore);
+      // 나를 담당으로 지정했거나 다시 알려 준 것 — 나를 직접 부른 알림이라 종이 '딩동' 흔들린다.
+      noteLiveNotificationArrival('revision', unreadBefore, { revisionAction: isAssignment ? 'add' : 'reminder' });
       toast(title, {
         ...notificationToastDecor('revision'),
         description: payload.description,

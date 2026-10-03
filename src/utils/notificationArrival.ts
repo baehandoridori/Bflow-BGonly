@@ -5,7 +5,8 @@
    - '실시간으로 방금 온' 알림만 반응한다. 실시간 수신 경로(dispatchNotification 등)가 안 읽은 수를 늘렸을 때만
      markLiveNotificationArrival 을 부른다. 앱 시작 때 디스크에서 불러오는 알림·놓친 알림 모으기·계정 전환은
      이 신호를 내지 않으므로 종이 흔들리지 않는다.
-   - 나를 직접 부른 알림(멘션·담당 배정·피드백 요청)만 종이 '딩동' 흔들리고, 나머지는 배지만 '톡'.
+   - 나를 직접 부른 알림(멘션·담당 배정·피드백 요청, 나를 지정한 새 리테이크·리테이크 다시 알림)만 종이 '딩동'
+     흔들리고, 나머지는 배지만 '톡'.
    - 여러 개가 한꺼번에 와도 반응은 한 번 — 종 흔들림과 배지 톡은 각자 1초에 한 번까지.
 
    종 주변의 은은한 빛(notification-bell.css, v1.127.5)은 상태 기반이라 여기서 건드리지 않는다.
@@ -15,8 +16,17 @@
 /** 나를 직접 부른 알림 — 종 '딩동' 대상. (일정 알림은 종의 강한 빛 대상이지만 흔들지는 않는다) */
 export const CALLS_ME_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(['mention', 'acting_feedback', 'scene_assignment']);
 
-export function isCallingMeNotification(type: string): boolean {
-  return CALLS_ME_NOTIFICATION_TYPES.has(type);
+/**
+ * 리테이크 알림 중 나를 직접 부른 것 — 나를 담당·알림 대상으로 지정한 새 리테이크('add')와 누군가 다시 알려 준 것('reminder').
+ * 담당 완료·진행 상태 같은 자동 알림은 배지만 '톡'.
+ */
+export const CALLS_ME_REVISION_ACTIONS: ReadonlySet<string> = new Set(['add', 'reminder']);
+
+export function isCallingMeNotification(type: string, metadata?: { revisionAction?: unknown } | null): boolean {
+  if (CALLS_ME_NOTIFICATION_TYPES.has(type)) return true;
+  return type === 'revision'
+    && typeof metadata?.revisionAction === 'string'
+    && CALLS_ME_REVISION_ACTIONS.has(metadata.revisionAction);
 }
 
 /** 종 흔들림 제한 — 1초에 한 번. */
@@ -35,8 +45,14 @@ export interface LiveArrival {
 }
 
 /** 아직 처리 안 된 신호에 새 신호를 합친다(같은 계정·유효 시간 안이면 하나로). */
-export function mergeLiveArrival(prev: LiveArrival | null, type: string, userId: string | null, now: number): LiveArrival {
-  const callsMe = isCallingMeNotification(type);
+export function mergeLiveArrival(
+  prev: LiveArrival | null,
+  type: string,
+  userId: string | null,
+  now: number,
+  metadata?: { revisionAction?: unknown } | null,
+): LiveArrival {
+  const callsMe = isCallingMeNotification(type, metadata);
   if (prev && prev.userId === userId && now - prev.at <= LIVE_ARRIVAL_TTL_MS) {
     return { callsMe: prev.callsMe || callsMe, at: now, userId };
   }
@@ -46,9 +62,14 @@ export function mergeLiveArrival(prev: LiveArrival | null, type: string, userId:
 let pendingArrival: LiveArrival | null = null;
 const arrivalListeners = new Set<() => void>();
 
-/** 실시간으로 방금 받은 알림이 안 읽은 수를 늘렸을 때 부른다. */
-export function markLiveNotificationArrival(type: string, userId: string | null, now: number = Date.now()): void {
-  pendingArrival = mergeLiveArrival(pendingArrival, type, userId, now);
+/** 실시간으로 방금 받은 알림이 안 읽은 수를 늘렸을 때 부른다. metadata 는 리테이크 알림이 나를 부른 것인지 가릴 때 쓴다. */
+export function markLiveNotificationArrival(
+  type: string,
+  userId: string | null,
+  now: number = Date.now(),
+  metadata?: { revisionAction?: unknown } | null,
+): void {
+  pendingArrival = mergeLiveArrival(pendingArrival, type, userId, now, metadata);
   arrivalListeners.forEach((listener) => {
     try { listener(); } catch { /* 반응 실패가 알림 수신을 막지 않게 */ }
   });

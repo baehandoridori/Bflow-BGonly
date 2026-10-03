@@ -291,6 +291,19 @@ export function invalidatePartCache(sheetName?: string): void {
   window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
 }
 
+/**
+ * 저장 요청이 실패로 끝났지만 서버엔 저장돼 있던 댓글을 저장된 것으로 받아들일 때(움직임 폴리싱 19번 '다시 보내기').
+ * 그 키의 캐시에는 이 댓글이 없으니 비워서 다음 조회가 서버 목록을 쓰게 하고, 열려 있는 패널에 다시 불러오라고 알린다.
+ */
+export function invalidateCommentsForKey(sceneKey: string): void {
+  const characterId = parseCharacterCommentKey(sceneKey);
+  if (characterId) {
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { characterId } }));
+    return;
+  }
+  invalidatePartCache(parseSceneKey(sceneKey).sheetName);
+}
+
 // ─── 통합 API ───────────────────────────────────
 
 export async function getComments(sceneKey: string, options: CommentReadOptions = {}): Promise<SceneComment[]> {

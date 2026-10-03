@@ -13,9 +13,13 @@ import { notificationTypeVisual } from '@/utils/notificationTypeVisual';
  * 실시간으로 방금 받은 알림이 안 읽은 수를 늘렸으면 헤더 종·배지에 알린다(움직임 폴리싱 18번).
  * 앱 시작 때 불러오거나 놓친 알림을 모아 오는 경로에서는 부르지 않는다 — 그때는 종이 흔들리지 않는다.
  */
-export function noteLiveNotificationArrival(type: NotificationType, unreadBefore: number): void {
+export function noteLiveNotificationArrival(
+  type: NotificationType,
+  unreadBefore: number,
+  metadata?: { revisionAction?: unknown } | null,
+): void {
   const state = useNotificationStore.getState();
-  if (state.unreadCount > unreadBefore) markLiveNotificationArrival(type, state.activeUserId);
+  if (state.unreadCount > unreadBefore) markLiveNotificationArrival(type, state.activeUserId, undefined, metadata);
 }
 
 /** 알림 카드(오른쪽 아래)의 종류별 왼쪽 색 막대 클래스 + 16px 아이콘. */
@@ -73,7 +77,7 @@ export function dispatchNotification(payload: NotifyPayload, settings?: Notifica
     body: payload.body,
     metadata: payload.metadata as Record<string, string | undefined>,
   });
-  noteLiveNotificationArrival(payload.type, unreadBefore);
+  noteLiveNotificationArrival(payload.type, unreadBefore, payload.metadata);
   const canNavigate = hasNotificationActionTarget(payload.type, payload.metadata);
 
   // 1. Sonner 토스트 (기본 스타일 + 종류별 왼쪽 색 막대·아이콘)

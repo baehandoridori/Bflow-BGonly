@@ -91,6 +91,15 @@ export function placeFollowTooltip(
   );
 }
 
+/**
+ * '아래로 띄우는 영역'(헤더, data-tooltip-placement="below") 규칙이 이 대상에 맞는지.
+ * 영역의 띠(헤더 막대) 안에서 시작하는 대상만 아래로 — 헤더 안에 그려지지만 막대 아래로 펼쳐지는
+ * 알림 창 내용(창 높이만큼 긴 너비 조절 손잡이 등)은 평소처럼 가리킨 곳 위에 띄운다.
+ */
+export function inBelowTooltipZone(targetTop: number, zoneBottom: number): boolean {
+  return targetTop < zoneBottom;
+}
+
 /** 자리 잡기 결과를 transform 문자열로. 위치 바꿈은 이 값 하나만 갈아 끼운다(합성 스레드). */
 export function tooltipTransform(placement: Pick<TooltipPlacement, 'left' | 'top'>): string {
   return `translate3d(${placement.left}px, ${placement.top}px, 0)`;

@@ -16,12 +16,14 @@
  * - 동작 줄이기: 등장·퇴장은 투명도만 100ms, 위치 이동은 즉시.
  * - 헤더처럼 data-tooltip-placement="below" 안쪽 요소는 자리가 있으면 가리킨 버튼 아래에 띄운다
  *   (버튼 아래 끝 + 6px, 가로는 커서를 따라감) — 종 아이콘과 그 빨간 배지를 덮지 않는다.
+ *   단, 헤더 막대 안에서 시작하는 버튼만이다. 헤더 안에 붙어 그려지는 알림 창 내용은 평소대로 가리킨 곳 위에 뜬다
+ *   (창 높이만큼 긴 너비 조절 손잡이의 말풍선이 커서에서 수백 px 아래 창 바닥에 뜨던 문제).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { animateEl, EASE_CSS, MOTION_MS } from '@/utils/motion';
-import { createTooltipWarmth, placeFollowTooltip, tooltipTransform } from '@/utils/tooltipPosition';
+import { createTooltipWarmth, inBelowTooltipZone, placeFollowTooltip, tooltipTransform } from '@/utils/tooltipPosition';
 
 const SHOW_DELAY = 120;  // ms — 네이티브(~500ms) 대비 훨씬 빠름
 const HIDE_DELAY = 60;
@@ -209,8 +211,12 @@ export function GlobalTooltipProvider() {
       target.removeAttribute('title');
 
       cursor.current = { x: e.clientX, y: e.clientY };
-      preferBelow.current = target.closest('[data-tooltip-placement="below"]') !== null;
-      targetBottom.current = preferBelow.current ? target.getBoundingClientRect().bottom : undefined;
+      // 헤더 막대 안의 버튼만 아래로. 헤더 안에 그려지는 알림 창 내용은 막대 아래에서 시작하므로 평소대로 위에.
+      const belowZone = target.closest('[data-tooltip-placement="below"]');
+      const targetRect = belowZone ? target.getBoundingClientRect() : null;
+      preferBelow.current = !!belowZone && !!targetRect
+        && inBelowTooltipZone(targetRect.top, belowZone.getBoundingClientRect().bottom);
+      targetBottom.current = preferBelow.current && targetRect ? targetRect.bottom : undefined;
 
       if (visible.current || warmth.isWarm(now())) {
         show(title, true);

@@ -13,6 +13,7 @@ import {
   addComment,
   updateComment,
   deleteComment,
+  invalidateCommentsForKey,
   extractMentions,
   addReaction,
   removeReaction,
@@ -88,9 +89,11 @@ import { useMotionPref } from '@/hooks/useMotionPref';
 import {
   COMMENT_SLOW_SEND_MS,
   REACTION_CHIP_REST,
+  REACTION_CHIP_START,
   commentBubbleRise,
   commentSendBubbleClass,
   freshReactionEmojis,
+  isCommentAlreadySavedError,
   mergeUnsentComments,
   reactionChipExit,
   type CommentSendStatus,
@@ -276,6 +279,26 @@ function cleanupDraftImages(images: AttachedImage[], context: string) {
   });
 }
 
+/**
+ * 보내지 못한 댓글을 버릴 때(지우기·씬 이동·패널 닫기) — 서버에서 같은 id 를 먼저 지우고(없으면 아무 일 없음),
+ * 지워진 뒤에만 올린 첨부를 정리한다. 저장은 됐는데 응답만 끊긴 댓글일 수 있다: 첨부부터 지우면 서버에 남은 댓글의 그림이 깨졌다.
+ * 서버에 닿지 못하면 첨부는 남겨 둔다(정리 못 한 파일이 남는 쪽이 저장된 댓글을 깨는 쪽보다 낫다). 서버에서 지웠는지 돌려준다.
+ */
+async function dropUnsentComment(
+  draft: Pick<UnsentCommentDraft, 'comment' | 'targetSceneKey' | 'attached'>,
+  context: string,
+): Promise<boolean> {
+  try {
+    await deleteComment(draft.targetSceneKey, draft.comment.id);
+  } catch (err) {
+    console.warn(`${context} 서버에서 지우지 못해 첨부를 남겨 둡니다:`, err);
+    draft.attached.forEach((item) => { try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ } });
+    return false;
+  }
+  cleanupDraftImages(draft.attached, context);
+  return true;
+}
+
 // ─── sceneKey 분해 ─────────────────────────
 function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string } {
   const idx = sceneKey.lastIndexOf(':');
@@ -308,6 +331,8 @@ interface ReactionsAreaProps {
   /** 반응을 다 불러온 뒤에만 새 칩을 '톡' 한다(패널을 열 때 이미 있던 칩은 가만히). */
   animateNew: boolean;
   reduceMotion: boolean;
+  /** 보내는 중(아직 서버에 없는 댓글) — 반응 버튼을 누를 수 없다. 겉모습은 그대로(0.4초 안에 끝나는 보통 보내기에 깜빡임이 없게). */
+  disabled?: boolean;
 }
 
 function ReactionsArea({
@@ -321,6 +346,7 @@ function ReactionsArea({
   compact = false,
   animateNew,
   reduceMotion,
+  disabled = false,
 }: ReactionsAreaProps) {
   const groups = groupReactionsByEmoji(reactions, currentUserId);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -348,7 +374,7 @@ function ReactionsArea({
       {/* 반응을 모두 취소한 칩은 0.6배로 줄며 옅어진 뒤 빠진다(옆 칩은 그 뒤 제자리로 — 이웃 미끄러짐은 생략). */}
       <AnimatePresence initial={false}>
         {groups.map((g) => (
-          <motion.span key={g.emoji} className="inline-flex" initial={false} animate={REACTION_CHIP_REST} exit={chipExit}>
+          <motion.span key={g.emoji} className="inline-flex" initial={REACTION_CHIP_START} animate={REACTION_CHIP_REST} exit={chipExit}>
             <ReactionChip
               group={g}
               currentUserId={currentUserId}
@@ -361,6 +387,7 @@ function ReactionsArea({
       <button
         ref={btnRef}
         type="button"
+        disabled={disabled}
         onClick={(e) => {
           e.stopPropagation();
           if (pickerOpen) onPickerClose();
@@ -368,6 +395,8 @@ function ReactionsArea({
         }}
         className={cn(
           'inline-flex items-center justify-center rounded-full border border-dashed border-bg-border text-text-secondary/60 hover:border-accent/60 hover:text-accent-sub hover:bg-accent/[0.06] transition-[opacity,color,background-color,border-color]',
+          // 보내는 중엔 마우스를 올려도 드러나지 않는다(누를 수 없는 버튼이 떠오르지 않게).
+          'disabled:invisible',
           compact ? 'w-5 h-5' : 'w-6 h-5',
           hasReactions ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-70 hover:opacity-100',
         )}
@@ -377,7 +406,7 @@ function ReactionsArea({
         <SmilePlus size={compact ? 11 : 12} />
       </button>
       <EmojiPicker
-        open={pickerOpen}
+        open={pickerOpen && !disabled}
         anchorEl={btnRef.current}
         onPick={(emoji) => onToggle(commentId, emoji)}
         onClose={onPickerClose}
@@ -388,16 +417,20 @@ function ReactionsArea({
 
 function ThreadReplyButton({
   compact = false,
+  disabled = false,
   onClick,
   'aria-label': ariaLabel,
 }: {
   compact?: boolean;
+  /** 보내는 중(아직 서버에 없는 댓글) — 누를 수 없다. 겉모습은 그대로 두고 마우스 반응만 끈다. */
+  disabled?: boolean;
   onClick: () => void;
   'aria-label': string;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
         onClick();
@@ -405,7 +438,7 @@ function ThreadReplyButton({
       aria-label={ariaLabel}
       title="이 스레드에 답글"
       className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded-full border border-bg-border/70 bg-bg-primary/60 text-text-secondary/70 hover:border-accent/50 hover:bg-accent/[0.08] hover:text-accent-sub transition-colors',
+        'inline-flex shrink-0 items-center gap-1 rounded-full border border-bg-border/70 bg-bg-primary/60 text-text-secondary/70 hover:border-accent/50 hover:bg-accent/[0.08] hover:text-accent-sub transition-colors disabled:pointer-events-none',
         compact ? 'h-5 px-1.5 text-[10px]' : 'h-6 px-2 text-[11px]',
       )}
     >
@@ -452,7 +485,7 @@ function CommentSendFailedNotice({
         align === 'end' ? 'justify-end' : 'justify-start',
       )}
     >
-      <span className="font-semibold text-status-low">보내지 못했어요</span>
+      <span className="comment-send-failed-label font-semibold text-status-low">보내지 못했어요</span>
       <span className="text-text-secondary/60" aria-hidden>·</span>
       <button
         type="button"
@@ -618,8 +651,9 @@ export function CommentPanel({
   const newBelowCountRef = useRef(0);
   newBelowCountRef.current = newBelowCount;
   // 움직임 폴리싱 19번: 아직 서버에 없는 내 댓글. 화면 표시('보내는 중' 흐림·'보내지 못했어요')는 state,
-  // 다시 보내기·지우기에 쓸 저장 정보는 ref. 0.4초 안에 끝나는 보통의 보내기는 state 를 건드리지 않는다.
-  const [sendStatusById, setSendStatusById] = useState<ReadonlyMap<string, 'slow' | 'failed'>>(() => new Map());
+  // 다시 보내기·지우기에 쓸 저장 정보는 ref. 'sending'(0.4초 전)은 겉모습은 그대로지만 지우기·수정·답글·반응을 막는 데 쓴다
+  // — 서버에 아직 없는 댓글을 지우면 삭제가 헛돌고 뒤이어 저장이 끝나며 지운 댓글이 되살아났다.
+  const [sendStatusById, setSendStatusById] = useState<ReadonlyMap<string, CommentSendStatus>>(() => new Map());
   const unsentCommentsRef = useRef<Map<string, UnsentComment>>(new Map());
   const slowSendTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // 움직임 폴리싱 20번: 휴지통을 누른 뒤 되돌리기를 기다리거나 서버에서 지우는 중인 댓글(id → 정보).
@@ -830,6 +864,8 @@ export function CommentPanel({
     if (focusComposer) requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [revisionExists]);
   const openContextualThreadReply = useCallback((target: SceneCommentWithSource) => {
+    // 아직 서버에 없는 내 댓글(보내는 중·보내지 못함)에는 답글을 달 수 없다 — 부모가 저장되기 전이다.
+    if (unsentCommentsRef.current.has(target.id)) return;
     if (target.revisionId) {
       openRevisionThread(target.revisionId, true, target);
       return;
@@ -837,6 +873,7 @@ export function CommentPanel({
     openThreadReply(target);
   }, [openRevisionThread, openThreadReply]);
   const replyInActiveThread = useCallback((target: SceneCommentWithSource) => {
+    if (unsentCommentsRef.current.has(target.id)) return;
     const targetRevisionId = activeRevisionThreadId ?? target.revisionId;
     if (targetRevisionId) {
       openRevisionThread(targetRevisionId, true, target);
@@ -1036,6 +1073,8 @@ export function CommentPanel({
   // v1.26.0: 이모지 리액션 토글 (옵티미스틱 → IPC → 실패 시 롤백)
   const handleReactionToggle = useCallback(async (commentId: string, emoji: string) => {
     if (!currentUser) return;
+    // 아직 서버에 없는 댓글에는 반응을 달 수 없다(저장 전이라 반응이 붙을 댓글이 없다).
+    if (unsentCommentsRef.current.has(commentId)) return;
     const prev = reactionsByCommentId.get(commentId) ?? [];
     const mine = prev.find((r) => r.userId === currentUser.id && r.emoji === emoji);
     let next: CommentReaction[];
@@ -1340,8 +1379,8 @@ export function CommentPanel({
   }, []);
 
   // ── 움직임 폴리싱 19번: 보내는 중·보내지 못한 내 댓글 ──
-  // 화면 표시는 sendStatusById('slow'·'failed'), 다시 보내기·지우기에 쓸 정보는 unsentCommentsRef.
-  const setCommentSendStatus = useCallback((id: string, status: 'slow' | 'failed' | null) => {
+  // 화면 표시는 sendStatusById('sending'·'slow'·'failed'), 다시 보내기·지우기에 쓸 정보는 unsentCommentsRef.
+  const setCommentSendStatus = useCallback((id: string, status: CommentSendStatus | null) => {
     setSendStatusById((prev) => {
       if ((prev.get(id) ?? null) === status) return prev;
       const next = new Map(prev);
@@ -1359,7 +1398,7 @@ export function CommentPanel({
   const beginCommentSend = (draft: UnsentCommentDraft) => {
     const id = draft.comment.id;
     unsentCommentsRef.current.set(id, { ...draft, status: 'sending' });
-    setCommentSendStatus(id, null);
+    setCommentSendStatus(id, 'sending');
     clearSlowSendTimer(id);
     slowSendTimersRef.current.set(id, setTimeout(() => {
       slowSendTimersRef.current.delete(id);
@@ -1398,7 +1437,8 @@ export function CommentPanel({
     slowSendTimersRef.current.forEach((timer) => clearTimeout(timer));
     slowSendTimersRef.current.clear();
     unsentCommentsRef.current.forEach((entry) => {
-      if (entry.status === 'failed') cleanupDraftImages(entry.attached, context);
+      // 서버에서 같은 id 를 지운 뒤에만 첨부 정리 — 저장됐는데 응답만 끊긴 댓글의 그림을 깨지 않게.
+      if (entry.status === 'failed') void dropUnsentComment(entry, context);
     });
     unsentCommentsRef.current.clear();
     if (mountedRef.current) setSendStatusById((prev) => (prev.size === 0 ? prev : new Map()));
@@ -1664,15 +1704,27 @@ export function CommentPanel({
       finishCommentSend(commentId);
       afterCommentDelivered(draft);
     } catch (err) {
+      // 앞서 보낸 요청이 저장은 됐는데 응답만 끊겼으면, 같은 id 로 다시 넣을 때 서버가 '이미 있음'으로 거절한다.
+      // 그건 저장된 것이다 — 계속 '보내지 못했어요'로 남기지 않고 저장된 것으로 마무리한다(목록은 서버 기준으로 다시 불러온다).
+      if (isCommentAlreadySavedError(err)) {
+        finishCommentSend(commentId);
+        invalidateCommentsForKey(draft.targetSceneKey);
+        afterCommentDelivered(draft);
+        return;
+      }
       console.error('[댓글 다시 보내기 실패]', err);
       if (!failCommentSend(commentId)) {
-        cleanupDraftImages(draft.attached, '[댓글 다시 보내기 실패]');
+        void dropUnsentComment(draft, '[댓글 다시 보내기 실패]');
         notifyLostComment();
       }
     }
   };
 
-  /** '지우기' — 아직 저장되지 않은 말풍선을 목록에서 빼고 올린 첨부를 정리한다(서버에는 처음부터 없다). */
+  /**
+   * '지우기' — 보내지 못한 말풍선을 목록에서 바로 빼고, 서버에서도 같은 id 를 지운 뒤에 올린 첨부를 정리한다.
+   * 저장은 됐는데 응답만 끊긴 댓글이면 서버에 남아 있다 — 그때 첨부부터 지우면 그 댓글의 그림이 깨졌다.
+   * 저장 안 된 보통의 경우엔 서버 삭제가 아무 일도 하지 않는다. 서버에 닿지 못하면 말풍선을 되돌려 놓고 알린다.
+   */
   const discardUnsentComment = (commentId: string) => {
     const entry = unsentCommentsRef.current.get(commentId);
     if (!entry || entry.status !== 'failed') return;
@@ -1681,7 +1733,16 @@ export function CommentPanel({
     const remaining = comments.filter((c) => c.id !== commentId);
     setComments((current) => current.filter((c) => c.id !== commentId));
     onCountChange?.(remaining.length);
-    cleanupDraftImages(entry.attached, '[보내지 못한 댓글 지우기]');
+    const panelSceneKey = sceneKeyRef.current;
+    void dropUnsentComment(entry, '[보내지 못한 댓글 지우기]').then((dropped) => {
+      if (dropped) return;
+      sonnerToast.error('댓글을 지우지 못했어요 · 인터넷 연결을 확인해 주세요');
+      // 같은 씬을 보고 있으면 '보내지 못했어요' 말풍선을 그대로 되돌려 놓는다(다시 보내기·지우기를 다시 고를 수 있게).
+      if (!mountedRef.current || sceneKeyRef.current !== panelSceneKey) return;
+      unsentCommentsRef.current.set(commentId, { ...entry, status: 'failed' });
+      setCommentSendStatus(commentId, 'failed');
+      reinsertComment(entry.comment);
+    });
   };
 
   const handleSubmit = async () => {
@@ -1860,15 +1921,9 @@ export function CommentPanel({
 
       // Codex P2 9차(2026-04-29): addComment 실패 + panel 이 그 동안 unmount 된 케이스 (slow request 중 close).
       // setState 가 unmounted component 에서 drop 되어 prevAttached 의 uploadedUrl 정리 안 됨 → orphan.
-      // mountedRef 체크 후 state 복원 대신 storage 직접 정리. 남길 말풍선이 없으니 말없이 사라지지 않게 알린다.
-      prevAttached.forEach(a => {
-        try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
-        if (a.uploadedUrl) {
-          storageService.deleteImage(a.uploadedUrl).catch(err2 => {
-            console.warn('[댓글 전송 실패 + unmount] storage 정리 실패:', err2);
-          });
-        }
-      });
+      // 남길 말풍선이 없으니 첨부를 정리하고 말없이 사라지지 않게 알린다. 첨부는 서버에서 같은 id 를 지운 뒤에만 정리한다
+      // (저장됐는데 응답만 끊긴 댓글이면 그 댓글의 그림이 깨지지 않게).
+      void dropUnsentComment(sendDraft, '[댓글 전송 실패 + unmount]');
       notifyLostComment();
     } finally {
       setSubmitting(false);
@@ -1880,6 +1935,8 @@ export function CommentPanel({
   // updateComment 가 supabase update payload 에서 images 컬럼을 제외해 실 이미지 URL 들이 보존된다.
   const handleEdit = async (commentId: string) => {
     if (!editText.trim()) return;
+    // 아직 서버에 없는 댓글은 고칠 수 없다(고친 내용이 저장되기 전 원래 글이 저장된다).
+    if (unsentCommentsRef.current.has(commentId)) return;
     const target = comments.find((c) => c.id === commentId);
     const targetKey = target?.storageKey ?? target?._sourceKey ?? primaryStorageKey;
     const mentions = extractMentions(editText, userNames);
@@ -1999,6 +2056,9 @@ export function CommentPanel({
 
   const handleDelete = (commentId: string) => {
     if (pendingDeletesRef.current.has(commentId)) return;
+    // 보내는 중인 댓글은 지우지 않는다 — 서버에 아직 없어 삭제가 헛돌고, 뒤이어 저장이 끝나면 지운 댓글이 되살아났다.
+    // (보내지 못한 말풍선은 아래 '지우기'가 맡는다.)
+    if (unsentCommentsRef.current.has(commentId)) return;
     const target = commentsRef.current.find((c) => c.id === commentId) ?? comments.find((c) => c.id === commentId);
     if (!target) return;
     const targetKey = target.storageKey ?? target._sourceKey ?? primaryStorageKey;
@@ -2243,7 +2303,7 @@ export function CommentPanel({
       const keptForRetry = sceneKeyRef.current === panelSceneKey && failCommentSend(comment.id);
       if (!keptForRetry) {
         finishCommentSend(comment.id);
-        cleanupDraftImages(submittedThreadAttached, '[스레드 댓글 전송 실패]');
+        void dropUnsentComment(sendDraft, '[스레드 댓글 전송 실패]');
         notifyLostComment();
       }
     } finally {
@@ -2935,8 +2995,9 @@ export function CommentPanel({
 
                     {!isEditing && sendStatus === 'slow' && <CommentSendClock />}
 
-                    {/* 수정/삭제 (자기 댓글만) + v1.24.0 답글 버튼 (모든 댓글). 보내지 못한 말풍선엔 아래 '다시 보내기·지우기'만. */}
-                    {!isEditing && sendStatus !== 'failed' && (
+                    {/* 수정/삭제 (자기 댓글만) + v1.24.0 답글 버튼 (모든 댓글). 보내지 못한 말풍선엔 아래 '다시 보내기·지우기'만.
+                        보내는 중(아직 서버에 없음)에는 지우기·수정·답글을 띄우지 않는다. */}
+                    {!isEditing && !sendStatus && (
                       <div
                         className={cn(
                           'absolute top-0 flex gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity',
@@ -2993,8 +3054,10 @@ export function CommentPanel({
                       onPickerClose={() => setReactionPicker(null)}
                       animateNew={reactionsReady}
                       reduceMotion={reduceMotion}
+                      disabled={!!sendStatus}
                     />
                     <ThreadReplyButton
+                      disabled={!!sendStatus}
                       aria-label={`답글 달기: ${comment.userName}`}
                       onClick={() => openContextualThreadReply(comment)}
                     />
@@ -3129,7 +3192,7 @@ export function CommentPanel({
                               </div>
                             )}
                             {!replyIsEditing && replySendStatus === 'slow' && <CommentSendClock />}
-                            {!replyIsEditing && replySendStatus !== 'failed' && (
+                            {!replyIsEditing && !replySendStatus && (
                               <div className={cn(
                                 'absolute top-0 flex gap-0.5 opacity-0 group-hover/replybubble:opacity-100 transition-opacity',
                                 replyIsOwn ? '-right-16' : '-right-7',
@@ -3182,9 +3245,11 @@ export function CommentPanel({
                               compact
                               animateNew={reactionsReady}
                               reduceMotion={reduceMotion}
+                              disabled={!!replySendStatus}
                             />
                             <ThreadReplyButton
                               compact
+                              disabled={!!replySendStatus}
                               aria-label={`답글 달기: ${reply.userName}`}
                               onClick={() => openContextualThreadReply(reply)}
                             />
@@ -3699,9 +3764,11 @@ export function CommentPanel({
                         compact
                         animateNew={reactionsReady}
                         reduceMotion={reduceMotion}
+                        disabled={!!messageSendStatus}
                       />
                       <ThreadReplyButton
                         compact
+                        disabled={!!messageSendStatus}
                         aria-label={`답글 달기: ${message.userName}`}
                         onClick={() => replyInActiveThread(message)}
                       />
