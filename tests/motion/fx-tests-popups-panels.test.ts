@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { build } from 'esbuild';
+import { build, type Plugin } from 'esbuild';
 import { createElement, isValidElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { CONTENT_SWAP_KEYFRAMES, CONTENT_SWAP_MS, imageSwapKeyframes } from '../../src/utils/contentSwap.ts';
 import { EASE_CSS } from '../../src/utils/motion.ts';
+import { resolveMotionPref } from '../../src/utils/motionLevel.ts';
 import { popClassName, popOriginFromPoint } from '../../src/utils/popupMotion.ts';
 
 /* 움직임 폴리싱 검증 지적 review-motion-rules-4 / popups-panels 갈래 리뷰 — 뮤테이션에서 살아남은 연결을 지킨다.
@@ -20,7 +21,7 @@ const read = (path: string) => readFileSync(path, 'utf-8').replace(/\r\n/g, '\n'
 /** 주석을 뺀 코드만 — 설명 글에 같은 낱말이 나와도 세지 않게. */
 const code = (path: string) => read(path).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-async function bundle(contents: string, external: string[]): Promise<string> {
+async function bundle(contents: string, external: string[], plugins: Plugin[] = []): Promise<string> {
   const result = await build({
     stdin: { contents, resolveDir: process.cwd(), loader: 'ts' },
     bundle: true,
@@ -30,9 +31,20 @@ async function bundle(contents: string, external: string[]): Promise<string> {
     logLevel: 'silent',
     loader: { '.css': 'empty' },
     external,
+    plugins,
   });
   return result.outputFiles[0].text;
 }
+
+/** useMotionPref 를 바깥 모듈로 빼서 테스트가 동작 줄이기 값을 직접 넣는다 — 훅이 OS 값을 framer 로 읽든
+    matchMedia 를 구독하든(움직임 단계 갈래) 상관없이, 이 컴포넌트가 '받은 reduce 대로' 움직이는지만 본다. */
+const MOTION_PREF_STUB = 'motion-pref-stub';
+const stubMotionPref: Plugin = {
+  name: 'stub-motion-pref',
+  setup(builder) {
+    builder.onResolve({ filter: /(?:^@\/hooks\/|\/)useMotionPref(?:\.ts)?$/ }, () => ({ path: MOTION_PREF_STUB, external: true }));
+  },
+};
 
 function load(source: string, resolve: (id: string) => unknown): Record<string, any> {
   const module = { exports: {} as Record<string, any> };
@@ -312,7 +324,10 @@ async function frameHarness({ reduce }: { reduce: boolean }) {
   const source = await (frameSource ??= bundle(
     "export { CharacterImageFrame } from './src/components/characters/CharacterImageFrame';",
     ['react', 'react/jsx-runtime', 'framer-motion', 'lucide-react'],
+    [stubMotionPref],
   ));
+  assert.ok(source.includes(`require("${MOTION_PREF_STUB}")`), '그림 틀은 useMotionPref 로 동작 줄이기를 읽는다(바꿔치기가 걸려야 함)');
+  const pref = resolveMotionPref(reduce, 'full');
   const images = new Map<string, ReturnType<typeof fakeImage>>();
   const layerDivs = new Map<string, ReturnType<typeof fakeAnimatable>>();
   const harness = createHookHarness((type, props) => {
@@ -331,7 +346,7 @@ async function frameHarness({ reduce }: { reduce: boolean }) {
   });
   const mod = load(source, (id) => {
     if (id === 'react') return harness.react;
-    if (id === 'framer-motion') return { useReducedMotion: () => reduce };
+    if (id === MOTION_PREF_STUB) return { useMotionPref: () => pref };
     if (id === 'lucide-react') return new Proxy({}, { get: () => () => null });
     return nodeRequire(id);
   });
@@ -461,7 +476,7 @@ test('그림 교체: 동작 줄이기면 옆에서 밀려오지 않고 opacity �
 
 test('휴가 날짜 카드: 교체 판정은 고른 날짜 key 로, 동작 줄이기는 앱 설정을 따른다', () => {
   const view = code('src/views/VacationView.tsx');
-  assert.match(view, /const \{ reduce \} = useMotionPref\(\);\n\s+const dateSwapIn = useSwapIn\(selectedDate\);/);
+  assert.match(view, /const \{[^}]*\breduce\b[^}]*\} = useMotionPref\(\);\n\s+const dateSwapIn = useSwapIn\(selectedDate\);/);
   assert.match(view, /<div key=\{selectedDate\} className=\{swapInClassName\(dateSwapIn, true\) \|\| undefined\}>/);
 });
 
@@ -471,7 +486,7 @@ test('리테이크 상세 칸: 교체 판정은 리테이크 id 로, 셸은 동�
   const end = panel.indexOf('function DetailPanelContent(');
   assert.ok(start >= 0 && end > start, 'DetailPanel 셸');
   const shell = panel.slice(start, end);
-  assert.match(shell, /const \{ reduce \} = useMotionPref\(\);\n\s+const swapIn = useSwapIn\(props\.revision\.id\);/);
+  assert.match(shell, /const \{[^}]*\breduce\b[^}]*\} = useMotionPref\(\);\n\s+const swapIn = useSwapIn\(props\.revision\.id\);/);
   assert.match(shell, /\{\.\.\.sidePanelPreset\(reduce\)\}/);
   assert.match(shell, /<DetailPanelContent key=\{props\.revision\.id\} \{\.\.\.props\} swapIn=\{swapIn\} \/>/);
   assert.match(panel.slice(end), /<div className=\{`p-5 \$\{swapInClassName\(swapIn\)\}`\}>/);

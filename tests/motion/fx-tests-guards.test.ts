@@ -38,6 +38,9 @@ function blockAfter(source: string, header: string, label = header): string {
   return blocks[0];
 }
 
+/** `const { …reduce… } = useMotionPref();` — 다른 이름(lite·level)이 함께 구조 분해돼도 통과(움직임 단계 갈래가 { reduce, lite } 로 넓힘). */
+const USES_MOTION_PREF_REDUCE = /const \{[^}]*\breduce\b[^}]*\} = useMotionPref\(\);/;
+
 const MODALS: Array<[string, string]> = [
   ['씬 상세', 'src/components/scenes/SceneDetailModal.tsx'],
   ['통합 상세', 'src/components/scenes/UnifiedSceneDetailModal.tsx'],
@@ -120,19 +123,19 @@ test('댓글 되돌리기: 기다리는 중(waiting)일 때만 — 서버 삭제
 
 test('헤더 새로고침 아이콘: 동작 줄이기면 돌기 시작하지 않고, 멈출 때도 바로 멈춘다', () => {
   const sync = code('src/components/layout/HeaderSyncStatus.tsx');
-  assert.match(sync, /const \{ reduce \} = useMotionPref\(\);/);
+  assert.match(sync, USES_MOTION_PREF_REDUCE);
   assert.match(sync, /const reduceRef = useRef\(reduce\);\n\s*reduceRef\.current = reduce;/);
   const startAt = sync.indexOf("if (change.spin === 'start') {");
   const spinAt = sync.indexOf('el.animate(SPIN_KEYFRAMES');
   assert.ok(startAt >= 0 && spinAt > startAt);
-  assert.match(sync.slice(startAt, spinAt), /if \([^)]*\breduceRef\.current\b[^)]*\) return;/, '돌기 전에 동작 줄이기 확인');
+  assert.match(sync.slice(startAt, spinAt), /if \([^)]*(?<!!)\breduceRef\.current\b[^)]*\) return;/, '돌기 전에 동작 줄이기 확인(뒤집힌 !reduceRef 는 X)');
   const stop = blockAfter(sync, "if (change.spin === 'stop') {");
-  assert.match(stop, /if \([^)]*\breduceRef\.current\b[^)]*\) \{\s*running\.cancel\(\);/, '멈출 때 감속 회전 없이 바로');
+  assert.match(stop, /if \([^)]*(?<!!)\breduceRef\.current\b[^)]*\) \{\s*running\.cancel\(\);/, '멈출 때 감속 회전 없이 바로(뒤집힌 !reduceRef 는 X)');
 });
 
 test('씬 완료: 카드 \'톡\'은 동작 줄이기가 아닐 때만, 동작 줄이기면 완료 칸 빛 테두리로 대신한다', () => {
   const fx = code('src/components/scenes/SceneCompletionFx.tsx');
-  assert.match(fx, /const \{ reduce \} = useMotionPref\(\);/);
+  assert.match(fx, USES_MOTION_PREF_REDUCE);
   assert.equal(fx.match(/\.animate\(CARD_POP_KEYFRAMES/g)?.length, 1, '톡은 한 곳에서만');
   const pop = blockAfter(fx, 'if (!reduce) {', '동작 줄이기가 아닐 때 분기');
   assert.match(pop, /card\.animate\(CARD_POP_KEYFRAMES, \{ duration: CARD_POP_MS, easing: CARD_POP_EASE \}\);\s*return;/);
@@ -146,11 +149,11 @@ test('씬 넘김 끝 고무줄 튕김: 동작 줄이기면 아예 돌지 않는�
   assert.match(bounce, /const \{[^}]*\breduce\b[^}]*\} = optsRef\.current;/);
   const animateAt = bounce.indexOf('animateEl(');
   assert.ok(animateAt > 0);
-  assert.match(bounce.slice(0, animateAt), /if \([^)]*\breduce\b[^)]*\) return;/, '움직이기 전에 동작 줄이기 확인');
+  assert.match(bounce.slice(0, animateAt), /if \([^)]*(?<!!)\breduce\b[^)]*\) return;/, '움직이기 전에 동작 줄이기 확인(뒤집힌 !reduce 는 X)');
 });
 
 test('내 리테이크 위젯: 줄 미끄러짐(FLIP)은 동작 줄이기에서 끈다', () => {
   const widget = code('src/components/widgets/MyRetakesWidget.tsx');
-  assert.match(widget, /const \{ reduce \} = useMotionPref\(\);/);
+  assert.match(widget, USES_MOTION_PREF_REDUCE);
   assert.match(widget, /useRowFlip\(listRef, [^;]*, \{ disabled: reduce \}\);/);
 });
