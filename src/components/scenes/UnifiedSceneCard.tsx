@@ -18,6 +18,7 @@ import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { Confetti } from '@/components/ui/Confetti';
 import { RollingNumber } from '@/components/ui/RollingNumber';
 import { SceneCompletionFx } from './SceneCompletionFx';
+import { pressStartsOnCardControl } from '@/utils/sceneCardSelection';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -207,6 +208,20 @@ export function UnifiedSceneCard({
   const hasImages = !!(bgScene?.storyboardUrl || bgScene?.guideUrl);
   const layoutId = bgScene?.layoutId || actScene?.layoutId;
 
+  // 단계 버튼은 누르는 순간 바뀌어 카드가 밀릴 수 있다 — 누름이 카드 안 버튼에서 시작했으면 이어지는 click 은 선택으로 보지 않는다
+  // (검증 지적 acc-scene-check-4).
+  const pressStartedOnControlRef = useRef(false);
+  const handlePointerDownCapture = (e: React.PointerEvent) => {
+    pressStartedOnControlRef.current = pressStartsOnCardControl(e.target);
+  };
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (pressStartedOnControlRef.current) {
+      pressStartedOnControlRef.current = false;
+      e.preventDefault();
+      return;
+    }
+    handleClick(e);
+  };
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
@@ -324,7 +339,8 @@ export function UnifiedSceneCard({
       style={{
         overflow: 'visible',
       }}
-      onClick={handleClick}
+      onPointerDownCapture={handlePointerDownCapture}
+      onClick={handleCardClick}
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}
       ref={cardRootRef}

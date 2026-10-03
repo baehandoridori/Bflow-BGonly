@@ -331,6 +331,7 @@ test('넘겨준 뒤 앞 요청이 성공해도 앞 저장의 성공 콜백은 �
   const retry = createSaveRetryController(clock.env);
   let resolveFirst: () => void = () => {};
   let firstSaved = 0;
+  const handedOver: unknown[] = [];
   const firstOutcome = retry.run<string>('a|stages', {
     carry: 'first',
     attempt: () => new Promise<void>((resolve) => {
@@ -341,14 +342,20 @@ test('넘겨준 뒤 앞 요청이 성공해도 앞 저장의 성공 콜백은 �
       firstSaved += 1;
     },
     onGiveUp: () => {},
+    onSupersededSaved: (successor) => {
+      handedOver.push(successor);
+    },
   });
   const second = scriptedJob(clock, ['transient', 'ok'], { carry: 'second' });
   const secondOutcome = retry.run('a|stages', second.job);
   await clock.advance(0);
-  assert.equal(second.log.retrying, 1);
+  assert.deepEqual(second.log.attempts, [], '같은 key 의 뒤 요청은 앞 요청이 끝날 때까지 기다린다(fx-retry)');
   resolveFirst();
   assert.equal(await firstOutcome, 'superseded');
   assert.equal(firstSaved, 0);
+  assert.deepEqual(handedOver, ['second'], '저장됐다는 사실은 지금 넘겨받은 저장에 알린다(fx-retry)');
+  await clock.advance(0);
+  assert.equal(second.log.retrying, 1);
   assert.equal(retry.isRetrying('a|stages'), true, '새 저장은 계속 다시 보내는 중');
   await clock.advance(800);
   assert.equal(await secondOutcome, 'saved');

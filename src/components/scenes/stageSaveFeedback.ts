@@ -5,6 +5,8 @@
    - 끝내 되돌린 칸: 고개를 젓듯 좌우로 0.24초(translate 0→−3→3→−2→0px) + 빨간(#E17055) 1.5px 테두리가
      0.9초 동안 번졌다 사라진다(15% 지점에서 가장 진함). 동작 줄이기면 흔들림 없이 테두리만.
    - 안내는 버튼 없는 토스트 한 줄: 'a012 검수 체크를 저장하지 못해 되돌렸어요' + '인터넷 연결을 확인해 주세요'.
+   - 다시 보내기 직전에 그 칸이 이미 다른 값이 돼 있으면(팀원의 변경·내 다른 버튼 등) 덮지 않고 멈춘다. 이때는 원인을
+     짐작하지 않는 안내만: 'a012 검수 체크 저장을 멈췄어요' + '그 사이 먼저 바뀐 값이 있어 그 값을 그대로 두었어요'.
 
    칸 이름(cell id)은 세 버튼 묶음이 같이 쓴다:
    - 씬 단위 LO/완료/검수/PNG 칸: 'lo' | 'done' | 'review' | 'png'
@@ -83,6 +85,25 @@ export function rollbackToastTitle(sceneId: string, subject: RollbackSubject, as
         ? `'${subject.label}' 단계를`
         : '작업 차수를';
   return `${sceneId}${who} ${what} 저장하지 못해 되돌렸어요`;
+}
+
+function rollbackSubjectText(subject: RollbackSubject): string {
+  return subject.kind === 'check'
+    ? `${subject.label} 체크`
+    : subject.kind === 'phase'
+      ? `'${subject.label}' 단계`
+      : '작업 차수';
+}
+
+/** 'a012 검수 체크 저장을 멈췄어요' · "a012 김지은 '완료' 단계 저장을 멈췄어요". */
+export function saveStoppedToastTitle(sceneId: string, subject: RollbackSubject, assigneeName?: string): string {
+  const who = assigneeName ? ` ${assigneeName}` : '';
+  return `${sceneId}${who} ${rollbackSubjectText(subject)} 저장을 멈췄어요`;
+}
+
+/** 멈춘 까닭을 짐작하지 않는다(팀원일 수도, 내가 다른 버튼으로 바꿨을 수도 있다). */
+export function saveStoppedToastDescription(): string {
+  return '그 사이 먼저 바뀐 값이 있어 그 값을 그대로 두었어요';
 }
 
 /** 인터넷 문제(다시 보내 봤지만 안 됨)면 연결 확인, 거절된 저장이면 새로고침 안내. */

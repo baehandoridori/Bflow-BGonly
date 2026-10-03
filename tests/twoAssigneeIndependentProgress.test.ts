@@ -104,7 +104,8 @@ test('per-assignee completion boundary changes persist completion metadata', () 
   assert.match(scenesView, /const completionMeta = \(\(\) =>/);
   assert.match(scenesView, /patch\.completedBy = completionMeta\.nextCompletedBy/);
   assert.match(scenesView, /patch\.completedAt = completionMeta\.nextCompletedAt/);
-  assert.match(scenesView, /await updateSceneCompletionMeta\(\s*sheetName,\s*sceneIndex,/);
+  // 재전송이 늦게 나갈 수 있으니 완료 기록은 줄 번호가 아니라 씬 UUID 로 쓴다(움직임 폴리싱 검증 지적 review-data-safety-4).
+  assert.match(scenesView, /await updateSceneCompletionMetaByUuid\(\s*sceneUuid,/);
 });
 
 test('per-assignee progress metadata writes are serialized per scene', () => {
@@ -113,7 +114,8 @@ test('per-assignee progress metadata writes are serialized per scene', () => {
   assert.match(scenesView, /assigneeProgressWriteQueueRef/);
   assert.match(scenesView, /queues\.get\(sceneUuid\) \?\? Promise\.resolve\(\)/);
   assert.match(scenesView, /const run = previous\.catch\(\(\) => undefined\)\.then\(task\)/);
-  assert.match(scenesView, /writeAssigneeProgressMetadata\(sceneUuid, nextProgress, Object\.keys\(nextProgress\)\)/);
+  // 늦게 보낼 수 있으니 최신 담당자 기록 위에 같은 변경을 다시 적용한 맵을 모든 담당자 이름으로 보낸다.
+  assert.match(scenesView, /writeAssigneeProgressMetadata\(sceneUuid, progress, Object\.keys\(progress\)\)/);
   assert.match(scenesView, /assigneeProgressMutationSeqRef/);
 });
 
