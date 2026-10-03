@@ -8,6 +8,7 @@ import {
   DEFAULT_MOTION_LEVEL,
   MOTION_LEVELS,
   applyStoredMotionLevel,
+  createMotionLevelSaveQueue,
   getMotionLevel,
   isMinimalMotionInDom,
   motionLevelBroadcastPayload,
@@ -424,6 +425,47 @@ test('설정 저장·방송: preferences.json motionLevel, 다른 창은 방송�
   // 이 창에는 저장보다 먼저 반영(낙관적)
   assert.ok(sync.indexOf('setMotionLevel(level);') < sync.indexOf('await savePreferences'));
   assert.match(read('src/services/settingsService.ts'), /motionLevel\?: MotionLevel;/);
+});
+
+test('설정 저장 줄: 빠르게 두 번 골라도 옛 저장이 새 값 뒤에 쓰거나 방송하지 않는다(코덱스 지적)', async () => {
+  const queue = createMotionLevelSaveQueue();
+  const log: string[] = [];
+  const gates: Array<() => void> = [];
+  const save = (seq: number, level: string) => queue.enqueue(seq, async (isStale) => {
+    log.push(`read:${level}`);
+    await new Promise<void>((resolve) => gates.push(resolve)); // 파일 읽기(늦게 끝나게)
+    if (isStale()) { log.push(`skip:${level}`); return; }
+    log.push(`write+broadcast:${level}`);
+  });
+  const first = save(1, 'lite');
+  await new Promise((r) => setTimeout(r, 0));
+  const second = save(2, 'minimal'); // 앞 저장이 읽는 중에 새로 고름
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(log, ['read:lite'], '두 번째 저장은 앞 저장이 끝날 때까지 시작하지 않는다');
+  gates.shift()?.(); // 앞 저장의 읽기가 끝남 → 이미 더 새 요청이 있으니 쓰지 않는다
+  await first;
+  await new Promise((r) => setTimeout(r, 0));
+  gates.shift()?.();
+  await second;
+  assert.deepEqual(log, ['read:lite', 'skip:lite', 'read:minimal', 'write+broadcast:minimal'], '마지막 값만 쓰고 방송');
+
+  // 차례가 오기 전에 더 새 요청이 들어온 저장은 시작조차 하지 않고, 앞 저장이 실패해도 줄은 이어진다.
+  const q2 = createMotionLevelSaveQueue();
+  const ran: number[] = [];
+  let failNow: () => void = () => {};
+  const failing = q2.enqueue(1, async () => { ran.push(1); await new Promise<void>((resolve) => { failNow = resolve; }); throw new Error('저장 실패'); });
+  await new Promise((r) => setTimeout(r, 0));
+  const skipped = q2.enqueue(2, async () => { ran.push(2); });
+  const last = q2.enqueue(3, async () => { ran.push(3); });
+  failNow();
+  await assert.rejects(failing, /저장 실패/);
+  await skipped;
+  await last;
+  assert.deepEqual(ran, [1, 3]);
+
+  const sync = read('src/services/motionLevelSync.ts');
+  const body = sync.slice(sync.indexOf('export async function saveMotionLevel'));
+  assert.match(body, /await saveQueue\.enqueue\(seq, async \(isStale\) => \{\s*const existing = \(await loadPreferences\(\)\) \?\? \{\};[\s\S]*?if \(isStale\(\)\) return;\s*await savePreferences\(/, '읽은 뒤 쓰기 전에 낡은 요청을 버린다');
 });
 
 test('설정 › 효과 맨 위에 움직임 3칸(기본·가볍게·최소)', () => {

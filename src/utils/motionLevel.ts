@@ -157,6 +157,31 @@ export function motionLevelFromBroadcast(payload: unknown, self?: MotionLevelBro
   return normalizeMotionLevel(message.motionLevel);
 }
 
+/**
+ * 움직임 설정 저장(파일 읽기 → 쓰기 → 방송)을 한 줄로 세운다(코덱스 지적: 빠르게 두 번 고르면 두 저장이 엇갈려,
+ * 늦게 끝난 옛 저장이 새 값 뒤에 파일·다른 창을 옛 값으로 되돌렸다).
+ * - 앞 저장이 끝난 뒤에 다음 저장을 시작한다(앞 저장이 실패해도 줄은 이어진다).
+ * - 차례가 왔을 때 더 새 요청이 이미 들어와 있으면 그 저장은 건너뛴다 — 새 요청이 쓰고 방송한다.
+ * - run 은 isStale() 로 '그사이 더 새 요청이 들어왔는지'를 다시 볼 수 있다(읽기를 기다린 뒤 쓰기 전에).
+ */
+export interface MotionLevelSaveQueue {
+  enqueue(seq: number, run: (isStale: () => boolean) => Promise<void>): Promise<void>;
+}
+
+export function createMotionLevelSaveQueue(): MotionLevelSaveQueue {
+  let tail: Promise<void> = Promise.resolve();
+  let latest = 0;
+  return {
+    enqueue(seq, run) {
+      if (seq > latest) latest = seq;
+      const isStale = () => seq < latest;
+      const job = tail.then(() => (isStale() ? undefined : run(isStale)));
+      tail = job.catch(() => undefined);
+      return job;
+    },
+  };
+}
+
 /* ─── OS '동작 줄이기' ─────────────────────────────────────────── */
 
 const OS_REDUCE_QUERY = '(prefers-reduced-motion: reduce)';
