@@ -66,6 +66,21 @@ export function rollDirection(previous: number, next: number): RollDirection {
   return next < previous ? -1 : 1;
 }
 
+/**
+ * 이번 렌더에서 숫자 열에 넘길 굴림 방향·출발 글자.
+ * 새 값이 처음 그려지는 렌더에서는 굴림 상태(view)가 아직 직전 굴림 그대로다. 그 방향을 넘기면 올린 직후
+ * (0.5초 안에) 되돌릴 때 띠가 반대로 감겨 엉뚱한 숫자가 스친다 → 직전 값(last)과 새 값으로 바로 정한다.
+ * 같은 값을 다시 그릴 때(굴림 상태가 막 갱신된 뒤)는 굴림 상태를 그대로 쓴다.
+ */
+export function rollColumnsPlan(
+  last: { value: number; text: string },
+  next: { value: number; text: string },
+  view: { from: string; dir: RollDirection },
+): { from: string; dir: RollDirection } {
+  if (last.text === next.text) return { from: view.from, dir: view.dir };
+  return { from: last.text, dir: rollDirection(last.value, next.value) };
+}
+
 const mod10 = (n: number) => ((n % 10) + 10) % 10;
 
 /**

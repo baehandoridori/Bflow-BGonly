@@ -164,7 +164,8 @@ test('동작 줄이기: 들림·톡·쓰레기통 커짐은 빠지고 테두리 
 test('월 보기: 칸(col)을 key 에서 빼 끄는 막대가 순간이동 대신 미끄러진다', () => {
   const grid = read('src/components/calendar/CalendarGrid.tsx');
   assert.doesNotMatch(grid, /-c\$\{bar\.startCol\}/, '칸을 key 에 넣으면 칸을 넘을 때마다 새로 붙는다');
-  assert.match(grid, /key=\{`\$\{identityKey\}-w\$\{wi\}`\}/);
+  // 막대 key 는 일정 키(방금 만든 일정은 저장 뒤에도 낙관적 키 — fx-misc acc-live-drag-view-4)와 주 번호뿐
+  assert.match(grid, /key=\{`\$\{barKey\}-w\$\{wi\}`\}/);
   assert.doesNotMatch(grid, /left 0\.12s|width 0\.12s|top 0\.12s/, 'left·width 전환은 매 프레임 레이아웃');
   assert.doesNotMatch(grid, /isGhost/, '끄는 막대를 흐린 점선(opacity .5)으로 바꾸지 않는다 — 진하게 들린다');
   assert.match(grid, /<DragSlideAnchor slideKey=\{slideKey\} registry=\{slideRegistry\}/);

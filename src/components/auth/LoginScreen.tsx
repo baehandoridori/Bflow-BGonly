@@ -839,6 +839,8 @@ export function LoginScreen({ mode = 'login', onComplete, restoreError, onPrimeM
   const exitStartRef = useRef(0);
   const completedRef = useRef(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  /** 걷던 덮개를 되돌린 횟수 — 로그인 카드를 새로 붙여 '로그인 중...' 에 멈춘 카드를 다시 쓰지 않는다. */
+  const formRoundRef = useRef(0);
 
   // 첫 진입: 글자(또는 로그인 카드)를 떠오르게 하고 덮개를 걷을 준비를 한다.
   const beginExit = useCallback((from: 'hero' | 'form') => {
@@ -863,6 +865,19 @@ export function LoginScreen({ mode = 'login', onComplete, restoreError, onPrimeM
     if (mode !== 'login' || !currentUser || phase === 'exit') return;
     beginExit(phase === 'login' ? 'form' : 'hero');
   }, [mode, currentUser, phase, beginExit]);
+
+  // 덮개가 걷히는 도중(또는 다 걷힌 직후) 사용자가 사라졌다(관리자가 그 계정을 지움 등).
+  // 비로그인 화면이 이 덮개를 같은 자리에서 이어 쓰므로, 걷던 덮개를 되돌리고 로그인 카드를 다시 보인다
+  // — 안 그러면 투명해진 덮개만 남아 로그인할 길이 없다.
+  useEffect(() => {
+    if (mode !== 'login' || currentUser || phase !== 'exit') return;
+    formRoundRef.current += 1;
+    completedRef.current = false;
+    rootRef.current?.classList.remove('bf-entry-curtain-lift');
+    entryCurtain.set('down');
+    setLifting(false);
+    setPhase('login');
+  }, [mode, currentUser, phase]);
 
   // 덮개가 떠 있는 동안 html[data-entry-curtain] — 아래에 미리 그린 대시보드의 등장 연출을 멈춰 둔다.
   useEffect(() => {
@@ -1000,7 +1015,7 @@ export function LoginScreen({ mode = 'login', onComplete, restoreError, onPrimeM
 
         {formVisible && (
           <motion.div
-            key="login"
+            key={`login-${formRoundRef.current}`}
             className={cn('flex flex-col items-center cursor-default', exiting && 'bf-entry-text-exit')}
             onClick={(e) => e.stopPropagation()}
           >

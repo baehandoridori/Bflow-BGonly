@@ -11,6 +11,7 @@ import {
   formatRolling,
   makeBezierEasing,
   planStripRoll,
+  rollColumnsPlan,
   rollDirection,
   splitRollingDigits,
   type RollDirection,
@@ -182,8 +183,11 @@ export function RollingNumber({
     );
   }
 
+  // 굴러가는 중 새 값이 온 첫 렌더: 굴림 상태는 아직 직전 굴림 방향이다. 열은 이 렌더에서 계획을 세우므로
+  // (자식 효과가 부모 효과보다 먼저 돈다) 방향·출발 글자를 여기서 직전 값 기준으로 정한다.
+  const plan = rollColumnsPlan(lastRef.current, { value: target, text }, view);
   const fromDigits = new Map<string, number>();
-  for (const token of splitRollingDigits(view.from)) {
+  for (const token of splitRollingDigits(plan.from)) {
     if (token.kind === 'digit') fromDigits.set(token.key, token.digit);
   }
 
@@ -196,7 +200,7 @@ export function RollingNumber({
       <span aria-hidden="true">
         {splitRollingDigits(text).map((token) =>
           token.kind === 'digit' ? (
-            <RollColumn key={token.key} digit={token.digit} mountFrom={fromDigits.get(token.key) ?? 0} dir={view.dir} />
+            <RollColumn key={token.key} digit={token.digit} mountFrom={fromDigits.get(token.key) ?? 0} dir={plan.dir} />
           ) : (
             <span key={token.key}>{token.char}</span>
           ),

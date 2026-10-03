@@ -45,6 +45,15 @@ export function resolveBackgroundActivity(state: BackgroundActivityState): Backg
   return { active: true, fadeMs: BACKGROUND_FADE_MS.resume };
 }
 
+/**
+ * 첫 진입 덮개('Bflow.' 화면·로그인 카드) 아래에 미리 그린 대시보드 배경 — 덮개가 내려와 있는 동안은
+ * 첫 장만 그리고 바로 쉰다(가려져 안 보이는데 초당 30장을 그리지 않게). 덮개가 걷히기 시작하면 창 상태대로
+ * 서서히 이어 간다. 보이는 로그인 배경에는 쓰지 않는다(holdBackgroundLoops 는 전역이라 그것까지 멈춘다).
+ */
+export function withEntryCurtainHold(target: BackgroundActivityTarget, curtainDown: boolean): BackgroundActivityTarget {
+  return curtainDown ? { active: false, fadeMs: 0 } : target;
+}
+
 /* ─── 잠시 멈춤 요청(위젯 끌기 등) ─────────────────────────────── */
 
 let holdCount = 0;
