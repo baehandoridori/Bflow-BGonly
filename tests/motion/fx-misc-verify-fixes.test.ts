@@ -10,6 +10,7 @@ import {
   type AssigneeFlash,
 } from '../../src/components/widgets/assigneeFlash.ts';
 import { SCENE_FLASH_MERGE_MS } from '../../src/stores/sceneFlashStore.ts';
+import { GHOST_LEAVE_MS, createGhostLingerOnChange } from '../../src/utils/dragLanding.ts';
 
 /* 움직임 폴리싱 검증 지적 수정 (갈래 fx-misc):
    acc-dash-1 · acc-dash-3 · review-correctness-3 · acc-live-drag-view-2/3/4 · acc-motion-settings-4 · acc-chrome-popups-2 */
@@ -174,6 +175,35 @@ test("'만들기': 저장 id 로 바뀌어도 같은 막대(key)로 이어 그�
   // 착지·실시간 표시는 실제 일정 키 그대로
   assert.match(grid, /landingToken=\{landing && landing\.key === identityKey \? landing\.seq : null\}/);
   assert.match(grid, /isRealtimeHighlighted=\{highlightedEventIdentities\?\.has\(identityKey\)\}/);
+});
+
+test("'만들기': 저장이 녹는 시간보다 빨리 끝나 창이 닫혀도 유리 막대는 끝까지 녹는다 (재검증 지적)", () => {
+  const range = { startDate: '2026-10-05', endDate: '2026-10-07', days: 3, dragging: false };
+  // 녹던 범위가 사라지고 그릴 범위도 없다(저장 성공 → 창 닫힘) → 다 녹을 때까지 남긴다.
+  assert.equal(createGhostLingerOnChange(range, null), range);
+  // 저장 실패로 창이 남음(범위 그대로, 녹기만 멈춤) → 남기지 않는다(유리 막대가 다시 보인다).
+  assert.equal(createGhostLingerOnChange(range, range), null);
+  // 녹기 시작(없던 녹는 범위가 생김)·녹기 전에 취소(녹던 범위 없음) → 남기지 않는다.
+  assert.equal(createGhostLingerOnChange(null, range), null);
+  assert.equal(createGhostLingerOnChange(null, null), null);
+
+  const grid = read('src/components/calendar/CalendarGrid.tsx');
+  const has = (snippet: string, message?: string) => assert.ok(grid.includes(snippet), message ?? `CalendarGrid 에 없음: ${snippet}`);
+  // 녹는 중일 때만 범위를 본다 — 끄는 동안 범위가 매번 새 값이어도 다시 그리지 않는다.
+  has('const leavingRange: GhostRange | null = createGhostLeaving ? createRange ?? null : null;');
+  // 범위가 사라지는 바로 그 렌더에서 정한다(효과에서 정하면 한 번 떼었다 다시 붙는다).
+  assert.match(grid, /if \(leavingRangeSeen !== leavingRange\) \{\s*setGhostLinger\(createGhostLingerOnChange\(leavingRangeSeen, createRange \?\? null\)\);\s*setLeavingRangeSeen\(leavingRange\);\s*\}/);
+  assert.match(grid, /const timer = setTimeout\(\(\) => setGhostLinger\(null\), GHOST_LEAVE_MS\);\s*return \(\) => clearTimeout\(timer\);/);
+  has('const ghostRange = createRange ?? ghostLinger;');
+  has('const ghostLeaving = createGhostLeaving || (!createRange && ghostLinger !== null);', '남기는 동안은 계속 녹는 중');
+  // 같은 자리의 유리 막대를 그대로 이어 그린다(범위가 사라져도 떼지 않는다).
+  assert.match(grid, /\{ghostRange && \(\s*<DragCreateGhost[\s\S]*?totalDays=\{ghostRange\.days\}[\s\S]*?leaving=\{ghostLeaving\}/);
+  assert.doesNotMatch(grid, /\{createRange && \(\s*<DragCreateGhost/);
+  assert.equal(GHOST_LEAVE_MS, 150);
+  // 저장 처리 시간은 건드리지 않는다(기다리면 캘린더 하네스의 가짜 시계가 멈췄다).
+  const view = read('src/views/ScheduleView.tsx');
+  const handler = view.slice(view.indexOf('const handleAddEvent = useCallback('), view.indexOf('const handleDeleteEvent'));
+  assert.doesNotMatch(handler, /GHOST_LEAVE_MS|setTimeout/);
 });
 
 /* ─── acc-motion-settings-4: 빠른 검색 — 키보드로 옮기는 중에는 커서 밑 줄로 선택을 덮어쓰지 않는다 ─── */

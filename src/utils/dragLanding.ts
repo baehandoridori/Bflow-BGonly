@@ -29,6 +29,18 @@ export const BORN_KEEP_MS = 1000;
 /** '만들기'를 누르면 유리 막대가 녹는 길이(ms) — CSS .calendar-drag-ghost-layer.is-leaving 과 같은 값. */
 export const GHOST_LEAVE_MS = 150;
 
+/**
+ * 녹던 유리 막대 범위가 바뀌는 순간, 다 녹을 때까지 남겨 둘 범위(남기지 않으면 null).
+ *
+ * 저장이 녹는 시간(GHOST_LEAVE_MS)보다 빨리 끝나면 생성 창이 닫히며 범위가 사라지는데, 그 순간 유리 막대를 떼면
+ * 반쯤 녹은 채 툭 사라졌다. 녹던 범위(previousLeavingRange)가 사라졌는데 그릴 범위(nextRange)도 없으면 그것을 남긴다
+ * (거두는 건 부른 쪽의 타이머). 저장에 실패해 창이 남으면(범위가 그대로) 남기지 않는다 — 유리 막대가 다시 보인다.
+ * 녹기 전에 창을 닫으면(취소) 녹던 범위가 없었으니 남기지 않는다.
+ */
+export function createGhostLingerOnChange<R>(previousLeavingRange: R | null, nextRange: R | null): R | null {
+  return previousLeavingRange !== null && nextRange === null ? previousLeavingRange : null;
+}
+
 export interface SlideBox {
   left: number;
   top: number;

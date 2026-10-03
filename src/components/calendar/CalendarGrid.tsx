@@ -39,7 +39,7 @@ import { DragCreateGhost } from './DragCreateGhost';
 import { useProximityReveal } from '@/hooks/useProximityReveal';
 import { shouldRevealOnMount } from '@/utils/gridFlip';
 import { DragSlideAnchor, DropLanding } from '@/components/ui/DragLanding';
-import type { LandingMark, SlideBox } from '@/utils/dragLanding';
+import { GHOST_LEAVE_MS, createGhostLingerOnChange, type LandingMark, type SlideBox } from '@/utils/dragLanding';
 
 // 바 배치는 주말 숨김과 한 몸이라 유틸로 옮겼다. 기존 import 경로는 그대로 살려 둔다.
 export { layoutEventBars, type EventBar };
@@ -679,9 +679,29 @@ export function CalendarGrid({
   );
   const columnCount = visibleWeeks[0]?.length ?? (showWeekends ? 7 : 5);
 
+  // '만들기' 뒤 저장이 유리 막대가 녹는 시간(150ms)보다 빨리 끝나 생성 창이 닫혀도, 유리 막대는 끝까지 녹인다
+  // (진짜 막대는 그대로 굳어진다). 범위가 사라지는 바로 그 렌더에서 남길 범위를 정한다(그리는 중 상태 맞추기) —
+  // 효과에서 정하면 한 번 떼었다 다시 붙어 반쯤 녹은 막대가 툭 사라진다. 녹는 중일 때만 범위를 보므로
+  // 끄는 동안(범위가 매번 새 값)에는 다시 그리지 않는다(재검증 지적 — 16번 acc-live-drag-view-4).
+  type GhostRange = NonNullable<typeof createRange>;
+  const leavingRange: GhostRange | null = createGhostLeaving ? createRange ?? null : null;
+  const [ghostLinger, setGhostLinger] = useState<GhostRange | null>(null);
+  const [leavingRangeSeen, setLeavingRangeSeen] = useState<GhostRange | null>(leavingRange);
+  if (leavingRangeSeen !== leavingRange) {
+    setGhostLinger(createGhostLingerOnChange(leavingRangeSeen, createRange ?? null));
+    setLeavingRangeSeen(leavingRange);
+  }
+  useEffect(() => {
+    if (!ghostLinger) return undefined;
+    const timer = setTimeout(() => setGhostLinger(null), GHOST_LEAVE_MS);
+    return () => clearTimeout(timer);
+  }, [ghostLinger]);
+  const ghostRange = createRange ?? ghostLinger;
+  const ghostLeaving = createGhostLeaving || (!createRange && ghostLinger !== null);
+
   const isInCreateRange = useCallback(
-    (date: string) => !!createRange && date >= createRange.startDate && date <= createRange.endDate,
-    [createRange],
+    (date: string) => !!ghostRange && date >= ghostRange.startDate && date <= ghostRange.endDate,
+    [ghostRange],
   );
 
   // 커서와의 거리로 + 버튼을 서서히 드러낸다. 누르고 있는 버튼은 계속 또렷하게.
@@ -781,16 +801,16 @@ export function CalendarGrid({
               className={cn("relative grid flex-1 min-h-0", isCurrentWeek && 'bg-accent/[0.03]')}
               style={{ gridTemplateColumns }}
             >
-              {createRange && (
+              {ghostRange && (
                 <DragCreateGhost
                   week={dateStrs}
                   isSelected={isInCreateRange}
                   gridTemplateColumns={gridTemplateColumns}
-                  totalDays={createRange.days}
-                  showLabel={dateStrs.includes(createRange.startDate)}
+                  totalDays={ghostRange.days}
+                  showLabel={dateStrs.includes(ghostRange.startDate)}
                   reduceMotion={reduceMotion}
-                  dragging={createRange.dragging}
-                  leaving={createGhostLeaving}
+                  dragging={ghostRange.dragging}
+                  leaving={ghostLeaving}
                 />
               )}
               {/* 날짜 셀 배경 */}
