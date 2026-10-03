@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 
 import {
   DEFAULT_MOTION_LEVEL,
@@ -26,6 +27,16 @@ import { animateEl, prefersReducedMotion } from '../../src/utils/motion.ts';
 
 const read = (file: string) => readFileSync(file, 'utf-8').replace(/\r\n/g, '\n');
 const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+// 빌드 때 '최소' 짝을 만드는 PostCSS 플러그인(scripts/postcss-motion-minimal.cjs)을 거친 CSS.
+const requireCjs = createRequire(import.meta.url);
+const postcss = requireCjs('postcss') as (plugins: unknown[]) => { process(css: string, opts: { from: string }): Promise<{ css: string }> };
+const motionMinimal = requireCjs('../../scripts/postcss-motion-minimal.cjs') as (() => unknown) & { MINIMAL_ON: string };
+const MINIMAL_ON = motionMinimal.MINIMAL_ON;
+async function buildMinimal(file: string): Promise<string> {
+  const result = await postcss([motionMinimal()]).process(readFileSync(file, 'utf-8'), { from: file });
+  return stripComments(result.css.replace(/\r\n/g, '\n'));
+}
 
 type FakeDoc = { documentElement: { dataset: Record<string, string> } };
 const g = globalThis as unknown as { document?: FakeDoc; window?: unknown };
@@ -299,22 +310,24 @@ test('토스트·대시보드 위젯의 !important 움직임은 no-preference �
 
 /* ─── CSS: '최소'·'가볍게' ─── */
 
-test("'최소' 전역 규칙: 동작 줄이기 전역 규칙과 같은 네 값, ID 특이도로 !important 규칙도 이긴다", () => {
+test("'최소' 전역 규칙: 빌드 때 동작 줄이기 전역 규칙을 특이도 그대로 복제(정보 표시를 살리는 규칙을 누르지 않게)", async () => {
+  // 예전에는 이 파일이 ID 특이도 '최소' 전역 규칙을 따로 두어, 동작 줄이기에서 정보 표시를 살리는 규칙까지 눌렀다.
+  // 이제 scripts/postcss-motion-minimal.cjs 가 index.css 동작 줄이기 블록을 그대로 '최소' 짝으로 만든다.
   const css = stripComments(read('src/styles/motion-foundation.css'));
-  const at = css.indexOf("html[data-motion='minimal'],\nhtml[data-motion='minimal'] :is(*, #bf-motion-minimal),");
-  assert.ok(at >= 0, '최소 전역 규칙 선택자');
-  const body = css.slice(css.indexOf('{', at) + 1, css.indexOf('}', at));
+  assert.doesNotMatch(css, /#bf-motion-minimal/);
+  assert.ok(!css.includes("html[data-motion='minimal']"), "손으로 쓴 '최소' 짝 없음(플러그인이 만든다)");
+  const index = await buildMinimal('src/index.css');
+  const at = index.indexOf(`*${MINIMAL_ON}, *${MINIMAL_ON}::before, *${MINIMAL_ON}::after {`);
+  assert.ok(at >= 0, '전역 규칙의 최소 짝(특이도 0)');
+  const body = index.slice(at, index.indexOf('}', at));
   for (const decl of ['animation-duration: 0.01ms !important', 'animation-iteration-count: 1 !important', 'transition-duration: 0.01ms !important', 'scroll-behavior: auto !important']) {
     assert.ok(body.includes(decl), decl);
   }
-  // index.css 전역 규칙과 같은 값인지
-  const index = stripComments(read('src/index.css'));
-  for (const decl of ['animation-duration: 0.01ms !important', 'animation-iteration-count: 1 !important', 'transition-duration: 0.01ms !important', 'scroll-behavior: auto !important']) {
-    assert.ok(index.includes(decl), `index.css 전역 규칙: ${decl}`);
-  }
-  // 동작 줄이기 전용 규칙의 '최소' 짝
-  assert.match(css, /html\[data-motion='minimal'\] \.bf-card-hover:hover \{\s*translate: none;/);
-  assert.match(css, /html\[data-motion='minimal'\] \.bf-press:active:not\(:disabled\) \{\s*transform: none;/);
+  // 동작 줄이기 전용 규칙의 '최소' 짝 — 카드 떠오름·누름 축소 없음
+  assert.ok(index.includes(`.bf-press:active:not(:disabled)${MINIMAL_ON} { transform: none; }`), '누름 축소 없음');
+  const foundation = (await buildMinimal('src/styles/motion-foundation.css')).replace(/\s+/g, ' ');
+  assert.ok(foundation.includes(`.bf-card-hover:hover${MINIMAL_ON} { translate: none; }`), '카드 떠오름 없음');
+  assert.ok(foundation.includes(`.scene-card-interactive:hover${MINIMAL_ON} { --tw-translate-y: 0px; }`), '씬 카드 떠오름 없음');
 });
 
 test("'가볍게' 이상: 숨 쉬는 장식을 멈춘다", () => {
@@ -354,14 +367,15 @@ test("'가볍게' 이상: 뒤 흐림을 모두 끄고(인라인 흐림도 이김
   assert.match(effects, /lite: '[^']*유리 효과도 꺼요/);
 });
 
-test('휴가 화면 동기화 막대: framer x 반복 대신 CSS transform 훑기, 동작 줄이기·최소는 멈춘 막대', () => {
+test('휴가 화면 동기화 막대: framer x 반복 대신 CSS transform 훑기, 동작 줄이기·최소는 멈춘 막대', async () => {
   const view = read('src/views/VacationView.tsx');
   assert.doesNotMatch(view, /repeat: Infinity/);
   assert.match(view, /className="bf-sync-sweep"/);
   const css = stripComments(read('src/styles/motion-foundation.css'));
   assert.match(css, /@keyframes bf-sync-sweep \{\s*from \{ transform: translateX\(-100%\); \}\s*to \{ transform: translateX\(250%\); \}/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.bf-sync-sweep \{[^}]*animation: none;/);
-  assert.match(css, /html\[data-motion='minimal'\] \.bf-sync-sweep \{[^}]*animation: none;/);
+  const built = (await buildMinimal('src/styles/motion-foundation.css')).replace(/\s+/g, ' ');
+  assert.ok(built.includes(`.bf-sync-sweep${MINIMAL_ON} { width: 100%; transform: none; opacity: 0.55; animation: none; }`), "'최소' 짝");
 });
 
 /* ─── 배선 ─── */
@@ -379,8 +393,10 @@ test('앱 바깥 MotionConfig: 기본 user, 최소면 always — 메인 창·위
 test('useMotionPref: 기존 { reduce } 사용처 그대로 + lite·level, OS 값과 앱 설정을 함께 본다', () => {
   const hook = read('src/hooks/useMotionPref.ts');
   assert.match(hook, /export function useMotionPref\(\): MotionPref/);
-  assert.match(hook, /useReducedMotion\(\) === true/);
-  assert.match(hook, /resolveMotionPref\(osReduce, level\)/);
+  // OS 값은 matchMedia 구독(쓰는 도중 바뀌어도 따라감) + 앱 설정 — 판단은 resolveMotionPref 한 곳
+  assert.match(hook, /useState<MotionPref>\(readMotionPref\)/);
+  assert.match(hook, /subscribeOsReducedMotion\(sync\)/);
+  assert.match(read('src/utils/motionLevel.ts'), /return resolveMotionPref\(readOsReducedMotion\(\), current\);/);
   // 함수로 직접 불러 보는 테스트 하네스가 흉내 내지 않는 useSyncExternalStore 는 쓰지 않는다
   assert.doesNotMatch(hook, /useSyncExternalStore\(/);
 });

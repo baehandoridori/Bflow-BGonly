@@ -2,8 +2,8 @@
 /* 들림·덮개·안착 링·쓰레기통은 src/styles/motion-live-drag.css '16. 끌어서 옮기기'(움직임 폴리싱 16번). */
 
 /* 움직임 폴리싱 바탕 B: 아래 !important 전환은 특이도가 높아 동작 줄이기 전역 규칙(*, 0.01ms !important)을
-   이긴다. 그래서 전환은 동작 줄이기가 아닐 때만 적용한다('움직임: 최소'는 motion-foundation.css 의 ID 특이도
-   규칙이 이긴다). 겹침 순서·투명도처럼 움직임이 아닌 값은 그대로 둔다. */
+   이긴다. 그래서 전환은 동작 줄이기가 아닐 때만 적용한다('움직임: 최소'도 빌드 때 이 블록에서 빠진다 —
+   scripts/postcss-motion-minimal.cjs). 겹침 순서·투명도처럼 움직임이 아닌 값은 그대로 둔다. */
 @media (prefers-reduced-motion: no-preference) {
   /* 기본 아이템: 부드러운 transition (밀려나는 위젯) — 크기·그림자는 움직이지 않는다(16번) */
   .react-grid-item {
