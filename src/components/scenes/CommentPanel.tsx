@@ -1721,9 +1721,11 @@ export function CommentPanel({
   };
 
   /**
-   * '지우기' — 보내지 못한 말풍선을 목록에서 바로 빼고, 서버에서도 같은 id 를 지운 뒤에 올린 첨부를 정리한다.
-   * 저장은 됐는데 응답만 끊긴 댓글이면 서버에 남아 있다 — 그때 첨부부터 지우면 그 댓글의 그림이 깨졌다.
-   * 저장 안 된 보통의 경우엔 서버 삭제가 아무 일도 하지 않는다. 서버에 닿지 못하면 말풍선을 되돌려 놓고 알린다.
+   * '지우기' — 보내지 못한 말풍선을 목록에서 바로 빼고 되돌리지 않는다(씬 이동·패널 닫기의 forgetUnsentComments 와 같은 정책).
+   * 서버 삭제(같은 id)는 최선만 다한다: 지워지면 올린 첨부도 정리하고, 서버에 닿지 못하면 첨부만 남긴다.
+   * 저장은 됐는데 응답만 끊긴 댓글이면 서버에 남아 있다 — 첨부를 지우지 않았으니 다음 재조회 때 정상 댓글로 보이고
+   * 휴지통으로 지울 수 있다. 보내기 실패의 흔한 원인이 연결 끊김이라, 그때 말풍선을 되살리고 오류를 띄우면
+   * 실패한 말풍선을 치울 수 없었다(재검증 지적 — review-data-safety-6 후속).
    */
   const discardUnsentComment = (commentId: string) => {
     const entry = unsentCommentsRef.current.get(commentId);
@@ -1733,16 +1735,7 @@ export function CommentPanel({
     const remaining = comments.filter((c) => c.id !== commentId);
     setComments((current) => current.filter((c) => c.id !== commentId));
     onCountChange?.(remaining.length);
-    const panelSceneKey = sceneKeyRef.current;
-    void dropUnsentComment(entry, '[보내지 못한 댓글 지우기]').then((dropped) => {
-      if (dropped) return;
-      sonnerToast.error('댓글을 지우지 못했어요 · 인터넷 연결을 확인해 주세요');
-      // 같은 씬을 보고 있으면 '보내지 못했어요' 말풍선을 그대로 되돌려 놓는다(다시 보내기·지우기를 다시 고를 수 있게).
-      if (!mountedRef.current || sceneKeyRef.current !== panelSceneKey) return;
-      unsentCommentsRef.current.set(commentId, { ...entry, status: 'failed' });
-      setCommentSendStatus(commentId, 'failed');
-      reinsertComment(entry.comment);
-    });
+    void dropUnsentComment(entry, '[보내지 못한 댓글 지우기]');
   };
 
   const handleSubmit = async () => {

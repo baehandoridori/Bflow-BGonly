@@ -205,9 +205,11 @@ test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 
   assert.match(retry, /if \(!entry \|\| entry\.status !== 'failed'\) return;/);
   assert.match(retry, /beginCommentSend\(draft\);\s*try \{\s*await addComment\(draft\.targetSceneKey, draft\.comment\);\s*finishCommentSend\(commentId\);\s*afterCommentDelivered\(draft\);/);
   assert.match(retry, /if \(!failCommentSend\(commentId\)\) \{\s*void dropUnsentComment\(draft, '\[댓글 다시 보내기 실패\]'\);/);
-  // 지우기: 말풍선은 바로 빼고, 서버에서 같은 id 를 지운 뒤에만 첨부 정리(검증 지적 review-data-safety-6). 실패하면 되돌려 놓는다.
+  // 지우기: 말풍선은 바로 빼고 되돌리지 않는다. 서버에서 같은 id 를 지운 뒤에만 첨부 정리(검증 지적 review-data-safety-6),
+  // 서버에 닿지 못하면 첨부만 남긴다 — 오류 안내·말풍선 복원 없이 조용히(재검증 지적).
   const discard = bodyOf(panel, 'const discardUnsentComment = (commentId: string) =>');
-  assert.match(discard, /void dropUnsentComment\(entry, '\[보내지 못한 댓글 지우기\]'\)\.then\(\(dropped\) => \{/);
+  assert.match(discard, /void dropUnsentComment\(entry, '\[보내지 못한 댓글 지우기\]'\);/);
+  assert.doesNotMatch(discard, /\.then\(|reinsertComment\(|sonnerToast\./, '서버 결과로 말풍선을 되살리거나 오류를 띄우지 않는다');
   assert.doesNotMatch(discard, /cleanupDraftImages\(/, '첨부를 서버 확인 없이 지우지 않는다');
   // 저장 뒤 할 일 한 곳: 다시 불러오기·읽음·미리보기 정리·슬랙 멘션
   const after = bodyOf(panel, 'const afterCommentDelivered = (draft: UnsentCommentDraft) =>');

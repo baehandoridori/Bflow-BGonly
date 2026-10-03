@@ -152,10 +152,12 @@ test('보내지 못한 댓글을 버릴 때는 서버에서 같은 id 를 먼저
   // 지우기·씬 이동/패널 닫기·남길 자리 없는 실패 — 모두 같은 길
   assert.match(bodyOf(panel, 'const forgetUnsentComments = (context: string) =>'), /if \(entry\.status === 'failed'\) void dropUnsentComment\(entry, context\);/);
   assert.equal([...panel.matchAll(/void dropUnsentComment\(/g)].length, 5);
-  // 지우기가 서버에 닿지 못하면 같은 씬에선 '보내지 못했어요' 말풍선을 되돌려 놓고 알린다(낙관적 → 실패 시 롤백).
+  // 지우기는 화면에서 바로 확정 제거하고 되돌리지 않는다(씬 이동·패널 닫기와 같은 정책, 재검증 지적).
+  // 연결이 끊겨 서버 삭제가 실패해도 말풍선을 되살리거나 오류를 띄우지 않는다 — 첨부만 남는다(dropUnsentComment).
   const discard = bodyOf(panel, 'const discardUnsentComment = (commentId: string) =>');
-  assert.match(discard, /sonnerToast\.error\('댓글을 지우지 못했어요 · 인터넷 연결을 확인해 주세요'\);/);
-  assert.match(discard, /if \(!mountedRef\.current \|\| sceneKeyRef\.current !== panelSceneKey\) return;\s*unsentCommentsRef\.current\.set\(commentId, \{ \.\.\.entry, status: 'failed' \}\);\s*setCommentSendStatus\(commentId, 'failed'\);\s*reinsertComment\(entry\.comment\);/);
+  assert.match(discard, /finishCommentSend\(commentId\);[\s\S]*?setComments\(\(current\) => current\.filter\(\(c\) => c\.id !== commentId\)\);[\s\S]*?void dropUnsentComment\(entry, '\[보내지 못한 댓글 지우기\]'\);/);
+  assert.doesNotMatch(discard, /dropUnsentComment\([^)]*\)\s*\.then/, '서버 결과를 기다려 화면을 바꾸지 않는다');
+  assert.doesNotMatch(discard, /sonnerToast|reinsertComment|unsentCommentsRef\.current\.set|setCommentSendStatus\(commentId, 'failed'\)/, '실패해도 말풍선 복원·오류 안내 없음');
 });
 
 /* ─── 새 반응 칩: 바깥 칸은 움직이지 않음 (acc-comments-notify-3) ─── */
