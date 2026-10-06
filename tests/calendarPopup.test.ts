@@ -732,22 +732,23 @@ test('미리보기: 새 창의 위치·크기를 기억했다가 다음에 그�
     await openPreviewWindow({ localStorage: storage, location: { hash: '' }, addEventListener: (type, listener) => { mainListeners.set(type, listener); } });
     assert.equal(mainListeners.size, 0);
 
+    // 창마다 다른 칸에 적는다 — 한 칸에 모아 적지 않는다(아래 '거의 동시에 적는 경우' 참고)
+    const scheduleKey = 'bflow:preview:widget-popup-bounds:schedule';
+    assert.deepEqual(JSON.parse(storage.getItem(scheduleKey) ?? ''), { left: 10.4, top: 20.6, width: 100, height: 50 }, '적을 때는 잰 값 그대로, 읽을 때 다듬는다');
+    assert.equal(storage.getItem('bflow:preview:widget-popup-bounds'), null);
+
     // 기억한 값이 깨졌거나 숫자가 아니면 기본 크기로
-    for (const broken of ['{broken', '[]', 'null', JSON.stringify({ schedule: { left: 'a', top: 0, width: 900, height: 640 } }), JSON.stringify({ schedule: { left: 0, top: 0, width: 900 } }), JSON.stringify({ schedule: null })]) {
-      storage.setItem('bflow:preview:widget-popup-bounds', broken);
+    for (const broken of ['{broken', '[]', 'null', '7', '"text"', JSON.stringify({ left: 'a', top: 0, width: 900, height: 640 }), JSON.stringify({ left: 0, top: 0, width: 900 }), JSON.stringify({ schedule: { left: 0, top: 0, width: 900, height: 640 } })]) {
+      storage.setItem(scheduleKey, broken);
       assert.equal((await open('schedule', '캘린더')).features, 'popup,width=1280,height=820', broken);
     }
 
     // 값이 깨져 있어도 다음 저장은 된다 — 깨진 값은 버리고 깨끗하게 새로 적는다
     Object.assign(popupWindow, { screenX: 5, screenY: 6, innerWidth: 700, innerHeight: 500 });
     for (const broken of ['{broken', '[1,2]', '"text"', 'null', '7']) {
-      storage.setItem('bflow:preview:widget-popup-bounds', broken);
+      storage.setItem(scheduleKey, broken);
       listeners.get('pagehide')!();
-      assert.deepEqual(
-        JSON.parse(storage.getItem('bflow:preview:widget-popup-bounds') ?? ''),
-        { schedule: { left: 5, top: 6, width: 700, height: 500 } },
-        broken,
-      );
+      assert.deepEqual(JSON.parse(storage.getItem(scheduleKey) ?? ''), { left: 5, top: 6, width: 700, height: 500 }, broken);
     }
     assert.equal((await open('schedule', '캘린더')).features, 'popup,width=700,height=500,left=5,top=6');
 
@@ -769,6 +770,40 @@ test('미리보기: 새 창의 위치·크기를 기억했다가 다음에 그�
     await openPreviewWindow(popupLike(700, 520));
     assert.deepEqual(resized.slice(1), [[10, 0], [0, -20]], '가로나 세로 한쪽만 달라도 맞춘다');
 
+    // 기억한 값이 깨져 있을 때 뜬 새 창도 멀쩡히 뜬다 — 크기를 맞추려 들지 않는다
+    storage.setItem(scheduleKey, '{broken');
+    await openPreviewWindow(popupLike(640, 480));
+    assert.equal(resized.length, 3);
+    listeners.get('pagehide')!(); // 캘린더 창이 자기 자리를 다시 적어 둔다(700×500 @ 5,6)
+
+    // 저장소의 이 칸을 읽고 쓸 수 없는 미리보기(사생활 보호 창 등)에서도 죽지 않는다 — 기억만 하지 않는다
+    const plain = fakeLocalStorage();
+    const isBoundsKey = (key: string) => key.startsWith('bflow:preview:widget-popup-bounds');
+    const blockedStorage = {
+      getItem: (key: string) => { if (isBoundsKey(key)) throw new Error('SecurityError'); return plain.getItem(key); },
+      setItem: (key: string, value: string) => { if (isBoundsKey(key)) throw new Error('QuotaExceededError'); plain.setItem(key, value); },
+      removeItem: plain.removeItem,
+    };
+    const blockedListeners = new Map<string, () => void>();
+    await openPreviewWindow({
+      localStorage: blockedStorage, location: { hash: '#widget-popup/schedule' }, opener: mainWindow,
+      screenX: 1, screenY: 2, innerWidth: 500, innerHeight: 400,
+      addEventListener: (type, listener) => { blockedListeners.set(type, listener); },
+      resizeBy: () => { assert.fail('기억한 것이 없으니 크기를 맞추지 않는다'); },
+    });
+    blockedListeners.get('resize')!();
+    blockedListeners.get('pagehide')!();
+    const blockedOpened: string[] = [];
+    const blockedMainWindow: PreviewWindow = {
+      localStorage: blockedStorage,
+      location: { hash: '', origin: 'http://localhost:5190', pathname: '/', search: '?preview=1' },
+      open: (_url, _name, features) => { blockedOpened.push(features); return {}; },
+    };
+    const blockedMain = await openPreviewWindow(blockedMainWindow);
+    holder.window = blockedMainWindow;
+    assert.deepEqual(await blockedMain.widgetOpenPopup('schedule', '캘린더'), { ok: true });
+    assert.deepEqual(blockedOpened, ['popup,width=1280,height=820'], '기본 크기로 연다');
+
     // 다른 새 창이 자기 자리를 적어도 캘린더 창의 기억은 남는다
     const boardListeners = new Map<string, () => void>();
     await openPreviewWindow({
@@ -781,6 +816,49 @@ test('미리보기: 새 창의 위치·크기를 기억했다가 다음에 그�
     boardListeners.get('pagehide')!();
     assert.equal((await open('character-board', '캐릭터 현황판')).features, 'popup,width=1000,height=720,left=40,top=50', '주소 뒤 쿼리는 창 id 가 아니다');
     assert.equal((await open('schedule', '캘린더')).features, 'popup,width=700,height=500,left=5,top=6');
+
+    // 두 새 창이 거의 동시에 적는 경우(코덱스 지적) — 서로 다른 프로세스의 창은 저장소를 읽은 뒤 쓰기 전에 끼어든 다른 창의
+    // 쓰기를 보지 못한다. 한 칸에 모두 모아 적으면(읽고-고치고-쓰기) 늦게 쓴 창이 먼저 쓴 창의 기억을 지운다.
+    // Electron 은 main 한 곳이 모아 적어서 이런 일이 없다. 미리보기는 창마다 다른 칸에 적어 서로 지울 수 없게 한다.
+    const backing = new Map<string, string>();
+    /** 창이 뜰 때 본 내용으로 읽기가 굳은 저장소(자기가 쓴 것만 더 보인다). 쓰기는 실제 저장소에 간다 */
+    const staleView = () => {
+      const seen = new Map(backing);
+      return {
+        getItem: (key: string) => seen.get(key) ?? null,
+        setItem: (key: string, value: string) => { seen.set(key, value); backing.set(key, value); },
+        removeItem: (key: string) => { seen.delete(key); backing.delete(key); },
+      };
+    };
+    const liveView = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => { backing.set(key, value); },
+      removeItem: (key: string) => { backing.delete(key); },
+    };
+    const racing = async (hash: string, at: { screenX: number; screenY: number; innerWidth: number; innerHeight: number }) => {
+      const raceListeners = new Map<string, () => void>();
+      await openPreviewWindow({
+        localStorage: staleView(), location: { hash }, opener: mainWindow, ...at,
+        addEventListener: (type, listener) => { raceListeners.set(type, listener); },
+      });
+      return raceListeners;
+    };
+    const calendarRace = await racing('#widget-popup/schedule', { screenX: 11, screenY: 12, innerWidth: 801, innerHeight: 601 });
+    const boardRace = await racing('#widget-popup/character-board', { screenX: 21, screenY: 22, innerWidth: 902, innerHeight: 702 });
+    calendarRace.get('pagehide')!();
+    boardRace.get('pagehide')!(); // 캘린더 창이 방금 쓴 것을 보지 못한 채 적는다
+    calendarRace.get('resize')!(); // 그 뒤 캘린더 창이 한 번 더 적어도(현황판 창의 쓰기를 못 본 채) 현황판의 기억은 남는다
+    const raceOpened: string[] = [];
+    const raceMainWindow: PreviewWindow = {
+      localStorage: liveView,
+      location: { hash: '', origin: 'http://localhost:5190', pathname: '/', search: '?preview=1' },
+      open: (_url, _name, features) => { raceOpened.push(features); return {}; },
+    };
+    const raceMain = await openPreviewWindow(raceMainWindow);
+    holder.window = raceMainWindow;
+    await raceMain.widgetOpenPopup('schedule', '캘린더');
+    await raceMain.widgetOpenPopup('character-board', '캐릭터 현황판');
+    assert.deepEqual(raceOpened, ['popup,width=801,height=601,left=11,top=12', 'popup,width=902,height=702,left=21,top=22']);
   } finally {
     console.log = originalLog;
     console.info = originalInfo;

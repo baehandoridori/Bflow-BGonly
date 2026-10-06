@@ -1149,27 +1149,19 @@ function receiveMockSessionMessage(data: unknown): void {
 /* ─── 미리보기: 새 창의 위치·크기 기억 ───
    Electron 에서는 main 프로세스가 새 창의 위치·크기를 저장해 다음에 같은 자리·크기로 연다. 미리보기에서도 같은 흐름을
    확인할 수 있게, 새 창이 자기 위치·크기를 localStorage 에 적어 두고(크기가 바뀔 때·닫힐 때) 다음에 열 때 그 값을 쓴다(코덱스 지적).
-   옮기기만 할 때는 브라우저가 알려 주지 않으므로 닫힐 때(pagehide) 마지막 자리를 적는다. */
-const MOCK_POPUP_BOUNDS_KEY = 'bflow:preview:widget-popup-bounds';
+   옮기기만 할 때는 브라우저가 알려 주지 않으므로 닫힐 때(pagehide) 마지막 자리를 적는다.
+   **창마다 다른 칸에 적는다.** Electron 은 main 한 곳이 모아 적지만, 미리보기는 창이 저마다 적는다 — 한 칸에 모두 모아 두면
+   (읽고-고치고-쓰기) 두 창이 거의 동시에 적을 때 늦게 쓴 창이 먼저 쓴 창의 기억을 지운다(코덱스 지적). */
+const MOCK_POPUP_BOUNDS_KEY_PREFIX = 'bflow:preview:widget-popup-bounds:';
 interface MockPopupBounds { left: number; top: number; width: number; height: number }
 type MockPopupBoundsStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
-function readAllMockPopupBounds(storage: MockPopupBoundsStorage): Record<string, Partial<MockPopupBounds> | undefined> {
-  try {
-    const parsed: unknown = JSON.parse(storage.getItem(MOCK_POPUP_BOUNDS_KEY) ?? '{}');
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, Partial<MockPopupBounds> | undefined>
-      : {};
-  } catch {
-    return {}; // 저장소를 못 읽거나 값이 깨졌으면 기억한 것이 없는 것으로 친다
-  }
-}
-
-/** 기억해 둔 위치·크기. 없거나 숫자가 아니면 null. 크기는 Electron 창과 같은 최소(280×200)를 지킨다 */
+/**
+ * 기억해 둔 위치·크기. 없거나 숫자가 아니면 null. 크기는 Electron 창과 같은 최소(280×200)를 지킨다.
+ * 값이 깨졌거나 저장소를 읽을 수 없으면 던진다 — 부르는 두 곳(여는 쪽·새 창)이 '기억한 것이 없다'로 친다.
+ */
 function readMockPopupBounds(storage: MockPopupBoundsStorage, widgetId: string): MockPopupBounds | null {
-  const saved = readAllMockPopupBounds(storage)[widgetId];
-  if (!saved) return null;
-  const { left, top, width, height } = saved;
+  const { left, top, width, height } = JSON.parse(storage.getItem(MOCK_POPUP_BOUNDS_KEY_PREFIX + widgetId) ?? '{}') as Partial<MockPopupBounds>;
   if (![left, top, width, height].every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
   return {
     left: Math.round(left as number),
@@ -1179,13 +1171,9 @@ function readMockPopupBounds(storage: MockPopupBoundsStorage, widgetId: string):
   };
 }
 
+/** 이 창의 칸에만 적는다(다른 창의 칸은 읽지도 고치지도 않는다). 저장소를 못 쓰면 던진다 — 부르는 쪽이 기억하지 않고 넘어간다 */
 function writeMockPopupBounds(storage: MockPopupBoundsStorage, widgetId: string, bounds: MockPopupBounds): void {
-  if (![bounds.left, bounds.top, bounds.width, bounds.height].every((value) => Number.isFinite(value))) return;
-  try {
-    storage.setItem(MOCK_POPUP_BOUNDS_KEY, JSON.stringify({ ...readAllMockPopupBounds(storage), [widgetId]: bounds }));
-  } catch {
-    // 저장소를 못 쓰면 기억하지 않는다
-  }
+  storage.setItem(MOCK_POPUP_BOUNDS_KEY_PREFIX + widgetId, JSON.stringify(bounds));
 }
 
 /** 미리보기의 '새 창 → 본 창 화면 이동' 신호 채널 (widgetNavigateView / onWidgetNavigateView) */
@@ -2592,7 +2580,7 @@ export function installDevElectronAPI(): void {
           if (dx !== 0 || dy !== 0) self.resizeBy(dx, dy);
         }
       } catch {
-        // 크기를 못 맞춰도 창은 열려 있다
+        // 기억한 값이 깨졌거나 저장소를 읽을 수 없거나 크기를 못 맞춰도, 창은 열려 있다
       }
       const save = () => {
         try {
@@ -3764,7 +3752,7 @@ export function installDevElectronAPI(): void {
       try {
         saved = readMockPopupBounds(window.localStorage, widgetId);
       } catch {
-        saved = null; // 저장소를 쓸 수 없는 미리보기
+        saved = null; // 기억한 값이 깨졌거나 저장소를 읽을 수 없는 미리보기 — 기억한 것이 없는 것으로 친다
       }
       const size = saved ? `width=${saved.width},height=${saved.height},left=${saved.left},top=${saved.top}`
         : widgetId === 'character-board' ? 'width=1160,height=780'
