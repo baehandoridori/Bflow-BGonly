@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { fitWidgetPopupBounds, fitWidgetPopupSize } from '../electron/widgetPopupBounds.ts';
 import { canPopOutToWindow, isWidgetPopupWindow } from '../src/utils/popupWindow.ts';
 import { parseWidgetViewNavigation, requestMainWindowView } from '../src/utils/widgetViewNavigation.ts';
 
@@ -143,6 +144,75 @@ test('main: 캘린더 새 창은 화면형 크기로, 항상 위는 끈 채로 �
 
   // 미리보기도 같은 크기로 연다
   assert.match(code('src/mocks/devElectronAPI.ts'), /widgetId === 'schedule' \? 'width=1280,height=820'/);
+});
+
+test('새 창 크기를 뜰 화면에 맞춘다 — 작은 화면에서 아래·오른쪽이 화면 밖으로 나가지 않게 (코덱스 지적)', () => {
+  // 크기: 화면(작업 영역)보다 크면 그만큼만 줄인다
+  const calendar = { width: 1280, height: 820 };
+  assert.deepEqual(fitWidgetPopupSize(calendar, { width: 1366, height: 728 }), { width: 1280, height: 728 }, '1366×768 노트북 — 높이만 줄인다');
+  assert.deepEqual(fitWidgetPopupSize(calendar, { width: 1280, height: 672 }), { width: 1280, height: 672 }, '1920×1080 을 150% 로 쓰는 노트북');
+  assert.deepEqual(fitWidgetPopupSize(calendar, { width: 865, height: 1488 }), { width: 865, height: 820 }, '세로로 세운 모니터 — 폭만 줄인다');
+  assert.deepEqual(fitWidgetPopupSize(calendar, { width: 2560, height: 1392 }), calendar, '넉넉한 화면에서는 그대로');
+  assert.deepEqual(fitWidgetPopupSize({ width: 1366, height: 728 }, { width: 1366, height: 728 }), { width: 1366, height: 728 }, '딱 맞으면 그대로');
+  assert.deepEqual(fitWidgetPopupSize({ width: 100, height: 90 }, { width: 1366, height: 728 }), { width: 280, height: 200 }, '최소 크기는 지킨다');
+  assert.deepEqual(fitWidgetPopupSize({ width: 900, height: 700 }, { width: 200, height: 150 }), { width: 280, height: 200 }, '화면이 최소 크기보다 작아도 최소 크기');
+
+  // 기억한 자리·크기 되살리기: 크기를 먼저 줄이고, 그 크기로 자리를 화면 안으로 민다
+  const laptop = { x: 0, y: 0, width: 1366, height: 728 };
+  assert.deepEqual(
+    fitWidgetPopupBounds({ x: 300, y: 100, width: 2000, height: 1300 }, laptop),
+    { x: 0, y: 0, width: 1366, height: 728 },
+    '큰 모니터에서 쓰던 크기 → 화면에 꽉 차는 크기',
+  );
+  assert.deepEqual(
+    fitWidgetPopupBounds({ x: 40, y: 20, width: 1280, height: 820 }, laptop),
+    { x: 40, y: 0, width: 1280, height: 728 },
+    '높이만 넘치면 높이만 줄이고 위로 붙인다 (가로 자리는 그대로)',
+  );
+  assert.deepEqual(
+    fitWidgetPopupBounds({ x: 1200, y: 600, width: 480, height: 400 }, laptop),
+    { x: 886, y: 328, width: 480, height: 400 },
+    '크기는 맞고 자리만 넘치면 안으로 민다',
+  );
+  assert.deepEqual(
+    fitWidgetPopupBounds({ x: 200, y: 100, width: 800, height: 500 }, laptop),
+    { x: 200, y: 100, width: 800, height: 500 },
+    '다 들어와 있으면 그대로',
+  );
+  assert.deepEqual(
+    fitWidgetPopupBounds({ x: 1300, y: 700, width: 100, height: 90 }, laptop),
+    { x: 1086, y: 528, width: 280, height: 200 },
+    '최소 크기로 키운 창도 키운 크기 기준으로 안으로 민다',
+  );
+  // 주 화면 왼쪽에 붙은 보조 모니터 — 좌표가 음수이고 위쪽이 0 이 아니다
+  const left = { x: -2560, y: 3, width: 2560, height: 1392 };
+  assert.deepEqual(fitWidgetPopupBounds({ x: -2700, y: -50, width: 800, height: 600 }, left), { x: -2560, y: 3, width: 800, height: 600 });
+  assert.deepEqual(fitWidgetPopupBounds({ x: -500, y: 1000, width: 800, height: 600 }, left), { x: -800, y: 795, width: 800, height: 600 });
+  assert.deepEqual(fitWidgetPopupBounds({ x: -2000, y: 100, width: 3000, height: 2000 }, left), { x: -2560, y: 3, width: 2560, height: 1392 });
+  // 결과에는 자리·크기만 — 기억해 둔 다른 값(투명도 등)이 창 크기 지정에 섞여 들어가지 않는다
+  const remembered = { x: 1, y: 2, width: 300, height: 300, opacity: 0.5, alwaysOnTop: true, title: '캘린더' };
+  assert.deepEqual(Object.keys(fitWidgetPopupBounds(remembered, laptop)).sort(), ['height', 'width', 'x', 'y']);
+
+  // main: 창이 뜰 화면 하나를 정해(기억한 자리의 화면, 처음이면 주 화면) 처음 크기·되살린 크기를 모두 그 안으로
+  const main = code('electron/main.ts');
+  assert.match(main, /import \{ fitWidgetPopupBounds, fitWidgetPopupSize, WIDGET_POPUP_MIN_HEIGHT, WIDGET_POPUP_MIN_WIDTH \} from '\.\/widgetPopupBounds';/);
+  const open = main.slice(main.indexOf('function openWidgetPopup('), main.indexOf("ipcMain.handle('widget:open-popup'"));
+  assert.match(
+    open,
+    /const targetWorkArea = \(savedPos\s+\? screen\.getDisplayNearestPoint\(\{ x: savedPos\.x, y: savedPos\.y \}\)\s+: screen\.getPrimaryDisplay\(\)\)\.workArea;/,
+  );
+  assert.match(
+    open,
+    /const \{ width: initWidth, height: initHeight \} = fitWidgetPopupSize\(\s*savedPos \?\? \{ width: preset\?\.width \?\? 420, height: preset\?\.height \?\? 360 \},\s*targetWorkArea,\s*\);/,
+  );
+  assert.match(open, /width: initWidth,\s+height: initHeight,\s+minWidth: WIDGET_POPUP_MIN_WIDTH,\s+minHeight: WIDGET_POPUP_MIN_HEIGHT,/);
+  // 되살릴 때: 크기까지 맞춘 값을 두 번 준다 — 배율이 다른 모니터로 옮겨 갈 때 한 번으로는 크기가 배율 비율만큼 어긋난다(실측)
+  assert.match(
+    open,
+    /if \(savedPos\) \{\s+const restored = fitWidgetPopupBounds\(savedPos, targetWorkArea\);\s+popupWin\.setBounds\(restored\);\s+popupWin\.setBounds\(restored\);\s+\}/,
+  );
+  assert.equal((open.match(/popupWin\.setBounds\(/g) ?? []).length, 3, '창 자리·크기를 정하는 곳은 되살리기(두 번)와 모서리 붙이기뿐');
+  assert.doesNotMatch(open, /savedPos\.width|savedPos\.height/, '기억한 크기를 맞추지 않고 그대로 쓰는 곳이 없다');
 });
 
 test('여는 곳 ①: 사이드바 캘린더·캐릭터 항목의 새 창 버튼 (공용)', () => {

@@ -95,6 +95,7 @@ import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy'
 import { compareVersions, readManifest } from './autoUpdate/manifest';
 import { resolveChildFolderPath } from './pathCreateFolder';
 import { parseFileNameWBuffer, imageMimeForPath } from './clipboardFiles';
+import { fitWidgetPopupBounds, fitWidgetPopupSize, WIDGET_POPUP_MIN_HEIGHT, WIDGET_POPUP_MIN_WIDTH } from './widgetPopupBounds';
 import { QUIT_FLUSHED_CHANNEL, waitForRendererQuitFlush } from './rendererQuitFlush';
 import {
   initVacation,
@@ -4469,8 +4470,16 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   // 저장된 위치/크기 복원 (Phase 0-6)
   const savedPos = widgetPositionCache.get(widgetId);
   const preset = WIDGET_POPUP_DEFAULTS[widgetId];
-  const initWidth = savedPos ? Math.max(280, savedPos.width) : preset?.width ?? 420;
-  const initHeight = savedPos ? Math.max(200, savedPos.height) : preset?.height ?? 360;
+  // 창이 뜰 화면 — 기억한 자리가 있으면 그 자리의 화면, 처음이면 주 화면(Electron 이 가운데에 띄우는 곳).
+  // 크기를 이 화면의 작업 영역 안으로 줄인다: 큰 모니터에서 쓰던 크기를 작은 화면(노트북·원격 접속)에서 되살리면
+  // 아래·오른쪽이 화면 밖으로 나가 내용과 크기 조절 모서리에 손이 닿지 않는다 (코덱스 지적).
+  const targetWorkArea = (savedPos
+    ? screen.getDisplayNearestPoint({ x: savedPos.x, y: savedPos.y })
+    : screen.getPrimaryDisplay()).workArea;
+  const { width: initWidth, height: initHeight } = fitWidgetPopupSize(
+    savedPos ?? { width: preset?.width ?? 420, height: preset?.height ?? 360 },
+    targetWorkArea,
+  );
   const initAOT = savedPos ? savedPos.alwaysOnTop : preset?.alwaysOnTop ?? true;
 
   // 호출 시점 extra가 우선. 없으면 이전에 저장된 extra 복원.
@@ -4480,8 +4489,8 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   const popupWin = new BrowserWindow({
     width: initWidth,
     height: initHeight,
-    minWidth: 280,
-    minHeight: 200,
+    minWidth: WIDGET_POPUP_MIN_WIDTH,
+    minHeight: WIDGET_POPUP_MIN_HEIGHT,
     frame: false,
     transparent: false,
     alwaysOnTop: initAOT,
@@ -4498,13 +4507,13 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
     },
   });
 
-  // 저장된 위치 적용 + 스크린 범위 검증
+  // 저장된 위치 적용 + 스크린 범위 검증 (크기까지 그 화면 안으로 맞춘 값)
   if (savedPos) {
-    const display = screen.getDisplayNearestPoint({ x: savedPos.x, y: savedPos.y });
-    const wa = display.workArea;
-    const cx = Math.max(wa.x, Math.min(wa.x + wa.width - initWidth, savedPos.x));
-    const cy = Math.max(wa.y, Math.min(wa.y + wa.height - initHeight, savedPos.y));
-    popupWin.setBounds({ x: cx, y: cy, width: initWidth, height: initHeight });
+    const restored = fitWidgetPopupBounds(savedPos, targetWorkArea);
+    popupWin.setBounds(restored);
+    // 창은 주 화면에서 만들어진다. 배율(확대 비율)이 다른 모니터로 옮겨 갈 때는 한 번으로는 크기가 '배율 비율'만큼
+    // 어긋난다(실측: 주 화면 150%·대상 100% 에서 600×500 → 400×333). 창이 그 화면에 놓인 뒤 한 번 더 주면 맞는다.
+    popupWin.setBounds(restored);
   }
 
   // 저장된 opacity 적용
