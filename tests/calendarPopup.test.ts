@@ -234,6 +234,171 @@ test('미리보기 mock: 창 사이 화면 이동 신호를 주고받는다', ()
   assert.match(mock, /onWidgetNavigateView: \(callback\) => \{\s+const channel = getMockWidgetViewChannel\(\);\s+if \(!channel\) return \(\) => \{\};\s+const handler = \(event: MessageEvent\) => callback\(event\.data\);\s+channel\.addEventListener\('message', handler\);\s+return \(\) => channel\.removeEventListener\('message', handler\);/);
 });
 
+// ── 5) 미리보기: 새 창이 본 창의 로그인 상태를 따라간다 (코덱스 지적) ──────────
+// Electron 에서는 main 프로세스가 로그인 상태를 모든 창에 알린다. 미리보기 mock 은 그 길이 no-op 이라
+// '로그인 유지'를 끄고 로그인하면 새 창에 로그인 안내만 뜨고, 본 창에서 로그아웃해도 새 창에 개인 일정이 남았다.
+type PreviewSession = { user: { id: string; name: string } | null };
+type PreviewApi = {
+  loginCanonicalSession(input: { name: string; password: string; rememberMe?: boolean }): Promise<{ ok: boolean; payload: PreviewSession }>;
+  logoutCanonicalSession(): Promise<{ ok: boolean; payload: PreviewSession }>;
+  restoreCanonicalSession(): Promise<{ ok: boolean; payload: PreviewSession }>;
+  onSessionChanged(callback: (payload: unknown) => void): () => void;
+  sessionRequestCurrent(): Promise<{ ok: boolean }>;
+};
+type PreviewWindow = { localStorage: unknown; location: { hash: string }; opener?: unknown; electronAPI?: PreviewApi };
+
+function fakeLocalStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+}
+
+let previewBundle: Promise<string> | undefined;
+let previewNonce = 0;
+/** mock 은 창마다 따로 도는 모듈이다 — 묶음을 창마다 새로 불러와 그 창의 window 로 설치한다 */
+async function openPreviewWindow(fake: PreviewWindow): Promise<PreviewApi> {
+  // esbuild 는 이 테스트에서만 쓴다 — 파일 머리에서 가져오면 다른 테스트까지 esbuild 가 있어야 돈다
+  const { build } = await import('esbuild');
+  previewBundle ??= build({
+    stdin: {
+      contents: "export { installDevElectronAPI } from './src/mocks/devElectronAPI.ts';",
+      resolveDir: process.cwd(),
+      sourcefile: 'calendar-popup-preview-entry.ts',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    write: false,
+    logLevel: 'silent',
+  }).then((result) => result.outputFiles[0].text);
+  const source = await previewBundle;
+  const holder = globalThis as Record<string, unknown>;
+  holder.window = fake;
+  const encoded = Buffer.from(source).toString('base64');
+  const preview = await import(`data:text/javascript;base64,${encoded}#calendar-popup-preview-${previewNonce++}`) as { installDevElectronAPI(): void };
+  holder.window = fake; // import 를 기다리는 동안 다른 창으로 바뀌었을 수 있다
+  preview.installDevElectronAPI();
+  assert.ok(fake.electronAPI, 'mock 이 설치돼야 한다');
+  return fake.electronAPI;
+}
+
+async function waitFor(condition: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 300; i++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`기다렸지만 일어나지 않음: ${label}`);
+}
+
+test('미리보기: 새 창이 자기를 연 본 창의 로그인·로그아웃을 따라간다 (코덱스 지적)', async () => {
+  const holder = globalThis as Record<string, unknown>;
+  const saved = { hadWindow: 'window' in holder, window: holder.window, hadDocument: 'document' in holder, document: holder.document };
+  const originalLog = console.log;
+  console.log = () => undefined; // mock 설치 안내 글
+  holder.document = { documentElement: { dataset: {} } };
+  const names = (list: unknown[]) => list.map((payload) => (payload as PreviewSession).user?.name ?? null);
+  try {
+    const storage = fakeLocalStorage(); // 같은 주소의 창은 localStorage 를 함께 쓴다
+    const mainWindow: PreviewWindow = { localStorage: storage, location: { hash: '' } };
+    const main = await openPreviewWindow(mainWindow);
+    // '로그인 유지'를 끄고 로그인 — 기억된 사용자가 없어 새 창 혼자서는 로그인을 되살리지 못한다
+    assert.equal((await main.loginCanonicalSession({ name: '장삐쭈', password: '1234', rememberMe: false })).ok, true);
+
+    const popupWindow: PreviewWindow = { localStorage: storage, location: { hash: '#widget-popup/schedule' }, opener: mainWindow };
+    const popup = await openPreviewWindow(popupWindow);
+    assert.equal((await popup.restoreCanonicalSession()).payload.user, null, '새 창 혼자서는 로그인 상태를 모른다');
+    const seen: unknown[] = [];
+    const off = popup.onSessionChanged((payload) => seen.push(payload));
+    await popup.sessionRequestCurrent();
+    await waitFor(() => seen.length === 1, '새 창이 본 창의 로그인을 받음');
+    assert.deepEqual(names(seen), ['장삐쭈']);
+    assert.equal((await popup.restoreCanonicalSession()).payload.user?.name, '장삐쭈', '새 창의 mock 도 그 사용자로 동작한다');
+
+    // 다른 본 창(다른 탭)에 다른 사람이 로그인해도 새 창은 자기를 연 창만 따라간다
+    const otherMain = await openPreviewWindow({ localStorage: fakeLocalStorage(), location: { hash: '' } });
+    assert.equal((await otherMain.loginCanonicalSession({ name: '허혜원', password: '1234', rememberMe: false })).ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(names(seen), ['장삐쭈']);
+    // 본 창끼리는 서로의 로그인을 받지 않는다
+    assert.equal((await main.restoreCanonicalSession()).payload.user?.name, '장삐쭈');
+    assert.equal((await otherMain.restoreCanonicalSession()).payload.user?.name, '허혜원');
+
+    // 본 창에서 다른 사람으로 다시 로그인 → 새 창도 바뀐다
+    assert.equal((await main.loginCanonicalSession({ name: '안류천', password: '1234', rememberMe: false })).ok, true);
+    await waitFor(() => seen.length === 2, '새 창이 바뀐 로그인을 받음');
+    assert.deepEqual(names(seen), ['장삐쭈', '안류천']);
+
+    // 본 창에서 로그아웃 → 열려 있던 새 창도 내용을 내린다(개인 일정이 남지 않게)
+    await main.logoutCanonicalSession();
+    await waitFor(() => seen.length === 3, '새 창이 로그아웃을 받음');
+    assert.deepEqual(names(seen), ['장삐쭈', '안류천', null]);
+    assert.equal((await popup.restoreCanonicalSession()).payload.user, null);
+
+    // 로그아웃된 본 창에 다시 물어도(새 창을 새로 고친 경우) '로그인 안 됨'으로 남는다 — 다른 탭의 로그인을 주워 오지 않는다
+    await popup.sessionRequestCurrent();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(names(seen), ['장삐쭈', '안류천', null]);
+
+    // 구독을 끊으면 더 받지 않는다
+    off();
+    assert.equal((await main.loginCanonicalSession({ name: '장삐쭈', password: '1234', rememberMe: false })).ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(seen.length, 3);
+
+    // 주소를 직접 쳐서 연 새 창(연 창을 모름)은 로그인돼 있는 본 창의 답을 받는다
+    const orphanWindow: PreviewWindow = { localStorage: fakeLocalStorage(), location: { hash: '#widget-popup/character-board' } };
+    const orphan = await openPreviewWindow(orphanWindow);
+    const orphanSeen: unknown[] = [];
+    orphan.onSessionChanged((payload) => orphanSeen.push(payload));
+    await orphan.sessionRequestCurrent();
+    await waitFor(() => orphanSeen.length >= 1, '연 창을 모르는 새 창도 로그인 상태를 받음');
+    assert.ok(names(orphanSeen).every((name) => name === '장삐쭈' || name === '허혜원'), names(orphanSeen).join(','));
+
+    // 모르는 사용자 id 가 오면 '로그인 안 됨'으로 정리한다(가짜 id 를 쥐고 있다가 다음 신호에 또 알리지 않는다).
+    // 이 시점의 새 창은 장삐쭈로 맞춰져 있다(위에서 구독만 끊었다).
+    const ownerId = (mainWindow as unknown as { __bflowPreviewWindowId?: string }).__bflowPreviewWindowId;
+    assert.equal(typeof ownerId, 'string', '본 창이 자기 id 를 window 에 남겨야 새 창이 알아본다');
+    const again: unknown[] = [];
+    popup.onSessionChanged((payload) => again.push(payload));
+    const forged = new BroadcastChannel('bflow-dev-session');
+    try {
+      forged.postMessage({ kind: 'bflow-dev-session', type: 'state', from: ownerId, userId: 'no-such-user' });
+      await waitFor(() => again.length === 1, '모르는 사용자 → 로그인 안 됨');
+      forged.postMessage({ kind: 'bflow-dev-session', type: 'state', from: ownerId, userId: null });
+      forged.postMessage({ kind: 'other-kind', type: 'state', from: ownerId, userId: '2' });
+      forged.postMessage({ kind: 'bflow-dev-session', type: 'state', from: 'someone-else', userId: '2' });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      assert.deepEqual(names(again), [null], '이미 로그인 안 됨 상태 — 같은 상태·남의 신호·다른 종류의 신호로는 다시 알리지 않는다');
+    } finally {
+      forged.close();
+    }
+
+    // 지목해서 물으면 로그아웃된 본 창도 답한다 — 새 창이 '기억된 로그인'만으로 혼자 켜져 있지 않게.
+    // (새 창이 뜨는 사이에 본 창이 로그아웃하면 그 알림을 놓친다. 그래서 뜬 뒤에 다시 묻는다.)
+    const sharedStorage = fakeLocalStorage();
+    const loggedOutMainWindow: PreviewWindow = { localStorage: sharedStorage, location: { hash: '' } };
+    await openPreviewWindow(loggedOutMainWindow);
+    const rememberingMain = await openPreviewWindow({ localStorage: sharedStorage, location: { hash: '' } });
+    assert.equal((await rememberingMain.loginCanonicalSession({ name: '강선영', password: '1234' })).ok, true); // 로그인 유지(기본)
+    const stalePopupWindow: PreviewWindow = { localStorage: sharedStorage, location: { hash: '#widget-popup/schedule' }, opener: loggedOutMainWindow };
+    const stalePopup = await openPreviewWindow(stalePopupWindow);
+    assert.equal((await stalePopup.restoreCanonicalSession()).payload.user?.name, '강선영', '기억된 로그인으로 혼자 켜진 상태');
+    const staleSeen: unknown[] = [];
+    stalePopup.onSessionChanged((payload) => staleSeen.push(payload));
+    await stalePopup.sessionRequestCurrent();
+    await waitFor(() => staleSeen.length === 1, '로그아웃된 본 창의 답');
+    assert.deepEqual(names(staleSeen), [null]);
+  } finally {
+    console.log = originalLog;
+    if (saved.hadWindow) holder.window = saved.window; else delete holder.window;
+    if (saved.hadDocument) holder.document = saved.document; else delete holder.document;
+  }
+});
+
 test('게이트 등록: 이 파일이 test:ui 에 들어 있다', () => {
   const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
   assert.ok(pkg.scripts['test:ui'].includes('./tests/calendarPopup.test.ts'));

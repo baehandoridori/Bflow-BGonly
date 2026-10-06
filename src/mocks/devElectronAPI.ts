@@ -25,6 +25,7 @@ import {
 } from './devPreviewComments';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
+import { isWidgetPopupWindow } from '@/utils/popupWindow';
 import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
 import { createPreviewGateway, listCalendarEvents as listGanttCalendarEvents, patchCalendarEvent as patchGanttCalendarEvent, deleteCalendarEvent as deleteGanttCalendarEvent, unlinkDeletedCalendar, subscribePreviewGantt, type PreviewOptions as GanttPreviewOptions } from '@/features/gantt/previewGateway';
 import { createMarketLocalStorageGateway } from '@/features/playground/market/localStorageGateway';
@@ -1049,6 +1050,79 @@ function receiveMockCalendarMessage(event: MessageEvent<unknown>): void {
     envelope.stamp,
   );
   notifyMockCalendarChanged(envelope.detail);
+}
+
+/* ─── 미리보기: 새 창이 본 창의 로그인 상태를 따라가게 한다 ───
+   Electron 에서는 main 프로세스 하나가 로그인 상태를 쥐고, 바뀔 때마다 모든 창에 session:changed 를 보낸다.
+   새 창은 뜨자마자 지금 상태를 다시 달라고 한다(session:request-current). 미리보기는 창마다 mock 이 따로 돌아서
+   그 길이 없었다 — '로그인 유지'를 끄고 로그인하면 새 창(캐릭터 현황판·캘린더)에는 로그인 안내만 뜨고,
+   본 창에서 로그아웃해도 열려 있던 새 창에는 개인 일정이 그대로 남았다(코덱스 지적).
+   그래서 새 창(#widget-popup/…)이 **자기를 연 본 창**의 로그인 상태를 BroadcastChannel 로 받아 따라간다.
+   본 창은 다른 창의 상태를 받지 않는다 — 탭 두 개에 서로 다른 사람으로 로그인해 보는 미리보기 쓰임을 건드리지 않게. */
+const MOCK_SESSION_MESSAGE_KIND = 'bflow-dev-session';
+/** 이 창의 미리보기 id — 새 창이 `window.opener.__bflowPreviewWindowId` 로 자기를 연 본 창을 알아본다 */
+const mockPreviewWindowId = createUuid();
+let mockWindowIsPopup = false;
+/** 새 창일 때, 자기를 연 본 창의 id. 주소를 직접 쳐서 연 새 창이면 null(로그인돼 있는 아무 본 창의 답을 받는다) */
+let mockSessionOwnerWindowId: string | null = null;
+let mockSessionChannel: BroadcastChannel | null | undefined;
+const mockSessionListeners = new Set<(payload: unknown) => void>();
+
+function getMockSessionChannel(): BroadcastChannel | null {
+  if (mockSessionChannel !== undefined) return mockSessionChannel;
+  if (typeof BroadcastChannel === 'undefined') {
+    mockSessionChannel = null;
+    return null;
+  }
+  const channel = new BroadcastChannel('bflow-dev-session');
+  channel.addEventListener('message', (event: MessageEvent) => receiveMockSessionMessage(event.data));
+  (channel as BroadcastChannel & { unref?: () => void }).unref?.();
+  mockSessionChannel = channel;
+  return channel;
+}
+
+/** 이 창의 로그인 상태를 다른 창에 알린다(본 창의 로그인·로그아웃, 새 창의 물음에 대한 답) */
+function postMockSessionState(): void {
+  getMockSessionChannel()?.postMessage({
+    kind: MOCK_SESSION_MESSAGE_KIND, type: 'state', from: mockPreviewWindowId, userId: previewCanonicalUserId,
+  });
+}
+
+/** 새 창: 자기를 연 본 창에 지금 로그인 상태를 묻는다 */
+function requestMockSessionState(): void {
+  if (!mockWindowIsPopup) return;
+  getMockSessionChannel()?.postMessage({
+    kind: MOCK_SESSION_MESSAGE_KIND, type: 'request', from: mockPreviewWindowId, to: mockSessionOwnerWindowId,
+  });
+}
+
+function receiveMockSessionMessage(data: unknown): void {
+  if (!data || typeof data !== 'object') return;
+  const message = data as { kind?: unknown; type?: unknown; from?: unknown; to?: unknown; userId?: unknown };
+  if (message.kind !== MOCK_SESSION_MESSAGE_KIND || message.from === mockPreviewWindowId) return;
+
+  if (message.type === 'request') {
+    // 새 창의 물음에는 본 창만 답한다. 나를 지목했으면 로그아웃 상태여도 답하고(그래야 새 창이 내용을 내린다),
+    // 누구에게든 묻는 것이면 로그인돼 있을 때만 답한다.
+    if (mockWindowIsPopup) return;
+    if (message.to === mockPreviewWindowId || (message.to == null && previewCanonicalUserId)) postMockSessionState();
+    return;
+  }
+
+  if (message.type !== 'state' || !mockWindowIsPopup) return;
+  if (mockSessionOwnerWindowId && message.from !== mockSessionOwnerWindowId) return; // 다른 본 창의 로그인은 따라가지 않는다
+  const userId = typeof message.userId === 'string' && getMockUsers().some((user) => user.id === message.userId)
+    ? message.userId
+    : null;
+  if (previewCanonicalUserId === userId) return;
+  // 로그인·로그아웃과 같은 전환을 이 창의 mock 에도 적용한다
+  if (previewCanonicalUserId) {
+    transitionMockPrivacyReplacementOrigin({ userId: previewCanonicalUserId, epoch: previewCanonicalEpoch });
+  }
+  previewCanonicalEpoch++;
+  previewCanonicalUserId = userId;
+  const payload = previewCanonicalPayload();
+  for (const listener of [...mockSessionListeners]) listener(payload);
 }
 
 /** 미리보기의 '새 창 → 본 창 화면 이동' 신호 채널 (widgetNavigateView / onWidgetNavigateView) */
@@ -2425,6 +2499,18 @@ export function installDevElectronAPI(): void {
   if (window.location?.protocol === 'file:') return; // 설치 앱의 IPC 실패를 mock 로그인으로 우회하지 않음
   if (hasUsableElectronAPI(window.electronAPI)) return; // 이미 Electron 환경이면 무시
 
+  // 창 사이 로그인 상태 맞추기 — 이 창이 새 창인지, 누가 열었는지는 창이 사는 동안 바뀌지 않으므로 여기서 한 번 정한다.
+  mockWindowIsPopup = isWidgetPopupWindow();
+  mockSessionOwnerWindowId = null;
+  try {
+    (window as unknown as { __bflowPreviewWindowId?: string }).__bflowPreviewWindowId = mockPreviewWindowId;
+    const openerId = (window.opener as { __bflowPreviewWindowId?: unknown } | null | undefined)?.__bflowPreviewWindowId;
+    if (mockWindowIsPopup && typeof openerId === 'string') mockSessionOwnerWindowId = openerId;
+  } catch {
+    // 다른 출처의 창이 열었으면 opener 를 읽을 수 없다 — 지목 없이 묻는다
+  }
+  getMockSessionChannel(); // 본 창은 새 창의 물음에 답하려고, 새 창은 답을 받으려고 미리 연다
+
   let previewLoginServerAvailable = true;
   const previewUpdater = createDevPreviewUpdater(appVersion);
   localStore[COMMENTS_FILE] ??= buildDevPreviewLocalCommentStore(MOCK_EPISODES);
@@ -3497,6 +3583,7 @@ export function installDevElectronAPI(): void {
       previewCanonicalUserId = user.id;
       writeRememberedPreviewUser(input.rememberMe === false ? null : user.id);
       maybeGrantPreviewDailyLogin();
+      postMockSessionState(); // 열려 있는 새 창이 이 로그인을 따라온다
       return { ok: true, payload: previewCanonicalPayload() };
     },
     restoreCanonicalSession: async () => {
@@ -3517,6 +3604,7 @@ export function installDevElectronAPI(): void {
       }
       previewCanonicalUserId = null;
       writeRememberedPreviewUser(null);
+      postMockSessionState(); // 열려 있는 새 창도 내용을 내린다
       return { ok: true, payload: previewCanonicalPayload() };
     },
     refreshCanonicalUser: async () => ({ ok: true, payload: previewCanonicalPayload() }),
@@ -3647,9 +3735,19 @@ export function installDevElectronAPI(): void {
     // 설정/세션 변경 브로드캐스트 (mock은 no-op)
     preferencesBroadcastChange: async () => ({ ok: true }),
     onPreferencesChanged: noop,
-    sessionBroadcastChange: async () => ({ ok: true }),
-    sessionRequestCurrent: async () => ({ ok: true }),
-    onSessionChanged: noop,
+    // 창 사이 로그인 상태 — 위 '새 창이 본 창의 로그인 상태를 따라가게 한다' 참고
+    sessionBroadcastChange: async () => {
+      postMockSessionState();
+      return { ok: true };
+    },
+    sessionRequestCurrent: async () => {
+      requestMockSessionState();
+      return { ok: true };
+    },
+    onSessionChanged: (callback) => {
+      mockSessionListeners.add(callback);
+      return () => { mockSessionListeners.delete(callback); };
+    },
     themeBroadcastChange: async () => ({ ok: true }),
     onThemeChanged: noop,
     calendarBroadcastChange: async () => {
