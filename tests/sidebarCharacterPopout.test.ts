@@ -16,14 +16,18 @@ const navStart = sidebar.indexOf('{navItems.map((item) => {');
 const navEnd = sidebar.indexOf('{/* 하단: 토글 + 버전');
 const block = sidebar.slice(navStart, navEnd);
 
-test('nav 블록: 캐릭터 항목에만, 펼침 상태에서만, widgetOpenPopup 이 있을 때만 버튼을 렌더', () => {
+test('nav 블록: 새 창으로 열 수 있는 항목(캐릭터·캘린더)에만, 펼침 상태에서만, widgetOpenPopup 이 있을 때만 버튼을 렌더', () => {
   assert.ok(navStart > -1 && navEnd > navStart);
-  assert.match(block, /const showBoardPopout = item\.id === 'character-board' && isVisuallyExpanded && boardPopoutReady\s*&& typeof window\.electronAPI\?\.widgetOpenPopup === 'function';/);
+  // v1.129.0: 캘린더도 새 창으로 열 수 있게 되면서 '캐릭터 전용'이던 버튼을 목록(NAV_POPOUTS) 기반 공용으로 바꿨다.
+  assert.match(block, /const popout = NAV_POPOUTS\[item\.id\];\s*const showPopout = popout !== undefined && isVisuallyExpanded && navPopoutReady\s*&& typeof window\.electronAPI\?\.widgetOpenPopup === 'function';/);
   // 코덱스 2차: 사이드바 폭 전환(350ms)이 끝난 뒤에만 그린다 — 펼쳐지는 동안 아이콘 위에 겹쳐 클릭을 가로채지 않게
-  assert.match(sidebar, /useEffect\(\(\) => \{\s*if \(!isVisuallyExpanded\) \{\s*setBoardPopoutReady\(false\);\s*return;\s*\}\s*const timer = setTimeout\(\(\) => setBoardPopoutReady\(true\), 350\);\s*return \(\) => clearTimeout\(timer\);\s*\}, \[isVisuallyExpanded\]\);/);
-  assert.match(block, /widgetOpenPopup\?\.\('character-board', '캐릭터 현황판'\)/);
-  assert.match(block, /aria-label="캐릭터 현황판을 새 창으로 열기"/);
-  assert.match(block, /title="캐릭터 현황판을 새 창으로 열어요"/);
+  assert.match(sidebar, /useEffect\(\(\) => \{\s*if \(!isVisuallyExpanded\) \{\s*setNavPopoutReady\(false\);\s*return;\s*\}\s*const timer = setTimeout\(\(\) => setNavPopoutReady\(true\), 350\);\s*return \(\) => clearTimeout\(timer\);\s*\}, \[isVisuallyExpanded\]\);/);
+  assert.match(block, /widgetOpenPopup\?\.\(item\.id, popout\.title\)/);
+  assert.match(block, /aria-label=\{popout\.ariaLabel\}/);
+  assert.match(block, /title=\{popout\.hint\}/);
+  // 창 이름·안내 글은 목록에서 정한다 — 현황판 것은 예전 글 그대로
+  assert.match(sidebar, /'character-board': \{ title: '캐릭터 현황판', hint: '캐릭터 현황판을 새 창으로 열어요', ariaLabel: '캐릭터 현황판을 새 창으로 열기' \},/);
+  assert.match(sidebar, /schedule: \{ title: '캘린더', hint: '캘린더를 새 창으로 열어요', ariaLabel: '캘린더를 새 창으로 열기' \},/);
   assert.match(sidebar, /import \{[^}]*ExternalLink[^}]*\} from 'lucide-react'/);
 });
 
@@ -37,15 +41,15 @@ test('nav 블록: 버튼 중첩 없음 — 래퍼는 실제 박스(relative), na
   assert.match(block, /hover:bg-bg-border\/50 group-hover\/nav:text-text-primary group-hover\/nav:bg-bg-border\/50'/);
   // 코덱스 2차: 투명(opacity)으로만 숨기면 보이기 전에도 클릭을 받는다 → visibility 로 숨겨, 보이는 순간부터만 눌린다.
   //   키보드는 nav 버튼에 포커스가 오면(group-focus-within) 드러나 Tab 으로 닿는다.
-  assert.match(block, /aria-label="캐릭터 현황판을 새 창으로 열기"\s*className="absolute right-1\.5 top-1\/2 -translate-y-1\/2[^"]*\binvisible group-hover\/nav:visible group-focus-within\/nav:visible\b/);
-  const popoutClass = block.match(/aria-label="캐릭터 현황판을 새 창으로 열기"\s*className="([^"]*)"/)?.[1] ?? '';
+  assert.match(block, /aria-label=\{popout\.ariaLabel\}\s*className="absolute right-1\.5 top-1\/2 -translate-y-1\/2[^"]*\binvisible group-hover\/nav:visible group-focus-within\/nav:visible\b/);
+  const popoutClass = block.match(/aria-label=\{popout\.ariaLabel\}\s*className="([^"]*)"/)?.[1] ?? '';
   assert.ok(popoutClass.length > 0);
   assert.doesNotMatch(popoutClass, /opacity-0|delay-\d+|transition-opacity/, '투명한 채 눌리는 지연 구간을 다시 만들지 않는다');
 });
 
 test('팝아웃 클릭은 현재 화면을 바꾸지 않는다 (setView 미호출) + 기존 nav 클릭 분기 유지', () => {
-  const popoutStart = block.indexOf('{showBoardPopout && (');
-  assert.ok(popoutStart > -1, '팝아웃 버튼은 showBoardPopout 이 참일 때만 렌더해야 한다');
+  const popoutStart = block.indexOf('{showPopout && popout && (');
+  assert.ok(popoutStart > -1, '팝아웃 버튼은 showPopout 이 참일 때만 렌더해야 한다');
   const popout = block.slice(popoutStart);
   assert.doesNotMatch(popout, /setView\(/);
   // 움직임 폴리싱 7번: 메뉴 클릭은 goToView 를 거친다 — 선택 표시를 먼저 출발시키고 setView 는 다음 프레임에 부른다.

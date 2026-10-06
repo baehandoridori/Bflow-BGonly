@@ -25,6 +25,7 @@ import {
 } from './devPreviewComments';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { createUuid } from '@/utils/createUuid';
+import { isWidgetPopupWindow } from '@/utils/popupWindow';
 import { createPersonalTodoPreviewStore, PERSONAL_TODO_PREVIEW_SESSION_KEY, type PersonalTodoPreviewStore } from './personalTodoPreviewStore';
 import { createPreviewGateway, listCalendarEvents as listGanttCalendarEvents, patchCalendarEvent as patchGanttCalendarEvent, deleteCalendarEvent as deleteGanttCalendarEvent, unlinkDeletedCalendar, subscribePreviewGantt, type PreviewOptions as GanttPreviewOptions } from '@/features/gantt/previewGateway';
 import { createMarketLocalStorageGateway } from '@/features/playground/market/localStorageGateway';
@@ -1049,6 +1050,145 @@ function receiveMockCalendarMessage(event: MessageEvent<unknown>): void {
     envelope.stamp,
   );
   notifyMockCalendarChanged(envelope.detail);
+}
+
+/* ─── 미리보기: 새 창이 본 창의 로그인 상태를 따라가게 한다 ───
+   Electron 에서는 main 프로세스 하나가 로그인 상태를 쥐고, 바뀔 때마다 모든 창에 session:changed 를 보낸다.
+   새 창은 뜨자마자 지금 상태를 다시 달라고 한다(session:request-current). 미리보기는 창마다 mock 이 따로 돌아서
+   그 길이 없었다 — '로그인 유지'를 끄고 로그인하면 새 창(캐릭터 현황판·캘린더)에는 로그인 안내만 뜨고,
+   본 창에서 로그아웃해도 열려 있던 새 창에는 개인 일정이 그대로 남았다(코덱스 지적).
+   그래서 새 창(#widget-popup/…)이 **자기를 연 본 창**의 로그인 상태를 BroadcastChannel 로 받아 따라간다.
+   본 창은 다른 창의 상태를 받지 않는다 — 탭 두 개에 서로 다른 사람으로 로그인해 보는 미리보기 쓰임을 건드리지 않게. */
+const MOCK_SESSION_MESSAGE_KIND = 'bflow-dev-session';
+/** 이 창의 미리보기 id — 새 창이 `window.opener.__bflowPreviewWindowId` 로 자기를 연 본 창을 알아본다 */
+const mockPreviewWindowId = createUuid();
+let mockWindowIsPopup = false;
+/** 이 mock 이 설치된 창 — 새 창이 자기를 연 본 창(opener)을 쓸 때마다 다시 읽으려고 잡아 둔다 */
+let mockSelfWindow: Window | null = null;
+let mockSessionChannel: BroadcastChannel | null | undefined;
+const mockSessionListeners = new Set<(payload: unknown) => void>();
+
+function getMockSessionChannel(): BroadcastChannel | null {
+  if (mockSessionChannel !== undefined) return mockSessionChannel;
+  if (typeof BroadcastChannel === 'undefined') {
+    mockSessionChannel = null;
+    return null;
+  }
+  const channel = new BroadcastChannel('bflow-dev-session');
+  channel.addEventListener('message', (event: MessageEvent) => receiveMockSessionMessage(event.data));
+  (channel as BroadcastChannel & { unref?: () => void }).unref?.();
+  mockSessionChannel = channel;
+  return channel;
+}
+
+/**
+ * 자기를 연 본 창의 **지금** id — 새 창이 로그인 상태를 물을 곳이자 화면 이동을 부탁할 곳.
+ * 쓸 때마다 읽는다: 본 창을 새로 고치면 그 창의 mock 이 처음부터 다시 돌아 id 가 바뀐다. 한 번 적어 두기만 하면
+ * 새로 고친 본 창을 못 알아봐 화면 이동 부탁이 허공에 가고, 본 창이 로그아웃 상태로 떠도 새 창에 내용이 남는다.
+ * 주소를 직접 쳐서 열었거나 연 창을 읽을 수 없으면 null(로그인돼 있는 아무 본 창의 답을 받고, 화면 이동 부탁은 모든 본 창이 받는다)
+ */
+function readMockOwnerWindowId(): string | null {
+  try {
+    const id = (mockSelfWindow?.opener as { __bflowPreviewWindowId?: unknown } | null | undefined)?.__bflowPreviewWindowId;
+    return typeof id === 'string' ? id : null;
+  } catch {
+    return null; // 다른 출처의 창이 열었으면 opener 를 읽을 수 없다 — 지목 없이 묻는다
+  }
+}
+
+/**
+ * 이 창의 로그인 상태를 다른 창에 알린다(본 창의 로그인·로그아웃, 새 창의 물음에 대한 답).
+ * restored: 막 뜬(새로 고친) 본 창이 알리는 '지금 상태' — 그 창이 열어 둔 새 창만 받는다.
+ */
+function postMockSessionState(restored = false): void {
+  getMockSessionChannel()?.postMessage({
+    kind: MOCK_SESSION_MESSAGE_KIND, type: 'state', from: mockPreviewWindowId, userId: previewCanonicalUserId, restored,
+  });
+}
+
+/** 새 창: 자기를 연 본 창에 지금 로그인 상태를 묻는다 */
+function requestMockSessionState(): void {
+  if (!mockWindowIsPopup) return;
+  getMockSessionChannel()?.postMessage({
+    kind: MOCK_SESSION_MESSAGE_KIND, type: 'request', from: mockPreviewWindowId, to: readMockOwnerWindowId(),
+  });
+}
+
+function receiveMockSessionMessage(data: unknown): void {
+  if (!data || typeof data !== 'object') return;
+  const message = data as { kind?: unknown; type?: unknown; from?: unknown; to?: unknown; userId?: unknown; restored?: unknown };
+  if (message.kind !== MOCK_SESSION_MESSAGE_KIND || message.from === mockPreviewWindowId) return;
+
+  if (message.type === 'request') {
+    // 새 창의 물음에는 본 창만 답한다. 나를 지목했으면 로그아웃 상태여도 답하고(그래야 새 창이 내용을 내린다),
+    // 누구에게든 묻는 것이면 로그인돼 있을 때만 답한다.
+    if (mockWindowIsPopup) return;
+    if (message.to === mockPreviewWindowId || (message.to == null && previewCanonicalUserId)) postMockSessionState();
+    return;
+  }
+
+  if (message.type !== 'state' || !mockWindowIsPopup) return;
+  // 자기를 연 본 창만 따라간다(다른 본 창의 로그인은 따라가지 않는다). 연 창을 모르는 새 창은 아무 본 창의 로그인·로그아웃을
+  // 받되, 막 뜬 본 창이 알리는 '지금 상태'는 받지 않는다 — 관계없는 탭 하나가 새로 떴다고 내용을 내리지 않게.
+  const ownerId = readMockOwnerWindowId();
+  if (ownerId ? message.from !== ownerId : message.restored === true) return;
+  const userId = typeof message.userId === 'string' && getMockUsers().some((user) => user.id === message.userId)
+    ? message.userId
+    : null;
+  if (previewCanonicalUserId === userId) return;
+  // 로그인·로그아웃과 같은 전환을 이 창의 mock 에도 적용한다
+  if (previewCanonicalUserId) {
+    transitionMockPrivacyReplacementOrigin({ userId: previewCanonicalUserId, epoch: previewCanonicalEpoch });
+  }
+  previewCanonicalEpoch++;
+  previewCanonicalUserId = userId;
+  const payload = previewCanonicalPayload();
+  for (const listener of [...mockSessionListeners]) listener(payload);
+}
+
+/* ─── 미리보기: 새 창의 위치·크기 기억 ───
+   Electron 에서는 main 프로세스가 새 창의 위치·크기를 저장해 다음에 같은 자리·크기로 연다. 미리보기에서도 같은 흐름을
+   확인할 수 있게, 새 창이 자기 위치·크기를 localStorage 에 적어 두고(크기가 바뀔 때·닫힐 때) 다음에 열 때 그 값을 쓴다(코덱스 지적).
+   옮기기만 할 때는 브라우저가 알려 주지 않으므로 닫힐 때(pagehide) 마지막 자리를 적는다.
+   **창마다 다른 칸에 적는다.** Electron 은 main 한 곳이 모아 적지만, 미리보기는 창이 저마다 적는다 — 한 칸에 모두 모아 두면
+   (읽고-고치고-쓰기) 두 창이 거의 동시에 적을 때 늦게 쓴 창이 먼저 쓴 창의 기억을 지운다(코덱스 지적). */
+const MOCK_POPUP_BOUNDS_KEY_PREFIX = 'bflow:preview:widget-popup-bounds:';
+interface MockPopupBounds { left: number; top: number; width: number; height: number }
+type MockPopupBoundsStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+/**
+ * 기억해 둔 위치·크기. 없거나 숫자가 아니면 null. 크기는 Electron 창과 같은 최소(280×200)를 지킨다.
+ * 값이 깨졌거나 저장소를 읽을 수 없으면 던진다 — 부르는 두 곳(여는 쪽·새 창)이 '기억한 것이 없다'로 친다.
+ */
+function readMockPopupBounds(storage: MockPopupBoundsStorage, widgetId: string): MockPopupBounds | null {
+  const { left, top, width, height } = JSON.parse(storage.getItem(MOCK_POPUP_BOUNDS_KEY_PREFIX + widgetId) ?? '{}') as Partial<MockPopupBounds>;
+  if (![left, top, width, height].every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
+  return {
+    left: Math.round(left as number),
+    top: Math.round(top as number),
+    width: Math.max(280, Math.round(width as number)),
+    height: Math.max(200, Math.round(height as number)),
+  };
+}
+
+/** 이 창의 칸에만 적는다(다른 창의 칸은 읽지도 고치지도 않는다). 저장소를 못 쓰면 던진다 — 부르는 쪽이 기억하지 않고 넘어간다 */
+function writeMockPopupBounds(storage: MockPopupBoundsStorage, widgetId: string, bounds: MockPopupBounds): void {
+  storage.setItem(MOCK_POPUP_BOUNDS_KEY_PREFIX + widgetId, JSON.stringify(bounds));
+}
+
+/** 미리보기의 '새 창 → 본 창 화면 이동' 신호 채널 (widgetNavigateView / onWidgetNavigateView) */
+const MOCK_WIDGET_VIEW_MESSAGE_KIND = 'bflow-dev-widget-navigate-view';
+let mockWidgetViewChannel: BroadcastChannel | null | undefined;
+function getMockWidgetViewChannel(): BroadcastChannel | null {
+  if (mockWidgetViewChannel !== undefined) return mockWidgetViewChannel;
+  if (typeof BroadcastChannel === 'undefined') {
+    mockWidgetViewChannel = null;
+    return null;
+  }
+  const channel = new BroadcastChannel('bflow-dev-widget-navigate-view');
+  (channel as BroadcastChannel & { unref?: () => void }).unref?.();
+  mockWidgetViewChannel = channel;
+  return channel;
 }
 
 function getMockCalendarChangeChannel(): BroadcastChannel | null {
@@ -2411,6 +2551,51 @@ export function installDevElectronAPI(): void {
   if (window.location?.protocol === 'file:') return; // 설치 앱의 IPC 실패를 mock 로그인으로 우회하지 않음
   if (hasUsableElectronAPI(window.electronAPI)) return; // 이미 Electron 환경이면 무시
 
+  // 창 사이 로그인 상태 맞추기 — 이 창이 새 창인지는 창이 사는 동안 바뀌지 않으므로 여기서 한 번 정한다.
+  // 누가 열었는지(자기를 연 본 창의 id)는 적어 두지 않고 쓸 때마다 읽는다 — readMockOwnerWindowId 참고.
+  mockWindowIsPopup = isWidgetPopupWindow();
+  mockSelfWindow = window;
+  (window as unknown as { __bflowPreviewWindowId?: string }).__bflowPreviewWindowId = mockPreviewWindowId;
+  getMockSessionChannel(); // 본 창은 새 창의 물음에 답하려고, 새 창은 답을 받으려고 미리 연다
+
+  // 새 창은 자기 위치·크기를 적어 둔다 — 다음에 같은 자리·크기로 열린다(Electron 에서는 main 이 하는 일)
+  if (mockWindowIsPopup && typeof window.addEventListener === 'function') {
+    const self = window;
+    let popupWidgetId: string | null = null;
+    try {
+      const encoded = /^#widget-popup\/([^?]+)/.exec(self.location?.hash ?? '')?.[1];
+      popupWidgetId = encoded ? decodeURIComponent(encoded) : null;
+    } catch {
+      popupWidgetId = null; // 주소가 깨졌으면 기억하지 않는다
+    }
+    if (popupWidgetId) {
+      const widgetId = popupWidgetId;
+      // 여는 쪽이 준 width/height 를 브라우저는 안쪽 크기로, Electron 은 창틀까지 포함한 크기로 읽는다. 그대로 두면
+      // Electron 미리보기에서는 열 때마다 창틀만큼 줄어든다 — 기억한 안쪽 크기와 다르면 새 창이 스스로 맞춘다.
+      try {
+        const remembered = readMockPopupBounds(self.localStorage, widgetId);
+        if (remembered && typeof self.resizeBy === 'function') {
+          const dx = remembered.width - self.innerWidth;
+          const dy = remembered.height - self.innerHeight;
+          if (dx !== 0 || dy !== 0) self.resizeBy(dx, dy);
+        }
+      } catch {
+        // 기억한 값이 깨졌거나 저장소를 읽을 수 없거나 크기를 못 맞춰도, 창은 열려 있다
+      }
+      const save = () => {
+        try {
+          writeMockPopupBounds(self.localStorage, widgetId, {
+            left: self.screenX, top: self.screenY, width: self.innerWidth, height: self.innerHeight,
+          });
+        } catch {
+          // 저장소를 쓸 수 없는 미리보기(사생활 보호 창 등)
+        }
+      };
+      self.addEventListener('resize', save);
+      self.addEventListener('pagehide', save);
+    }
+  }
+
   let previewLoginServerAvailable = true;
   const previewUpdater = createDevPreviewUpdater(appVersion);
   localStore[COMMENTS_FILE] ??= buildDevPreviewLocalCommentStore(MOCK_EPISODES);
@@ -2542,6 +2727,34 @@ export function installDevElectronAPI(): void {
     onWidgetNavigateMain: noop,
     widgetNavigateToDate: async () => {},
     onWidgetNavigateToDate: noop,
+    // 새 창(캘린더 등) → 본 창 화면 이동. Electron 에서는 main 프로세스가 하나뿐인 본 창을 앞으로 가져와 전달한다.
+    //   미리보기에서는 같은 주소의 창끼리 BroadcastChannel 로 신호를 주고받아 같은 흐름을 눈으로 확인할 수 있다.
+    //   본 창 탭이 여러 개여도 **새 창을 연 그 탭만** 움직이도록, 부탁에 자기를 연 창의 id 를 싣는다(코덱스 지적).
+    //   id 는 부탁하는 순간에 읽는다 — 본 창을 새로 고친 뒤에도 그 창이 받는다.
+    //   주소를 직접 쳐서 연 새 창은 연 창을 모르므로(to: null) 열려 있는 본 창이 모두 받는다.
+    widgetNavigateView: async (payload) => {
+      getMockWidgetViewChannel()?.postMessage({
+        kind: MOCK_WIDGET_VIEW_MESSAGE_KIND, from: mockPreviewWindowId, to: readMockOwnerWindowId(), payload,
+      });
+      try {
+        (window.opener as Window | null)?.focus?.();
+      } catch {
+        // 본 창을 앞으로 못 가져와도 신호는 이미 갔다
+      }
+    },
+    onWidgetNavigateView: (callback) => {
+      const channel = getMockWidgetViewChannel();
+      if (!channel) return () => {};
+      const handler = (event: MessageEvent) => {
+        const message = event.data as { kind?: unknown; to?: unknown; payload?: unknown } | null;
+        if (!message || typeof message !== 'object' || message.kind !== MOCK_WIDGET_VIEW_MESSAGE_KIND) return;
+        if (mockWindowIsPopup) return; // 화면 이동 부탁은 본 창만 받는다
+        if (typeof message.to === 'string' && message.to !== mockPreviewWindowId) return; // 다른 탭이 연 새 창의 부탁
+        callback(message.payload);
+      };
+      channel.addEventListener('message', handler);
+      return () => channel.removeEventListener('message', handler);
+    },
 
     imageSave: async () => '/dev/mock-image.png',
     imageDelete: async () => true,
@@ -3466,6 +3679,7 @@ export function installDevElectronAPI(): void {
       previewCanonicalUserId = user.id;
       writeRememberedPreviewUser(input.rememberMe === false ? null : user.id);
       maybeGrantPreviewDailyLogin();
+      postMockSessionState(); // 열려 있는 새 창이 이 로그인을 따라온다
       return { ok: true, payload: previewCanonicalPayload() };
     },
     restoreCanonicalSession: async () => {
@@ -3474,6 +3688,9 @@ export function installDevElectronAPI(): void {
         previewCanonicalEpoch++;
       }
       maybeGrantPreviewDailyLogin();
+      // 본 창을 새로 고치면 이 mock 이 처음부터 다시 돈다 — 이 창이 열어 둔 새 창이 지금 상태를 따라오게 알린다.
+      // ('로그인 유지' 없이 로그인했었다면 본 창은 로그아웃 상태로 뜬다. 열려 있던 새 창에 개인 일정이 남으면 안 된다.)
+      if (!mockWindowIsPopup) postMockSessionState(true);
       return { ok: true, payload: previewCanonicalPayload() };
     },
     logoutCanonicalSession: async () => {
@@ -3486,6 +3703,7 @@ export function installDevElectronAPI(): void {
       }
       previewCanonicalUserId = null;
       writeRememberedPreviewUser(null);
+      postMockSessionState(); // 열려 있는 새 창도 내용을 내린다
       return { ok: true, payload: previewCanonicalPayload() };
     },
     refreshCanonicalUser: async () => ({ ok: true, payload: previewCanonicalPayload() }),
@@ -3528,7 +3746,18 @@ export function installDevElectronAPI(): void {
         console.info('[preview] widgetOpenPopup', widgetId, title, 'no window');
         return { ok: false };
       }
-      const size = widgetId === 'character-board' ? 'width=1160,height=780' : 'width=480,height=600';
+      // 전에 열었던 창이면 그때의 위치·크기로, 처음이면 기본 크기로 연다(Electron main 의 savedPos ?? WIDGET_POPUP_DEFAULTS).
+      // 화면형 새 창의 기본 크기는 main 과 같다.
+      let saved: MockPopupBounds | null = null;
+      try {
+        saved = readMockPopupBounds(window.localStorage, widgetId);
+      } catch {
+        saved = null; // 기억한 값이 깨졌거나 저장소를 읽을 수 없는 미리보기 — 기억한 것이 없는 것으로 친다
+      }
+      const size = saved ? `width=${saved.width},height=${saved.height},left=${saved.left},top=${saved.top}`
+        : widgetId === 'character-board' ? 'width=1160,height=780'
+        : widgetId === 'schedule' ? 'width=1280,height=820'
+        : 'width=480,height=600';
       const url = `${window.location.origin}${window.location.pathname}${window.location.search}${hash}`;
       const opened = window.open(url, `bflow-widget-${widgetId}`, `popup,${size}`);
       console.info('[preview] widgetOpenPopup', widgetId, title, opened ? 'opened' : 'blocked');
@@ -3613,9 +3842,19 @@ export function installDevElectronAPI(): void {
     // 설정/세션 변경 브로드캐스트 (mock은 no-op)
     preferencesBroadcastChange: async () => ({ ok: true }),
     onPreferencesChanged: noop,
-    sessionBroadcastChange: async () => ({ ok: true }),
-    sessionRequestCurrent: async () => ({ ok: true }),
-    onSessionChanged: noop,
+    // 창 사이 로그인 상태 — 위 '새 창이 본 창의 로그인 상태를 따라가게 한다' 참고
+    sessionBroadcastChange: async () => {
+      postMockSessionState();
+      return { ok: true };
+    },
+    sessionRequestCurrent: async () => {
+      requestMockSessionState();
+      return { ok: true };
+    },
+    onSessionChanged: (callback) => {
+      mockSessionListeners.add(callback);
+      return () => { mockSessionListeners.delete(callback); };
+    },
     themeBroadcastChange: async () => ({ ok: true }),
     onThemeChanged: noop,
     calendarBroadcastChange: async () => {

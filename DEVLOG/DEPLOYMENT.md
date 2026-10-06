@@ -55,7 +55,7 @@ dist/
 
 **핵심**: `package.json` 의 `"asar": false` 설정으로 모든 파일이 풀린 상태. 이전에 모듈 누락 이슈로 명시적으로 끈 결정 (커밋 `08656e0`).
 
-**크기 기준 (v1.128.2~)**: `win-unpacked` 약 396MB(7,140개), `BFLOW-Setup.exe` 약 115MB. `win-unpacked/resources/app/dist/` 안에는 화면 묶음(`index.html`·`assets/`·`splash/`)만 있어야 한다. v1.128.1 까지는 이 안에 런타임 한 벌(`win-unpacked`, 268MB)이 더 들어가 664MB / 192MB 였다. 막는 규칙과 확인은 `AUTO_UPDATE_OPERATIONS.md` '앱 안에 빌드 산출물을 다시 담지 않는다'.
+**크기 기준 (v1.129.1~)**: `win-unpacked` 약 396MB(7,140개), `BFLOW-Setup.exe` 약 115MB. `win-unpacked/resources/app/dist/` 안에는 화면 묶음(`index.html`·`assets/`·`splash/`)만 있어야 한다. v1.129.0 까지는 이 안에 런타임 한 벌(`win-unpacked`, 268MB)이 더 들어가 664MB / 192MB 였다. 막는 규칙과 확인은 `AUTO_UPDATE_OPERATIONS.md` '앱 안에 빌드 산출물을 다시 담지 않는다'.
 
 ---
 

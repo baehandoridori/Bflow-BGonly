@@ -4,7 +4,7 @@
  * 문제: 화면 묶음 폴더(vite)와 electron-builder 출력 폴더가 둘 다 `dist` 다. 화면 묶음을 앱에 담으려고
  * package.json build.files 에 "dist 아래 전부"를 넣어 두었는데, electron-builder 는 런타임을 먼저
  * dist/win-unpacked 에 풀고 그 다음에 앱 파일을 모은다. 그래서 방금 푼 런타임 한 벌(71개, 268MB)이
- * 앱 안(resources/app/dist/win-unpacked)으로 한 번 더 복사됐다 — v1.128.1 설치 파일 192MB 중 77MB.
+ * 앱 안(resources/app/dist/win-unpacked)으로 한 번 더 복사됐다 — v1.129.0 까지 설치 파일 192MB 중 77MB.
  * vite 정리 없이 패키징만 다시 돌리면 이전 설치 파일·latest.yml·manifest.json 까지 같이 들어갔다.
  *
  * electron-builder 에는 이 상황을 위한 자동 제외(`!dist/*-unpacked`)가 있지만, 24.13.3 에서는 files 를
@@ -110,14 +110,14 @@ test('build.files — 앱이 실행에 쓰는 파일은 그대로 담긴다', as
 test('build.files — 빌드 산출물은 앱 안으로 다시 담기지 않는다', async () => {
   const packaged = await loadPackagedCheck();
   for (const [file, what] of [
-    ['dist/win-unpacked/electron.exe', '방금 풀어 둔 런타임 (v1.128.1 까지 들어가던 268MB)'],
+    ['dist/win-unpacked/electron.exe', '방금 풀어 둔 런타임 (v1.129.0 까지 들어가던 268MB)'],
     ['dist/win-unpacked/locales/ko.pak', '런타임의 하위 폴더'],
     ['dist/win-unpacked/resources/app/dist/index.html', '이전 빌드의 앱 폴더'],
     ['dist/win-arm64-unpacked/electron.exe', '다른 아키텍처용 런타임'],
     ['dist/BFLOW-Setup.exe', '이전 설치 파일'],
     ['dist/BFLOW-Setup.exe.blockmap', '설치 파일 보조 기록'],
     ['dist/__uninstaller-nsis-bflow.exe', '설치 파일을 만드는 중에 생기는 임시 파일'],
-    ['dist/bflow-1.128.2-x64.nsis.7z', '설치 파일을 만들다 멈추면 남는 묶음'],
+    ['dist/bflow-1.129.1-x64.nsis.7z', '설치 파일을 만들다 멈추면 남는 묶음'],
     ['dist/latest.yml', '설치 파일 정보'],
     ['dist/builder-debug.yml', 'electron-builder 기록'],
     ['dist/builder-effective-config.yaml', '터미널에서 직접 빌드할 때만 생기는 기록'],
@@ -208,7 +208,7 @@ test('generate-manifest — 화면 폴더에 vite 가 만든 것만 있으면 ma
   assert.doesNotMatch(ok.output, /섞여 있습니다/);
 });
 
-test('generate-manifest — 앱 안에 런타임이 한 벌 더 들어가 있으면 막는다 (v1.128.1 까지의 모양)', () => {
+test('generate-manifest — 앱 안에 런타임이 한 벌 더 들어가 있으면 막는다 (v1.129.0 까지의 모양)', () => {
   const root = makeRelease(['win-unpacked/electron.exe', 'win-unpacked/locales/ko.pak']);
   const blocked = generateManifest(root);
   assert.notEqual(blocked.status, 0, blocked.output);

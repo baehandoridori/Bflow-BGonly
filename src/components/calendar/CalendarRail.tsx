@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { groupCalendarsForRail } from '@/utils/calendarEventFilter';
+import { requestMainWindowView } from '@/utils/widgetViewNavigation';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { IcsSubscribeForm } from '@/components/calendar/IcsSubscribeForm';
 import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
@@ -383,7 +384,8 @@ export function CalendarRail({ isAuthenticated, onOpenSettings, onCreateCalendar
           <div className="flex items-start gap-1.5 px-1 py-1 text-[10px] leading-4 text-text-secondary">
             <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-text-secondary/50" />
             <span>
-              구글 캘린더 연동 안 됨 · <button type="button" onClick={() => setView('settings')} className="text-accent hover:underline cursor-pointer">설정에서 연동하기</button>
+              {/* 새 창으로 띄운 캘린더에는 설정 화면이 없다 — 본 창이 설정 화면을 열게 한다. */}
+              구글 캘린더 연동 안 됨 · <button type="button" onClick={() => { if (!requestMainWindowView({ view: 'settings' })) setView('settings'); }} className="text-accent hover:underline cursor-pointer">설정에서 연동하기</button>
             </span>
           </div>
         )}
