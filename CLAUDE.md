@@ -91,7 +91,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 1. **플랜 우선**: 비자명한 작업(3단계+)은 플랜 모드 진입. 틀어지면 STOP 후 재계획.
 2. **서브에이전트 활용**: 리서치/탐색/병렬 분석은 서브에이전트에 위임. 메인 컨텍스트 깨끗하게 유지.
 3. **자기개선**: 수정 받으면 `tasks/lessons.md`에 패턴 기록. 동일 실수 반복 방지.
-4. **완료 전 검증**: 작동 증명 없이 완료 표시 금지. typecheck + 관련 테스트 + 빌드 + 동작 확인.
+4. **완료 전 검증**: 작동 증명 없이 완료 표시 금지. typecheck + 관련 테스트 + 빌드 + 동작 확인. **화면을 바꿨으면 앱과 같은 엔진으로 본다** — 앱은 Electron 33(Chromium 130)이고 PC 의 Chrome 은 훨씬 새 버전이라 같은 코드가 다르게 놓일 수 있다(`npm run preview:electron`, tasks/lessons.md 2026-10-06).
 5. **자율 버그 수정**: 버그 리포트 받으면 지시 없이 바로 수정. 로그/오류 직접 추적.
 6. **단순함 우선**: 최소한의 코드 영향. 과잉 설계 금지. 근본 원인 해결.
 
@@ -123,6 +123,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
   - `tldr_for_users.md` 처럼 슬랙에 그대로 공유해도 어색하지 않은 톤이 기준. 한솔이 직접 팀에 안내할 때 그대로 쓸 수 있어야 한다.
   - 같은 룰을 PR 본문의 `📋 업데이트 요약` 섹션에도 적용한다 (상세 기술 설명 섹션은 개발자 톤 OK).
 - 배포용 `manifest.json`은 `BFLOW-Setup.exe`가 있을 때만 생성한다. `--allow-missing-installer`는 개발용 `build:vite`에서만 사용한다.
+- **휴가 연동 토큰은 배포 빌드에 항상 넣는다 (v1.128.1~)**: 값(`BFLOW_VACATION_TOKEN`)은 레포에 커밋하지 않고 메인 체크아웃의 `.env.local` 에만 둔다. `scripts/vacation-token.cjs` 가 환경변수 → 빌드 폴더 → 메인 체크아웃 순서로 찾으므로 워크트리 빌드에도 들어간다. `npm run build` 는 토큰이 없으면 첫 단계에서 멈추고, 묶음에 토큰이 없으면 `manifest.json` 을 만들지 않는다 — 이 확인을 끄거나 우회하지 말 것. 토큰 값은 로그·PR·문서에 적지 않는다.
 - 토스트가 떴다는 것만으로 업데이트 성공으로 판단하지 말고, 다음 실행 버전과 `swap.log`의 `[installer-main]`/`[installer]` 로그, `installer-pending` 정리 여부를 확인한다.
 - 설치/적용 중에는 사용자가 상황을 알 수 있어야 한다. renderer는 `applying` 상태를 표시하고, 앱 종료 후 helper는 별도 진행 창을 띄운다.
 - PowerShell helper를 TypeScript 백틱 문자열 안에 넣을 때 PowerShell 변수는 `$($name)` 형태로 쓴다. `${name}`은 JavaScript 보간으로 실행되어 helper 시작 전 `ReferenceError`를 만들 수 있다.

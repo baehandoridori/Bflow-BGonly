@@ -25,7 +25,9 @@ export const DEFAULT_VACATION_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co/fu
 
 // ─── 휴가 API 토큰 (x-bflow-token) ─────────────────────────
 // 빌드타임 주입: `.env.local` 의 BFLOW_VACATION_TOKEN 을 vite define 이 치환한다(.env* 는 gitignore).
-// **실값을 레포에 커밋하지 않는다.** 비어 있으면 vacation-config.json 의 apiToken(설정 화면 입력란)으로 폴백한다.
+// **실값을 레포에 커밋하지 않는다.** 찾는 규칙은 scripts/vacation-token.cjs — 워크트리 빌드는 메인 체크아웃의
+// `.env.local` 까지 보고, 배포 빌드(npm run build)는 토큰이 없거나 묶음에 안 들어가면 실패한다.
+// 개발 빌드에서는 비어 있을 수 있다 — 그때는 vacation-config.json 의 apiToken(설정 화면 입력란)으로 폴백한다.
 export const DEFAULT_VACATION_TOKEN = __BFLOW_VACATION_TOKEN__;
 
 // URL이 비어있으면 자동 연결을 건너뜁니다.

@@ -156,6 +156,7 @@ DB 스키마 변경 시:
 8. **버전 버튼 UX**: 좌하단 버전 버튼은 업데이트가 없어도 항상 열려야 한다. 모달은 열자마자 자동 확인하지 않고, 모달 안의 `새로고침`을 눌렀을 때만 `update:check-now` IPC로 배포 manifest를 다시 읽어 현재/최신 버전과 버전별 업데이트 내역을 갱신한다. 새로고침 중에는 기존 표시 내용을 유지해 중간 상태 때문에 레이아웃이 흔들리지 않게 한다.
 9. **helper PowerShell 보간 주의**: `helperSwap.ts`/`installerApply.ts`의 PowerShell 스크립트는 TypeScript 백틱 문자열 안에 있다. PowerShell 변수는 `$($stepName)`처럼 쓰고 `${stepName}`을 쓰면 JavaScript 변수로 평가되어 helper가 시작되기 전에 실패한다.
 10. **업데이트 내역 보존**: `DEVLOG/update-notes.json`의 과거 항목은 앱 모달에서 펼쳐 볼 수 있는 기록이다. 새 버전 추가 시 기존 항목을 삭제하지 말고 최신 항목을 맨 위에 추가한다.
+11. **휴가 연동 토큰**: 배포 빌드에는 휴가 API 토큰(`BFLOW_VACATION_TOKEN`)이 꼭 들어가야 한다. 값은 메인 체크아웃 `C:\Bflow-BGonly\.env.local` 에만 있고(레포에 커밋하지 않음), 워크트리에서 빌드하면 거기서 자동으로 찾는다. `npm run build` 는 토큰이 없으면 처음에 멈추고, 묶음에 토큰이 안 들어갔으면 `manifest.json` 을 만들지 않는다. 상세는 `AUTO_UPDATE_OPERATIONS.md` '휴가 연동 토큰'.
 
 ---
 
