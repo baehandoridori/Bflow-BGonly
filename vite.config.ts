@@ -22,7 +22,8 @@ const realWorkspaceNodeModules = fs.existsSync(workspaceNodeModules)
 function vacationTokenFor(mode: string): string {
   const resolved = resolveVacationToken({ root: __dirname, mode });
   if (!resolved.token) {
-    console.warn('[vacation-token] 휴가 연동 토큰 없음 — 이 빌드는 휴가 연동이 되지 않습니다(개발 확인용으로만 쓰세요).');
+    const why = resolved.problem ? `적힌 값을 읽을 수 없음(${resolved.file})` : '찾지 못함';
+    console.warn(`[vacation-token] 휴가 연동 토큰 ${why} — 이 빌드는 휴가 연동이 되지 않습니다(개발 확인용으로만 쓰세요).`);
   } else if (resolved.source === 'main-checkout') {
     console.info(`[vacation-token] 휴가 연동 토큰 출처: ${describeVacationTokenSource(resolved)}`);
   }

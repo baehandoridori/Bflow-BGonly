@@ -23,22 +23,44 @@ const path = require('path');
 
 const TOKEN_KEY = 'BFLOW_VACATION_TOKEN';
 
-/** .env 형식 글에서 key 의 값을 읽는다. 없으면 null, 같은 키가 여러 번이면 마지막 값 */
+/** 풀어서 읽을 것이 없는 값 — 공백·따옴표·변수 확장($)·이스케이프(\)가 없는 글자만 (따옴표 없는 값의 # 주석은 그 전에 떼어 낸다) */
+const PLAIN_VALUE = /^[^\s"'`$\\]*$/;
+
+const UNSUPPORTED_VALUE_REASON =
+  '값을 그대로 읽을 수 없는 꼴입니다(변수 확장 ${...}, 역슬래시, 따옴표 안의 따옴표·공백, 여러 줄 값). '
+  + '토큰 글자를 한 줄에 그대로 적어 주세요.';
+
+/**
+ * KEY= 뒤의 글을 값으로 읽는다.
+ *
+ * 받는 꼴은 `값`, `"값"`, `'값'` 과 그 뒤 주석(`# ...`)뿐이다. 이 꼴은 vite(dotenv + dotenv-expand)가 읽는 값과 같다.
+ * 그 밖의 꼴(변수 확장·이스케이프·여러 줄)은 vite 가 풀어서 읽으므로 여기서 글자 그대로 읽으면 다른 값이 된다 —
+ * 풀지 않은 `${...}` 를 토큰으로 묶음에 넣으면, 확인은 전부 통과하는데 서버가 거부하는 빌드가 나간다.
+ * 그래서 흉내 내어 풀지 않고 오류로 돌린다. (오류 글에 값은 넣지 않는다.)
+ */
+function readPlainEnvValue(raw) {
+  const text = raw.trim();
+  const quoted = /^(["'`])(.*?)\1\s*(?:#.*)?$/.exec(text);
+  const body = quoted ? quoted[2] : text.replace(/\s*#.*$/, '');
+  if (!PLAIN_VALUE.test(body)) throw new Error(UNSUPPORTED_VALUE_REASON);
+  return body;
+}
+
+/**
+ * .env 형식 글에서 key 의 값을 읽는다. 키가 없으면 null, 같은 키가 여러 번이면 마지막 줄.
+ * 값이 받지 않는 꼴이면 예외를 던진다(readPlainEnvValue).
+ */
 function parseEnvValue(text, key) {
-  let value = null;
-  for (const rawLine of String(text).replace(/^﻿/, '').split(/\r?\n/)) {
+  const source = String(text);
+  const lines = (source.charCodeAt(0) === 0xfeff ? source.slice(1) : source).split(/\r?\n/);
+  let assignment = null;
+  for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
     const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)$/.exec(line);
-    if (!match || match[1] !== key) continue;
-    const raw = match[2].trim();
-    const quote = raw[0];
-    const closing = quote === '"' || quote === "'" || quote === '`' ? raw.indexOf(quote, 1) : -1;
-    value = closing > 0
-      ? raw.slice(1, closing)
-      : raw.replace(/\s+#.*$/, '').trim();
+    if (match && match[1] === key) assignment = match[2];
   }
-  return value;
+  return assignment === null ? null : readPlainEnvValue(assignment);
 }
 
 /** vite 의 loadEnv 가 읽는 파일과 같은 순서 — 뒤 파일이 앞 파일을 덮는다 */
@@ -46,7 +68,11 @@ function envFileNames(mode) {
   return ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
 }
 
-/** dir 의 .env 파일들에서 토큰을 읽는다. 비어 있지 않은 값을 찾으면 { token, file }, 없으면 null */
+/**
+ * dir 의 .env 파일들에서 토큰을 읽는다.
+ * 어느 파일에도 키가 없으면 null. 있으면 마지막 파일 기준으로 { token, file, problem } —
+ * 값을 읽을 수 없는 꼴이면 token 은 '' 이고 problem 에 이유가 들어간다.
+ */
 function readTokenFromEnvFiles(dir, mode) {
   let found = null;
   for (const name of envFileNames(mode)) {
@@ -57,10 +83,14 @@ function readTokenFromEnvFiles(dir, mode) {
     } catch {
       continue;
     }
-    const value = parseEnvValue(text, TOKEN_KEY);
-    if (value !== null) found = { token: value.trim(), file };
+    try {
+      const value = parseEnvValue(text, TOKEN_KEY);
+      if (value !== null) found = { token: value, file, problem: null };
+    } catch (error) {
+      found = { token: '', file, problem: error.message };
+    }
   }
-  return found && found.token ? found : null;
+  return found;
 }
 
 /**
@@ -93,20 +123,24 @@ function findMainCheckoutRoot(root) {
 
 /**
  * 빌드에 넣을 휴가 연동 토큰을 찾는다.
- * @returns {{ token: string, source: 'env' | 'root' | 'main-checkout' | 'none', file: string | null }}
+ *
+ * 값을 읽을 수 없는 꼴의 줄을 만나면 다음 후보로 넘어가지 않고 거기서 멈춘다(token '' + problem) —
+ * 적어 둔 값을 조용히 건너뛰어 다른 곳의 값으로 빌드하면, 고쳤다고 믿은 토큰이 실제로는 안 들어간다.
+ * @returns {{ token: string, source: 'env' | 'root' | 'main-checkout' | 'none', file: string | null, problem: string | null }}
  */
 function resolveVacationToken({ root, env = process.env, mode = 'production' }) {
   const fromEnv = typeof env[TOKEN_KEY] === 'string' ? env[TOKEN_KEY].trim() : '';
-  if (fromEnv) return { token: fromEnv, source: 'env', file: null };
-
-  const local = readTokenFromEnvFiles(root, mode);
-  if (local) return { token: local.token, source: 'root', file: local.file };
+  if (fromEnv) return { token: fromEnv, source: 'env', file: null, problem: null };
 
   const mainRoot = findMainCheckoutRoot(root);
-  const main = mainRoot ? readTokenFromEnvFiles(mainRoot, mode) : null;
-  if (main) return { token: main.token, source: 'main-checkout', file: main.file };
-
-  return { token: '', source: 'none', file: null };
+  const candidates = [['root', root], ...(mainRoot ? [['main-checkout', mainRoot]] : [])];
+  for (const [source, dir] of candidates) {
+    const found = readTokenFromEnvFiles(dir, mode);
+    if (!found) continue;
+    if (found.problem) return { token: '', source: 'none', file: found.file, problem: found.problem };
+    if (found.token) return { token: found.token, source, file: found.file, problem: null };
+  }
+  return { token: '', source: 'none', file: null, problem: null };
 }
 
 /** 토큰을 어디서 찾았는지 사람이 읽을 말로 (값은 넣지 않는다) */
@@ -117,12 +151,21 @@ function describeVacationTokenSource(resolved) {
   return '없음';
 }
 
-/** 토큰을 못 찾았을 때 보여 줄 안내 */
-function missingVacationTokenMessage(root) {
+/** 토큰을 쓸 수 없을 때(못 찾았거나, 적힌 값을 읽을 수 없을 때) 보여 줄 안내. 값은 넣지 않는다 */
+function vacationTokenProblemMessage(resolved, root) {
+  const consequence = "  토큰 없이 만든 앱은 팀 PC 에서 휴가 연동이 '인증 토큰이 유효하지 않습니다'로 끊깁니다.";
+  if (resolved.problem) {
+    return [
+      `휴가 연동 토큰(${TOKEN_KEY})이 적혀 있지만 읽을 수 없습니다.`,
+      `  파일: ${resolved.file}`,
+      `  이유: ${resolved.problem}`,
+      consequence,
+    ].join('\n');
+  }
   const mainRoot = findMainCheckoutRoot(root);
   return [
     `휴가 연동 토큰(${TOKEN_KEY})을 찾지 못했습니다.`,
-    "  토큰 없이 만든 앱은 팀 PC 에서 휴가 연동이 '인증 토큰이 유효하지 않습니다'로 끊깁니다.",
+    consequence,
     `  찾아본 곳: 셸 환경변수 ${TOKEN_KEY} → ${path.join(root, '.env.local')}`
       + (mainRoot ? ` → ${path.join(mainRoot, '.env.local')}` : ''),
     `  해결: 위 파일 중 하나에 ${TOKEN_KEY}=... 한 줄을 넣거나 환경변수로 넘긴 뒤 다시 빌드하세요.`,
@@ -153,20 +196,30 @@ function isDirectory(dir) {
 /**
  * 배포 전 확인 — 만들어진 화면 묶음에 토큰이 실제로 들어 있는지 본다.
  *
- * 보는 곳: vite 가 만든 dist/assets 와, 설치 파일로 묶이는 dist/win-unpacked/resources/app/dist/assets.
- * 있는 곳은 모두 토큰을 담고 있어야 한다(둘 다 없으면 실패).
+ * 보는 곳은 두 군데이고 **둘 다 있어야 한다**: vite 가 만든 dist/assets 와, 설치 파일로 묶이는
+ * dist/win-unpacked/resources/app/dist/assets. 설치 파일(BFLOW-Setup.exe)은 압축돼 있어 속을 볼 수 없으므로,
+ * 같은 빌드에서 함께 만들어지는 이 사본으로 확인한다. 사본이 없으면 통과시키지 않는다 — 예전 빌드의
+ * 설치 파일만 남아 있는데 새 vite 결과만 보고 배포 신호를 내면, 토큰 없는 설치 파일이 그대로 나간다.
  * @returns {{ ok: boolean, message: string }}
  */
 function checkReleaseVacationToken({ root, distDir, env = process.env, mode = 'production' }) {
   const resolved = resolveVacationToken({ root, env, mode });
-  if (!resolved.token) return { ok: false, message: missingVacationTokenMessage(root) };
+  if (!resolved.token) return { ok: false, message: vacationTokenProblemMessage(resolved, root) };
 
   const bundleDirs = [
     path.join(distDir, 'assets'),
     path.join(distDir, 'win-unpacked', 'resources', 'app', 'dist', 'assets'),
-  ].filter(isDirectory);
-  if (bundleDirs.length === 0) {
-    return { ok: false, message: `휴가 연동 토큰을 확인할 화면 묶음이 없습니다 (${path.join(distDir, 'assets')}).` };
+  ];
+  const absent = bundleDirs.filter((dir) => !isDirectory(dir));
+  if (absent.length > 0) {
+    return {
+      ok: false,
+      message: [
+        '휴가 연동 토큰을 확인할 화면 묶음이 없습니다.',
+        ...absent.map((dir) => `  없음: ${dir}`),
+        '  설치 파일은 이 묶음과 같은 빌드에서 만들어져야 합니다 — npm run build 를 처음부터 다시 돌리세요.',
+      ].join('\n'),
+    };
   }
 
   const missing = bundleDirs.filter((dir) => !dirContainsToken(dir, resolved.token));
@@ -194,16 +247,16 @@ module.exports = {
   findMainCheckoutRoot,
   resolveVacationToken,
   describeVacationTokenSource,
-  missingVacationTokenMessage,
+  vacationTokenProblemMessage,
   checkReleaseVacationToken,
 };
 
-// `node scripts/vacation-token.cjs` — 배포 빌드 첫 단계. 토큰이 없으면 여기서 멈춘다.
+// `node scripts/vacation-token.cjs` — 배포 빌드 첫 단계. 토큰을 쓸 수 없으면 여기서 멈춘다.
 if (require.main === module) {
   const root = path.resolve(__dirname, '..');
   const resolved = resolveVacationToken({ root });
   if (!resolved.token) {
-    console.error(`[vacation-token] ${missingVacationTokenMessage(root)}`);
+    console.error(`[vacation-token] ${vacationTokenProblemMessage(resolved, root)}`);
     process.exit(1);
   }
   console.log(`[vacation-token] 휴가 연동 토큰 확인 — 출처: ${describeVacationTokenSource(resolved)}`);

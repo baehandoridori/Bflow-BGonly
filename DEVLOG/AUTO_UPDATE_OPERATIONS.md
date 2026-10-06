@@ -52,7 +52,8 @@
 휴가 API(`x-bflow-token`) 토큰은 레포에 커밋하지 않고 빌드할 때 화면 묶음에 넣는다. 값은 `.env.local` 의 `BFLOW_VACATION_TOKEN` 한 줄이고, 이 파일은 gitignore 라 **메인 체크아웃(`C:\Bflow-BGonly`)에만 있다.**
 
 - 찾는 순서(`scripts/vacation-token.cjs`): 셸 환경변수 → 빌드 폴더의 `.env*` → 워크트리라면 메인 체크아웃의 `.env*`. 그래서 워크트리에서 빌드해도 토큰이 들어간다.
-- `npm run build` 는 **첫 단계**에서 토큰을 못 찾으면 멈추고, **마지막 단계**(`generate-manifest.js`)는 `dist/assets` 와 `dist/win-unpacked/resources/app/dist/assets` 에 토큰이 실제로 들어 있을 때만 `manifest.json` 을 쓴다. `manifest.json` 이 없으면 배포가 성립하지 않는다.
+- `npm run build` 는 **첫 단계**에서 토큰을 못 찾으면 멈추고, **마지막 단계**(`generate-manifest.js`)는 `dist/assets` 와 `dist/win-unpacked/resources/app/dist/assets` 에 토큰이 실제로 들어 있을 때만 `manifest.json` 을 쓴다. `manifest.json` 이 없으면 배포가 성립하지 않는다. 두 묶음은 **둘 다 있어야 한다** — 설치 파일(`BFLOW-Setup.exe`)은 속을 볼 수 없어 같은 빌드의 `win-unpacked` 사본으로 확인하므로, 사본 없이 예전 설치 파일만 남은 상태로는 통과하지 않는다.
+- `.env.local` 의 토큰 줄은 `BFLOW_VACATION_TOKEN=값`(따옴표로 감싸도 됨)처럼 **값을 그대로** 적는다. 변수 확장(`${...}`)·역슬래시·여러 줄 값은 읽지 않고 오류로 멈춘다 — 풀지 않은 글자가 토큰으로 묶음에 들어가면 확인은 통과하는데 서버가 거부하는 빌드가 되기 때문이다.
 - 개발용 `build:vite` 는 토큰 없이도 통과한다(다른 PC·CI). 그 결과물은 배포하지 않는다.
 - 토큰 값은 로그·PR·문서·채팅 어디에도 적지 않는다. 확인은 "들어 있다/없다"와 출처로만 한다.
 - 배경: v1.127.5·v1.128.0 을 `.env.local` 이 없는 워크트리에서 빌드해 토큰이 빈 채로 배포됐고, 팀 PC 의 휴가 연동이 '인증 토큰이 유효하지 않습니다'로 끊겼다. 빌드는 경고 없이 통과했다.
@@ -215,7 +216,8 @@ Get-Content -LiteralPath $log -Tail 40
 | 이전 업데이트 내역이 안 보임 | `manifest.json.releaseNotes` 길이 확인 | `generate-manifest.js`가 내역을 자르지 않아야 함 |
 | G드라이브 배포 직후 감지 실패 | 원격 `manifest.json`, `BFLOW-Setup.exe` 해시/크기 확인 | manifest가 마지막에 올라갔는지 확인 |
 | 휴가 연동이 '인증 토큰이 유효하지 않습니다'로 끊김 | 설정의 연동 화면 › 휴가 관리 API 토큰 칸이 비어 있을 때 보이는 안내 글이 '내장 토큰 사용 중'인지 '앱에 토큰이 없습니다'인지. 빌드 로그의 휴가 연동 토큰 확인 두 줄 | '앱에 토큰이 없습니다'면 토큰 없이 만든 빌드다 — 토큰을 넣어 다시 빌드·배포. 토큰 칸에 값이 저장돼 있으면 그 값이 내장 토큰보다 먼저 쓰이므로, 틀린 값이면 칸을 비우고 '설정 저장'. 둘 다 아니면 서버 쪽 토큰이 바뀐 것 |
-| `npm run build` 가 `휴가 연동 토큰을 찾지 못했습니다`로 멈춤 | 메인 체크아웃 `.env.local` 의 `BFLOW_VACATION_TOKEN` 줄 | 파일·줄이 없으면 한솔에게 토큰을 받아 넣는다. 확인을 끄지 않는다 |
+| `npm run build` 가 `휴가 연동 토큰을 찾지 못했습니다`·`읽을 수 없습니다`로 멈춤 | 메인 체크아웃 `.env.local` 의 `BFLOW_VACATION_TOKEN` 줄 | 파일·줄이 없으면 한솔에게 토큰을 받아 넣는다. `읽을 수 없습니다`면 값을 그대로 한 줄로 다시 적는다. 확인을 끄지 않는다 |
+| 앱에서만 화면이 깨지고 미리보기(Chrome)에서는 멀쩡함 | `npm run preview:electron` 으로 같은 화면을 앱 엔진에서 열어 비교 | 앱은 Electron 33(Chromium 130)이라 최신 Chrome 과 기본 레이아웃이 다를 수 있다. v1.128.0 캐릭터 카드 그림이 이 경우였다(tasks/lessons.md 2026-10-06) |
 | 업데이트가 `자동 중단`(suppressed)으로 멈춤 | `%LOCALAPPDATA%\Bflow-BGonly\.swap-suppressed`(content=설치 버전) 존재 여부 | 적용 실패 후 영구 suppression. 모달 `다시 시도`(v1.44.2~) 또는 설치 파일 직접 실행으로 해제. 다른 버전 설치 시 own 버전이 바뀌면 자동 정리 |
 
 ---

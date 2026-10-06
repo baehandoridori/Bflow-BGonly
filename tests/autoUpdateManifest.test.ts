@@ -35,9 +35,14 @@ test('manifest generation and reading preserve every valid item and the complete
     await writeFile(path.join(dir, 'DEVLOG', 'update-notes.json'), JSON.stringify(notes));
     await writeFile(path.join(dir, 'dist', 'BFLOW-Setup.exe'), installer);
     await writeFile(path.join(dir, 'dist', 'win-unpacked', 'app.txt'), 'app');
-    // 배포용 manifest 는 화면 묶음에 휴가 연동 토큰이 들어 있어야 만들어진다 (tests/vacationTokenBuild.test.ts)
+    // 배포용 manifest 는 화면 묶음 두 곳(빌드 결과·설치 파일용 사본)에 휴가 연동 토큰이 들어 있어야 만들어진다
+    // (tests/vacationTokenBuild.test.ts)
+    const bundle = 'const token="manifest-test-token";';
+    const packagedAssets = path.join(dir, 'dist', 'win-unpacked', 'resources', 'app', 'dist', 'assets');
     await mkdir(path.join(dir, 'dist', 'assets'));
-    await writeFile(path.join(dir, 'dist', 'assets', 'index-test.js'), 'const token="manifest-test-token";');
+    await mkdir(packagedAssets, { recursive: true });
+    await writeFile(path.join(dir, 'dist', 'assets', 'index-test.js'), bundle);
+    await writeFile(path.join(packagedAssets, 'index-test.js'), bundle);
 
     const result = spawnSync(process.execPath, [generator], {
       cwd: dir,
@@ -51,8 +56,9 @@ test('manifest generation and reading preserve every valid item and the complete
     assert.deepEqual(generated.releaseNotes, expected, 'generation must not truncate either items or older versions');
     assert.deepEqual((await readManifest(manifestPath))?.releaseNotes, expected, 'the app must receive the same complete notes');
     assert.deepEqual(generated.installer, { fileName: 'BFLOW-Setup.exe', sizeBytes: installer.length });
-    assert.equal(generated.fileCount, 1);
-    assert.equal(generated.totalBytes, 3);
+    // win-unpacked 안의 파일: app.txt(3바이트) + 설치 파일용 화면 묶음 1개
+    assert.equal(generated.fileCount, 2);
+    assert.equal(generated.totalBytes, 3 + Buffer.byteLength(bundle));
   } finally {
     assert.equal(path.dirname(path.resolve(dir)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(dir).startsWith('bflow-manifest-generator-'));

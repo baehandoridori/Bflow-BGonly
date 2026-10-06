@@ -78,12 +78,49 @@ test('parseEnvValue — .env 한 줄에서 값을 읽는다', () => {
   assert.equal(parseEnvValue(`${KEY}="${TOKEN}"`, KEY), TOKEN, '큰따옴표');
   assert.equal(parseEnvValue(`${KEY}='${TOKEN}' # 메모`, KEY), TOKEN, '작은따옴표 + 뒤 주석');
   assert.equal(parseEnvValue(`${KEY}=${TOKEN} # 메모`, KEY), TOKEN, '따옴표 없는 값 뒤 주석');
-  assert.equal(parseEnvValue(`${KEY}=a#b`, KEY), 'a#b', '공백 없는 # 은 값의 일부');
+  assert.equal(parseEnvValue(`${KEY}=${TOKEN}#메모`, KEY), TOKEN, '따옴표 없는 값은 # 부터 주석 (vite 가 쓰는 dotenv 와 같다)');
+  assert.equal(parseEnvValue(`${KEY}=\`${TOKEN}\``, KEY), TOKEN, '백틱 따옴표');
+  assert.equal(parseEnvValue(`${KEY}="ab#cd"`, KEY), 'ab#cd', '따옴표 안의 # 은 값의 일부 (dotenv 와 같다)');
+  assert.equal(parseEnvValue(`${KEY}="ab#cd" # 메모 "x"`, KEY), 'ab#cd', '따옴표 뒤 주석 안의 따옴표는 상관없다');
   assert.equal(parseEnvValue(`# ${KEY}=${OTHER}\nOTHER_KEY=x\n${KEY}=${TOKEN}`, KEY), TOKEN, '주석·다른 키는 건너뛴다');
   assert.equal(parseEnvValue(`${KEY}=${OTHER}\n${KEY}=${TOKEN}`, KEY), TOKEN, '같은 키는 마지막 값');
   assert.equal(parseEnvValue(`${KEY}_OLD=${OTHER}\nMY_${KEY}=${OTHER}`, KEY), null, '이름이 일부만 같은 키는 다른 키');
   assert.equal(parseEnvValue(`${KEY}=`, KEY), '', '빈 값');
+  assert.equal(parseEnvValue(`${KEY}=""`, KEY), '', '빈 따옴표');
   assert.equal(parseEnvValue('', KEY), null);
+  // 다른 키의 값이 받지 않는 꼴이어도 상관하지 않는다 — 토큰 줄만 본다
+  assert.equal(parseEnvValue(`OTHER="a b $HOME"\n${KEY}=${TOKEN}`, KEY), TOKEN);
+});
+
+test('parseEnvValue — vite 가 풀어서 읽는 꼴은 흉내 내지 않고 거부한다 (코덱스 지적)', () => {
+  // vite(dotenv-expand)는 ${VAR} 를 다른 값으로 바꾸고 \" 를 " 로 푼다. 글자 그대로 읽으면 묶음에 다른 값이 들어가는데,
+  // 빌드 첫 단계와 묶음 확인이 '그 틀린 값'을 서로 확인해 주므로 전부 통과한다 — 토큰이 틀린 앱이 배포된다.
+  const unsupported: Array<[string, string]> = [
+    ['변수 확장 ${}', `${KEY}=\${VACATION_SECRET}`],
+    ['변수 확장 $', `${KEY}=$VACATION_SECRET`],
+    ['값 중간의 확장', `${KEY}=abc\${SUFFIX}`],
+    ['따옴표 안 확장', `${KEY}="\${VACATION_SECRET}"`],
+    ['이스케이프한 따옴표', `${KEY}="abc\\"def"`],
+    ['역슬래시', `${KEY}=abc\\ndef`],
+    ['따옴표 안 공백', `${KEY}="abc def"`],
+    ['따옴표 없는 공백', `${KEY}=abc def`],
+    ['닫히지 않은 따옴표(여러 줄 값)', `${KEY}="abc\ndef"`],
+    ['따옴표 뒤에 붙은 글자', `${KEY}="abc"def`],
+    ['짝이 안 맞는 따옴표', `${KEY}="abc'`],
+  ];
+  for (const [label, text] of unsupported) {
+    assert.throws(() => parseEnvValue(text, KEY), /그대로 읽을 수 없는 꼴/, label);
+  }
+  // 오류 글에 값이 새지 않는다
+  try {
+    parseEnvValue(`${KEY}="${TOKEN} \${X}"`, KEY);
+    assert.fail('거부해야 한다');
+  } catch (error) {
+    assert.ok(!(error as Error).message.includes(TOKEN));
+  }
+  // 마지막 줄이 기준이다: 앞줄이 이상해도 뒷줄이 멀쩡하면 읽고, 뒷줄이 이상하면 거부한다
+  assert.equal(parseEnvValue(`${KEY}=\${OLD}\n${KEY}=${TOKEN}`, KEY), TOKEN);
+  assert.throws(() => parseEnvValue(`${KEY}=${TOKEN}\n${KEY}=\${NEW}`, KEY));
 });
 
 // ── 메인 체크아웃 찾기 ────────────────────────────────────────────────
@@ -127,7 +164,7 @@ test('resolveVacationToken — 환경변수 > 빌드 폴더 > 메인 체크아�
 
   assert.deepEqual(
     resolveVacationToken({ root: worktree, env: { [KEY]: '  env-token  ' } }),
-    { token: 'env-token', source: 'env', file: null },
+    { token: 'env-token', source: 'env', file: null, problem: null },
   );
   const fromRoot = resolveVacationToken({ root: worktree, env: {} });
   assert.equal(fromRoot.token, 'worktree-token');
@@ -151,11 +188,43 @@ test('resolveVacationToken — vite 와 같은 .env 파일 순서(뒤 파일이 
 
 test('resolveVacationToken — 어디에도 없으면 빈 값 (메인 체크아웃은 위 폴더를 뒤지지 않는다)', () => {
   const { main, worktree } = makeWorktree();
-  assert.deepEqual(resolveVacationToken({ root: worktree, env: {} }), { token: '', source: 'none', file: null });
+  assert.deepEqual(resolveVacationToken({ root: worktree, env: {} }), { token: '', source: 'none', file: null, problem: null });
 
   // 메인 체크아웃에서 빌드할 때 바깥 폴더의 .env.local 을 끌어오지 않는다
   write(path.join(path.dirname(main), '.env.local'), `${KEY}=${OTHER}\n`);
   assert.equal(resolveVacationToken({ root: main, env: {} }).token, '');
+});
+
+test('resolveVacationToken — 읽을 수 없는 꼴로 적힌 값은 건너뛰지 않고 거기서 멈춘다', () => {
+  const { main, worktree } = makeWorktree();
+  write(path.join(main, '.env.local'), `${KEY}=${TOKEN}\n`);
+  write(path.join(worktree, '.env.local'), `${KEY}=\${VACATION_SECRET}\n`);
+
+  // 워크트리에 적어 둔 값이 이상하면 메인 체크아웃 값으로 조용히 넘어가지 않는다 —
+  // 넘어가면 '고쳐 적은 토큰'이 아니라 옛 토큰으로 빌드된다
+  const blocked = resolveVacationToken({ root: worktree, env: {} });
+  assert.equal(blocked.token, '');
+  assert.equal(blocked.source, 'none');
+  assert.equal(blocked.file, path.join(worktree, '.env.local'));
+  assert.match(blocked.problem ?? '', /그대로 읽을 수 없는 꼴/);
+
+  // 메인 체크아웃 쪽이 이상할 때도 같다
+  write(path.join(worktree, '.env.local'), '# 비움\n');
+  write(path.join(main, '.env.local'), `${KEY}="a b"\n`);
+  const blockedMain = resolveVacationToken({ root: worktree, env: {} });
+  assert.equal(blockedMain.token, '');
+  assert.equal(blockedMain.file, path.join(main, '.env.local'));
+  assert.ok(blockedMain.problem);
+
+  // 환경변수로 넘긴 값은 파일을 읽지 않으므로 영향받지 않는다
+  assert.equal(resolveVacationToken({ root: worktree, env: { [KEY]: OTHER } }).token, OTHER);
+
+  // 같은 폴더에서 뒤 파일이 멀쩡한 값으로 덮으면 그 값을 쓴다 (vite 와 같은 덮어쓰기 순서)
+  write(path.join(main, '.env.production.local'), `${KEY}=${TOKEN}\n`);
+  assert.deepEqual(
+    resolveVacationToken({ root: worktree, env: {} }),
+    { token: TOKEN, source: 'main-checkout', file: path.join(main, '.env.production.local'), problem: null },
+  );
 });
 
 test('describeVacationTokenSource — 출처만 말하고 토큰 값은 넣지 않는다', () => {
@@ -195,8 +264,21 @@ test('checkReleaseVacationToken — 묶음(빌드 결과·설치 파일용 사�
   assert.equal(passed.ok, true, passed.message);
   assert.ok(!passed.message.includes(TOKEN), '통과 메시지에도 토큰 값은 없다');
 
-  const onlyBuilt = makeBuild({ token: TOKEN, built: TOKEN });
-  assert.equal(checkReleaseVacationToken({ ...onlyBuilt, env: {} }).ok, true, '설치 파일용 사본이 아직 없으면 빌드 결과만 본다');
+});
+
+test('checkReleaseVacationToken — 설치 파일용 사본이 없으면 빌드 결과만 보고 통과시키지 않는다 (코덱스 지적)', () => {
+  // 예전 빌드의 설치 파일만 남고 win-unpacked 가 없는 상태에서 새 vite 결과만 확인해 배포 신호를 내면,
+  // 토큰 없는 옛 설치 파일이 그대로 나간다. 설치 파일은 속을 볼 수 없으니 같은 빌드의 사본이 꼭 있어야 한다.
+  const onlyBuilt = checkReleaseVacationToken({ ...makeBuild({ token: TOKEN, built: TOKEN }), env: {} });
+  assert.equal(onlyBuilt.ok, false);
+  assert.match(onlyBuilt.message, /묶음이 없습니다/);
+  assert.match(onlyBuilt.message, /win-unpacked/);
+  assert.ok(!onlyBuilt.message.includes(TOKEN));
+
+  // 반대로 사본만 있고 빌드 결과가 없는 것도 한 빌드가 아니다
+  const onlyPackaged = checkReleaseVacationToken({ ...makeBuild({ token: TOKEN, packaged: TOKEN }), env: {} });
+  assert.equal(onlyPackaged.ok, false);
+  assert.match(onlyPackaged.message, /묶음이 없습니다/);
 });
 
 test('checkReleaseVacationToken — 토큰이 없거나 묶음에 안 들어갔으면 막는다', () => {
@@ -216,7 +298,9 @@ test('checkReleaseVacationToken — 토큰이 없거나 묶음에 안 들어갔�
   assert.match(stalePackaged.message, /win-unpacked/);
 
   // 다른 토큰이 들어간 묶음
-  assert.equal(checkReleaseVacationToken({ ...makeBuild({ token: TOKEN, built: OTHER }), env: {} }).ok, false);
+  const otherToken = checkReleaseVacationToken({ ...makeBuild({ token: TOKEN, built: OTHER, packaged: OTHER }), env: {} });
+  assert.equal(otherToken.ok, false);
+  assert.match(otherToken.message, /들어 있지 않습니다/);
 
   // 확인할 묶음이 아예 없다
   const noBundle = checkReleaseVacationToken({ ...makeBuild({ token: TOKEN }), env: {} });
@@ -224,9 +308,19 @@ test('checkReleaseVacationToken — 토큰이 없거나 묶음에 안 들어갔�
   assert.match(noBundle.message, /묶음이 없습니다/);
 
   // .js 가 아닌 파일에만 있는 것은 치지 않는다
-  const cssOnly = makeBuild({ token: TOKEN, built: '' });
-  write(path.join(cssOnly.distDir, 'assets', 'note.txt'), TOKEN);
-  assert.equal(checkReleaseVacationToken({ ...cssOnly, env: {} }).ok, false);
+  const textOnly = makeBuild({ token: TOKEN, built: '', packaged: TOKEN });
+  write(path.join(textOnly.distDir, 'assets', 'note.txt'), TOKEN);
+  const textOnlyCheck = checkReleaseVacationToken({ ...textOnly, env: {} });
+  assert.equal(textOnlyCheck.ok, false);
+  assert.match(textOnlyCheck.message, /들어 있지 않습니다/);
+
+  // 토큰이 읽을 수 없는 꼴로 적혀 있으면 묶음을 보기 전에 막는다
+  const unreadable = makeBuild({ built: TOKEN, packaged: TOKEN });
+  write(path.join(unreadable.root, '.env.local'), `${KEY}=\${VACATION_SECRET}\n`);
+  const unreadableCheck = checkReleaseVacationToken({ ...unreadable, env: {} });
+  assert.equal(unreadableCheck.ok, false);
+  assert.match(unreadableCheck.message, /읽을 수 없습니다/);
+  assert.ok(!unreadableCheck.message.includes('VACATION_SECRET'), '적힌 값을 안내에 옮기지 않는다');
 });
 
 // ── 빌드 첫 단계 (node scripts/vacation-token.cjs) ────────────────────
@@ -265,6 +359,15 @@ test('빌드 첫 단계 — 토큰이 없으면 실패하고, 있으면 출처�
   const fromEnv = run(tempDirWithScripts(), 'vacation-token.cjs', [], { [KEY]: OTHER });
   assert.equal(fromEnv.status, 0, fromEnv.output);
   assert.ok(!fromEnv.output.includes(OTHER));
+
+  // 읽을 수 없는 꼴로 적힌 값: 실패하고, 어느 파일인지와 이유만 말한다
+  const unreadableRoot = tempDirWithScripts();
+  write(path.join(unreadableRoot, '.env.local'), `${KEY}="\${VACATION_SECRET}"\n`);
+  const unreadable = run(unreadableRoot, 'vacation-token.cjs');
+  assert.equal(unreadable.status, 1, unreadable.output);
+  assert.match(unreadable.output, /읽을 수 없습니다/);
+  assert.match(unreadable.output, /\.env\.local/);
+  assert.ok(!unreadable.output.includes('VACATION_SECRET'));
 });
 
 function tempDirWithScripts(): string {
@@ -294,6 +397,8 @@ test('generate-manifest — 배포용은 묶음에 토큰이 있을 때만 manif
     ['토큰을 못 찾음', { built: '', packaged: '' }],
     ['묶음이 토큰 없이 만들어짐', { token: TOKEN, built: '', packaged: '' }],
     ['설치 파일용 사본에 토큰 없음', { token: TOKEN, built: TOKEN, packaged: '' }],
+    // 예전 빌드의 설치 파일만 남고 win-unpacked 가 없는데 새 vite 결과에는 토큰이 있다 (코덱스 지적)
+    ['설치 파일용 사본이 없음(옛 설치 파일만 남음)', { token: TOKEN, built: TOKEN }],
   ] as const) {
     const root = makeRelease(options);
     const blocked = run(root, 'generate-manifest.js');
