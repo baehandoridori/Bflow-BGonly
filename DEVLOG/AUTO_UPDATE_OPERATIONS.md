@@ -58,7 +58,7 @@
 - 토큰 값은 로그·PR·문서·채팅 어디에도 적지 않는다. 확인은 "들어 있다/없다"와 출처로만 한다.
 - 배경: v1.127.5·v1.128.0 을 `.env.local` 이 없는 워크트리에서 빌드해 토큰이 빈 채로 배포됐고, 팀 PC 의 휴가 연동이 '인증 토큰이 유효하지 않습니다'로 끊겼다. 빌드는 경고 없이 통과했다.
 
-### 앱 안에 빌드 산출물을 다시 담지 않는다 (v1.128.2~)
+### 앱 안에 빌드 산출물을 다시 담지 않는다 (v1.129.1~)
 
 화면 묶음 폴더(vite)와 electron-builder 출력 폴더가 둘 다 `dist` 다. 화면 묶음을 앱에 담으려고 `package.json` `build.files` 에 `dist/**/*` 가 있는데, electron-builder 는 런타임을 먼저 `dist/win-unpacked` 에 풀고 그 다음에 앱 파일을 모으기 때문에 **방금 푼 런타임이 앱 안(`resources/app/dist/win-unpacked`)으로 한 번 더 복사된다.** vite 정리 없이 패키징만 다시 돌리면 이전 `BFLOW-Setup.exe`·`latest.yml`·`manifest.json` 까지 같이 들어간다.
 
@@ -66,18 +66,18 @@
 - electron-builder 에도 같은 자동 제외(`!dist/*-unpacked`)가 있지만 24.13.3 에서는 `files` 를 문자열 목록으로 쓰면 적용되지 않는다(설정을 읽으며 목록이 묶음 하나로 바뀌고, 자동 제외는 버려지는 쪽에 붙는다). 그래서 직접 적는다.
 - `generate-manifest.js` 는 결과물의 화면 폴더(`dist/win-unpacked/resources/app/dist`)에 vite 가 만든 것(`index.html`·`assets`·`public` 에서 복사된 항목) 말고 다른 것이 있으면 `manifest.json` 을 쓰지 않는다. `public/` 에 폴더를 더하면 자동으로 허용된다.
 - 제외 규칙은 출처를 가리지 않는다. `public/` **맨 위**에 `manifest.json`, `*.exe`·`*.blockmap`·`*.yml`·`*.yaml`·`*.7z` 파일이나 `*-unpacked` 폴더를 두면 화면 묶음(`dist`)에는 복사되지만 앱에는 담기지 않는다(위 확인도 빠진 것은 보지 않는다). 그런 이름이 필요하면 하위 폴더에 둔다.
-- 크기 기준(v1.128.2): `win-unpacked` 약 396MB(7,140개), `BFLOW-Setup.exe` 약 115MB. 설치 파일이 190MB 를 넘으면 이 문제가 되살아난 것이다.
+- 크기 기준(v1.129.1): `win-unpacked` 약 396MB(7,140개), `BFLOW-Setup.exe` 약 115MB. 설치 파일이 190MB 를 넘으면 이 문제가 되살아난 것이다.
 - 출력 폴더(`directories.output`)는 바꾸지 않는다. 배포 절차·`generate-manifest.js`·G드라이브 탐색(`electron/autoUpdate/paths.ts`)이 모두 `dist` 를 전제로 한다.
-- 배경: v1.128.1 까지 런타임 한 벌(71개, 268MB)이 앱 안에 더 들어가 `win-unpacked` 664MB, 설치 파일 192MB 였다. 설치된 앱도 그만큼 컸다.
+- 배경: v1.129.0 까지 런타임 한 벌(71개, 268MB)이 앱 안에 더 들어가 `win-unpacked` 664MB, 설치 파일 192MB 였다. 설치된 앱도 그만큼 컸다.
 
-### 의존성 목록에 프로젝트 폴더를 적지 않는다 (v1.128.3~)
+### 의존성 목록에 프로젝트 폴더를 적지 않는다 (v1.129.2~)
 
 electron-builder 는 `package.json` `dependencies` 에 적힌 것을 앱의 `node_modules` 로 담는다. 폴더를 가리키는 항목(`file:…`, 상대·절대 경로)이 있고 그 폴더가 실제로 있으면, 폴더 내용(소스·`.env.local`·`dist` 의 옛 런타임과 설치 파일)이 `resources/app/node_modules/<이름>` 으로 통째로 들어간다. 위의 화면 폴더 확인은 `resources/app/dist` 만 보므로 이 경로는 잡지 못한다.
 
 - `tests/packagedAppContents.test.ts` 가 `package.json` 의 의존성이 전부 npm 저장소 표기인지, `package-lock.json` 에 폴더 연결(`link` 항목, `node_modules/` 밖의 항목)이 없는지 확인한다. 배포 빌드의 테스트 묶음(`test:auto-update`)에 들어 있어서, 걸리면 패키징 전에 멈춘다.
 - 워크트리 경로를 `npm install` 에 넘기지 않는다. `npm install <폴더>` 는 그 폴더를 의존성으로 적는다.
 - lock 에서 지울 때 `npm install --package-lock-only` 만으로는 끝나지 않는다. 연결 대상 항목이 `"extraneous": true` 로 남고 다시 돌려도 그대로다. 그 항목까지 직접 지운 뒤, 다시 돌려도 lock 이 한 글자도 바뀌지 않는지와 `npm ci` 통과를 확인한다.
-- 배경: v1.24.1 ~ v1.128.2 의 `dependencies` 에 `"bflow": "file:.claude/worktrees/hardcore-bardeen-8d3837"` 가 들어 있었다. 그 폴더가 지워진 뒤라 끊어진 연결만 남아 결과물에는 들어가지 않았다(그 자리에 폴더를 만들어 패키징하면 들어가는 것을 확인했다). 이미 설치된 폴더들의 끊어진 `node_modules\bflow` 는 새 lock 을 받은 뒤 `npm install` 한 번이면 npm 이 지운다. 손으로 지울 때는 `cmd /c rmdir` 로 링크만 끊는다.
+- 배경: v1.24.1 ~ v1.129.1 의 `dependencies` 에 `"bflow": "file:.claude/worktrees/hardcore-bardeen-8d3837"` 가 들어 있었다. 그 폴더가 지워진 뒤라 끊어진 연결만 남아 결과물에는 들어가지 않았다(그 자리에 폴더를 만들어 패키징하면 들어가는 것을 확인했다). 이미 설치된 폴더들의 끊어진 `node_modules\bflow` 는 새 lock 을 받은 뒤 `npm install` 한 번이면 npm 이 지운다. 손으로 지울 때는 `cmd /c rmdir` 로 링크만 끊는다.
 
 ---
 
@@ -145,7 +145,7 @@ electron-builder 는 `package.json` `dependencies` 에 적힌 것을 앱의 `nod
 5. PR 생성 후 리뷰를 확인하고 필요한 수정까지 반영한다.
 6. PR을 머지한다.
 7. `C:\Bflow-BGonly`에서 `git pull --ff-only`.
-8. `npm run build`로 정식 설치 파일을 만든다. 워크트리에서 빌드해도 된다(토큰은 메인 체크아웃 `.env.local` 에서 찾는다). 빌드 로그에 `[vacation-token] 휴가 연동 토큰 확인` 과 `[generate-manifest] 휴가 연동 토큰 확인 — 화면 묶음 2곳에 들어 있음` 두 줄이 있어야 한다. 그 아래 `[generate-manifest] 앱 묶음 확인 — 화면 폴더에 빌드 산출물이 섞이지 않음` 줄도 확인한다(v1.128.2~).
+8. `npm run build`로 정식 설치 파일을 만든다. 워크트리에서 빌드해도 된다(토큰은 메인 체크아웃 `.env.local` 에서 찾는다). 빌드 로그에 `[vacation-token] 휴가 연동 토큰 확인` 과 `[generate-manifest] 휴가 연동 토큰 확인 — 화면 묶음 2곳에 들어 있음` 두 줄이 있어야 한다. 그 아래 `[generate-manifest] 앱 묶음 확인 — 화면 폴더에 빌드 산출물이 섞이지 않음` 줄도 확인한다(v1.129.1~).
 9. G드라이브에 배포하되 `manifest.json`은 마지막에 복사한다.
 
 배포 복사 예시:
@@ -257,5 +257,5 @@ Get-Content -LiteralPath $log -Tail 40
 - [ ] `DEVLOG/update-notes.json`에 새 버전 항목을 추가했고 과거 항목을 삭제하지 않았다.
 - [ ] `npm run test:auto-update`를 통과했다.
 - [ ] 정식 빌드 로그에서 휴가 연동 토큰 확인 두 줄(`[vacation-token]`, `[generate-manifest] … 화면 묶음 2곳`)을 봤다.
-- [ ] 정식 빌드 로그에서 `[generate-manifest] 앱 묶음 확인` 줄을 봤고, `BFLOW-Setup.exe` 크기가 직전 배포와 비슷하다(v1.128.2 기준 약 115MB).
+- [ ] 정식 빌드 로그에서 `[generate-manifest] 앱 묶음 확인` 줄을 봤고, `BFLOW-Setup.exe` 크기가 직전 배포와 비슷하다(v1.129.1 기준 약 115MB).
 - [ ] 실제 업데이트 테스트에서 설치 버전, 최신 버전 열림, `installer-pending` 정리, `swap.log`를 확인했다.

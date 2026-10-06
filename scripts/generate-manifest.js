@@ -89,7 +89,7 @@ if (!allowMissingInstaller) {
  *
  * 화면 묶음 폴더와 electron-builder 출력 폴더가 둘 다 dist 라서, package.json build.files 의
  * "dist 아래 전부" 포함 규칙은 방금 풀어 둔 런타임(dist/win-unpacked)과 이전 설치 파일까지 앱 안으로 다시 담는다.
- * v1.128.1 까지 런타임 한 벌(71개, 268MB)이 앱 안에 더 들어가 설치 파일이 192MB 였다(뺀 뒤 115MB).
+ * v1.129.0 까지 런타임 한 벌(71개, 268MB)이 앱 안에 더 들어가 설치 파일이 192MB 였다(뺀 뒤 115MB).
  * build.files 의 `!dist/…` 제외 규칙이 이를 막고, 여기서는 결과물에서 직접 확인한다.
  * 화면 폴더에는 vite 가 만드는 것(index.html·assets·public 에서 복사된 항목)만 있어야 한다.
  */

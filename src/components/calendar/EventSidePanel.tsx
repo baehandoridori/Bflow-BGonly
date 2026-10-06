@@ -22,6 +22,7 @@ import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { requestMainWindowView } from '@/utils/widgetViewNavigation';
 import {
   getTagCanonicalSnapshot,
   isOptimisticCalendarTagId,
@@ -410,11 +411,14 @@ export function EventSidePanel({
       {hasLinkedTodo && (
         <button
           onClick={() => {
-            setView('dashboard');
-            // 대시보드 마운트 대기 후 네비게이션 이벤트 디스패치
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId: linkedTodoId } }));
-            }, 300);
+            // 새 창으로 띄운 캘린더에는 대시보드가 없다 — 본 창이 대시보드의 그 할 일로 가게 한다.
+            if (!requestMainWindowView({ view: 'dashboard', todoId: linkedTodoId })) {
+              setView('dashboard');
+              // 대시보드 마운트 대기 후 네비게이션 이벤트 디스패치
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId: linkedTodoId } }));
+              }, 300);
+            }
             onClose();
           }}
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#A29BFE]/15 text-[#A29BFE] hover:bg-[#A29BFE]/25 transition-colors cursor-pointer"

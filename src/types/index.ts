@@ -3,6 +3,7 @@ import type { BflowDeepLink } from '../shared/bflowDeepLink';
 import type { RetakeDeliveryResult } from '../shared/retakeNotifications';
 import type { RevisionUpdateResult } from '../shared/revisionPersistence';
 import type { CharacterCommentSummaries } from '../shared/characterCommentSummary';
+import type { WidgetViewNavigation } from '../utils/widgetViewNavigation';
 import type {
   ArcadeExecuteCommand,
   ArcadeExecuteResult,
@@ -1347,6 +1348,10 @@ export interface ElectronAPI extends CalendarApiInputContract {
   widgetNavigateToDate?: (payload: { date: string; todoId: string }) => Promise<void>;
   /** 위젯 팝업 → 본체 캘린더 날짜 이동 — 본체가 점프 신호 수신 */
   onWidgetNavigateToDate?: (callback: (payload: { date: string; todoId: string }) => void) => () => void;
+  /** 새 창으로 띄운 화면(캘린더 등) → 본체 화면 이동 — 새 창에서 본체로 이동 신호 전송 */
+  widgetNavigateView?: (payload: WidgetViewNavigation) => Promise<void>;
+  /** 새 창 → 본체 화면 이동 — 본체가 이동 신호 수신. 받은 값은 parseWidgetViewNavigation 으로 확인한다 */
+  onWidgetNavigateView?: (callback: (payload: unknown) => void) => () => void;
   supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkUpdateSceneFields: (updates: BulkFieldUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;

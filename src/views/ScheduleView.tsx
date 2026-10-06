@@ -5,7 +5,7 @@ import type { CalendarRecurrenceScope } from '@/shared/calendarRecurrenceContrac
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Plus,
+  CalendarDays, ChevronLeft, ChevronRight, ExternalLink, Plus,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
@@ -48,6 +48,8 @@ import {
   type CalendarEventIdentity,
 } from '@/utils/calendarEventIdentity';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { canPopOutToWindow } from '@/utils/popupWindow';
+import { requestMainWindowView } from '@/utils/widgetViewNavigation';
 import { createUuid } from '@/utils/createUuid';
 import { fmtDate, parseDate, addDays, formatWeekHeaderLabel } from '@/utils/calendarDate';
 import { calendarViewAnchor } from '@/utils/calendarViewAnchor';
@@ -956,11 +958,12 @@ export function ScheduleView() {
     setPanelEvent((previous) => previous && hasSameCalendarEventIdentity(previous, ev) ? null : ev);
   }, []);
 
-  // 이벤트에서 해당 뷰로 이동
+  // 이벤트에서 해당 뷰로 이동.
+  // 새 창으로 띄운 캘린더에는 다른 화면이 없다 — 그때는 본 창이 그 화면을 열게 한다(requestMainWindowView).
   const handleNavigate = useCallback((ev: CalendarEvent) => {
     // 휴가 이벤트 → 휴가 탭으로 이동
     if (ev.type === 'vacation') {
-      setView('vacation');
+      if (!requestMainWindowView({ view: 'vacation' })) setView('vacation');
       setPanelEvent(null);
       return;
     }
@@ -970,12 +973,21 @@ export function ScheduleView() {
       const match = ev.linkedSheetName.match(/_([A-Z])_/);
       if (match) linkedPart = match[1];
     }
+    const toastMessage = `${ev.title} → 씬 뷰로 이동합니다`;
+    if (requestMainWindowView({
+      view: 'scenes',
+      episodeNumber: ev.linkedEpisode,
+      partId: linkedPart ?? undefined,
+      department: ev.linkedDepartment,
+      highlightSceneId: ev.linkedSceneId,
+      toastMessage,
+    })) return;
     navigateToSceneView({
       episodeNumber: ev.linkedEpisode,
       partId: linkedPart,
       department: ev.linkedDepartment,
       highlightSceneId: ev.linkedSceneId,
-      toastMessage: `${ev.title} → 씬 뷰로 이동합니다`,
+      toastMessage,
     });
   }, [setView]);
 
@@ -1768,6 +1780,18 @@ export function ScheduleView() {
               )}
             >
               {showWeekends ? '주말' : '평일만'}
+            </button>
+          )}
+
+          {/* 새 창으로 — 다른 화면을 보면서 캘린더를 옆에 띄워 둘 수 있다(캐릭터 현황판과 같은 방식). 새 창 안에서는 숨긴다. */}
+          {canPopOutToWindow() && (
+            <button
+              type="button"
+              onClick={() => { void window.electronAPI?.widgetOpenPopup?.('schedule', '캘린더'); }}
+              title="캘린더를 별도 창으로 열어요 — 다른 화면을 보면서 같이 쓸 수 있어요"
+              className="flex items-center gap-1.5 rounded-lg border border-bg-border/50 bg-bg-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+            >
+              <ExternalLink size={13} /> 새 창으로
             </button>
           )}
 

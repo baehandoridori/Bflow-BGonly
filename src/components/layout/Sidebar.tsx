@@ -63,6 +63,15 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 
+/**
+ * 새 창으로 열 수 있는 화면 — 펼친 사이드바에서 항목에 마우스를 올리면 오른쪽에 '새 창으로' 버튼이 뜬다.
+ * 키는 화면 id 이자 새 창의 id 다(WidgetPopup 의 WIDGET_REGISTRY, main 의 WIDGET_POPUP_DEFAULTS 와 같은 값).
+ */
+const NAV_POPOUTS: Partial<Record<ViewMode, { title: string; hint: string; ariaLabel: string }>> = {
+  'character-board': { title: '캐릭터 현황판', hint: '캐릭터 현황판을 새 창으로 열어요', ariaLabel: '캐릭터 현황판을 새 창으로 열기' },
+  schedule: { title: '캘린더', hint: '캘린더를 새 창으로 열어요', ariaLabel: '캘린더를 새 창으로 열기' },
+};
+
 /** 리퀴드 글래스 스타일 B 로고 아이콘 (테마 accent 색상 반영) */
 function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
   const containerRef = useRef<HTMLButtonElement>(null);
@@ -233,15 +242,15 @@ export function Sidebar() {
 
   const isExpanded = sidebarExpanded;
   const isVisuallyExpanded = isExpanded || isHovered;
-  // 피드백 59(코덱스 2차): '캐릭터' 새 창 버튼은 사이드바 폭 전환(350ms)이 끝난 뒤에만 그린다 —
+  // 피드백 59(코덱스 2차): 새 창 버튼(캐릭터·캘린더)은 사이드바 폭 전환(350ms)이 끝난 뒤에만 그린다 —
   //   펼쳐지는 동안 좁은 행에서 아이콘 위에 겹쳐 클릭을 가로채지 않게.
-  const [boardPopoutReady, setBoardPopoutReady] = useState(false);
+  const [navPopoutReady, setNavPopoutReady] = useState(false);
   useEffect(() => {
     if (!isVisuallyExpanded) {
-      setBoardPopoutReady(false);
+      setNavPopoutReady(false);
       return;
     }
-    const timer = setTimeout(() => setBoardPopoutReady(true), 350);
+    const timer = setTimeout(() => setNavPopoutReady(true), 350);
     return () => clearTimeout(timer);
   }, [isVisuallyExpanded]);
   const hasRemoteUpdate = Boolean(
@@ -491,20 +500,21 @@ export function Sidebar() {
             </span>
           </button>
           );
-          // 피드백 59: '캐릭터' 항목은 펼침 상태에서 우측에 '새 창으로' 버튼을 띄운다 — 현재 화면을 떠나지 않고
-          //   캐릭터 현황판을 별도 창으로 연다. 버튼 안에 버튼을 두지 않기 위해 nav 버튼의 형제로 absolute 배치.
-          //   (래퍼가 자리(mx-2·shrink-0)를 맡고, nav 버튼은 w-full 로 그 안을 채운다.)
-          const showBoardPopout = item.id === 'character-board' && isVisuallyExpanded && boardPopoutReady
+          // 피드백 59: 새 창으로 열 수 있는 항목(캐릭터·캘린더 — NAV_POPOUTS)은 펼침 상태에서 우측에 '새 창으로' 버튼을
+          //   띄운다 — 현재 화면을 떠나지 않고 그 화면을 별도 창으로 연다. 버튼 안에 버튼을 두지 않기 위해 nav 버튼의
+          //   형제로 absolute 배치. (래퍼가 자리(mx-2·shrink-0)를 맡고, nav 버튼은 w-full 로 그 안을 채운다.)
+          const popout = NAV_POPOUTS[item.id];
+          const showPopout = popout !== undefined && isVisuallyExpanded && navPopoutReady
             && typeof window.electronAPI?.widgetOpenPopup === 'function';
           return (
             <div key={item.id} className="group/nav relative shrink-0 mx-2">
               {navButton}
-              {showBoardPopout && (
+              {showPopout && popout && (
                 <button
                   type="button"
-                  onClick={() => { void window.electronAPI?.widgetOpenPopup?.('character-board', '캐릭터 현황판'); }}
-                  title="캐릭터 현황판을 새 창으로 열어요"
-                  aria-label="캐릭터 현황판을 새 창으로 열기"
+                  onClick={() => { void window.electronAPI?.widgetOpenPopup?.(item.id, popout.title); }}
+                  title={popout.hint}
+                  aria-label={popout.ariaLabel}
                   className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-md text-text-secondary/60 invisible group-hover/nav:visible group-focus-within/nav:visible hover:bg-bg-border/60 hover:text-text-primary cursor-pointer"
                 >
                   <ExternalLink size={14} />

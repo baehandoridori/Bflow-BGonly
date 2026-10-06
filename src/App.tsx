@@ -100,6 +100,7 @@ import { dispatchNotification, noteLiveNotificationArrival, type NotificationSet
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { parseWidgetViewNavigation } from '@/utils/widgetViewNavigation';
 import { resolveNotificationSceneTarget } from '@/utils/notificationSceneNavigation';
 import {
   beginCatchupRun,
@@ -2583,11 +2584,37 @@ export default function App() {
       );
     });
 
+    // 새 창으로 띄운 화면(캘린더 등)의 '다른 화면으로 가는' 버튼 → 본체가 그 화면을 연다.
+    // 새 창에는 그 화면 하나뿐이라 자기 창에서는 갈 곳이 없다(휴가·설정·대시보드의 할 일·씬 목록).
+    const offWidgetNavigateView = window.electronAPI.onWidgetNavigateView?.((payload) => {
+      const navigation = parseWidgetViewNavigation(payload);
+      if (!navigation) return;
+      if (navigation.view === 'scenes') {
+        navigateToSceneView({
+          episodeNumber: navigation.episodeNumber,
+          partId: navigation.partId,
+          department: navigation.department,
+          highlightSceneId: navigation.highlightSceneId,
+          toastMessage: navigation.toastMessage,
+        });
+        return;
+      }
+      useAppStore.getState().setView(navigation.view);
+      if (navigation.view === 'dashboard' && navigation.todoId) {
+        const todoId = navigation.todoId;
+        // 대시보드가 그려진 뒤에 받도록 — 캘린더 상세 창의 '할일로 이동'과 같은 기다림이다
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId } }));
+        }, 300);
+      }
+    });
+
     return () => {
       offBroadcast?.();
       offJump?.();
       offWidgetNavigate?.();
       offWidgetNavigateDate?.();
+      offWidgetNavigateView?.();
     };
   }, []);
 

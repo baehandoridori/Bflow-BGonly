@@ -4,7 +4,7 @@
  * 문제: 화면 묶음 폴더(vite)와 electron-builder 출력 폴더가 둘 다 `dist` 다. 화면 묶음을 앱에 담으려고
  * package.json build.files 에 "dist 아래 전부"를 넣어 두었는데, electron-builder 는 런타임을 먼저
  * dist/win-unpacked 에 풀고 그 다음에 앱 파일을 모은다. 그래서 방금 푼 런타임 한 벌(71개, 268MB)이
- * 앱 안(resources/app/dist/win-unpacked)으로 한 번 더 복사됐다 — v1.128.1 설치 파일 192MB 중 77MB.
+ * 앱 안(resources/app/dist/win-unpacked)으로 한 번 더 복사됐다 — v1.129.0 까지 설치 파일 192MB 중 77MB.
  * vite 정리 없이 패키징만 다시 돌리면 이전 설치 파일·latest.yml·manifest.json 까지 같이 들어갔다.
  *
  * electron-builder 에는 이 상황을 위한 자동 제외(`!dist/*-unpacked`)가 있지만, 24.13.3 에서는 files 를
@@ -112,14 +112,14 @@ test('build.files — 앱이 실행에 쓰는 파일은 그대로 담긴다', as
 test('build.files — 빌드 산출물은 앱 안으로 다시 담기지 않는다', async () => {
   const packaged = await loadPackagedCheck();
   for (const [file, what] of [
-    ['dist/win-unpacked/electron.exe', '방금 풀어 둔 런타임 (v1.128.1 까지 들어가던 268MB)'],
+    ['dist/win-unpacked/electron.exe', '방금 풀어 둔 런타임 (v1.129.0 까지 들어가던 268MB)'],
     ['dist/win-unpacked/locales/ko.pak', '런타임의 하위 폴더'],
     ['dist/win-unpacked/resources/app/dist/index.html', '이전 빌드의 앱 폴더'],
     ['dist/win-arm64-unpacked/electron.exe', '다른 아키텍처용 런타임'],
     ['dist/BFLOW-Setup.exe', '이전 설치 파일'],
     ['dist/BFLOW-Setup.exe.blockmap', '설치 파일 보조 기록'],
     ['dist/__uninstaller-nsis-bflow.exe', '설치 파일을 만드는 중에 생기는 임시 파일'],
-    ['dist/bflow-1.128.2-x64.nsis.7z', '설치 파일을 만들다 멈추면 남는 묶음'],
+    ['dist/bflow-1.129.1-x64.nsis.7z', '설치 파일을 만들다 멈추면 남는 묶음'],
     ['dist/latest.yml', '설치 파일 정보'],
     ['dist/builder-debug.yml', 'electron-builder 기록'],
     ['dist/builder-effective-config.yaml', '터미널에서 직접 빌드할 때만 생기는 기록'],
@@ -210,7 +210,7 @@ test('generate-manifest — 화면 폴더에 vite 가 만든 것만 있으면 ma
   assert.doesNotMatch(ok.output, /섞여 있습니다/);
 });
 
-test('generate-manifest — 앱 안에 런타임이 한 벌 더 들어가 있으면 막는다 (v1.128.1 까지의 모양)', () => {
+test('generate-manifest — 앱 안에 런타임이 한 벌 더 들어가 있으면 막는다 (v1.129.0 까지의 모양)', () => {
   const root = makeRelease(['win-unpacked/electron.exe', 'win-unpacked/locales/ko.pak']);
   const blocked = generateManifest(root);
   assert.notEqual(blocked.status, 0, blocked.output);
@@ -241,7 +241,7 @@ test('generate-manifest — 화면 폴더가 아예 없으면 확인했다고 �
 /**
  * 프로젝트 폴더가 npm 패키지인 척 앱에 담기지 않게 지킨다.
  *
- * v1.24.1 ~ v1.128.2 의 dependencies 에 `"bflow": "file:.claude/worktrees/hardcore-bardeen-8d3837"` 가 들어 있었다.
+ * v1.24.1 ~ v1.129.1 의 dependencies 에 `"bflow": "file:.claude/worktrees/hardcore-bardeen-8d3837"` 가 들어 있었다.
  * 작업 폴더(워크트리) 하나를 패키지처럼 설치한 흔적이고, 코드 어디에서도 쓰지 않는다. 그 폴더가 지워진 뒤라
  * 끊어진 연결만 남아 결과물은 멀쩡했지만, electron-builder 는 dependencies 에 적힌 것을 앱에 담는다.
  * 같은 자리에 폴더가 다시 생기면 그 안의 소스·.env.local·dist(옛 런타임과 설치 파일까지)가 통째로
@@ -251,8 +251,12 @@ test('generate-manifest — 화면 폴더가 아예 없으면 확인했다고 �
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
 type DependencyLists = { name?: string } & Partial<Record<(typeof DEPENDENCY_FIELDS)[number], Record<string, string>>>;
 
-/** npm 저장소가 아니라 이 PC 의 폴더·파일을 가리키는 표기 — file:, link:, 상대 경로, 절대 경로 */
-const LOCAL_SPEC = /^(?:file:|link:|workspace:|portal:|\.{1,2}(?:[\\/]|$)|~[\\/]|[\\/]|[A-Za-z]:[\\/])/;
+/**
+ * npm 저장소가 아니라 이 PC 의 폴더·파일을 가리키는 표기 — file:, link:, 상대 경로, 절대 경로.
+ * `git+file:` 도 이 PC 의 저장소 폴더다. npm 은 이것을 link 없이 보통 패키지처럼 설치해서 아래 lock 확인에는
+ * 걸리지 않으므로 여기서 잡는다(코덱스 지적).
+ */
+const LOCAL_SPEC = /^(?:file:|link:|workspace:|portal:|git\+file:|\.{1,2}(?:[\\/]|$)|~[\\/]|[\\/]|[A-Za-z]:[\\/])/;
 
 function localDependencies(lists: DependencyLists, projectName: string): string[] {
   const found: string[] = [];
@@ -267,6 +271,43 @@ function localDependencies(lists: DependencyLists, projectName: string): string[
 function readRepoJson(name: string) {
   return JSON.parse(readFileSync(path.join(repoRoot, name), 'utf8'));
 }
+
+test('의존성 표기 — 이 PC 의 폴더를 가리키는 꼴은 모두 알아보고, 받아 오는 꼴은 건드리지 않는다', () => {
+  const found = (spec: string) => localDependencies({ dependencies: { dep: spec } }, 'bflow');
+  for (const spec of [
+    'file:.claude/worktrees/hardcore-bardeen-8d3837',
+    'file:///C:/work/app',
+    'link:../app',
+    'workspace:*',
+    'portal:../app',
+    'git+file:///C:/worktree',
+    './app',
+    '../app',
+    '.',
+    '..',
+    '~/app',
+    '/work/app',
+    'C:\\work\\app',
+    'C:/work/app',
+  ]) {
+    assert.deepEqual(found(spec), [`dependencies.dep: ${spec}`], spec);
+  }
+  for (const spec of [
+    '^1.2.3',
+    '1.2.3',
+    'latest',
+    'npm:other@^1.0.0',
+    'github:user/repo',
+    'user/repo',
+    'git+https://github.com/user/repo.git',
+    'git+ssh://git@github.com/user/repo.git',
+    'https://example.com/app-1.0.0.tgz',
+  ]) {
+    assert.deepEqual(found(spec), [], spec);
+  }
+  // 이름이 프로젝트 자신이면 표기가 무엇이든 잡는다
+  assert.deepEqual(localDependencies({ devDependencies: { bflow: '^1.0.0' } }, 'bflow'), ['devDependencies.bflow: ^1.0.0']);
+});
 
 test('package.json — 의존성은 npm 에서 받는 것뿐이다 (이 PC 의 폴더나 프로젝트 자기 자신을 가리키지 않는다)', () => {
   const pkg = readRepoJson('package.json') as DependencyLists & { name: string };
