@@ -1063,8 +1063,11 @@ const MOCK_SESSION_MESSAGE_KIND = 'bflow-dev-session';
 /** 이 창의 미리보기 id — 새 창이 `window.opener.__bflowPreviewWindowId` 로 자기를 연 본 창을 알아본다 */
 const mockPreviewWindowId = createUuid();
 let mockWindowIsPopup = false;
-/** 새 창일 때, 자기를 연 본 창의 id. 주소를 직접 쳐서 연 새 창이면 null(로그인돼 있는 아무 본 창의 답을 받는다) */
-let mockSessionOwnerWindowId: string | null = null;
+/**
+ * 새 창일 때, 자기를 연 본 창의 id — 로그인 상태를 물을 곳이자 화면 이동을 부탁할 곳.
+ * 주소를 직접 쳐서 연 새 창이면 null(로그인돼 있는 아무 본 창의 답을 받고, 화면 이동 부탁은 모든 본 창이 받는다)
+ */
+let mockOwnerWindowId: string | null = null;
 let mockSessionChannel: BroadcastChannel | null | undefined;
 const mockSessionListeners = new Set<(payload: unknown) => void>();
 
@@ -1092,7 +1095,7 @@ function postMockSessionState(): void {
 function requestMockSessionState(): void {
   if (!mockWindowIsPopup) return;
   getMockSessionChannel()?.postMessage({
-    kind: MOCK_SESSION_MESSAGE_KIND, type: 'request', from: mockPreviewWindowId, to: mockSessionOwnerWindowId,
+    kind: MOCK_SESSION_MESSAGE_KIND, type: 'request', from: mockPreviewWindowId, to: mockOwnerWindowId,
   });
 }
 
@@ -1110,7 +1113,7 @@ function receiveMockSessionMessage(data: unknown): void {
   }
 
   if (message.type !== 'state' || !mockWindowIsPopup) return;
-  if (mockSessionOwnerWindowId && message.from !== mockSessionOwnerWindowId) return; // 다른 본 창의 로그인은 따라가지 않는다
+  if (mockOwnerWindowId && message.from !== mockOwnerWindowId) return; // 다른 본 창의 로그인은 따라가지 않는다
   const userId = typeof message.userId === 'string' && getMockUsers().some((user) => user.id === message.userId)
     ? message.userId
     : null;
@@ -1126,6 +1129,7 @@ function receiveMockSessionMessage(data: unknown): void {
 }
 
 /** 미리보기의 '새 창 → 본 창 화면 이동' 신호 채널 (widgetNavigateView / onWidgetNavigateView) */
+const MOCK_WIDGET_VIEW_MESSAGE_KIND = 'bflow-dev-widget-navigate-view';
 let mockWidgetViewChannel: BroadcastChannel | null | undefined;
 function getMockWidgetViewChannel(): BroadcastChannel | null {
   if (mockWidgetViewChannel !== undefined) return mockWidgetViewChannel;
@@ -2501,11 +2505,11 @@ export function installDevElectronAPI(): void {
 
   // 창 사이 로그인 상태 맞추기 — 이 창이 새 창인지, 누가 열었는지는 창이 사는 동안 바뀌지 않으므로 여기서 한 번 정한다.
   mockWindowIsPopup = isWidgetPopupWindow();
-  mockSessionOwnerWindowId = null;
+  mockOwnerWindowId = null;
   try {
     (window as unknown as { __bflowPreviewWindowId?: string }).__bflowPreviewWindowId = mockPreviewWindowId;
     const openerId = (window.opener as { __bflowPreviewWindowId?: unknown } | null | undefined)?.__bflowPreviewWindowId;
-    if (mockWindowIsPopup && typeof openerId === 'string') mockSessionOwnerWindowId = openerId;
+    if (mockWindowIsPopup && typeof openerId === 'string') mockOwnerWindowId = openerId;
   } catch {
     // 다른 출처의 창이 열었으면 opener 를 읽을 수 없다 — 지목 없이 묻는다
   }
@@ -2642,10 +2646,14 @@ export function installDevElectronAPI(): void {
     onWidgetNavigateMain: noop,
     widgetNavigateToDate: async () => {},
     onWidgetNavigateToDate: noop,
-    // 새 창(캘린더 등) → 본 창 화면 이동. Electron 에서는 main 프로세스가 본 창을 앞으로 가져와 전달한다.
+    // 새 창(캘린더 등) → 본 창 화면 이동. Electron 에서는 main 프로세스가 하나뿐인 본 창을 앞으로 가져와 전달한다.
     //   미리보기에서는 같은 주소의 창끼리 BroadcastChannel 로 신호를 주고받아 같은 흐름을 눈으로 확인할 수 있다.
+    //   본 창 탭이 여러 개여도 **새 창을 연 그 탭만** 움직이도록, 부탁에 자기를 연 창의 id 를 싣는다(코덱스 지적).
+    //   주소를 직접 쳐서 연 새 창은 연 창을 모르므로(to: null) 열려 있는 본 창이 모두 받는다.
     widgetNavigateView: async (payload) => {
-      getMockWidgetViewChannel()?.postMessage(payload);
+      getMockWidgetViewChannel()?.postMessage({
+        kind: MOCK_WIDGET_VIEW_MESSAGE_KIND, from: mockPreviewWindowId, to: mockOwnerWindowId, payload,
+      });
       try {
         (window.opener as Window | null)?.focus?.();
       } catch {
@@ -2655,7 +2663,13 @@ export function installDevElectronAPI(): void {
     onWidgetNavigateView: (callback) => {
       const channel = getMockWidgetViewChannel();
       if (!channel) return () => {};
-      const handler = (event: MessageEvent) => callback(event.data);
+      const handler = (event: MessageEvent) => {
+        const message = event.data as { kind?: unknown; to?: unknown; payload?: unknown } | null;
+        if (!message || typeof message !== 'object' || message.kind !== MOCK_WIDGET_VIEW_MESSAGE_KIND) return;
+        if (mockWindowIsPopup) return; // 화면 이동 부탁은 본 창만 받는다
+        if (typeof message.to === 'string' && message.to !== mockPreviewWindowId) return; // 다른 탭이 연 새 창의 부탁
+        callback(message.payload);
+      };
       channel.addEventListener('message', handler);
       return () => channel.removeEventListener('message', handler);
     },

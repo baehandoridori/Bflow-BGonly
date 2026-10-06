@@ -228,12 +228,6 @@ test('본 창(App): 받은 요청을 확인한 뒤 그 화면을 연다', () => 
   assert.match(app.slice(start), /offWidgetNavigateView\?\.\(\);/, '구독 해제');
 });
 
-test('미리보기 mock: 창 사이 화면 이동 신호를 주고받는다', () => {
-  const mock = code('src/mocks/devElectronAPI.ts');
-  assert.match(mock, /widgetNavigateView: async \(payload\) => \{\s+getMockWidgetViewChannel\(\)\?\.postMessage\(payload\);/);
-  assert.match(mock, /onWidgetNavigateView: \(callback\) => \{\s+const channel = getMockWidgetViewChannel\(\);\s+if \(!channel\) return \(\) => \{\};\s+const handler = \(event: MessageEvent\) => callback\(event\.data\);\s+channel\.addEventListener\('message', handler\);\s+return \(\) => channel\.removeEventListener\('message', handler\);/);
-});
-
 // ── 5) 미리보기: 새 창이 본 창의 로그인 상태를 따라간다 (코덱스 지적) ──────────
 // Electron 에서는 main 프로세스가 로그인 상태를 모든 창에 알린다. 미리보기 mock 은 그 길이 no-op 이라
 // '로그인 유지'를 끄고 로그인하면 새 창에 로그인 안내만 뜨고, 본 창에서 로그아웃해도 새 창에 개인 일정이 남았다.
@@ -244,6 +238,8 @@ type PreviewApi = {
   restoreCanonicalSession(): Promise<{ ok: boolean; payload: PreviewSession }>;
   onSessionChanged(callback: (payload: unknown) => void): () => void;
   sessionRequestCurrent(): Promise<{ ok: boolean }>;
+  widgetNavigateView(payload: unknown): Promise<void>;
+  onWidgetNavigateView(callback: (payload: unknown) => void): () => void;
 };
 type PreviewWindow = { localStorage: unknown; location: { hash: string }; opener?: unknown; electronAPI?: PreviewApi };
 
@@ -392,6 +388,72 @@ test('미리보기: 새 창이 자기를 연 본 창의 로그인·로그아웃�
     await stalePopup.sessionRequestCurrent();
     await waitFor(() => staleSeen.length === 1, '로그아웃된 본 창의 답');
     assert.deepEqual(names(staleSeen), [null]);
+  } finally {
+    console.log = originalLog;
+    if (saved.hadWindow) holder.window = saved.window; else delete holder.window;
+    if (saved.hadDocument) holder.document = saved.document; else delete holder.document;
+  }
+});
+
+test('미리보기: 새 창의 화면 이동 부탁은 그 창을 연 본 창만 받는다 (코덱스 지적)', async () => {
+  // Electron 에는 본 창이 하나뿐이다. 미리보기에서 본 창 탭을 두 개 열어 두면, 맨몸으로 방송한 부탁을 두 탭이 다 받아
+  // 새 창 하나가 모든 탭의 화면을 바꿨다. 부탁에 '자기를 연 창'을 실어 그 탭만 받게 한다.
+  const holder = globalThis as Record<string, unknown>;
+  const saved = { hadWindow: 'window' in holder, window: holder.window, hadDocument: 'document' in holder, document: holder.document };
+  const originalLog = console.log;
+  console.log = () => undefined;
+  holder.document = { documentElement: { dataset: {} } };
+  try {
+    const storage = fakeLocalStorage();
+    const mainWindow: PreviewWindow = { localStorage: storage, location: { hash: '' } };
+    const otherMainWindow: PreviewWindow = { localStorage: storage, location: { hash: '' } };
+    const popupWindow: PreviewWindow = { localStorage: storage, location: { hash: '#widget-popup/schedule' }, opener: mainWindow };
+    const main = await openPreviewWindow(mainWindow);
+    const otherMain = await openPreviewWindow(otherMainWindow);
+    const popup = await openPreviewWindow(popupWindow);
+    const got = { main: [] as unknown[], other: [] as unknown[], popup: [] as unknown[] };
+    const offMain = main.onWidgetNavigateView((payload) => got.main.push(payload));
+    otherMain.onWidgetNavigateView((payload) => got.other.push(payload));
+    popup.onWidgetNavigateView((payload) => got.popup.push(payload));
+
+    holder.window = popupWindow;
+    await popup.widgetNavigateView({ view: 'scenes', episodeNumber: 5, highlightSceneId: 'a001' });
+    await waitFor(() => got.main.length === 1, '새 창을 연 본 창이 부탁을 받음');
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(got.main, [{ view: 'scenes', episodeNumber: 5, highlightSceneId: 'a001' }], '보낸 값 그대로');
+    assert.deepEqual(got.other, [], '다른 탭은 움직이지 않는다');
+    assert.deepEqual(got.popup, [], '새 창은 화면 이동 부탁을 받지 않는다');
+
+    // 주소를 직접 쳐서 연 새 창은 연 창을 모른다 → 열려 있는 본 창이 모두 받는다
+    const orphanWindow: PreviewWindow = { localStorage: storage, location: { hash: '#widget-popup/schedule' } };
+    const orphan = await openPreviewWindow(orphanWindow);
+    holder.window = orphanWindow;
+    await orphan.widgetNavigateView({ view: 'settings' });
+    await waitFor(() => got.main.length === 2 && got.other.length === 1, '연 창을 모르는 새 창의 부탁');
+    assert.deepEqual(got.other, [{ view: 'settings' }]);
+    assert.deepEqual(got.popup, []);
+
+    // 다른 모양의 신호(예전의 맨몸 값·다른 종류)는 화면을 바꾸지 않는다
+    const forged = new BroadcastChannel('bflow-dev-widget-navigate-view');
+    try {
+      forged.postMessage({ view: 'vacation' });
+      forged.postMessage({ kind: 'something-else', to: null, payload: { view: 'vacation' } });
+      forged.postMessage('vacation');
+      forged.postMessage(null);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      assert.equal(got.main.length, 2);
+      assert.equal(got.other.length, 1);
+    } finally {
+      forged.close();
+    }
+
+    // 구독을 끊으면 더 받지 않는다
+    offMain();
+    holder.window = popupWindow;
+    await popup.widgetNavigateView({ view: 'vacation' });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(got.main.length, 2);
+    assert.equal(got.other.length, 1, '여전히 다른 탭은 받지 않는다');
   } finally {
     console.log = originalLog;
     if (saved.hadWindow) holder.window = saved.window; else delete holder.window;
