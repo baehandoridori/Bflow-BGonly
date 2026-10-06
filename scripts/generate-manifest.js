@@ -8,6 +8,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { checkReleaseVacationToken } = require('./vacation-token.cjs');
 
 const root = path.resolve(__dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
@@ -65,6 +66,21 @@ if (fs.existsSync(installerPath)) {
     process.exit(1);
   }
   console.warn(`${message} --allow-missing-installer 플래그로 개발용 manifest만 생성합니다.`);
+}
+
+/**
+ * 배포용 manifest 는 화면 묶음에 휴가 연동 토큰이 실제로 들어 있을 때만 쓴다.
+ * manifest.json 이 업데이트 신호라, 이게 없으면 토큰 빠진 빌드가 팀 PC 로 나가지 않는다.
+ * (v1.127.5·v1.128.0 이 토큰 없이 배포돼 휴가 연동이 끊겼다. 개발용 빌드는 토큰 없이도 만든다.)
+ */
+if (!allowMissingInstaller) {
+  const tokenCheck = checkReleaseVacationToken({ root, distDir });
+  if (!tokenCheck.ok) {
+    console.error(`[generate-manifest] ${tokenCheck.message}`);
+    console.error('[generate-manifest] 배포용 manifest를 만들지 않았습니다.');
+    process.exit(1);
+  }
+  console.log(`[generate-manifest] ${tokenCheck.message}`);
 }
 
 const releaseNotesPath = path.join(root, 'DEVLOG', 'update-notes.json');

@@ -30,12 +30,21 @@ test('manifest generation and reading preserve every valid item and the complete
     await mkdir(path.join(dir, 'dist', 'win-unpacked'), { recursive: true });
     const generator = path.join(dir, 'scripts', 'generate-manifest.js');
     await copyFile(new URL('../scripts/generate-manifest.js', import.meta.url), generator);
+    await copyFile(new URL('../scripts/vacation-token.cjs', import.meta.url), path.join(dir, 'scripts', 'vacation-token.cjs'));
     await writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.115.0' }));
     await writeFile(path.join(dir, 'DEVLOG', 'update-notes.json'), JSON.stringify(notes));
     await writeFile(path.join(dir, 'dist', 'BFLOW-Setup.exe'), installer);
     await writeFile(path.join(dir, 'dist', 'win-unpacked', 'app.txt'), 'app');
+    // 배포용 manifest 는 화면 묶음에 휴가 연동 토큰이 들어 있어야 만들어진다 (tests/vacationTokenBuild.test.ts)
+    await mkdir(path.join(dir, 'dist', 'assets'));
+    await writeFile(path.join(dir, 'dist', 'assets', 'index-test.js'), 'const token="manifest-test-token";');
 
-    const result = spawnSync(process.execPath, [generator], { cwd: dir, encoding: 'utf8', timeout: 10000 });
+    const result = spawnSync(process.execPath, [generator], {
+      cwd: dir,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: { ...process.env, BFLOW_VACATION_TOKEN: 'manifest-test-token' },
+    });
     assert.equal(result.status, 0, result.stderr || result.error?.message || result.stdout);
     const manifestPath = path.join(dir, 'dist', 'manifest.json');
     const generated = JSON.parse(await readFile(manifestPath, 'utf8'));
