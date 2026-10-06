@@ -1063,11 +1063,8 @@ const MOCK_SESSION_MESSAGE_KIND = 'bflow-dev-session';
 /** 이 창의 미리보기 id — 새 창이 `window.opener.__bflowPreviewWindowId` 로 자기를 연 본 창을 알아본다 */
 const mockPreviewWindowId = createUuid();
 let mockWindowIsPopup = false;
-/**
- * 새 창일 때, 자기를 연 본 창의 id — 로그인 상태를 물을 곳이자 화면 이동을 부탁할 곳.
- * 주소를 직접 쳐서 연 새 창이면 null(로그인돼 있는 아무 본 창의 답을 받고, 화면 이동 부탁은 모든 본 창이 받는다)
- */
-let mockOwnerWindowId: string | null = null;
+/** 이 mock 이 설치된 창 — 새 창이 자기를 연 본 창(opener)을 쓸 때마다 다시 읽으려고 잡아 둔다 */
+let mockSelfWindow: Window | null = null;
 let mockSessionChannel: BroadcastChannel | null | undefined;
 const mockSessionListeners = new Set<(payload: unknown) => void>();
 
@@ -1084,10 +1081,28 @@ function getMockSessionChannel(): BroadcastChannel | null {
   return channel;
 }
 
-/** 이 창의 로그인 상태를 다른 창에 알린다(본 창의 로그인·로그아웃, 새 창의 물음에 대한 답) */
-function postMockSessionState(): void {
+/**
+ * 자기를 연 본 창의 **지금** id — 새 창이 로그인 상태를 물을 곳이자 화면 이동을 부탁할 곳.
+ * 쓸 때마다 읽는다: 본 창을 새로 고치면 그 창의 mock 이 처음부터 다시 돌아 id 가 바뀐다. 한 번 적어 두기만 하면
+ * 새로 고친 본 창을 못 알아봐 화면 이동 부탁이 허공에 가고, 본 창이 로그아웃 상태로 떠도 새 창에 내용이 남는다.
+ * 주소를 직접 쳐서 열었거나 연 창을 읽을 수 없으면 null(로그인돼 있는 아무 본 창의 답을 받고, 화면 이동 부탁은 모든 본 창이 받는다)
+ */
+function readMockOwnerWindowId(): string | null {
+  try {
+    const id = (mockSelfWindow?.opener as { __bflowPreviewWindowId?: unknown } | null | undefined)?.__bflowPreviewWindowId;
+    return typeof id === 'string' ? id : null;
+  } catch {
+    return null; // 다른 출처의 창이 열었으면 opener 를 읽을 수 없다 — 지목 없이 묻는다
+  }
+}
+
+/**
+ * 이 창의 로그인 상태를 다른 창에 알린다(본 창의 로그인·로그아웃, 새 창의 물음에 대한 답).
+ * restored: 막 뜬(새로 고친) 본 창이 알리는 '지금 상태' — 그 창이 열어 둔 새 창만 받는다.
+ */
+function postMockSessionState(restored = false): void {
   getMockSessionChannel()?.postMessage({
-    kind: MOCK_SESSION_MESSAGE_KIND, type: 'state', from: mockPreviewWindowId, userId: previewCanonicalUserId,
+    kind: MOCK_SESSION_MESSAGE_KIND, type: 'state', from: mockPreviewWindowId, userId: previewCanonicalUserId, restored,
   });
 }
 
@@ -1095,13 +1110,13 @@ function postMockSessionState(): void {
 function requestMockSessionState(): void {
   if (!mockWindowIsPopup) return;
   getMockSessionChannel()?.postMessage({
-    kind: MOCK_SESSION_MESSAGE_KIND, type: 'request', from: mockPreviewWindowId, to: mockOwnerWindowId,
+    kind: MOCK_SESSION_MESSAGE_KIND, type: 'request', from: mockPreviewWindowId, to: readMockOwnerWindowId(),
   });
 }
 
 function receiveMockSessionMessage(data: unknown): void {
   if (!data || typeof data !== 'object') return;
-  const message = data as { kind?: unknown; type?: unknown; from?: unknown; to?: unknown; userId?: unknown };
+  const message = data as { kind?: unknown; type?: unknown; from?: unknown; to?: unknown; userId?: unknown; restored?: unknown };
   if (message.kind !== MOCK_SESSION_MESSAGE_KIND || message.from === mockPreviewWindowId) return;
 
   if (message.type === 'request') {
@@ -1113,7 +1128,10 @@ function receiveMockSessionMessage(data: unknown): void {
   }
 
   if (message.type !== 'state' || !mockWindowIsPopup) return;
-  if (mockOwnerWindowId && message.from !== mockOwnerWindowId) return; // 다른 본 창의 로그인은 따라가지 않는다
+  // 자기를 연 본 창만 따라간다(다른 본 창의 로그인은 따라가지 않는다). 연 창을 모르는 새 창은 아무 본 창의 로그인·로그아웃을
+  // 받되, 막 뜬 본 창이 알리는 '지금 상태'는 받지 않는다 — 관계없는 탭 하나가 새로 떴다고 내용을 내리지 않게.
+  const ownerId = readMockOwnerWindowId();
+  if (ownerId ? message.from !== ownerId : message.restored === true) return;
   const userId = typeof message.userId === 'string' && getMockUsers().some((user) => user.id === message.userId)
     ? message.userId
     : null;
@@ -2545,16 +2563,11 @@ export function installDevElectronAPI(): void {
   if (window.location?.protocol === 'file:') return; // 설치 앱의 IPC 실패를 mock 로그인으로 우회하지 않음
   if (hasUsableElectronAPI(window.electronAPI)) return; // 이미 Electron 환경이면 무시
 
-  // 창 사이 로그인 상태 맞추기 — 이 창이 새 창인지, 누가 열었는지는 창이 사는 동안 바뀌지 않으므로 여기서 한 번 정한다.
+  // 창 사이 로그인 상태 맞추기 — 이 창이 새 창인지는 창이 사는 동안 바뀌지 않으므로 여기서 한 번 정한다.
+  // 누가 열었는지(자기를 연 본 창의 id)는 적어 두지 않고 쓸 때마다 읽는다 — readMockOwnerWindowId 참고.
   mockWindowIsPopup = isWidgetPopupWindow();
-  mockOwnerWindowId = null;
-  try {
-    (window as unknown as { __bflowPreviewWindowId?: string }).__bflowPreviewWindowId = mockPreviewWindowId;
-    const openerId = (window.opener as { __bflowPreviewWindowId?: unknown } | null | undefined)?.__bflowPreviewWindowId;
-    if (mockWindowIsPopup && typeof openerId === 'string') mockOwnerWindowId = openerId;
-  } catch {
-    // 다른 출처의 창이 열었으면 opener 를 읽을 수 없다 — 지목 없이 묻는다
-  }
+  mockSelfWindow = window;
+  (window as unknown as { __bflowPreviewWindowId?: string }).__bflowPreviewWindowId = mockPreviewWindowId;
   getMockSessionChannel(); // 본 창은 새 창의 물음에 답하려고, 새 창은 답을 받으려고 미리 연다
 
   // 새 창은 자기 위치·크기를 적어 둔다 — 다음에 같은 자리·크기로 열린다(Electron 에서는 main 이 하는 일)
@@ -2729,10 +2742,11 @@ export function installDevElectronAPI(): void {
     // 새 창(캘린더 등) → 본 창 화면 이동. Electron 에서는 main 프로세스가 하나뿐인 본 창을 앞으로 가져와 전달한다.
     //   미리보기에서는 같은 주소의 창끼리 BroadcastChannel 로 신호를 주고받아 같은 흐름을 눈으로 확인할 수 있다.
     //   본 창 탭이 여러 개여도 **새 창을 연 그 탭만** 움직이도록, 부탁에 자기를 연 창의 id 를 싣는다(코덱스 지적).
+    //   id 는 부탁하는 순간에 읽는다 — 본 창을 새로 고친 뒤에도 그 창이 받는다.
     //   주소를 직접 쳐서 연 새 창은 연 창을 모르므로(to: null) 열려 있는 본 창이 모두 받는다.
     widgetNavigateView: async (payload) => {
       getMockWidgetViewChannel()?.postMessage({
-        kind: MOCK_WIDGET_VIEW_MESSAGE_KIND, from: mockPreviewWindowId, to: mockOwnerWindowId, payload,
+        kind: MOCK_WIDGET_VIEW_MESSAGE_KIND, from: mockPreviewWindowId, to: readMockOwnerWindowId(), payload,
       });
       try {
         (window.opener as Window | null)?.focus?.();
@@ -3686,6 +3700,9 @@ export function installDevElectronAPI(): void {
         previewCanonicalEpoch++;
       }
       maybeGrantPreviewDailyLogin();
+      // 본 창을 새로 고치면 이 mock 이 처음부터 다시 돈다 — 이 창이 열어 둔 새 창이 지금 상태를 따라오게 알린다.
+      // ('로그인 유지' 없이 로그인했었다면 본 창은 로그아웃 상태로 뜬다. 열려 있던 새 창에 개인 일정이 남으면 안 된다.)
+      if (!mockWindowIsPopup) postMockSessionState(true);
       return { ok: true, payload: previewCanonicalPayload() };
     },
     logoutCanonicalSession: async () => {
