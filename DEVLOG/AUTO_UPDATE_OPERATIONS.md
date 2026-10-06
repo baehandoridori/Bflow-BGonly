@@ -70,6 +70,15 @@
 - 출력 폴더(`directories.output`)는 바꾸지 않는다. 배포 절차·`generate-manifest.js`·G드라이브 탐색(`electron/autoUpdate/paths.ts`)이 모두 `dist` 를 전제로 한다.
 - 배경: v1.129.0 까지 런타임 한 벌(71개, 268MB)이 앱 안에 더 들어가 `win-unpacked` 664MB, 설치 파일 192MB 였다. 설치된 앱도 그만큼 컸다.
 
+### 의존성 목록에 프로젝트 폴더를 적지 않는다 (v1.129.2~)
+
+electron-builder 는 `package.json` `dependencies` 에 적힌 것을 앱의 `node_modules` 로 담는다. 폴더를 가리키는 항목(`file:…`, 상대·절대 경로)이 있고 그 폴더가 실제로 있으면, 폴더 내용(소스·`.env.local`·`dist` 의 옛 런타임과 설치 파일)이 `resources/app/node_modules/<이름>` 으로 통째로 들어간다. 위의 화면 폴더 확인은 `resources/app/dist` 만 보므로 이 경로는 잡지 못한다.
+
+- `tests/packagedAppContents.test.ts` 가 `package.json` 의 의존성이 전부 npm 저장소 표기인지, `package-lock.json` 에 폴더 연결(`link` 항목, `node_modules/` 밖의 항목)이 없는지 확인한다. 배포 빌드의 테스트 묶음(`test:auto-update`)에 들어 있어서, 걸리면 패키징 전에 멈춘다.
+- 워크트리 경로를 `npm install` 에 넘기지 않는다. `npm install <폴더>` 는 그 폴더를 의존성으로 적는다.
+- lock 에서 지울 때 `npm install --package-lock-only` 만으로는 끝나지 않는다. 연결 대상 항목이 `"extraneous": true` 로 남고 다시 돌려도 그대로다. 그 항목까지 직접 지운 뒤, 다시 돌려도 lock 이 한 글자도 바뀌지 않는지와 `npm ci` 통과를 확인한다.
+- 배경: v1.24.1 ~ v1.129.1 의 `dependencies` 에 `"bflow": "file:.claude/worktrees/hardcore-bardeen-8d3837"` 가 들어 있었다. 그 폴더가 지워진 뒤라 끊어진 연결만 남아 결과물에는 들어가지 않았다(그 자리에 폴더를 만들어 패키징하면 들어가는 것을 확인했다). 이미 설치된 폴더들의 끊어진 `node_modules\bflow` 는 새 lock 을 받은 뒤 `npm install` 한 번이면 npm 이 지운다. 손으로 지울 때는 `cmd /c rmdir` 로 링크만 끊는다.
+
 ---
 
 ## 3. 동작 흐름
@@ -208,7 +217,7 @@ Get-Content -LiteralPath $log -Tail 40
 | `scripts/generate-manifest.js` | build 후 manifest 생성, installer/releaseNotes 포함. 배포용은 묶음에 휴가 연동 토큰이 있고, 앱의 화면 폴더에 빌드 산출물이 섞이지 않았을 때만 생성 |
 | `scripts/vacation-token.cjs` | 휴가 연동 토큰 찾기(환경변수 → 빌드 폴더 → 메인 체크아웃), 배포 빌드 첫 단계 확인, 묶음 확인 |
 | `tests/autoUpdate*.test.ts` | 자동 업데이트 회귀 테스트 |
-| `tests/packagedAppContents.test.ts` | `build.files` 가 앱에 담는 파일·빼는 산출물, 화면 폴더 확인 회귀 테스트 |
+| `tests/packagedAppContents.test.ts` | `build.files` 가 앱에 담는 파일·빼는 산출물, 화면 폴더 확인, 의존성 목록에 폴더 연결이 없는지 회귀 테스트 |
 | `DEVLOG/update-notes.json` | 앱 모달에 표시되는 버전별 업데이트 내역 |
 
 레거시 파일:
