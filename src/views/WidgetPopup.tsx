@@ -57,6 +57,7 @@ import type {
 } from '@/types';
 import { getPreset, getLightColors, applyTheme, type ThemeColors } from '@/themes';
 import { DEFAULT_GAS_IMAGE_URL } from '@/config';
+import { loadScheduleView } from '@/views/viewLoaders';
 
 // 모듈 레벨 쿨다운: dataNotifyChange 호출 시 자체 변경 감지
 let _reloadCooldown = false;
@@ -274,6 +275,34 @@ function CharacterBoardPopupBody() {
   );
 }
 
+// 캘린더 화면도 App.tsx 와 같은 지연 로드 함수를 쓴다 — 본 창과 같은 청크를 받는다.
+const ScheduleView = lazy(() => loadScheduleView().then((m) => ({ default: m.ScheduleView })));
+
+/**
+ * 캘린더 새 창 본문 — 사이드바 '캘린더' 화면(ScheduleView)을 그대로 띄운다. 대시보드의 작은 캘린더 위젯
+ * ('calendar'·'calendar-<시각>')과는 다른 것이라 id 를 'schedule' 로 둔다('calendar-' 로 시작하면 위젯 규칙에 걸린다).
+ *
+ * 로그인 확인은 현황판 새 창과 같은 이유다: 캘린더에는 개인 일정이 있어서, 창이 열린 채 로그아웃하면
+ * 공유 PC 에 내용이 남지 않게 한다.
+ * 일정 읽기·다른 창의 변경 반영·휴가 연결·외부 구독은 ScheduleView 와 이 팝업 껍데기가 이미 맡고 있다.
+ * 창 안의 '다른 화면으로 가는' 버튼은 본 창으로 넘긴다(src/utils/widgetViewNavigation.ts).
+ */
+function SchedulePopupBody() {
+  const currentUser = useAuthStore((s) => s.currentUser);
+  if (!currentUser) {
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-text-secondary">
+        로그인한 뒤에 캘린더를 볼 수 있어요.
+      </div>
+    );
+  }
+  return (
+    <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-text-secondary/50">불러오는 중...</div>}>
+      <ScheduleView />
+    </Suspense>
+  );
+}
+
 const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNode }> = {
   'overall-progress': { label: '전체 진행률', component: <OverallProgressWidget /> },
   'stage-bars': { label: '단계별 진행률', component: <StageBarsWidget /> },
@@ -295,6 +324,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'ep-full-bg-progress': { label: 'EP 전체 BG 진행률', component: <EpFullDeptProgressWidget dept="bg" /> },
   'ep-full-act-progress': { label: 'EP 전체 ACT 진행률', component: <EpFullDeptProgressWidget dept="acting" /> },
   'character-board': { label: '캐릭터 현황판', component: <CharacterBoardPopupBody /> },
+  'schedule': { label: '캘린더', component: <SchedulePopupBody /> },
 };
 
 /**

@@ -1051,6 +1051,20 @@ function receiveMockCalendarMessage(event: MessageEvent<unknown>): void {
   notifyMockCalendarChanged(envelope.detail);
 }
 
+/** 미리보기의 '새 창 → 본 창 화면 이동' 신호 채널 (widgetNavigateView / onWidgetNavigateView) */
+let mockWidgetViewChannel: BroadcastChannel | null | undefined;
+function getMockWidgetViewChannel(): BroadcastChannel | null {
+  if (mockWidgetViewChannel !== undefined) return mockWidgetViewChannel;
+  if (typeof BroadcastChannel === 'undefined') {
+    mockWidgetViewChannel = null;
+    return null;
+  }
+  const channel = new BroadcastChannel('bflow-dev-widget-navigate-view');
+  (channel as BroadcastChannel & { unref?: () => void }).unref?.();
+  mockWidgetViewChannel = channel;
+  return channel;
+}
+
 function getMockCalendarChangeChannel(): BroadcastChannel | null {
   if (mockCalendarChangeChannel !== undefined) return mockCalendarChangeChannel;
   if (typeof BroadcastChannel === 'undefined') {
@@ -2542,6 +2556,23 @@ export function installDevElectronAPI(): void {
     onWidgetNavigateMain: noop,
     widgetNavigateToDate: async () => {},
     onWidgetNavigateToDate: noop,
+    // 새 창(캘린더 등) → 본 창 화면 이동. Electron 에서는 main 프로세스가 본 창을 앞으로 가져와 전달한다.
+    //   미리보기에서는 같은 주소의 창끼리 BroadcastChannel 로 신호를 주고받아 같은 흐름을 눈으로 확인할 수 있다.
+    widgetNavigateView: async (payload) => {
+      getMockWidgetViewChannel()?.postMessage(payload);
+      try {
+        (window.opener as Window | null)?.focus?.();
+      } catch {
+        // 본 창을 앞으로 못 가져와도 신호는 이미 갔다
+      }
+    },
+    onWidgetNavigateView: (callback) => {
+      const channel = getMockWidgetViewChannel();
+      if (!channel) return () => {};
+      const handler = (event: MessageEvent) => callback(event.data);
+      channel.addEventListener('message', handler);
+      return () => channel.removeEventListener('message', handler);
+    },
 
     imageSave: async () => '/dev/mock-image.png',
     imageDelete: async () => true,
@@ -3528,7 +3559,10 @@ export function installDevElectronAPI(): void {
         console.info('[preview] widgetOpenPopup', widgetId, title, 'no window');
         return { ok: false };
       }
-      const size = widgetId === 'character-board' ? 'width=1160,height=780' : 'width=480,height=600';
+      // 화면형 새 창은 Electron main 의 WIDGET_POPUP_DEFAULTS 와 같은 크기로 연다
+      const size = widgetId === 'character-board' ? 'width=1160,height=780'
+        : widgetId === 'schedule' ? 'width=1280,height=820'
+        : 'width=480,height=600';
       const url = `${window.location.origin}${window.location.pathname}${window.location.search}${hash}`;
       const opened = window.open(url, `bflow-widget-${widgetId}`, `popup,${size}`);
       console.info('[preview] widgetOpenPopup', widgetId, title, opened ? 'opened' : 'blocked');

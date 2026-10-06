@@ -755,6 +755,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('widget:navigate-to-date', handler);
     return () => ipcRenderer.removeListener('widget:navigate-to-date', handler);
   },
+  // 새 창으로 띄운 화면(캘린더 등) → 본체 화면 이동 (widget:navigate-main 패턴 미러링)
+  widgetNavigateView: (payload: unknown) =>
+    ipcRenderer.invoke('widget:navigate-view', payload),
+  onWidgetNavigateView: (callback: (payload: unknown) => void) => {
+    const handler = (_event: unknown, data: unknown) => callback(data);
+    ipcRenderer.on('widget:navigate-view', handler);
+    return () => ipcRenderer.removeListener('widget:navigate-view', handler);
+  },
   widgetGetSize: (widgetId: string) =>
     ipcRenderer.invoke('widget:get-size', widgetId) as Promise<{ x: number; y: number; width: number; height: number } | null>,
   widgetCaptureBehind: (widgetId: string) =>

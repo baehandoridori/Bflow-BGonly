@@ -4452,8 +4452,10 @@ ipcMain.handle('clipboard:read-image-file', async () => {
 // ─── IPC 핸들러: 위젯 팝업 윈도우 ──────────────────────────────
 
 // 위젯별 첫 오픈 기본값 — 캐릭터 현황판처럼 화면형 팝업은 위젯 기본(420×360·AOT)이 맞지 않는다 (피드백 36).
+// 'schedule' 은 캘린더 화면 전체를 띄우는 새 창이다(대시보드 캘린더 위젯 'calendar'·'calendar-<시각>' 과 다르다).
 const WIDGET_POPUP_DEFAULTS: Record<string, { width: number; height: number; alwaysOnTop?: boolean }> = {
   'character-board': { width: 1160, height: 780, alwaysOnTop: false },
+  'schedule': { width: 1280, height: 820, alwaysOnTop: false },
 };
 
 function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<string, string>): { ok: boolean } {
@@ -4713,6 +4715,18 @@ ipcMain.handle('widget:navigate-to-date', (_e, payload: { date: string; todoId: 
     mainWindow.show();
     mainWindow.focus();
     mainWindow.webContents.send('widget:navigate-to-date', payload);
+  }
+});
+
+// 새 창으로 띄운 화면(캘린더 등)의 '다른 화면으로 가는' 버튼 → 본체 윈도우를 앞으로 + 그 화면으로 이동.
+// 새 창에는 그 화면 하나뿐이라 자기 창에서는 갈 곳이 없다. 받은 값은 그대로 넘기고,
+// 아는 화면인지는 본체 렌더러가 확인한다(src/utils/widgetViewNavigation.ts 의 parseWidgetViewNavigation).
+ipcMain.handle('widget:navigate-view', (_e, payload: unknown) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('widget:navigate-view', payload);
   }
 });
 
