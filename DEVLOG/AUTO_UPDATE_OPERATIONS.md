@@ -58,6 +58,17 @@
 - 토큰 값은 로그·PR·문서·채팅 어디에도 적지 않는다. 확인은 "들어 있다/없다"와 출처로만 한다.
 - 배경: v1.127.5·v1.128.0 을 `.env.local` 이 없는 워크트리에서 빌드해 토큰이 빈 채로 배포됐고, 팀 PC 의 휴가 연동이 '인증 토큰이 유효하지 않습니다'로 끊겼다. 빌드는 경고 없이 통과했다.
 
+### 앱 안에 빌드 산출물을 다시 담지 않는다 (v1.128.2~)
+
+화면 묶음 폴더(vite)와 electron-builder 출력 폴더가 둘 다 `dist` 다. 화면 묶음을 앱에 담으려고 `package.json` `build.files` 에 `dist/**/*` 가 있는데, electron-builder 는 런타임을 먼저 `dist/win-unpacked` 에 풀고 그 다음에 앱 파일을 모으기 때문에 **방금 푼 런타임이 앱 안(`resources/app/dist/win-unpacked`)으로 한 번 더 복사된다.** vite 정리 없이 패키징만 다시 돌리면 이전 `BFLOW-Setup.exe`·`latest.yml`·`manifest.json` 까지 같이 들어간다.
+
+- 막는 규칙(`build.files`, `dist/**/*` **바로 뒤**): `!dist/*-unpacked{,/**/*}`, `!dist/*.{exe,blockmap,yml,yaml,7z}`, `!dist/manifest.json`. 뒤에 오는 규칙이 앞 규칙을 덮으므로 순서를 바꾸면 듣지 않는다.
+- electron-builder 에도 같은 자동 제외(`!dist/*-unpacked`)가 있지만 24.13.3 에서는 `files` 를 문자열 목록으로 쓰면 적용되지 않는다(설정을 읽으며 목록이 묶음 하나로 바뀌고, 자동 제외는 버려지는 쪽에 붙는다). 그래서 직접 적는다.
+- `generate-manifest.js` 는 결과물의 화면 폴더(`dist/win-unpacked/resources/app/dist`)에 vite 가 만든 것(`index.html`·`assets`·`public` 에서 복사된 항목) 말고 다른 것이 있으면 `manifest.json` 을 쓰지 않는다. `public/` 에 폴더를 더하면 자동으로 허용된다.
+- 크기 기준(v1.128.2): `win-unpacked` 약 396MB(7,140개), `BFLOW-Setup.exe` 약 115MB. 설치 파일이 190MB 를 넘으면 이 문제가 되살아난 것이다.
+- 출력 폴더(`directories.output`)는 바꾸지 않는다. 배포 절차·`generate-manifest.js`·G드라이브 탐색(`electron/autoUpdate/paths.ts`)이 모두 `dist` 를 전제로 한다.
+- 배경: v1.128.1 까지 런타임 한 벌(71개, 268MB)이 앱 안에 더 들어가 `win-unpacked` 664MB, 설치 파일 192MB 였다. 설치된 앱도 그만큼 컸다.
+
 ---
 
 ## 3. 동작 흐름
@@ -107,6 +118,7 @@
 - `manifest.json`을 다른 파일보다 먼저 G드라이브에 올리지 말 것.
 - `build:vite`의 `--allow-missing-installer` 결과를 정식 배포로 쓰지 말 것.
 - 휴가 연동 토큰 확인(`npm run build` 의 첫 단계와 `generate-manifest.js` 의 묶음 확인)을 건너뛰거나 지우지 말 것. `vite build`·`electron-builder` 를 따로 돌려 만든 결과물에 손으로 `manifest.json` 을 붙여 배포하지 말 것.
+- `package.json` `build.files` 의 `!dist/…` 제외 규칙 세 줄을 지우거나 `dist/**/*` 앞으로 옮기지 말 것. 앱 안에 런타임·이전 설치 파일이 한 번 더 들어가 설치 파일이 190MB 이상으로 커진다.
 - `DEVLOG/update-notes.json`에서 과거 버전 기록을 정리한다며 삭제하지 말 것.
 - PowerShell helper를 TypeScript 백틱 문자열 안에 쓸 때 PowerShell 변수를 `${name}`으로 쓰지 말 것. `$($name)`을 써야 한다.
 
@@ -123,7 +135,7 @@
 5. PR 생성 후 리뷰를 확인하고 필요한 수정까지 반영한다.
 6. PR을 머지한다.
 7. `C:\Bflow-BGonly`에서 `git pull --ff-only`.
-8. `npm run build`로 정식 설치 파일을 만든다. 워크트리에서 빌드해도 된다(토큰은 메인 체크아웃 `.env.local` 에서 찾는다). 빌드 로그에 `[vacation-token] 휴가 연동 토큰 확인` 과 `[generate-manifest] 휴가 연동 토큰 확인 — 화면 묶음 2곳에 들어 있음` 두 줄이 있어야 한다.
+8. `npm run build`로 정식 설치 파일을 만든다. 워크트리에서 빌드해도 된다(토큰은 메인 체크아웃 `.env.local` 에서 찾는다). 빌드 로그에 `[vacation-token] 휴가 연동 토큰 확인` 과 `[generate-manifest] 휴가 연동 토큰 확인 — 화면 묶음 2곳에 들어 있음` 두 줄이 있어야 한다. 그 아래 `[generate-manifest] 앱 묶음 확인 — 화면 폴더에 빌드 산출물이 섞이지 않음` 줄도 확인한다(v1.128.2~).
 9. G드라이브에 배포하되 `manifest.json`은 마지막에 복사한다.
 
 배포 복사 예시:
@@ -192,9 +204,10 @@ Get-Content -LiteralPath $log -Tail 40
 | `src/components/update/UpdateCenterModal.tsx` | 버전 모달, 수동 새로고침, 이전 내역 펼치기 |
 | `src/components/layout/Sidebar.tsx` | 좌하단 버전 버튼/배지 |
 | `src/App.tsx` | 업데이트 상태 구독, 지속 토스트, 즉시 업데이트 버튼 |
-| `scripts/generate-manifest.js` | build 후 manifest 생성, installer/releaseNotes 포함. 배포용은 묶음에 휴가 연동 토큰이 있을 때만 생성 |
+| `scripts/generate-manifest.js` | build 후 manifest 생성, installer/releaseNotes 포함. 배포용은 묶음에 휴가 연동 토큰이 있고, 앱의 화면 폴더에 빌드 산출물이 섞이지 않았을 때만 생성 |
 | `scripts/vacation-token.cjs` | 휴가 연동 토큰 찾기(환경변수 → 빌드 폴더 → 메인 체크아웃), 배포 빌드 첫 단계 확인, 묶음 확인 |
 | `tests/autoUpdate*.test.ts` | 자동 업데이트 회귀 테스트 |
+| `tests/packagedAppContents.test.ts` | `build.files` 가 앱에 담는 파일·빼는 산출물, 화면 폴더 확인 회귀 테스트 |
 | `DEVLOG/update-notes.json` | 앱 모달에 표시되는 버전별 업데이트 내역 |
 
 레거시 파일:
@@ -217,6 +230,7 @@ Get-Content -LiteralPath $log -Tail 40
 | G드라이브 배포 직후 감지 실패 | 원격 `manifest.json`, `BFLOW-Setup.exe` 해시/크기 확인 | manifest가 마지막에 올라갔는지 확인 |
 | 휴가 연동이 '인증 토큰이 유효하지 않습니다'로 끊김 | 설정의 연동 화면 › 휴가 관리 API 토큰 칸이 비어 있을 때 보이는 안내 글이 '내장 토큰 사용 중'인지 '앱에 토큰이 없습니다'인지. 빌드 로그의 휴가 연동 토큰 확인 두 줄 | '앱에 토큰이 없습니다'면 토큰 없이 만든 빌드다 — 토큰을 넣어 다시 빌드·배포. 토큰 칸에 값이 저장돼 있으면 그 값이 내장 토큰보다 먼저 쓰이므로, 틀린 값이면 칸을 비우고 '설정 저장'. 둘 다 아니면 서버 쪽 토큰이 바뀐 것 |
 | `npm run build` 가 `휴가 연동 토큰을 찾지 못했습니다`·`읽을 수 없습니다`로 멈춤 | 메인 체크아웃 `.env.local` 의 `BFLOW_VACATION_TOKEN` 줄 | 파일·줄이 없으면 한솔에게 토큰을 받아 넣는다. `읽을 수 없습니다`면 값을 그대로 한 줄로 다시 적는다. 확인을 끄지 않는다 |
+| `BFLOW-Setup.exe` 가 갑자기 커짐(약 115MB → 190MB 이상), 또는 `npm run build` 가 `화면 폴더에 빌드 산출물이 섞여 있습니다`로 멈춤 | `dist\win-unpacked\resources\app\dist` 안에 `index.html`·`assets`·`splash` 말고 다른 것(`win-unpacked`, `*.exe`, `*.yml` 등)이 있는지. `package.json` `build.files` 의 `!dist/…` 세 줄과 순서 | 제외 규칙이 빠졌거나 순서가 바뀐 것이다 — 되돌리고 `npm run build` 를 처음부터 다시 돌린다. 확인을 끄지 않는다 |
 | 앱에서만 화면이 깨지고 미리보기(Chrome)에서는 멀쩡함 | `npm run preview:electron` 으로 같은 화면을 앱 엔진에서 열어 비교 | 앱은 Electron 33(Chromium 130)이라 최신 Chrome 과 기본 레이아웃이 다를 수 있다. v1.128.0 캐릭터 카드 그림이 이 경우였다(tasks/lessons.md 2026-10-06) |
 | 업데이트가 `자동 중단`(suppressed)으로 멈춤 | `%LOCALAPPDATA%\Bflow-BGonly\.swap-suppressed`(content=설치 버전) 존재 여부 | 적용 실패 후 영구 suppression. 모달 `다시 시도`(v1.44.2~) 또는 설치 파일 직접 실행으로 해제. 다른 버전 설치 시 own 버전이 바뀌면 자동 정리 |
 
@@ -233,4 +247,5 @@ Get-Content -LiteralPath $log -Tail 40
 - [ ] `DEVLOG/update-notes.json`에 새 버전 항목을 추가했고 과거 항목을 삭제하지 않았다.
 - [ ] `npm run test:auto-update`를 통과했다.
 - [ ] 정식 빌드 로그에서 휴가 연동 토큰 확인 두 줄(`[vacation-token]`, `[generate-manifest] … 화면 묶음 2곳`)을 봤다.
+- [ ] 정식 빌드 로그에서 `[generate-manifest] 앱 묶음 확인` 줄을 봤고, `BFLOW-Setup.exe` 크기가 직전 배포와 비슷하다(v1.128.2 기준 약 115MB).
 - [ ] 실제 업데이트 테스트에서 설치 버전, 최신 버전 열림, `installer-pending` 정리, `swap.log`를 확인했다.

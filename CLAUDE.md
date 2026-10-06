@@ -124,6 +124,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
   - 같은 룰을 PR 본문의 `📋 업데이트 요약` 섹션에도 적용한다 (상세 기술 설명 섹션은 개발자 톤 OK).
 - 배포용 `manifest.json`은 `BFLOW-Setup.exe`가 있을 때만 생성한다. `--allow-missing-installer`는 개발용 `build:vite`에서만 사용한다.
 - **휴가 연동 토큰은 배포 빌드에 항상 넣는다 (v1.128.1~)**: 값(`BFLOW_VACATION_TOKEN`)은 레포에 커밋하지 않고 메인 체크아웃의 `.env.local` 에만 둔다. `scripts/vacation-token.cjs` 가 환경변수 → 빌드 폴더 → 메인 체크아웃 순서로 찾으므로 워크트리 빌드에도 들어간다. `npm run build` 는 토큰이 없으면 첫 단계에서 멈추고, 묶음에 토큰이 없으면 `manifest.json` 을 만들지 않는다 — 이 확인을 끄거나 우회하지 말 것. 토큰 값은 로그·PR·문서에 적지 않는다.
+- **앱 안에 빌드 산출물을 다시 담지 않는다 (v1.128.2~)**: 화면 묶음 폴더와 electron-builder 출력 폴더가 둘 다 `dist` 다. `package.json` `build.files` 의 `dist/**/*` 바로 뒤 `!dist/…` 제외 규칙 세 줄을 지우거나 순서를 바꾸지 말 것(런타임 한 벌이 앱 안에 더 들어가 설치 파일이 115MB → 192MB 로 커진다). 출력 폴더(`directories.output`)도 바꾸지 않는다. `generate-manifest.js` 는 앱의 화면 폴더에 다른 것이 섞이면 `manifest.json` 을 만들지 않는다.
 - 토스트가 떴다는 것만으로 업데이트 성공으로 판단하지 말고, 다음 실행 버전과 `swap.log`의 `[installer-main]`/`[installer]` 로그, `installer-pending` 정리 여부를 확인한다.
 - 설치/적용 중에는 사용자가 상황을 알 수 있어야 한다. renderer는 `applying` 상태를 표시하고, 앱 종료 후 helper는 별도 진행 창을 띄운다.
 - PowerShell helper를 TypeScript 백틱 문자열 안에 넣을 때 PowerShell 변수는 `$($name)` 형태로 쓴다. `${name}`은 JavaScript 보간으로 실행되어 helper 시작 전 `ReferenceError`를 만들 수 있다.
