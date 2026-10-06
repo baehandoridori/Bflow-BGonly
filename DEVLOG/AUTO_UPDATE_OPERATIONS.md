@@ -65,6 +65,7 @@
 - 막는 규칙(`build.files`, `dist/**/*` **바로 뒤**): `!dist/*-unpacked{,/**/*}`, `!dist/*.{exe,blockmap,yml,yaml,7z}`, `!dist/manifest.json`. 뒤에 오는 규칙이 앞 규칙을 덮으므로 순서를 바꾸면 듣지 않는다.
 - electron-builder 에도 같은 자동 제외(`!dist/*-unpacked`)가 있지만 24.13.3 에서는 `files` 를 문자열 목록으로 쓰면 적용되지 않는다(설정을 읽으며 목록이 묶음 하나로 바뀌고, 자동 제외는 버려지는 쪽에 붙는다). 그래서 직접 적는다.
 - `generate-manifest.js` 는 결과물의 화면 폴더(`dist/win-unpacked/resources/app/dist`)에 vite 가 만든 것(`index.html`·`assets`·`public` 에서 복사된 항목) 말고 다른 것이 있으면 `manifest.json` 을 쓰지 않는다. `public/` 에 폴더를 더하면 자동으로 허용된다.
+- 제외 규칙은 출처를 가리지 않는다. `public/` **맨 위**에 `manifest.json`, `*.exe`·`*.blockmap`·`*.yml`·`*.yaml`·`*.7z` 파일이나 `*-unpacked` 폴더를 두면 화면 묶음(`dist`)에는 복사되지만 앱에는 담기지 않는다(위 확인도 빠진 것은 보지 않는다). 그런 이름이 필요하면 하위 폴더에 둔다.
 - 크기 기준(v1.128.2): `win-unpacked` 약 396MB(7,140개), `BFLOW-Setup.exe` 약 115MB. 설치 파일이 190MB 를 넘으면 이 문제가 되살아난 것이다.
 - 출력 폴더(`directories.output`)는 바꾸지 않는다. 배포 절차·`generate-manifest.js`·G드라이브 탐색(`electron/autoUpdate/paths.ts`)이 모두 `dist` 를 전제로 한다.
 - 배경: v1.128.1 까지 런타임 한 벌(71개, 268MB)이 앱 안에 더 들어가 `win-unpacked` 664MB, 설치 파일 192MB 였다. 설치된 앱도 그만큼 컸다.
