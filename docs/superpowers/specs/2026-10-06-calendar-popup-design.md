@@ -69,6 +69,19 @@
 - main 의 `widget:navigate-view` 는 본 창이 최소화돼 있으면 되살린 뒤(`restore`) 앞으로 가져온다.
 - 본 창은 받은 값을 그대로 믿지 않는다: `parseWidgetViewNavigation` 이 통과시킨 네 화면(휴가·설정·대시보드·씬 목록)만 연다.
 
+### 미리보기에서의 로그인 상태 (코덱스 1차 지적)
+
+Electron 에서는 main 프로세스가 로그인 상태를 모든 창에 알리고(`session:changed`), 새 창은 뜨자마자 다시 달라고 한다
+(`session:request-current`). 미리보기 mock 은 창마다 따로 돌고 그 길이 no-op 이라, 새 창의 로그인 확인이 본 창과 어긋났다 —
+'로그인 유지'를 끄고 로그인하면 새 창에 안내만 뜨고, 본 창에서 로그아웃해도 새 창에 개인 일정이 남았다.
+
+그래서 mock 에서 **새 창이 자기를 연 본 창의 로그인 상태를 따라간다**(창 사이 BroadcastChannel).
+
+- 새 창은 뜬 직후 자기를 연 창(`window.opener`)에 지금 상태를 묻는다. 지목받은 본 창은 로그아웃 상태여도 답한다.
+- 본 창의 로그인·로그아웃은 그때마다 알린다. 새 창은 mock 상태를 바꾸고 `onSessionChanged` 구독자에게 알린다.
+- 본 창끼리는 맞추지 않는다(탭 두 개에 서로 다른 사람으로 로그인해 보는 쓰임 유지). 새 창도 자기를 연 창만 따라간다.
+- 주소를 직접 쳐서 연 새 창(연 창을 모름)은 로그인돼 있는 본 창의 답을 받는다.
+
 ## 5. 범위 밖 (알고 넘어가는 것)
 
 - 새 창이 열린 뒤에 본 창에서 구글 캘린더를 새로 연동하면, 새 창은 닫았다 다시 열어야 구글 일정이 보인다
@@ -83,7 +96,7 @@
 |---|---|
 | `electron/main.ts` | `WIDGET_POPUP_DEFAULTS.schedule`, `widget:navigate-view` 핸들러 |
 | `electron/preload.ts`, `src/types/index.ts` | `widgetNavigateView` / `onWidgetNavigateView` |
-| `src/mocks/devElectronAPI.ts` | 미리보기용: 새 창 크기, 화면 이동 신호(창 사이 BroadcastChannel) |
+| `src/mocks/devElectronAPI.ts` | 미리보기용: 새 창 크기, 화면 이동 신호(창 사이 BroadcastChannel), 새 창이 본 창의 로그인 상태를 따라가기 |
 | `src/utils/popupWindow.ts`, `src/utils/widgetViewNavigation.ts` | 새 파일 (위 4절) |
 | `src/views/WidgetPopup.tsx` | `SchedulePopupBody`, 등록 |
 | `src/views/ScheduleView.tsx` | 머리줄 '새 창으로' 버튼, '이동'의 팝업 분기 |
