@@ -13,6 +13,8 @@
  * 지키는 방법 두 가지:
  *   1) build.files — electron-builder 가 빌드 때 쓰는 코드 그대로 "이 파일이 앱에 담기는가"를 물어본다.
  *   2) generate-manifest.js — 실제 결과물의 화면 폴더에 다른 것이 섞였으면 배포 신호(manifest.json)를 쓰지 않는다.
+ *
+ * 앱에 엉뚱한 것이 담기는 길이 하나 더 있다 — 의존성 목록에 프로젝트 폴더가 적히는 경우. 아래 3) 이 지킨다.
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -233,6 +235,64 @@ test('generate-manifest — 화면 폴더가 아예 없으면 확인했다고 �
   assert.notEqual(blocked.status, 0, blocked.output);
   assert.equal(blocked.manifestWritten, false);
   assert.doesNotMatch(blocked.output, /앱 묶음 확인 —/, '보지 않은 것을 확인했다고 적으면 안 된다');
+});
+
+// ── 3) 의존성 목록 ────────────────────────────────────────────────────
+/**
+ * 프로젝트 폴더가 npm 패키지인 척 앱에 담기지 않게 지킨다.
+ *
+ * v1.24.1 ~ v1.128.2 의 dependencies 에 `"bflow": "file:.claude/worktrees/hardcore-bardeen-8d3837"` 가 들어 있었다.
+ * 작업 폴더(워크트리) 하나를 패키지처럼 설치한 흔적이고, 코드 어디에서도 쓰지 않는다. 그 폴더가 지워진 뒤라
+ * 끊어진 연결만 남아 결과물은 멀쩡했지만, electron-builder 는 dependencies 에 적힌 것을 앱에 담는다.
+ * 같은 자리에 폴더가 다시 생기면 그 안의 소스·.env.local·dist(옛 런타임과 설치 파일까지)가 통째로
+ * resources/app/node_modules/bflow 로 들어간다 — 2026-10-06 그 자리에 폴더를 만들고 패키징해서 확인했다.
+ * 위 2) 는 화면 폴더(resources/app/dist)만 보므로 이 경로를 잡지 못한다. 그래서 원인인 목록을 본다.
+ */
+const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
+type DependencyLists = { name?: string } & Partial<Record<(typeof DEPENDENCY_FIELDS)[number], Record<string, string>>>;
+
+/** npm 저장소가 아니라 이 PC 의 폴더·파일을 가리키는 표기 — file:, link:, 상대 경로, 절대 경로 */
+const LOCAL_SPEC = /^(?:file:|link:|workspace:|portal:|\.{1,2}(?:[\\/]|$)|~[\\/]|[\\/]|[A-Za-z]:[\\/])/;
+
+function localDependencies(lists: DependencyLists, projectName: string): string[] {
+  const found: string[] = [];
+  for (const field of DEPENDENCY_FIELDS) {
+    for (const [name, spec] of Object.entries(lists[field] ?? {})) {
+      if (name === projectName || LOCAL_SPEC.test(spec)) found.push(`${field}.${name}: ${spec}`);
+    }
+  }
+  return found;
+}
+
+function readRepoJson(name: string) {
+  return JSON.parse(readFileSync(path.join(repoRoot, name), 'utf8'));
+}
+
+test('package.json — 의존성은 npm 에서 받는 것뿐이다 (이 PC 의 폴더나 프로젝트 자기 자신을 가리키지 않는다)', () => {
+  const pkg = readRepoJson('package.json') as DependencyLists & { name: string };
+  assert.deepEqual(
+    localDependencies(pkg, pkg.name),
+    [],
+    '폴더를 가리키는 의존성은 그 폴더가 통째로 설치 파일에 담깁니다. 워크트리 경로를 npm install 에 넘기지 않았는지 확인하고 지워 주세요.',
+  );
+});
+
+test('package-lock.json — 설치 목록에도 폴더 연결이 남아 있지 않다', () => {
+  const pkg = readRepoJson('package.json') as { name: string };
+  const lock = readRepoJson('package-lock.json') as {
+    packages: Record<string, DependencyLists & { link?: boolean }>;
+  };
+  assert.deepEqual(localDependencies(lock.packages[''], pkg.name), [], 'lock 맨 위의 의존성 목록');
+
+  // npm 이 받는 패키지는 전부 node_modules/ 아래에 적힌다. 그 밖의 키는 연결 대상 폴더, link 는 그 폴더로 가는 연결이다.
+  const folderLinks = Object.entries(lock.packages)
+    .filter(([key, entry]) => key !== '' && (!key.startsWith('node_modules/') || entry.link === true))
+    .map(([key]) => key);
+  assert.deepEqual(
+    folderLinks,
+    [],
+    'package.json 에서 줄만 지우고 `npm install --package-lock-only` 를 돌리면 연결 대상 항목이 extraneous 표시로 남습니다 — 그 항목도 지워 주세요.',
+  );
 });
 
 // ── 연결 ──────────────────────────────────────────────────────────────
