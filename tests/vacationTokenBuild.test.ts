@@ -327,3 +327,25 @@ test('vite.config.ts — 묶음에 넣는 토큰은 같은 규칙(resolveVacatio
   assert.match(config, /__BFLOW_VACATION_TOKEN__: JSON\.stringify\(vacationTokenFor\(mode\)\)/);
   assert.doesNotMatch(config, /loadEnv/, 'vite 의 loadEnv 로 따로 읽으면 메인 체크아웃을 못 본다');
 });
+
+test('vite.config.ts — vite 가 실제로 읽을 수 있고, 찾은 토큰이 define 으로 들어간다', async () => {
+  // 처음 만든 판은 단위 테스트를 다 통과하고도 실제 빌드에서 멈췄다: vite 가 설정을 묶으며
+  // scripts/vacation-token.cjs 앞에 코드를 끼워 넣어 첫 줄의 `#!` 가 문법 오류가 됐다.
+  // 그래서 문자열 확인만 하지 않고 vite 가 읽는 방식 그대로 설정을 읽어 본다.
+  const { loadConfigFromFile } = await import('vite');
+  const previous = process.env[KEY];
+  process.env[KEY] = TOKEN;
+  try {
+    const loaded = await loadConfigFromFile(
+      { command: 'build', mode: 'production' },
+      path.join(repoRoot, 'vite.config.ts'),
+      repoRoot,
+      'silent',
+    );
+    assert.ok(loaded, 'vite.config.ts 를 읽지 못했다');
+    assert.equal(loaded.config.define?.__BFLOW_VACATION_TOKEN__, JSON.stringify(TOKEN));
+  } finally {
+    if (previous === undefined) delete process.env[KEY];
+    else process.env[KEY] = previous;
+  }
+});
