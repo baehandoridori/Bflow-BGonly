@@ -1128,6 +1128,48 @@ function receiveMockSessionMessage(data: unknown): void {
   for (const listener of [...mockSessionListeners]) listener(payload);
 }
 
+/* ─── 미리보기: 새 창의 위치·크기 기억 ───
+   Electron 에서는 main 프로세스가 새 창의 위치·크기를 저장해 다음에 같은 자리·크기로 연다. 미리보기에서도 같은 흐름을
+   확인할 수 있게, 새 창이 자기 위치·크기를 localStorage 에 적어 두고(크기가 바뀔 때·닫힐 때) 다음에 열 때 그 값을 쓴다(코덱스 지적).
+   옮기기만 할 때는 브라우저가 알려 주지 않으므로 닫힐 때(pagehide) 마지막 자리를 적는다. */
+const MOCK_POPUP_BOUNDS_KEY = 'bflow:preview:widget-popup-bounds';
+interface MockPopupBounds { left: number; top: number; width: number; height: number }
+type MockPopupBoundsStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+function readAllMockPopupBounds(storage: MockPopupBoundsStorage): Record<string, Partial<MockPopupBounds> | undefined> {
+  try {
+    const parsed: unknown = JSON.parse(storage.getItem(MOCK_POPUP_BOUNDS_KEY) ?? '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, Partial<MockPopupBounds> | undefined>
+      : {};
+  } catch {
+    return {}; // 저장소를 못 읽거나 값이 깨졌으면 기억한 것이 없는 것으로 친다
+  }
+}
+
+/** 기억해 둔 위치·크기. 없거나 숫자가 아니면 null. 크기는 Electron 창과 같은 최소(280×200)를 지킨다 */
+function readMockPopupBounds(storage: MockPopupBoundsStorage, widgetId: string): MockPopupBounds | null {
+  const saved = readAllMockPopupBounds(storage)[widgetId];
+  if (!saved) return null;
+  const { left, top, width, height } = saved;
+  if (![left, top, width, height].every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
+  return {
+    left: Math.round(left as number),
+    top: Math.round(top as number),
+    width: Math.max(280, Math.round(width as number)),
+    height: Math.max(200, Math.round(height as number)),
+  };
+}
+
+function writeMockPopupBounds(storage: MockPopupBoundsStorage, widgetId: string, bounds: MockPopupBounds): void {
+  if (![bounds.left, bounds.top, bounds.width, bounds.height].every((value) => Number.isFinite(value))) return;
+  try {
+    storage.setItem(MOCK_POPUP_BOUNDS_KEY, JSON.stringify({ ...readAllMockPopupBounds(storage), [widgetId]: bounds }));
+  } catch {
+    // 저장소를 못 쓰면 기억하지 않는다
+  }
+}
+
 /** 미리보기의 '새 창 → 본 창 화면 이동' 신호 채널 (widgetNavigateView / onWidgetNavigateView) */
 const MOCK_WIDGET_VIEW_MESSAGE_KIND = 'bflow-dev-widget-navigate-view';
 let mockWidgetViewChannel: BroadcastChannel | null | undefined;
@@ -2515,6 +2557,44 @@ export function installDevElectronAPI(): void {
   }
   getMockSessionChannel(); // 본 창은 새 창의 물음에 답하려고, 새 창은 답을 받으려고 미리 연다
 
+  // 새 창은 자기 위치·크기를 적어 둔다 — 다음에 같은 자리·크기로 열린다(Electron 에서는 main 이 하는 일)
+  if (mockWindowIsPopup && typeof window.addEventListener === 'function') {
+    const self = window;
+    let popupWidgetId: string | null = null;
+    try {
+      const encoded = /^#widget-popup\/([^?]+)/.exec(self.location?.hash ?? '')?.[1];
+      popupWidgetId = encoded ? decodeURIComponent(encoded) : null;
+    } catch {
+      popupWidgetId = null; // 주소가 깨졌으면 기억하지 않는다
+    }
+    if (popupWidgetId) {
+      const widgetId = popupWidgetId;
+      // 여는 쪽이 준 width/height 를 브라우저는 안쪽 크기로, Electron 은 창틀까지 포함한 크기로 읽는다. 그대로 두면
+      // Electron 미리보기에서는 열 때마다 창틀만큼 줄어든다 — 기억한 안쪽 크기와 다르면 새 창이 스스로 맞춘다.
+      try {
+        const remembered = readMockPopupBounds(self.localStorage, widgetId);
+        if (remembered && typeof self.resizeBy === 'function') {
+          const dx = remembered.width - self.innerWidth;
+          const dy = remembered.height - self.innerHeight;
+          if (dx !== 0 || dy !== 0) self.resizeBy(dx, dy);
+        }
+      } catch {
+        // 크기를 못 맞춰도 창은 열려 있다
+      }
+      const save = () => {
+        try {
+          writeMockPopupBounds(self.localStorage, widgetId, {
+            left: self.screenX, top: self.screenY, width: self.innerWidth, height: self.innerHeight,
+          });
+        } catch {
+          // 저장소를 쓸 수 없는 미리보기(사생활 보호 창 등)
+        }
+      };
+      self.addEventListener('resize', save);
+      self.addEventListener('pagehide', save);
+    }
+  }
+
   let previewLoginServerAvailable = true;
   const previewUpdater = createDevPreviewUpdater(appVersion);
   localStore[COMMENTS_FILE] ??= buildDevPreviewLocalCommentStore(MOCK_EPISODES);
@@ -3661,8 +3741,16 @@ export function installDevElectronAPI(): void {
         console.info('[preview] widgetOpenPopup', widgetId, title, 'no window');
         return { ok: false };
       }
-      // 화면형 새 창은 Electron main 의 WIDGET_POPUP_DEFAULTS 와 같은 크기로 연다
-      const size = widgetId === 'character-board' ? 'width=1160,height=780'
+      // 전에 열었던 창이면 그때의 위치·크기로, 처음이면 기본 크기로 연다(Electron main 의 savedPos ?? WIDGET_POPUP_DEFAULTS).
+      // 화면형 새 창의 기본 크기는 main 과 같다.
+      let saved: MockPopupBounds | null = null;
+      try {
+        saved = readMockPopupBounds(window.localStorage, widgetId);
+      } catch {
+        saved = null; // 저장소를 쓸 수 없는 미리보기
+      }
+      const size = saved ? `width=${saved.width},height=${saved.height},left=${saved.left},top=${saved.top}`
+        : widgetId === 'character-board' ? 'width=1160,height=780'
         : widgetId === 'schedule' ? 'width=1280,height=820'
         : 'width=480,height=600';
       const url = `${window.location.origin}${window.location.pathname}${window.location.search}${hash}`;

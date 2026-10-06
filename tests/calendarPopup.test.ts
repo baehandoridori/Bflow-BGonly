@@ -240,8 +240,19 @@ type PreviewApi = {
   sessionRequestCurrent(): Promise<{ ok: boolean }>;
   widgetNavigateView(payload: unknown): Promise<void>;
   onWidgetNavigateView(callback: (payload: unknown) => void): () => void;
+  widgetOpenPopup(widgetId: string, title: string, extra?: Record<string, string>): Promise<{ ok: boolean }>;
 };
-type PreviewWindow = { localStorage: unknown; location: { hash: string }; opener?: unknown; electronAPI?: PreviewApi };
+type PreviewWindow = {
+  localStorage: unknown;
+  location: { hash: string; origin?: string; pathname?: string; search?: string };
+  opener?: unknown;
+  electronAPI?: PreviewApi;
+  // 새 창 열기·위치와 크기 기억을 흉내 낼 때만 쓴다
+  open?: (url: string, name: string, features: string) => unknown;
+  addEventListener?: (type: string, listener: () => void) => void;
+  screenX?: number; screenY?: number; innerWidth?: number; innerHeight?: number;
+  resizeBy?: (dx: number, dy: number) => void;
+};
 
 function fakeLocalStorage() {
   const values = new Map<string, string>();
@@ -456,6 +467,129 @@ test('미리보기: 새 창의 화면 이동 부탁은 그 창을 연 본 창만
     assert.equal(got.other.length, 1, '여전히 다른 탭은 받지 않는다');
   } finally {
     console.log = originalLog;
+    if (saved.hadWindow) holder.window = saved.window; else delete holder.window;
+    if (saved.hadDocument) holder.document = saved.document; else delete holder.document;
+  }
+});
+
+test('미리보기: 새 창의 위치·크기를 기억했다가 다음에 그대로 연다 (코덱스 지적)', async () => {
+  // Electron 에서는 main 이 새 창의 위치·크기를 저장해 다음에 같은 자리로 연다. 미리보기는 늘 기본 크기로만 열어서
+  // '창의 위치와 크기는 다음에 열 때도 그대로'를 미리보기에서 확인할 수 없었다.
+  const holder = globalThis as Record<string, unknown>;
+  const saved = { hadWindow: 'window' in holder, window: holder.window, hadDocument: 'document' in holder, document: holder.document };
+  const originalLog = console.log;
+  const originalInfo = console.info;
+  console.log = () => undefined;
+  console.info = () => undefined; // [preview] widgetOpenPopup 안내 글
+  holder.document = { documentElement: { dataset: {} } };
+  try {
+    const storage = fakeLocalStorage();
+    const opened: Array<{ url: string; name: string; features: string }> = [];
+    const mainWindow: PreviewWindow = {
+      localStorage: storage,
+      location: { hash: '', origin: 'http://localhost:5190', pathname: '/', search: '?preview=1' },
+      open: (url, name, features) => { opened.push({ url, name, features }); return {}; },
+    };
+    const main = await openPreviewWindow(mainWindow);
+    const open = async (widgetId: string, title: string) => {
+      holder.window = mainWindow;
+      assert.deepEqual(await main.widgetOpenPopup(widgetId, title), { ok: true });
+      return opened.at(-1)!;
+    };
+
+    // 처음엔 기본 크기
+    const first = await open('schedule', '캘린더');
+    assert.equal(first.features, 'popup,width=1280,height=820');
+    assert.equal(first.url, 'http://localhost:5190/?preview=1#widget-popup/schedule');
+    assert.equal(first.name, 'bflow-widget-schedule');
+
+    // 새 창: 크기가 바뀌면·닫힐 때 자기 위치와 크기를 적어 둔다
+    const listeners = new Map<string, () => void>();
+    const popupWindow: PreviewWindow = {
+      localStorage: storage,
+      location: { hash: '#widget-popup/schedule' },
+      opener: mainWindow,
+      screenX: 0, screenY: 0, innerWidth: 1280, innerHeight: 820,
+      addEventListener: (type, listener) => { listeners.set(type, listener); },
+    };
+    await openPreviewWindow(popupWindow);
+    assert.deepEqual([...listeners.keys()].sort(), ['pagehide', 'resize']);
+
+    Object.assign(popupWindow, { screenX: 140, screenY: 60, innerWidth: 900, innerHeight: 640 });
+    listeners.get('resize')!();
+    assert.equal((await open('schedule', '캘린더')).features, 'popup,width=900,height=640,left=140,top=60');
+
+    // 옮기기만 하면 브라우저가 알려 주지 않는다 → 닫힐 때 마지막 자리를 적는다
+    Object.assign(popupWindow, { screenX: 300, screenY: 200 });
+    listeners.get('pagehide')!();
+    assert.equal((await open('schedule', '캘린더')).features, 'popup,width=900,height=640,left=300,top=200');
+
+    // 다른 새 창은 자기 기본 크기 그대로(창마다 따로 기억한다)
+    assert.equal((await open('character-board', '캐릭터 현황판')).features, 'popup,width=1160,height=780');
+    assert.equal((await open('my-tasks', '내 할일')).features, 'popup,width=480,height=600');
+
+    // 너무 작은 크기는 Electron 창과 같은 최소(280×200)로, 소수는 반올림
+    Object.assign(popupWindow, { screenX: 10.4, screenY: 20.6, innerWidth: 100, innerHeight: 50 });
+    listeners.get('resize')!();
+    assert.equal((await open('schedule', '캘린더')).features, 'popup,width=280,height=200,left=10,top=21');
+
+    // 본 창은 자기 위치·크기를 적지 않는다(새 창만)
+    const mainListeners = new Map<string, () => void>();
+    await openPreviewWindow({ localStorage: storage, location: { hash: '' }, addEventListener: (type, listener) => { mainListeners.set(type, listener); } });
+    assert.equal(mainListeners.size, 0);
+
+    // 기억한 값이 깨졌거나 숫자가 아니면 기본 크기로
+    for (const broken of ['{broken', '[]', 'null', JSON.stringify({ schedule: { left: 'a', top: 0, width: 900, height: 640 } }), JSON.stringify({ schedule: { left: 0, top: 0, width: 900 } }), JSON.stringify({ schedule: null })]) {
+      storage.setItem('bflow:preview:widget-popup-bounds', broken);
+      assert.equal((await open('schedule', '캘린더')).features, 'popup,width=1280,height=820', broken);
+    }
+
+    // 값이 깨져 있어도 다음 저장은 된다 — 깨진 값은 버리고 깨끗하게 새로 적는다
+    Object.assign(popupWindow, { screenX: 5, screenY: 6, innerWidth: 700, innerHeight: 500 });
+    for (const broken of ['{broken', '[1,2]', '"text"', 'null', '7']) {
+      storage.setItem('bflow:preview:widget-popup-bounds', broken);
+      listeners.get('pagehide')!();
+      assert.deepEqual(
+        JSON.parse(storage.getItem('bflow:preview:widget-popup-bounds') ?? ''),
+        { schedule: { left: 5, top: 6, width: 700, height: 500 } },
+        broken,
+      );
+    }
+    assert.equal((await open('schedule', '캘린더')).features, 'popup,width=700,height=500,left=5,top=6');
+
+    // 여는 쪽이 준 크기를 Electron 은 창틀까지 포함한 크기로 읽어, 그대로 두면 열 때마다 창틀만큼 줄어든다.
+    // 새 창은 떴을 때 기억한 안쪽 크기(700×500)와 다르면 스스로 맞춘다. 같으면 건드리지 않는다.
+    const resized: Array<[number, number]> = [];
+    const popupLike = (innerWidth: number, innerHeight: number, hash = '#widget-popup/schedule'): PreviewWindow => ({
+      localStorage: storage, location: { hash }, opener: mainWindow, screenX: 5, screenY: 6, innerWidth, innerHeight,
+      addEventListener: () => undefined,
+      resizeBy: (dx, dy) => { resized.push([dx, dy]); },
+    });
+    await openPreviewWindow(popupLike(686, 437));
+    assert.deepEqual(resized, [[14, 63]], '창틀만큼 작게 열렸으면 그만큼 키운다');
+    await openPreviewWindow(popupLike(700, 500));
+    assert.equal(resized.length, 1, '이미 맞으면 건드리지 않는다');
+    await openPreviewWindow(popupLike(400, 300, '#widget-popup/my-tasks'));
+    assert.equal(resized.length, 1, '기억한 것이 없는 새 창은 건드리지 않는다');
+    await openPreviewWindow(popupLike(690, 500));
+    await openPreviewWindow(popupLike(700, 520));
+    assert.deepEqual(resized.slice(1), [[10, 0], [0, -20]], '가로나 세로 한쪽만 달라도 맞춘다');
+
+    // 다른 새 창이 자기 자리를 적어도 캘린더 창의 기억은 남는다
+    const boardListeners = new Map<string, () => void>();
+    await openPreviewWindow({
+      localStorage: storage,
+      location: { hash: '#widget-popup/character-board?tab=board' },
+      opener: mainWindow,
+      screenX: 40, screenY: 50, innerWidth: 1000, innerHeight: 720,
+      addEventListener: (type, listener) => { boardListeners.set(type, listener); },
+    });
+    boardListeners.get('pagehide')!();
+    assert.equal((await open('character-board', '캐릭터 현황판')).features, 'popup,width=1000,height=720,left=40,top=50', '주소 뒤 쿼리는 창 id 가 아니다');
+    assert.equal((await open('schedule', '캘린더')).features, 'popup,width=700,height=500,left=5,top=6');
+  } finally {
+    console.log = originalLog;
+    console.info = originalInfo;
     if (saved.hadWindow) holder.window = saved.window; else delete holder.window;
     if (saved.hadDocument) holder.document = saved.document; else delete holder.document;
   }
