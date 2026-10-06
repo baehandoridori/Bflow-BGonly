@@ -270,6 +270,30 @@ test('캐릭터 그림: 카드 ‹ › 는 누른 쪽으로, 상세 큰 미리�
   }
 });
 
+test('캐릭터 그림: 겹쳐 바꾸는 틀을 감싼 칸은 폭을 직접 받는다 — 겹친 층은 칸을 넓혀 주지 못한다 (v1.128.0 회귀)', () => {
+  // v1.128.0 에서 현황판 카드 그림이 통째로 사라졌다. 카드 루트는 <button> 인데, 앱이 쓰는 엔진
+  // (Electron 33 = Chromium 130)은 button 의 기본 align-items 가 flex-start 라 안쪽 칸이 가로로 늘어나지 않는다.
+  // 예전엔 흐름 안의 <img> 가 칸의 폭을 만들었지만, 그림이 absolute 층이 되면서 내용 폭이 0 → 칸이 0×0.
+  // 최신 Chrome 은 button 도 늘려 줘서(align-items: normal) 거기서 한 검증으로는 보이지 않았다.
+  const frame = code('src/components/characters/CharacterImageFrame.tsx');
+  assert.match(frame, /className="absolute inset-0 flex items-center justify-center"/, '겹친 층은 흐름 밖 — 틀·칸의 크기를 만들지 않는다');
+
+  const card = code('src/components/characters/CharacterCard.tsx');
+  assert.match(card, /<button\n\s+type="button"\n\s+data-flip-id=\{character\.id\}/, '카드 루트는 button(엔진에 따라 자식을 늘리지 않는다)');
+  const cardWrap = card.match(/className="(relative [^"]*aspect-\[3\/4\][^"]*)">\s*\{shown \? \(\s*<CharacterImageFrame/)?.[1] ?? '';
+  assert.match(cardWrap, /(^| )w-full( |$)/, `카드 그림 칸에 w-full 이 있어야 한다: "${cardWrap}"`);
+
+  const slot = code('src/components/characters/FeaturedImageSlot.tsx');
+  const slotWrap = slot.match(/'(group relative aspect-\[3\/4\][^']*)'/)?.[1] ?? '';
+  assert.match(slotWrap, /(^| )w-full( |$)/, `상세 큰 미리보기 칸에 w-full 이 있어야 한다: "${slotWrap}"`);
+
+  // 겹쳐 바꾸기를 쓰는 곳이 늘면 이 테스트에 그 칸을 추가한다(폭을 직접 받는지 확인).
+  const optedIn = ['src/components/characters/CharacterCard.tsx', 'src/components/characters/FeaturedImageSlot.tsx'];
+  for (const path of ['src/components/characters/CharacterDetailModal.tsx', 'src/components/characters/CharacterImageLightbox.tsx', 'src/components/characters/CharacterListRow.tsx', 'src/views/EpisodeAssetBoard.tsx', 'src/components/characters/CharacterTabGroupsView.tsx', 'src/views/CharacterBoardView.tsx']) {
+    assert.doesNotMatch(code(path), /swapDirection=/, `${path} 가 겹쳐 바꾸기를 쓰기 시작했다 — 감싼 칸의 폭을 확인하고 위 목록(${optedIn.length}곳)에 더한다`);
+  }
+});
+
 test('캐릭터 상세 창: 캐릭터를 바꾸면 다시 그리지 않고 오른쪽 내용만 WAAPI 로 떠오른다', () => {
   const modal = code('src/components/characters/CharacterDetailModal.tsx');
   assert.match(modal, /useSwapFade\(detailMainRef, selectedId, reduceMotion\);/);

@@ -25,6 +25,7 @@
     "build": "node scripts/vacation-token.cjs && npm run typecheck && npm run test:playground && npm run test:auto-update && npm run test:entity && npm run test:notifications && npm run test:presence && npm run test:character && npm run test:calendar && npm run test:ui && npm run test:gantt && npm run test:vacation && npm run test:motion && vite build && electron-builder && node scripts/generate-manifest.js",
     "build:vite": "npm run typecheck && npm run test:playground && npm run test:auto-update && npm run test:entity && npm run test:notifications && npm run test:presence && npm run test:character && npm run test:calendar && npm run test:ui && npm run test:gantt && npm run test:vacation && npm run test:motion && vite build && node scripts/generate-manifest.js --allow-missing-installer",
     "preview": "vite preview",
+    "preview:electron": "electron scripts/preview-electron.cjs",
     "electron:dev": "vite build && electron .",
     "lint": "eslint src --ext ts,tsx"
   },

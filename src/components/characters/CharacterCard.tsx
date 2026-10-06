@@ -117,8 +117,12 @@ export const CharacterCard = memo(function CharacterCard({
           )}
         />
       )}
+      {/* 그림 칸의 폭은 w-full 로 직접 준다. 카드 루트가 <button> 인데, 앱이 쓰는 엔진(Electron 33 = Chromium 130)은
+          button 의 기본 align-items 가 flex-start 라 자식이 가로로 늘어나지 않는다. 예전엔 흐름 안의 <img> 가 폭을
+          만들어 줬지만, 그림이 겹친 층(absolute)이 된 뒤로는 내용 폭이 0 이라 칸이 0×0 으로 접혀 그림이 사라졌다
+          (v1.128.0 회귀 — 최신 Chrome 은 button 도 늘려 줘서 거기서는 멀쩡했다). */}
       {!compact && (
-        <div style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
+        <div style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative w-full aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
           {shown ? (
             <CharacterImageFrame
               url={shown.featuredImageUrl}
