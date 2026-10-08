@@ -205,11 +205,11 @@ export const MAP_FIT_MARGIN = 0.04;
 export function fitMapViewport(map: BackgroundMap): Pick<MapViewport, 'x' | 'y' | 'zoom'> {
   const bounds = mapPlanBounds(map), { width, height } = MAP_PLAN_EXTENT;
   const margin = MAP_FIT_MARGIN * Math.max(bounds.width, bounds.height * width / height);
-  // Only a side that leaves the base extent gets the margin. The far edges are rebuilt as x + width,
-  // which can overshoot the extent by a rounding step; that is not a side that left.
-  const beyond = (distance: number) => distance > 1e-6 ? margin : 0;
-  const left = bounds.x - beyond(-bounds.x), right = bounds.x + bounds.width + beyond(bounds.x + bounds.width - width);
-  const top = bounds.y - beyond(-bounds.y), bottom = bounds.y + bounds.height + beyond(bounds.y + bounds.height - height);
+  // A side that leaves the base extent moves out by the margin. Any other side is the base edge itself:
+  // the bounds can overshoot it by a rounding step, and that is not a side that left.
+  const side = (base: number, edge: number, outward: 1 | -1) => (edge - base) * outward > 1e-6 ? edge + outward * margin : base;
+  const left = side(0, bounds.x, -1), right = side(width, bounds.x + bounds.width, 1);
+  const top = side(0, bounds.y, -1), bottom = side(height, bounds.y + bounds.height, 1);
   const zoom = clampZoom(Math.min(width / (right - left), height / (bottom - top)));
   return { x: (left + right) / 2 - width / (2 * zoom), y: (top + bottom) / 2 - height / (2 * zoom), zoom };
 }

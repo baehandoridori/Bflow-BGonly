@@ -387,6 +387,9 @@ test('fitting shows everything drawn and leaves a map inside the base extent at 
   const start = { x: 0, y: 0, zoom: 1 };
   assert.deepEqual(fitMapViewport(mapOf()), start); assert.deepEqual(fitMapViewport(mapOf(room(100, 100, 400, 260))), start);
   assert.deepEqual(fitMapViewport(mapA), start, 'a camera inside the base extent');
+  // Bounds that overshoot the base extent by a rounding step (right; then left, top and bottom) are still inside it.
+  assert.deepEqual(fitMapViewport(mapOf(room(900.1, 100, 99.9, 100))), start);
+  assert.deepEqual(fitMapViewport(mapOf({ ...room(160, -160, 680, 1000), rotation: 270 })), start);
   const left = fitMapViewport(mapOf(room(-500, 100, 500, 100)));
   near(left.zoom, 0.641026, 1e-3); near(left.x, -560, 1e-3); near(left.y, -190.4, 1e-3);
   // Too wide for the zoom floor: the floor, centred on the box.
@@ -396,16 +399,21 @@ test('fitting shows everything drawn and leaves a map inside the base extent at 
   const marginOf = (map: BackgroundMap) => { const bounds = mapPlanBounds(map); return MAP_FIT_MARGIN * Math.max(bounds.width, bounds.height * 1000 / 680); };
   const above = mapOf(room(100, -300, 100, 100)), up = fitMapViewport(above);
   near(up.y, -300 - marginOf(above), 1e-9); near(up.y + 680 / up.zoom, 680, 1e-9);
+  const below = mapOf(room(100, 700, 100, 100)), down = fitMapViewport(below);
+  near(down.y, 0, 1e-9); near(down.y + 680 / down.zoom, 800 + marginOf(below), 1e-9);
   // The far edge of these bounds comes out as 1000.0000000000001: rounding, not a side that sticks out.
   const beside = mapOf(room(-24.15, 100, 100, 100)), sideways = fitMapViewport(beside);
   assert.ok(mapPlanBounds(beside).x + mapPlanBounds(beside).width > 1000);
   near(sideways.x, -24.15 - marginOf(beside), 1e-9); near(sideways.x + 1000 / sideways.zoom, 1000, 1e-9);
+  // Half a unit out is a side that sticks out.
+  const barely = mapOf(room(-0.5, 100, 100, 100));
+  near(fitMapViewport(barely).x, -0.5 - marginOf(barely), 1e-9);
   // A node without a finite position is left out, as in the plan bounds.
   assert.deepEqual(fitMapViewport(mapOf(room(-500, 100, 500, 100), { ...camera, x: Number.NaN })), left);
   assert.deepEqual(fitMapViewport(mapOf({ ...camera, y: Number.POSITIVE_INFINITY })), start);
   // Away from the zoom limits the view box holds the plan bounds.
   const tilted: BackgroundSpace = { ...room(700, 500, 600, 300), rotation: 30 };
-  for (const map of [mapOf(), mapA, mapOf(room(100, 100, 400, 260)), mapOf(room(-500, 100, 500, 100)), above, beside, mapOf(room(900, 600, 300, 200)), mapOf(tilted, { ...camera, x: -80, y: 1200 })]) {
+  for (const map of [mapOf(), mapA, mapOf(room(100, 100, 400, 260)), mapOf(room(-500, 100, 500, 100)), above, below, beside, barely, mapOf(room(900, 600, 300, 200)), mapOf(tilted, { ...camera, x: -80, y: 1200 })]) {
     const fit = fitMapViewport(map), bounds = mapPlanBounds(map);
     assert.ok(fit.zoom > MAP_ZOOM_LIMITS.min && fit.zoom <= 1);
     assert.ok(fit.x <= bounds.x + 1e-9 && fit.y <= bounds.y + 1e-9, 'left and top');
