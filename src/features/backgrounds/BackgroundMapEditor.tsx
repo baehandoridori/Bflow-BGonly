@@ -7,10 +7,12 @@ import { BackgroundMapGallery } from './BackgroundMapGallery';
 import { BackgroundMapPanels } from './BackgroundMapPanels';
 import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
 import { MapNodeHandles } from './BackgroundMapPlanOverlays';
-import { addMapCamera, containsPoint, moveMapNode, polygonSpace, removeMapNode, resizeSpace, transformMapSpace } from './mapGeometry';
+import { addMapCamera, containsPoint, moveMapNode, polygonSpace, removeMapNode, transformMapSpace } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
 import { MAP_EDIT_MARK } from './mapPlanEdit';
+import { previewPlanGesture } from './mapPlanGesture';
+import type { PlanGesture } from './mapPlanGesture';
 import { planNodeCovers, planStackUnder } from './mapPlanPreview';
 import type { MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
@@ -34,7 +36,6 @@ type PointerSession = {
   stack: string[] | null;
 };
 const message = (error: unknown) => error instanceof Error ? error.message : '도면을 저장하지 못했습니다. 다시 시도해 주세요.';
-const angle = (point: BackgroundPoint, center: BackgroundPoint) => Math.atan2(point.y - center.y, point.x - center.x) * 180 / Math.PI;
 const normalizeAngle = (value: number) => ((value % 360) + 360) % 360;
 const uuid = () => crypto.randomUUID();
 const round = (value: number) => Math.round(value * 100) / 100;
@@ -57,6 +58,16 @@ const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
 /** What the plan draws for a camera or symbol lies under this point: the camera's dot (ring when vertical) or fan, the symbol's box. */
 const onPlanMark = (node: BackgroundNode, point: BackgroundPoint) =>
   planNodeCovers(node, point, node.type !== 'camera' ? 0 : projectCameraToPlan(node).vertical ? 18 : 12, 80);
+/**
+ * The plan gesture a pressed pointer performs. Only the sessions that edit the map have one (`pan` and `click`
+ * never ask): any other names no node, so nothing is previewed for it.
+ */
+function planGestureOf(session: PointerSession): PlanGesture {
+  const { mode, node } = session;
+  if (mode === 'draw' && node?.type === 'space') return { mode, node };
+  if (node && (mode === 'move' || mode === 'resize' || mode === 'rotate')) return { mode, nodeId: node.id };
+  return { mode: 'move', nodeId: '' };
+}
 
 function mapPath(maps: BackgroundMap[], id: string): BackgroundMap[] {
   return backgroundMapPath({ maps, places: [], views: [], groups: [], usages: [], canManage: false }, id);
@@ -490,24 +501,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const delta = { x: point.x - session.start.x, y: point.y - session.start.y };
     if (session.mode === 'pan') { updateView({ x: session.view.x - delta.x, y: session.view.y - delta.y }, session.mapId); return; }
     if (session.mode === 'click' || !canEdit || !session.node) return;
-    let next = session.initial;
-    if (session.mode === 'move') next = moveMapNode(next, session.node.id, delta);
-    if (session.mode === 'draw' && session.node.type === 'space') {
-      const space = { ...session.node, x: Math.min(point.x, session.start.x), y: Math.min(point.y, session.start.y), width: Math.max(10, Math.abs(delta.x)), height: Math.max(10, Math.abs(delta.y)) };
-      next = { ...next, nodes: [...next.nodes, space] };
-    }
-    if (session.mode === 'resize' && session.node.type !== 'camera') {
-      const resized = resizeSpace(session.node, point);
-      next = resized.type === 'space' ? transformMapSpace(next, resized) : { ...next, nodes: next.nodes.map(item => item.id === resized.id ? resized : item) };
-    }
-    if (session.mode === 'rotate') {
-      // Only the horizontal direction changes: height, tilt and frame of a camera stay as they are.
-      const node = session.node;
-      const center = node.type !== 'camera' ? { x: node.x + node.width / 2, y: node.y + node.height / 2 } : node;
-      const degrees = node.type === 'camera' ? normalizeAngle(angle(point, center)) : normalizeAngle(node.rotation + angle(point, center) - angle(session.start, center));
-      next = node.type === 'space' ? transformMapSpace(next, { ...node, rotation: degrees }) : { ...next, nodes: next.nodes.map(item => item.id === node.id ? node.type === 'camera' ? { ...node, angle: degrees } : { ...node, rotation: degrees } : item) };
-    }
-    doc.previewGesture(next);
+    const preview = previewPlanGesture(planGestureOf(session), session.initial, session.start, point, null);
+    if (!preview) return;
+    doc.previewGesture(preview.map);
   }
   /** Also ends a drag as cancelled: pointercancel, or the canvas itself losing the pointer capture. */
   function pointerUp(event: ReactPointerEvent<SVGSVGElement>, cancel = false) {
