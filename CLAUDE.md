@@ -1,5 +1,7 @@
 # CLAUDE.md — B flow
 
+> **배경 라이브러리 시험 공개 (v1.130.0, 2026-10-08):** 배경 라이브러리(장소·도면·배경·에피소드별 배경)와 평면/3D 공동 도면을 main에 통합했다. **메뉴와 화면은 배한솔 계정에만 열려 있다** — 사이드바 노출과 화면 진입이 모두 `src/features/playground/featureFlag.ts`의 `canAccessBackgroundLibrary`를 거치므로, 공개 범위를 넓힐 때는 그 함수만 바꾼다(화면 노출만 막는 장치다. 서버 권한은 별개로, 읽기는 로그인한 누구나·장소/도면/배경 편집은 관리자·에피소드별 사용 기록은 팀원도 가능하다). 운영 DB에는 2026-10-08에 `2026-09-21-background-library.sql` → `2026-10-07-background-map-3d.sql` 순서로 적용했다(기본 파일을 다시 실행하면 3D 파일도 다시 실행한다). 결정·미검증 항목은 [구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md) §13~§14, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)을 본다.
+
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
 > **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료, Phase 9 M-0~M-5 완료, M-6 준비 완료 (빌드/배포만 남음)

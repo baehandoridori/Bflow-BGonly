@@ -32,6 +32,7 @@ export type ViewMode =
   | 'compositing-revisions'
   | 'retake-hub'
   | 'character-board'
+  | 'background-library'
   | 'playground'
   | 'settings';
 // v1.30.0~ : 'compositing' = 새 컴포지팅 현황 대시보드 (CompositingDashboardView)

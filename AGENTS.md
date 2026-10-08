@@ -1,5 +1,7 @@
 # AGENTS.md — B flow
 
+> **배경 라이브러리 시험 공개 (v1.130.0, 2026-10-08):** 배경 라이브러리(장소·도면·배경·에피소드별 배경)와 평면/3D 공동 도면을 main에 통합했다. **메뉴와 화면은 배한솔 계정에만 열려 있다** — 사이드바 노출과 화면 진입이 모두 `src/features/playground/featureFlag.ts`의 `canAccessBackgroundLibrary`를 거치므로, 공개 범위를 넓힐 때는 그 함수만 바꾼다(화면 노출만 막는 장치다. 서버 권한은 별개로, 읽기는 로그인한 누구나·장소/도면/배경 편집은 관리자·에피소드별 사용 기록은 팀원도 가능하다). 운영 DB에는 2026-10-08에 `2026-09-21-background-library.sql` → `2026-10-07-background-map-3d.sql` 순서로 적용했다(기본 파일을 다시 실행하면 3D 파일도 다시 실행한다). 결정·미검증 항목은 [구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md) §13~§14, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)을 본다.
+
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
 > **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료, Playground v3 배한솔 한정 테스트 중
@@ -90,11 +92,26 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 ### 배플레이그라운드 v3 데이터 경계
 
 - **시세**: `shared/playgroundMarketModel.mjs`의 결정론 모델이 장 전체·업종·종목·이벤트 입력으로 로컬 계산한다. 실제 시장 API나 별도 시세 DB를 사용하지 않는다.
+
 - **화면과 체결**: renderer preview는 같은 공용 모델로 시세와 주문 확인값을 보여 주고, Electron의 `MarketAccountService`가 체결 직전 canonical 가격·거래정지·revision을 다시 검증한다.
 - **계좌**: 실제 앱의 예수금·보유 종목·거래 결과는 Supabase가 정본이다. 테스트 모드는 로컬 preview gateway로 같은 명령·rollback 계약을 지킨다.
 - **긴 차트**: 완료된 과거 봉만 제한된 cache에 재사용하고 점진 계산한다. 현재 진행 봉은 실제 시간으로 다시 계산하며 오래된 비동기 요청은 중단한다.
 - **아케이드 포인트**: 지갑·출석·게임 기록·도전과제는 Supabase가 정본이며, 모든 포인트 변경은 원장과 같은 트랜잭션의 RPC(`playground_arcade_read`/`playground_arcade_execute`)를 거친다. renderer는 IPC → main `ArcadeService`만 경유하고, 밸런스 수치는 `src/features/playground/arcade/constants.ts`가 정본이다(SQL·계약 테스트로 동기화). 우상단 포인트 배지·출석/업무 적립·게임별 순위표가 여기에 연결된다.
 - **아케이드 게임**: 스네이크·테트리스 엔진은 부작용 없는 순수 모듈이다. 난수는 `crypto` 시드 → 결정론 PRNG로만 만들고 `Math.random()`/`Date.now()`를 엔진에 쓰지 않는다(리플레이·테스트 재현성). 게임 시작/종료는 `request_id` 멱등이라 재시도·중복 제출에도 입장료 중복 차감·이중 지급이 없다. 신기록 슬랙은 전체 최고 기록 경신 + 관리 토글 on + 주소 설정 시에만 발송된다.
+
+### 배경 라이브러리 데이터 경계 (v1.130.0 시험 공개)
+
+- **노출 범위**: 메뉴와 화면은 `canAccessBackgroundLibrary`(배플레이그라운드와 같은 계정 판정)를 통과한 계정에만 보인다. 사이드바 필터와 `resolveAllowedView`가 같은 함수를 쓰며 `tests/backgroundAccess.test.ts`가 둘 다 고정한다. 새 진입 경로(단축키·검색·새 창·딥링크)를 더할 때도 이 함수를 거치게 한다. 서버와 메인 프로세스는 계정을 가리지 않으므로 이 장치는 화면 노출용이다.
+- `src/features/backgrounds`는 장소·도면·배경/변형/수정본·시점 묶음·에피소드 사용을 분리한다. 도면 노드 삭제는 원본 자산과 사용 기록을 지우지 않는다.
+- 도면 노드는 공간·카메라·`symbol`(문/사물 기호)로 구분한다. 기호는 배경 시점 ID를 갖지 않으며 같은 도면의 공간에만 연결한다. 공간 변형에 소속 기호도 따라가되 잠금은 보존하고 공간 삭제 시 연결만 해제한다. 기호 종류·치수·경첩/열림 방향은 공용 domain과 SQL에서 함께 검증한다.
+- preload epoch → `backgroundIpc.ts` → `backgroundStore.ts` → `background_library_read/execute`로 저장한다. DB는 `app_session_user_id`로 사용자를 확정하고 관리자는 자산 편집, 로그인 사용자는 에피소드 연결을 편집한다.
+- 엔티티별 revision CAS, requestId 멱등, 삭제 ID 재사용 차단을 유지한다. 화면은 낙관 반영 후 실패 복구하며 session generation과 refresh ticket으로 오래된 응답을 배제한다.
+- 도면 생성·연결·위치 변경은 관리자 전용 `save-maps` 원자적 명령을 사용한다. 1~100개 도면의 CAS를 모두 확인한 뒤 최종 참조/순환을 검사한다. 다른 부모로 옮길 때 이전 공간의 입구 연결도 같은 명령에서 해제하며, 응답 유실은 전체 제출 내용과 정확한 다음 revision이 일치할 때만 완료로 복구한다.
+- `background-library` Realtime 채널은 데이터 없는 변경 신호만 전달한다. Preview는 같은 domain과 Web Locks/localStorage를 사용한다. 운영에 샘플을 자동 주입하지 않는다.
+- 평면/3D 공동 도면: 도면 노드의 x/y/width/height/rotation/angle은 평면 값 그대로이며 `height`는 평면 세로 길이다. 수직 축은 선택 필드(공간 `elevation`·`volumeHeight`, 카메라 `elevation`·`pitch`·`roll`·`aspect`, 기호 `elevation`·`volumeHeight`·`pitch`·`roll`)로만 더한다. 없는 값은 `mapSpatial.ts`가 읽을 때 기본값으로 풀이하며, 보기·전환만으로는 쓰지 않고 사용자가 바꾼 값만 저장한다. 범위는 `domain.ts`의 `BACKGROUND_SPATIAL_LIMITS`와 `DEVLOG/migrations/2026-10-07-background-map-3d.sql`이 같아야 하며, 이 SQL은 기본 migration 뒤에 적용하고 기본 migration을 다시 실행하면 이 SQL도 다시 실행한다. 평면 SVG·3D 화면·보조 평면도는 `mapDocument.ts`의 초안 하나를 읽고(별도 3D 저장소 없음), 한 번의 드래그는 되돌리기 한 단계다. 새 카메라는 `addMapCamera`의 고정 생성점에만 만든다. three.js는 3D 모드에서만 지연 로드한다.
+- 새 설치는 `DEVLOG/migrations/2026-09-21-background-library.sql`이 필요하다. 이미지 미리보기는 기존 `scene-images`의 `backgrounds/` 경로를 사용하고 원본 파일/장소 폴더는 별도 경로로 보존한다.
+- 파일 연결은 변형의 선택적 `workFilePath`와 수정본의 선택적 `sourceImagePath`로 구분한다. 기존 수정본 `filePath`는 작업파일 호환용이며 명시적인 빈 경로를 구형 값으로 되살리지 않는다. 이미지 갱신은 새 수정본을 추가하고 연결 해제는 원본·미리보기를 삭제하지 않는다.
+- `background:read-image-file`은 읽기 전후 세션/admin을 확인하고 로컬·공유 경로 PNG/JPG/WebP를 20MB 이내로 제한한다. main의 nativeImage로 검증·1600px 이내 축소하며 투명도를 보존한다. renderer에서 100개 수정본 제한을 읽기/업로드 전에 확인하고 domain/SQL에서도 검증한다.
 
 ---
 

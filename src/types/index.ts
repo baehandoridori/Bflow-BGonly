@@ -1056,6 +1056,12 @@ export interface SupabaseRealtimeStatusMetadata {
 }
 
 export interface ElectronAPI extends CalendarApiInputContract {
+  backgroundRead: () => Promise<import('../features/backgrounds/types').BackgroundSnapshot>;
+  backgroundExecute: (request: import('../features/backgrounds/types').BackgroundRequest) => Promise<import('../features/backgrounds/types').BackgroundSnapshot>;
+  onBackgroundChanged: (callback: () => void) => () => void;
+  backgroundUploadImage: (base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  backgroundReadImageFile: (filePath: string) => Promise<{ dataUrl: string; filePath: string }>;
+  getPathForFile: (file: File) => string;
   calendarFeedStatus: (calendarId: string) => Promise<import('../shared/calendarSubscription').CalendarFeedStatus>;
   calendarFeedManage: (request: import('../shared/calendarSubscription').CalendarFeedRequest) => Promise<import('../shared/calendarSubscription').CalendarFeedResult>;
   ganttRead: () => Promise<import('../features/gantt/types').GanttSnapshot>;

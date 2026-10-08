@@ -14,6 +14,7 @@ import { version as appVersion } from '../../package.json';
 import { RetakeNotificationService } from '../../electron/retakeNotificationService';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
 import { createThreadTodoPreviewStore, type ThreadTodoPreviewStore } from './threadTodoPreviewStore';
+import { createBackgroundPreviewGateway, subscribeBackgroundPreview } from '../features/backgrounds/previewGateway';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -144,6 +145,16 @@ function requireGanttPreviewSession() {
   const epoch = previewCanonicalEpoch;
   const options = ganttPreviewOptions(actor.id, epoch);
   return { actor, options, gateway: createPreviewGateway(actor.id, options) };
+}
+
+function requireBackgroundPreviewSession() {
+  const actor = requireMockCalendarUser(), epoch = previewCanonicalEpoch;
+  const assertCurrent = () => {
+    if (actor.id !== previewCanonicalUserId || epoch !== previewCanonicalEpoch) throw new Error('로그인 세션이 변경되었습니다. 다시 시도해 주세요.');
+  };
+  return { actor, assertCurrent, gateway: createBackgroundPreviewGateway({
+    id: actor.id, canManage: actor.role === 'admin', episodeNumbers: MOCK_EPISODES.map(ep => ep.episodeNumber),
+  }, { storage: window.localStorage, assertCurrent }) };
 }
 
 type MockCalendarRow = Awaited<ReturnType<ElectronAPI['calendarCreate']>>;
@@ -2639,6 +2650,7 @@ export function installDevElectronAPI(): void {
     },
     fontDelete: async () => ({ ok: true }),
     fontGetPathForFile: () => '',
+    getPathForFile: () => '',
 
     usersRead: async () => ({
       users: getMockUsers().map(u => ({
@@ -3722,6 +3734,43 @@ export function installDevElectronAPI(): void {
     ganttRead: async () => {
       const { gateway, options } = requireGanttPreviewSession();
       const result = await gateway.read(); options.assertCurrent?.(); return result;
+    },
+    backgroundRead: async () => {
+      const { gateway, assertCurrent } = requireBackgroundPreviewSession();
+      const result = await gateway.read(); assertCurrent(); return result;
+    },
+    backgroundExecute: async (request) => {
+      const { gateway, assertCurrent } = requireBackgroundPreviewSession();
+      const result = await gateway.execute(request); assertCurrent(); return result;
+    },
+    onBackgroundChanged: (callback) => subscribeBackgroundPreview(callback),
+    backgroundUploadImage: async (base64Data) => {
+      const { actor, assertCurrent } = requireBackgroundPreviewSession();
+      if (actor.role !== 'admin') throw new Error('배경 이미지 업로드는 관리자만 할 수 있습니다.');
+      if (typeof base64Data !== 'string' || base64Data.length > 2_000_000 || !/^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(base64Data)) return {ok:false,error:'2MB 이하의 PNG, JPEG, WebP 미리보기를 선택해 주세요.'};
+      assertCurrent(); return {ok:true,url:base64Data};
+    },
+    backgroundReadImageFile: async (filePath) => {
+      const { actor, assertCurrent } = requireBackgroundPreviewSession();
+      if (actor.role !== 'admin') throw new Error('배경 이미지 파일 연결은 관리자만 할 수 있습니다.');
+      const samplePath = 'G:\\공유 드라이브\\JBBJ\\배경\\교실\\교실_낮.png';
+      if (typeof filePath !== 'string' || filePath.trim() !== samplePath) {
+        throw new Error(`브라우저 프리뷰에서는 PC 파일 경로를 직접 읽을 수 없습니다. 이미지 파일을 선택하거나 예제 경로를 사용해 주세요: ${samplePath}`);
+      }
+      const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 400;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('예제 이미지 미리보기를 만들 수 없습니다.');
+      context.fillStyle = '#e9e4d8'; context.fillRect(0, 0, 640, 400);
+      context.fillStyle = '#c0b397'; context.fillRect(0, 270, 640, 130);
+      context.fillStyle = '#385e58'; context.fillRect(170, 60, 300, 130);
+      context.fillStyle = '#b7d9e9'; context.fillRect(30, 50, 100, 180); context.fillRect(510, 50, 100, 180);
+      for (const y of [260, 330]) for (const x of [145, 285, 425]) {
+        context.fillStyle = '#a58160'; context.fillRect(x, y, 90, 38);
+        context.fillStyle = '#676b6b'; context.fillRect(x + 8, y + 38, 5, 24); context.fillRect(x + 77, y + 38, 5, 24);
+      }
+      context.fillStyle = '#f3f1e6'; context.font = '18px sans-serif'; context.fillText('프리뷰 예제 · 교실 낮', 226, 133);
+      const dataUrl = canvas.toDataURL('image/png');
+      assertCurrent(); return { dataUrl, filePath: samplePath };
     },
     ganttExecute: async (request) => {
       const { gateway, options } = requireGanttPreviewSession();

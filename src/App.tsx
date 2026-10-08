@@ -10,6 +10,7 @@ import { useActivityStore } from '@/stores/useActivityStore';
 import { subscribeToActivityRealtime } from '@/services/supabaseService';
 import {
   loadAssigneeView,
+  loadBackgroundLibraryView,
   loadCharacterBoardView,
   loadCompositingDashboardView,
   loadCompositingView,
@@ -37,6 +38,7 @@ const CompositingView = lazy(loadCompositingView); // default export — 기존 
 const CompositingDashboardView = lazy(loadCompositingDashboardView); // v1.30.0+ 새 현황 대시보드
 const RetakeHubView = lazy(loadRetakeHubView); // 리테이크 허브 5단계 — 감독 세트 허브
 const CharacterBoardView = lazy(loadCharacterBoardView); // 캐릭터 현황판
+const BackgroundLibraryView = lazy(loadBackgroundLibraryView); // 배경 라이브러리
 const PlaygroundView = lazy(() => import('@/views/PlaygroundView'));
 const SettingsView = lazy(() => loadSettingsView().then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
@@ -3280,6 +3282,8 @@ export default function App() {
           return <RetakeHubView />;
         case 'character-board':
           return <CharacterBoardView />;
+        case 'background-library':
+          return <BackgroundLibraryView />;
         case 'playground':
           return <PlaygroundView authorizedHansol={canAccessPlayground(currentUser)} />;
         case 'settings':
