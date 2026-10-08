@@ -6,8 +6,14 @@ import { readFileSync, readdirSync } from 'node:fs';
 // mutation: the line it guards was broken in a scratch copy, and the anchor failed.
 
 const directory = new URL('../src/features/backgrounds/', import.meta.url);
-/** Read with LF line endings: a fresh checkout under core.autocrlf has CRLF. No marker or pattern below carries a line break. */
-const read = (name: string) => readFileSync(new URL(name, directory), 'utf8').replace(/\r\n/g, '\n');
+/**
+ * Read with LF line endings (a fresh checkout under core.autocrlf has CRLF; no marker or pattern below carries a
+ * line break) and without comments: a guarded line that is commented out is as gone as a deleted one.
+ * The pattern knows no strings, so `//` right after a quote, a colon or a backslash stays (a string, a URL, a regex).
+ * On every source of this feature it removes exactly what the TypeScript parser reads as a comment.
+ */
+const read = (name: string) => readFileSync(new URL(name, directory), 'utf8').replace(/\r\n/g, '\n')
+  .replace(/\/\*[\s\S]*?\*\/|(?<![:'"`\\])\/\/.*$/gm, '');
 const editor = read('BackgroundMapEditor.tsx');
 const nameBox = read('BackgroundMapNameBox.tsx');
 const overlays = read('BackgroundMapPlanOverlays.tsx');
@@ -62,8 +68,10 @@ function canvasTag(): string {
 test('anchor 1: the wheel is a native, non-passive listener on the plan SVG, attached again for each map and mode', () => {
   // The registration and the dependency list are one effect: no other effect starts between them.
   assert.match(editor, /svg\.addEventListener\('wheel', onWheel, \{ passive: false \}\);(?:(?!useEffect\()[\s\S])*?\}, \[onWheel, current\?\.id, mode\]\);/);
+  // What the listener is non-passive for: the wheel is swallowed first, whatever the handler does next.
+  assert.match(editor, /const onWheel = useEvent\(\(event: WheelEvent\) => \{\s*event\.preventDefault\(\);/);
   // React listens to onWheel passively: preventDefault would do nothing there.
-  assert.doesNotMatch(editor, /onWheel=/);
+  assert.doesNotMatch(editor, /onWheel(?:Capture)?=/);
 });
 
 test('anchor 2: fit shows everything that is drawn, and the reset of the view is gone', () => {
@@ -73,7 +81,10 @@ test('anchor 2: fit shows everything that is drawn, and the reset of the view is
 });
 
 test('anchor 3: a drag on the plan is computed by previewPlanGesture, and only then previewed', () => {
-  inOrder(handler.pointerMove(), 'previewPlanGesture(', 'doc.previewGesture(');
+  // What is previewed is the map previewPlanGesture returned, and a move previews nothing else.
+  const move = handler.pointerMove();
+  inOrder(move, 'const preview = previewPlanGesture(gesture, session.initial, session.start, point, snap);', 'doc.previewGesture(preview.map);');
+  assert.equal(count(move, /doc\.previewGesture\(/g), 1, 'one preview per move');
   // The gesture maths lives in one place, mapPlanGesture.ts.
   assert.doesNotMatch(editor, /\bresizeSpace\(/);
   assert.doesNotMatch(editor, /moveMapNode\(next/);
@@ -81,6 +92,8 @@ test('anchor 3: a drag on the plan is computed by previewPlanGesture, and only t
 
 test('anchor 4: the name of a node just drawn joins the drawing step only while the draft is still that drawing', () => {
   assert.match(handler.commitName(), /updateMap\(next, edit\.created && draftNow\.value === edit\.created \? \{ history: false \} : undefined\);/);
+  // Only a node just drawn carries that value: a rename by F2 or by double-click is an undo step of its own.
+  assert.match(editor, /setRenaming\(\{ mapId: current\.id, nodeId: id, created: created \? value : null \}\);/);
 });
 
 test('anchor 5: the step to the next pile item is taken by the click on the SVG, not by the release and not by a double-click while editing', () => {
@@ -92,15 +105,21 @@ test('anchor 5: the step to the next pile item is taken by the click on the SVG,
   const up = handler.pointerUp();
   assert.match(up, /pendingCycle\.current = \{ ids, nodeId: session\.node\.id, mapId: session\.mapId \};/);
   assert.doesNotMatch(up, /select\(ids\[/);
+  // The release selects once, the node of the gesture that ended: no step under another spelling.
+  assert.match(up, /if \(session\.node\) select\(session\.node\.id, session\.mapId\);/);
+  assert.equal(count(up, /\bselect\(/g), 1, 'the release selects nowhere else');
   const asking = up.slice(positions(up, 'if (!cancel && !session.moved && session.stack && session.node)')[0]);
   assert.doesNotMatch(asking, /\bselect\(/);
 });
 
 test('anchor 6: double-clicks are handled in one place, the SVG, from the presses that pointerDown logged', () => {
   // A press that captured the pointer sends its dblclick to the SVG: a handler on a node or on a handle would never run.
-  assert.equal(count(`${editor}${overlays}`, /onDoubleClick=/g), 1);
+  assert.equal(count(`${editor}${overlays}`, /onDoubleClick(?:Capture)?=/g), 1);
   assert.match(canvasTag(), /onDoubleClick=\{canvasDoubleClick\}/);
   assert.match(handler.canvasDoubleClick(), /const \[first, last\] = pressLog\.current;/);
+  // What the log is read for, before anything opens: no double-click on a handle, and both presses on the same node.
+  inOrder(handler.canvasDoubleClick(), 'if (!current || !last || last.handle || Date.now() - lastDrag.current <= 450) return;',
+    'if (!first || first.hitId !== last.hitId) return;', 'openSpace(', 'beginRename(');
   assert.match(handler.pointerDown(), /pressLog\.current = \[pressLog\.current\[1\], \{ hitId: node\?\.id \?\? null, targetId: handle \? null : target\?\.id \?\? null, handle: !!handle \}\];/);
 });
 
@@ -121,22 +140,23 @@ test('anchor 7: the name box keeps Escape and compositions to itself, hands the 
 test('anchor 8: no screen of the background feature puts HTML inside an SVG', () => {
   const screens = readdirSync(directory).filter(name => name.endsWith('.tsx'));
   assert.ok(screens.includes('BackgroundMapEditor.tsx') && screens.includes('BackgroundMapNameBox.tsx'), 'the screens were listed');
-  // With the opening bracket: a comment may name the element.
+  // With the opening bracket: the markup, not the word.
   for (const name of screens) assert.doesNotMatch(read(name), /<foreignObject/, `${name} has a <foreignObject>`);
 });
 
 test('anchor 9: the snap and gesture modules stay pure: no three.js, no DOM', () => {
   for (const name of ['mapSnap.ts', 'mapPlanGesture.ts']) {
     const source = read(name);
-    // The import and the access, not the words: a header comment may say that three is never imported here.
+    // The import and the access, not the words.
     assert.doesNotMatch(source, /from\s+['"]three/, `${name} imports three.js`);
     assert.doesNotMatch(source, /\b(?:document|window)\.\w/, `${name} touches the DOM`);
   }
 });
 
 test('anchor 10: the 3D files import none of the plan editing modules', () => {
+  // By whatever path: './mapSnap', '../backgrounds/mapSnap' and '@/features/backgrounds/mapSnap' are one module.
   for (const name of ['BackgroundMap3D.tsx', 'map3dScene.ts', 'BackgroundMapCameraGizmo.ts'])
-    assert.doesNotMatch(read(name), /['"]\.\/(?:mapSnap|mapPlanGesture|mapPlanEdit)(?:\.ts)?['"]/, `${name} imports a plan editing module`);
+    assert.doesNotMatch(read(name), /['"][^'"]*\/(?:mapSnap|mapPlanGesture|mapPlanEdit)(?:\.ts)?['"]/, `${name} imports a plan editing module`);
 });
 
 test('anchor 11: the plan has no grid that is always drawn', () => {
@@ -160,6 +180,10 @@ test('anchor 13: the plan shortcuts come before the guard that leaves keys to a 
   const keys = handler.keyboard(), shortcuts = ["event.key === 'F2'", 'fitView()', 'zoomBy(1.25)', 'zoomBy(0.8)'];
   const [guard] = positions(keys, 'if (target.closest(interactive)) return;');
   positions(keys, ...shortcuts).forEach((at, index) => assert.ok(at < guard, `${shortcuts[index]} must come before the guard`));
+  // What they stop at themselves is text entry and dialogs, never a button: with one in it they would be as deaf as behind the guard.
+  assert.match(keys, /&& !event\.nativeEvent\.isComposing && !target\.closest\(textEntry\)\) \{/);
+  assert.match(editor, /const textEntry = `\$\{textFields\}, dialog`;/);
+  assert.match(editor, /const textFields = 'input, textarea, select, \[contenteditable\]:not\(\[contenteditable="false"\]\)';/);
 });
 
 test('anchor 14: the polygon tool takes a press for the same point within the dot size on screen, not within one map unit', () => {
@@ -189,7 +213,9 @@ test('anchor 17: the Alt of a drag is kept from the window menu until that key i
   for (const listener of ["window.addEventListener('keydown', key, true);", "window.addEventListener('keyup', key, true);", "window.addEventListener('blur', forget);"])
     assert.ok(effect.includes(listener), listener);
   const key = piece(effect, 'const key = (event: KeyboardEvent) => {', 'const forget = () =>');
-  inOrder(key, "if (event.key !== 'Alt') return;", 'if (!altDrag.current) return;', 'event.preventDefault();', "if (event.type === 'keyup') altDrag.current = false;");
+  // The third place that switches it on: Alt pressed while the pointer is already down and resting.
+  inOrder(key, "if (event.key !== 'Alt') return;", "if (event.type === 'keydown' && pointerRef.current) altDrag.current = true;",
+    'if (!altDrag.current) return;', 'event.preventDefault();', "if (event.type === 'keyup') altDrag.current = false;");
   assert.equal(count(key, /altDrag\.current = false/g), 1, 'only the release of the key ends it');
   assert.match(effect, /const forget = \(\) => \{ altDrag\.current = false; \};/);
   // Switched on where the session is recorded, and on every move of it, before the drag threshold.
@@ -203,6 +229,7 @@ test('anchor 17: the Alt of a drag is kept from the window menu until that key i
   assert.doesNotMatch(editor, /event\.key === 'Alt' && pointerRef\.current|pointerRef\.current && event\.key === 'Alt'/);
 });
 
-test('anchor 18: the snap input carries the reach, in screen pixels at the zoom of the press', () => {
-  assert.match(handler.pointerMove(), /tolerance: MAP_SNAP\.tolerancePx \* session\.scale, reach: MAP_SNAP\.reachPx \* session\.scale \}/);
+test('anchor 18: the snap input carries the reach, in screen pixels at the zoom of the press, and there is none while Alt is held', () => {
+  // From the condition on: the toggle and the Alt of this very move decide whether there is a snap input at all.
+  assert.match(handler.pointerMove(), /const snap = snapEnabled && !event\.altKey\s*\? \{ candidates: .*\s*tolerance: MAP_SNAP\.tolerancePx \* session\.scale, reach: MAP_SNAP\.reachPx \* session\.scale \}\s*: null;/);
 });
