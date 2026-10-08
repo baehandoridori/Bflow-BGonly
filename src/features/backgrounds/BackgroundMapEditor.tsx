@@ -1,14 +1,21 @@
 import { Component, Fragment, Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { Move3d, Orbit, Rotate3d, Scale3d } from 'lucide-react';
 import type { BackgroundCamera, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSnapshot, BackgroundSpace, BackgroundSymbol, BackgroundSymbolKind } from './types';
 import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './BackgroundUI';
 import { BackgroundMapGallery } from './BackgroundMapGallery';
 import { BackgroundMapPanels } from './BackgroundMapPanels';
 import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
-import { addMapCamera, containsPoint, moveMapNode, polygonSpace, removeMapNode, resizeSpace, transformMapSpace } from './mapGeometry';
+import { MapNodeHandles, MapSnapGuides, MapVertexHandles } from './BackgroundMapPlanOverlays';
+import { BackgroundMapNameBox } from './BackgroundMapNameBox';
+import { addMapCamera, containsPoint, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removePolygonVertex, renameMapNode, replaceMapNode, transformMapSpace } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
-import { fieldEditStartMap, gestureStartMap, mapDraft, mapDraftChanged, mapViewport, revealPlanPoint, zoomMapViewport } from './mapDocument';
+import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
+import { MAP_EDIT_MARK, POLYGON_POINT_LIMIT, doubleClickNodeId, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
+import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
+import type { PlanGesture } from './mapPlanGesture';
+import { MAP_SNAP, sameSnapGuides } from './mapSnap';
+import type { SnapCandidates, SnapGuide } from './mapSnap';
 import { planNodeCovers, planStackUnder } from './mapPlanPreview';
 import type { MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
@@ -23,21 +30,46 @@ type Props = { snapshot: BackgroundSnapshot; pending: boolean; execute: (command
 /** `hand` pans the plan and orbits the 3D world. The drawing tools exist on the plan only. */
 type Tool = 'select' | 'hand' | 'rect' | 'ellipse' | 'polygon' | 'symbol';
 type CreateForm = { id: string; name: string; parentId: string | null; spaceId: string | null; placeId: string | null };
+/** The handle of the selected node a press landed on. The object is a point handle of a polygon: that point, or with `insert` the + of the edge that starts at it. */
+type PlanHandle = 'resize' | 'rotate' | { index: number; insert: boolean };
 /** One pressed pointer on the plan. `pan` and `click` never touch the document. */
 type PointerSession = {
-  mode: 'pan' | 'click' | 'move' | 'resize' | 'rotate' | 'draw'; pointerId: number;
+  mode: 'pan' | 'click' | 'move' | 'resize' | 'rotate' | 'draw' | 'vertex'; pointerId: number;
   mapId: string; initial: BackgroundMap; node?: BackgroundNode; start: BackgroundPoint;
   clientX: number; clientY: number; matrix: DOMMatrix; view: MapViewport; moved: boolean;
   /** Overlapping cameras and symbols under the press: a plain click steps to the next one. */
   stack: string[] | null;
+  /** Map units per CSS pixel at the press: the snap tolerance and reach of the whole gesture. */
+  scale: number;
+  /** `vertex` mode: the dragged point, or the edge a new point is pulled out of. */
+  vertex: { index: number; insert: boolean } | null;
+  /** Snap targets, collected from `initial` on the first move that needs them. */
+  candidates: SnapCandidates | null;
 };
+/** What one press landed on. A double-click on the canvas is resolved from the last two of these. */
+type PlanPress = {
+  /** Topmost node under the press: the node whose element took the pointerdown. Null on empty canvas. */
+  hitId: string | null;
+  /** The node the press acted on (the pile member that was already picked). Null for a handle and for empty canvas. */
+  targetId: string | null;
+  handle: boolean;
+};
+/** The node whose name box is open on the plan. */
+type NameEdit = { mapId: string; nodeId: string; /** The draft value right after the creating edit; null for an existing node. */ created: BackgroundMap | null };
+/** One empty list for every time no guide is shown, so the guides state keeps its identity. */
+const NO_GUIDES: readonly SnapGuide[] = [];
+/** The press log with nothing in it: no double-click can be resolved from it. */
+const NO_PRESSES: readonly [PlanPress | null, PlanPress | null] = [null, null];
 const message = (error: unknown) => error instanceof Error ? error.message : '도면을 저장하지 못했습니다. 다시 시도해 주세요.';
-const angle = (point: BackgroundPoint, center: BackgroundPoint) => Math.atan2(point.y - center.y, point.x - center.x) * 180 / Math.PI;
 const normalizeAngle = (value: number) => ((value % 360) + 360) % 360;
 const uuid = () => crypto.randomUUID();
 const round = (value: number) => Math.round(value * 100) / 100;
 const isDrawTool = (tool: Tool) => tool === 'rect' || tool === 'ellipse' || tool === 'polygon';
-const interactive = 'input, textarea, select, button, [contenteditable]:not([contenteditable="false"])';
+/** Where a key is text. Both selectors below are built on it, so a new kind of text field reaches both. */
+const textFields = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+const interactive = `${textFields}, button`;
+/** Where a key is text, or belongs to an open dialog: the plan shortcuts leave it alone. */
+const textEntry = `${textFields}, dialog`;
 const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔어요. 편집 내용은 그대로예요.';
 const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string }[] = [
   { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기' },
@@ -51,6 +83,18 @@ const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
 /** What the plan draws for a camera or symbol lies under this point: the camera's dot (ring when vertical) or fan, the symbol's box. */
 const onPlanMark = (node: BackgroundNode, point: BackgroundPoint) =>
   planNodeCovers(node, point, node.type !== 'camera' ? 0 : projectCameraToPlan(node).vertical ? 18 : 12, 80);
+/**
+ * The plan gesture a pressed pointer performs. Only the sessions that edit the map have one (`pan` and `click`
+ * never ask): any other names no node, so nothing is previewed for it. The editing modes are told apart by
+ * exclusion: a mode added to the session does not compile here until it has a gesture of its own.
+ */
+function planGestureOf(session: PointerSession): PlanGesture {
+  const { mode, node, vertex } = session;
+  if (mode === 'draw' && node?.type === 'space') return { mode, node };
+  if (mode === 'vertex' && node && vertex) return { mode, nodeId: node.id, ...vertex };
+  if (node && mode !== 'pan' && mode !== 'click' && mode !== 'draw' && mode !== 'vertex') return { mode, nodeId: node.id };
+  return { mode: 'move', nodeId: '' };
+}
 
 function mapPath(maps: BackgroundMap[], id: string): BackgroundMap[] {
   return backgroundMapPath({ maps, places: [], views: [], groups: [], usages: [], canManage: false }, id);
@@ -133,6 +177,21 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [symbolPaletteOpen, setSymbolPaletteOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [polygon, setPolygon] = useState<BackgroundPoint[]>([]);
+  // Snapping, and the lines the drag in progress is stuck to. The lines on show are compared here, before the
+  // state is set: a state update that comes after the preview of the same pointer move runs this whole component
+  // once more even when it changes nothing, so a drag would render twice for every move.
+  const [snapEnabled, setSnapEnabled] = useState(readSnapPreference);
+  const [guides, setGuides] = useState<readonly SnapGuide[]>(NO_GUIDES);
+  const shownGuides = useRef<readonly SnapGuide[]>(NO_GUIDES);
+  const showGuides = (next: readonly SnapGuide[]) => {
+    if (sameSnapGuides(shownGuides.current, next)) return;
+    shownGuides.current = next; setGuides(next);
+  };
+  /** The point of a polygon that was pressed last, the one Delete removes. Read it through `activeIndex`, never directly. */
+  const [activeVertex, setActiveVertex] = useState<{ mapId: string; nodeId: string; index: number } | null>(null);
+  const [renaming, setRenamingState] = useState<NameEdit | null>(null);
+  const renamingRef = useRef<NameEdit | null>(null);       // handlers read this, so a late blur after a close is a no-op
+  function setRenaming(next: NameEdit | null) { renamingRef.current = next; setRenamingState(next); }
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
@@ -146,6 +205,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 680 });
   const pointerRef = useRef<PointerSession | null>(null);
   const lastDrag = useRef(0);
+  /** The last two presses on the plan, the older one first. */
+  const pressLog = useRef(NO_PRESSES);
+  /** The step to the next item of a pile, asked for by a press that did not move. The click that follows takes it. */
+  const pendingCycle = useRef<{ ids: string[]; nodeId: string; mapId: string } | null>(null);
   /** Orbit pose of the 3D viewport per map. UI state only: never history, never a render. */
   const viewStates = useRef<Record<string, Map3DViewState>>({});
   const focusNonce = useRef(0);
@@ -159,8 +222,19 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const editing = !!draft && snapshot.canManage;
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
+  // The name box is drawn only while its node can still be renamed here; otherwise it goes without a commit.
+  const renamingNode = renaming && mode === 'plan' && canEdit && renaming.mapId === current?.id
+    ? current.nodes.find(node => node.id === renaming.nodeId && !node.locked) : undefined;
   const lookThroughId = mode === '3d' && lookThrough && lookThrough.mapId === current?.id && selected?.type === 'camera' && lookThrough.id === selected.id ? lookThrough.id : null;
-  const labelScale = Math.min(4, Math.max(0.4, 1 / (Math.min(canvasSize.width / 1000, canvasSize.height / 680) * view.zoom)));
+  const screenScale = mapScreenScale(view.zoom, canvasSize);
+  const labelScale = Math.min(MAP_LABEL_SCALE_LIMITS.max, Math.max(MAP_LABEL_SCALE_LIMITS.min, screenScale));
+  const vertexHandles = mode === 'plan' && canEdit && tool === 'select' && selected?.type === 'space' && !selected.locked
+    ? planVertexHandles(selected, screenScale) : null;
+  // The picked point comes from the point handles on show only. Without them (zoomed out too far, locked, another
+  // tool, a save running) there is none, so Delete never removes a point that cannot be seen; zooming back in
+  // brings the same point back.
+  const activeIndex = vertexHandles && activeVertex && activeVertex.mapId === current?.id && activeVertex.nodeId === selected?.id
+    && activeVertex.index < vertexHandles.vertices.length ? activeVertex.index : null;
   // The image grid reads the maps as they were when a gesture started, so it does not recompute on every frame.
   const settledMapsRef = useRef(maps);
   if (!gestureActive) settledMapsRef.current = maps;
@@ -178,6 +252,27 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     observer.observe(svg);
     return () => observer.disconnect();
   }, [current?.id, mode]);
+  /**
+   * The wheel over the plan zooms about the pointer. It is always swallowed, so a narrow window does not scroll
+   * instead, and the view is read from the store: a fast wheel outruns the renders.
+   */
+  const onWheel = useEvent((event: WheelEvent) => {
+    event.preventDefault();
+    if (!current || pointerRef.current || doc.isGestureActive()) return;
+    const anchor = pointFrom(event);
+    if (!anchor) return;
+    const live = mapViewport(doc.getState(), current.id);
+    const zoomed = zoomMapViewportAt(live, wheelZoomFactor(event.deltaY, event.deltaMode, event.ctrlKey), anchor);
+    if (zoomed !== live) updateView({ zoom: zoomed.zoom, x: zoomed.x, y: zoomed.y });
+  });
+  // A native listener, because React listens to the wheel passively. The plan SVG is replaced by the 3D mode,
+  // so it is attached again on the dependencies of the size observer above.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, [onWheel, current?.id, mode]);
   useEffect(() => { if (!snapshot.canManage) { setTool('select'); setPolygon([]); setSymbolPaletteOpen(false); } }, [snapshot.canManage]);
 
   /** Ends the pressed pointer and cancels the gesture in progress. Nothing of it reaches the history. */
@@ -186,6 +281,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     pointerRef.current = null;
     if (session && svgRef.current?.hasPointerCapture(session.pointerId)) svgRef.current.releasePointerCapture(session.pointerId);
     doc.cancelGesture();
+    showGuides(NO_GUIDES);
   });
   // Another map, the other display mode, a save starting or lost edit rights never commit a half-done drag.
   useLayoutEffect(() => { abortGesture(); }, [abortGesture, current?.id, mode, canEdit]);
@@ -197,10 +293,38 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     window.addEventListener('keydown', cancel, true);
     return () => window.removeEventListener('keydown', cancel, true);
   }, [gestureActive, abortGesture]);
+  /** The Alt key being held was used on a plan drag: its key events stay away from the window menu until it is released. */
+  const altDrag = useRef(false);
+  // Releasing the pointer does not end this: the release of Alt usually comes after it, and that is the event
+  // that would hand the keyboard to the window menu.
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Alt') return;
+      if (event.type === 'keydown' && pointerRef.current) altDrag.current = true;     // Alt pressed during a drag
+      if (!altDrag.current) return;
+      event.preventDefault();                                                          // its auto-repeat comes here too
+      if (event.type === 'keyup') altDrag.current = false;                             // that Alt is released
+    };
+    const forget = () => { altDrag.current = false; };                                 // Alt+Tab and the like: the release never reaches this window
+    window.addEventListener('keydown', key, true); window.addEventListener('keyup', key, true); window.addEventListener('blur', forget);
+    return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('keyup', key, true); window.removeEventListener('blur', forget); };
+  }, []);
+  // A press the canvas did not take can never be the first half of a double-click on a node.
+  useEffect(() => {
+    const forget = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !svgRef.current?.contains(event.target)) pressLog.current = NO_PRESSES;
+    };
+    window.addEventListener('pointerdown', forget, true);
+    return () => window.removeEventListener('pointerdown', forget, true);
+  }, []);
   // Looking through a camera ends when the selection, the map or the mode moves away from it.
   useEffect(() => {
     setLookThrough(previous => previous && mode === '3d' && previous.mapId === current?.id && previous.id === view.selectedId ? previous : null);
   }, [view.selectedId, current?.id, mode]);
+  // A picked point belongs to one selection, on one map, while it can be edited.
+  useEffect(() => setActiveVertex(null), [view.selectedId, current?.id, mode, canEdit]);
+  // A name box whose node can no longer be renamed is closed, and what was typed in it is dropped.
+  useEffect(() => { if (renaming && !renamingNode) setRenaming(null); }, [renaming, renamingNode]);
 
   /** Cancels a gesture in progress and returns the drafts and maps without its preview. */
   function settle() {
@@ -309,7 +433,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function undo(redo = false) {
     if (!current || !canEdit || pointerRef.current || doc.isGestureActive()) return;
     if (redo) doc.redo(current.id); else doc.undo(current.id);
-    setPolygon([]);
+    setPolygon([]); setActiveVertex(null);        // after the step the index may name another point
   }
   async function saveMap() {
     if (!current || !draft || !canEdit) return;
@@ -405,10 +529,43 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (!geometry) { setError('가로와 세로 길이가 각각 10 이상이 되도록 서로 다른 점 3개 이상을 찍어 주세요.'); return; }
     const node = { ...newSpace('polygon', geometry), ...geometry };
     updateMap({ ...current, nodes: [...current.nodes, node] }); select(node.id); setPolygon([]); setTool('select'); setError('');
+    beginRename(node.id, true);
   }
   function openSpace(id: string) {
     const node = current?.nodes.find(item => item.id === id);
     if (node?.type === 'space' && node.childMapId && maps.some(map => map.id === node.childMapId)) navigate(node.childMapId);
+  }
+  /** Opens the name box. `created` true: the node was just drawn, so its name joins that undo step. */
+  function beginRename(id: string, created = false) {
+    if (!current || mode !== 'plan' || !canEdit || pointerRef.current || doc.isGestureActive()) return;
+    const value = mapDraft(doc.getState(), current.id)?.value;
+    const node = value?.nodes.find(item => item.id === id);
+    if (!value || !node || node.locked) return;
+    select(id);
+    setRenaming({ mapId: current.id, nodeId: id, created: created ? value : null });
+  }
+  // The three handlers of the name box go through useEvent: whenever the box calls them, they see the edit rights and the map of the latest render.
+  const commitName = useEvent((text: string, returnFocus: boolean) => {
+    const edit = renamingRef.current;
+    if (!edit) return;
+    setRenaming(null);
+    const draftNow = mapDraft(doc.getState(), edit.mapId);
+    if (draftNow && canEdit) {
+      const next = renameMapNode(draftNow.value, edit.nodeId, text);     // the same map back when the live draft has no such node, or has it locked
+      // The name of a node that was just drawn replaces the value of that drawing step, as long as nothing else was edited in between.
+      if (next !== draftNow.value) updateMap(next, edit.created && draftNow.value === edit.created ? { history: false } : undefined);
+    }
+    if (returnFocus) focusCanvas();
+  });
+  const cancelName = useEvent(() => { if (!renamingRef.current) return; setRenaming(null); focusCanvas(); });
+  /** Undo or redo asked for in a name box nothing was typed into: the box closes without a commit and the editor's own history runs. */
+  const passNameHistory = useEvent((redo: boolean) => { cancelName(); undo(redo); });
+  function renameSelected() {
+    // During a drag or a pan the view is left alone as well: the session holds the transform and the view of the press.
+    if (!selected || !canEdit || selected.locked || pointerRef.current || doc.isGestureActive()) return;
+    const revealed = revealPlanPoint(view, nodeNameAnchor(selected), 24);   // out of sight: only the view moves, as for a new camera
+    if (revealed !== view) updateView({ x: revealed.x, y: revealed.y });
+    beginRename(selected.id);
   }
   function pointFrom(event: { clientX: number; clientY: number }, matrix?: DOMMatrix): BackgroundPoint | null {
     const inverse = matrix ?? svgRef.current?.getScreenCTM()?.inverse();
@@ -416,13 +573,21 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse);
     return { x: point.x, y: point.y };
   }
-  function pointerDown(event: ReactPointerEvent<SVGElement>, node?: BackgroundNode, handle?: 'resize' | 'rotate') {
-    if (!current || disabled || pointerRef.current || doc.isGestureActive() || (event.button !== 0 && event.button !== 1)) return;
+  function pointerDown(event: ReactPointerEvent<SVGElement>, node?: BackgroundNode, handle?: PlanHandle) {
+    // A step to the next pile item that no click took ends with the next press on the canvas, taken or not. The release
+    // that ends a two-button press, or a long touch, is followed by no click, and the click of a press that is
+    // refused below (a save is running) must not take that step.
+    pendingCycle.current = null;
+    // A press the editor does not take empties the press log, like a press outside the canvas: it is no half of a double-click.
+    if (!current || disabled || pointerRef.current || doc.isGestureActive() || (event.button !== 0 && event.button !== 1)) { pressLog.current = NO_PRESSES; return; }
     const point = pointFrom(event), matrix = svgRef.current?.getScreenCTM()?.inverse();
-    if (!point || !matrix) return;
+    if (!point || !matrix) { pressLog.current = NO_PRESSES; return; }
     event.preventDefault(); event.stopPropagation();
     setSymbolPaletteOpen(false);
     svgRef.current?.focus();
+    // A press anywhere but on a point lets go of the picked point. A + is no point: while it is pulled the polygon
+    // has one more point, and the old index would name another dot.
+    if (typeof handle !== 'object' || handle.insert) setActiveVertex(null);
     // Taking the focus ends a number entry that was still open, and that may have edited the map just now:
     // everything below starts from the map as it is at this moment, not as it was drawn.
     const live = mapDraft(doc.getState(), current.id)?.value ?? current;
@@ -435,56 +600,63 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       if (picked) { target = picked; stack = ids; }
       else select(node?.id ?? null);
     }
+    // The pointerdown comes before any capture, so it reached the element that was really pressed: `node` is the topmost one there.
+    pressLog.current = [pressLog.current[1], { hitId: node?.id ?? null, targetId: handle ? null : target?.id ?? null, handle: !!handle }];
     if (canEdit && event.button === 0 && !handle && tool === 'polygon') {
       setPolygon(previous => {
+        // A space stores at most this many points; past it the outline could neither be saved nor trimmed.
+        if (previous.length >= POLYGON_POINT_LIMIT) return previous;
         const last = previous[previous.length - 1];
-        return last && Math.hypot(last.x - point.x, last.y - point.y) < 1 ? previous : [...previous, point];
+        // The same point again: within the drag threshold on screen, so the second press of a double-click adds none.
+        return last && Math.hypot(last.x - point.x, last.y - point.y) < MAP_EDIT_MARK.polygonDot * screenScale ? previous : [...previous, point];
       }); setError(''); return;
     }
     if (canEdit && event.button === 0 && !handle && tool === 'symbol') { placeSymbol(point, live); return; }
     let mode: PointerSession['mode'] = 'pan';
     if (canEdit && event.button === 0 && tool !== 'hand') {
       if (tool === 'rect' || tool === 'ellipse') { mode = 'draw'; target = newSpace(tool, point); }
-      else if (target) mode = target.locked ? 'click' : handle ?? 'move';
+      else if (target) mode = target.locked ? 'click' : typeof handle === 'object' ? 'vertex' : handle ?? 'move';
     } else if (node && tool !== 'hand' && event.button !== 1) mode = 'click';
     if (mode === 'click' && !stack) return;
     // One drag is one gesture of the shared document: previews until release, then at most one undo step.
     if (mode !== 'pan' && mode !== 'click' && !doc.beginGesture(current.id)) return;
-    pointerRef.current = { mode, pointerId: event.pointerId, mapId: current.id, initial: live, node: target, start: point, clientX: event.clientX, clientY: event.clientY, matrix, view: { ...view }, moved: false, stack };
+    const vertex = mode === 'vertex' && typeof handle === 'object' ? handle : null;
+    // A pressed point is the picked one, dragged or not. A + is no point yet: the one it makes is picked on release.
+    if (vertex && target && !vertex.insert) setActiveVertex({ mapId: current.id, nodeId: target.id, index: vertex.index });
+    pointerRef.current = { mode, pointerId: event.pointerId, mapId: current.id, initial: live, node: target, start: point, clientX: event.clientX, clientY: event.clientY, matrix, view: { ...view }, moved: false, stack, scale: screenScale, vertex, candidates: null };
+    if (event.altKey) altDrag.current = true;
     svgRef.current?.setPointerCapture(event.pointerId);
   }
   function pointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     const session = pointerRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
+    if (event.altKey) altDrag.current = true;
     const point = pointFrom(event, session.matrix); if (!point) return;
     if (!session.moved && Math.hypot(event.clientX - session.clientX, event.clientY - session.clientY) < 4) return;
     session.moved = true;
     const delta = { x: point.x - session.start.x, y: point.y - session.start.y };
     if (session.mode === 'pan') { updateView({ x: session.view.x - delta.x, y: session.view.y - delta.y }, session.mapId); return; }
     if (session.mode === 'click' || !canEdit || !session.node) return;
-    let next = session.initial;
-    if (session.mode === 'move') next = moveMapNode(next, session.node.id, delta);
-    if (session.mode === 'draw' && session.node.type === 'space') {
-      const space = { ...session.node, x: Math.min(point.x, session.start.x), y: Math.min(point.y, session.start.y), width: Math.max(10, Math.abs(delta.x)), height: Math.max(10, Math.abs(delta.y)) };
-      next = { ...next, nodes: [...next.nodes, space] };
-    }
-    if (session.mode === 'resize' && session.node.type !== 'camera') {
-      const resized = resizeSpace(session.node, point);
-      next = resized.type === 'space' ? transformMapSpace(next, resized) : { ...next, nodes: next.nodes.map(item => item.id === resized.id ? resized : item) };
-    }
-    if (session.mode === 'rotate') {
-      // Only the horizontal direction changes: height, tilt and frame of a camera stay as they are.
-      const node = session.node;
-      const center = node.type !== 'camera' ? { x: node.x + node.width / 2, y: node.y + node.height / 2 } : node;
-      const degrees = node.type === 'camera' ? normalizeAngle(angle(point, center)) : normalizeAngle(node.rotation + angle(point, center) - angle(session.start, center));
-      next = node.type === 'space' ? transformMapSpace(next, { ...node, rotation: degrees }) : { ...next, nodes: next.nodes.map(item => item.id === node.id ? node.type === 'camera' ? { ...node, angle: degrees } : { ...node, rotation: degrees } : item) };
-    }
-    doc.previewGesture(next);
+    const gesture = planGestureOf(session);
+    // Alt is read at every move: held it frees the drag, released the drag sticks again. The distances are
+    // screen pixels at the zoom of the press.
+    const snap = snapEnabled && !event.altKey
+      ? { candidates: session.candidates ??= planGestureCandidates(gesture, session.initial),
+          tolerance: MAP_SNAP.tolerancePx * session.scale, reach: MAP_SNAP.reachPx * session.scale }
+      : null;
+    const preview = previewPlanGesture(gesture, session.initial, session.start, point, snap);
+    if (!preview) { showGuides(NO_GUIDES); return; }
+    doc.previewGesture(preview.map); showGuides(preview.guides);
   }
   /** Also ends a drag as cancelled: pointercancel, or the canvas itself losing the pointer capture. */
   function pointerUp(event: ReactPointerEvent<SVGSVGElement>, cancel = false) {
     const session = pointerRef.current; if (!session || session.pointerId !== event.pointerId) return;
+    showGuides(NO_GUIDES);
     pointerRef.current = null;
+    // What the last Delete said about a point is over once the points are worked on again. Cleared here, not on
+    // the press: the message sits above the canvas, and removing it mid-drag would resize the canvas under a
+    // drag that still converts positions with the transform taken at the press.
+    if (session.mode === 'vertex') setError('');
     if (svgRef.current?.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
     if (session.moved) lastDrag.current = Date.now();
     if (session.mode === 'pan') return;
@@ -493,32 +665,89 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       else {
         doc.finishGesture();
         if (session.node) select(session.node.id, session.mapId);
-        if (session.mode === 'draw') setTool('select');
+        if (session.mode === 'draw') { setTool('select'); if (session.node) beginRename(session.node.id, true); }
+        // A + that was pulled out: its point is the picked one, but only when the polygon really gained a point.
+        // A drag whose every position was refused changes nothing, and `index + 1` would then be the point that
+        // was beside the + all along: the next Delete would remove a point nobody picked.
+        if (session.mode === 'vertex' && session.vertex?.insert && session.node) {
+          const points = (map: BackgroundMap | undefined) => {
+            const item = map?.nodes.find(candidate => candidate.id === session.node!.id);
+            return item?.type === 'space' ? item.points.length : -1;
+          };
+          const added = points(mapDraft(doc.getState(), session.mapId)?.value) === points(session.initial) + 1;
+          setActiveVertex(added ? { mapId: session.mapId, nodeId: session.node.id, index: session.vertex.index + 1 } : null);
+        }
       }
     }
+    // A press on a pile that did not move asks for the next item. The click that follows takes the step:
+    // only a click knows whether it is the second one of a double-click.
     if (!cancel && !session.moved && session.stack && session.node) {
       const ids = session.stack;
-      select(ids[(ids.indexOf(session.node.id) + 1) % ids.length], session.mapId);
+      pendingCycle.current = { ids, nodeId: session.node.id, mapId: session.mapId };
     }
+  }
+  /**
+   * Double-clicks reach the canvas only: a press that captured the pointer sends its click and dblclick to the SVG,
+   * never to the node. What was pressed is read from the press log.
+   */
+  function canvasDoubleClick(event: ReactMouseEvent<SVGSVGElement>) {
+    const [first, last] = pressLog.current;
+    if (!current || !last || last.handle || Date.now() - lastDrag.current <= 450) return;
+    if (last.hitId === null) { if (tool === 'polygon') finishPolygon(); return; }        // empty canvas: the first press is not looked at
+    if (!first || first.hitId !== last.hitId) return;                                    // the first press was off the canvas, or on another node
+    const node = current.nodes.find(item => item.id === last.hitId), point = pointFrom(event);
+    if (!node) return;
+    const pile = node.type === 'space' || !point ? [node.id] : planStackUnder(current, node.id, undefined, item => onPlanMark(item, point));
+    const target = current.nodes.find(item => item.id === doubleClickNodeId(first.targetId, node.id, pile)) ?? node;
+    if (target.type === 'space' && target.childMapId && maps.some(map => map.id === target.childMapId)) {
+      if (tool === 'select' || tool === 'hand') openSpace(target.id);                    // a space with a detail map opens it, before any renaming
+      return;
+    }
+    if (tool === 'select') beginRename(target.id);                                       // edit rights and the lock are checked there
   }
   function zoomBy(factor: number) {
     if (pointerRef.current) return;
     const zoomed = zoomMapViewport(view, factor);
     updateView({ zoom: zoomed.zoom, x: zoomed.x, y: zoomed.y });
   }
+  /** Shows everything that is drawn on the map. */
+  function fitView() {
+    if (!current || pointerRef.current) return;
+    updateView(fitMapViewport(current));
+  }
   function keyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
       // A gesture in progress is cancelled first; the tool is left as it is.
       if (event.nativeEvent === handledEscape.current) return;
       if (doc.isGestureActive()) { abortGesture(); return; }
-      setPolygon([]); setTool('select'); setSymbolPaletteOpen(false);
+      setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setActiveVertex(null);
     }
     const target = event.target as HTMLElement;
+    // Plan shortcuts. They come before the guard below, so they also work while a button has the focus.
+    // Ctrl and Meta combinations are left to the app-wide zoom.
+    if (mode === 'plan' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.nativeEvent.isComposing && !target.closest(textEntry)) {
+      if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomBy(1.25); return; }
+      if (event.key === '-') { event.preventDefault(); zoomBy(0.8); return; }
+      if (event.key === '0') { event.preventDefault(); fitView(); return; }
+      if (event.key === 'F2' && selected) { event.preventDefault(); renameSelected(); return; }
+    }
     if (target.closest(interactive)) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd' && selected?.type === 'symbol' && canEdit) { event.preventDefault(); duplicateSymbol(); }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(event.shiftKey); }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); undo(true); }
-    if (event.key === 'Delete' && selected && canEdit && !selected.locked && !pointerRef.current && !doc.isGestureActive()) { event.preventDefault(); setConfirmation('delete-node'); }
+    // Delete with a picked point on show removes that point, never the node. `activeIndex` is null whenever the
+    // point handles are not drawn, and then the key goes on to the line below as before.
+    if (event.key === 'Delete' && activeIndex !== null && current && selected?.type === 'space' && canEdit && !target.closest('dialog')) {
+      event.preventDefault();
+      if (pointerRef.current || doc.isGestureActive()) return;
+      const shaped = removePolygonVertex(selected, activeIndex);
+      if (shaped) { updateMap(replaceMapNode(current, shaped)); setActiveVertex(null); setError(''); }
+      else setError(selected.points.length <= 3 ? '다각형에는 꼭짓점이 3개 이상 필요해요. 이 점은 지울 수 없어요.' : '이 점을 지우면 공간이 너무 작아져요.');
+      return;
+    }
+    // Not on the repeats of a held key: the first one may have removed a picked point just now, and the rest
+    // would go on to ask about the whole node.
+    if (event.key === 'Delete' && !event.repeat && selected && canEdit && !selected.locked && !pointerRef.current && !doc.isGestureActive()) { event.preventDefault(); setConfirmation('delete-node'); }
   }
 
   // Stable callbacks: the 3D viewport, the companion plan and the image grid must not re-subscribe on every preview.
@@ -561,7 +790,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     : [{ id: 'select', label: '선택', title: editing ? '선택: 클릭해 고르고 손잡이로 옮기기' : '선택: 클릭해 고르기', icon: '↖', named: true },
       { id: 'hand', label: '둘러보기', title: '둘러보기: 끌어서 돌려 보기만 하고 배치는 그대로 둬요', icon: <Orbit size={17} strokeWidth={1.8} aria-hidden="true" />, named: true }];
   const footerHint = tool === 'symbol' ? `${getSymbolPreset(symbolKind).label} 놓을 ${mode === 'plan' ? '곳' : '바닥'}을 클릭 · Esc 취소`
-    : mode === 'plan' ? (tool === 'polygon' ? '점을 차례로 찍고 다각형 완성 · Esc 취소' : editing ? '선택 후 드래그 · 모서리로 크기 조절 · 위쪽 원으로 회전' : '클릭해서 선택 · 공간 더블클릭으로 상세 도면 열기')
+    : mode === 'plan' ? (tool === 'polygon' ? '점을 차례로 찍고 다각형 완성 · Esc 취소'
+      : vertexHandles ? '점을 끌어 모양 고치기 · +를 끌어 점 추가 · 점 고르고 Delete'
+        // A polygon picked for editing whose point handles are hidden: it is too small on screen for them.
+        : canEdit && tool === 'select' && selected?.type === 'space' && selected.shape === 'polygon' && !selected.locked ? '확대하면 점을 고칠 수 있어요 · 휠로 확대'
+          : editing ? '끌어 옮기기 · 모서리로 크기 · 원으로 회전 · 더블클릭 이름 · 휠 확대' : '클릭해서 선택 · 공간 더블클릭으로 상세 도면 열기 · 휠로 확대')
       : tool === 'hand' ? '끌어서 둘러보기 · 휠로 확대 · 배치는 움직이지 않아요'
         : editing ? `클릭해 선택 · ${GIZMO_MODES.find(item => item.id === gizmoMode)!.hint} · 오른쪽 버튼으로 끌어 둘러보기 · 휠로 확대 · 공간 그리기는 평면에서`
           : '클릭해 선택 · 오른쪽 버튼으로 끌어 둘러보기 · 휠로 확대 · 공간 더블클릭으로 상세 도면 열기';
@@ -590,7 +823,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               <button type="button" className={mode === '3d' ? 'is-active' : ''} aria-pressed={mode === '3d'} title="돌려 볼 수 있는 입체 도면" onClick={() => switchMode('3d')}>3D</button>
             </div>
             <span className="bmap-divider" />
-            {toolItems.map(item => <button type="button" key={item.id} className={`${tool === item.id ? 'is-active' : ''}${item.named ? ' bmap-toolbar-named' : ''}`} title={item.title} aria-label={item.label} aria-pressed={tool === item.id} disabled={disabled} onClick={() => { setTool(item.id); setPolygon([]); setSymbolPaletteOpen(false); }}>{typeof item.icon === 'string' ? <span aria-hidden="true">{item.icon}</span> : item.icon}<span>{item.label}</span></button>)}
+            {toolItems.map(item => <button type="button" key={item.id} className={`${tool === item.id ? 'is-active' : ''}${item.named ? ' bmap-toolbar-named' : ''}`} title={item.title} aria-label={item.label} aria-pressed={tool === item.id} disabled={disabled} onClick={() => { setTool(item.id); setPolygon([]); setSymbolPaletteOpen(false); setActiveVertex(null); }}>{typeof item.icon === 'string' ? <span aria-hidden="true">{item.icon}</span> : item.icon}<span>{item.label}</span></button>)}
             {mode === '3d' && editing && <><span className="bmap-divider" /><div className="bmap-gizmo-modes" role="group" aria-label="선택한 배치를 조절하는 방식">
               {GIZMO_MODES.map(item => <button type="button" key={item.id} className={gizmoMode === item.id && tool === 'select' ? 'is-active' : ''} title={`${item.label}: ${item.hint}`} aria-label={item.label} aria-pressed={gizmoMode === item.id && tool === 'select'} disabled={disabled} onClick={() => { setGizmoMode(item.id); setTool('select'); setSymbolPaletteOpen(false); }}><item.Icon size={17} strokeWidth={1.8} aria-hidden="true" /><span>{item.label}</span></button>)}
             </div></>}
@@ -605,11 +838,15 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             </div>}
             {editing && <><span className="bmap-divider" /><button type="button" title="되돌리기 (Ctrl+Z)" aria-label="되돌리기" disabled={!draft?.past.length || disabled || gestureActive} onClick={() => undo()}>↶</button><button type="button" title="다시 실행 (Ctrl+Shift+Z)" aria-label="다시 실행" disabled={!draft?.future.length || disabled || gestureActive} onClick={() => undo(true)}>↷</button></>}
           </div>
-          {mode === 'plan' ? <svg ref={svgRef} className={`bmap-canvas tool-${tool}`} style={{ '--bmap-label-scale': labelScale } as CSSProperties} viewBox={`${view.x} ${view.y} ${1000 / view.zoom} ${680 / view.zoom}`} aria-label={`${current.name} 도면`} tabIndex={0} onPointerDown={event => pointerDown(event)} onPointerMove={pointerMove} onPointerUp={event => pointerUp(event)} onPointerCancel={event => pointerUp(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) pointerUp(event, true); }} onDoubleClick={() => { if (tool === 'polygon' && Date.now() - lastDrag.current > 450) finishPolygon(); }}>
+          {mode === 'plan' ? <svg ref={svgRef} className={`bmap-canvas tool-${tool}`} style={{ '--bmap-label-scale': labelScale } as CSSProperties} viewBox={`${view.x} ${view.y} ${1000 / view.zoom} ${680 / view.zoom}`} aria-label={`${current.name} 도면`} tabIndex={0} onPointerDown={event => pointerDown(event)} onPointerMove={pointerMove} onPointerUp={event => pointerUp(event)} onPointerCancel={event => pointerUp(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) pointerUp(event, true); }} onClick={event => {
+            const cycle = pendingCycle.current; pendingCycle.current = null;
+            if (!cycle || (event.detail >= 2 && canEdit)) return;        // while editing, a repeated click is a double-click, not another step
+            select(cycle.ids[(cycle.ids.indexOf(cycle.nodeId) + 1) % cycle.ids.length], cycle.mapId);
+          }} onDoubleClick={canvasDoubleClick}>
             {current.imageUrl && <image href={current.imageUrl} x="0" y="0" width="1000" height="680" preserveAspectRatio="xMidYMid meet" opacity="0.65" pointerEvents="none" />}
             {current.nodes.filter((node): node is BackgroundSpace => node.type === 'space').map(node => {
               const isSelected = node.id === selected?.id;
-              return <g key={node.id} className={`bmap-space ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => { event.stopPropagation(); if (Date.now() - lastDrag.current > 450 && (tool === 'select' || tool === 'hand')) openSpace(node.id); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-space ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                 {node.shape === 'ellipse' ? <ellipse cx={node.width / 2} cy={node.height / 2} rx={node.width / 2} ry={node.height / 2} /> : node.shape === 'polygon' ? <polygon points={node.points.map(point => `${point.x * node.width},${point.y * node.height}`).join(' ')} /> : <rect width={node.width} height={node.height} rx="4" />}
                 <text x={node.width / 2} y={node.height / 2} textAnchor="middle" dominantBaseline="central" pointerEvents="none">{node.locked ? '🔒 ' : ''}{node.name}</text>
                 {node.childMapId && <text className="bmap-space-detail" x={node.width / 2} y={node.height / 2 + 21} textAnchor="middle" pointerEvents="none">상세 도면 ↗</text>}
@@ -620,7 +857,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               return <Fragment key={node.id}>
                 {/* A tilted object casts the outline of its whole box; its own plan size is untouched. */}
                 {(tilt.pitch !== 0 || tilt.roll !== 0) && <polygon className={`bmap-symbol-tilt ${isSelected ? 'is-selected' : ''}`} points={nodePlanOutline(node).map(point => `${point.x},${point.y}`).join(' ')} pointerEvents="none" />}
-                <g className={`bmap-symbol ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}, 기호`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
+                <g className={`bmap-symbol ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}, 기호`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                   <title>{`${node.name}${node.locked ? ' · 잠김' : ''}`}</title>
                   <rect className="bmap-symbol-hit" width={node.width} height={node.height} rx="3" />
                   <g transform={`scale(${node.width / 100} ${node.height / 100})`}><BackgroundSymbolGlyph symbol={node.symbol} hinge={node.hinge} swing={node.swing} /></g>
@@ -634,7 +871,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               const plan = projectCameraToPlan(node), reach = Math.hypot(plan.direction.x, plan.direction.y);
               const half = node.fov / 2 * Math.PI / 180, radius = 80 * reach;
               const tilt = Math.abs(plan.pitch) >= 0.5 ? cameraPitchLabel(plan.pitch) : '';
-              return <g key={node.id} className={`bmap-camera ${node.id === selected?.id ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-camera ${node.id === selected?.id ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
                 {plan.vertical ? <>
                   <circle className="bmap-camera-ring" r="17" /><circle r="11" />
                   {plan.vertical === 'up' ? <circle className="bmap-camera-mark" r="3.5" /> : <path className="bmap-camera-mark" d="M -4.5 -4.5 L 4.5 4.5 M 4.5 -4.5 L -4.5 4.5" />}
@@ -642,21 +879,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                 <text x="0" y={plan.vertical ? 35 : 29} textAnchor="middle" pointerEvents="none">{node.locked ? '🔒 ' : ''}{node.name}{tilt ? ` · ${tilt}` : ''}</text>
               </g>;
             })}
-            {!!polygon.length && <g className="bmap-polygon-preview" pointerEvents="none"><polyline points={polygon.map(point => `${point.x},${point.y}`).join(' ')} />{polygon.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={4 / view.zoom} />)}</g>}
+            {!!polygon.length && <g className="bmap-polygon-preview" pointerEvents="none"><polyline points={polygon.map(point => `${point.x},${point.y}`).join(' ')} />{polygon.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={MAP_EDIT_MARK.polygonDot * screenScale} />)}</g>}
+            <MapSnapGuides guides={guides} scale={screenScale} />
             {/* Handles are drawn last, so an item picked from under others can still be turned and resized. */}
-            {selected && canEdit && !selected.locked && (selected.type === 'camera' ? (() => {
-              const plan = projectCameraToPlan(selected), reach = 80 * Math.hypot(plan.direction.x, plan.direction.y);
-              // The handle stays on the stored direction, also when the camera looks straight up or down.
-              return <g className="bmap-handles" transform={`translate(${selected.x} ${selected.y}) rotate(${selected.angle})`}>
-                {reach < 72 && <line className="bmap-camera-guide" x1={Math.max(plan.vertical ? 18 : 12, reach)} y1="0" x2="73" y2="0" />}
-                <circle className="bmap-camera-direction" cx="80" cy="0" r="7" onPointerDown={event => pointerDown(event, selected, 'rotate')} />
-              </g>;
-            })() : (() => {
-              const lift = selected.type === 'space' ? 28 : 25;
-              return <g className="bmap-handles" transform={`translate(${selected.x} ${selected.y}) rotate(${selected.rotation} ${selected.width / 2} ${selected.height / 2})`}>
-                <line x1={selected.width / 2} x2={selected.width / 2} y1="0" y2={-lift} /><circle className="bmap-rotate-handle" cx={selected.width / 2} cy={-lift} r="7" onPointerDown={event => pointerDown(event, selected, 'rotate')} /><rect className="bmap-resize-handle" x={selected.width - 6} y={selected.height - 6} width="12" height="12" onPointerDown={event => pointerDown(event, selected, 'resize')} />
-              </g>;
-            })())}
+            {selected && canEdit && !selected.locked && <MapNodeHandles node={selected} scale={screenScale} vertexHandles={!!vertexHandles} onHandleDown={(event, handle) => pointerDown(event, selected, handle)} />}
+            {/* The point handles come over the turn and resize handles: the + of each edge first, the points on top. */}
+            {vertexHandles && selected?.type === 'space' && <MapVertexHandles handles={vertexHandles} scale={screenScale} activeIndex={activeIndex} onHandleDown={(event, handle) => pointerDown(event, selected, handle)} />}
           </svg> : <div className="bmap-3d-split">
             <div className="bmap-3d-main" ref={stageRef} tabIndex={-1} onPointerDownCapture={event => {
               setSymbolPaletteOpen(false);
@@ -674,8 +902,13 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             </div>
             <BackgroundMapPlanPreview map={current} selectedId={view.selectedId} onSelect={selectNode} />
           </div>}
+          {/* An HTML input beside the SVG, placed over its node. Keyed by the node, so each opening starts with that node's name. */}
+          {renamingNode && <BackgroundMapNameBox key={renamingNode.id} svgRef={svgRef} anchor={nodeNameAnchor(renamingNode)}
+            drop={renamingNode.type === 'camera' ? MAP_EDIT_MARK.nameBoxCameraDrop : 0} label={`${kindLabel(renamingNode)} 이름`}
+            initial={renamingNode.name} positionKey={`${view.x}:${view.y}:${view.zoom}:${canvasSize.width}:${canvasSize.height}`}
+            onCommit={commitName} onCancel={cancelName} onHistory={passNameHistory} />}
           {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : '도면 편집에서 공간·문·사물·카메라를 배치할 수 있습니다.'}</span></div>}
-          <div className="bmap-canvas-footer"><span>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom"><button type="button" aria-label="도면 축소" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="확대와 위치 초기화" onClick={() => updateView({ x: 0, y: 0, zoom: 1 })}>맞춤</button></div>}</div>
+          <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' ? footerHint : undefined}>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
         <aside className="bmap-inspector" id="bmap-selection-properties" aria-label="선택 속성" hidden={!inspectorOpen}>
@@ -684,11 +917,20 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             {editing ? <Field label="이름"><input value={selected.name} disabled={fieldLocked} onChange={event => patchNode({ name: event.target.value }, 'name')} onBlur={doc.endCoalescing} /></Field> : <h3 className="bmap-selected-name">{selected.name}</h3>}
             {selected.type === 'space' && <section className="bmap-connection" aria-label="공간의 상세 도면">
               <span className="bmap-eyebrow">이 공간 안으로</span>
-              {linkedMap ? <><strong>{linkedMap.name}</strong><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => navigate(linkedMap.id)}>상세 도면 열기 →</button><p>공간을 더블클릭해도 열립니다.</p></> : <><p>이 공간의 내부를 별도 도면으로 이어보세요.</p>{snapshot.canManage && <button type="button" className="bg-button bg-primary" disabled={disabled || selected.locked || !!polygon.length} onClick={() => openCreate(current.id, selected)}>내부 도면 만들기</button>}</>}
+              {linkedMap ? <><strong>{linkedMap.name}</strong><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => navigate(linkedMap.id)}>상세 도면 열기 →</button><p>{editing && mode === 'plan' ? '공간을 더블클릭해도 열립니다. 이름은 F2 키나 위의 이름 칸에서 바꿔요.' : '공간을 더블클릭해도 열립니다.'}</p></> : <><p>이 공간의 내부를 별도 도면으로 이어보세요.</p>{snapshot.canManage && <button type="button" className="bg-button bg-primary" disabled={disabled || selected.locked || !!polygon.length} onClick={() => openCreate(current.id, selected)}>내부 도면 만들기</button>}</>}
               {snapshot.canManage && <div className="bmap-link-actions"><button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => { setError(''); setLinkForm({ spaceId: selected.id, mapId: selected.childMapId ?? '', search: '' }); }}>{linkedMap ? '연결 변경' : '기존 도면 연결'}</button>{linkedMap && <button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => void linkMap(null, selected.id)}>연결 해제</button>}</div>}
               {selected.locked && <p>잠금을 해제하면 연결을 바꿀 수 있습니다.</p>}
               {draftChanged && <p className="bmap-save-note">연결할 때 현재 공간 편집 내용도 함께 저장됩니다.</p>}
             </section>}
+            {/* Out in the open, not in the folded 'position, size, lock' section, where it would not be found. An ellipse gets nothing.
+                On the plan only, where the points it speaks of can be worked on: the 3D view stays as it was. */}
+            {editing && mode === 'plan' && selected.type === 'space' && <div className="bmap-shape-actions">
+              {/* The button goes away with its own click. The focus goes to the canvas, or the keys (undo is the only way back) would reach nothing. */}
+              {selected.shape === 'rect' && <><button type="button" className="bmap-text-button" disabled={fieldLocked || gestureActive}
+                onClick={() => { const shaped = rectToPolygon(selected); if (shaped) { updateMap(replaceMapNode(current, shaped)); focusCanvas(); } }}>다각형으로 바꾸기</button>
+                <p className="bmap-hint">꼭짓점을 끌어 ㄱ자 같은 모양으로 고칠 수 있어요.</p></>}
+              {selected.shape === 'polygon' && <p className="bmap-hint">점을 끌어 모양을 고쳐요. 변 가운데의 +를 끌면 점이 생기고, 점을 고른 뒤 Delete를 누르면 지워져요.</p>}
+            </div>}
             {selected.type === 'camera' && (() => {
               const angles = cameraAngles(selected), aspect = cameraAspect(selected), preset = ASPECT_PRESETS.find(item => Math.abs(item.value - aspect) < 0.005);
               return <>

@@ -71,15 +71,35 @@
 .bmap-camera text { font-size:calc(12px * var(--bmap-label-scale,1)); fill:rgb(var(--color-text-primary)); paint-order:stroke; stroke:rgb(var(--color-bg-primary)); stroke-width:4; stroke-linejoin:round; transform:translateY(calc(10px * (var(--bmap-label-scale,1) - 1))); }
 .bmap-polygon-preview polyline { fill:rgb(var(--color-accent) / .08); stroke:rgb(var(--color-accent-sub)); stroke-width:1.5; stroke-dasharray:5 4; vector-effect:non-scaling-stroke; }
 .bmap-polygon-preview circle { fill:rgb(var(--color-accent-sub)); }
+/* Shown only while a drag is stuck to something. */
+.bmap-snap-guides line { stroke:#ff7aa8; stroke-width:1; vector-effect:non-scaling-stroke; pointer-events:none; }
+[data-color-mode="light"] .bmap-snap-guides line { stroke:#d6336c; }
+/* Point handles of the selected polygon. The first circle of a handle is the wider area that takes the press and shows nothing; the second is the dot. */
+.bmap-vertex-handle { cursor:move; }
+.bmap-vertex-add { cursor:copy; }
+.bmap-vertex-handle circle,.bmap-vertex-add circle { fill:transparent; }
+.bmap-vertex-handle circle+circle,.bmap-vertex-add circle+circle { fill:rgb(var(--color-bg-card)); stroke:rgb(var(--color-accent-sub)); stroke-width:2; vector-effect:non-scaling-stroke; }
+.bmap-vertex-handle.is-active circle+circle { fill:rgb(var(--color-accent-sub)); }
+.bmap-vertex-add circle+circle { stroke-width:1; stroke-dasharray:2 2; }
+.bmap-vertex-add path { fill:none; stroke:rgb(var(--color-accent-sub)); stroke-width:1.5; vector-effect:non-scaling-stroke; }
 .bmap-canvas-empty { position:absolute; inset:90px 20px 75px; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; gap:8px; color:rgb(var(--color-text-secondary)); text-align:center; }
 .bmap-canvas-empty strong { font-size:15px; font-weight:500; }
 .bmap-canvas-empty span { font-size:11px; }
 .bmap-canvas-footer { min-height:42px; border-top:1px solid rgb(var(--color-bg-border)); display:flex; align-items:center; justify-content:space-between; padding:6px 12px; gap:10px; background:rgb(var(--color-bg-card) / .4); font-size:10px; color:rgb(var(--color-text-secondary)); }
+/* Two lines high on the plan whatever the hint says: a hint that changes with the selection must not resize the canvas between the two clicks of a double-click. */
+.bmap-canvas-wrap:not(.is-3d) .bmap-footer-hint { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; line-height:15px; }
 .bmap-zoom { display:flex; align-items:center; gap:5px; flex-shrink:0; }
 .bg-library .bmap-zoom button { padding:3px 6px; min-height:26px; border:0; border-radius:4px; font-size:12px; background:transparent; }
 .bmap-zoom button:hover { background:rgb(var(--color-bg-border)); }
 .bmap-zoom span { min-width:37px; text-align:center; }
+.bmap-snap-toggle { margin-right:6px; }
+/* On looks like an active toolbar button. The selector has to outweigh the shared zoom button rule above, which sets a transparent background. */
+.bg-library .bmap-zoom .bmap-snap-toggle[aria-pressed="true"] { color:rgb(var(--color-accent-sub)); background:rgb(var(--color-accent) / .18); }
 .bmap-polygon-actions { position:absolute; display:flex; align-items:center; gap:8px; bottom:56px; left:50%; transform:translateX(-50%); padding:8px; background:rgb(var(--color-bg-card)); border:1px solid rgb(var(--color-bg-border)); border-radius:8px; font-size:11px; }
+/* The name box floats over its node; left and top are set from script. The selector has to outweigh the shared input rule of the library (full width, 36px high). */
+.bg-library input.bmap-name-box:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { position:absolute; z-index:3; width:168px; min-height:30px; padding:4px 8px; transform:translate(-50%,-50%); text-align:center; font-size:13px; border-color:rgb(var(--color-accent)); background:rgb(var(--color-bg-card)); box-shadow:0 3px 12px rgb(var(--color-shadow) / .12); }
+/* The name drawn on the plan gives way to the box that edits it. */
+.is-renaming text { visibility:hidden; }
 .bmap-inspector { flex:0 0 248px; padding:18px 16px; border-left:1px solid rgb(var(--color-bg-border)); overflow-y:auto; background:rgb(var(--color-bg-card) / .4); font-size:12px; }
 .bmap-inspector .bg-field { margin-bottom:12px; }
 .bmap-inspector input:not([type=checkbox]),.bmap-inspector select { width:100%; min-width:0; padding:7px 8px; border:1px solid rgb(var(--color-bg-border)); border-radius:5px; background:rgb(var(--color-bg-primary)); color:rgb(var(--color-text-primary)); font-size:12px; }
@@ -134,6 +154,7 @@
 .bmap-link-actions { display:flex; justify-content:space-between; gap:4px; }
 .bg-library .bmap-text-button { border:0; background:transparent; min-height:36px; padding:5px 0; color:rgb(var(--color-text-secondary)); font-size:12px; }
 .bg-library .bmap-text-button:hover { color:rgb(var(--color-accent-sub)); background:transparent; }
+.bmap-shape-actions { margin:10px 0 4px; }
 .bmap-disclosure { margin:12px 0; border-top:1px solid rgb(var(--color-bg-border) / .65); }
 .bmap-disclosure>summary { cursor:pointer; padding:14px 0; color:rgb(var(--color-text-secondary)); font-size:12px; }
 .bmap-disclosure>summary>span { float:right; max-width:95px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:10px; opacity:.8; }

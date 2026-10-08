@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { polygonSpace, resizeSpace, moveMapNode, removeMapNode, containsPoint, transformMapSpace } from '../src/features/backgrounds/mapGeometry.ts';
-import type { BackgroundCamera, BackgroundMap, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
+import type { BackgroundCamera, BackgroundMap, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 import { addMapCamera, applyNodeWorldPose, stackedMapNodeIds } from '../src/features/backgrounds/mapGeometry.ts';
-import { cameraOrientation, nodeOrientation, nodeWorldPose } from '../src/features/backgrounds/mapSpatial.ts';
+import { nodeLocalPoint, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpaceTo } from '../src/features/backgrounds/mapGeometry.ts';
+import { nodeNameAnchor, renameMapNode } from '../src/features/backgrounds/mapGeometry.ts';
+import { insertPolygonVertex, movePolygonVertex, polygonFromWorldPoints, rectToPolygon, removePolygonVertex } from '../src/features/backgrounds/mapGeometry.ts';
+import { cameraOrientation, nodeOrientation, nodePlanOutline, nodeWorldPose } from '../src/features/backgrounds/mapSpatial.ts';
+import { validateBackgroundEntity } from '../src/features/backgrounds/domain.ts';
 
 const space: BackgroundSpace = { id: 'space', type: 'space', name: '교실', placeId: null, childMapId: null, x: 100, y: 100, width: 100, height: 60, rotation: 90, shape: 'rect', points: [], locked: false };
 const map: BackgroundMap = { id: 'map', revision: 1, name: '학교', parentId: null, placeId: null, imageUrl: '', nodes: [space, { id: 'camera', type: 'camera', name: '전경', x: 130, y: 130, spaceId: 'space', angle: 0, fov: 60, viewIds: ['view'], locked: false }] };
@@ -539,4 +543,355 @@ test('a 3D edit of a space stops its carried members at the saved limit', () => 
   const lifted = applyNodeWorldPose(outside, room.id, { position: { ...nodeWorldPose(outsideRoom).position, y: 30 }, quaternion: upright, scale: one });
   assert.deepEqual(lifted, transformMapSpace(outside, { ...outsideRoom, elevation: 30 }));
   assert.deepEqual(lifted.nodes[1], { ...outside.nodes[1], elevation: 180 }); assert.equal(lifted.nodes[4], lockedLens);
+});
+
+// --- Resize helpers, exact placement and node replacement --------------------------------------
+const tight = (actual: number, expected: number, label = '') =>
+  assert.ok(Math.abs(actual - expected) < 1e-9, `${label} ${actual} != ${expected}`);
+const plainRoom: BackgroundSpace = { ...space, id: 'room', x: 100, y: 100, width: 60, height: 40, rotation: 0 };
+/** Stored with decimals, as drawn rooms are. */
+const oddRoom: BackgroundSpace = { ...space, id: 'odd', x: 244.65, y: 120.3, width: 144.65, height: 80, rotation: 0 };
+
+test('a pointer resize is the pointer read in the node frame, then a resize to that local size', () => {
+  const pointers = [{ x: 100, y: 230 }, { x: 331.7, y: 208.4 }, { x: 500, y: -100 }, { x: 200000, y: 200000 }];
+  for (const rotation of [0, 90, 37]) for (const node of [{ ...oddRoom, rotation }, { ...symbol, rotation }]) for (const pointer of pointers) {
+    const local = nodeLocalPoint(node, pointer);
+    assert.deepEqual(resizeSpaceTo(node, local.x, local.y), resizeSpace(node, pointer), `${node.type} at ${rotation}`);
+  }
+  // The frame starts at the turned top-left corner and runs along the node's own sides.
+  const local = nodeLocalPoint(space, { x: 100, y: 230 });
+  tight(local.x, 150, 'local x'); tight(local.y, 80, 'local y');
+  const grown = resizeSpaceTo(space, 150, 80);
+  assert.equal(grown.width, 150); assert.equal(grown.height, 80); tight(grown.x, 65, 'x'); tight(grown.y, 115, 'y');
+  // A half and a three-quarter turn are turned as well: the frame flips, and a new size moves the stored position.
+  for (const [rotation, pointer, size, x, y] of [[180, { x: 75, y: 90 }, { x: 85, y: 50 }, 75, 90], [270, { x: 170, y: 65 }, { x: 85, y: 60 }, 97.5, 77.5]] as const) {
+    const node = { ...plainRoom, rotation }, read = nodeLocalPoint(node, pointer), sized = resizeSpaceTo(node, size.x, size.y);
+    tight(read.x, size.x, `local x at ${rotation}`); tight(read.y, size.y, `local y at ${rotation}`);
+    assert.equal(sized.width, size.x); assert.equal(sized.height, size.y); tight(sized.x, x, `x at ${rotation}`); tight(sized.y, y, `y at ${rotation}`);
+  }
+  assert.deepEqual(nodeLocalPoint(oddRoom, { x: 300.4, y: 177.7 }), { x: 300.4 - 244.65, y: 177.7 - 120.3 });
+  // Lengths stay within the saved limits, turned or not.
+  for (const rotation of [0, 37]) {
+    const clamped = resizeSpaceTo({ ...oddRoom, rotation }, 5, 200000);
+    assert.equal(clamped.width, 10); assert.equal(clamped.height, 100000);
+  }
+});
+
+test('resizing an unturned node keeps its stored position digit for digit', () => {
+  // Going through the centre and back loses the last digit: (244.65 + 30) - 30 is 244.64999999999998.
+  for (const [width, height] of [[30, 50], [60, 40], [55.35, 79.7], [144.65, 80], [5, 200000], [0.1 + 0.2, 1 / 3]]) {
+    const resized = resizeSpaceTo(oddRoom, width, height);
+    assert.equal(resized.x, 244.65, `x at width ${width}`); assert.equal(resized.y, 120.3, `y at height ${height}`);
+  }
+  for (const pointer of [{ x: 300, y: 200 }, { x: 274.65, y: 170.3 }, { x: 500000, y: -5 }, { x: 244.65, y: 120.3 }]) {
+    const resized = resizeSpace({ ...oddRoom, width: 60, height: 40 }, pointer);
+    assert.equal(resized.x, 244.65, `x at ${pointer.x}`); assert.equal(resized.y, 120.3, `y at ${pointer.y}`);
+  }
+  assert.deepEqual(resizeSpaceTo(oddRoom, 30, 50), { ...oddRoom, width: 30, height: 50 });
+  // Symbols follow the same rule and keep their own fields.
+  const door: BackgroundSymbol = { ...symbol, x: 244.65, y: 120.3, rotation: 0 };
+  assert.deepEqual(resizeSpaceTo(door, 33.3, 12.5), { ...door, width: 33.3, height: 12.5 });
+  assert.deepEqual(resizeSpace(door, { x: 300, y: 200 }), { ...door, width: 300 - 244.65, height: 200 - 120.3 });
+});
+
+test('the resize corner is the bottom-right corner of the turned box', () => {
+  assert.deepEqual(nodeResizeCorner(oddRoom), { x: 244.65 + 144.65, y: 120.3 + 80 });
+  assert.deepEqual(nodeResizeCorner({ ...symbol, rotation: 0 }), { x: 150, y: 155 });
+  // Not through the centre either: 433.69 + 18.33 / 2 + 18.33 / 2 is 452.02000000000004.
+  assert.deepEqual(nodeResizeCorner({ ...plainRoom, x: 433.69, y: 433.69, width: 18.33, height: 18.33 }), { x: 433.69 + 18.33, y: 433.69 + 18.33 });
+  for (const [rotation, x, y] of [[90, 110, 150], [180, 100, 100], [270, 150, 90]]) {
+    const corner = nodeResizeCorner({ ...plainRoom, rotation });
+    tight(corner.x, x, `x at ${rotation}`); tight(corner.y, y, `y at ${rotation}`);
+  }
+  // Resizing to where the handle already stands changes no length.
+  for (const rotation of [0, 90, 37]) for (const node of [{ ...oddRoom, rotation }, { ...symbol, rotation }]) {
+    const same = resizeSpace(node, nodeResizeCorner(node)), label = `${node.type} at ${rotation}`;
+    tight(same.width, node.width, `${label} width`); tight(same.height, node.height, `${label} height`);
+    tight(same.x, node.x, `${label} x`); tight(same.y, node.y, `${label} y`);
+  }
+});
+
+test('placing a node stores exactly the given position and carries the members of a space', () => {
+  const lockedDoor: BackgroundSymbol = { ...symbol, id: 'locked-symbol', locked: true };
+  const unrelated: BackgroundCamera = { ...memberCamera, id: 'unrelated', spaceId: null };
+  const source: BackgroundMap = { ...map, nodes: [space, memberCamera, symbol, lockedDoor, unrelated] }, frozen = JSON.stringify(source);
+  const target = { x: 244.65, y: 120.3 };
+
+  const placed = placeMapNode(source, space.id, target);
+  assert.equal(placed.nodes[0].x, 244.65); assert.equal(placed.nodes[0].y, 120.3);
+  assert.deepEqual(placed.nodes[0], { ...space, ...target });
+  // Members land where a move by the same difference takes them.
+  const moved = moveMapNode(source, space.id, { x: target.x - space.x, y: target.y - space.y });
+  for (const index of [1, 2]) {
+    tight(placed.nodes[index].x, moved.nodes[index].x, `member ${index} x`); tight(placed.nodes[index].y, moved.nodes[index].y, `member ${index} y`);
+    assert.deepEqual({ ...placed.nodes[index], x: 0, y: 0 }, { ...source.nodes[index], x: 0, y: 0 });
+  }
+  tight(placed.nodes[1].x, 274.65, 'camera x'); tight(placed.nodes[1].y, 150.3, 'camera y');
+  assert.equal(placed.nodes[3], lockedDoor); assert.equal(placed.nodes[4], unrelated);
+
+  // A camera or a symbol is placed alone.
+  const lens = placeMapNode(source, memberCamera.id, { x: 3.3, y: -7.1 });
+  assert.deepEqual(lens.nodes[1], { ...memberCamera, x: 3.3, y: -7.1 });
+  const door = placeMapNode(source, symbol.id, target);
+  assert.deepEqual(door.nodes[2], { ...symbol, ...target });
+  for (const [result, changed] of [[lens, 1], [door, 2]] as const) source.nodes.forEach((node, index) => { if (index !== changed) assert.equal(result.nodes[index], node); });
+
+  // Locked and unknown nodes return the map itself.
+  const fixed: BackgroundMap = { ...map, nodes: [{ ...space, locked: true }, { ...memberCamera, locked: true }, lockedDoor] };
+  for (const id of [space.id, memberCamera.id, lockedDoor.id, 'missing']) assert.equal(placeMapNode(fixed, id, target), fixed, id);
+  assert.equal(placeMapNode(source, 'missing', target), source);
+  assert.equal(JSON.stringify(source), frozen);
+});
+
+test('replacing a node swaps that node alone, where a space transform carries its members', () => {
+  const source: BackgroundMap = { ...map, nodes: [space, memberCamera, symbol] }, frozen = JSON.stringify(source);
+  const shifted: BackgroundSpace = { ...space, x: 300 };
+  const replaced = replaceMapNode(source, shifted);
+  assert.equal(replaced.nodes[0], shifted); assert.equal(replaced.nodes[1], memberCamera); assert.equal(replaced.nodes[2], symbol);
+  const carried = transformMapSpace(source, shifted);
+  assert.equal(carried.nodes[0], shifted); near(carried.nodes[1].x, 330); near(carried.nodes[2].x, 330);
+  // Any kind of node, and the rest of the map stays as it is.
+  const lens: BackgroundCamera = { ...memberCamera, angle: 90 }, door: BackgroundSymbol = { ...symbol, rotation: 0 };
+  const withLens = replaceMapNode(source, lens), withDoor = replaceMapNode(source, door);
+  assert.deepEqual(withLens, { ...source, nodes: [space, lens, symbol] }); assert.equal(withLens.nodes[1], lens); assert.equal(withLens.nodes[0], space);
+  assert.deepEqual(withDoor, { ...source, nodes: [space, memberCamera, door] }); assert.equal(withDoor.nodes[2], door); assert.equal(withDoor.nodes[1], memberCamera);
+  assert.equal(JSON.stringify(source), frozen);
+});
+
+// --- Naming on the plan ------------------------------------------------------------------------
+test('renaming a node stores the trimmed name, and a name that changes nothing returns the map itself', () => {
+  const drawn: BackgroundSpace = { ...space, name: '새 공간' };
+  const lockedDoor: BackgroundSymbol = { ...symbol, id: 'locked-symbol', locked: true };
+  const source: BackgroundMap = { ...map, nodes: [drawn, memberCamera, symbol, lockedDoor] }, frozen = JSON.stringify(source);
+
+  const renamed = renameMapNode(source, drawn.id, '  교실  ');
+  assert.equal(renamed.nodes[0].name, '교실');
+  assert.deepEqual(renamed.nodes[0], { ...drawn, name: '교실' });
+  // Only the name of that node changes: its members and the rest of the map are the same objects.
+  for (const index of [1, 2, 3]) assert.equal(renamed.nodes[index], source.nodes[index]);
+  assert.deepEqual({ ...renamed, nodes: [] }, { ...source, nodes: [] });
+  // Any kind of node, and spaces inside the name stay.
+  assert.deepEqual(renameMapNode(source, memberCamera.id, '정면 카메라').nodes[1], { ...memberCamera, name: '정면 카메라' });
+  assert.deepEqual(renameMapNode(source, symbol.id, '뒷문\n').nodes[2], { ...symbol, name: '뒷문' });
+
+  // Blank, and the name it already has (as typed or once trimmed).
+  for (const name of ['', '   ', '새 공간', '  새 공간 ']) assert.equal(renameMapNode(source, drawn.id, name), source, JSON.stringify(name));
+  assert.equal(renameMapNode(source, memberCamera.id, memberCamera.name), source);
+  // A stored name can carry outer whitespace: the name field of the inspector keeps what was typed. A name box nothing was
+  // typed into hands that very name back, and that is no change. Outer whitespace alone never makes a new name.
+  const padded: BackgroundMap = { ...source, nodes: [{ ...drawn, name: ' 교실 ' }, memberCamera] };
+  for (const name of [' 교실 ', '교실', '교실 ', '  교실\t']) assert.equal(renameMapNode(padded, drawn.id, name), padded, JSON.stringify(name));
+  assert.deepEqual(renameMapNode(padded, drawn.id, ' 과학실 ').nodes[0], { ...drawn, name: '과학실' });
+  // Locked and unknown nodes.
+  assert.equal(renameMapNode(source, lockedDoor.id, '뒷문'), source);
+  assert.equal(renameMapNode({ ...source, nodes: [{ ...drawn, locked: true }] }, drawn.id, '교실').nodes[0].name, '새 공간');
+  assert.equal(renameMapNode(source, 'missing', '교실'), source);
+  assert.equal(JSON.stringify(source), frozen);
+});
+
+test('the name box of a node is centred on the box of a space or symbol and on the point of a camera', () => {
+  // The centre of the box does not turn with the node.
+  for (const rotation of [0, 37, 90, 180]) assert.deepEqual(nodeNameAnchor({ ...plainRoom, rotation }), { x: 130, y: 120 }, `room at ${rotation}`);
+  assert.deepEqual(nodeNameAnchor({ ...plainRoom, shape: 'ellipse' }), { x: 130, y: 120 });
+  assert.deepEqual(nodeNameAnchor(symbol), { x: 140, y: 150 });
+  assert.deepEqual(nodeNameAnchor({ ...symbol, rotation: 37, pitch: 20 }), { x: 140, y: 150 });
+  // A camera has no box: whatever it looks at, the anchor is the point it stands on.
+  assert.deepEqual(nodeNameAnchor(memberCamera), { x: 130, y: 130 });
+  assert.deepEqual(nodeNameAnchor({ ...memberCamera, x: 500.25, y: -340.5, angle: 211, pitch: -90 }), { x: 500.25, y: -340.5 });
+});
+
+// --- Polygon points ----------------------------------------------------------------------------
+const xy = (x: number, y: number): BackgroundPoint => ({ x, y });
+const midway = (a: BackgroundPoint, b: BackgroundPoint) => xy((a.x + b.x) / 2, (a.y + b.y) / 2);
+/** Its plan outline is (20, 30) (120, 30) (70, 80). */
+const triangle: BackgroundSpace = { ...plainRoom, id: 'triangle', x: 20, y: 30, width: 100, height: 50, shape: 'polygon', points: [xy(0, 0), xy(1, 0), xy(0.5, 1)] };
+/** Four points on no common line, in a box of decimals that is turned by 37 degrees. */
+const kite: BackgroundSpace = { ...oddRoom, id: 'kite', rotation: 37, shape: 'polygon', points: [xy(0.1, 0), xy(1, 0.35), xy(0.6, 1), xy(0, 0.7)] };
+/** A regular polygon of `count` points in a box of 400. */
+const ring = (count: number): BackgroundSpace => ({ ...plainRoom, id: 'ring', width: 400, height: 400, shape: 'polygon',
+  points: Array.from({ length: count }, (_, index) => xy(0.5 + Math.cos(index / count * Math.PI * 2) / 2, 0.5 + Math.sin(index / count * Math.PI * 2) / 2)) });
+const outlineArea = (points: BackgroundPoint[]) => Math.abs(points.reduce((sum, point, index) => {
+  const next = points[(index + 1) % points.length];
+  return sum + point.x * next.y - next.x * point.y;
+}, 0)) / 2;
+const sameOutline = (actual: BackgroundPoint[], expected: BackgroundPoint[], label = '') => {
+  assert.equal(actual.length, expected.length, label);
+  actual.forEach((point, index) => { tight(point.x, expected[index].x, `${label} point ${index} x`); tight(point.y, expected[index].y, `${label} point ${index} y`); });
+};
+
+test('moving a polygon point rebuilds the box around the points, and every other point stays where it is on the plan', () => {
+  // The apex goes 50 further down: the box is twice as tall and the stored ratios are what they were.
+  assert.deepEqual(movePolygonVertex(triangle, 2, xy(70, 130)), { ...triangle, x: 20, y: 30, width: 100, height: 100, points: [xy(0, 0), xy(1, 0), xy(0.5, 1)] });
+  // A corner goes 20 to the left: the box starts there, and the apex is now 70 of 120 across.
+  assert.deepEqual(movePolygonVertex(triangle, 0, xy(0, 30)), { ...triangle, x: 0, width: 120, points: [xy(0, 0), xy(1, 0), xy(70 / 120, 1)] });
+
+  const frozen = JSON.stringify(kite), before = nodePlanOutline(kite);
+  for (const index of [0, 1, 2, 3]) {
+    const target = xy(before[index].x + 23.4, before[index].y - 41.7), moved = movePolygonVertex(kite, index, target), label = `point ${index}`;
+    assert.ok(moved, label);
+    // The turn is kept, and so is everything that is not the box or the points.
+    assert.equal(moved.rotation, 37, label);
+    assert.deepEqual({ ...moved, x: 0, y: 0, width: 0, height: 0, points: [] }, { ...kite, x: 0, y: 0, width: 0, height: 0, points: [] }, label);
+    sameOutline(nodePlanOutline(moved), before.map((point, at) => at === index ? target : point), label);
+    // The box is the bounds of the points along the space's own sides: each side of it carries a point.
+    assert.equal(moved.points.length, 4, label);
+    for (const axis of ['x', 'y'] as const) {
+      for (const point of moved.points) assert.ok(point[axis] >= 0 && point[axis] <= 1, `${label} ${axis} ${point[axis]}`);
+      assert.ok(moved.points.some(point => point[axis] === 0), `${label} ${axis} start`); assert.ok(moved.points.some(point => point[axis] === 1), `${label} ${axis} end`);
+    }
+  }
+  assert.equal(JSON.stringify(kite), frozen);
+});
+
+test('a point is added after its corner, also on the edge that closes the outline, and a point is removed', () => {
+  for (const source of [kite, { ...kite, rotation: 0 }]) {
+    const frozen = JSON.stringify(source), before = nodePlanOutline(source), count = before.length;
+    for (let index = 0; index < count; index++) {
+      const centre = midway(before[index], before[(index + 1) % count]), added = insertPolygonVertex(source, index, centre), label = `edge ${index} at ${source.rotation}`;
+      assert.ok(added, label); assert.equal(added.points.length, count + 1, label); assert.equal(added.rotation, source.rotation, label);
+      // The new point takes the place after its corner: after the last corner that is the end of the list.
+      sameOutline(nodePlanOutline(added), [...before.slice(0, index + 1), centre, ...before.slice(index + 1)], label);
+      // The middle of an edge changes neither the box nor the area.
+      for (const key of ['x', 'y', 'width', 'height'] as const) tight(added[key], source[key], `${label} ${key}`);
+      tight(outlineArea(nodePlanOutline(added)), outlineArea(before), `${label} area`);
+    }
+    const closing = nodePlanOutline(insertPolygonVertex(source, count - 1, midway(before[count - 1], before[0]))!);
+    tight(closing[count].x, (before[count - 1].x + before[0].x) / 2, 'closing x'); tight(closing[count].y, (before[count - 1].y + before[0].y) / 2, 'closing y');
+    // Pulled off its edge, the new point is where it was put and the box grows around it.
+    const out = xy(before[1].x + 300, before[1].y - 200), bulged = insertPolygonVertex(source, 1, out)!;
+    sameOutline(nodePlanOutline(bulged), [before[0], before[1], out, before[2], before[3]], `bulge at ${source.rotation}`);
+    assert.ok(bulged.width > source.width && bulged.height > source.height);
+
+    for (let index = 0; index < count; index++) {
+      const removed = removePolygonVertex(source, index), label = `without ${index} at ${source.rotation}`;
+      assert.ok(removed, label); assert.equal(removed.points.length, 3, label); assert.equal(removed.rotation, source.rotation, label);
+      sameOutline(nodePlanOutline(removed), before.filter((_, at) => at !== index), label);
+      // Three points are the fewest a polygon has.
+      for (const last of [0, 1, 2]) assert.equal(removePolygonVertex(removed, last), null, label);
+    }
+    assert.equal(JSON.stringify(source), frozen);
+  }
+  for (const index of [0, 1, 2]) assert.equal(removePolygonVertex(triangle, index), null);
+
+  // 200 points are the most a polygon stores: a full one takes no more, and can still be changed.
+  const full = ring(200), almost = ring(199), edge = (space: BackgroundSpace) => { const outline = nodePlanOutline(space); return midway(outline[0], outline[1]); };
+  assert.equal(insertPolygonVertex(full, 0, edge(full)), null); assert.equal(insertPolygonVertex(full, 199, xy(900, 900)), null);
+  assert.equal(insertPolygonVertex(almost, 0, edge(almost))!.points.length, 200);
+  assert.equal(removePolygonVertex(full, 7)!.points.length, 199);
+  assert.equal(movePolygonVertex(full, 7, xy(900, 900))!.points.length, 200);
+  assert.equal(polygonFromWorldPoints(full, [...nodePlanOutline(full), xy(900, 900)]), null);
+  assert.equal(polygonFromWorldPoints(full, nodePlanOutline(full))!.points.length, 200);
+});
+
+test('a polygon edit that cannot be stored gives null', () => {
+  // Removing a point can leave too narrow a box: four points here, so it is not the three-point limit that refuses.
+  const sliver: BackgroundSpace = { ...plainRoom, id: 'sliver', x: 0, y: 0, width: 100, height: 100, shape: 'polygon', points: [xy(0, 0), xy(0.05, 0), xy(1, 0.5), xy(0.05, 1)] };
+  assert.equal(removePolygonVertex(sliver, 2), null);
+  assert.equal(removePolygonVertex(sliver, 1)!.points.length, 3);
+
+  // A side of the box under 10 or over 100000.
+  assert.equal(movePolygonVertex(triangle, 2, xy(70, 39.9)), null); assert.equal(movePolygonVertex(triangle, 2, xy(70, 40))!.height, 10);
+  assert.equal(movePolygonVertex(triangle, 1, xy(100021, 30)), null); assert.equal(movePolygonVertex(triangle, 1, xy(100020, 30))!.width, 100000);
+  assert.equal(insertPolygonVertex(triangle, 1, xy(70, 100111)), null);
+  // A box that starts beyond the saved limit, on either side.
+  const far = (x: number, y: number) => polygonFromWorldPoints(triangle, [xy(x, y), xy(x + 100, y), xy(x + 50, y + 50)]);
+  assert.deepEqual(far(100000, -100000), { ...triangle, x: 100000, y: -100000 });
+  for (const [x, y] of [[100001, 30], [-100001, 30], [20, 100001], [20, -100001]]) assert.equal(far(x, y), null, `${x}, ${y}`);
+
+  // Less than 1 of area: three points on one line, in a box that is large enough.
+  const half: BackgroundSpace = { ...sliver, id: 'half', points: [xy(0, 0), xy(1, 1), xy(0, 1)] };
+  assert.equal(movePolygonVertex(half, 2, xy(50, 50)), null); assert.equal(movePolygonVertex(half, 2, xy(50, 50.01)), null);
+  assert.ok(movePolygonVertex(half, 2, xy(50, 51)));
+  // The limit is 1 and no other number: an area of 0.95 is refused, one of 1.05 is kept.
+  assert.equal(movePolygonVertex(half, 2, xy(50, 50.019)), null); assert.ok(movePolygonVertex(half, 2, xy(50, 50.021)));
+  assert.equal(polygonFromWorldPoints(half, [xy(0, 0), xy(100, 100), xy(50, 50)]), null);
+  // Fewer than three points.
+  assert.equal(polygonFromWorldPoints(half, [xy(0, 0), xy(100, 100)]), null); assert.equal(polygonFromWorldPoints(half, []), null);
+
+  const outline = nodePlanOutline(kite), away = xy(outline[0].x + 23.4, outline[0].y - 41.7);
+  for (const broken of [xy(Number.NaN, 50), xy(50, Number.POSITIVE_INFINITY), xy(Number.NEGATIVE_INFINITY, Number.NaN)]) {
+    assert.equal(movePolygonVertex(kite, 0, broken), null); assert.equal(insertPolygonVertex(kite, 0, broken), null);
+    assert.equal(polygonFromWorldPoints(kite, [outline[0], outline[1], broken]), null);
+  }
+  // A locked space, a space that is no polygon (whatever it still carries in `points`), and an index that is none of its points.
+  // Two stored points are no polygon either: the plan draws such a space as its box, and that outline is not theirs.
+  const refused: [BackgroundSpace, number][] = [[{ ...kite, locked: true }, 0], [{ ...kite, shape: 'rect' }, 0], [{ ...kite, shape: 'ellipse' }, 0], [plainRoom, 0],
+    [{ ...kite, points: kite.points.slice(0, 2) }, 0], [kite, -1], [kite, 4], [kite, 1.5], [kite, Number.NaN], [kite, Number.POSITIVE_INFINITY]];
+  for (const [space, index] of refused) {
+    const label = `${space.shape}${space.locked ? ' locked' : ''} ${space.points.length} points, index ${index}`;
+    assert.equal(movePolygonVertex(space, index, away), null, label); assert.equal(insertPolygonVertex(space, index, away), null, label);
+    assert.equal(removePolygonVertex(space, index), null, label);
+  }
+  for (const index of [0, 1, 2, 3]) assert.ok(movePolygonVertex(kite, index, away) && insertPolygonVertex(kite, index, away) && removePolygonVertex(kite, index), `point ${index}`);
+});
+
+test('a moved or added point cannot land on a point beside it', () => {
+  const outline = nodePlanOutline(kite), count = outline.length;
+  for (let index = 0; index < count; index++) {
+    const previous = outline[(index + count - 1) % count], next = outline[(index + 1) % count], label = `point ${index}`;
+    // That would leave an edge of no length and two point handles on one spot.
+    assert.equal(movePolygonVertex(kite, index, previous), null, label); assert.equal(movePolygonVertex(kite, index, next), null, label);
+    assert.equal(movePolygonVertex(kite, index, xy(next.x + 1e-7, next.y)), null, label);
+    // A new point goes between its corner and the next one: neither end of that edge will do.
+    assert.equal(insertPolygonVertex(kite, index, outline[index]), null, label); assert.equal(insertPolygonVertex(kite, index, next), null, label);
+    assert.equal(insertPolygonVertex(kite, index, xy(outline[index].x, outline[index].y - 1e-7)), null, label);
+    // One spot reaches 1e-6 and no other distance: half of that away is still on the point, twice that is beside it.
+    assert.equal(movePolygonVertex(kite, index, xy(next.x + 5e-7, next.y)), null, label); assert.ok(movePolygonVertex(kite, index, xy(next.x + 2e-6, next.y)), label);
+    assert.equal(insertPolygonVertex(kite, index, xy(next.x + 5e-7, next.y)), null, label); assert.ok(insertPolygonVertex(kite, index, xy(next.x + 2e-6, next.y)), label);
+    // Right beside it is another place.
+    assert.ok(movePolygonVertex(kite, index, xy(next.x + 0.001, next.y)), label); assert.ok(insertPolygonVertex(kite, index, xy(next.x + 0.001, next.y)), label);
+  }
+});
+
+test('a point put where it already stands leaves the space as it is', () => {
+  // Rebuilt from its plan points a box of decimals does not come back digit for digit, and a drag that
+  // returned to where it started would stay as a change.
+  assert.notDeepEqual(polygonFromWorldPoints(kite, nodePlanOutline(kite)), kite);
+  for (const source of [kite, { ...kite, rotation: 0 }, triangle]) nodePlanOutline(source).forEach((spot, index) => {
+    const label = `point ${index} at ${source.rotation}`;
+    assert.equal(movePolygonVertex(source, index, spot), source, label);
+    assert.equal(movePolygonVertex(source, index, xy(spot.x + 1e-7, spot.y - 1e-7)), source, label);
+    // The same 1e-6 as for the points beside it: half of that away it has not moved, twice that away it has.
+    assert.equal(movePolygonVertex(source, index, xy(spot.x + 5e-7, spot.y)), source, label);
+    const nudged = movePolygonVertex(source, index, xy(spot.x + 2e-6, spot.y));
+    assert.ok(nudged, label); assert.notEqual(nudged, source, label);
+    // Any real travel is a new space.
+    const moved = movePolygonVertex(source, index, xy(spot.x + 0.001, spot.y));
+    assert.ok(moved, label); assert.notDeepEqual(moved, source, label);
+  });
+  // What cannot be edited is still refused.
+  assert.equal(movePolygonVertex({ ...kite, locked: true }, 0, nodePlanOutline(kite)[0]), null);
+  assert.equal(movePolygonVertex({ ...kite, shape: 'rect' }, 0, nodePlanOutline(kite)[0]), null);
+});
+
+test('an edited polygon is a node the saved-data check accepts', () => {
+  const uuid = (tail: number) => `00000000-0000-4000-8000-${String(tail).padStart(12, '0')}`;
+  const stored = (node: BackgroundSpace) => ({ id: uuid(1), revision: 1, name: '학교', parentId: null, placeId: null, imageUrl: '', nodes: [{ ...node, id: uuid(2) }] });
+  const outline = nodePlanOutline(kite), full = ring(199);
+  const edited = [
+    movePolygonVertex(kite, 2, xy(outline[2].x + 311.7, outline[2].y - 96.3)), movePolygonVertex(triangle, 2, xy(70, 130)),
+    insertPolygonVertex(kite, 3, xy(outline[3].x - 57.3, outline[3].y + 12.9)), insertPolygonVertex(full, 0, midway(nodePlanOutline(full)[0], nodePlanOutline(full)[1])),
+    removePolygonVertex(kite, 0), rectToPolygon(oddRoom), rectToPolygon({ ...oddRoom, rotation: 37 }),
+  ];
+  for (const [index, node] of edited.entries()) {
+    assert.ok(node, `edit ${index}`);
+    assert.doesNotThrow(() => validateBackgroundEntity('map', stored(node)), `edit ${index}`);
+  }
+  // The check is the real one: a point outside the box is refused.
+  assert.throws(() => validateBackgroundEntity('map', stored({ ...kite, points: [xy(0, 0), xy(1.0000001, 0), xy(0, 1)] })));
+});
+
+test('a rectangle becomes a four-point polygon with the very same outline', () => {
+  const linked: BackgroundSpace = { ...oddRoom, name: '과학실', placeId: 'place', childMapId: 'child', elevation: 40, volumeHeight: 250 };
+  for (const rotation of [0, 37]) {
+    const rect: BackgroundSpace = { ...linked, rotation }, frozen = JSON.stringify(rect), polygon = rectToPolygon(rect);
+    // Name, links, heights, position and turn are as they were.
+    assert.deepEqual(polygon, { ...rect, shape: 'polygon', points: [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)] });
+    assert.deepEqual(nodePlanOutline(polygon!), nodePlanOutline(rect));
+    assert.equal(JSON.stringify(rect), frozen);
+  }
+  // Whatever a rectangle still carried in `points` is replaced.
+  assert.deepEqual(rectToPolygon({ ...linked, points: [xy(0.2, 0.3)] })!.points, [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)]);
+  // Only an unlocked rectangle is converted.
+  for (const other of [{ ...linked, shape: 'ellipse' as const }, triangle, kite, { ...linked, locked: true }]) assert.equal(rectToPolygon(other), null, `${other.shape} ${other.locked}`);
 });

@@ -1,6 +1,6 @@
-import type { BackgroundCamera, BackgroundMap, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
+import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
 import { MAP_SPATIAL_LIMITS, cameraAngles, cameraAnglesFromOrientation, cameraOrientation, createMapCamera, nextMapCameraName, nodeAngles, nodeAnglesFromOrientation,
-  nodeElevation, nodeOrientation, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees } from './mapSpatial.ts';
+  nodeElevation, nodeOrientation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees } from './mapSpatial.ts';
 import type { QuaternionValue, Vec3 } from './mapSpatial.ts';
 
 function rotate(point: BackgroundPoint, angle: number): BackgroundPoint {
@@ -9,14 +9,41 @@ function rotate(point: BackgroundPoint, angle: number): BackgroundPoint {
 }
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+/**
+ * The rotated top-left corner: the point a resize keeps fixed. Only for turned nodes. An unturned one
+ * uses its stored x/y as they are, since `x + width / 2 - width / 2` can lose the last digit.
+ */
+function resizeOrigin(node: BackgroundSpace | BackgroundSymbol): BackgroundPoint {
+  const cornerOffset = rotate({ x: -node.width / 2, y: -node.height / 2 }, node.rotation);
+  return { x: node.x + node.width / 2 + cornerOffset.x, y: node.y + node.height / 2 + cornerOffset.y };
+}
+
+/** A plan point in the node's own unrotated frame, measured from its rotated top-left corner (the point a resize keeps fixed). */
+export function nodeLocalPoint(node: BackgroundSpace | BackgroundSymbol, world: BackgroundPoint): BackgroundPoint {
+  if (node.rotation === 0) return { x: world.x - node.x, y: world.y - node.y };
+  const origin = resizeOrigin(node);
+  return rotate({ x: world.x - origin.x, y: world.y - origin.y }, -node.rotation);
+}
+
+/** Resize to a local size (clamped to 10..100000) while the rotated top-left stays fixed. */
+export function resizeSpaceTo<T extends BackgroundSpace | BackgroundSymbol>(space: T, width: number, height: number): T {
+  const size = { width: clamp(width, 10, 100000), height: clamp(height, 10, 100000) };
+  if (space.rotation === 0) return { ...space, ...size };
+  const origin = resizeOrigin(space), centerOffset = rotate({ x: size.width / 2, y: size.height / 2 }, space.rotation);
+  return { ...space, ...size, x: origin.x + centerOffset.x - size.width / 2, y: origin.y + centerOffset.y - size.height / 2 };
+}
+
 /** Resize from the bottom-right handle while the rotated top-left stays fixed. */
 export function resizeSpace<T extends BackgroundSpace | BackgroundSymbol>(space: T, pointer: BackgroundPoint): T {
-  const cornerOffset = rotate({ x: -space.width / 2, y: -space.height / 2 }, space.rotation);
-  const origin = { x: space.x + space.width / 2 + cornerOffset.x, y: space.y + space.height / 2 + cornerOffset.y };
-  const local = rotate({ x: pointer.x - origin.x, y: pointer.y - origin.y }, -space.rotation);
-  const width = Math.min(100000, Math.max(10, local.x)), height = Math.min(100000, Math.max(10, local.y));
-  const centerOffset = rotate({ x: width / 2, y: height / 2 }, space.rotation);
-  return { ...space, width, height, x: origin.x + centerOffset.x - width / 2, y: origin.y + centerOffset.y - height / 2 };
+  const local = nodeLocalPoint(space, pointer);
+  return resizeSpaceTo(space, local.x, local.y);
+}
+
+/** Plan position of the bottom-right corner: the point the resize handle stands for. */
+export function nodeResizeCorner(node: BackgroundSpace | BackgroundSymbol): BackgroundPoint {
+  if (node.rotation === 0) return { x: node.x + node.width, y: node.y + node.height };
+  const origin = resizeOrigin(node), offset = rotate({ x: node.width, y: node.height }, node.rotation);
+  return { x: origin.x + offset.x, y: origin.y + offset.y };
 }
 
 /**
@@ -49,6 +76,11 @@ export function transformMapSpace(map: BackgroundMap, next: BackgroundSpace): Ba
   }) };
 }
 
+/** Replace one node. Members of a space do NOT follow: use transformMapSpace when a space moves, turns or scales as a whole. */
+export function replaceMapNode(map: BackgroundMap, next: BackgroundNode): BackgroundMap {
+  return { ...map, nodes: map.nodes.map(node => node.id === next.id ? next : node) };
+}
+
 export function moveMapNode(map: BackgroundMap, id: string, delta: BackgroundPoint): BackgroundMap {
   const selected = map.nodes.find(node => node.id === id);
   if (!selected || selected.locked) return map;
@@ -56,20 +88,121 @@ export function moveMapNode(map: BackgroundMap, id: string, delta: BackgroundPoi
   return { ...map, nodes: map.nodes.map(node => node.id === id ? { ...node, x: node.x + delta.x, y: node.y + delta.y } : node) };
 }
 
+/** Move a node so that its stored x/y become exactly `position`. Members of a space follow as in moveMapNode. Unknown or locked nodes return `map`. */
+export function placeMapNode(map: BackgroundMap, id: string, position: BackgroundPoint): BackgroundMap {
+  const selected = map.nodes.find(node => node.id === id);
+  if (!selected || selected.locked) return map;
+  if (selected.type === 'space') return transformMapSpace(map, { ...selected, x: position.x, y: position.y });
+  return replaceMapNode(map, { ...selected, x: position.x, y: position.y });
+}
+
+/**
+ * The map with the node renamed to the trimmed name. Blank or unchanged names, unknown and locked nodes return `map` itself.
+ * Unchanged is judged between the trimmed names: a stored name can carry outer whitespace (the inspector keeps what was typed),
+ * and a name box nothing was typed into hands that name back.
+ */
+export function renameMapNode(map: BackgroundMap, id: string, name: string): BackgroundMap {
+  const node = map.nodes.find(item => item.id === id), trimmed = name.trim();
+  if (!node || node.locked || !trimmed || trimmed === node.name.trim()) return map;
+  return replaceMapNode(map, { ...node, name: trimmed });
+}
+
+/** Plan point the name box of a node is centred on: the box centre of a space or symbol, the position of a camera. */
+export function nodeNameAnchor(node: BackgroundNode): BackgroundPoint {
+  return node.type === 'camera' ? { x: node.x, y: node.y } : { x: node.x + node.width / 2, y: node.y + node.height / 2 };
+}
+
 export function removeMapNode(map: BackgroundMap, id: string): BackgroundMap {
   return { ...map, nodes: map.nodes.filter(node => node.id !== id).map(node => node.type !== 'space' && node.spaceId === id ? { ...node, spaceId: null } : node) };
+}
+
+/** The area an outline encloses, whichever way round its points run. */
+function outlineArea(points: readonly BackgroundPoint[]): number {
+  return Math.abs(points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return sum + point.x * next.y - next.x * point.y;
+  }, 0)) / 2;
 }
 
 export function polygonSpace(points: BackgroundPoint[]): Pick<BackgroundSpace, 'x' | 'y' | 'width' | 'height' | 'points'> | null {
   if (points.length < 3) return null;
   const x = Math.min(...points.map(point => point.x)), y = Math.min(...points.map(point => point.y));
   const width = Math.max(...points.map(point => point.x)) - x, height = Math.max(...points.map(point => point.y)) - y;
-  const area = Math.abs(points.reduce((sum, point, index) => {
-    const next = points[(index + 1) % points.length];
-    return sum + point.x * next.y - next.x * point.y;
-  }, 0)) / 2;
-  if (width < 10 || height < 10 || area < 1) return null;
+  if (width < 10 || height < 10 || outlineArea(points) < 1) return null;
   return { x, y, width, height, points: points.map(point => ({ x: (point.x - x) / width, y: (point.y - y) / height })) };
+}
+
+/** Saved limits of a plan box: no position and no side beyond the first, no side under the second. */
+const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
+/**
+ * A polygon stores three to this many points. The + handles (`mapPlanEdit.ts`, which does not import this module)
+ * and the saved-data check (`validateBackgroundEntity` in `domain.ts`) hold the same number.
+ */
+const POLYGON_POINT_LIMIT = 200;
+/** Points closer together than this are one point. */
+const SAME_POINT = 1e-6;
+
+/**
+ * A polygon space rebuilt from absolute plan points. The rotation is kept, the box becomes the bounding box of the
+ * points in the space's own unrotated frame, and every point is normalised against it, so each point keeps its plan
+ * position. Null when the result cannot be stored.
+ */
+export function polygonFromWorldPoints(space: BackgroundSpace, points: readonly BackgroundPoint[]): BackgroundSpace | null {
+  if (points.length < 3 || points.length > POLYGON_POINT_LIMIT || points.some(point => !Number.isFinite(point.x) || !Number.isFinite(point.y))) return null;
+  const centre = { x: space.x + space.width / 2, y: space.y + space.height / 2 };
+  const local = points.map(point => rotate({ x: point.x - centre.x, y: point.y - centre.y }, -space.rotation));
+  const xs = local.map(point => point.x), ys = local.map(point => point.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const width = maxX - minX, height = maxY - minY;
+  // Each limit is asked for as what passes, so a value that is no number fails it too.
+  const storable = (length: number) => length >= MIN_PLAN_SIZE && length <= PLAN_LIMIT;
+  if (!storable(width) || !storable(height) || !(outlineArea(local) >= 1)) return null;
+  const middle = rotate({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, space.rotation);
+  const x = centre.x + middle.x - width / 2, y = centre.y + middle.y - height / 2;
+  if (!(Math.abs(x) <= PLAN_LIMIT && Math.abs(y) <= PLAN_LIMIT)) return null;
+  return { ...space, x, y, width, height, points: local.map(point => ({ x: clamp((point.x - minX) / width, 0, 1), y: clamp((point.y - minY) / height, 0, 1) })) };
+}
+
+/** The plan points of an unlocked polygon space in stored order, when `index` is one of them. */
+function polygonPlanPoints(space: BackgroundSpace, index: number): BackgroundPoint[] | null {
+  // With fewer than three stored points the plan outline is that of the box, not of those points.
+  if (space.shape !== 'polygon' || space.locked || space.points.length < 3) return null;
+  return Number.isInteger(index) && index >= 0 && index < space.points.length ? nodePlanOutline(space) : null;
+}
+const samePoint = (a: BackgroundPoint, b: BackgroundPoint) => Math.hypot(a.x - b.x, a.y - b.y) < SAME_POINT;
+
+/** Moves one point to `point`. Null on a point beside it: the edge between the two would have no length. */
+export function movePolygonVertex(space: BackgroundSpace, index: number, point: BackgroundPoint): BackgroundSpace | null {
+  const points = polygonPlanPoints(space, index);
+  if (!points) return null;
+  // Where it already stands, the space is left as it is: rebuilt from its plan points every stored value would
+  // shift in its last digits, and a drag that came back would stay as a change.
+  if (samePoint(point, points[index])) return space;
+  const count = points.length;
+  if (samePoint(point, points[(index + count - 1) % count]) || samePoint(point, points[(index + 1) % count])) return null;
+  return polygonFromWorldPoints(space, points.map((item, at) => at === index ? point : item));
+}
+
+/** Adds `point` between `index` and the next point. Null on either of the two. */
+export function insertPolygonVertex(space: BackgroundSpace, index: number, point: BackgroundPoint): BackgroundSpace | null {
+  const points = polygonPlanPoints(space, index);
+  if (!points || points.length >= POLYGON_POINT_LIMIT) return null;
+  if (samePoint(point, points[index]) || samePoint(point, points[(index + 1) % points.length])) return null;
+  return polygonFromWorldPoints(space, [...points.slice(0, index + 1), point, ...points.slice(index + 1)]);
+}
+
+/** Removes one point. Null when only three are left. */
+export function removePolygonVertex(space: BackgroundSpace, index: number): BackgroundSpace | null {
+  const points = polygonPlanPoints(space, index);
+  if (!points || points.length <= 3) return null;
+  return polygonFromWorldPoints(space, points.filter((_, at) => at !== index));
+}
+
+/** A rectangle as a four-point polygon with the same outline. Null for other shapes and for locked spaces. */
+export function rectToPolygon(space: BackgroundSpace): BackgroundSpace | null {
+  if (space.shape !== 'rect' || space.locked) return null;
+  // The corners in the order the outline of a rectangle has them.
+  return { ...space, shape: 'polygon', points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] };
 }
 
 export function containsPoint(space: BackgroundSpace, point: BackgroundPoint): boolean {
@@ -99,7 +232,7 @@ export function addMapCamera(map: BackgroundMap, id: string): { map: BackgroundM
 /** Result of a 3D gizmo: world position and orientation of the node root, and scale relative to the stored node. */
 export type NodeWorldPoseInput = { position: Vec3; quaternion: QuaternionValue; scale: Vec3 };
 
-const CHANGE_EPSILON = 1e-6, PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10, VERTICAL_SNAP = 0.0005;
+const CHANGE_EPSILON = 1e-6, VERTICAL_SNAP = 0.0005;
 const round3 = (value: number) => Math.round(value * 1000) / 1000 + 0;
 /** The value to store, or null when the axis was not really touched and the saved field must stay as it is. */
 function settle(value: number, current: number, min: number, max: number): number | null {
@@ -124,8 +257,6 @@ function settlePitch(value: number, current: number, seen: number): number | nul
 }
 const settled = <T extends Record<string, number | null>>(values: T) =>
   Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null)) as { [K in keyof T]?: number };
-const replaceNode = (map: BackgroundMap, next: BackgroundCamera | BackgroundSymbol): BackgroundMap =>
-  ({ ...map, nodes: map.nodes.map(node => node.id === next.id ? next : node) });
 
 /**
  * Convert a 3D gizmo result into node fields. Only values that really changed are written, so an
@@ -142,7 +273,7 @@ export function applyNodeWorldPose(initialMap: BackgroundMap, id: string, pose: 
     const changes = settled({ x: settle(position.x, node.x, -PLAN_LIMIT, PLAN_LIMIT), y: settle(position.z, node.y, -PLAN_LIMIT, PLAN_LIMIT),
       angle: settleTurn(read.angle, current.angle, normalizeDegrees), elevation,
       pitch: settlePitch(read.pitch, current.pitch, seen.pitch), roll: settleTurn(read.roll, current.roll, normalizeSignedDegrees) });
-    return Object.keys(changes).length ? replaceNode(initialMap, { ...node, ...changes }) : initialMap;
+    return Object.keys(changes).length ? replaceMapNode(initialMap, { ...node, ...changes }) : initialMap;
   }
   // The root is the centre of the base, so a resize keeps that centre where the gizmo left it.
   const current = nodeAngles(node), read = nodeAnglesFromOrientation(quaternion, current), volumeHeight = nodeVolumeHeight(node);
@@ -164,7 +295,7 @@ export function applyNodeWorldPose(initialMap: BackgroundMap, id: string, pose: 
   }
   const seen = nodeAnglesFromOrientation(nodeOrientation(current), current);
   const changes = settled({ ...box, pitch: settlePitch(read.pitch, current.pitch, seen.pitch), roll: settleTurn(read.roll, current.roll, normalizeSignedDegrees) });
-  return Object.keys(changes).length ? replaceNode(initialMap, { ...node, ...changes }) : initialMap;
+  return Object.keys(changes).length ? replaceMapNode(initialMap, { ...node, ...changes }) : initialMap;
 }
 
 /** Cameras and symbols sharing a plan spot with the given one, in map order, so each can be picked in turn. */

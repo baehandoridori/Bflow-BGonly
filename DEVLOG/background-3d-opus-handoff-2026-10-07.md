@@ -348,3 +348,42 @@ Three를 React 화면에 직접 연결하거나 React 래퍼를 사용하는 것
 
 - 설치된 앱에서의 실제 저장·이미지 업로드·실시간 신호(운영 DB/Storage). 배포 뒤 한솔 계정 실기 확인 대상이다.
 - 팀원 PC에서 메뉴가 보이지 않는지(코드와 미리보기 시험 계정으로만 확인).
+
+## 15. ① 평면 편집 기본기 (v1.131.0)
+
+v1.130.0 시험 공개 뒤 한솔이 보낸 도면 피드백 2차의 첫 묶음이다(라운드 계획 `docs/superpowers/plans/2026-10-08-background-map-feedback-round2.md`의 B1, 2026-10-08 설계 승인). 평면 도면에 휠 확대·축소와 전체 맞춤, 그리자마자 이름 짓기, 가까운 도형에 붙는 스냅, 다각형 점 편집을 더했다. 저장 자료·운영 DB·3D 화면은 바꾸지 않았고 배경 메뉴는 계속 배한솔 계정에만 보인다. 브랜치는 `claude/bg-map-editing-basics`(main v1.130.0, d8325afb에서 갈라짐)이다.
+
+### 15.1 문서 위치
+
+- 설계(계약): `docs/superpowers/specs/2026-10-08-background-map-editing-basics-design.md`. 거기 적힌 동작이 승인된 범위의 전부다. 하지 않는 것은 1.2절, 앱 엔진에서 확인할 것과 한솔에게 알릴 것은 16절에 있다.
+- 구현 계획: `docs/superpowers/plans/2026-10-08-background-map-editing-basics.md`. Task 1~13이 설계 15절의 일곱 단계이며, 둘로 나눈 곳은 "순수 모듈 + 테스트" 커밋과 "편집기 배선" 커밋의 경계다.
+- 수동 검증(설계 13절)의 결과와 자동 검사 수치는 [누적 검증 기록](background-library-verification-2026-09-21.md)의 `2026-10-08 ① 평면 편집 기본기 (v1.131.0)` 절에 적는다. 그 절은 13절 전체를 확인한 뒤에 쓴다 — 절이 아직 없으면 수동 검증이 끝나지 않은 것이다.
+
+### 15.2 파일
+
+새 파일 9개: `src/features/backgrounds/`의 mapSnap.ts, mapPlanGesture.ts, mapPlanEdit.ts, BackgroundMapNameBox.tsx, BackgroundMapPlanOverlays.tsx / `tests/`의 backgroundMapSnap, backgroundMapPlanGesture, backgroundMapPlanEdit, backgroundMapEditorWiring (.test.ts).
+
+바뀐 파일: mapDocument.ts, mapGeometry.ts, BackgroundMapEditor.tsx, backgrounds-map.css / tests의 backgroundMapDocument, backgroundMapGeometry / package.json, package-lock.json, DEVLOG/update-notes.json, AGENTS.md, ROADMAP.md, 이 문서, 라운드 계획. 3D 파일(BackgroundMap3D.tsx, map3dScene.ts, BackgroundMapCameraGizmo.ts)과 types.ts, domain.ts, mapSpatial.ts, mapEditSession.ts, useBackgroundMapDocument.ts, mapWorkflow.ts, mapCanvas.ts, 보조 평면도, electron 쪽, SQL은 건드리지 않았다.
+
+| 파일 | 책임 |
+|---|---|
+| mapSnap.ts | 스냅 대상 모으기, 가까이 있는 것만 거르기(닿는 거리), 옮기기·크기·점·회전의 붙이기와 정수 맞춤, 안내선 값 (순수, three.js·DOM 없음) |
+| mapPlanGesture.ts | 평면 제스처 한 번의 미리보기: (시작 도면, 누른 점, 지금 점, 스냅) → (도면, 안내선) (순수) |
+| mapPlanEdit.ts | 화면 크기 상수, 손잡이·점 손잡이 배치, 더블클릭 대상, 스냅 설정 읽기/쓰기 |
+| BackgroundMapNameBox.tsx | 캔버스 위 이름 입력 칸(위치·포커스·Enter/Esc/blur) |
+| BackgroundMapPlanOverlays.tsx | 안내선, 회전·크기 손잡이, 점 손잡이를 그리는 SVG 조각(받은 값만 그린다) |
+| mapDocument.ts | `MAP_ZOOM_LIMITS.min` 0.1, `MAP_LABEL_SCALE_LIMITS`, `mapScreenScale`, `zoomMapViewportAt`, `wheelZoomFactor`, `MAP_FIT_MARGIN`, `fitMapViewport`. 리듀서·상태 모양은 그대로다 |
+| mapGeometry.ts | `nodeLocalPoint`·`resizeSpaceTo`(기존 `resizeSpace`를 둘로), `nodeResizeCorner`, `placeMapNode`, `replaceMapNode`(공개·전 종류), `renameMapNode`, `nodeNameAnchor`, 다각형 점 함수 다섯 개(`polygonFromWorldPoints`, `movePolygonVertex`, `insertPolygonVertex`, `removePolygonVertex`, `rectToPolygon`) |
+| BackgroundMapEditor.tsx | 휠 효과·맞춤·키, 세션 필드와 누름 기록, 창 단위 처리기 둘(캔버스 밖 누름 / 끌기에 쓴 Alt), `pointerMove`는 `previewPlanGesture` 호출, 넘기기는 `click`, 더블클릭은 SVG 한 곳, 이름 칸·안내선·점 손잡이 배선, 스냅 버튼, 모양 줄, 문구 |
+| tests/backgroundMapEditorWiring.test.ts | 편집기 배선의 소스 앵커 18개(설계 12.7). 아래 15.3의 규칙 대부분을 글자로 고정한다 |
+
+모듈 의존은 `mapPlanGesture.ts` → `mapSnap.ts` → `mapGeometry.ts` → `mapSpatial.ts`, `mapPlanEdit.ts` → `mapSpatial.ts` 한 방향이다. 3D 파일은 새 모듈을 import하지 않는다.
+
+### 15.3 뒤 묶음이 지켜야 할 것
+
+- **화면 배율값 하나**: 편집기는 렌더마다 `screenScale = mapScreenScale(view.zoom, canvasSize)` 하나를 구하고 손잡이 크기, 스냅 허용 거리와 닿는 거리, 안내선 여유, 점 손잡이가 모두 이 값만 쓴다. 다음 묶음의 선택 상자 여유와 주석 핀도 이 값을 쓴다(배율 계산을 따로 만들지 않는다).
+- **`snapMove`의 id 집합과 닿는 거리**: `snapMove`는 처음부터 움직이는 id 집합과 기준 노드를 받고 `delta`를 돌려준다. 묶음 이동은 같은 `delta`를 나머지에 더하면 된다. 닿는 거리(`MAP_SNAP.reachPx`, 화면 48px)는 합친 상자에서 재므로 묶음에도 그대로 쓴다. 닿는 거리를 없애 선을 끝없이 늘이면 도면의 모든 것이 후보가 되어 늘 붙는다.
+- **넘기기는 `click`에서**: 겹친 카메라·기호 묶음의 "다시 누르면 다음 것으로"는 `pointerUp`이 `pendingCycle`에 적어 두기만 하고 SVG의 `onClick`이 넘긴다. `pointerUp`에서 바로 고르던 꼴로 되돌리면 더블클릭의 둘째 누름이 선택을 넘겨 버린다.
+- **더블클릭은 SVG에서 누름 기록으로**: 편집 중의 누름은 포인터를 캡처하므로 `click`·`dblclick`이 노드 `<g>`에 닿지 않는다. 더블클릭은 SVG의 `onDoubleClick={canvasDoubleClick}` 하나가 받고, 무엇을 눌렀는지는 `pointerDown`이 적어 둔 최근 두 번의 누름(`pressLog`)으로 판정한다. 노드 `<g>`에 `onDoubleClick`을 달지 않는다. **캔버스가 받지 않은 누름은 기록을 비운다** — SVG 밖의 누름은 창 단위 `pointerdown` 캡처 처리기가, SVG 안이지만 편집기가 받지 않은 누름(저장 중, 오른쪽 버튼 등)은 `pointerDown`의 가드가 비운다. 캔버스 위에 뜨는 버튼이나 창을 새로 더해도 이 규칙이 그 아래 노드의 이름 칸이 열리거나 상세 도면으로 들어가는 것을 막는다. 시간·거리 상수로 막지 않는다.
+- **②가 정해야 하는 넘기기 조건(설계 11절)**: 지금의 조건 `event.detail >= 2 && canEdit`은 "묶음에는 카메라·기호만 있고, 보기 모드의 더블클릭은 그것들에 아무 일도 하지 않는다"에 기댄 임시 조건이다. 공간이 묶음에 들어오면 깨진다 — 연결된 공간의 더블클릭은 보기 모드에서도 그 도면으로 들어가므로, 조건을 그대로 두면 보기 모드에서 두 번 넘긴 뒤 들어가게 된다. ②의 규칙은 "더블클릭이 첫 누름의 대상에 작용하는 경우(이름 고치기, 연결된 공간으로 들어가기)에는 보기 모드에서도 둘째 클릭이 넘기지 않는다"로 잡는다. 편집 중에 겹친 공간을 빠르게 두 번 누르면 '아래 공간으로'가 아니라 이름 고치기나 들어가기가 된다는 점도 ② 설계에서 한솔에게 보여 준다. `doubleClickNodeId`는 묶음 목록을 받으므로 묶음에 공간을 넣어 같은 길을 쓸 수 있다.
+- 그 밖에 설계 11절 '다음 묶음 ②를 막지 않는 점'에 적힌 것: 손잡이·점 손잡이는 "선택된 것 하나"일 때만 그린다(지금의 `selectedId`). 여러 개 선택이 들어오면 그 조건만 바꾼다.
