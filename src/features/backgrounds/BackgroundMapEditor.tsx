@@ -6,9 +6,11 @@ import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './Bac
 import { BackgroundMapGallery } from './BackgroundMapGallery';
 import { BackgroundMapPanels } from './BackgroundMapPanels';
 import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
+import { MapNodeHandles } from './BackgroundMapPlanOverlays';
 import { addMapCamera, containsPoint, moveMapNode, polygonSpace, removeMapNode, resizeSpace, transformMapSpace } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
-import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, zoomMapViewport } from './mapDocument';
+import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
+import { MAP_EDIT_MARK } from './mapPlanEdit';
 import { planNodeCovers, planStackUnder } from './mapPlanPreview';
 import type { MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
@@ -38,6 +40,8 @@ const uuid = () => crypto.randomUUID();
 const round = (value: number) => Math.round(value * 100) / 100;
 const isDrawTool = (tool: Tool) => tool === 'rect' || tool === 'ellipse' || tool === 'polygon';
 const interactive = 'input, textarea, select, button, [contenteditable]:not([contenteditable="false"])';
+/** Where a key is text, or belongs to an open dialog: the plan shortcuts leave it alone. */
+const textEntry = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog';
 const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔어요. 편집 내용은 그대로예요.';
 const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string }[] = [
   { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기' },
@@ -179,6 +183,27 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     observer.observe(svg);
     return () => observer.disconnect();
   }, [current?.id, mode]);
+  /**
+   * The wheel over the plan zooms about the pointer. It is always swallowed, so a narrow window does not scroll
+   * instead, and the view is read from the store: a fast wheel outruns the renders.
+   */
+  const onWheel = useEvent((event: WheelEvent) => {
+    event.preventDefault();
+    if (!current || pointerRef.current || doc.isGestureActive()) return;
+    const anchor = pointFrom(event);
+    if (!anchor) return;
+    const live = mapViewport(doc.getState(), current.id);
+    const zoomed = zoomMapViewportAt(live, wheelZoomFactor(event.deltaY, event.deltaMode, event.ctrlKey), anchor);
+    if (zoomed !== live) updateView({ zoom: zoomed.zoom, x: zoomed.x, y: zoomed.y });
+  });
+  // A native listener, because React listens to the wheel passively. The plan SVG is replaced by the 3D mode,
+  // so it is attached again on the dependencies of the size observer above.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, [onWheel, current?.id, mode]);
   useEffect(() => { if (!snapshot.canManage) { setTool('select'); setPolygon([]); setSymbolPaletteOpen(false); } }, [snapshot.canManage]);
 
   /** Ends the pressed pointer and cancels the gesture in progress. Nothing of it reaches the history. */
@@ -507,6 +532,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const zoomed = zoomMapViewport(view, factor);
     updateView({ zoom: zoomed.zoom, x: zoomed.x, y: zoomed.y });
   }
+  /** Shows everything that is drawn on the map. */
+  function fitView() {
+    if (!current || pointerRef.current) return;
+    updateView(fitMapViewport(current));
+  }
   function keyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
       // A gesture in progress is cancelled first; the tool is left as it is.
@@ -515,6 +545,13 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       setPolygon([]); setTool('select'); setSymbolPaletteOpen(false);
     }
     const target = event.target as HTMLElement;
+    // Plan shortcuts. They come before the guard below, so they also work while a button has the focus.
+    // Ctrl and Meta combinations are left to the app-wide zoom.
+    if (mode === 'plan' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.nativeEvent.isComposing && !target.closest(textEntry)) {
+      if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomBy(1.25); return; }
+      if (event.key === '-') { event.preventDefault(); zoomBy(0.8); return; }
+      if (event.key === '0') { event.preventDefault(); fitView(); return; }
+    }
     if (target.closest(interactive)) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd' && selected?.type === 'symbol' && canEdit) { event.preventDefault(); duplicateSymbol(); }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(event.shiftKey); }
@@ -643,21 +680,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                 <text x="0" y={plan.vertical ? 35 : 29} textAnchor="middle" pointerEvents="none">{node.locked ? '🔒 ' : ''}{node.name}{tilt ? ` · ${tilt}` : ''}</text>
               </g>;
             })}
-            {!!polygon.length && <g className="bmap-polygon-preview" pointerEvents="none"><polyline points={polygon.map(point => `${point.x},${point.y}`).join(' ')} />{polygon.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={4 / view.zoom} />)}</g>}
+            {!!polygon.length && <g className="bmap-polygon-preview" pointerEvents="none"><polyline points={polygon.map(point => `${point.x},${point.y}`).join(' ')} />{polygon.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={MAP_EDIT_MARK.polygonDot * screenScale} />)}</g>}
             {/* Handles are drawn last, so an item picked from under others can still be turned and resized. */}
-            {selected && canEdit && !selected.locked && (selected.type === 'camera' ? (() => {
-              const plan = projectCameraToPlan(selected), reach = 80 * Math.hypot(plan.direction.x, plan.direction.y);
-              // The handle stays on the stored direction, also when the camera looks straight up or down.
-              return <g className="bmap-handles" transform={`translate(${selected.x} ${selected.y}) rotate(${selected.angle})`}>
-                {reach < 72 && <line className="bmap-camera-guide" x1={Math.max(plan.vertical ? 18 : 12, reach)} y1="0" x2="73" y2="0" />}
-                <circle className="bmap-camera-direction" cx="80" cy="0" r="7" onPointerDown={event => pointerDown(event, selected, 'rotate')} />
-              </g>;
-            })() : (() => {
-              const lift = selected.type === 'space' ? 28 : 25;
-              return <g className="bmap-handles" transform={`translate(${selected.x} ${selected.y}) rotate(${selected.rotation} ${selected.width / 2} ${selected.height / 2})`}>
-                <line x1={selected.width / 2} x2={selected.width / 2} y1="0" y2={-lift} /><circle className="bmap-rotate-handle" cx={selected.width / 2} cy={-lift} r="7" onPointerDown={event => pointerDown(event, selected, 'rotate')} /><rect className="bmap-resize-handle" x={selected.width - 6} y={selected.height - 6} width="12" height="12" onPointerDown={event => pointerDown(event, selected, 'resize')} />
-              </g>;
-            })())}
+            {selected && canEdit && !selected.locked && <MapNodeHandles node={selected} scale={screenScale} vertexHandles={false} onHandleDown={(event, handle) => pointerDown(event, selected, handle)} />}
           </svg> : <div className="bmap-3d-split">
             <div className="bmap-3d-main" ref={stageRef} tabIndex={-1} onPointerDownCapture={event => {
               setSymbolPaletteOpen(false);
@@ -676,7 +701,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             <BackgroundMapPlanPreview map={current} selectedId={view.selectedId} onSelect={selectNode} />
           </div>}
           {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : '도면 편집에서 공간·문·사물·카메라를 배치할 수 있습니다.'}</span></div>}
-          <div className="bmap-canvas-footer"><span>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom"><button type="button" aria-label="도면 축소" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="확대와 위치 초기화" onClick={() => updateView({ x: 0, y: 0, zoom: 1 })}>맞춤</button></div>}</div>
+          <div className="bmap-canvas-footer"><span>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom"><button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
         <aside className="bmap-inspector" id="bmap-selection-properties" aria-label="선택 속성" hidden={!inspectorOpen}>
