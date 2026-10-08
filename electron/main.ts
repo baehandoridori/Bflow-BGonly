@@ -24,6 +24,10 @@ import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarIpc';
 import { registerCalendarReminders } from './calendarReminders';
 import { registerGanttIpc } from './ganttIpc';
+import { registerBackgroundIpc } from './backgroundIpc';
+import { createBackgroundStore, startBackgroundRealtime } from './backgroundStore';
+import { uploadBackgroundImage } from './backgroundStorage';
+import { readBackgroundImageFile } from './backgroundImageFile';
 import { registerCalendarSubscriptionIpc } from './calendarSubscriptionIpc';
 import { createCalendarSubscriptionService } from './calendarSubscriptionService';
 import { setGanttSessionTokenResolver } from './ganttStore';
@@ -2535,6 +2539,14 @@ function getSessionOriginOrThrow(): { userId: string; epoch: number; role: 'admi
 
 // 간트 RPC 는 actor id 대신 서버 세션 토큰을 받는다. canonical 사용자와 일치할 때만 토큰이 나간다.
 setGanttSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
+registerBackgroundIpc({
+  ipc: ipcMain,
+  store: createBackgroundStore(supabaseClient, { tokenFor: actorId => sessionManager.getSessionTokenFor(actorId) }),
+  getSessionOriginOrThrow,
+  onChanged: () => broadcastToAllWindows('background:changed', {}),
+  uploadImage: uploadBackgroundImage,
+  readImageFile: filePath => readBackgroundImageFile(filePath, { decode: buffer => nativeImage.createFromBuffer(buffer) }),
+});
 calendarStore.setCalendarSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
 registerCalendarSubscriptionIpc({
   getSessionOriginOrThrow,
@@ -3324,7 +3336,10 @@ ipcMain.handle('slack:send-rigging-webhook', wrapIpc(async (_e: unknown, payload
 }));
 
 // ─── Realtime 구독 (앱 시작 시 자동 설정) ───
+let backgroundRealtimeCleanup: (() => void) | null = null;
 function startSupabaseRealtime() {
+  backgroundRealtimeCleanup?.();
+  backgroundRealtimeCleanup = startBackgroundRealtime(supabaseClient, () => broadcastToAllWindows('background:changed', {}));
   // 1) postgres_changes 기반 (기존)
   setupRealtimeSubscription({
     onSceneChange: (payload) => broadcastSupabaseEvent('scenes', payload),
@@ -5453,6 +5468,8 @@ app.whenReady().then(async () => {
 // ─── 종료 시 미완료 작업 대기 (Phase 0-5) ─────────────────────
 
 app.on('before-quit', (e) => {
+  backgroundRealtimeCleanup?.();
+  backgroundRealtimeCleanup = null;
   icsSubscriptionIpc.dispose();
   if (isQuitting) return;
   isQuitting = true;

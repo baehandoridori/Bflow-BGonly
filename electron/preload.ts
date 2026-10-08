@@ -153,6 +153,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fontDelete: (font: { id: string; filename: string }) => ipcRenderer.invoke('font:delete', font),
   // v1.20.0: 드래그앤드롭에서 File → 절대 경로 (Electron 32+에선 File.path 제거 → webUtils 사용 필수)
   fontGetPathForFile: (file: File) => webUtils.getPathForFile(file),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   // 실시간 동기화: 다른 창이 데이터를 변경했을 때 델타 알림
   onDataChanged: (callback: (delta?: unknown) => void) => {
@@ -477,6 +478,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('auth:change-own-password', input),
   readPersonalTodos: () => ipcRenderer.invoke('personal-todo:read', canonicalSessionEpoch),
   ganttRead: () => ipcRenderer.invoke('gantt:read', canonicalSessionEpoch),
+  backgroundRead: () => ipcRenderer.invoke('background:read', canonicalSessionEpoch),
+  backgroundExecute: (request: import('../src/features/backgrounds/types').BackgroundRequest) => ipcRenderer.invoke('background:execute', request, canonicalSessionEpoch),
+  backgroundUploadImage: (base64Data: string) => ipcRenderer.invoke('background:upload-image', base64Data, canonicalSessionEpoch),
+  backgroundReadImageFile: (filePath: string) => ipcRenderer.invoke('background:read-image-file', filePath, canonicalSessionEpoch),
+  onBackgroundChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('background:changed', listener);
+    return () => ipcRenderer.removeListener('background:changed', listener);
+  },
   ganttExecute: (request: import('../src/features/gantt/types').GanttRequest) => ipcRenderer.invoke('gantt:execute', request, canonicalSessionEpoch),
   onGanttChanged: (callback: () => void) => {
     const listener = () => callback();

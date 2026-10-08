@@ -27,7 +27,7 @@ export function canAccessPlayground(
 
 const KNOWN_VIEWS = new Set<ViewMode>([
   'dashboard', 'episode', 'scenes', 'assignee', 'team', 'calendar', 'schedule', 'vacation',
-  'compositing', 'compositing-revisions', 'retake-hub', 'character-board', 'playground', 'settings',
+  'compositing', 'compositing-revisions', 'retake-hub', 'character-board', 'background-library', 'playground', 'settings',
 ]);
 
 export function resolveAllowedView(

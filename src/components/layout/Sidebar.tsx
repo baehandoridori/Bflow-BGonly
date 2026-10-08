@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Gamepad2, Settings, PanelLeft, ExternalLink } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, ListChecks, Drama, Map, Gamepad2, Settings, PanelLeft, ExternalLink } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -55,6 +55,7 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'retake-hub', label: '리테이크 허브', icon: <ListChecks size={20} /> },
   // 캐릭터 현황판 — 전면 공개(정식 릴리즈).
   { id: 'character-board', label: '캐릭터', icon: <Drama size={20} /> },
+  { id: 'background-library', label: '배경', icon: <Map size={20} /> },
   { id: 'playground', label: '배플레이그라운드', icon: <Gamepad2 size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];

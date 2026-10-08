@@ -1,5 +1,9 @@
 # CLAUDE.md — B flow
 
+> **배경 평면/3D 후속 작업 (2026-10-07):** [Opus 5.5 구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md)와 [실행 계획](docs/superpowers/plans/2026-10-07-background-3d-editor.md)을 먼저 읽는다. 같은 배치의 평면/3D 전환, 고정 기본점에 카메라 생성, 기즈모 이동·회전, 3D 카메라 편집 중 동시 2D 확인이 요구사항이다. 2026-10-07에 구현과 로컬 검증을 마쳤다(미커밋·미배포). 구현 결과·확정한 결정·미검증 항목은 인수인계 문서 §13, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)의 2026-10-07 절을 본다.
+
+> **배경 라이브러리 작업 재개 안내 (2026-10-06):** 이 워크트리의 미커밋 구현은 보존 중이다. [상세 인수인계](DEVLOG/background-library-handoff-2026-10-06.md)를 먼저 읽는다. 작업 위치는 `C:\Bflow-BGonly\.worktrees\background-library`이며, 상위 checkout과 미추적 파일을 덮어쓰거나 정리하지 않는다. 마지막 완료 항목은 에피소드별 배경 UI이며 운영 DB 적용·배포는 미실행이다.
+
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
 > **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료, Phase 9 M-0~M-5 완료, M-6 준비 완료 (빌드/배포만 남음)

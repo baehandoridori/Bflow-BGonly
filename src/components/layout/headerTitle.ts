@@ -9,6 +9,7 @@ const VIEW_TITLES: Partial<Record<ViewMode, string>> = {
   vacation: '휴가 관리',
   playground: '배플레이그라운드',
   settings: '설정',
+  'background-library': '배경 라이브러리',
 };
 
 export function resolveHeaderTitle(

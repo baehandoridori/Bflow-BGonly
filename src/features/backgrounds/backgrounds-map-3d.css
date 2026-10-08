@@ -1,0 +1,25 @@
+/* 3D map viewport. It fills whatever box the editor gives it; its own controls sit at the bottom. */
+.bmap-3d { position:relative; flex:1 1 auto; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; background:rgb(var(--color-bg-primary)); color:rgb(var(--color-text-primary)); }
+.bmap-3d:focus-visible { outline:2px solid rgb(var(--color-accent-sub)); outline-offset:-2px; }
+.bmap-3d-stage { position:absolute; inset:0; }
+.bmap-3d-canvas { display:block; width:100%; height:100%; outline:0; touch-action:none; user-select:none; cursor:default; }
+.bmap-3d.is-look .bmap-3d-canvas { cursor:grab; }
+.bmap-3d.is-look .bmap-3d-canvas:active { cursor:grabbing; }
+.bmap-3d.is-placing .bmap-3d-canvas { cursor:crosshair; }
+.bmap-3d.is-looking .bmap-3d-canvas { cursor:default; }
+
+.bmap-3d-bar { position:absolute; left:8px; right:8px; bottom:8px; display:flex; flex-wrap:wrap-reverse; align-items:flex-end; justify-content:space-between; gap:6px; pointer-events:none; }
+.bmap-3d-bar>* { pointer-events:auto; }
+.bmap-3d-hint { flex:1 1 150px; min-width:0; max-width:max-content; margin:0; padding:5px 8px; border:1px solid rgb(var(--color-bg-border)); border-radius:6px; background:rgb(var(--color-bg-card) / .9); color:rgb(var(--color-text-secondary)); font-size:10px; line-height:1.45; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; pointer-events:none; }
+.bmap-3d-hint:empty { display:none; }
+.bmap-3d-look { color:rgb(var(--color-text-primary)); border-color:#e6b57880; }
+.bmap-3d-look strong { font-weight:600; color:#e6b578; }
+[data-color-mode="light"] .bmap-3d-look strong { color:#8a5a14; }
+.bmap-3d-look span { margin-left:6px; color:rgb(var(--color-text-secondary)); }
+
+.bmap-3d-controls { display:flex; flex:0 0 auto; margin-left:auto; gap:2px; padding:3px; border:1px solid rgb(var(--color-bg-border)); border-radius:8px; background:rgb(var(--color-bg-card) / .94); box-shadow:0 3px 12px rgb(var(--color-shadow) / .12); }
+.bg-library .bmap-3d-controls button,.bmap-3d-controls button { display:inline-flex; align-items:center; justify-content:center; min-width:28px; min-height:28px; padding:4px 7px; border:0; border-radius:5px; background:transparent; color:rgb(var(--color-text-secondary)); font:inherit; font-size:11px; line-height:1; white-space:nowrap; cursor:pointer; }
+.bg-library .bmap-3d-controls button:hover:not(:disabled),.bmap-3d-controls button:hover:not(:disabled) { background:rgb(var(--color-bg-border) / .7); color:rgb(var(--color-text-primary)); }
+.bg-library .bmap-3d-return,.bmap-3d-return { flex:0 0 auto; margin-left:auto; min-height:30px; padding:5px 10px; border:1px solid #e6b57899; border-radius:7px; background:rgb(var(--color-bg-card) / .96); color:rgb(var(--color-text-primary)); font:inherit; font-size:11px; white-space:nowrap; cursor:pointer; }
+.bg-library .bmap-3d-return:hover:not(:disabled),.bmap-3d-return:hover:not(:disabled) { background:#e6b57826; border-color:#e6b578; }
+.bmap-3d-controls button:focus-visible,.bmap-3d-return:focus-visible { outline:2px solid rgb(var(--color-accent-sub)); outline-offset:1px; }
