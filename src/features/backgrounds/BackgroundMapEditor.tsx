@@ -558,6 +558,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     return { x: point.x, y: point.y };
   }
   function pointerDown(event: ReactPointerEvent<SVGElement>, node?: BackgroundNode, handle?: 'resize' | 'rotate') {
+    // A step to the next pile item that no click took ends with the next press on the canvas, taken or not. The release
+    // that ends a two-button press, or a long touch, is followed by no click, and the click of a press that is
+    // refused below (a save is running) must not take that step.
+    pendingCycle.current = null;
     // A press the editor does not take empties the press log, like a press outside the canvas: it is no half of a double-click.
     if (!current || disabled || pointerRef.current || doc.isGestureActive() || (event.button !== 0 && event.button !== 1)) { pressLog.current = NO_PRESSES; return; }
     const point = pointFrom(event), matrix = svgRef.current?.getScreenCTM()?.inverse();
@@ -565,7 +569,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     event.preventDefault(); event.stopPropagation();
     setSymbolPaletteOpen(false);
     svgRef.current?.focus();
-    pendingCycle.current = null;
     // Taking the focus ends a number entry that was still open, and that may have edited the map just now:
     // everything below starts from the map as it is at this moment, not as it was drawn.
     const live = mapDraft(doc.getState(), current.id)?.value ?? current;
@@ -856,7 +859,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             {editing ? <Field label="이름"><input value={selected.name} disabled={fieldLocked} onChange={event => patchNode({ name: event.target.value }, 'name')} onBlur={doc.endCoalescing} /></Field> : <h3 className="bmap-selected-name">{selected.name}</h3>}
             {selected.type === 'space' && <section className="bmap-connection" aria-label="공간의 상세 도면">
               <span className="bmap-eyebrow">이 공간 안으로</span>
-              {linkedMap ? <><strong>{linkedMap.name}</strong><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => navigate(linkedMap.id)}>상세 도면 열기 →</button><p>{editing ? '공간을 더블클릭해도 열립니다. 이름은 F2 키나 위의 이름 칸에서 바꿔요.' : '공간을 더블클릭해도 열립니다.'}</p></> : <><p>이 공간의 내부를 별도 도면으로 이어보세요.</p>{snapshot.canManage && <button type="button" className="bg-button bg-primary" disabled={disabled || selected.locked || !!polygon.length} onClick={() => openCreate(current.id, selected)}>내부 도면 만들기</button>}</>}
+              {linkedMap ? <><strong>{linkedMap.name}</strong><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => navigate(linkedMap.id)}>상세 도면 열기 →</button><p>{editing && mode === 'plan' ? '공간을 더블클릭해도 열립니다. 이름은 F2 키나 위의 이름 칸에서 바꿔요.' : '공간을 더블클릭해도 열립니다.'}</p></> : <><p>이 공간의 내부를 별도 도면으로 이어보세요.</p>{snapshot.canManage && <button type="button" className="bg-button bg-primary" disabled={disabled || selected.locked || !!polygon.length} onClick={() => openCreate(current.id, selected)}>내부 도면 만들기</button>}</>}
               {snapshot.canManage && <div className="bmap-link-actions"><button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => { setError(''); setLinkForm({ spaceId: selected.id, mapId: selected.childMapId ?? '', search: '' }); }}>{linkedMap ? '연결 변경' : '기존 도면 연결'}</button>{linkedMap && <button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => void linkMap(null, selected.id)}>연결 해제</button>}</div>}
               {selected.locked && <p>잠금을 해제하면 연결을 바꿀 수 있습니다.</p>}
               {draftChanged && <p className="bmap-save-note">연결할 때 현재 공간 편집 내용도 함께 저장됩니다.</p>}
