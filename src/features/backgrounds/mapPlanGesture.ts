@@ -1,5 +1,5 @@
 import type { BackgroundMap, BackgroundPoint, BackgroundSpace } from './types.ts';
-import { moveMapNode, nodeResizeCorner, replaceMapNode, resizeSpace, transformMapSpace } from './mapGeometry.ts';
+import { moveMapNode, nodeResizeCorner, replaceMapNode, resizeSpace, resizeSpaceTo, transformMapSpace } from './mapGeometry.ts';
 import { normalizeDegrees } from './mapSpatial.ts';
 import type { SnapCandidates, SnapGuide } from './mapSnap.ts';
 
@@ -32,7 +32,10 @@ export function previewPlanGesture(gesture: PlanGesture, initial: BackgroundMap,
     if (node.type === 'camera') return { map: initial, guides: [] };
     // The handle stands for the bottom-right corner, which travels as far as the pointer did: where the handle
     // was pressed does not enter the result, so the corner never jumps to the pointer.
-    const corner = nodeResizeCorner(node), resized = resizeSpace(node, { x: corner.x + delta.x, y: corner.y + delta.y });
+    const handle = nodeResizeCorner(node), corner = { x: handle.x + delta.x, y: handle.y + delta.y };
+    // An unturned node takes the travel on its stored size: `x + width + travel - x` can lose the last digit,
+    // and then a drag that came back, or the length that was not dragged, would stay as a change.
+    const resized = node.rotation === 0 ? resizeSpaceTo(node, node.width + delta.x, node.height + delta.y) : resizeSpace(node, corner);
     return { map: resized.type === 'space' ? transformMapSpace(initial, resized) : replaceMapNode(initial, resized), guides: [] };
   }
   // Only the horizontal direction changes: height, tilt and frame of a camera stay as they are.

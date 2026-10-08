@@ -60,12 +60,13 @@ const onPlanMark = (node: BackgroundNode, point: BackgroundPoint) =>
   planNodeCovers(node, point, node.type !== 'camera' ? 0 : projectCameraToPlan(node).vertical ? 18 : 12, 80);
 /**
  * The plan gesture a pressed pointer performs. Only the sessions that edit the map have one (`pan` and `click`
- * never ask): any other names no node, so nothing is previewed for it.
+ * never ask): any other names no node, so nothing is previewed for it. The editing modes are told apart by
+ * exclusion: a mode added to the session does not compile here until it has a gesture of its own.
  */
 function planGestureOf(session: PointerSession): PlanGesture {
   const { mode, node } = session;
   if (mode === 'draw' && node?.type === 'space') return { mode, node };
-  if (node && (mode === 'move' || mode === 'resize' || mode === 'rotate')) return { mode, nodeId: node.id };
+  if (node && mode !== 'pan' && mode !== 'click' && mode !== 'draw') return { mode, nodeId: node.id };
   return { mode: 'move', nodeId: '' };
 }
 

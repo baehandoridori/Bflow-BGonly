@@ -67,6 +67,22 @@ test('a free resize moves the bottom-right corner by as far as the pointer went'
   }
 });
 
+test('a free resize of an unturned node adds the travel to its stored size, to the last digit', () => {
+  // Decimal coordinates, where going through the corner does not come back: 120.3 + 80 - 120.3 is 80.00000000000001.
+  const box = { x: 244.65, y: 120.3, width: 144.65, height: 80 }, press = { x: 400.2, y: 210.7 };
+  for (const source of [{ ...room, ...box }, { ...chair, ...box }]) {
+    const initial = replaceMapNode(plan, source), gesture: PlanGesture = { mode: 'resize', nodeId: source.id }, label = source.type;
+    const sized = (point: BackgroundPoint) => previewPlanGesture(gesture, initial, press, point, null)!.map.nodes.find(node => node.id === source.id) as BackgroundSpace | BackgroundSymbol;
+    // A drag that came back to where it was pressed is the map as it was: nothing is left to undo.
+    assert.deepEqual(previewPlanGesture(gesture, initial, press, press, null), { map: initial, guides: [] }, label);
+    // The length that was not dragged keeps every digit.
+    const wide = sized({ x: 431.9, y: 210.7 }), tall = sized({ x: 400.2, y: 251.3 });
+    assert.equal(wide.width, box.width + (431.9 - 400.2), label); assert.equal(wide.height, 80, label);
+    assert.equal(tall.height, box.height + (251.3 - 210.7), label); assert.equal(tall.width, 144.65, label);
+    for (const node of [wide, tall]) { assert.equal(node.x, 244.65, label); assert.equal(node.y, 120.3, label); }
+  }
+});
+
 test('a free rotation points a camera at the pointer and turns a space or symbol by the swept angle', () => {
   // A camera looks from its own position toward the pointer, wherever the press was.
   for (const start of [{ x: 580, y: 340 }, { x: 12, y: 700 }]) {
@@ -101,6 +117,18 @@ test('a free rotation points a camera at the pointer and turns a space or symbol
   const spun = previewPlanGesture({ mode: 'rotate', nodeId: chair.id }, plan, { x: 320, y: 210 }, { x: 345, y: 235 }, null)!;
   assert.deepEqual(spun.map.nodes[CHAIR], { ...chair, rotation: 90 }); assert.deepEqual(spun.guides, []);
   for (const index of [ROOM, LENS, LOOKOUT]) assert.equal(spun.map.nodes[index], plan.nodes[index]);
+});
+
+test('a free rotation keeps the angle as it was computed, also right beside a quarter turn', () => {
+  const around = (centre: BackgroundPoint, radius: number, degrees: number): BackgroundPoint =>
+    ({ x: centre.x + radius * Math.cos(degrees * Math.PI / 180), y: centre.y + radius * Math.sin(degrees * Math.PI / 180) });
+  // 1.5 degrees off 90, 0 and 270: nothing is rounded and no stop catches the angle.
+  const swept = previewPlanGesture({ mode: 'rotate', nodeId: room.id }, plan, { x: 250, y: 72 }, around({ x: 250, y: 200 }, 128, 1.5), null)!;
+  near((swept.map.nodes[ROOM] as BackgroundSpace).rotation, 91.5, 'space'); near((swept.map.nodes[LENS] as BackgroundCamera).angle, 101.5, 'member angle');
+  const spun = previewPlanGesture({ mode: 'rotate', nodeId: chair.id }, plan, { x: 320, y: 210 }, around({ x: 320, y: 235 }, 25, -91.5), null)!;
+  near((spun.map.nodes[CHAIR] as BackgroundSymbol).rotation, 358.5, 'symbol');
+  const aimed = previewPlanGesture({ mode: 'rotate', nodeId: lookout.id }, plan, { x: 580, y: 340 }, around(lookout, 80, 268.5), null)!;
+  near((aimed.map.nodes[LOOKOUT] as BackgroundCamera).angle, 268.5, 'camera');
 });
 
 test('drawing appends a box of at least 10 between the press and the pointer', () => {
