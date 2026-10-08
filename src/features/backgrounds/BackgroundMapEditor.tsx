@@ -159,11 +159,16 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [symbolPaletteOpen, setSymbolPaletteOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [polygon, setPolygon] = useState<BackgroundPoint[]>([]);
-  // Snapping, and the lines the drag in progress is stuck to. Showing the same lines again keeps the state as it
-  // is: a drag that stays stuck does not render the guides for every pointer move.
+  // Snapping, and the lines the drag in progress is stuck to. The lines on show are compared here, before the
+  // state is set: a state update that comes after the preview of the same pointer move runs this whole component
+  // once more even when it changes nothing, so a drag would render twice for every move.
   const [snapEnabled, setSnapEnabled] = useState(readSnapPreference);
   const [guides, setGuides] = useState<readonly SnapGuide[]>(NO_GUIDES);
-  const showGuides = (next: readonly SnapGuide[]) => setGuides(previous => sameSnapGuides(previous, next) ? previous : next);
+  const shownGuides = useRef<readonly SnapGuide[]>(NO_GUIDES);
+  const showGuides = (next: readonly SnapGuide[]) => {
+    if (sameSnapGuides(shownGuides.current, next)) return;
+    shownGuides.current = next; setGuides(next);
+  };
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);

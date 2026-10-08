@@ -38,7 +38,8 @@ export function previewPlanGesture(gesture: PlanGesture, initial: BackgroundMap,
   const node = initial.nodes.find(item => item.id === gesture.nodeId);
   if (!node) return null;
   if (gesture.mode === 'move') {
-    const stuck = snap && snapMove(initial, [node.id], node.id, delta, snap.candidates, snap.tolerance, snap.reach);
+    // A locked node does not move, so it is not snapped: no guide shows for a node that stayed where it was.
+    const stuck = snap && !node.locked && snapMove(initial, [node.id], node.id, delta, snap.candidates, snap.tolerance, snap.reach);
     // A snapped position is stored as it is, not reached by adding the travel: a stuck edge keeps the very
     // value of its target, and the other axis is an exact whole number.
     return stuck ? { map: placeMapNode(initial, node.id, stuck.position), guides: stuck.guides } : { map: moveMapNode(initial, node.id, delta), guides: [] };
@@ -48,7 +49,8 @@ export function previewPlanGesture(gesture: PlanGesture, initial: BackgroundMap,
     // The handle stands for the bottom-right corner, which travels as far as the pointer did: where the handle
     // was pressed does not enter the result, so the corner never jumps to the pointer.
     const handle = nodeResizeCorner(node), corner = { x: handle.x + delta.x, y: handle.y + delta.y };
-    const stuck = snap && snapResize(node, corner, snap.candidates, snap.tolerance, snap.reach);
+    // A locked node is not snapped here either.
+    const stuck = snap && !node.locked && snapResize(node, corner, snap.candidates, snap.tolerance, snap.reach);
     // A free drag of an unturned node adds the travel to its stored size: `x + width + travel - x` can lose the
     // last digit, and then a drag that came back, or the length that was not dragged, would stay as a change.
     const resized = stuck ? stuck.node : node.rotation === 0 ? resizeSpaceTo(node, node.width + delta.x, node.height + delta.y) : resizeSpace(node, corner);

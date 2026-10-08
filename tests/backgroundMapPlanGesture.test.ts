@@ -236,6 +236,29 @@ test('a space does not stick to a member it carries, and does stick to a locked 
   assert.equal(held.map.nodes[CHAIR], bolted.nodes[CHAIR]); near(held.map.nodes[LENS].x, 400, 'carried camera');
 });
 
+test('a space sticks by its own edges, not by those of a member that reaches past them', () => {
+  // A door in the left wall pokes 20 out of the room, and the hall ends 15.35 to the left of that wall.
+  const door: BackgroundSymbol = { ...chair, id: 'door', name: '문', symbol: 'door', x: 80, y: 180, width: 40, height: 40 };
+  const hall: BackgroundSpace = { ...room, id: 'hall', name: '복도', x: 20, y: 40, width: 64.65, height: 350 };
+  const initial: BackgroundMap = { ...plan, nodes: [room, door, hall] }, edge = hall.x + hall.width;
+  // The wall comes 2.95 from the hall and takes its value. Measured together with the door, the left edge
+  // would be 20 further out and there would be nothing for it to stick to.
+  const preview = snapped({ mode: 'move', nodeId: room.id }, initial, { x: 150, y: 150 }, { x: 137.6, y: 153.7 }), moved = preview.map.nodes;
+  assert.equal(moved[0].x, edge); assert.equal(moved[0].y, 104);
+  assert.deepEqual(preview.guides, [{ axis: 'x', at: edge, from: 40, to: 390 }]);
+  // The door goes as far as the room did.
+  near(moved[1].x, door.x + (edge - room.x), 'door x'); near(moved[1].y, 184, 'door y'); assert.equal(moved[2], hall);
+});
+
+test('a snapped move takes a camera by its point', () => {
+  // Brought to 2.3 left of the left wall of the room and 1.4 below its middle line.
+  const camera: BackgroundCamera = { ...lookout, id: 'camera', x: 60, y: 420 };
+  const initial: BackgroundMap = { ...plan, nodes: [room, camera] };
+  const preview = snapped({ mode: 'move', nodeId: camera.id }, initial, { x: 60, y: 420 }, { x: 97.7, y: 201.4 });
+  assert.deepEqual(preview.map.nodes[1], { ...camera, x: 100, y: 200 }); assert.equal(preview.map.nodes[0], room);
+  assert.deepEqual(preview.guides, [{ axis: 'x', at: 100, from: 100, to: 300 }, { axis: 'y', at: 200, from: 100, to: 400 }]);
+});
+
 test('a snapped move sticks only to what is near on the other axis', () => {
   const gesture: PlanGesture = { mode: 'move', nodeId: room.id }, start = { x: 250, y: 200 };
   const stool = (x: number, y: number): BackgroundSymbol => ({ ...chair, id: 'stool', spaceId: null, x, y, width: 60, height: 60 });
@@ -246,6 +269,18 @@ test('a snapped move sticks only to what is near on the other axis', () => {
   const beside = snapped(gesture, { ...plan, nodes: [room, stool(430, 151.5)] }, start, { x: 250.3, y: 250.2 });
   assert.equal(beside.map.nodes[0].x, 100); assert.equal(beside.map.nodes[0].y, 151.5);
   assert.deepEqual(beside.guides, [{ axis: 'y', at: 151.5, from: 100, to: 490 }]);
+});
+
+test('a snapped resize sticks only to what is near on the other axis', () => {
+  const gesture: PlanGesture = { mode: 'resize', nodeId: room.id }, start = { x: 400, y: 300 }, point = { x: 697.6, y: 300.3 };
+  const stool = (y: number): BackgroundSymbol => ({ ...chair, id: 'stool', spaceId: null, x: 700, y, width: 60, height: 60 });
+  // The dragged corner comes 2.4 short of the left edge of the stool, but the stool is 99.7 further down.
+  const apart = snapped(gesture, { ...plan, nodes: [room, stool(400)] }, start, point);
+  assert.deepEqual(apart.map.nodes[0], { ...room, width: 598, height: 200 }); assert.deepEqual(apart.guides, []);
+  // The same 2.4 with the stool 39.7 further down.
+  const beside = snapped(gesture, { ...plan, nodes: [room, stool(340)] }, start, point);
+  assert.deepEqual(beside.map.nodes[0], { ...room, width: 600, height: 200 });
+  assert.deepEqual(beside.guides, [{ axis: 'x', at: 700, from: 100, to: 400 }]);
 });
 
 test('a snapped resize takes the corner to a near line and makes the other length a whole number', () => {
@@ -273,6 +308,22 @@ test('a snapped resize takes the corner to a near line and makes the other lengt
   // A camera has no size, snapped or not.
   const lensless = snapped({ mode: 'resize', nodeId: lookout.id }, plan, start, point);
   assert.equal(lensless.map, plan); assert.deepEqual(lensless.guides, []);
+});
+
+test('a locked node sticks to nothing: the map is as it was and no guide shows', () => {
+  // The room of the first snapped move, locked: 2.95 from the hall, where it would stick if it could move.
+  const hall: BackgroundSpace = { ...room, id: 'hall', name: '복도', x: 20, y: 40, width: 64.65, height: 350 };
+  const initial: BackgroundMap = { ...plan, nodes: [{ ...room, locked: true }, hall] };
+  const moved = snapped({ mode: 'move', nodeId: room.id }, initial, { x: 150, y: 150 }, { x: 137.6, y: 153.7 });
+  assert.equal(moved.map, initial); assert.deepEqual(moved.guides, []);
+  // Its corner dragged to 1.8 from the bottom edge of the hall.
+  const sized = snapped({ mode: 'resize', nodeId: room.id }, initial, { x: 400, y: 300 }, { x: 400.4, y: 388.2 });
+  assert.equal(sized.map, initial); assert.deepEqual(sized.guides, []);
+  // Whatever kind the locked node is, its snapped move is the free one: the chair would stick to the middle line of its room.
+  const fixed: BackgroundMap = { ...plan, nodes: plan.nodes.map(node => ({ ...node, locked: true })) };
+  for (const node of fixed.nodes) {
+    assert.deepEqual(snapped({ mode: 'move', nodeId: node.id }, fixed, { x: 310.5, y: 240.25 }, { x: 352, y: 199.75 }), { map: fixed, guides: [] }, node.id);
+  }
 });
 
 test('a snapped rotation is caught by the quarter turns, and the members of a space turn with it', () => {
