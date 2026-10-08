@@ -96,10 +96,14 @@ export function placeMapNode(map: BackgroundMap, id: string, position: Backgroun
   return replaceMapNode(map, { ...selected, x: position.x, y: position.y });
 }
 
-/** The map with the node renamed to the trimmed name. Blank or unchanged names, unknown and locked nodes return `map` itself. */
+/**
+ * The map with the node renamed to the trimmed name. Blank or unchanged names, unknown and locked nodes return `map` itself.
+ * Unchanged is judged between the trimmed names: a stored name can carry outer whitespace (the inspector keeps what was typed),
+ * and a name box nothing was typed into hands that name back.
+ */
 export function renameMapNode(map: BackgroundMap, id: string, name: string): BackgroundMap {
   const node = map.nodes.find(item => item.id === id), trimmed = name.trim();
-  if (!node || node.locked || !trimmed || trimmed === node.name) return map;
+  if (!node || node.locked || !trimmed || trimmed === node.name.trim()) return map;
   return replaceMapNode(map, { ...node, name: trimmed });
 }
 

@@ -675,6 +675,11 @@ test('renaming a node stores the trimmed name, and a name that changes nothing r
   // Blank, and the name it already has (as typed or once trimmed).
   for (const name of ['', '   ', '새 공간', '  새 공간 ']) assert.equal(renameMapNode(source, drawn.id, name), source, JSON.stringify(name));
   assert.equal(renameMapNode(source, memberCamera.id, memberCamera.name), source);
+  // A stored name can carry outer whitespace: the name field of the inspector keeps what was typed. A name box nothing was
+  // typed into hands that very name back, and that is no change. Outer whitespace alone never makes a new name.
+  const padded: BackgroundMap = { ...source, nodes: [{ ...drawn, name: ' 교실 ' }, memberCamera] };
+  for (const name of [' 교실 ', '교실', '교실 ', '  교실\t']) assert.equal(renameMapNode(padded, drawn.id, name), padded, JSON.stringify(name));
+  assert.deepEqual(renameMapNode(padded, drawn.id, ' 과학실 ').nodes[0], { ...drawn, name: '과학실' });
   // Locked and unknown nodes.
   assert.equal(renameMapNode(source, lockedDoor.id, '뒷문'), source);
   assert.equal(renameMapNode({ ...source, nodes: [{ ...drawn, locked: true }] }, drawn.id, '교실').nodes[0].name, '새 공간');
