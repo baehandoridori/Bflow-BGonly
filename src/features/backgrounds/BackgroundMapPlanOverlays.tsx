@@ -1,5 +1,6 @@
 import type { JSX, PointerEvent as ReactPointerEvent } from 'react';
 import { MAP_EDIT_MARK, planNodeHandles } from './mapPlanEdit';
+import type { PlanVertexHandles } from './mapPlanEdit';
 import type { SnapGuide } from './mapSnap';
 import type { BackgroundNode } from './types';
 
@@ -38,5 +39,27 @@ export function MapNodeHandles({ node, scale, vertexHandles, onHandleDown }: {
       {handles.resize?.shifted && <line x1={width} y1={height} x2={handles.resize.x} y2={handles.resize.y} />}
       {handles.resize && <rect className="bmap-resize-handle" x={handles.resize.x} y={handles.resize.y} width={handles.resize.size} height={handles.resize.size} onPointerDown={event => onHandleDown(event, 'resize')} />}
     </>}
+  </g>;
+}
+
+/**
+ * Point handles of the selected polygon, in plan coordinates (outside the turned group of the space): a + in the
+ * middle of each edge that has room for one, and over them a dot on every point. The first circle of a handle is
+ * the wider area that takes the press; the second is what shows.
+ */
+export function MapVertexHandles({ handles, scale, activeIndex, onHandleDown }: {
+  handles: PlanVertexHandles; scale: number; activeIndex: number | null;
+  onHandleDown(event: ReactPointerEvent<SVGElement>, handle: { index: number; insert: boolean }): void }): JSX.Element {
+  const hit = MAP_EDIT_MARK.vertexHit * scale, arm = MAP_EDIT_MARK.edge * scale / 2;
+  return <g className="bmap-vertex-handles" aria-hidden="true">
+    {handles.edges.map(({ index, point }) => <g key={index} className="bmap-vertex-add" onPointerDown={event => onHandleDown(event, { index, insert: true })}>
+      <circle cx={point.x} cy={point.y} r={hit} />
+      <circle cx={point.x} cy={point.y} r={MAP_EDIT_MARK.edge * scale} />
+      <path d={`M ${point.x - arm} ${point.y} H ${point.x + arm} M ${point.x} ${point.y - arm} V ${point.y + arm}`} />
+    </g>)}
+    {handles.vertices.map((point, index) => <g key={index} className={`bmap-vertex-handle${index === activeIndex ? ' is-active' : ''}`} onPointerDown={event => onHandleDown(event, { index, insert: false })}>
+      <circle cx={point.x} cy={point.y} r={hit} />
+      <circle cx={point.x} cy={point.y} r={MAP_EDIT_MARK.vertex * scale} />
+    </g>)}
   </g>;
 }
