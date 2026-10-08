@@ -7,7 +7,8 @@ import { BackgroundMapGallery } from './BackgroundMapGallery';
 import { BackgroundMapPanels } from './BackgroundMapPanels';
 import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
 import { MapNodeHandles, MapSnapGuides } from './BackgroundMapPlanOverlays';
-import { addMapCamera, containsPoint, moveMapNode, polygonSpace, removeMapNode, transformMapSpace } from './mapGeometry';
+import { BackgroundMapNameBox } from './BackgroundMapNameBox';
+import { addMapCamera, containsPoint, moveMapNode, nodeNameAnchor, polygonSpace, removeMapNode, renameMapNode, transformMapSpace } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
 import { MAP_EDIT_MARK, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
@@ -41,6 +42,8 @@ type PointerSession = {
   /** Snap targets, collected from `initial` on the first move that needs them. */
   candidates: SnapCandidates | null;
 };
+/** The node whose name box is open on the plan. */
+type NameEdit = { mapId: string; nodeId: string; /** The draft value right after the creating edit; null for an existing node. */ created: BackgroundMap | null };
 /** One empty list for every time no guide is shown, so the guides state keeps its identity. */
 const NO_GUIDES: readonly SnapGuide[] = [];
 const message = (error: unknown) => error instanceof Error ? error.message : '도면을 저장하지 못했습니다. 다시 시도해 주세요.';
@@ -169,6 +172,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (sameSnapGuides(shownGuides.current, next)) return;
     shownGuides.current = next; setGuides(next);
   };
+  const [renaming, setRenamingState] = useState<NameEdit | null>(null);
+  const renamingRef = useRef<NameEdit | null>(null);       // handlers read this, so a late blur after a close is a no-op
+  function setRenaming(next: NameEdit | null) { renamingRef.current = next; setRenamingState(next); }
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
@@ -195,6 +201,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const editing = !!draft && snapshot.canManage;
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
+  // The name box is drawn only while its node can still be renamed here; otherwise it goes without a commit.
+  const renamingNode = renaming && mode === 'plan' && canEdit && renaming.mapId === current?.id
+    ? current.nodes.find(node => node.id === renaming.nodeId && !node.locked) : undefined;
   const lookThroughId = mode === '3d' && lookThrough && lookThrough.mapId === current?.id && selected?.type === 'camera' && lookThrough.id === selected.id ? lookThrough.id : null;
   const screenScale = mapScreenScale(view.zoom, canvasSize);
   const labelScale = Math.min(MAP_LABEL_SCALE_LIMITS.max, Math.max(MAP_LABEL_SCALE_LIMITS.min, screenScale));
@@ -276,6 +285,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   useEffect(() => {
     setLookThrough(previous => previous && mode === '3d' && previous.mapId === current?.id && previous.id === view.selectedId ? previous : null);
   }, [view.selectedId, current?.id, mode]);
+  // A name box whose node can no longer be renamed is closed, and what was typed in it is dropped.
+  useEffect(() => { if (renaming && !renamingNode) setRenaming(null); }, [renaming, renamingNode]);
 
   /** Cancels a gesture in progress and returns the drafts and maps without its preview. */
   function settle() {
@@ -480,10 +491,43 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (!geometry) { setError('가로와 세로 길이가 각각 10 이상이 되도록 서로 다른 점 3개 이상을 찍어 주세요.'); return; }
     const node = { ...newSpace('polygon', geometry), ...geometry };
     updateMap({ ...current, nodes: [...current.nodes, node] }); select(node.id); setPolygon([]); setTool('select'); setError('');
+    beginRename(node.id, true);
   }
   function openSpace(id: string) {
     const node = current?.nodes.find(item => item.id === id);
     if (node?.type === 'space' && node.childMapId && maps.some(map => map.id === node.childMapId)) navigate(node.childMapId);
+  }
+  /** Opens the name box. `created` true: the node was just drawn, so its name joins that undo step. */
+  function beginRename(id: string, created = false) {
+    if (!current || mode !== 'plan' || !canEdit || pointerRef.current || doc.isGestureActive()) return;
+    const value = mapDraft(doc.getState(), current.id)?.value;
+    const node = value?.nodes.find(item => item.id === id);
+    if (!value || !node || node.locked) return;
+    select(id);
+    setRenaming({ mapId: current.id, nodeId: id, created: created ? value : null });
+  }
+  // The three handlers of the name box go through useEvent: whenever the box calls them, they see the edit rights and the map of the latest render.
+  const commitName = useEvent((text: string, returnFocus: boolean) => {
+    const edit = renamingRef.current;
+    if (!edit) return;
+    setRenaming(null);
+    const draftNow = mapDraft(doc.getState(), edit.mapId);
+    if (draftNow && canEdit) {
+      const next = renameMapNode(draftNow.value, edit.nodeId, text);     // the same map back when the live draft has no such node, or has it locked
+      // The name of a node that was just drawn replaces the value of that drawing step, as long as nothing else was edited in between.
+      if (next !== draftNow.value) updateMap(next, edit.created && draftNow.value === edit.created ? { history: false } : undefined);
+    }
+    if (returnFocus) focusCanvas();
+  });
+  const cancelName = useEvent(() => { if (!renamingRef.current) return; setRenaming(null); focusCanvas(); });
+  /** Undo or redo asked for in a name box nothing was typed into: the box closes without a commit and the editor's own history runs. */
+  const passNameHistory = useEvent((redo: boolean) => { cancelName(); undo(redo); });
+  function renameSelected() {
+    // During a drag or a pan the view is left alone as well: the session holds the transform and the view of the press.
+    if (!selected || !canEdit || selected.locked || pointerRef.current || doc.isGestureActive()) return;
+    const revealed = revealPlanPoint(view, nodeNameAnchor(selected), 24);   // out of sight: only the view moves, as for a new camera
+    if (revealed !== view) updateView({ x: revealed.x, y: revealed.y });
+    beginRename(selected.id);
   }
   function pointFrom(event: { clientX: number; clientY: number }, matrix?: DOMMatrix): BackgroundPoint | null {
     const inverse = matrix ?? svgRef.current?.getScreenCTM()?.inverse();
@@ -563,7 +607,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       else {
         doc.finishGesture();
         if (session.node) select(session.node.id, session.mapId);
-        if (session.mode === 'draw') setTool('select');
+        if (session.mode === 'draw') { setTool('select'); if (session.node) beginRename(session.node.id, true); }
       }
     }
     if (!cancel && !session.moved && session.stack && session.node) {
@@ -595,6 +639,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomBy(1.25); return; }
       if (event.key === '-') { event.preventDefault(); zoomBy(0.8); return; }
       if (event.key === '0') { event.preventDefault(); fitView(); return; }
+      if (event.key === 'F2' && selected) { event.preventDefault(); renameSelected(); return; }
     }
     if (target.closest(interactive)) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd' && selected?.type === 'symbol' && canEdit) { event.preventDefault(); duplicateSymbol(); }
@@ -691,7 +736,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             {current.imageUrl && <image href={current.imageUrl} x="0" y="0" width="1000" height="680" preserveAspectRatio="xMidYMid meet" opacity="0.65" pointerEvents="none" />}
             {current.nodes.filter((node): node is BackgroundSpace => node.type === 'space').map(node => {
               const isSelected = node.id === selected?.id;
-              return <g key={node.id} className={`bmap-space ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => { event.stopPropagation(); if (Date.now() - lastDrag.current > 450 && (tool === 'select' || tool === 'hand')) openSpace(node.id); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-space ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => { event.stopPropagation(); if (Date.now() - lastDrag.current > 450 && (tool === 'select' || tool === 'hand')) openSpace(node.id); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                 {node.shape === 'ellipse' ? <ellipse cx={node.width / 2} cy={node.height / 2} rx={node.width / 2} ry={node.height / 2} /> : node.shape === 'polygon' ? <polygon points={node.points.map(point => `${point.x * node.width},${point.y * node.height}`).join(' ')} /> : <rect width={node.width} height={node.height} rx="4" />}
                 <text x={node.width / 2} y={node.height / 2} textAnchor="middle" dominantBaseline="central" pointerEvents="none">{node.locked ? '🔒 ' : ''}{node.name}</text>
                 {node.childMapId && <text className="bmap-space-detail" x={node.width / 2} y={node.height / 2 + 21} textAnchor="middle" pointerEvents="none">상세 도면 ↗</text>}
@@ -702,7 +747,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               return <Fragment key={node.id}>
                 {/* A tilted object casts the outline of its whole box; its own plan size is untouched. */}
                 {(tilt.pitch !== 0 || tilt.roll !== 0) && <polygon className={`bmap-symbol-tilt ${isSelected ? 'is-selected' : ''}`} points={nodePlanOutline(node).map(point => `${point.x},${point.y}`).join(' ')} pointerEvents="none" />}
-                <g className={`bmap-symbol ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}, 기호`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
+                <g className={`bmap-symbol ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}, 기호`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                   <title>{`${node.name}${node.locked ? ' · 잠김' : ''}`}</title>
                   <rect className="bmap-symbol-hit" width={node.width} height={node.height} rx="3" />
                   <g transform={`scale(${node.width / 100} ${node.height / 100})`}><BackgroundSymbolGlyph symbol={node.symbol} hinge={node.hinge} swing={node.swing} /></g>
@@ -716,7 +761,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               const plan = projectCameraToPlan(node), reach = Math.hypot(plan.direction.x, plan.direction.y);
               const half = node.fov / 2 * Math.PI / 180, radius = 80 * reach;
               const tilt = Math.abs(plan.pitch) >= 0.5 ? cameraPitchLabel(plan.pitch) : '';
-              return <g key={node.id} className={`bmap-camera ${node.id === selected?.id ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-camera ${node.id === selected?.id ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
                 {plan.vertical ? <>
                   <circle className="bmap-camera-ring" r="17" /><circle r="11" />
                   {plan.vertical === 'up' ? <circle className="bmap-camera-mark" r="3.5" /> : <path className="bmap-camera-mark" d="M -4.5 -4.5 L 4.5 4.5 M 4.5 -4.5 L -4.5 4.5" />}
@@ -745,6 +790,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             </div>
             <BackgroundMapPlanPreview map={current} selectedId={view.selectedId} onSelect={selectNode} />
           </div>}
+          {/* An HTML input beside the SVG, placed over its node. Keyed by the node, so each opening starts with that node's name. */}
+          {renamingNode && <BackgroundMapNameBox key={renamingNode.id} svgRef={svgRef} anchor={nodeNameAnchor(renamingNode)}
+            drop={renamingNode.type === 'camera' ? MAP_EDIT_MARK.nameBoxCameraDrop : 0} label={`${kindLabel(renamingNode)} 이름`}
+            initial={renamingNode.name} positionKey={`${view.x}:${view.y}:${view.zoom}:${canvasSize.width}:${canvasSize.height}`}
+            onCommit={commitName} onCancel={cancelName} onHistory={passNameHistory} />}
           {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : '도면 편집에서 공간·문·사물·카메라를 배치할 수 있습니다.'}</span></div>}
           <div className="bmap-canvas-footer"><span>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}

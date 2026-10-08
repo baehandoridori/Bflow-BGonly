@@ -96,6 +96,18 @@ export function placeMapNode(map: BackgroundMap, id: string, position: Backgroun
   return replaceMapNode(map, { ...selected, x: position.x, y: position.y });
 }
 
+/** The map with the node renamed to the trimmed name. Blank or unchanged names, unknown and locked nodes return `map` itself. */
+export function renameMapNode(map: BackgroundMap, id: string, name: string): BackgroundMap {
+  const node = map.nodes.find(item => item.id === id), trimmed = name.trim();
+  if (!node || node.locked || !trimmed || trimmed === node.name) return map;
+  return replaceMapNode(map, { ...node, name: trimmed });
+}
+
+/** Plan point the name box of a node is centred on: the box centre of a space or symbol, the position of a camera. */
+export function nodeNameAnchor(node: BackgroundNode): BackgroundPoint {
+  return node.type === 'camera' ? { x: node.x, y: node.y } : { x: node.x + node.width / 2, y: node.y + node.height / 2 };
+}
+
 export function removeMapNode(map: BackgroundMap, id: string): BackgroundMap {
   return { ...map, nodes: map.nodes.filter(node => node.id !== id).map(node => node.type !== 'space' && node.spaceId === id ? { ...node, spaceId: null } : node) };
 }

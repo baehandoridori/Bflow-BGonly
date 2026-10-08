@@ -4,6 +4,7 @@ import { polygonSpace, resizeSpace, moveMapNode, removeMapNode, containsPoint, t
 import type { BackgroundCamera, BackgroundMap, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 import { addMapCamera, applyNodeWorldPose, stackedMapNodeIds } from '../src/features/backgrounds/mapGeometry.ts';
 import { nodeLocalPoint, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpaceTo } from '../src/features/backgrounds/mapGeometry.ts';
+import { nodeNameAnchor, renameMapNode } from '../src/features/backgrounds/mapGeometry.ts';
 import { cameraOrientation, nodeOrientation, nodeWorldPose } from '../src/features/backgrounds/mapSpatial.ts';
 
 const space: BackgroundSpace = { id: 'space', type: 'space', name: '교실', placeId: null, childMapId: null, x: 100, y: 100, width: 100, height: 60, rotation: 90, shape: 'rect', points: [], locked: false };
@@ -653,4 +654,41 @@ test('replacing a node swaps that node alone, where a space transform carries it
   assert.deepEqual(withLens, { ...source, nodes: [space, lens, symbol] }); assert.equal(withLens.nodes[1], lens); assert.equal(withLens.nodes[0], space);
   assert.deepEqual(withDoor, { ...source, nodes: [space, memberCamera, door] }); assert.equal(withDoor.nodes[2], door); assert.equal(withDoor.nodes[1], memberCamera);
   assert.equal(JSON.stringify(source), frozen);
+});
+
+// --- Naming on the plan ------------------------------------------------------------------------
+test('renaming a node stores the trimmed name, and a name that changes nothing returns the map itself', () => {
+  const drawn: BackgroundSpace = { ...space, name: '새 공간' };
+  const lockedDoor: BackgroundSymbol = { ...symbol, id: 'locked-symbol', locked: true };
+  const source: BackgroundMap = { ...map, nodes: [drawn, memberCamera, symbol, lockedDoor] }, frozen = JSON.stringify(source);
+
+  const renamed = renameMapNode(source, drawn.id, '  교실  ');
+  assert.equal(renamed.nodes[0].name, '교실');
+  assert.deepEqual(renamed.nodes[0], { ...drawn, name: '교실' });
+  // Only the name of that node changes: its members and the rest of the map are the same objects.
+  for (const index of [1, 2, 3]) assert.equal(renamed.nodes[index], source.nodes[index]);
+  assert.deepEqual({ ...renamed, nodes: [] }, { ...source, nodes: [] });
+  // Any kind of node, and spaces inside the name stay.
+  assert.deepEqual(renameMapNode(source, memberCamera.id, '정면 카메라').nodes[1], { ...memberCamera, name: '정면 카메라' });
+  assert.deepEqual(renameMapNode(source, symbol.id, '뒷문\n').nodes[2], { ...symbol, name: '뒷문' });
+
+  // Blank, and the name it already has (as typed or once trimmed).
+  for (const name of ['', '   ', '새 공간', '  새 공간 ']) assert.equal(renameMapNode(source, drawn.id, name), source, JSON.stringify(name));
+  assert.equal(renameMapNode(source, memberCamera.id, memberCamera.name), source);
+  // Locked and unknown nodes.
+  assert.equal(renameMapNode(source, lockedDoor.id, '뒷문'), source);
+  assert.equal(renameMapNode({ ...source, nodes: [{ ...drawn, locked: true }] }, drawn.id, '교실').nodes[0].name, '새 공간');
+  assert.equal(renameMapNode(source, 'missing', '교실'), source);
+  assert.equal(JSON.stringify(source), frozen);
+});
+
+test('the name box of a node is centred on the box of a space or symbol and on the point of a camera', () => {
+  // The centre of the box does not turn with the node.
+  for (const rotation of [0, 37, 90, 180]) assert.deepEqual(nodeNameAnchor({ ...plainRoom, rotation }), { x: 130, y: 120 }, `room at ${rotation}`);
+  assert.deepEqual(nodeNameAnchor({ ...plainRoom, shape: 'ellipse' }), { x: 130, y: 120 });
+  assert.deepEqual(nodeNameAnchor(symbol), { x: 140, y: 150 });
+  assert.deepEqual(nodeNameAnchor({ ...symbol, rotation: 37, pitch: 20 }), { x: 140, y: 150 });
+  // A camera has no box: whatever it looks at, the anchor is the point it stands on.
+  assert.deepEqual(nodeNameAnchor(memberCamera), { x: 130, y: 130 });
+  assert.deepEqual(nodeNameAnchor({ ...memberCamera, x: 500.25, y: -340.5, angle: 211, pitch: -90 }), { x: 500.25, y: -340.5 });
 });

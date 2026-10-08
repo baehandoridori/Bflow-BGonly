@@ -86,6 +86,10 @@
 /* On looks like an active toolbar button. The selector has to outweigh the shared zoom button rule above, which sets a transparent background. */
 .bg-library .bmap-zoom .bmap-snap-toggle[aria-pressed="true"] { color:rgb(var(--color-accent-sub)); background:rgb(var(--color-accent) / .18); }
 .bmap-polygon-actions { position:absolute; display:flex; align-items:center; gap:8px; bottom:56px; left:50%; transform:translateX(-50%); padding:8px; background:rgb(var(--color-bg-card)); border:1px solid rgb(var(--color-bg-border)); border-radius:8px; font-size:11px; }
+/* The name box floats over its node; left and top are set from script. The selector has to outweigh the shared input rule of the library (full width, 36px high). */
+.bg-library input.bmap-name-box:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { position:absolute; z-index:3; width:168px; min-height:30px; padding:4px 8px; transform:translate(-50%,-50%); text-align:center; font-size:13px; border-color:rgb(var(--color-accent)); background:rgb(var(--color-bg-card)); box-shadow:0 3px 12px rgb(var(--color-shadow) / .12); }
+/* The name drawn on the plan gives way to the box that edits it. */
+.is-renaming text { visibility:hidden; }
 .bmap-inspector { flex:0 0 248px; padding:18px 16px; border-left:1px solid rgb(var(--color-bg-border)); overflow-y:auto; background:rgb(var(--color-bg-card) / .4); font-size:12px; }
 .bmap-inspector .bg-field { margin-bottom:12px; }
 .bmap-inspector input:not([type=checkbox]),.bmap-inspector select { width:100%; min-width:0; padding:7px 8px; border:1px solid rgb(var(--color-bg-border)); border-radius:5px; background:rgb(var(--color-bg-primary)); color:rgb(var(--color-text-primary)); font-size:12px; }
