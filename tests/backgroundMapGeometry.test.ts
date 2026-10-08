@@ -560,6 +560,12 @@ test('a pointer resize is the pointer read in the node frame, then a resize to t
   tight(local.x, 150, 'local x'); tight(local.y, 80, 'local y');
   const grown = resizeSpaceTo(space, 150, 80);
   assert.equal(grown.width, 150); assert.equal(grown.height, 80); tight(grown.x, 65, 'x'); tight(grown.y, 115, 'y');
+  // A half and a three-quarter turn are turned as well: the frame flips, and a new size moves the stored position.
+  for (const [rotation, pointer, size, x, y] of [[180, { x: 75, y: 90 }, { x: 85, y: 50 }, 75, 90], [270, { x: 170, y: 65 }, { x: 85, y: 60 }, 97.5, 77.5]] as const) {
+    const node = { ...plainRoom, rotation }, read = nodeLocalPoint(node, pointer), sized = resizeSpaceTo(node, size.x, size.y);
+    tight(read.x, size.x, `local x at ${rotation}`); tight(read.y, size.y, `local y at ${rotation}`);
+    assert.equal(sized.width, size.x); assert.equal(sized.height, size.y); tight(sized.x, x, `x at ${rotation}`); tight(sized.y, y, `y at ${rotation}`);
+  }
   assert.deepEqual(nodeLocalPoint(oddRoom, { x: 300.4, y: 177.7 }), { x: 300.4 - 244.65, y: 177.7 - 120.3 });
   // Lengths stay within the saved limits, turned or not.
   for (const rotation of [0, 37]) {
@@ -588,6 +594,8 @@ test('resizing an unturned node keeps its stored position digit for digit', () =
 test('the resize corner is the bottom-right corner of the turned box', () => {
   assert.deepEqual(nodeResizeCorner(oddRoom), { x: 244.65 + 144.65, y: 120.3 + 80 });
   assert.deepEqual(nodeResizeCorner({ ...symbol, rotation: 0 }), { x: 150, y: 155 });
+  // Not through the centre either: 433.69 + 18.33 / 2 + 18.33 / 2 is 452.02000000000004.
+  assert.deepEqual(nodeResizeCorner({ ...plainRoom, x: 433.69, y: 433.69, width: 18.33, height: 18.33 }), { x: 433.69 + 18.33, y: 433.69 + 18.33 });
   for (const [rotation, x, y] of [[90, 110, 150], [180, 100, 100], [270, 150, 90]]) {
     const corner = nodeResizeCorner({ ...plainRoom, rotation });
     tight(corner.x, x, `x at ${rotation}`); tight(corner.y, y, `y at ${rotation}`);
