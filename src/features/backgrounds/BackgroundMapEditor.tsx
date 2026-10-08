@@ -1,5 +1,5 @@
 import { Component, Fragment, Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { Move3d, Orbit, Rotate3d, Scale3d } from 'lucide-react';
 import type { BackgroundCamera, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSnapshot, BackgroundSpace, BackgroundSymbol, BackgroundSymbolKind } from './types';
 import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './BackgroundUI';
@@ -11,7 +11,7 @@ import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { addMapCamera, containsPoint, moveMapNode, nodeNameAnchor, polygonSpace, removeMapNode, renameMapNode, transformMapSpace } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
-import { MAP_EDIT_MARK, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
+import { MAP_EDIT_MARK, doubleClickNodeId, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
 import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
 import type { PlanGesture } from './mapPlanGesture';
 import { MAP_SNAP, sameSnapGuides } from './mapSnap';
@@ -42,10 +42,20 @@ type PointerSession = {
   /** Snap targets, collected from `initial` on the first move that needs them. */
   candidates: SnapCandidates | null;
 };
+/** What one press landed on. A double-click on the canvas is resolved from the last two of these. */
+type PlanPress = {
+  /** Topmost node under the press: the node whose element took the pointerdown. Null on empty canvas. */
+  hitId: string | null;
+  /** The node the press acted on (the pile member that was already picked). Null for a handle and for empty canvas. */
+  targetId: string | null;
+  handle: boolean;
+};
 /** The node whose name box is open on the plan. */
 type NameEdit = { mapId: string; nodeId: string; /** The draft value right after the creating edit; null for an existing node. */ created: BackgroundMap | null };
 /** One empty list for every time no guide is shown, so the guides state keeps its identity. */
 const NO_GUIDES: readonly SnapGuide[] = [];
+/** The press log with nothing in it: no double-click can be resolved from it. */
+const NO_PRESSES: readonly [PlanPress | null, PlanPress | null] = [null, null];
 const message = (error: unknown) => error instanceof Error ? error.message : '도면을 저장하지 못했습니다. 다시 시도해 주세요.';
 const normalizeAngle = (value: number) => ((value % 360) + 360) % 360;
 const uuid = () => crypto.randomUUID();
@@ -188,6 +198,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 680 });
   const pointerRef = useRef<PointerSession | null>(null);
   const lastDrag = useRef(0);
+  /** The last two presses on the plan, the older one first. */
+  const pressLog = useRef(NO_PRESSES);
+  /** The step to the next item of a pile, asked for by a press that did not move. The click that follows takes it. */
+  const pendingCycle = useRef<{ ids: string[]; nodeId: string; mapId: string } | null>(null);
   /** Orbit pose of the 3D viewport per map. UI state only: never history, never a render. */
   const viewStates = useRef<Record<string, Map3DViewState>>({});
   const focusNonce = useRef(0);
@@ -280,6 +294,14 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const forget = () => { altDrag.current = false; };                                 // Alt+Tab and the like: the release never reaches this window
     window.addEventListener('keydown', key, true); window.addEventListener('keyup', key, true); window.addEventListener('blur', forget);
     return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('keyup', key, true); window.removeEventListener('blur', forget); };
+  }, []);
+  // A press the canvas did not take can never be the first half of a double-click on a node.
+  useEffect(() => {
+    const forget = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !svgRef.current?.contains(event.target)) pressLog.current = NO_PRESSES;
+    };
+    window.addEventListener('pointerdown', forget, true);
+    return () => window.removeEventListener('pointerdown', forget, true);
   }, []);
   // Looking through a camera ends when the selection, the map or the mode moves away from it.
   useEffect(() => {
@@ -536,12 +558,14 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     return { x: point.x, y: point.y };
   }
   function pointerDown(event: ReactPointerEvent<SVGElement>, node?: BackgroundNode, handle?: 'resize' | 'rotate') {
-    if (!current || disabled || pointerRef.current || doc.isGestureActive() || (event.button !== 0 && event.button !== 1)) return;
+    // A press the editor does not take empties the press log, like a press outside the canvas: it is no half of a double-click.
+    if (!current || disabled || pointerRef.current || doc.isGestureActive() || (event.button !== 0 && event.button !== 1)) { pressLog.current = NO_PRESSES; return; }
     const point = pointFrom(event), matrix = svgRef.current?.getScreenCTM()?.inverse();
-    if (!point || !matrix) return;
+    if (!point || !matrix) { pressLog.current = NO_PRESSES; return; }
     event.preventDefault(); event.stopPropagation();
     setSymbolPaletteOpen(false);
     svgRef.current?.focus();
+    pendingCycle.current = null;
     // Taking the focus ends a number entry that was still open, and that may have edited the map just now:
     // everything below starts from the map as it is at this moment, not as it was drawn.
     const live = mapDraft(doc.getState(), current.id)?.value ?? current;
@@ -554,6 +578,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       if (picked) { target = picked; stack = ids; }
       else select(node?.id ?? null);
     }
+    // The pointerdown comes before any capture, so it reached the element that was really pressed: `node` is the topmost one there.
+    pressLog.current = [pressLog.current[1], { hitId: node?.id ?? null, targetId: handle ? null : target?.id ?? null, handle: !!handle }];
     if (canEdit && event.button === 0 && !handle && tool === 'polygon') {
       setPolygon(previous => {
         const last = previous[previous.length - 1];
@@ -610,10 +636,31 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
         if (session.mode === 'draw') { setTool('select'); if (session.node) beginRename(session.node.id, true); }
       }
     }
+    // A press on a pile that did not move asks for the next item. The click that follows takes the step:
+    // only a click knows whether it is the second one of a double-click.
     if (!cancel && !session.moved && session.stack && session.node) {
       const ids = session.stack;
-      select(ids[(ids.indexOf(session.node.id) + 1) % ids.length], session.mapId);
+      pendingCycle.current = { ids, nodeId: session.node.id, mapId: session.mapId };
     }
+  }
+  /**
+   * Double-clicks reach the canvas only: a press that captured the pointer sends its click and dblclick to the SVG,
+   * never to the node. What was pressed is read from the press log.
+   */
+  function canvasDoubleClick(event: ReactMouseEvent<SVGSVGElement>) {
+    const [first, last] = pressLog.current;
+    if (!current || !last || last.handle || Date.now() - lastDrag.current <= 450) return;
+    if (last.hitId === null) { if (tool === 'polygon') finishPolygon(); return; }        // empty canvas: the first press is not looked at
+    if (!first || first.hitId !== last.hitId) return;                                    // the first press was off the canvas, or on another node
+    const node = current.nodes.find(item => item.id === last.hitId), point = pointFrom(event);
+    if (!node) return;
+    const pile = node.type === 'space' || !point ? [node.id] : planStackUnder(current, node.id, undefined, item => onPlanMark(item, point));
+    const target = current.nodes.find(item => item.id === doubleClickNodeId(first.targetId, node.id, pile)) ?? node;
+    if (target.type === 'space' && target.childMapId && maps.some(map => map.id === target.childMapId)) {
+      if (tool === 'select' || tool === 'hand') openSpace(target.id);                    // a space with a detail map opens it, before any renaming
+      return;
+    }
+    if (tool === 'select') beginRename(target.id);                                       // edit rights and the lock are checked there
   }
   function zoomBy(factor: number) {
     if (pointerRef.current) return;
@@ -688,7 +735,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     : [{ id: 'select', label: '선택', title: editing ? '선택: 클릭해 고르고 손잡이로 옮기기' : '선택: 클릭해 고르기', icon: '↖', named: true },
       { id: 'hand', label: '둘러보기', title: '둘러보기: 끌어서 돌려 보기만 하고 배치는 그대로 둬요', icon: <Orbit size={17} strokeWidth={1.8} aria-hidden="true" />, named: true }];
   const footerHint = tool === 'symbol' ? `${getSymbolPreset(symbolKind).label} 놓을 ${mode === 'plan' ? '곳' : '바닥'}을 클릭 · Esc 취소`
-    : mode === 'plan' ? (tool === 'polygon' ? '점을 차례로 찍고 다각형 완성 · Esc 취소' : editing ? '선택 후 드래그 · 모서리로 크기 조절 · 위쪽 원으로 회전' : '클릭해서 선택 · 공간 더블클릭으로 상세 도면 열기')
+    : mode === 'plan' ? (tool === 'polygon' ? '점을 차례로 찍고 다각형 완성 · Esc 취소' : editing ? '끌어 옮기기 · 모서리로 크기 · 원으로 회전 · 더블클릭 이름 · 휠 확대' : '클릭해서 선택 · 공간 더블클릭으로 상세 도면 열기 · 휠로 확대')
       : tool === 'hand' ? '끌어서 둘러보기 · 휠로 확대 · 배치는 움직이지 않아요'
         : editing ? `클릭해 선택 · ${GIZMO_MODES.find(item => item.id === gizmoMode)!.hint} · 오른쪽 버튼으로 끌어 둘러보기 · 휠로 확대 · 공간 그리기는 평면에서`
           : '클릭해 선택 · 오른쪽 버튼으로 끌어 둘러보기 · 휠로 확대 · 공간 더블클릭으로 상세 도면 열기';
@@ -732,11 +779,15 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             </div>}
             {editing && <><span className="bmap-divider" /><button type="button" title="되돌리기 (Ctrl+Z)" aria-label="되돌리기" disabled={!draft?.past.length || disabled || gestureActive} onClick={() => undo()}>↶</button><button type="button" title="다시 실행 (Ctrl+Shift+Z)" aria-label="다시 실행" disabled={!draft?.future.length || disabled || gestureActive} onClick={() => undo(true)}>↷</button></>}
           </div>
-          {mode === 'plan' ? <svg ref={svgRef} className={`bmap-canvas tool-${tool}`} style={{ '--bmap-label-scale': labelScale } as CSSProperties} viewBox={`${view.x} ${view.y} ${1000 / view.zoom} ${680 / view.zoom}`} aria-label={`${current.name} 도면`} tabIndex={0} onPointerDown={event => pointerDown(event)} onPointerMove={pointerMove} onPointerUp={event => pointerUp(event)} onPointerCancel={event => pointerUp(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) pointerUp(event, true); }} onDoubleClick={() => { if (tool === 'polygon' && Date.now() - lastDrag.current > 450) finishPolygon(); }}>
+          {mode === 'plan' ? <svg ref={svgRef} className={`bmap-canvas tool-${tool}`} style={{ '--bmap-label-scale': labelScale } as CSSProperties} viewBox={`${view.x} ${view.y} ${1000 / view.zoom} ${680 / view.zoom}`} aria-label={`${current.name} 도면`} tabIndex={0} onPointerDown={event => pointerDown(event)} onPointerMove={pointerMove} onPointerUp={event => pointerUp(event)} onPointerCancel={event => pointerUp(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) pointerUp(event, true); }} onClick={event => {
+            const cycle = pendingCycle.current; pendingCycle.current = null;
+            if (!cycle || (event.detail >= 2 && canEdit)) return;        // while editing, a repeated click is a double-click, not another step
+            select(cycle.ids[(cycle.ids.indexOf(cycle.nodeId) + 1) % cycle.ids.length], cycle.mapId);
+          }} onDoubleClick={canvasDoubleClick}>
             {current.imageUrl && <image href={current.imageUrl} x="0" y="0" width="1000" height="680" preserveAspectRatio="xMidYMid meet" opacity="0.65" pointerEvents="none" />}
             {current.nodes.filter((node): node is BackgroundSpace => node.type === 'space').map(node => {
               const isSelected = node.id === selected?.id;
-              return <g key={node.id} className={`bmap-space ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => { event.stopPropagation(); if (Date.now() - lastDrag.current > 450 && (tool === 'select' || tool === 'hand')) openSpace(node.id); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-space ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                 {node.shape === 'ellipse' ? <ellipse cx={node.width / 2} cy={node.height / 2} rx={node.width / 2} ry={node.height / 2} /> : node.shape === 'polygon' ? <polygon points={node.points.map(point => `${point.x * node.width},${point.y * node.height}`).join(' ')} /> : <rect width={node.width} height={node.height} rx="4" />}
                 <text x={node.width / 2} y={node.height / 2} textAnchor="middle" dominantBaseline="central" pointerEvents="none">{node.locked ? '🔒 ' : ''}{node.name}</text>
                 {node.childMapId && <text className="bmap-space-detail" x={node.width / 2} y={node.height / 2 + 21} textAnchor="middle" pointerEvents="none">상세 도면 ↗</text>}
@@ -747,7 +798,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               return <Fragment key={node.id}>
                 {/* A tilted object casts the outline of its whole box; its own plan size is untouched. */}
                 {(tilt.pitch !== 0 || tilt.roll !== 0) && <polygon className={`bmap-symbol-tilt ${isSelected ? 'is-selected' : ''}`} points={nodePlanOutline(node).map(point => `${point.x},${point.y}`).join(' ')} pointerEvents="none" />}
-                <g className={`bmap-symbol ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}, 기호`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
+                <g className={`bmap-symbol ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}, 기호`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                   <title>{`${node.name}${node.locked ? ' · 잠김' : ''}`}</title>
                   <rect className="bmap-symbol-hit" width={node.width} height={node.height} rx="3" />
                   <g transform={`scale(${node.width / 100} ${node.height / 100})`}><BackgroundSymbolGlyph symbol={node.symbol} hinge={node.hinge} swing={node.swing} /></g>
@@ -761,7 +812,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               const plan = projectCameraToPlan(node), reach = Math.hypot(plan.direction.x, plan.direction.y);
               const half = node.fov / 2 * Math.PI / 180, radius = 80 * reach;
               const tilt = Math.abs(plan.pitch) >= 0.5 ? cameraPitchLabel(plan.pitch) : '';
-              return <g key={node.id} className={`bmap-camera ${node.id === selected?.id ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-camera ${node.id === selected?.id ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
                 {plan.vertical ? <>
                   <circle className="bmap-camera-ring" r="17" /><circle r="11" />
                   {plan.vertical === 'up' ? <circle className="bmap-camera-mark" r="3.5" /> : <path className="bmap-camera-mark" d="M -4.5 -4.5 L 4.5 4.5 M 4.5 -4.5 L -4.5 4.5" />}
@@ -796,7 +847,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             initial={renamingNode.name} positionKey={`${view.x}:${view.y}:${view.zoom}:${canvasSize.width}:${canvasSize.height}`}
             onCommit={commitName} onCancel={cancelName} onHistory={passNameHistory} />}
           {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : '도면 편집에서 공간·문·사물·카메라를 배치할 수 있습니다.'}</span></div>}
-          <div className="bmap-canvas-footer"><span>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
+          <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' ? footerHint : undefined}>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
         <aside className="bmap-inspector" id="bmap-selection-properties" aria-label="선택 속성" hidden={!inspectorOpen}>
@@ -805,7 +856,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             {editing ? <Field label="이름"><input value={selected.name} disabled={fieldLocked} onChange={event => patchNode({ name: event.target.value }, 'name')} onBlur={doc.endCoalescing} /></Field> : <h3 className="bmap-selected-name">{selected.name}</h3>}
             {selected.type === 'space' && <section className="bmap-connection" aria-label="공간의 상세 도면">
               <span className="bmap-eyebrow">이 공간 안으로</span>
-              {linkedMap ? <><strong>{linkedMap.name}</strong><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => navigate(linkedMap.id)}>상세 도면 열기 →</button><p>공간을 더블클릭해도 열립니다.</p></> : <><p>이 공간의 내부를 별도 도면으로 이어보세요.</p>{snapshot.canManage && <button type="button" className="bg-button bg-primary" disabled={disabled || selected.locked || !!polygon.length} onClick={() => openCreate(current.id, selected)}>내부 도면 만들기</button>}</>}
+              {linkedMap ? <><strong>{linkedMap.name}</strong><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => navigate(linkedMap.id)}>상세 도면 열기 →</button><p>{editing ? '공간을 더블클릭해도 열립니다. 이름은 F2 키나 위의 이름 칸에서 바꿔요.' : '공간을 더블클릭해도 열립니다.'}</p></> : <><p>이 공간의 내부를 별도 도면으로 이어보세요.</p>{snapshot.canManage && <button type="button" className="bg-button bg-primary" disabled={disabled || selected.locked || !!polygon.length} onClick={() => openCreate(current.id, selected)}>내부 도면 만들기</button>}</>}
               {snapshot.canManage && <div className="bmap-link-actions"><button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => { setError(''); setLinkForm({ spaceId: selected.id, mapId: selected.childMapId ?? '', search: '' }); }}>{linkedMap ? '연결 변경' : '기존 도면 연결'}</button>{linkedMap && <button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => void linkMap(null, selected.id)}>연결 해제</button>}</div>}
               {selected.locked && <p>잠금을 해제하면 연결을 바꿀 수 있습니다.</p>}
               {draftChanged && <p className="bmap-save-note">연결할 때 현재 공간 편집 내용도 함께 저장됩니다.</p>}

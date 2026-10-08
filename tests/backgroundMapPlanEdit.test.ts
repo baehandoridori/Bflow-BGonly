@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP_SNAP_PREFERENCE_KEY, planNodeHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
+import { MAP_SNAP_PREFERENCE_KEY, doubleClickNodeId, planNodeHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
 import type { PlanNodeHandles } from '../src/features/backgrounds/mapPlanEdit.ts';
 import type { BackgroundCamera, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
@@ -120,6 +120,22 @@ test('the resize square steps outside the corner when a point handle sits on it'
     assert.equal(boxOf({ ...squared, shape: 'ellipse' }, 1, vertexHandles).resize!.shifted, false);
     assert.deepEqual(boxOf(chair, 1, vertexHandles).resize, { x: 34, y: 34, size: 12, shifted: false });
   }
+});
+
+test('a double-click acts on the node its first press picked from the pile, else on the node under it', () => {
+  // The first press was on the pile member already picked: the double-click is about that one, not the topmost.
+  assert.equal(doubleClickNodeId('c', 'a', ['a', 'b', 'c']), 'c');
+  assert.equal(doubleClickNodeId('b', 'a', ['a', 'b', 'c']), 'b');
+  // The pressed node itself, piled or alone.
+  assert.equal(doubleClickNodeId('a', 'a', ['a']), 'a');
+  assert.equal(doubleClickNodeId('a', 'a', ['a', 'b', 'c']), 'a');
+  assert.equal(doubleClickNodeId('a', 'a', []), 'a');
+  // A first press that acted on something outside the pile says nothing about this spot.
+  assert.equal(doubleClickNodeId('x', 'a', ['a', 'b']), 'a');
+  assert.equal(doubleClickNodeId('x', 'a', []), 'a');
+  // A first press on a handle or on nothing acted on no node.
+  assert.equal(doubleClickNodeId(null, 'a', ['a', 'b']), 'a');
+  assert.equal(doubleClickNodeId(null, 'a', []), 'a');
 });
 
 /** Runs `body` with `storage` in the place of the browser storage (with none at all for null), then puts back what was there. */

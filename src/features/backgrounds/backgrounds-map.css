@@ -78,6 +78,8 @@
 .bmap-canvas-empty strong { font-size:15px; font-weight:500; }
 .bmap-canvas-empty span { font-size:11px; }
 .bmap-canvas-footer { min-height:42px; border-top:1px solid rgb(var(--color-bg-border)); display:flex; align-items:center; justify-content:space-between; padding:6px 12px; gap:10px; background:rgb(var(--color-bg-card) / .4); font-size:10px; color:rgb(var(--color-text-secondary)); }
+/* Two lines high on the plan whatever the hint says: a hint that changes with the selection must not resize the canvas between the two clicks of a double-click. */
+.bmap-canvas-wrap:not(.is-3d) .bmap-footer-hint { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; line-height:15px; }
 .bmap-zoom { display:flex; align-items:center; gap:5px; flex-shrink:0; }
 .bg-library .bmap-zoom button { padding:3px 6px; min-height:26px; border:0; border-radius:4px; font-size:12px; background:transparent; }
 .bmap-zoom button:hover { background:rgb(var(--color-bg-border)); }

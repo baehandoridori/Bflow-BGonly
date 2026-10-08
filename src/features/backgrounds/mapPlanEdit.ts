@@ -40,6 +40,15 @@ export function planNodeHandles(node: BackgroundNode, scale: number, vertexHandl
   return { kind: 'box', radius, lift, resize: { x: width + out, y: height + out, size, shifted } };
 }
 
+/**
+ * The node a double-click acts on. `firstPressId` is the node its first press acted on, `hitId` the topmost node
+ * under the second press and `pile` the overlapping nodes there: the one picked from the pile before the
+ * double-click wins over the topmost one.
+ */
+export function doubleClickNodeId(firstPressId: string | null, hitId: string, pile: readonly string[]): string {
+  return firstPressId !== null && (firstPressId === hitId || pile.includes(firstPressId)) ? firstPressId : hitId;
+}
+
 /** Whether plan drags snap is remembered per device. */
 export const MAP_SNAP_PREFERENCE_KEY = 'bflow.background-map.snap.v1';
 /** On unless this device stored `off`: also when nothing is stored or there is no storage. */
