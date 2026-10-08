@@ -8,7 +8,7 @@ import { BackgroundMapPanels } from './BackgroundMapPanels';
 import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
 import { addMapCamera, containsPoint, moveMapNode, polygonSpace, removeMapNode, resizeSpace, transformMapSpace } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
-import { fieldEditStartMap, gestureStartMap, mapDraft, mapDraftChanged, mapViewport, revealPlanPoint, zoomMapViewport } from './mapDocument';
+import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, zoomMapViewport } from './mapDocument';
 import { planNodeCovers, planStackUnder } from './mapPlanPreview';
 import type { MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
@@ -160,7 +160,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
   const lookThroughId = mode === '3d' && lookThrough && lookThrough.mapId === current?.id && selected?.type === 'camera' && lookThrough.id === selected.id ? lookThrough.id : null;
-  const labelScale = Math.min(4, Math.max(0.4, 1 / (Math.min(canvasSize.width / 1000, canvasSize.height / 680) * view.zoom)));
+  const screenScale = mapScreenScale(view.zoom, canvasSize);
+  const labelScale = Math.min(MAP_LABEL_SCALE_LIMITS.max, Math.max(MAP_LABEL_SCALE_LIMITS.min, screenScale));
   // The image grid reads the maps as they were when a gesture started, so it does not recompute on every frame.
   const settledMapsRef = useRef(maps);
   if (!gestureActive) settledMapsRef.current = maps;

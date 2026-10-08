@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { BackgroundCamera, BackgroundMap, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 import { canRedoMap, canUndoMap, createMapDocument, createMapDocumentStore, fieldEditStartMap, gestureStartMap, isMapGestureActive, mapDraft, mapDraftChanged, mapViewport,
-  reduceMapDocument, revealPlanPoint, zoomMapViewport } from '../src/features/backgrounds/mapDocument.ts';
+  reduceMapDocument, revealPlanPoint, zoomMapViewport, MAP_ZOOM_LIMITS, MAP_LABEL_SCALE_LIMITS, MAP_FIT_MARGIN, mapScreenScale, zoomMapViewportAt, wheelZoomFactor, fitMapViewport } from '../src/features/backgrounds/mapDocument.ts';
 import type { MapDocumentAction, MapDocumentState } from '../src/features/backgrounds/mapDocument.ts';
 import { MAP_HISTORY_LIMIT } from '../src/features/backgrounds/mapEditSession.ts';
 import { effectiveMaps, saveMapChanges } from '../src/features/backgrounds/mapWorkflow.ts';
 import { emptyBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
 import { addMapCamera, transformMapSpace } from '../src/features/backgrounds/mapGeometry.ts';
-import { DEFAULT_MAP_CAMERA_POSE } from '../src/features/backgrounds/mapSpatial.ts';
+import { DEFAULT_MAP_CAMERA_POSE, mapPlanBounds } from '../src/features/backgrounds/mapSpatial.ts';
 
 const A = '00000000-0000-4000-8000-00000000000a', B = '00000000-0000-4000-8000-00000000000b';
 const camera: BackgroundCamera = { id: '00000000-0000-4000-8000-0000000000c1', type: 'camera', name: '카메라 1', x: 500, y: 340, spaceId: null, angle: 0, fov: 60, viewIds: [], locked: false, elevation: 120, pitch: -35 };
@@ -336,9 +336,105 @@ test('zooming keeps the centre of the plan view and stays inside the limits', ()
   const home = { x: 0, y: 0, zoom: 1, selectedId: 'kept' };
   assert.deepEqual(zoomMapViewport(home, 2), { x: 250, y: 170, zoom: 2, selectedId: 'kept' });
   assert.deepEqual(zoomMapViewport(zoomMapViewport(home, 2), 0.5), home);
-  assert.equal(zoomMapViewport(home, 100).zoom, 4); assert.equal(zoomMapViewport(home, 0.001).zoom, 0.25);
+  assert.equal(zoomMapViewport(home, 100).zoom, 4); assert.equal(zoomMapViewport(home, 0.001).zoom, 0.1);
   const widest = zoomMapViewport(home, 0.001);
   assert.equal(zoomMapViewport(widest, 0.5), widest);
+});
+
+const near = (actual: number, expected: number, tolerance = 1e-12) => assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} is not within ${tolerance} of ${expected}`);
+const room = (x: number, y: number, width: number, height: number): BackgroundSpace =>
+  ({ id: '00000000-0000-4000-8000-0000000000e1', type: 'space', name: '새 공간', placeId: null, childMapId: null, x, y, width, height, rotation: 0, shape: 'rect', points: [], locked: false });
+const mapOf = (...nodes: BackgroundMap['nodes']): BackgroundMap => ({ ...mapA, nodes });
+
+test('zooming at a plan point keeps that point at its place on screen', () => {
+  const home = { x: 0, y: 0, zoom: 1, selectedId: 'kept' };
+  assert.deepEqual(zoomMapViewportAt(home, 2, { x: 500, y: 340 }), { x: 250, y: 170, zoom: 2, selectedId: 'kept' });
+  assert.deepEqual(zoomMapViewportAt(home, 2, { x: 500, y: 340 }), zoomMapViewport(home, 2));
+  assert.deepEqual(zoomMapViewportAt(home, 2, { x: 0, y: 0 }), { x: 0, y: 0, zoom: 2, selectedId: 'kept' });
+  assert.deepEqual(zoomMapViewportAt(home, 2, { x: 1000, y: 680 }), { x: 500, y: 340, zoom: 2, selectedId: 'kept' });
+  assert.deepEqual(zoomMapViewportAt(home, 0.5, { x: 250, y: 170 }), { x: -250, y: -170, zoom: 0.5, selectedId: 'kept' });
+  // The anchor stays as many zoomed units from the corner of the view as it was.
+  const panned = { x: -120.5, y: 64.25, zoom: 1.6, selectedId: null };
+  for (const anchor of [{ x: 37.5, y: 412.25 }, { x: -800, y: 90 }, { x: 4321.125, y: -77.7 }]) for (const factor of [1.25, 0.37]) {
+    const next = zoomMapViewportAt(panned, factor, anchor);
+    near(next.zoom, 1.6 * factor);
+    near((anchor.x - next.x) * next.zoom, (anchor.x - panned.x) * panned.zoom, 1e-9);
+    near((anchor.y - next.y) * next.zoom, (anchor.y - panned.y) * panned.zoom, 1e-9);
+  }
+  // At a limit, or for a broken factor or anchor, the same object comes back.
+  const closest = { x: 10, y: 20, zoom: MAP_ZOOM_LIMITS.max, selectedId: 'kept' }, widest = { x: 10, y: 20, zoom: MAP_ZOOM_LIMITS.min, selectedId: 'kept' };
+  assert.equal(zoomMapViewportAt(closest, 2, { x: 5, y: 5 }), closest); assert.equal(zoomMapViewportAt(widest, 0.5, { x: 5, y: 5 }), widest);
+  assert.equal(zoomMapViewportAt(home, Number.NaN, { x: 5, y: 5 }), home);
+  assert.equal(zoomMapViewportAt(home, 2, { x: Number.NaN, y: 5 }), home); assert.equal(zoomMapViewportAt(home, 2, { x: 5, y: Number.NaN }), home);
+  assert.equal(zoomMapViewportAt(home, 3, { x: 123, y: 45 }).selectedId, 'kept'); assert.equal(zoomMapViewportAt(panned, 3, { x: 123, y: 45 }).selectedId, null);
+  // Past a limit the zoom stops there and the anchor still holds.
+  assert.deepEqual(zoomMapViewportAt(home, 100, { x: 1000, y: 680 }), { x: 750, y: 510, zoom: 4, selectedId: 'kept' });
+});
+
+test('one wheel event zooms by a bounded step, a pinch by a finer one', () => {
+  near(wheelZoomFactor(100, 0, false), 0.8187307530779818); near(wheelZoomFactor(-100, 0, false), 1.2214027581601699);
+  near(wheelZoomFactor(3, 1, false), 0.9084640160687062); near(wheelZoomFactor(1000, 0, false), 0.697676326071031);
+  near(wheelZoomFactor(2, 0, true), 0.9801986733067553); near(wheelZoomFactor(100, 0, true), 0.8187307530779818);
+  // Page units: a quarter of a page is one notch, a whole page is cut off like any long scroll.
+  near(wheelZoomFactor(0.25, 2, false), 0.8187307530779818); near(wheelZoomFactor(1, 2, false), 0.697676326071031);
+  for (const pinch of [false, true]) {
+    assert.equal(wheelZoomFactor(0, 0, pinch), 1); assert.equal(wheelZoomFactor(Number.NaN, 0, pinch), 1); assert.equal(wheelZoomFactor(Number.POSITIVE_INFINITY, 0, pinch), 1);
+    for (const delta of [1, 7.5, 100, 5000]) for (const unit of [0, 1, 2]) near(wheelZoomFactor(delta, unit, pinch) * wheelZoomFactor(-delta, unit, pinch), 1);
+  }
+});
+
+test('fitting shows everything drawn and leaves a map inside the base extent at the start view', () => {
+  const start = { x: 0, y: 0, zoom: 1 };
+  assert.deepEqual(fitMapViewport(mapOf()), start); assert.deepEqual(fitMapViewport(mapOf(room(100, 100, 400, 260))), start);
+  assert.deepEqual(fitMapViewport(mapA), start, 'a camera inside the base extent');
+  const left = fitMapViewport(mapOf(room(-500, 100, 500, 100)));
+  near(left.zoom, 0.641026, 1e-3); near(left.x, -560, 1e-3); near(left.y, -190.4, 1e-3);
+  // Too wide for the zoom floor: the floor, centred on the box.
+  const far = fitMapViewport(mapOf(room(50000, 0, 100, 100)));
+  assert.equal(far.zoom, 0.1); near(far.x, 21052, 1e-6); near(far.y, -3060, 1e-6);
+  // Only the side the plan sticks out of gets the margin.
+  const marginOf = (map: BackgroundMap) => { const bounds = mapPlanBounds(map); return MAP_FIT_MARGIN * Math.max(bounds.width, bounds.height * 1000 / 680); };
+  const above = mapOf(room(100, -300, 100, 100)), up = fitMapViewport(above);
+  near(up.y, -300 - marginOf(above), 1e-9); near(up.y + 680 / up.zoom, 680, 1e-9);
+  // The far edge of these bounds comes out as 1000.0000000000001: rounding, not a side that sticks out.
+  const beside = mapOf(room(-24.15, 100, 100, 100)), sideways = fitMapViewport(beside);
+  assert.ok(mapPlanBounds(beside).x + mapPlanBounds(beside).width > 1000);
+  near(sideways.x, -24.15 - marginOf(beside), 1e-9); near(sideways.x + 1000 / sideways.zoom, 1000, 1e-9);
+  // A node without a finite position is left out, as in the plan bounds.
+  assert.deepEqual(fitMapViewport(mapOf(room(-500, 100, 500, 100), { ...camera, x: Number.NaN })), left);
+  assert.deepEqual(fitMapViewport(mapOf({ ...camera, y: Number.POSITIVE_INFINITY })), start);
+  // Away from the zoom limits the view box holds the plan bounds.
+  const tilted: BackgroundSpace = { ...room(700, 500, 600, 300), rotation: 30 };
+  for (const map of [mapOf(), mapA, mapOf(room(100, 100, 400, 260)), mapOf(room(-500, 100, 500, 100)), above, beside, mapOf(room(900, 600, 300, 200)), mapOf(tilted, { ...camera, x: -80, y: 1200 })]) {
+    const fit = fitMapViewport(map), bounds = mapPlanBounds(map);
+    assert.ok(fit.zoom > MAP_ZOOM_LIMITS.min && fit.zoom <= 1);
+    assert.ok(fit.x <= bounds.x + 1e-9 && fit.y <= bounds.y + 1e-9, 'left and top');
+    assert.ok(fit.x + 1000 / fit.zoom >= bounds.x + bounds.width - 1e-9 && fit.y + 680 / fit.zoom >= bounds.y + bounds.height - 1e-9, 'right and bottom');
+  }
+});
+
+test('the screen scale is the map units under one CSS pixel of the plan canvas', () => {
+  assert.equal(mapScreenScale(1, { width: 1000, height: 680 }), 1); assert.equal(mapScreenScale(1, { width: 500, height: 680 }), 2);
+  assert.equal(mapScreenScale(1, { width: 2000, height: 680 }), 1); assert.equal(mapScreenScale(2, { width: 1000, height: 680 }), 0.5);
+  // A canvas without a usable size counts as the base extent.
+  assert.equal(mapScreenScale(2, { width: 0, height: 0 }), 0.5); assert.equal(mapScreenScale(2, { width: Number.NaN, height: 680 }), 0.5);
+  assert.equal(mapScreenScale(2, { width: 500, height: -1 }), 0.5); assert.equal(mapScreenScale(2, { width: Number.POSITIVE_INFINITY, height: 340 }), 0.5);
+  assert.deepEqual(MAP_ZOOM_LIMITS, { min: 0.1, max: 4 }); assert.equal(MAP_FIT_MARGIN, 0.04);
+  assert.equal(MAP_LABEL_SCALE_LIMITS.max, 1 / MAP_ZOOM_LIMITS.min); assert.equal(MAP_LABEL_SCALE_LIMITS.min, 0.4);
+});
+
+test('a drawn space and the name given right after it are one undo step', () => {
+  const start = run(createMapDocument(), { type: 'begin-editing', map: mapA }), before = valueOf(start);
+  const space = room(100, 100, 400, 260), drawn: BackgroundMap = { ...before, nodes: [...before.nodes, space] };
+  const finished = run(start, { type: 'gesture-begin', mapId: A }, { type: 'gesture-preview', map: drawn }, { type: 'gesture-finish' });
+  const renamed: BackgroundMap = { ...drawn, nodes: drawn.nodes.map(node => node.id === space.id ? { ...node, name: '거실' } : node) };
+  const state = run(finished, { type: 'update', map: renamed, history: false });
+  const nameOf = (next: MapDocumentState) => valueOf(next).nodes.find(node => node.id === space.id)?.name;
+  assert.equal(mapDraft(state, A)!.past.length, 1); assert.equal(nameOf(state), '거실');
+  const undone = run(state, { type: 'undo', mapId: A });
+  assert.equal(valueOf(undone), before); assert.equal(nameOf(undone), undefined); assert.equal(valueOf(undone).nodes.length, 1);
+  const redone = run(undone, { type: 'redo', mapId: A });
+  assert.equal(nameOf(redone), '거실'); assert.equal(valueOf(redone), renamed);
 });
 
 test('the store applies actions synchronously and notifies only on a change', () => {
