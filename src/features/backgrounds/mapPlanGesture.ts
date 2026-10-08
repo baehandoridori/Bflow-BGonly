@@ -18,11 +18,13 @@ const bearing = (point: BackgroundPoint, center: BackgroundPoint) => Math.atan2(
 
 /**
  * What a point handle of a polygon stands for and the two points beside it: a point between its neighbours,
- * or the middle of an edge between its two ends. Null when the gesture names no point of a polygon space.
+ * or the middle of an edge between its two ends. Null when the gesture names no point the point edits would take:
+ * then nothing is beside it either, and no line is collected for a drag that shows nothing.
  */
 function vertexHandle(gesture: Extract<PlanGesture, { mode: 'vertex' }>, initial: BackgroundMap): { space: BackgroundSpace; base: BackgroundPoint; beside: BackgroundPoint[] } | null {
   const space = initial.nodes.find(item => item.id === gesture.nodeId), { index } = gesture;
-  if (space?.type !== 'space' || space.shape !== 'polygon') return null;
+  // Locked it does not change, and with fewer than three stored points the plan outline is that of the box, not of those points.
+  if (space?.type !== 'space' || space.shape !== 'polygon' || space.locked || space.points.length < 3) return null;
   const outline = nodePlanOutline(space), count = outline.length;
   if (!Number.isInteger(index) || index < 0 || index >= count) return null;
   const point = outline[index], next = outline[(index + 1) % count];

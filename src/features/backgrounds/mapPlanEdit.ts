@@ -42,7 +42,10 @@ export function planNodeHandles(node: BackgroundNode, scale: number, vertexHandl
 
 /** `edges`: the + of an edge, in its middle. Edge `index` runs from point `index` to the next one. */
 export type PlanVertexHandles = { vertices: BackgroundPoint[]; edges: { index: number; point: BackgroundPoint }[] };
-/** A polygon stores no more points than this: a full one gets no +. */
+/**
+ * A polygon stores no more points than this: a full one gets no +. The same number as the limit of the point edits
+ * (`mapGeometry.ts`, which this module does not import) and of the saved-data check (`validateBackgroundEntity` in `domain.ts`).
+ */
 const POLYGON_POINT_LIMIT = 200;
 
 /** Absolute plan positions of the point handles of a polygon space, or null when none are shown. */

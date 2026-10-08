@@ -802,6 +802,8 @@ test('a polygon edit that cannot be stored gives null', () => {
   const half: BackgroundSpace = { ...sliver, id: 'half', points: [xy(0, 0), xy(1, 1), xy(0, 1)] };
   assert.equal(movePolygonVertex(half, 2, xy(50, 50)), null); assert.equal(movePolygonVertex(half, 2, xy(50, 50.01)), null);
   assert.ok(movePolygonVertex(half, 2, xy(50, 51)));
+  // The limit is 1 and no other number: an area of 0.95 is refused, one of 1.05 is kept.
+  assert.equal(movePolygonVertex(half, 2, xy(50, 50.019)), null); assert.ok(movePolygonVertex(half, 2, xy(50, 50.021)));
   assert.equal(polygonFromWorldPoints(half, [xy(0, 0), xy(100, 100), xy(50, 50)]), null);
   // Fewer than three points.
   assert.equal(polygonFromWorldPoints(half, [xy(0, 0), xy(100, 100)]), null); assert.equal(polygonFromWorldPoints(half, []), null);
@@ -833,6 +835,9 @@ test('a moved or added point cannot land on a point beside it', () => {
     // A new point goes between its corner and the next one: neither end of that edge will do.
     assert.equal(insertPolygonVertex(kite, index, outline[index]), null, label); assert.equal(insertPolygonVertex(kite, index, next), null, label);
     assert.equal(insertPolygonVertex(kite, index, xy(outline[index].x, outline[index].y - 1e-7)), null, label);
+    // One spot reaches 1e-6 and no other distance: half of that away is still on the point, twice that is beside it.
+    assert.equal(movePolygonVertex(kite, index, xy(next.x + 5e-7, next.y)), null, label); assert.ok(movePolygonVertex(kite, index, xy(next.x + 2e-6, next.y)), label);
+    assert.equal(insertPolygonVertex(kite, index, xy(next.x + 5e-7, next.y)), null, label); assert.ok(insertPolygonVertex(kite, index, xy(next.x + 2e-6, next.y)), label);
     // Right beside it is another place.
     assert.ok(movePolygonVertex(kite, index, xy(next.x + 0.001, next.y)), label); assert.ok(insertPolygonVertex(kite, index, xy(next.x + 0.001, next.y)), label);
   }
@@ -846,6 +851,10 @@ test('a point put where it already stands leaves the space as it is', () => {
     const label = `point ${index} at ${source.rotation}`;
     assert.equal(movePolygonVertex(source, index, spot), source, label);
     assert.equal(movePolygonVertex(source, index, xy(spot.x + 1e-7, spot.y - 1e-7)), source, label);
+    // The same 1e-6 as for the points beside it: half of that away it has not moved, twice that away it has.
+    assert.equal(movePolygonVertex(source, index, xy(spot.x + 5e-7, spot.y)), source, label);
+    const nudged = movePolygonVertex(source, index, xy(spot.x + 2e-6, spot.y));
+    assert.ok(nudged, label); assert.notEqual(nudged, source, label);
     // Any real travel is a new space.
     const moved = movePolygonVertex(source, index, xy(spot.x + 0.001, spot.y));
     assert.ok(moved, label); assert.notDeepEqual(moved, source, label);

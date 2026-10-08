@@ -116,19 +116,28 @@ export function removeMapNode(map: BackgroundMap, id: string): BackgroundMap {
   return { ...map, nodes: map.nodes.filter(node => node.id !== id).map(node => node.type !== 'space' && node.spaceId === id ? { ...node, spaceId: null } : node) };
 }
 
+/** The area an outline encloses, whichever way round its points run. */
+function outlineArea(points: readonly BackgroundPoint[]): number {
+  return Math.abs(points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return sum + point.x * next.y - next.x * point.y;
+  }, 0)) / 2;
+}
+
 export function polygonSpace(points: BackgroundPoint[]): Pick<BackgroundSpace, 'x' | 'y' | 'width' | 'height' | 'points'> | null {
   if (points.length < 3) return null;
   const x = Math.min(...points.map(point => point.x)), y = Math.min(...points.map(point => point.y));
   const width = Math.max(...points.map(point => point.x)) - x, height = Math.max(...points.map(point => point.y)) - y;
-  const area = Math.abs(points.reduce((sum, point, index) => {
-    const next = points[(index + 1) % points.length];
-    return sum + point.x * next.y - next.x * point.y;
-  }, 0)) / 2;
-  if (width < 10 || height < 10 || area < 1) return null;
+  if (width < 10 || height < 10 || outlineArea(points) < 1) return null;
   return { x, y, width, height, points: points.map(point => ({ x: (point.x - x) / width, y: (point.y - y) / height })) };
 }
 
-/** A polygon stores three to this many points. */
+/** Saved limits of a plan box: no position and no side beyond the first, no side under the second. */
+const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
+/**
+ * A polygon stores three to this many points. The + handles (`mapPlanEdit.ts`, which does not import this module)
+ * and the saved-data check (`validateBackgroundEntity` in `domain.ts`) hold the same number.
+ */
 const POLYGON_POINT_LIMIT = 200;
 /** Points closer together than this are one point. */
 const SAME_POINT = 1e-6;
@@ -145,16 +154,12 @@ export function polygonFromWorldPoints(space: BackgroundSpace, points: readonly 
   const xs = local.map(point => point.x), ys = local.map(point => point.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
   const width = maxX - minX, height = maxY - minY;
-  const area = Math.abs(local.reduce((sum, point, index) => {
-    const next = local[(index + 1) % local.length];
-    return sum + point.x * next.y - next.x * point.y;
-  }, 0)) / 2;
   // Each limit is asked for as what passes, so a value that is no number fails it too.
-  const storable = (length: number) => length >= 10 && length <= 100000;
-  if (!storable(width) || !storable(height) || !(area >= 1)) return null;
+  const storable = (length: number) => length >= MIN_PLAN_SIZE && length <= PLAN_LIMIT;
+  if (!storable(width) || !storable(height) || !(outlineArea(local) >= 1)) return null;
   const middle = rotate({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, space.rotation);
   const x = centre.x + middle.x - width / 2, y = centre.y + middle.y - height / 2;
-  if (!(Math.abs(x) <= 100000 && Math.abs(y) <= 100000)) return null;
+  if (!(Math.abs(x) <= PLAN_LIMIT && Math.abs(y) <= PLAN_LIMIT)) return null;
   return { ...space, x, y, width, height, points: local.map(point => ({ x: clamp((point.x - minX) / width, 0, 1), y: clamp((point.y - minY) / height, 0, 1) })) };
 }
 
@@ -227,7 +232,7 @@ export function addMapCamera(map: BackgroundMap, id: string): { map: BackgroundM
 /** Result of a 3D gizmo: world position and orientation of the node root, and scale relative to the stored node. */
 export type NodeWorldPoseInput = { position: Vec3; quaternion: QuaternionValue; scale: Vec3 };
 
-const CHANGE_EPSILON = 1e-6, PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10, VERTICAL_SNAP = 0.0005;
+const CHANGE_EPSILON = 1e-6, VERTICAL_SNAP = 0.0005;
 const round3 = (value: number) => Math.round(value * 1000) / 1000 + 0;
 /** The value to store, or null when the axis was not really touched and the saved field must stay as it is. */
 function settle(value: number, current: number, min: number, max: number): number | null {

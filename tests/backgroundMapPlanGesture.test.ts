@@ -602,10 +602,12 @@ test('a point drag that cannot be shown gives null', () => {
 
   // Only a point of an unlocked polygon can be dragged. What is none has no point beside it either: it collects no line.
   const start = xy(200, 100), point = xy(231, 78), bolted = replaceMapNode(garden, { ...yard, locked: true });
-  const pointless = (gesture: PlanGesture, label: string) => {
-    assert.equal(previewPlanGesture(gesture, garden, start, point, null), null, label);
-    assert.equal(previewPlanGesture(gesture, garden, start, point, snapping(gesture, garden)), null, label);
-    const candidates = planGestureCandidates(gesture, garden);
+  // Two stored points are no polygon: the plan draws such a space as its box, and the four corners of that box are not its points.
+  const stub = replaceMapNode(garden, { ...yard, points: yard.points.slice(0, 2) });
+  const pointless = (gesture: PlanGesture, label: string, initial: BackgroundMap = garden) => {
+    assert.equal(previewPlanGesture(gesture, initial, start, point, null), null, label);
+    assert.equal(previewPlanGesture(gesture, initial, start, point, snapping(gesture, initial)), null, label);
+    const candidates = planGestureCandidates(gesture, initial);
     assert.deepEqual([candidates.x, candidates.y], [[], []], label);
   };
   for (const insert of [false, true]) {
@@ -613,8 +615,9 @@ test('a point drag that cannot be shown gives null', () => {
     for (const index of [-1, 6, 1.5, Number.NaN]) pointless({ mode: 'vertex', nodeId: yard.id, index, insert }, `index ${index}`);
     const gesture: PlanGesture = { mode: 'vertex', nodeId: yard.id, index: 1, insert };
     assert.ok(previewPlanGesture(gesture, garden, start, point, null));
-    assert.equal(previewPlanGesture(gesture, bolted, start, point, null), null);
-    assert.equal(previewPlanGesture(gesture, bolted, start, point, snapping(gesture, bolted)), null);
+    assert.equal(planGestureCandidates(gesture, garden).x.length, 2);
+    pointless(gesture, 'locked', bolted);
+    for (const index of [0, 1, 2, 3]) pointless({ ...gesture, index }, `two points, index ${index}`, stub);
     // A pointer position that is no number.
     assert.equal(previewPlanGesture(gesture, garden, start, xy(Number.NaN, 78), null), null);
     assert.equal(previewPlanGesture(gesture, garden, start, xy(Number.NaN, 78), snapping(gesture, garden)), null);
