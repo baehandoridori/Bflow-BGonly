@@ -585,8 +585,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     event.preventDefault(); event.stopPropagation();
     setSymbolPaletteOpen(false);
     svgRef.current?.focus();
-    // A press anywhere but on a point handle lets go of the picked point.
-    if (typeof handle !== 'object') setActiveVertex(null);
+    // A press anywhere but on a point lets go of the picked point. A + is no point: while it is pulled the polygon
+    // has one more point, and the old index would name another dot.
+    if (typeof handle !== 'object' || handle.insert) setActiveVertex(null);
     // Taking the focus ends a number entry that was still open, and that may have edited the map just now:
     // everything below starts from the map as it is at this moment, not as it was drawn.
     const live = mapDraft(doc.getState(), current.id)?.value ?? current;
@@ -620,6 +621,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const vertex = mode === 'vertex' && typeof handle === 'object' ? handle : null;
     // A pressed point is the picked one, dragged or not. A + is no point yet: the one it makes is picked on release.
     if (vertex && target && !vertex.insert) setActiveVertex({ mapId: current.id, nodeId: target.id, index: vertex.index });
+    // What the last Delete said about a point is over once the points are worked on again.
+    if (vertex) setError('');
     pointerRef.current = { mode, pointerId: event.pointerId, mapId: current.id, initial: live, node: target, start: point, clientX: event.clientX, clientY: event.clientY, matrix, view: { ...view }, moved: false, stack, scale: screenScale, vertex, candidates: null };
     if (event.altKey) altDrag.current = true;
     svgRef.current?.setPointerCapture(event.pointerId);
@@ -738,7 +741,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       else setError(selected.points.length <= 3 ? '다각형에는 꼭짓점이 3개 이상 필요해요. 이 점은 지울 수 없어요.' : '이 점을 지우면 공간이 너무 작아져요.');
       return;
     }
-    if (event.key === 'Delete' && selected && canEdit && !selected.locked && !pointerRef.current && !doc.isGestureActive()) { event.preventDefault(); setConfirmation('delete-node'); }
+    // Not on the repeats of a held key: the first one may have removed a picked point just now, and the rest
+    // would go on to ask about the whole node.
+    if (event.key === 'Delete' && !event.repeat && selected && canEdit && !selected.locked && !pointerRef.current && !doc.isGestureActive()) { event.preventDefault(); setConfirmation('delete-node'); }
   }
 
   // Stable callbacks: the 3D viewport, the companion plan and the image grid must not re-subscribe on every preview.
@@ -913,10 +918,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               {selected.locked && <p>잠금을 해제하면 연결을 바꿀 수 있습니다.</p>}
               {draftChanged && <p className="bmap-save-note">연결할 때 현재 공간 편집 내용도 함께 저장됩니다.</p>}
             </section>}
-            {/* Out in the open, not in the folded 'position, size, lock' section, where it would not be found. An ellipse gets nothing. */}
-            {editing && selected.type === 'space' && <div className="bmap-shape-actions">
+            {/* Out in the open, not in the folded 'position, size, lock' section, where it would not be found. An ellipse gets nothing.
+                On the plan only, where the points it speaks of can be worked on: the 3D view stays as it was. */}
+            {editing && mode === 'plan' && selected.type === 'space' && <div className="bmap-shape-actions">
+              {/* The button goes away with its own click. The focus goes to the canvas, or the keys (undo is the only way back) would reach nothing. */}
               {selected.shape === 'rect' && <><button type="button" className="bmap-text-button" disabled={fieldLocked || gestureActive}
-                onClick={() => { const shaped = rectToPolygon(selected); if (shaped) updateMap(replaceMapNode(current, shaped)); }}>다각형으로 바꾸기</button>
+                onClick={() => { const shaped = rectToPolygon(selected); if (shaped) { updateMap(replaceMapNode(current, shaped)); focusCanvas(); } }}>다각형으로 바꾸기</button>
                 <p className="bmap-hint">꼭짓점을 끌어 ㄱ자 같은 모양으로 고칠 수 있어요.</p></>}
               {selected.shape === 'polygon' && <p className="bmap-hint">점을 끌어 모양을 고쳐요. 변 가운데의 +를 끌면 점이 생기고, 점을 고른 뒤 Delete를 누르면 지워져요.</p>}
             </div>}
