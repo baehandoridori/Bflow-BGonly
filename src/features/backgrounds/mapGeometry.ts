@@ -1,4 +1,4 @@
-import type { BackgroundCamera, BackgroundMap, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
+import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
 import { MAP_SPATIAL_LIMITS, cameraAngles, cameraAnglesFromOrientation, cameraOrientation, createMapCamera, nextMapCameraName, nodeAngles, nodeAnglesFromOrientation,
   nodeElevation, nodeOrientation, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees } from './mapSpatial.ts';
 import type { QuaternionValue, Vec3 } from './mapSpatial.ts';
@@ -9,14 +9,41 @@ function rotate(point: BackgroundPoint, angle: number): BackgroundPoint {
 }
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+/**
+ * The rotated top-left corner: the point a resize keeps fixed. Only for turned nodes. An unturned one
+ * uses its stored x/y as they are, since `x + width / 2 - width / 2` can lose the last digit.
+ */
+function resizeOrigin(node: BackgroundSpace | BackgroundSymbol): BackgroundPoint {
+  const cornerOffset = rotate({ x: -node.width / 2, y: -node.height / 2 }, node.rotation);
+  return { x: node.x + node.width / 2 + cornerOffset.x, y: node.y + node.height / 2 + cornerOffset.y };
+}
+
+/** A plan point in the node's own unrotated frame, measured from its rotated top-left corner (the point a resize keeps fixed). */
+export function nodeLocalPoint(node: BackgroundSpace | BackgroundSymbol, world: BackgroundPoint): BackgroundPoint {
+  if (node.rotation === 0) return { x: world.x - node.x, y: world.y - node.y };
+  const origin = resizeOrigin(node);
+  return rotate({ x: world.x - origin.x, y: world.y - origin.y }, -node.rotation);
+}
+
+/** Resize to a local size (clamped to 10..100000) while the rotated top-left stays fixed. */
+export function resizeSpaceTo<T extends BackgroundSpace | BackgroundSymbol>(space: T, width: number, height: number): T {
+  const size = { width: clamp(width, 10, 100000), height: clamp(height, 10, 100000) };
+  if (space.rotation === 0) return { ...space, ...size };
+  const origin = resizeOrigin(space), centerOffset = rotate({ x: size.width / 2, y: size.height / 2 }, space.rotation);
+  return { ...space, ...size, x: origin.x + centerOffset.x - size.width / 2, y: origin.y + centerOffset.y - size.height / 2 };
+}
+
 /** Resize from the bottom-right handle while the rotated top-left stays fixed. */
 export function resizeSpace<T extends BackgroundSpace | BackgroundSymbol>(space: T, pointer: BackgroundPoint): T {
-  const cornerOffset = rotate({ x: -space.width / 2, y: -space.height / 2 }, space.rotation);
-  const origin = { x: space.x + space.width / 2 + cornerOffset.x, y: space.y + space.height / 2 + cornerOffset.y };
-  const local = rotate({ x: pointer.x - origin.x, y: pointer.y - origin.y }, -space.rotation);
-  const width = Math.min(100000, Math.max(10, local.x)), height = Math.min(100000, Math.max(10, local.y));
-  const centerOffset = rotate({ x: width / 2, y: height / 2 }, space.rotation);
-  return { ...space, width, height, x: origin.x + centerOffset.x - width / 2, y: origin.y + centerOffset.y - height / 2 };
+  const local = nodeLocalPoint(space, pointer);
+  return resizeSpaceTo(space, local.x, local.y);
+}
+
+/** Plan position of the bottom-right corner: the point the resize handle stands for. */
+export function nodeResizeCorner(node: BackgroundSpace | BackgroundSymbol): BackgroundPoint {
+  if (node.rotation === 0) return { x: node.x + node.width, y: node.y + node.height };
+  const origin = resizeOrigin(node), offset = rotate({ x: node.width, y: node.height }, node.rotation);
+  return { x: origin.x + offset.x, y: origin.y + offset.y };
 }
 
 /**
@@ -49,11 +76,24 @@ export function transformMapSpace(map: BackgroundMap, next: BackgroundSpace): Ba
   }) };
 }
 
+/** Replace one node. Members of a space do NOT follow: use transformMapSpace when a space moves, turns or scales as a whole. */
+export function replaceMapNode(map: BackgroundMap, next: BackgroundNode): BackgroundMap {
+  return { ...map, nodes: map.nodes.map(node => node.id === next.id ? next : node) };
+}
+
 export function moveMapNode(map: BackgroundMap, id: string, delta: BackgroundPoint): BackgroundMap {
   const selected = map.nodes.find(node => node.id === id);
   if (!selected || selected.locked) return map;
   if (selected.type === 'space') return transformMapSpace(map, { ...selected, x: selected.x + delta.x, y: selected.y + delta.y });
   return { ...map, nodes: map.nodes.map(node => node.id === id ? { ...node, x: node.x + delta.x, y: node.y + delta.y } : node) };
+}
+
+/** Move a node so that its stored x/y become exactly `position`. Members of a space follow as in moveMapNode. Unknown or locked nodes return `map`. */
+export function placeMapNode(map: BackgroundMap, id: string, position: BackgroundPoint): BackgroundMap {
+  const selected = map.nodes.find(node => node.id === id);
+  if (!selected || selected.locked) return map;
+  if (selected.type === 'space') return transformMapSpace(map, { ...selected, x: position.x, y: position.y });
+  return replaceMapNode(map, { ...selected, x: position.x, y: position.y });
 }
 
 export function removeMapNode(map: BackgroundMap, id: string): BackgroundMap {
@@ -124,8 +164,6 @@ function settlePitch(value: number, current: number, seen: number): number | nul
 }
 const settled = <T extends Record<string, number | null>>(values: T) =>
   Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null)) as { [K in keyof T]?: number };
-const replaceNode = (map: BackgroundMap, next: BackgroundCamera | BackgroundSymbol): BackgroundMap =>
-  ({ ...map, nodes: map.nodes.map(node => node.id === next.id ? next : node) });
 
 /**
  * Convert a 3D gizmo result into node fields. Only values that really changed are written, so an
@@ -142,7 +180,7 @@ export function applyNodeWorldPose(initialMap: BackgroundMap, id: string, pose: 
     const changes = settled({ x: settle(position.x, node.x, -PLAN_LIMIT, PLAN_LIMIT), y: settle(position.z, node.y, -PLAN_LIMIT, PLAN_LIMIT),
       angle: settleTurn(read.angle, current.angle, normalizeDegrees), elevation,
       pitch: settlePitch(read.pitch, current.pitch, seen.pitch), roll: settleTurn(read.roll, current.roll, normalizeSignedDegrees) });
-    return Object.keys(changes).length ? replaceNode(initialMap, { ...node, ...changes }) : initialMap;
+    return Object.keys(changes).length ? replaceMapNode(initialMap, { ...node, ...changes }) : initialMap;
   }
   // The root is the centre of the base, so a resize keeps that centre where the gizmo left it.
   const current = nodeAngles(node), read = nodeAnglesFromOrientation(quaternion, current), volumeHeight = nodeVolumeHeight(node);
@@ -164,7 +202,7 @@ export function applyNodeWorldPose(initialMap: BackgroundMap, id: string, pose: 
   }
   const seen = nodeAnglesFromOrientation(nodeOrientation(current), current);
   const changes = settled({ ...box, pitch: settlePitch(read.pitch, current.pitch, seen.pitch), roll: settleTurn(read.roll, current.roll, normalizeSignedDegrees) });
-  return Object.keys(changes).length ? replaceNode(initialMap, { ...node, ...changes }) : initialMap;
+  return Object.keys(changes).length ? replaceMapNode(initialMap, { ...node, ...changes }) : initialMap;
 }
 
 /** Cameras and symbols sharing a plan spot with the given one, in map order, so each can be picked in turn. */

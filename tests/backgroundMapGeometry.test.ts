@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { polygonSpace, resizeSpace, moveMapNode, removeMapNode, containsPoint, transformMapSpace } from '../src/features/backgrounds/mapGeometry.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 import { addMapCamera, applyNodeWorldPose, stackedMapNodeIds } from '../src/features/backgrounds/mapGeometry.ts';
+import { nodeLocalPoint, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpaceTo } from '../src/features/backgrounds/mapGeometry.ts';
 import { cameraOrientation, nodeOrientation, nodeWorldPose } from '../src/features/backgrounds/mapSpatial.ts';
 
 const space: BackgroundSpace = { id: 'space', type: 'space', name: '교실', placeId: null, childMapId: null, x: 100, y: 100, width: 100, height: 60, rotation: 90, shape: 'rect', points: [], locked: false };
@@ -539,4 +540,109 @@ test('a 3D edit of a space stops its carried members at the saved limit', () => 
   const lifted = applyNodeWorldPose(outside, room.id, { position: { ...nodeWorldPose(outsideRoom).position, y: 30 }, quaternion: upright, scale: one });
   assert.deepEqual(lifted, transformMapSpace(outside, { ...outsideRoom, elevation: 30 }));
   assert.deepEqual(lifted.nodes[1], { ...outside.nodes[1], elevation: 180 }); assert.equal(lifted.nodes[4], lockedLens);
+});
+
+// --- Resize helpers, exact placement and node replacement --------------------------------------
+const tight = (actual: number, expected: number, label = '') =>
+  assert.ok(Math.abs(actual - expected) < 1e-9, `${label} ${actual} != ${expected}`);
+const plainRoom: BackgroundSpace = { ...space, id: 'room', x: 100, y: 100, width: 60, height: 40, rotation: 0 };
+/** Stored with decimals, as drawn rooms are. */
+const oddRoom: BackgroundSpace = { ...space, id: 'odd', x: 244.65, y: 120.3, width: 144.65, height: 80, rotation: 0 };
+
+test('a pointer resize is the pointer read in the node frame, then a resize to that local size', () => {
+  const pointers = [{ x: 100, y: 230 }, { x: 331.7, y: 208.4 }, { x: 500, y: -100 }, { x: 200000, y: 200000 }];
+  for (const rotation of [0, 90, 37]) for (const node of [{ ...oddRoom, rotation }, { ...symbol, rotation }]) for (const pointer of pointers) {
+    const local = nodeLocalPoint(node, pointer);
+    assert.deepEqual(resizeSpaceTo(node, local.x, local.y), resizeSpace(node, pointer), `${node.type} at ${rotation}`);
+  }
+  // The frame starts at the turned top-left corner and runs along the node's own sides.
+  const local = nodeLocalPoint(space, { x: 100, y: 230 });
+  tight(local.x, 150, 'local x'); tight(local.y, 80, 'local y');
+  const grown = resizeSpaceTo(space, 150, 80);
+  assert.equal(grown.width, 150); assert.equal(grown.height, 80); tight(grown.x, 65, 'x'); tight(grown.y, 115, 'y');
+  assert.deepEqual(nodeLocalPoint(oddRoom, { x: 300.4, y: 177.7 }), { x: 300.4 - 244.65, y: 177.7 - 120.3 });
+  // Lengths stay within the saved limits, turned or not.
+  for (const rotation of [0, 37]) {
+    const clamped = resizeSpaceTo({ ...oddRoom, rotation }, 5, 200000);
+    assert.equal(clamped.width, 10); assert.equal(clamped.height, 100000);
+  }
+});
+
+test('resizing an unturned node keeps its stored position digit for digit', () => {
+  // Going through the centre and back loses the last digit: (244.65 + 30) - 30 is 244.64999999999998.
+  for (const [width, height] of [[30, 50], [60, 40], [55.35, 79.7], [144.65, 80], [5, 200000], [0.1 + 0.2, 1 / 3]]) {
+    const resized = resizeSpaceTo(oddRoom, width, height);
+    assert.equal(resized.x, 244.65, `x at width ${width}`); assert.equal(resized.y, 120.3, `y at height ${height}`);
+  }
+  for (const pointer of [{ x: 300, y: 200 }, { x: 274.65, y: 170.3 }, { x: 500000, y: -5 }, { x: 244.65, y: 120.3 }]) {
+    const resized = resizeSpace({ ...oddRoom, width: 60, height: 40 }, pointer);
+    assert.equal(resized.x, 244.65, `x at ${pointer.x}`); assert.equal(resized.y, 120.3, `y at ${pointer.y}`);
+  }
+  assert.deepEqual(resizeSpaceTo(oddRoom, 30, 50), { ...oddRoom, width: 30, height: 50 });
+  // Symbols follow the same rule and keep their own fields.
+  const door: BackgroundSymbol = { ...symbol, x: 244.65, y: 120.3, rotation: 0 };
+  assert.deepEqual(resizeSpaceTo(door, 33.3, 12.5), { ...door, width: 33.3, height: 12.5 });
+  assert.deepEqual(resizeSpace(door, { x: 300, y: 200 }), { ...door, width: 300 - 244.65, height: 200 - 120.3 });
+});
+
+test('the resize corner is the bottom-right corner of the turned box', () => {
+  assert.deepEqual(nodeResizeCorner(oddRoom), { x: 244.65 + 144.65, y: 120.3 + 80 });
+  assert.deepEqual(nodeResizeCorner({ ...symbol, rotation: 0 }), { x: 150, y: 155 });
+  for (const [rotation, x, y] of [[90, 110, 150], [180, 100, 100], [270, 150, 90]]) {
+    const corner = nodeResizeCorner({ ...plainRoom, rotation });
+    tight(corner.x, x, `x at ${rotation}`); tight(corner.y, y, `y at ${rotation}`);
+  }
+  // Resizing to where the handle already stands changes no length.
+  for (const rotation of [0, 90, 37]) for (const node of [{ ...oddRoom, rotation }, { ...symbol, rotation }]) {
+    const same = resizeSpace(node, nodeResizeCorner(node)), label = `${node.type} at ${rotation}`;
+    tight(same.width, node.width, `${label} width`); tight(same.height, node.height, `${label} height`);
+    tight(same.x, node.x, `${label} x`); tight(same.y, node.y, `${label} y`);
+  }
+});
+
+test('placing a node stores exactly the given position and carries the members of a space', () => {
+  const lockedDoor: BackgroundSymbol = { ...symbol, id: 'locked-symbol', locked: true };
+  const unrelated: BackgroundCamera = { ...memberCamera, id: 'unrelated', spaceId: null };
+  const source: BackgroundMap = { ...map, nodes: [space, memberCamera, symbol, lockedDoor, unrelated] }, frozen = JSON.stringify(source);
+  const target = { x: 244.65, y: 120.3 };
+
+  const placed = placeMapNode(source, space.id, target);
+  assert.equal(placed.nodes[0].x, 244.65); assert.equal(placed.nodes[0].y, 120.3);
+  assert.deepEqual(placed.nodes[0], { ...space, ...target });
+  // Members land where a move by the same difference takes them.
+  const moved = moveMapNode(source, space.id, { x: target.x - space.x, y: target.y - space.y });
+  for (const index of [1, 2]) {
+    tight(placed.nodes[index].x, moved.nodes[index].x, `member ${index} x`); tight(placed.nodes[index].y, moved.nodes[index].y, `member ${index} y`);
+    assert.deepEqual({ ...placed.nodes[index], x: 0, y: 0 }, { ...source.nodes[index], x: 0, y: 0 });
+  }
+  tight(placed.nodes[1].x, 274.65, 'camera x'); tight(placed.nodes[1].y, 150.3, 'camera y');
+  assert.equal(placed.nodes[3], lockedDoor); assert.equal(placed.nodes[4], unrelated);
+
+  // A camera or a symbol is placed alone.
+  const lens = placeMapNode(source, memberCamera.id, { x: 3.3, y: -7.1 });
+  assert.deepEqual(lens.nodes[1], { ...memberCamera, x: 3.3, y: -7.1 });
+  const door = placeMapNode(source, symbol.id, target);
+  assert.deepEqual(door.nodes[2], { ...symbol, ...target });
+  for (const [result, changed] of [[lens, 1], [door, 2]] as const) source.nodes.forEach((node, index) => { if (index !== changed) assert.equal(result.nodes[index], node); });
+
+  // Locked and unknown nodes return the map itself.
+  const fixed: BackgroundMap = { ...map, nodes: [{ ...space, locked: true }, { ...memberCamera, locked: true }, lockedDoor] };
+  for (const id of [space.id, memberCamera.id, lockedDoor.id, 'missing']) assert.equal(placeMapNode(fixed, id, target), fixed, id);
+  assert.equal(placeMapNode(source, 'missing', target), source);
+  assert.equal(JSON.stringify(source), frozen);
+});
+
+test('replacing a node swaps that node alone, where a space transform carries its members', () => {
+  const source: BackgroundMap = { ...map, nodes: [space, memberCamera, symbol] }, frozen = JSON.stringify(source);
+  const shifted: BackgroundSpace = { ...space, x: 300 };
+  const replaced = replaceMapNode(source, shifted);
+  assert.equal(replaced.nodes[0], shifted); assert.equal(replaced.nodes[1], memberCamera); assert.equal(replaced.nodes[2], symbol);
+  const carried = transformMapSpace(source, shifted);
+  assert.equal(carried.nodes[0], shifted); near(carried.nodes[1].x, 330); near(carried.nodes[2].x, 330);
+  // Any kind of node, and the rest of the map stays as it is.
+  const lens: BackgroundCamera = { ...memberCamera, angle: 90 }, door: BackgroundSymbol = { ...symbol, rotation: 0 };
+  const withLens = replaceMapNode(source, lens), withDoor = replaceMapNode(source, door);
+  assert.deepEqual(withLens, { ...source, nodes: [space, lens, symbol] }); assert.equal(withLens.nodes[1], lens); assert.equal(withLens.nodes[0], space);
+  assert.deepEqual(withDoor, { ...source, nodes: [space, memberCamera, door] }); assert.equal(withDoor.nodes[2], door); assert.equal(withDoor.nodes[1], memberCamera);
+  assert.equal(JSON.stringify(source), frozen);
 });
