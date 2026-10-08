@@ -39,9 +39,11 @@ const normalizeAngle = (value: number) => ((value % 360) + 360) % 360;
 const uuid = () => crypto.randomUUID();
 const round = (value: number) => Math.round(value * 100) / 100;
 const isDrawTool = (tool: Tool) => tool === 'rect' || tool === 'ellipse' || tool === 'polygon';
-const interactive = 'input, textarea, select, button, [contenteditable]:not([contenteditable="false"])';
+/** Where a key is text. Both selectors below are built on it, so a new kind of text field reaches both. */
+const textFields = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+const interactive = `${textFields}, button`;
 /** Where a key is text, or belongs to an open dialog: the plan shortcuts leave it alone. */
-const textEntry = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog';
+const textEntry = `${textFields}, dialog`;
 const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔어요. 편집 내용은 그대로예요.';
 const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string }[] = [
   { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기' },

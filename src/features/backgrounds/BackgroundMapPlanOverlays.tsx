@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { JSX, PointerEvent as ReactPointerEvent } from 'react';
 import { planNodeHandles } from './mapPlanEdit';
 import type { BackgroundNode } from './types';
 
