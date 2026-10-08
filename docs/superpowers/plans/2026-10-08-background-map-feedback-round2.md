@@ -22,6 +22,8 @@
 - 목표: 평면 도면을 다루는 손맛을 먼저 고칩니다. 휠로 확대·축소하고, 공간을 그리자마자 이름을 붙이고, 옮기거나 줄일 때 착 붙고, 다각형의 점을 고칠 수 있게 됩니다. 저장된 자료는 건드리지 않아 가장 안전한 묶음입니다.
 - 운영 DB: None.
 - 순서 근거: No stored-data change and no contract change outside the plan surface, so it is the lowest-risk release right after the v1.130.0 launch. F9 goes first because its screen-scale value and zoom-safe handles are reused by F4 (tolerance), F11 (vertex handles), F6 (marquee slop) and F12 (pins). F4 precedes F11 because vertex snapping reuses mapSnap. Everything here is pure-function heavy and testable with node --test. Put new pure logic in new .ts modules and new overlays in small components; do not restructure the three pointer functions up front.
+- 문서: 설계 [`docs/superpowers/specs/2026-10-08-background-map-editing-basics-design.md`](../specs/2026-10-08-background-map-editing-basics-design.md) · 구현 계획 [`docs/superpowers/plans/2026-10-08-background-map-editing-basics.md`](2026-10-08-background-map-editing-basics.md)
+- 상태: 2026-10-08 구현 완료(v1.131.0) · 수동 검증·배포 대기
 
 ### B2 선택 도구 개편
 
@@ -330,7 +332,7 @@ Resolved by opening the code (root C:/Bflow-BGonly/.claude/worktrees/background-
 
 | 묶음 | 설계 문서 | 상태 |
 |---|---|---|
-| ① 평면 편집 기본기 | `docs/superpowers/specs/2026-10-08-background-map-editing-basics-design.md` | 2026-10-08 설계 승인, 구현 중 |
+| ① 평면 편집 기본기 | `docs/superpowers/specs/2026-10-08-background-map-editing-basics-design.md` | 2026-10-08 구현 완료(v1.131.0) · 수동 검증·배포 대기 |
 | ② 선택 도구 개편 | - | 대기 |
 | ③ 새 도면 요소 | - | 대기 |
 | ④ 팀 공개와 편집 권한 | - | 대기 (결정 필요) |
