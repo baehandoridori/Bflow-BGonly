@@ -1,12 +1,14 @@
 import type { BackgroundMap, BackgroundPoint, BackgroundSpace } from './types.ts';
-import { moveMapNode, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpace, resizeSpaceTo, transformMapSpace } from './mapGeometry.ts';
-import { normalizeDegrees } from './mapSpatial.ts';
-import { collectSnapCandidates, snapMove, snapResize, snapRotation, snapTravellingIds } from './mapSnap.ts';
+import { insertPolygonVertex, moveMapNode, movePolygonVertex, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpace, resizeSpaceTo, transformMapSpace } from './mapGeometry.ts';
+import { nodePlanOutline, normalizeDegrees } from './mapSpatial.ts';
+import { collectSnapCandidates, snapMove, snapPoint, snapResize, snapRotation, snapTravellingIds, withVertexNeighbours } from './mapSnap.ts';
 import type { SnapCandidates, SnapGuide } from './mapSnap.ts';
 
 export type PlanGesture =
   | { mode: 'move' | 'resize' | 'rotate'; nodeId: string }
-  | { mode: 'draw'; node: BackgroundSpace };
+  | { mode: 'draw'; node: BackgroundSpace }
+  /** A point of a polygon, or with `insert` the new point pulled out of the edge from `index` to the next point. */
+  | { mode: 'vertex'; nodeId: string; index: number; insert: boolean };
 export type PlanGestureSnap = { candidates: SnapCandidates; /** map units */ tolerance: number;
   /** Map units: how far away on the other axis a target may be and still count (move and resize). */ reach: number };
 export type PlanGesturePreview = { map: BackgroundMap; guides: SnapGuide[] };
@@ -14,10 +16,28 @@ export type PlanGesturePreview = { map: BackgroundMap; guides: SnapGuide[] };
 /** Plan angle in degrees of the direction from `center` to `point`. */
 const bearing = (point: BackgroundPoint, center: BackgroundPoint) => Math.atan2(point.y - center.y, point.x - center.x) * 180 / Math.PI;
 
+/**
+ * What a point handle of a polygon stands for and the two points beside it: a point between its neighbours,
+ * or the middle of an edge between its two ends. Null when the gesture names no point of a polygon space.
+ */
+function vertexHandle(gesture: Extract<PlanGesture, { mode: 'vertex' }>, initial: BackgroundMap): { space: BackgroundSpace; base: BackgroundPoint; beside: BackgroundPoint[] } | null {
+  const space = initial.nodes.find(item => item.id === gesture.nodeId), { index } = gesture;
+  if (space?.type !== 'space' || space.shape !== 'polygon') return null;
+  const outline = nodePlanOutline(space), count = outline.length;
+  if (!Number.isInteger(index) || index < 0 || index >= count) return null;
+  const point = outline[index], next = outline[(index + 1) % count];
+  return gesture.insert ? { space, base: { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 }, beside: [point, next] }
+    : { space, base: point, beside: [outline[(index + count - 1) % count], next] };
+}
+
 /** Snap targets of one gesture, from the map as it was at the press. */
 export function planGestureCandidates(gesture: PlanGesture, initial: BackgroundMap): SnapCandidates {
   // Drawing is not snapped, and a turn is caught by its stops alone: neither uses a line.
   if (gesture.mode === 'draw' || gesture.mode === 'rotate') return { x: [], y: [], points: [] };
+  // A point sticks to two things only: the corners of the other spaces, and the x and y of the points beside it.
+  // No edge or centre line of another node and no border of the plan, or it would catch on every chair in the room.
+  if (gesture.mode === 'vertex') return withVertexNeighbours(
+    { x: [], y: [], points: collectSnapCandidates(initial, new Set([gesture.nodeId])).points }, vertexHandle(gesture, initial)?.beside ?? []);
   // Everything but the node and what travels with it. What is near is told apart at each pointer position.
   return collectSnapCandidates(initial, snapTravellingIds(initial, [gesture.nodeId]));
 }
@@ -34,6 +54,17 @@ export function previewPlanGesture(gesture: PlanGesture, initial: BackgroundMap,
   if (gesture.mode === 'draw') {
     const drawn = { ...gesture.node, x: Math.min(start.x, point.x), y: Math.min(start.y, point.y), width: Math.max(10, Math.abs(delta.x)), height: Math.max(10, Math.abs(delta.y)) };
     return { map: { ...initial, nodes: [...initial.nodes, drawn] }, guides: [] };
+  }
+  if (gesture.mode === 'vertex') {
+    const handle = vertexHandle(gesture, initial);
+    if (!handle) return null;
+    // The point travels as far as the pointer did, from where its handle stands: where the handle was pressed
+    // does not enter the result, so a point that was lined up is not put off by the press alone.
+    const free = { x: handle.base.x + delta.x, y: handle.base.y + delta.y }, stuck = snap && snapPoint(free, snap.candidates, snap.tolerance);
+    const target = stuck ? stuck.point : free;
+    const shaped = gesture.insert ? insertPolygonVertex(handle.space, gesture.index, target) : movePolygonVertex(handle.space, gesture.index, target);
+    // Only the space is swapped: its members stay where they are, which the whole-space transform would not do.
+    return shaped && { map: replaceMapNode(initial, shaped), guides: stuck ? stuck.guides : [] };
   }
   const node = initial.nodes.find(item => item.id === gesture.nodeId);
   if (!node) return null;

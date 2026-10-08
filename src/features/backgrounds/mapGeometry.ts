@@ -1,6 +1,6 @@
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
 import { MAP_SPATIAL_LIMITS, cameraAngles, cameraAnglesFromOrientation, cameraOrientation, createMapCamera, nextMapCameraName, nodeAngles, nodeAnglesFromOrientation,
-  nodeElevation, nodeOrientation, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees } from './mapSpatial.ts';
+  nodeElevation, nodeOrientation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees } from './mapSpatial.ts';
 import type { QuaternionValue, Vec3 } from './mapSpatial.ts';
 
 function rotate(point: BackgroundPoint, angle: number): BackgroundPoint {
@@ -126,6 +126,78 @@ export function polygonSpace(points: BackgroundPoint[]): Pick<BackgroundSpace, '
   }, 0)) / 2;
   if (width < 10 || height < 10 || area < 1) return null;
   return { x, y, width, height, points: points.map(point => ({ x: (point.x - x) / width, y: (point.y - y) / height })) };
+}
+
+/** A polygon stores three to this many points. */
+const POLYGON_POINT_LIMIT = 200;
+/** Points closer together than this are one point. */
+const SAME_POINT = 1e-6;
+
+/**
+ * A polygon space rebuilt from absolute plan points. The rotation is kept, the box becomes the bounding box of the
+ * points in the space's own unrotated frame, and every point is normalised against it, so each point keeps its plan
+ * position. Null when the result cannot be stored.
+ */
+export function polygonFromWorldPoints(space: BackgroundSpace, points: readonly BackgroundPoint[]): BackgroundSpace | null {
+  if (points.length < 3 || points.length > POLYGON_POINT_LIMIT || points.some(point => !Number.isFinite(point.x) || !Number.isFinite(point.y))) return null;
+  const centre = { x: space.x + space.width / 2, y: space.y + space.height / 2 };
+  const local = points.map(point => rotate({ x: point.x - centre.x, y: point.y - centre.y }, -space.rotation));
+  const xs = local.map(point => point.x), ys = local.map(point => point.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const width = maxX - minX, height = maxY - minY;
+  const area = Math.abs(local.reduce((sum, point, index) => {
+    const next = local[(index + 1) % local.length];
+    return sum + point.x * next.y - next.x * point.y;
+  }, 0)) / 2;
+  // Each limit is asked for as what passes, so a value that is no number fails it too.
+  const storable = (length: number) => length >= 10 && length <= 100000;
+  if (!storable(width) || !storable(height) || !(area >= 1)) return null;
+  const middle = rotate({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, space.rotation);
+  const x = centre.x + middle.x - width / 2, y = centre.y + middle.y - height / 2;
+  if (!(Math.abs(x) <= 100000 && Math.abs(y) <= 100000)) return null;
+  return { ...space, x, y, width, height, points: local.map(point => ({ x: clamp((point.x - minX) / width, 0, 1), y: clamp((point.y - minY) / height, 0, 1) })) };
+}
+
+/** The plan points of an unlocked polygon space in stored order, when `index` is one of them. */
+function polygonPlanPoints(space: BackgroundSpace, index: number): BackgroundPoint[] | null {
+  // With fewer than three stored points the plan outline is that of the box, not of those points.
+  if (space.shape !== 'polygon' || space.locked || space.points.length < 3) return null;
+  return Number.isInteger(index) && index >= 0 && index < space.points.length ? nodePlanOutline(space) : null;
+}
+const samePoint = (a: BackgroundPoint, b: BackgroundPoint) => Math.hypot(a.x - b.x, a.y - b.y) < SAME_POINT;
+
+/** Moves one point to `point`. Null on a point beside it: the edge between the two would have no length. */
+export function movePolygonVertex(space: BackgroundSpace, index: number, point: BackgroundPoint): BackgroundSpace | null {
+  const points = polygonPlanPoints(space, index);
+  if (!points) return null;
+  // Where it already stands, the space is left as it is: rebuilt from its plan points every stored value would
+  // shift in its last digits, and a drag that came back would stay as a change.
+  if (samePoint(point, points[index])) return space;
+  const count = points.length;
+  if (samePoint(point, points[(index + count - 1) % count]) || samePoint(point, points[(index + 1) % count])) return null;
+  return polygonFromWorldPoints(space, points.map((item, at) => at === index ? point : item));
+}
+
+/** Adds `point` between `index` and the next point. Null on either of the two. */
+export function insertPolygonVertex(space: BackgroundSpace, index: number, point: BackgroundPoint): BackgroundSpace | null {
+  const points = polygonPlanPoints(space, index);
+  if (!points || points.length >= POLYGON_POINT_LIMIT) return null;
+  if (samePoint(point, points[index]) || samePoint(point, points[(index + 1) % points.length])) return null;
+  return polygonFromWorldPoints(space, [...points.slice(0, index + 1), point, ...points.slice(index + 1)]);
+}
+
+/** Removes one point. Null when only three are left. */
+export function removePolygonVertex(space: BackgroundSpace, index: number): BackgroundSpace | null {
+  const points = polygonPlanPoints(space, index);
+  if (!points || points.length <= 3) return null;
+  return polygonFromWorldPoints(space, points.filter((_, at) => at !== index));
+}
+
+/** A rectangle as a four-point polygon with the same outline. Null for other shapes and for locked spaces. */
+export function rectToPolygon(space: BackgroundSpace): BackgroundSpace | null {
+  if (space.shape !== 'rect' || space.locked) return null;
+  // The corners in the order the outline of a rectangle has them.
+  return { ...space, shape: 'polygon', points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] };
 }
 
 export function containsPoint(space: BackgroundSpace, point: BackgroundPoint): boolean {

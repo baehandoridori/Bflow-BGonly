@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP_SNAP_PREFERENCE_KEY, doubleClickNodeId, planNodeHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
+import { MAP_SNAP_PREFERENCE_KEY, doubleClickNodeId, planNodeHandles, planVertexHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
 import type { PlanNodeHandles } from '../src/features/backgrounds/mapPlanEdit.ts';
+import { nodePlanOutline } from '../src/features/backgrounds/mapSpatial.ts';
 import type { BackgroundCamera, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
 const near = (actual: number, expected: number, label = '') =>
@@ -120,6 +121,72 @@ test('the resize square steps outside the corner when a point handle sits on it'
     assert.equal(boxOf({ ...squared, shape: 'ellipse' }, 1, vertexHandles).resize!.shifted, false);
     assert.deepEqual(boxOf(chair, 1, vertexHandles).resize, { x: 34, y: 34, size: 12, shifted: false });
   }
+});
+
+test('point handles show for an unlocked polygon whose long side is at least 32px on screen', () => {
+  assert.ok(planVertexHandles(squared, 1));
+  assert.equal(planVertexHandles(room, 1), null);
+  // Only the shape counts, whatever a rectangle or an ellipse still carries in `points`.
+  assert.equal(planVertexHandles({ ...squared, shape: 'rect' }, 1), null);
+  assert.equal(planVertexHandles({ ...squared, shape: 'ellipse' }, 1), null);
+  assert.equal(planVertexHandles({ ...squared, locked: true }, 1), null);
+  assert.equal(planVertexHandles(polygonRoom({ x: 0, y: 0 }, { x: 1, y: 1 }), 1), null);
+  // 200 map units are 32px at scale 6.25: under that the hit areas of the points would cover the body.
+  assert.ok(planVertexHandles(squared, 6.25));
+  assert.equal(planVertexHandles(squared, 6.5), null);
+  assert.equal(planVertexHandles(squared, 40), null);
+  // Either side can be the long one.
+  assert.ok(planVertexHandles({ ...squared, width: 12, height: 400 }, 12.5));
+  assert.equal(planVertexHandles({ ...squared, width: 12, height: 400 }, 13), null);
+});
+
+test('the point handles stand on the plan outline of the polygon, turned with it', () => {
+  assert.deepEqual(planVertexHandles(squared, 1)!.vertices, [{ x: 100, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 200 }, { x: 100, y: 200 }]);
+  const bent = polygonRoom({ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 0.5 }, { x: 1, y: 0.5 }, { x: 1, y: 1 }, { x: 0, y: 1 });
+  for (const source of [squared, bent]) for (const rotation of [0, 37, 90, 270]) for (const scale of [0.25, 1, 4]) {
+    const space = { ...source, rotation }, handles = planVertexHandles(space, scale)!, label = `${source.points.length} points at ${rotation}, scale ${scale}`;
+    // Plan positions, in the stored order: they do not depend on the zoom.
+    assert.deepEqual(handles.vertices, nodePlanOutline(space), label);
+    assert.equal(handles.vertices.length, source.points.length, label);
+  }
+  // Turned a quarter about its centre (200, 150), the first point is the top-right corner on screen.
+  const quarter = planVertexHandles({ ...squared, rotation: 90 }, 1)!.vertices;
+  near(quarter[0].x, 250, 'x'); near(quarter[0].y, 50, 'y'); near(quarter[2].x, 150, 'x'); near(quarter[2].y, 250, 'y');
+});
+
+test('a + stands in the middle of every edge that is at least 28px long on screen', () => {
+  // Edge `index` runs from point `index` to the next one, and the last edge back to the first point.
+  assert.deepEqual(planVertexHandles(squared, 1)!.edges, [{ index: 0, point: { x: 200, y: 100 } }, { index: 1, point: { x: 300, y: 150 } },
+    { index: 2, point: { x: 200, y: 200 } }, { index: 3, point: { x: 100, y: 150 } }]);
+  const indexes = (space: BackgroundSpace, scale: number) => planVertexHandles(space, scale)!.edges.map(edge => edge.index);
+  // At scale 4 the 200 sides are 50px and the 100 sides 25px.
+  assert.deepEqual(indexes(squared, 4), [0, 2]);
+  // 112 map units are exactly 28px there, 111 are not.
+  assert.deepEqual(indexes({ ...squared, height: 112 }, 4), [0, 1, 2, 3]);
+  assert.deepEqual(indexes({ ...squared, height: 111 }, 4), [0, 2]);
+  // An edge is measured along itself: the slanted one is 141.4 long (35px), though only 100 across and 100 down.
+  const slanted = polygonRoom({ x: 0, y: 0 }, { x: 0.5, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 });
+  assert.deepEqual(indexes(slanted, 4), [0, 3]);
+  // Turned, each + is midway between the two turned points.
+  const turned = { ...squared, rotation: 37 }, handles = planVertexHandles(turned, 1)!, outline = nodePlanOutline(turned);
+  assert.deepEqual(handles.edges, outline.map((point, index) => {
+    const next = outline[(index + 1) % outline.length];
+    return { index, point: { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 } };
+  }));
+});
+
+test('a polygon that already has 200 points gets no +', () => {
+  const ring = (count: number) => polygonRoom(...Array.from({ length: count }, (_, index) =>
+    ({ x: 0.5 + Math.cos(index / count * Math.PI * 2) / 2, y: 0.5 + Math.sin(index / count * Math.PI * 2) / 2 })));
+  const wide = (count: number) => ({ ...ring(count), width: 400, height: 400 });
+  // Zoomed in to scale 0.1, each edge of about 6.3 map units is some 63px long.
+  const full = planVertexHandles(wide(200), 0.1)!, almost = planVertexHandles(wide(199), 0.1)!;
+  assert.equal(full.vertices.length, 200); assert.deepEqual(full.edges, []);
+  assert.equal(almost.vertices.length, 199); assert.equal(almost.edges.length, 199);
+  assert.deepEqual(almost.edges.map(edge => edge.index), almost.vertices.map((_, index) => index));
+  // At scale 1 the same edges are under 28px: the points keep their handles, without a + between them.
+  const packed = planVertexHandles(wide(199), 1)!;
+  assert.equal(packed.vertices.length, 199); assert.deepEqual(packed.edges, []);
 });
 
 test('a double-click acts on the node its first press picked from the pile, else on the node under it', () => {

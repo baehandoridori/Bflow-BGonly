@@ -1,5 +1,5 @@
-import { projectCameraToPlan } from './mapSpatial.ts';
-import type { BackgroundNode } from './types.ts';
+import { nodePlanOutline, projectCameraToPlan } from './mapSpatial.ts';
+import type { BackgroundNode, BackgroundPoint, BackgroundSpace } from './types.ts';
 
 /** Sizes in CSS pixels unless noted. Multiplied by the screen scale they stay constant on screen. */
 export const MAP_EDIT_MARK = {
@@ -38,6 +38,24 @@ export function planNodeHandles(node: BackgroundNode, scale: number, vertexHandl
   if (!shifted) return { kind: 'box', radius, lift, resize: { x: width - half, y: height - half, size, shifted } };
   const out = (mark.resizeShift - mark.resize / 2) * scale;
   return { kind: 'box', radius, lift, resize: { x: width + out, y: height + out, size, shifted } };
+}
+
+/** `edges`: the + of an edge, in its middle. Edge `index` runs from point `index` to the next one. */
+export type PlanVertexHandles = { vertices: BackgroundPoint[]; edges: { index: number; point: BackgroundPoint }[] };
+/** A polygon stores no more points than this: a full one gets no +. */
+const POLYGON_POINT_LIMIT = 200;
+
+/** Absolute plan positions of the point handles of a polygon space, or null when none are shown. */
+export function planVertexHandles(space: BackgroundSpace, scale: number): PlanVertexHandles | null {
+  const mark = MAP_EDIT_MARK;
+  // Smaller on screen than this, the hit areas of the points would cover the whole body.
+  if (space.shape !== 'polygon' || space.locked || space.points.length < 3 || Math.max(space.width, space.height) / scale < mark.vertexMinNode) return null;
+  const vertices = nodePlanOutline(space), edges: PlanVertexHandles['edges'] = [];
+  if (vertices.length < POLYGON_POINT_LIMIT) vertices.forEach((from, index) => {
+    const to = vertices[(index + 1) % vertices.length];
+    if (Math.hypot(to.x - from.x, to.y - from.y) / scale >= mark.edgeMin) edges.push({ index, point: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 } });
+  });
+  return { vertices, edges };
 }
 
 /**

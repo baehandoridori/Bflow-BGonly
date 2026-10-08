@@ -401,3 +401,250 @@ test('a snapped preview depends on its arguments alone as well', () => {
   const gesture: PlanGesture = { mode: 'move', nodeId: chair.id }, lost = { x: Number.NaN, y: 199.75 };
   assert.deepEqual(previewPlanGesture(gesture, plan, start, lost, snapping(gesture, plan)), previewPlanGesture(gesture, plan, start, lost, null));
 });
+
+// --- Polygon points ----------------------------------------------------------------------------
+type PointGesture = Extract<PlanGesture, { mode: 'vertex' }>;
+const xy = (x: number, y: number): BackgroundPoint => ({ x, y });
+const sameOutline = (actual: BackgroundPoint[], expected: BackgroundPoint[], label = '') => {
+  assert.equal(actual.length, expected.length, label);
+  actual.forEach((point, index) => { near(point.x, expected[index].x, `${label} point ${index} x`); near(point.y, expected[index].y, `${label} point ${index} y`); });
+};
+/** An L-shaped room whose outline runs through CORNERS. */
+const yard: BackgroundSpace = { ...room, id: 'yard', name: '마당', x: 100, y: 100, width: 200, height: 200, shape: 'polygon',
+  points: [xy(0, 0), xy(0.5, 0), xy(0.5, 0.5), xy(1, 0.5), xy(1, 1), xy(0, 1)] };
+const CORNERS = [xy(100, 100), xy(200, 100), xy(200, 200), xy(300, 200), xy(300, 300), xy(100, 300)];
+/** Members of the yard, standing inside it. */
+const bench: BackgroundSymbol = { ...chair, id: 'bench', name: '벤치', spaceId: 'yard', x: 130, y: 230, width: 40, height: 30 };
+const yardLens: BackgroundCamera = { ...lens, id: 'yard-lens', name: '카메라 3', spaceId: 'yard', x: 250, y: 250 };
+/** Other spaces: a room with decimal corners and an oval. */
+const shed: BackgroundSpace = { ...room, id: 'shed', name: '창고', x: 400.35, y: 100.7, width: 120, height: 80 };
+const pond: BackgroundSpace = { ...room, id: 'pond', name: '연못', x: 600, y: 400, width: 100, height: 60, shape: 'ellipse' };
+const garden: BackgroundMap = { ...plan, nodes: [yard, bench, yardLens, shed, pond] };
+const YARD = 0, OTHERS = [1, 2, 3, 4];
+const yardOutline = (map: BackgroundMap) => nodePlanOutline(map.nodes[YARD] as BackgroundSpace);
+/** Dragging point `index` of the yard, or the + on the edge from that point to the next. */
+const corner = (index: number): PointGesture => ({ mode: 'vertex', nodeId: yard.id, index, insert: false });
+const edge = (index: number): PointGesture => ({ mode: 'vertex', nodeId: yard.id, index, insert: true });
+/** Where the handle of a gesture stands: on its point, or in the middle of its edge. */
+const handleOf = (gesture: PointGesture, initial: BackgroundMap): BackgroundPoint => {
+  const outline = yardOutline(initial), from = outline[gesture.index], next = outline[(gesture.index + 1) % outline.length];
+  return gesture.insert ? xy((from.x + next.x) / 2, (from.y + next.y) / 2) : from;
+};
+/** A snapping drag of a handle, from its middle to `to`, with the targets the gesture itself collects. */
+const pull = (gesture: PointGesture, to: BackgroundPoint, initial: BackgroundMap = garden) =>
+  previewPlanGesture(gesture, initial, handleOf(gesture, initial), to, snapping(gesture, initial));
+
+test('a free point drag moves that one point by as far as the pointer went, and nothing else on the map', () => {
+  assert.deepEqual(yardOutline(garden), CORNERS);
+  for (const rotation of [0, 37]) {
+    const space = { ...yard, rotation }, initial = replaceMapNode(garden, space), before = nodePlanOutline(space), frozen = JSON.stringify(initial);
+    for (const index of [0, 3, 5]) {
+      // Pressed off the middle of the handle.
+      const start = xy(before[index].x + 6, before[index].y + 3), point = xy(start.x + 31.5, start.y - 22.25), label = `point ${index} at ${rotation}`;
+      const preview = previewPlanGesture(corner(index), initial, start, point, null);
+      assert.ok(preview, label); assert.deepEqual(preview.guides, [], label);
+      const shaped = preview.map.nodes[YARD] as BackgroundSpace;
+      sameOutline(nodePlanOutline(shaped), before.map((spot, at) => at === index ? xy(spot.x + 31.5, spot.y - 22.25) : spot), label);
+      // The turn stays, and so does everything that is not the box or the points.
+      assert.equal(shaped.rotation, rotation, label); assert.equal(shaped.points.length, 6, label);
+      assert.deepEqual({ ...shaped, x: 0, y: 0, width: 0, height: 0, points: [] }, { ...space, x: 0, y: 0, width: 0, height: 0, points: [] }, label);
+      // Members and every other node are the very objects they were: a reshaped space carries nothing along.
+      for (const other of OTHERS) assert.equal(preview.map.nodes[other], initial.nodes[other], label);
+      assert.deepEqual({ ...preview.map, nodes: [] }, { ...initial, nodes: [] }, label);
+      // The first point is a corner of the box. Had that new box gone through the whole-space transform, the bench would have been carried.
+      if (index === 0) assert.notDeepEqual(transformMapSpace(initial, shaped).nodes[1], bench, label);
+    }
+    assert.equal(JSON.stringify(initial), frozen);
+  }
+});
+
+test('where a point handle was pressed does not enter the result', () => {
+  // Point 1 stands on (200, 100). Pressed 6 right of and 3 below its middle, then dragged 10 to the right.
+  const nudged = previewPlanGesture(corner(1), garden, xy(206, 103), xy(216, 103), null)!;
+  sameOutline(yardOutline(nudged.map), CORNERS.map((spot, at) => at === 1 ? xy(210, 100) : spot));
+  // The same travel from any press gives the same map: for a point and for a + on an edge, the closing edge too.
+  for (const gesture of [corner(1), corner(5), edge(1), edge(5)]) {
+    const label = JSON.stringify(gesture), centred = previewPlanGesture(gesture, garden, xy(200, 100), xy(231, 78), null);
+    assert.ok(centred, label);
+    assert.deepEqual(previewPlanGesture(gesture, garden, xy(206, 103), xy(237, 81), null), centred, label);
+    assert.deepEqual(previewPlanGesture(gesture, garden, xy(-40, 512), xy(-9, 490), null), centred, label);
+    // Whatever was previewed in between.
+    previewPlanGesture(gesture, garden, xy(206, 103), xy(14.2, 633.1), null);
+    assert.deepEqual(previewPlanGesture(gesture, garden, xy(200, 100), xy(231, 78), null), centred, label);
+  }
+});
+
+test('a point drag that came back to where it was pressed is the map as it was', () => {
+  // Also in a turned box of decimals, which does not come back digit for digit when it is rebuilt from its plan points.
+  const odd = { x: 244.65, y: 120.3, width: 144.65, height: 80 }, press = xy(206.4, 103.7);
+  for (const space of [yard, { ...yard, ...odd }, { ...yard, ...odd, rotation: 37 }]) {
+    const initial = replaceMapNode(garden, space);
+    for (const index of [0, 1, 2, 3, 4, 5]) {
+      const preview = previewPlanGesture(corner(index), initial, press, press, null), label = `point ${index} at ${space.rotation}`;
+      // Nothing is left to undo.
+      assert.deepEqual(preview, { map: initial, guides: [] }, label); assert.equal(preview!.map.nodes[YARD], space, label);
+    }
+  }
+  // Snapping, a point that stands on whole numbers stays too: (200, 100) is lined up with both points beside it.
+  const still = pull(corner(1), CORNERS[1])!;
+  assert.deepEqual(still.map, garden);
+  assert.deepEqual(still.guides, [{ axis: 'x', at: 200, from: 100, to: 200 }, { axis: 'y', at: 100, from: 100, to: 200 }]);
+});
+
+test('dragging a + adds a point after its corner, also on the edge that closes the outline', () => {
+  for (const rotation of [0, 37]) {
+    const space = { ...yard, rotation }, initial = replaceMapNode(garden, space), before = nodePlanOutline(space);
+    for (const index of [0, 1, 4, 5]) {
+      const gesture = edge(index), base = handleOf(gesture, initial), label = `edge ${index} at ${rotation}`;
+      // Pressed beside the +, which stands in the middle of the edge, and pulled 40 right and 10 down.
+      const preview = previewPlanGesture(gesture, initial, xy(base.x + 3, base.y - 2), xy(base.x + 43, base.y + 8), null);
+      assert.ok(preview, label); assert.deepEqual(preview.guides, [], label);
+      const shaped = preview.map.nodes[YARD] as BackgroundSpace;
+      assert.equal(shaped.points.length, 7, label); assert.equal(shaped.rotation, rotation, label);
+      // The new point takes the place after its corner: after the last corner that is the end of the list.
+      sameOutline(nodePlanOutline(shaped), [...before.slice(0, index + 1), xy(base.x + 40, base.y + 10), ...before.slice(index + 1)], label);
+      for (const other of OTHERS) assert.equal(preview.map.nodes[other], initial.nodes[other], label);
+    }
+  }
+  // The edge from the last point (100, 300) back to the first (100, 100): its + stands on (100, 200).
+  assert.deepEqual(handleOf(edge(5), garden), xy(100, 200));
+  sameOutline(yardOutline(previewPlanGesture(edge(5), garden, xy(100, 200), xy(70, 200), null)!.map), [...CORNERS, xy(70, 200)]);
+  // A + that has not travelled yet stands on its edge: nothing moves, and nothing sticks out.
+  sameOutline(yardOutline(previewPlanGesture(edge(1), garden, xy(203, 148), xy(203, 148), null)!.map), [...CORNERS.slice(0, 2), xy(200, 150), ...CORNERS.slice(2)]);
+});
+
+test('a snapped point sticks to the x and y of the two points beside it', () => {
+  // Point 1 is between (100, 100) and (200, 200). Lifted to 3.7 right of the x of the second, far from either y.
+  const lifted = pull(corner(1), xy(203.7, 60.4))!;
+  sameOutline(yardOutline(lifted.map), CORNERS.map((spot, at) => at === 1 ? xy(200, 60) : spot));
+  assert.deepEqual(lifted.guides, [{ axis: 'x', at: 200, from: 60, to: 200 }]);
+  // Both at once make the square corner: point 2 comes back to 4.2 and 3.1 from where its two neighbours cross.
+  const squared = pull(corner(2), xy(204.2, 196.9))!;
+  sameOutline(yardOutline(squared.map), CORNERS);
+  assert.deepEqual(squared.guides, [{ axis: 'x', at: 200, from: 100, to: 200 }, { axis: 'y', at: 200, from: 200, to: 300 }]);
+  // However far away the point beside it is: point 0 lines up with point 5, 137 further down.
+  const aligned = pull(corner(0), xy(97.8, 163.3))!;
+  sameOutline(yardOutline(aligned.map), CORNERS.map((spot, at) => at === 0 ? xy(100, 163) : spot));
+  assert.deepEqual(aligned.guides, [{ axis: 'x', at: 100, from: 163, to: 300 }]);
+  // The points beside a new point are the two ends of its edge: pulled out to the right, level with the upper end (200, 100).
+  const added = pull(edge(1), xy(262.6, 102.3))!;
+  sameOutline(yardOutline(added.map), [...CORNERS.slice(0, 2), xy(263, 100), ...CORNERS.slice(2)]);
+  assert.deepEqual(added.guides, [{ axis: 'y', at: 100, from: 200, to: 263 }]);
+  for (const other of OTHERS) for (const preview of [lifted, squared, aligned, added]) assert.equal(preview.map.nodes[other], garden.nodes[other]);
+  // Dragged freely the same point keeps its decimals, and no guide shows.
+  const free = previewPlanGesture(corner(1), garden, CORNERS[1], xy(203.7, 60.4), null)!;
+  sameOutline(yardOutline(free.map), CORNERS.map((spot, at) => at === 1 ? xy(203.7, 60.4) : spot)); assert.deepEqual(free.guides, []);
+  // Turned, the points still stick along the screen axes: to the x of the point beside it, as it stands on the plan.
+  const tilted = replaceMapNode(garden, { ...yard, rotation: 37 }), before = yardOutline(tilted);
+  const level = pull(corner(1), xy(before[2].x + 2.4, before[1].y - 71.3), tilted)!;
+  sameOutline(yardOutline(level.map), before.map((spot, at) => at === 1 ? xy(before[2].x, Math.round(before[1].y - 71.3)) : spot));
+  assert.deepEqual(level.guides.map(guide => guide.axis), ['x']);
+});
+
+test('a snapped point takes the corner of another space as it is', () => {
+  const [topLeft] = nodePlanOutline(shed);
+  near(topLeft.x, 400.35); near(topLeft.y, 100.7);
+  // Point 3 comes 3.6 from that corner.
+  const stuck = pull(corner(3), xy(397.7, 103.1))!;
+  sameOutline(yardOutline(stuck.map), CORNERS.map((spot, at) => at === 3 ? topLeft : spot));
+  // A corner shows as a small cross: two guides without a length.
+  assert.deepEqual(stuck.guides, [{ axis: 'x', at: topLeft.x, from: topLeft.y, to: topLeft.y }, { axis: 'y', at: topLeft.y, from: topLeft.x, to: topLeft.x }]);
+  for (const other of OTHERS) assert.equal(stuck.map.nodes[other], garden.nodes[other]);
+  // A new point takes it as well.
+  const added = pull(edge(2), xy(402.1, 98.2))!;
+  sameOutline(yardOutline(added.map), [...CORNERS.slice(0, 3), topLeft, ...CORNERS.slice(3)]);
+  // More than the tolerance away, the corner is no target: both coordinates become whole numbers.
+  const short = pull(corner(3), xy(394.2, 102.4))!;
+  sameOutline(yardOutline(short.map), CORNERS.map((spot, at) => at === 3 ? xy(394, 102) : spot)); assert.deepEqual(short.guides, []);
+  // Dragged freely nothing sticks.
+  const free = previewPlanGesture(corner(3), garden, CORNERS[3], xy(397.7, 103.1), null)!;
+  sameOutline(yardOutline(free.map), CORNERS.map((spot, at) => at === 3 ? xy(397.7, 103.1) : spot)); assert.deepEqual(free.guides, []);
+});
+
+test('a snapped point sticks to nothing else: it lands on whole numbers and no guide shows', () => {
+  const places: [string, number, BackgroundPoint, BackgroundPoint][] = [
+    // 2 from the left wall of the shed, 30 and more from its corners.
+    ['the middle of an edge of another room', 3, xy(398.4, 131.2), xy(398, 131)],
+    ['a centre line of another room', 3, xy(430.6, 142.4), xy(431, 142)],
+    ['the box of an oval room', 3, xy(598.3, 398.4), xy(598, 398)],
+    ['an edge of a chair inside the polygon', 0, xy(128.3, 231.6), xy(128, 232)],
+    ['a centre line of that chair', 0, xy(151.8, 243.4), xy(152, 243)],
+    ['a camera inside the polygon', 0, xy(251.7, 248.4), xy(252, 248)],
+    ['the border of the plan', 0, xy(2.4, 150.3), xy(2, 150)],
+  ];
+  // What a move would stick to: every line of the map but those of the yard itself.
+  const everything: PlanGestureSnap = { candidates: collectSnapCandidates(garden, new Set([yard.id])), tolerance: 6, reach: 48 };
+  for (const [label, index, to, landed] of places) {
+    const preview = pull(corner(index), to);
+    assert.ok(preview, label); assert.deepEqual(preview.guides, [], label);
+    sameOutline(yardOutline(preview.map), CORNERS.map((spot, at) => at === index ? landed : spot), label);
+    // Each of these places is on such a line: handed all of them, the same drag does stick.
+    assert.notDeepEqual(previewPlanGesture(corner(index), garden, CORNERS[index], to, everything)!.guides, [], label);
+  }
+});
+
+test('a point drag that cannot be shown gives null', () => {
+  // A triangle (500, 400) (600, 400) (550, 450): its apex cannot come closer than 10 to the side across.
+  const wedge: BackgroundSpace = { ...yard, id: 'wedge', x: 500, y: 400, width: 100, height: 50, points: [xy(0, 0), xy(1, 0), xy(0.5, 1)] };
+  const initial: BackgroundMap = { ...plan, nodes: [wedge, shed] }, apex: PlanGesture = { mode: 'vertex', nodeId: wedge.id, index: 2, insert: false };
+  assert.ok(previewPlanGesture(apex, initial, xy(550, 450), xy(550, 410), null));
+  assert.equal(previewPlanGesture(apex, initial, xy(550, 450), xy(550, 409.5), null), null);
+  // Snapped to whole numbers it lands 9 from that side.
+  assert.equal(previewPlanGesture(apex, initial, xy(550, 450), xy(550.2, 409.3), snapping(apex, initial)), null);
+  assert.ok(previewPlanGesture(apex, initial, xy(550, 450), xy(550.2, 410.3), snapping(apex, initial)));
+
+  // 2.3 and 2.4 from point 0: the x and the y of that point both take point 1, which would then stand on it.
+  assert.equal(pull(corner(1), xy(102.3, 97.6)), null);
+  assert.ok(previewPlanGesture(corner(1), garden, CORNERS[1], xy(102.3, 97.6), null));
+  // A new point pulled onto an end of its own edge.
+  assert.equal(pull(edge(1), xy(203.1, 104.2)), null);
+  assert.ok(previewPlanGesture(edge(1), garden, xy(200, 150), xy(203.1, 104.2), null));
+
+  // Only a point of an unlocked polygon can be dragged. What is none has no point beside it either: it collects no line.
+  const start = xy(200, 100), point = xy(231, 78), bolted = replaceMapNode(garden, { ...yard, locked: true });
+  const pointless = (gesture: PlanGesture, label: string) => {
+    assert.equal(previewPlanGesture(gesture, garden, start, point, null), null, label);
+    assert.equal(previewPlanGesture(gesture, garden, start, point, snapping(gesture, garden)), null, label);
+    const candidates = planGestureCandidates(gesture, garden);
+    assert.deepEqual([candidates.x, candidates.y], [[], []], label);
+  };
+  for (const insert of [false, true]) {
+    for (const nodeId of [shed.id, pond.id, bench.id, yardLens.id, 'missing']) pointless({ mode: 'vertex', nodeId, index: 0, insert }, nodeId);
+    for (const index of [-1, 6, 1.5, Number.NaN]) pointless({ mode: 'vertex', nodeId: yard.id, index, insert }, `index ${index}`);
+    const gesture: PlanGesture = { mode: 'vertex', nodeId: yard.id, index: 1, insert };
+    assert.ok(previewPlanGesture(gesture, garden, start, point, null));
+    assert.equal(previewPlanGesture(gesture, bolted, start, point, null), null);
+    assert.equal(previewPlanGesture(gesture, bolted, start, point, snapping(gesture, bolted)), null);
+    // A pointer position that is no number.
+    assert.equal(previewPlanGesture(gesture, garden, start, xy(Number.NaN, 78), null), null);
+    assert.equal(previewPlanGesture(gesture, garden, start, xy(Number.NaN, 78), snapping(gesture, garden)), null);
+  }
+});
+
+test('a point collects the two points beside it and the corners of the other spaces, and nothing else', () => {
+  // Two other rooms (one of them a turned polygon), an oval, and a bench and a camera inside the yard.
+  const annex: BackgroundSpace = { ...yard, id: 'annex', name: '별채', x: 600, y: 60, width: 100, height: 50, rotation: 37, points: [xy(0, 0), xy(1, 0), xy(0.5, 1)] };
+  const initial: BackgroundMap = { ...garden, nodes: [...garden.nodes, annex] }, corners = [...nodePlanOutline(shed), ...nodePlanOutline(annex)];
+  assert.equal(corners.length, 7);
+  const lines = (axis: 'x' | 'y', ...points: BackgroundPoint[]) => points.map(point => axis === 'x'
+    ? { axis, at: point.x, from: point.y, to: point.y } : { axis, at: point.y, from: point.x, to: point.x });
+  const beside: [PointGesture, BackgroundPoint, BackgroundPoint][] = [
+    // A point: the one before it and the one after it, around the end of the list as well.
+    [corner(1), CORNERS[0], CORNERS[2]], [corner(0), CORNERS[5], CORNERS[1]], [corner(5), CORNERS[4], CORNERS[0]],
+    // A +: the two ends of its edge.
+    [edge(1), CORNERS[1], CORNERS[2]], [edge(5), CORNERS[5], CORNERS[0]],
+  ];
+  for (const [gesture, first, second] of beside) {
+    const candidates = planGestureCandidates(gesture, initial), label = JSON.stringify(gesture);
+    // No border of the plan and no line of another node: each axis has the lines of the two points beside it.
+    assert.deepEqual(candidates.x, lines('x', first, second), label); assert.deepEqual(candidates.y, lines('y', first, second), label);
+    // Corners of the other rectangles and polygons: not its own, and none for the oval, the bench or the camera.
+    assert.deepEqual(candidates.points, corners, label);
+  }
+  // The same map hands a move of the yard the border and the lines of every node that stays behind.
+  const moving = planGestureCandidates({ mode: 'move', nodeId: yard.id }, initial);
+  assert.equal(moving.x.length, 2 + 3 + 3 + 1); assert.equal(moving.y.length, 2 + 3 + 3 + 1);
+  // Locked members stay behind in a move, but a point never sticks to them.
+  const bolted = replaceMapNode(initial, { ...bench, locked: true });
+  assert.deepEqual(planGestureCandidates(corner(1), bolted), planGestureCandidates(corner(1), initial));
+});
