@@ -37,6 +37,11 @@ test('at scale 1 the handles stand where the editor drew them in map units', () 
   const steep = cameraOf({ ...camera, pitch: 85 }, 1);
   assert.deepEqual(steep.guide, { from: 12, to: 73 });
   assert.deepEqual(planNodeHandles({ ...camera, pitch: 90 }, 1, false), { kind: 'camera', distance: 80, radius: 7, guide: { from: 18, to: 73 } });
+  // The fan is as long wherever the camera points: its handles live in its own turned frame.
+  for (const angle of [90, 180, 217]) {
+    assert.deepEqual(planNodeHandles({ ...camera, angle }, 1, false), { kind: 'camera', distance: 80, radius: 7, guide: null });
+    near(cameraOf({ ...camera, angle, pitch: 60 }, 1).guide!.from, 40, `from at ${angle}`);
+  }
 });
 
 test('handles keep their size on screen at any zoom', () => {
@@ -64,6 +69,9 @@ test('the camera guide is drawn only while the fan ends more than 8px short of t
   assert.equal(cameraOf({ ...camera, pitch: 25 }, 1).guide, null);
   const short = cameraOf({ ...camera, pitch: 30 }, 1).guide!;
   near(short.from, 80 * Math.cos(Math.PI / 6), 'from'); assert.equal(short.to, 73);
+  // Pitch 26.5 leaves a 71.6 fan, 8.4px short: the threshold is 8px, not 9.
+  const barely = cameraOf({ ...camera, pitch: 26.5 }, 1).guide!;
+  near(barely.from, 80 * Math.cos(26.5 * Math.PI / 180), 'from'); assert.equal(barely.to, 73);
   // At scale 2 the same 8px are 16 map units.
   assert.equal(cameraOf({ ...camera, pitch: 30 }, 2).guide, null);
   // Exactly 8px short (handle at 100, level fan at 80, scale 2.5) still gets none.
@@ -75,11 +83,15 @@ test('a node whose long side is under 12px on screen has no resize square', () =
   assert.deepEqual(planNodeHandles(dot, 1, false), { kind: 'box', radius: 7, lift: 25, resize: null });
   assert.deepEqual(boxOf(dot, 0.5).resize, { x: 7, y: 7, size: 6, shifted: false });
   assert.deepEqual(boxOf({ ...chair, width: 12, height: 12 }, 1).resize, { x: 6, y: 6, size: 12, shifted: false });
+  // The limit is the square's own 12px: 11.5px is still under it.
+  assert.equal(boxOf({ ...chair, width: 11.5, height: 11.5 }, 1).resize, null);
   const wall: BackgroundSpace = { ...room, width: 400, height: 12 };
   assert.deepEqual(boxOf(wall, 1).resize, { x: 394, y: 6, size: 12, shifted: false });
   // The long side decides: 200px by 6px keeps the square, 10px by 0.3px loses it.
   assert.deepEqual(boxOf(wall, 2).resize, { x: 388, y: 0, size: 24, shifted: false });
   assert.equal(boxOf(wall, 40).resize, null);
+  // Either side can be the long one: a wall standing 6px wide and 200px tall keeps it too.
+  assert.deepEqual(boxOf({ ...room, width: 12, height: 400 }, 2).resize, { x: 0, y: 388, size: 24, shifted: false });
 });
 
 test('the resize square steps outside the corner when a point handle sits on it', () => {
@@ -91,6 +103,13 @@ test('the resize square steps outside the corner when a point handle sits on it'
   // 14px across and 10px up: still within reach on both axes.
   const close = polygonRoom({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.93, y: 0.9 }, { x: 0, y: 1 });
   assert.equal(boxOf(close, 1, true).resize!.shifted, true);
+  // The reach is 15px (half the square plus the point's hit area): 14.5px across is inside it, 15.5px is not.
+  const across = (x: number) => polygonRoom({ x: 0, y: 0 }, { x: 1, y: 0 }, { x, y: 1 }, { x: 0, y: 1 });
+  assert.equal(boxOf(across(0.9275), 1, true).resize!.shifted, true);
+  assert.equal(boxOf(across(0.9225), 1, true).resize!.shifted, false);
+  // Exactly 15px across or up (75 map units at scale 5) is out of reach as well.
+  const edge = polygonRoom({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 0.25 }, { x: 0.625, y: 1 }, { x: 0, y: 1 });
+  assert.equal(boxOf(edge, 5, true).resize!.shifted, false);
   assert.deepEqual(boxOf(squared, 2, true).resize, { x: 216, y: 116, size: 24, shifted: true });
   // The reach is a screen distance too: the same 20 map units are 10px at scale 2.
   assert.equal(boxOf(cleared, 2, true).resize!.shifted, true);
