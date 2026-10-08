@@ -1,6 +1,18 @@
 import type { JSX, PointerEvent as ReactPointerEvent } from 'react';
-import { planNodeHandles } from './mapPlanEdit';
+import { MAP_EDIT_MARK, planNodeHandles } from './mapPlanEdit';
+import type { SnapGuide } from './mapSnap';
 import type { BackgroundNode } from './types';
+
+/** The lines a drag is stuck to. Each runs a little past both of its ends, by the same length on screen at any zoom. */
+export function MapSnapGuides({ guides, scale }: { guides: readonly SnapGuide[]; scale: number }): JSX.Element | null {
+  if (!guides.length) return null;
+  const overhang = MAP_EDIT_MARK.guideOverhang * scale;
+  return <g className="bmap-snap-guides" pointerEvents="none" aria-hidden="true">
+    {guides.map((guide, index) => guide.axis === 'x'
+      ? <line key={index} x1={guide.at} x2={guide.at} y1={guide.from - overhang} y2={guide.to + overhang} />
+      : <line key={index} x1={guide.from - overhang} x2={guide.to + overhang} y1={guide.at} y2={guide.at} />)}
+  </g>;
+}
 
 /** Rotate and resize handles of the selected node. Their sizes come from `planNodeHandles`, so they stay the same on screen at any zoom. */
 export function MapNodeHandles({ node, scale, vertexHandles, onHandleDown }: {

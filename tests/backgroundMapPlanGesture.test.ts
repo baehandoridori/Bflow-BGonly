@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { previewPlanGesture } from '../src/features/backgrounds/mapPlanGesture.ts';
-import type { PlanGesture } from '../src/features/backgrounds/mapPlanGesture.ts';
-import { moveMapNode, nodeResizeCorner, replaceMapNode, resizeSpace, transformMapSpace } from '../src/features/backgrounds/mapGeometry.ts';
+import { planGestureCandidates, previewPlanGesture } from '../src/features/backgrounds/mapPlanGesture.ts';
+import type { PlanGesture, PlanGestureSnap } from '../src/features/backgrounds/mapPlanGesture.ts';
+import { moveMapNode, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpace, transformMapSpace } from '../src/features/backgrounds/mapGeometry.ts';
+import { collectSnapCandidates, snapTravellingIds } from '../src/features/backgrounds/mapSnap.ts';
+import { nodePlanOutline } from '../src/features/backgrounds/mapSpatial.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
 const near = (actual: number, expected: number, label = '') =>
@@ -183,4 +185,168 @@ test('a preview depends on its arguments alone and leaves the map as it was', ()
 
   const fixed: BackgroundMap = { ...plan, nodes: plan.nodes.map(node => ({ ...node, locked: true })) };
   for (const node of fixed.nodes) assert.deepEqual(previewPlanGesture({ mode: 'move', nodeId: node.id }, fixed, start, point, null), { map: fixed, guides: [] }, node.id);
+});
+
+/** A snapping drag at a tolerance of 6 and a reach of 48, with the targets the gesture itself collects. */
+const snapping = (gesture: PlanGesture, initial: BackgroundMap): PlanGestureSnap => ({ candidates: planGestureCandidates(gesture, initial), tolerance: 6, reach: 48 });
+const snapped = (gesture: PlanGesture, initial: BackgroundMap, start: BackgroundPoint, point: BackgroundPoint) => {
+  const preview = previewPlanGesture(gesture, initial, start, point, snapping(gesture, initial));
+  assert.ok(preview, JSON.stringify(gesture));
+  return preview;
+};
+
+test('a snapped move places the node on its neighbour, and the members of a space travel as far', () => {
+  // A hall whose right edge is a decimal value, 15.35 to the left of the room.
+  const hall: BackgroundSpace = { ...room, id: 'hall', name: '복도', x: 20, y: 40, width: 64.65, height: 350 };
+  const initial: BackgroundMap = { ...plan, nodes: [...plan.nodes, hall] }, edge = hall.x + hall.width;
+  const gesture: PlanGesture = { mode: 'move', nodeId: room.id }, start = { x: 150, y: 150 }, point = { x: 137.6, y: 153.7 };
+  const preview = snapped(gesture, initial, start, point), moved = preview.map.nodes;
+  // The left edge takes the very value of the right edge of the hall; the axis that stuck to nothing is a whole number.
+  assert.equal(moved[ROOM].x, edge); assert.equal(moved[ROOM].y, 104);
+  assert.deepEqual(preview.map, placeMapNode(initial, room.id, { x: edge, y: 104 }));
+  assert.deepEqual(preview.guides, [{ axis: 'x', at: edge, from: 40, to: 390 }]);
+  // Members go as far as the room went, not as far as the pointer did.
+  for (const index of [LENS, CHAIR]) {
+    near(moved[index].x - plan.nodes[index].x, edge - room.x, `member ${index} x`); near(moved[index].y - plan.nodes[index].y, 4, `member ${index} y`);
+  }
+  assert.equal(moved[LOOKOUT], lookout); assert.equal(moved[plan.nodes.length], hall);
+  // The free drag of the same travel keeps its decimals and shows no guide.
+  const free = previewPlanGesture(gesture, initial, start, point, null)!;
+  near(free.map.nodes[ROOM].x, 87.6, 'free x'); near(free.map.nodes[ROOM].y, 103.7, 'free y'); assert.deepEqual(free.guides, []);
+
+  // The snapped position is stored as it is. Reached by adding the travel, a drag from far away would miss the last digit.
+  const stool: BackgroundSymbol = { ...chair, id: 'stool', spaceId: null, x: 512.7, y: 420.3 };
+  assert.notEqual(stool.x + (edge - stool.x), edge);
+  const far = snapped({ mode: 'move', nodeId: stool.id }, { ...initial, nodes: [...initial.nodes, stool] }, { x: 520, y: 430 }, { x: 94.7, y: 260.1 });
+  assert.deepEqual(far.map.nodes[initial.nodes.length], { ...stool, x: edge, y: 250 });
+  assert.deepEqual(far.guides, [{ axis: 'x', at: edge, from: 40, to: 390 }]);
+});
+
+test('a space does not stick to a member it carries, and does stick to a locked one that stays', () => {
+  const gesture: PlanGesture = { mode: 'move', nodeId: room.id }, start = { x: 150, y: 150 }, point = { x: 347.2, y: 150.4 };
+  // The left edge of the room comes 2.8 short of where its chair was. The chair travels along, so it is no target.
+  const carried = snapped(gesture, plan, start, point);
+  assert.equal(carried.map.nodes[ROOM].x, 297); assert.equal(carried.map.nodes[ROOM].y, 100); assert.deepEqual(carried.guides, []);
+  near(carried.map.nodes[CHAIR].x, 497, 'carried chair');
+  // Locked, the chair stays where it is and the room sticks to its left edge.
+  const bolted = replaceMapNode(plan, { ...chair, locked: true });
+  const held = snapped(gesture, bolted, start, point);
+  assert.equal(held.map.nodes[ROOM].x, 300); assert.equal(held.map.nodes[ROOM].y, 100);
+  assert.deepEqual(held.guides, [{ axis: 'x', at: 300, from: 100, to: 300 }]);
+  assert.equal(held.map.nodes[CHAIR], bolted.nodes[CHAIR]); near(held.map.nodes[LENS].x, 400, 'carried camera');
+});
+
+test('a snapped move sticks only to what is near on the other axis', () => {
+  const gesture: PlanGesture = { mode: 'move', nodeId: room.id }, start = { x: 250, y: 200 };
+  const stool = (x: number, y: number): BackgroundSymbol => ({ ...chair, id: 'stool', spaceId: null, x, y, width: 60, height: 60 });
+  // The top of the room comes 1.3 from the top of the stool, but the stool is 299.7 away to the right.
+  const apart = snapped(gesture, { ...plan, nodes: [room, stool(700, 451.5)] }, start, { x: 250.3, y: 550.2 });
+  assert.equal(apart.map.nodes[0].x, 100); assert.equal(apart.map.nodes[0].y, 450); assert.deepEqual(apart.guides, []);
+  // The same 1.3 with the stool 29.7 away.
+  const beside = snapped(gesture, { ...plan, nodes: [room, stool(430, 151.5)] }, start, { x: 250.3, y: 250.2 });
+  assert.equal(beside.map.nodes[0].x, 100); assert.equal(beside.map.nodes[0].y, 151.5);
+  assert.deepEqual(beside.guides, [{ axis: 'y', at: 151.5, from: 100, to: 490 }]);
+});
+
+test('a snapped resize takes the corner to a near line and makes the other length a whole number', () => {
+  const start = { x: 396, y: 296 };
+  // The right edge of the room comes 2.4 short of the camera at x 500, which is 19.7 below the dragged corner.
+  const grown = snapped({ mode: 'resize', nodeId: room.id }, plan, start, { x: 493.6, y: 316.3 });
+  assert.deepEqual(grown.map.nodes[ROOM], { ...room, width: 400, height: 220 });
+  assert.deepEqual(grown.map, transformMapSpace(plan, { ...room, width: 400, height: 220 }));
+  assert.deepEqual(grown.guides, [{ axis: 'x', at: 500, from: 100, to: 340 }]);
+  near(grown.map.nodes[LENS].x, 100 + 100 * 400 / 300, 'member x'); near(grown.map.nodes[LENS].y, 100 + 50 * 220 / 200, 'member y');
+
+  // A symbol is resized alone: both edges of the chair reach the walls of its room.
+  const seat = snapped({ mode: 'resize', nodeId: chair.id }, plan, start, { x: 453.8, y: 344.4 });
+  assert.deepEqual(seat.map.nodes[CHAIR], { ...chair, width: 100, height: 80 });
+  for (const index of [ROOM, LENS, LOOKOUT]) assert.equal(seat.map.nodes[index], plan.nodes[index]);
+  assert.deepEqual(seat.guides, [{ axis: 'x', at: 400, from: 100, to: 300 }, { axis: 'y', at: 300, from: 100, to: 400 }]);
+
+  // Turned off the quarter turns nothing sticks: both lengths of the free result become whole numbers.
+  const tilted = turned(room, 37), gesture: PlanGesture = { mode: 'resize', nodeId: room.id }, point = { x: 426.5, y: 306.25 };
+  const free = previewPlanGesture(gesture, tilted.initial, start, point, null)!.map.nodes[ROOM] as BackgroundSpace;
+  const loose = snapped(gesture, tilted.initial, start, point), sized = loose.map.nodes[ROOM] as BackgroundSpace;
+  assert.equal(sized.width, Math.round(free.width)); assert.equal(sized.height, Math.round(free.height));
+  assert.notEqual(sized.width, free.width); assert.notEqual(sized.height, free.height); assert.deepEqual(loose.guides, []);
+
+  // A camera has no size, snapped or not.
+  const lensless = snapped({ mode: 'resize', nodeId: lookout.id }, plan, start, point);
+  assert.equal(lensless.map, plan); assert.deepEqual(lensless.guides, []);
+});
+
+test('a snapped rotation is caught by the quarter turns, and the members of a space turn with it', () => {
+  const around = (centre: BackgroundPoint, radius: number, degrees: number): BackgroundPoint =>
+    ({ x: centre.x + radius * Math.cos(degrees * Math.PI / 180), y: centre.y + radius * Math.sin(degrees * Math.PI / 180) });
+  const gesture: PlanGesture = { mode: 'rotate', nodeId: room.id }, top = { x: 250, y: 72 };
+  // Swept 91.5 degrees: exactly 90, and the members turn by that 90 too.
+  const caught = snapped(gesture, plan, top, around({ x: 250, y: 200 }, 128, 1.5));
+  assert.equal((caught.map.nodes[ROOM] as BackgroundSpace).rotation, 90);
+  assert.deepEqual(caught, { map: transformMapSpace(plan, { ...room, rotation: 90 }), guides: [] });
+  near((caught.map.nodes[LENS] as BackgroundCamera).angle, 100, 'member angle'); near((caught.map.nodes[CHAIR] as BackgroundSymbol).rotation, 90, 'member rotation');
+  // A symbol 1.5 degrees short of a full turn is back at 0, a camera 1.5 short of 270 points there.
+  const spun = snapped({ mode: 'rotate', nodeId: chair.id }, plan, { x: 320, y: 210 }, around({ x: 320, y: 235 }, 25, -91.5));
+  assert.equal((spun.map.nodes[CHAIR] as BackgroundSymbol).rotation, 0); assert.deepEqual(spun.guides, []);
+  const aimed = snapped({ mode: 'rotate', nodeId: lookout.id }, plan, { x: 580, y: 340 }, around(lookout, 80, 268.5));
+  assert.equal((aimed.map.nodes[LOOKOUT] as BackgroundCamera).angle, 270); assert.deepEqual(aimed.guides, []);
+  // More than 3 degrees from every stop the angle is as it was computed: it is not made a whole number.
+  const loose = snapped(gesture, plan, top, around({ x: 250, y: 200 }, 128, 5.5));
+  near((loose.map.nodes[ROOM] as BackgroundSpace).rotation, 95.5, 'past the stop'); assert.deepEqual(loose.guides, []);
+});
+
+test('drawing is not snapped: the box is the press and the pointer as they are', () => {
+  const blank: BackgroundSpace = { ...room, id: 'new', name: '새 공간', x: 0, y: 0, width: 10, height: 10 };
+  const gesture: PlanGesture = { mode: 'draw', node: blank };
+  // Pressed 1.3 from the corner of the room and released 1.4 from the camera.
+  const start = { x: 401.3, y: 301.7 }, point = { x: 498.6, y: 338.2 };
+  const free = previewPlanGesture(gesture, plan, start, point, null)!;
+  // Whatever the snap carries: what a drawing collects, or every line and corner of the map.
+  for (const candidates of [planGestureCandidates(gesture, plan), collectSnapCandidates(plan, new Set())]) {
+    const drawn = previewPlanGesture(gesture, plan, start, point, { candidates, tolerance: 6, reach: 48 })!;
+    assert.deepEqual(drawn, free); assert.deepEqual(drawn.guides, []);
+    assert.deepEqual(drawn.map.nodes[plan.nodes.length], { ...blank, x: 401.3, y: 301.7, width: 498.6 - 401.3, height: 338.2 - 301.7 });
+  }
+});
+
+test('a move and a resize collect everything that does not travel along; drawing and turning collect nothing', () => {
+  const bolted = replaceMapNode(plan, { ...chair, locked: true });
+  for (const mode of ['move', 'resize'] as const) {
+    // The room carries its camera and its chair: the plan border and the camera outside are left.
+    const beside = planGestureCandidates({ mode, nodeId: room.id }, plan);
+    assert.deepEqual(beside, collectSnapCandidates(plan, snapTravellingIds(plan, [room.id])), mode);
+    assert.deepEqual(beside.x.map(line => line.at), [0, 1000, 500], mode); assert.deepEqual(beside.y.map(line => line.at), [0, 680, 340], mode);
+    assert.deepEqual(beside.points, [], mode);
+    // A chair travels alone: its room, the camera in that room and the one outside are all targets.
+    const inside = planGestureCandidates({ mode, nodeId: chair.id }, plan);
+    assert.deepEqual(inside, collectSnapCandidates(plan, new Set([chair.id])), mode);
+    assert.deepEqual(inside.x.map(line => line.at), [0, 1000, 100, 250, 400, 200, 500], mode);
+    assert.deepEqual(inside.y.map(line => line.at), [0, 680, 100, 200, 300, 150, 340], mode);
+    assert.deepEqual(inside.points, nodePlanOutline(room), mode);
+    // A locked member stays behind, so its own room may stick to it.
+    assert.deepEqual(planGestureCandidates({ mode, nodeId: room.id }, bolted).x.map(line => line.at), [0, 1000, 300, 320, 340, 500], mode);
+  }
+  const blank: BackgroundSpace = { ...room, id: 'new', name: '새 공간' };
+  const none: PlanGesture[] = [{ mode: 'draw', node: blank }, ...[room.id, lens.id, chair.id, lookout.id].map(nodeId => ({ mode: 'rotate' as const, nodeId }))];
+  for (const gesture of none) {
+    const candidates = planGestureCandidates(gesture, plan), label = JSON.stringify(gesture);
+    assert.equal(candidates.x.length, 0, label); assert.equal(candidates.y.length, 0, label); assert.equal(candidates.points.length, 0, label);
+  }
+});
+
+test('a snapped preview depends on its arguments alone as well', () => {
+  const frozen = JSON.stringify(plan), start = { x: 310.5, y: 240.25 }, point = { x: 352, y: 199.75 }, elsewhere = { x: 14.2, y: 633.1 };
+  for (const nodeId of [room.id, lens.id, chair.id, lookout.id]) for (const mode of ['move', 'resize', 'rotate'] as const) {
+    const gesture: PlanGesture = { mode, nodeId }, snap = snapping(gesture, plan), label = `${mode} ${nodeId}`;
+    const first = previewPlanGesture(gesture, plan, start, point, snap);
+    assert.ok(first, label);
+    // Another position in between leaves no trace, in the result or in the targets.
+    previewPlanGesture(gesture, plan, start, elsewhere, snap);
+    assert.deepEqual(previewPlanGesture(gesture, plan, start, point, snap), first, label);
+    assert.deepEqual(snap, snapping(gesture, plan), label);
+    assert.equal(previewPlanGesture({ mode, nodeId: 'missing' }, plan, start, point, snap), null, label);
+  }
+  assert.equal(JSON.stringify(plan), frozen);
+  // A pointer position that is no number cannot be snapped: the move is the free one, with no guide.
+  const gesture: PlanGesture = { mode: 'move', nodeId: chair.id }, lost = { x: Number.NaN, y: 199.75 };
+  assert.deepEqual(previewPlanGesture(gesture, plan, start, lost, snapping(gesture, plan)), previewPlanGesture(gesture, plan, start, lost, null));
 });

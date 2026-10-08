@@ -39,3 +39,13 @@ export function planNodeHandles(node: BackgroundNode, scale: number, vertexHandl
   const out = (mark.resizeShift - mark.resize / 2) * scale;
   return { kind: 'box', radius, lift, resize: { x: width + out, y: height + out, size, shifted } };
 }
+
+/** Whether plan drags snap is remembered per device. */
+export const MAP_SNAP_PREFERENCE_KEY = 'bflow.background-map.snap.v1';
+/** On unless this device stored `off`: also when nothing is stored or there is no storage. */
+export function readSnapPreference(): boolean {
+  try { return localStorage.getItem(MAP_SNAP_PREFERENCE_KEY) !== 'off'; } catch { return true; }
+}
+export function storeSnapPreference(enabled: boolean): void {
+  try { localStorage.setItem(MAP_SNAP_PREFERENCE_KEY, enabled ? 'on' : 'off'); } catch { /* A display preference must not block editing. */ }
+}

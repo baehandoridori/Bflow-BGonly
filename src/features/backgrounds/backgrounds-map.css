@@ -71,6 +71,9 @@
 .bmap-camera text { font-size:calc(12px * var(--bmap-label-scale,1)); fill:rgb(var(--color-text-primary)); paint-order:stroke; stroke:rgb(var(--color-bg-primary)); stroke-width:4; stroke-linejoin:round; transform:translateY(calc(10px * (var(--bmap-label-scale,1) - 1))); }
 .bmap-polygon-preview polyline { fill:rgb(var(--color-accent) / .08); stroke:rgb(var(--color-accent-sub)); stroke-width:1.5; stroke-dasharray:5 4; vector-effect:non-scaling-stroke; }
 .bmap-polygon-preview circle { fill:rgb(var(--color-accent-sub)); }
+/* Shown only while a drag is stuck to something. */
+.bmap-snap-guides line { stroke:#ff7aa8; stroke-width:1; vector-effect:non-scaling-stroke; pointer-events:none; }
+[data-color-mode="light"] .bmap-snap-guides line { stroke:#d6336c; }
 .bmap-canvas-empty { position:absolute; inset:90px 20px 75px; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; gap:8px; color:rgb(var(--color-text-secondary)); text-align:center; }
 .bmap-canvas-empty strong { font-size:15px; font-weight:500; }
 .bmap-canvas-empty span { font-size:11px; }
@@ -79,6 +82,9 @@
 .bg-library .bmap-zoom button { padding:3px 6px; min-height:26px; border:0; border-radius:4px; font-size:12px; background:transparent; }
 .bmap-zoom button:hover { background:rgb(var(--color-bg-border)); }
 .bmap-zoom span { min-width:37px; text-align:center; }
+.bmap-snap-toggle { margin-right:6px; }
+/* On looks like an active toolbar button. The selector has to outweigh the shared zoom button rule above, which sets a transparent background. */
+.bg-library .bmap-zoom .bmap-snap-toggle[aria-pressed="true"] { color:rgb(var(--color-accent-sub)); background:rgb(var(--color-accent) / .18); }
 .bmap-polygon-actions { position:absolute; display:flex; align-items:center; gap:8px; bottom:56px; left:50%; transform:translateX(-50%); padding:8px; background:rgb(var(--color-bg-card)); border:1px solid rgb(var(--color-bg-border)); border-radius:8px; font-size:11px; }
 .bmap-inspector { flex:0 0 248px; padding:18px 16px; border-left:1px solid rgb(var(--color-bg-border)); overflow-y:auto; background:rgb(var(--color-bg-card) / .4); font-size:12px; }
 .bmap-inspector .bg-field { margin-bottom:12px; }

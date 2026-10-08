@@ -6,13 +6,15 @@ import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './Bac
 import { BackgroundMapGallery } from './BackgroundMapGallery';
 import { BackgroundMapPanels } from './BackgroundMapPanels';
 import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
-import { MapNodeHandles } from './BackgroundMapPlanOverlays';
+import { MapNodeHandles, MapSnapGuides } from './BackgroundMapPlanOverlays';
 import { addMapCamera, containsPoint, moveMapNode, polygonSpace, removeMapNode, transformMapSpace } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
-import { MAP_EDIT_MARK } from './mapPlanEdit';
-import { previewPlanGesture } from './mapPlanGesture';
+import { MAP_EDIT_MARK, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
+import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
 import type { PlanGesture } from './mapPlanGesture';
+import { MAP_SNAP, sameSnapGuides } from './mapSnap';
+import type { SnapCandidates, SnapGuide } from './mapSnap';
 import { planNodeCovers, planStackUnder } from './mapPlanPreview';
 import type { MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
@@ -34,7 +36,13 @@ type PointerSession = {
   clientX: number; clientY: number; matrix: DOMMatrix; view: MapViewport; moved: boolean;
   /** Overlapping cameras and symbols under the press: a plain click steps to the next one. */
   stack: string[] | null;
+  /** Map units per CSS pixel at the press: the snap tolerance and reach of the whole gesture. */
+  scale: number;
+  /** Snap targets, collected from `initial` on the first move that needs them. */
+  candidates: SnapCandidates | null;
 };
+/** One empty list for every time no guide is shown, so the guides state keeps its identity. */
+const NO_GUIDES: readonly SnapGuide[] = [];
 const message = (error: unknown) => error instanceof Error ? error.message : '도면을 저장하지 못했습니다. 다시 시도해 주세요.';
 const normalizeAngle = (value: number) => ((value % 360) + 360) % 360;
 const uuid = () => crypto.randomUUID();
@@ -151,6 +159,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [symbolPaletteOpen, setSymbolPaletteOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [polygon, setPolygon] = useState<BackgroundPoint[]>([]);
+  // Snapping, and the lines the drag in progress is stuck to. Showing the same lines again keeps the state as it
+  // is: a drag that stays stuck does not render the guides for every pointer move.
+  const [snapEnabled, setSnapEnabled] = useState(readSnapPreference);
+  const [guides, setGuides] = useState<readonly SnapGuide[]>(NO_GUIDES);
+  const showGuides = (next: readonly SnapGuide[]) => setGuides(previous => sameSnapGuides(previous, next) ? previous : next);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
@@ -226,6 +239,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     pointerRef.current = null;
     if (session && svgRef.current?.hasPointerCapture(session.pointerId)) svgRef.current.releasePointerCapture(session.pointerId);
     doc.cancelGesture();
+    showGuides(NO_GUIDES);
   });
   // Another map, the other display mode, a save starting or lost edit rights never commit a half-done drag.
   useLayoutEffect(() => { abortGesture(); }, [abortGesture, current?.id, mode, canEdit]);
@@ -237,6 +251,22 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     window.addEventListener('keydown', cancel, true);
     return () => window.removeEventListener('keydown', cancel, true);
   }, [gestureActive, abortGesture]);
+  /** The Alt key being held was used on a plan drag: its key events stay away from the window menu until it is released. */
+  const altDrag = useRef(false);
+  // Releasing the pointer does not end this: the release of Alt usually comes after it, and that is the event
+  // that would hand the keyboard to the window menu.
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Alt') return;
+      if (event.type === 'keydown' && pointerRef.current) altDrag.current = true;     // Alt pressed during a drag
+      if (!altDrag.current) return;
+      event.preventDefault();                                                          // its auto-repeat comes here too
+      if (event.type === 'keyup') altDrag.current = false;                             // that Alt is released
+    };
+    const forget = () => { altDrag.current = false; };                                 // Alt+Tab and the like: the release never reaches this window
+    window.addEventListener('keydown', key, true); window.addEventListener('keyup', key, true); window.addEventListener('blur', forget);
+    return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('keyup', key, true); window.removeEventListener('blur', forget); };
+  }, []);
   // Looking through a camera ends when the selection, the map or the mode moves away from it.
   useEffect(() => {
     setLookThrough(previous => previous && mode === '3d' && previous.mapId === current?.id && previous.id === view.selectedId ? previous : null);
@@ -490,25 +520,35 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (mode === 'click' && !stack) return;
     // One drag is one gesture of the shared document: previews until release, then at most one undo step.
     if (mode !== 'pan' && mode !== 'click' && !doc.beginGesture(current.id)) return;
-    pointerRef.current = { mode, pointerId: event.pointerId, mapId: current.id, initial: live, node: target, start: point, clientX: event.clientX, clientY: event.clientY, matrix, view: { ...view }, moved: false, stack };
+    pointerRef.current = { mode, pointerId: event.pointerId, mapId: current.id, initial: live, node: target, start: point, clientX: event.clientX, clientY: event.clientY, matrix, view: { ...view }, moved: false, stack, scale: screenScale, candidates: null };
+    if (event.altKey) altDrag.current = true;
     svgRef.current?.setPointerCapture(event.pointerId);
   }
   function pointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     const session = pointerRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
+    if (event.altKey) altDrag.current = true;
     const point = pointFrom(event, session.matrix); if (!point) return;
     if (!session.moved && Math.hypot(event.clientX - session.clientX, event.clientY - session.clientY) < 4) return;
     session.moved = true;
     const delta = { x: point.x - session.start.x, y: point.y - session.start.y };
     if (session.mode === 'pan') { updateView({ x: session.view.x - delta.x, y: session.view.y - delta.y }, session.mapId); return; }
     if (session.mode === 'click' || !canEdit || !session.node) return;
-    const preview = previewPlanGesture(planGestureOf(session), session.initial, session.start, point, null);
-    if (!preview) return;
-    doc.previewGesture(preview.map);
+    const gesture = planGestureOf(session);
+    // Alt is read at every move: held it frees the drag, released the drag sticks again. The distances are
+    // screen pixels at the zoom of the press.
+    const snap = snapEnabled && !event.altKey
+      ? { candidates: session.candidates ??= planGestureCandidates(gesture, session.initial),
+          tolerance: MAP_SNAP.tolerancePx * session.scale, reach: MAP_SNAP.reachPx * session.scale }
+      : null;
+    const preview = previewPlanGesture(gesture, session.initial, session.start, point, snap);
+    if (!preview) { showGuides(NO_GUIDES); return; }
+    doc.previewGesture(preview.map); showGuides(preview.guides);
   }
   /** Also ends a drag as cancelled: pointercancel, or the canvas itself losing the pointer capture. */
   function pointerUp(event: ReactPointerEvent<SVGSVGElement>, cancel = false) {
     const session = pointerRef.current; if (!session || session.pointerId !== event.pointerId) return;
+    showGuides(NO_GUIDES);
     pointerRef.current = null;
     if (svgRef.current?.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
     if (session.moved) lastDrag.current = Date.now();
@@ -680,6 +720,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               </g>;
             })}
             {!!polygon.length && <g className="bmap-polygon-preview" pointerEvents="none"><polyline points={polygon.map(point => `${point.x},${point.y}`).join(' ')} />{polygon.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={MAP_EDIT_MARK.polygonDot * screenScale} />)}</g>}
+            <MapSnapGuides guides={guides} scale={screenScale} />
             {/* Handles are drawn last, so an item picked from under others can still be turned and resized. */}
             {selected && canEdit && !selected.locked && <MapNodeHandles node={selected} scale={screenScale} vertexHandles={false} onHandleDown={(event, handle) => pointerDown(event, selected, handle)} />}
           </svg> : <div className="bmap-3d-split">
@@ -700,7 +741,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             <BackgroundMapPlanPreview map={current} selectedId={view.selectedId} onSelect={selectNode} />
           </div>}
           {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : '도면 편집에서 공간·문·사물·카메라를 배치할 수 있습니다.'}</span></div>}
-          <div className="bmap-canvas-footer"><span>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom"><button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
+          <div className="bmap-canvas-footer"><span>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
         <aside className="bmap-inspector" id="bmap-selection-properties" aria-label="선택 속성" hidden={!inspectorOpen}>

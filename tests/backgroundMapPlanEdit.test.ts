@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planNodeHandles } from '../src/features/backgrounds/mapPlanEdit.ts';
+import { MAP_SNAP_PREFERENCE_KEY, planNodeHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
 import type { PlanNodeHandles } from '../src/features/backgrounds/mapPlanEdit.ts';
 import type { BackgroundCamera, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
@@ -120,4 +120,55 @@ test('the resize square steps outside the corner when a point handle sits on it'
     assert.equal(boxOf({ ...squared, shape: 'ellipse' }, 1, vertexHandles).resize!.shifted, false);
     assert.deepEqual(boxOf(chair, 1, vertexHandles).resize, { x: 34, y: 34, size: 12, shifted: false });
   }
+});
+
+/** Runs `body` with `storage` in the place of the browser storage (with none at all for null), then puts back what was there. */
+function withStorage(storage: object | null, body: () => void) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  if (storage) Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  else delete (globalThis as { localStorage?: unknown }).localStorage;
+  try { body(); } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+}
+const memoryStorage = (entries: [string, string][] = []) => {
+  const items = new Map(entries);
+  return { items, getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => { items.set(key, value); } };
+};
+
+test('without a storage snapping is on, and storing the choice does not throw', () => {
+  withStorage(null, () => {
+    assert.equal(typeof (globalThis as { localStorage?: unknown }).localStorage, 'undefined');
+    assert.equal(readSnapPreference(), true);
+    assert.doesNotThrow(() => storeSnapPreference(false));
+    assert.doesNotThrow(() => storeSnapPreference(true));
+    assert.equal(readSnapPreference(), true);
+  });
+  // A storage that refuses to be read or written is the same as none.
+  const refusing = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('full'); } };
+  withStorage(refusing, () => {
+    assert.equal(readSnapPreference(), true);
+    assert.doesNotThrow(() => storeSnapPreference(false));
+  });
+});
+
+test('snapping is off only when this device stored off', () => {
+  assert.equal(MAP_SNAP_PREFERENCE_KEY, 'bflow.background-map.snap.v1');
+  const key = 'bflow.background-map.snap.v1', before = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  withStorage(memoryStorage(), () => assert.equal(readSnapPreference(), true));
+  withStorage(memoryStorage([[key, 'off']]), () => assert.equal(readSnapPreference(), false));
+  for (const stored of ['on', '', 'OFF', 'false', '0']) withStorage(memoryStorage([[key, stored]]), () => assert.equal(readSnapPreference(), true, `"${stored}"`));
+  // Only its own key counts.
+  withStorage(memoryStorage([['bflow.background-map.panel-height.v1', 'off']]), () => assert.equal(readSnapPreference(), true));
+
+  const storage = memoryStorage();
+  withStorage(storage, () => {
+    storeSnapPreference(false);
+    assert.deepEqual([...storage.items], [[key, 'off']]); assert.equal(readSnapPreference(), false);
+    storeSnapPreference(true);
+    assert.deepEqual([...storage.items], [[key, 'on']]); assert.equal(readSnapPreference(), true);
+  });
+  // The stand-in is gone again.
+  assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, 'localStorage'), before);
 });
