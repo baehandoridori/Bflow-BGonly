@@ -25,7 +25,9 @@ type Stretch = { from: number; to: number };
 const AXES: readonly Axis[] = ['x', 'y'];
 /** Lines whose values differ by no more than this are one line to a guide. */
 const SAME_LINE = 1e-6;
-const MIN_LENGTH = 10;
+/** Distances no farther apart than this are a tie: the same in exact numbers, apart in the last digits only. */
+const TIE = 1e-9;
+const MIN_LENGTH = 10, MAX_LENGTH = 100000;
 
 const across = (axis: Axis): Axis => axis === 'x' ? 'y' : 'x';
 /** Nearest whole number, never -0. */
@@ -122,13 +124,17 @@ function nearLines(candidates: SnapCandidates, box: SnapBox, reach: number): Rec
   return { x: candidates.x.filter(near), y: candidates.y.filter(near) };
 }
 
-/** The line closest to any of the values and within `tolerance` of it. On a tie the earlier value wins, then the earlier line. */
+/**
+ * The line closest to any of the values and within `tolerance` of it. On a tie the earlier value wins, then the earlier line.
+ * A later pair has to be closer by more than the noise of the arithmetic: a node beside one of its own size is equally far
+ * with its start, middle and end, and the last digits must not pick another pair at each pointer position.
+ */
 function closestLine(values: readonly number[], lines: readonly SnapLine[], tolerance: number): { index: number; line: SnapLine } | null {
   if (!(tolerance > 0)) return null;
   let best: { index: number; line: SnapLine } | null = null, least = Infinity;
   for (let index = 0; index < values.length; index++) for (const line of lines) {
     const distance = Math.abs(line.at - values[index]);
-    if (distance <= tolerance && distance < least) { best = { index, line }; least = distance; }
+    if (distance <= tolerance && distance < least - TIE) { best = { index, line }; least = distance; }
   }
   return best;
 }
@@ -211,7 +217,8 @@ export function snapResize<T extends BackgroundSpace | BackgroundSymbol>(node: T
     // A line that would leave less than the minimum length does not count.
     const line = hit && length(hit.line.at) >= MIN_LENGTH ? hit.line : null;
     lengths[axis] = line ? length(line.at) : whole(length(corner[axis]));
-    if (line) stuck.push(line);
+    // A length past the maximum is cut there, which leaves the edge short of the line: there is nothing to show.
+    if (line && length(line.at) <= MAX_LENGTH) stuck.push(line);
   }
   // Odd quarter turns: the screen y sets the width and the screen x the height.
   const resized = turns % 2 === 0 ? resizeSpaceTo(node, lengths.x, lengths.y) : resizeSpaceTo(node, lengths.y, lengths.x);

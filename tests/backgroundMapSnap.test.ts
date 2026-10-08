@@ -141,6 +141,10 @@ test('a move does not stick to what is far away on the other axis', () => {
   assert.deepEqual(far.position, { x: 248, y: 421 }); assert.deepEqual(far.guides, []);
   // The same drag with a reach that takes A in.
   assert.equal(drag(map, 'b', { x: -52, y: 300.4 }, TOLERANCE, 1000).position.x, 244.65);
+  // Near is judged where the drag is before anything sticks. The left edge at 206 is 54 from the end of the level
+  // line; stuck at 200 it is exactly 48 from it, and must still not take the line.
+  const before = snapMove(plan(space('d', 300, 500, 20, 20)), ['d'], 'd', { x: -94, y: 2 }, only([vertical(200)], [horizontal(500, 100, 152)]), TOLERANCE, REACH);
+  assert.deepEqual(before?.position, { x: 200, y: 502 }); assert.deepEqual(before?.guides, [{ axis: 'x', at: 200, from: 0, to: 680 }]);
 });
 
 test('the reach is measured from the stretch a line covers, the gap of exactly the reach included', () => {
@@ -253,6 +257,20 @@ test('a move sticks at exactly the tolerance, to the closer line, and to the ear
   assert.equal(wide?.position.x, 85);
 });
 
+test('a tie stays a tie through the last digits of fractions: the start wins at every pointer position', () => {
+  // Two chairs of one size: left to left, centre to centre and right to right are the same distance, apart in the last digit only.
+  const map = plan(symbol('fixed', 244.65, 300, 60, 60), symbol('chair', 300.4, 380, 60, 60)), candidates = around(map, 'chair');
+  // The left edge goes from 5.9 before the left edge of the other chair to 5.9 past it.
+  for (let step = 0; step < 400; step++) {
+    const result = snapMove(map, ['chair'], 'chair', { x: 244.65 - 5.9 + step * 0.0295 - 300.4, y: 0 }, candidates, TOLERANCE, REACH);
+    // The stored x is the very number of the other chair, and the guide does not jump to its centre line.
+    assert.deepEqual(result?.position, { x: 244.65, y: 380 }, `step ${step}`);
+    assert.deepEqual(result?.guides, [{ axis: 'x', at: 244.65, from: 300, to: 440 }], `step ${step}`);
+  }
+  // Only the last digits are a tie: a line closer by a millionth still wins over an earlier one.
+  assert.equal(snapPoint({ x: 200, y: 0 }, only([vertical(202.000001), vertical(198)]), TOLERANCE).point.x, 198);
+});
+
 test('a guide covers every near line at the value it stuck to', () => {
   // F starts where A ends, a little below: both are within reach of B.
   const map = plan(A, B, space('f', 244.65, 240, 50, 40));
@@ -299,6 +317,8 @@ test('a point takes a near corner before any line', () => {
     { point: { x: 203, y: 104 }, guides: [{ axis: 'x', at: 203, from: 104, to: 104 }, { axis: 'y', at: 104, from: 203, to: 203 }] });
   // 5 away on each axis is more than 6 in a straight line: no corner, so the lines take it.
   assert.deepEqual(snapPoint({ x: 198, y: 99 }, candidates, TOLERANCE).point, { x: 200, y: 100 });
+  // The closest corner, not the first one near enough: (205, 105) is 5.7 away and comes first.
+  assert.deepEqual(snapPoint({ x: 201, y: 101 }, only([], [], [{ x: 205, y: 105 }, { x: 203, y: 104 }]), TOLERANCE).point, { x: 203, y: 104 });
   // A corner at exactly the tolerance.
   assert.deepEqual(snapPoint({ x: 216, y: 110 }, only([], [], [{ x: 210, y: 110 }]), TOLERANCE).point, { x: 210, y: 110 });
   assert.deepEqual(snapPoint({ x: 216.01, y: 110 }, only([], [], [{ x: 210, y: 110 }]), TOLERANCE).point, { x: 216, y: 110 });
@@ -309,6 +329,10 @@ test('a point sticks to a line on one axis and becomes a whole number on the oth
   assert.deepEqual(mixed, { point: { x: 200, y: 301 }, guides: [{ axis: 'x', at: 200, from: 50, to: 301 }] });
   const level = snapPoint({ x: 203.2, y: 300.6 }, only([], [horizontal(302.5, 400, 450), horizontal(302.5, 90, 120)]), TOLERANCE);
   assert.deepEqual(level, { point: { x: 203, y: 302.5 }, guides: [{ axis: 'y', at: 302.5, from: 90, to: 450 }] });
+  // Lines no more than a millionth apart are one line to a guide. Two millionths apart they are two.
+  const guidesWith = (at: number) => snapPoint({ x: 197.2, y: 300.6 }, only([vertical(200, 50, 80), vertical(at, 400, 450)]), TOLERANCE).guides;
+  assert.deepEqual(guidesWith(200.0000005), [{ axis: 'x', at: 200, from: 50, to: 450 }]);
+  assert.deepEqual(guidesWith(200.000002), [{ axis: 'x', at: 200, from: 50, to: 301 }]);
   const both = snapPoint({ x: 203.2, y: 300.6 }, only([vertical(200.25, 50, 80)], [horizontal(302.5, 400, 450)]), TOLERANCE);
   assert.deepEqual(both.point, { x: 200.25, y: 302.5 });
   assert.deepEqual(both.guides, [{ axis: 'x', at: 200.25, from: 50, to: 302.5 }, { axis: 'y', at: 302.5, from: 200.25, to: 450 }]);
@@ -382,6 +406,11 @@ test('a resize does not stick to a neighbour that is far away on the other axis'
     assert.equal(snapResize(room, flat, only([vertical(200, 140, 480)]), TOLERANCE, reach).node.width, 100, `touching, reach ${reach}`);
     assert.equal(snapResize(room, flat, only([vertical(200, 141, 480)]), TOLERANCE, reach).node.width, 98, `a gap of 1, reach ${reach}`);
   }
+  // Near is measured from the box between the fixed corner and the dragged one, not from the room as it was:
+  // a line that starts 110 below the room is inside the box dragged down to 300.3,
+  assert.equal(snapResize(room, { x: 198.4, y: 300.3 }, only([vertical(200, 250, 400)]), TOLERANCE, REACH).node.width, 100);
+  // and one that starts 30 below the room is 58 from the box dragged up to 112.
+  assert.equal(snapResize(room, { x: 198.4, y: 112 }, only([vertical(200, 170, 400)]), TOLERANCE, REACH).node.width, 98);
   // A guide covers the near lines at that value only.
   const pair = snapResize(room, corner, only([vertical(200, 150, 180), vertical(200, 400, 480), vertical(200, 60, 90)]), TOLERANCE, REACH);
   assert.deepEqual(pair.guides, [{ axis: 'x', at: 200, from: 60, to: 180 }]);
@@ -436,6 +465,13 @@ test('a resize ignores a line that would leave less than the minimum, and stops 
   assert.deepEqual(snapResize(room, { x: 40.2, y: 20.7 }, only(), TOLERANCE, REACH).node, { ...room, width: 10, height: 10 });
   const huge = snapResize(room, { x: 250000.4, y: 140.2 }, only(), TOLERANCE, REACH);
   assert.equal(huge.node.width, 100000); assert.equal(huge.node.height, 40);
+  // A stuck length past the maximum is kept and cut there. The edge is then short of the line, so no guide is shown.
+  const long = space('long', 0, 0, 99990, 40);
+  const cut = snapResize(long, { x: 99998, y: 40 }, only([vertical(100003, 0, 40)]), TOLERANCE, REACH);
+  assert.equal(cut.node.width, 100000); assert.deepEqual(cut.guides, []);
+  // Exactly the maximum sticks.
+  const most = snapResize(long, { x: 99998, y: 40 }, only([vertical(100000, 0, 40)]), TOLERANCE, REACH);
+  assert.equal(most.node.width, 100000); assert.deepEqual(most.guides, [{ axis: 'x', at: 100000, from: 0, to: 40 }]);
 });
 
 test('a symbol is resized by the same rules, and a tilted one does not stick', () => {
