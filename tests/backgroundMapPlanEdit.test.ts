@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP_SNAP_PREFERENCE_KEY, doubleClickNodeId, planNodeHandles, planVertexHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
+import { MAP_SNAP_PREFERENCE_KEY, POLYGON_POINT_LIMIT, doubleClickNodeId, planNodeHandles, planVertexHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
 import type { PlanNodeHandles } from '../src/features/backgrounds/mapPlanEdit.ts';
 import { nodePlanOutline } from '../src/features/backgrounds/mapSpatial.ts';
 import type { BackgroundCamera, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
+import { validateBackgroundEntity } from '../src/features/backgrounds/domain.ts';
 
 const near = (actual: number, expected: number, label = '') =>
   assert.ok(Math.abs(actual - expected) < 1e-9, `${label} ${actual} != ${expected}`);
@@ -254,4 +255,13 @@ test('snapping is off only when this device stored off', () => {
   });
   // The stand-in is gone again.
   assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, 'localStorage'), before);
+});
+
+test('the point limit of a polygon is the one the saved-data check uses', () => {
+  // The polygon tool, the + handles and the point edits all stop here; a space with more points cannot be saved.
+  assert.equal(POLYGON_POINT_LIMIT, 200);
+  const ring = (count: number): BackgroundSpace => ({ id: 'ring', type: 'space', name: '둘레', placeId: null, childMapId: null, x: 0, y: 0, width: 400, height: 400, rotation: 0, shape: 'polygon', locked: false,
+    points: Array.from({ length: count }, (_, index) => ({ x: .5 + .5 * Math.cos(index / count * 2 * Math.PI), y: .5 + .5 * Math.sin(index / count * 2 * Math.PI) })) });
+  assert.doesNotThrow(() => validateBackgroundEntity('map', { id: '11111111-1111-4111-8111-111111111111', revision: 0, name: '도면', parentId: null, placeId: null, imageUrl: '', nodes: [{ ...ring(POLYGON_POINT_LIMIT), id: '22222222-2222-4222-8222-222222222222' }] }));
+  assert.throws(() => validateBackgroundEntity('map', { id: '11111111-1111-4111-8111-111111111111', revision: 0, name: '도면', parentId: null, placeId: null, imageUrl: '', nodes: [{ ...ring(POLYGON_POINT_LIMIT + 1), id: '22222222-2222-4222-8222-222222222222' }] }));
 });

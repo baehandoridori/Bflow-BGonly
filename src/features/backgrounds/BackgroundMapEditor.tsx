@@ -11,7 +11,7 @@ import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { addMapCamera, containsPoint, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removePolygonVertex, renameMapNode, replaceMapNode, transformMapSpace } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
-import { MAP_EDIT_MARK, doubleClickNodeId, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
+import { MAP_EDIT_MARK, POLYGON_POINT_LIMIT, doubleClickNodeId, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
 import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
 import type { PlanGesture } from './mapPlanGesture';
 import { MAP_SNAP, sameSnapGuides } from './mapSnap';
@@ -604,6 +604,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     pressLog.current = [pressLog.current[1], { hitId: node?.id ?? null, targetId: handle ? null : target?.id ?? null, handle: !!handle }];
     if (canEdit && event.button === 0 && !handle && tool === 'polygon') {
       setPolygon(previous => {
+        // A space stores at most this many points; past it the outline could neither be saved nor trimmed.
+        if (previous.length >= POLYGON_POINT_LIMIT) return previous;
         const last = previous[previous.length - 1];
         // The same point again: within the drag threshold on screen, so the second press of a double-click adds none.
         return last && Math.hypot(last.x - point.x, last.y - point.y) < MAP_EDIT_MARK.polygonDot * screenScale ? previous : [...previous, point];
@@ -621,8 +623,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const vertex = mode === 'vertex' && typeof handle === 'object' ? handle : null;
     // A pressed point is the picked one, dragged or not. A + is no point yet: the one it makes is picked on release.
     if (vertex && target && !vertex.insert) setActiveVertex({ mapId: current.id, nodeId: target.id, index: vertex.index });
-    // What the last Delete said about a point is over once the points are worked on again.
-    if (vertex) setError('');
     pointerRef.current = { mode, pointerId: event.pointerId, mapId: current.id, initial: live, node: target, start: point, clientX: event.clientX, clientY: event.clientY, matrix, view: { ...view }, moved: false, stack, scale: screenScale, vertex, candidates: null };
     if (event.altKey) altDrag.current = true;
     svgRef.current?.setPointerCapture(event.pointerId);
@@ -653,6 +653,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const session = pointerRef.current; if (!session || session.pointerId !== event.pointerId) return;
     showGuides(NO_GUIDES);
     pointerRef.current = null;
+    // What the last Delete said about a point is over once the points are worked on again. Cleared here, not on
+    // the press: the message sits above the canvas, and removing it mid-drag would resize the canvas under a
+    // drag that still converts positions with the transform taken at the press.
+    if (session.mode === 'vertex') setError('');
     if (svgRef.current?.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
     if (session.moved) lastDrag.current = Date.now();
     if (session.mode === 'pan') return;

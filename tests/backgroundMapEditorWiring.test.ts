@@ -233,3 +233,14 @@ test('anchor 18: the snap input carries the reach, in screen pixels at the zoom 
   // From the condition on: the toggle and the Alt of this very move decide whether there is a snap input at all.
   assert.match(handler.pointerMove(), /const snap = snapEnabled && !event\.altKey\s*\? \{ candidates: .*\s*tolerance: MAP_SNAP\.tolerancePx \* session\.scale, reach: MAP_SNAP\.reachPx \* session\.scale \}\s*: null;/);
 });
+
+test('anchor 19: a press that starts a drag changes nothing laid out above the canvas', () => {
+  // The message sits above the canvas. Clearing it on the press would resize the canvas under a drag that still
+  // converts positions with the transform taken at the press, so the point would run ahead of the pointer.
+  assert.equal(count(handler.pointerDown(), /setError\(/g), 1, 'only the polygon tool, which returns before any session');
+  inOrder(handler.pointerUp(), 'pointerRef.current = null;', "if (session.mode === 'vertex') setError('');");
+});
+
+test('anchor 20: the polygon tool stops at the number of points a space can store', () => {
+  inOrder(handler.pointerDown(), 'setPolygon(previous => {', 'if (previous.length >= POLYGON_POINT_LIMIT) return previous;', 'const last = previous[previous.length - 1];');
+});
