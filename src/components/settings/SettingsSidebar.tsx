@@ -4,11 +4,12 @@ import {
   Palette, Type, Keyboard, Sparkles, Monitor,
   KeyRound, Database, HelpCircle, UserCircle, Bell,
   Layers, ShieldCheck,
-  ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 
 export type SettingsTabId =
   | 'profile'
@@ -160,7 +161,7 @@ export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
               className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-secondary/60 hover:text-text-secondary transition-colors cursor-pointer"
             >
               <span>{group.label}</span>
-              {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              <DisclosureChevron expanded={!isCollapsed} size={12} />
             </button>
             <AnimatePresence initial={false}>
               {!isCollapsed && (
@@ -171,15 +172,23 @@ export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
                   transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
                   style={{ overflow: 'hidden' }}
                 >
-                  <div className="flex flex-col gap-0.5">
+                  <div className="relative flex flex-col gap-0.5">
+                    {/* 선택 표시가 그룹 안에서 세로로 미끄러진다(움직임 폴리싱 7번). 다른 그룹으로 가면 그 그룹에서 바로 놓인다. */}
+                    <SlidingIndicator
+                      activeKey={group.tabs.some((tab) => tab.id === active) ? active : null}
+                      axis="y"
+                      timing="rail"
+                      className="left-0 right-0 rounded-lg bg-accent/15"
+                    />
                     {group.tabs.map((tab) => (
                       <button
                         key={tab.id}
+                        data-slide-key={tab.id}
                         onClick={() => onChange(tab.id)}
                         className={cn(
-                          'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer text-left',
+                          'relative w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer text-left',
                           active === tab.id
-                            ? 'bg-accent/15 text-accent'
+                            ? 'text-accent'
                             : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/30',
                         )}
                       >

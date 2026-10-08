@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, ChevronDown, ChevronRight, Circle, Layers } from 'lucide-react';
+import { AlertTriangle, Circle, Layers } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import type { CompRevision, RevisionStatus, Episode } from '@/types';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
@@ -14,6 +14,7 @@ import type { SceneGroup } from './utils';
 import { SceneJumpButton } from './SceneJumpButton';
 import { RevisionCommentMarker, summarizeRevisionComments } from './RevisionCommentMarker';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 
 // ─── EP 그룹 타입 ──────────
 
@@ -123,7 +124,7 @@ export function EpisodeGroupSection({
               className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-bg-primary/30 transition-colors"
             >
               <span className="shrink-0 text-text-secondary">
-                {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <DisclosureChevron expanded={expanded} size={16} />
               </span>
               <div className="flex items-baseline gap-2 flex-1 min-w-0">
                 <span className="text-[16px] font-mono font-bold text-text-primary">{epLabel}</span>
@@ -213,7 +214,7 @@ function SceneNested({
         className="flex items-center gap-2 mb-2 cursor-pointer"
       >
         <span className="shrink-0 text-text-secondary/60">
-          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <DisclosureChevron expanded={expanded} size={12} />
         </span>
         <span className="text-[12px] font-mono font-bold text-text-primary">{info.partId ?? info.part} {info.sceneNo || sceneLabel}</span>
         <SceneJumpButton

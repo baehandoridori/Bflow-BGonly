@@ -6,9 +6,22 @@
  *   fit 은 3:4 크롭 프레임 기준으로 저작되므로, fit 을 적용하는 표면은 반드시 3:4 비율 컨테이너여야
  *   편집기에서 맞춘 구도가 그대로 재현된다 (다른 비율에 적용하면 구도가 다르게 잘림).
  */
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Image as ImageIcon, RefreshCw } from 'lucide-react';
 import type { CharacterImageBackground, CharacterImageFit } from '@/types';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import {
+  CONTENT_SWAP_MS,
+  imageLayersOnReady,
+  imageLayersOnSettled,
+  imageLayersOnTarget,
+  imageLayersWithTopLook,
+  imageSwapKeyframes,
+  initialImageLayers,
+  type ImageSwapLayer,
+  type SwapDirection,
+} from '@/utils/contentSwap';
+import { EASE_CSS, animateEl } from '@/utils/motion';
 import {
   DEFAULT_CHARACTER_IMAGE_BACKGROUND,
   DEFAULT_CHARACTER_IMAGE_FIT,
@@ -42,6 +55,157 @@ function withRetryNonce(url: string, retryNonce: number): string {
   return `${url}${separator}characterImageRetry=${retryNonce}`;
 }
 
+/* ─── 그림 겹쳐 바꾸기 (움직임 폴리싱 11번, swapDirection 을 넘긴 표면만) ─────────────
+   옛 그림을 아래층에 그대로 두고, 새 그림은 보이지 않게 받아 decode 까지 끝낸 다음 누른 쪽에서 6px 밀려 들어오며
+   160ms 에 떠오른다. 다 떠오르면 아래층을 지운다 — 빈 칸이 번쩍이지 않는다. 동작 줄이기는 opacity 만 100ms.
+   층마다 자기 배경·구도를 가진다(복장마다 배경이 달라도 옛 그림은 옛 모습 그대로 아래에 남는다). */
+
+interface ImageLook {
+  background: CharacterImageBackground;
+  fitStyle: CSSProperties;
+}
+
+const sameLook = (a: ImageLook, b: ImageLook) => a.background === b.background
+  && a.fitStyle.transform === b.fitStyle.transform
+  && a.fitStyle.transformOrigin === b.fitStyle.transformOrigin;
+
+function SwapImageLayer({
+  layer,
+  top,
+  alt,
+  imgClassName,
+  eager,
+  reduce,
+  onReady,
+  onSettled,
+  onError,
+}: {
+  layer: ImageSwapLayer<ImageLook>;
+  top: boolean;
+  alt: string;
+  imgClassName?: string;
+  eager: boolean;
+  reduce: boolean;
+  onReady: (src: string) => void;
+  onSettled: (src: string) => void;
+  onError: () => void;
+}) {
+  const layerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // 받는 중: 다 받아 decode 까지 끝나면 떠오르기 시작.
+  useEffect(() => {
+    if (layer.phase !== 'loading') return;
+    const img = imgRef.current;
+    if (!img) return;
+    let live = true;
+    const ready = () => { if (live) onReady(layer.src); };
+    const loaded = () => img.complete && img.naturalWidth > 0;
+    if (typeof img.decode === 'function') {
+      img.decode().then(ready, () => { if (loaded()) ready(); });
+    } else if (loaded()) {
+      ready();
+    } else {
+      img.addEventListener('load', ready, { once: true });
+    }
+    return () => { live = false; img.removeEventListener('load', ready); };
+  }, [layer.phase, layer.src, onReady]);
+
+  // 떠오르기: 그리기 전에 시작해 새 그림이 한 번 비쳤다가 사라지는 깜빡임이 없다.
+  useLayoutEffect(() => {
+    if (layer.phase !== 'entering') return;
+    const animation = animateEl(
+      layerRef.current,
+      imageSwapKeyframes(layer.direction),
+      { duration: reduce ? CONTENT_SWAP_MS.reduced : CONTENT_SWAP_MS.image, easing: EASE_CSS.out },
+      reduce,
+    );
+    if (!animation) {
+      onSettled(layer.src);
+      return;
+    }
+    let live = true;
+    animation.finished.then(() => { if (live) onSettled(layer.src); }, () => undefined);
+    return () => {
+      live = false;
+      animation.cancel();
+    };
+    // 단계가 바뀔 때만 — 다른 값이 바뀌어도 떠오르던 움직임을 다시 시작하지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layer.phase]);
+
+  return (
+    <div
+      ref={layerRef}
+      aria-hidden={top ? undefined : true}
+      className="absolute inset-0 flex items-center justify-center"
+      style={{ ...backgroundStyle(layer.look.background), ...(layer.phase === 'loading' ? { opacity: 0 } : null) }}
+    >
+      <img
+        ref={imgRef}
+        src={layer.src}
+        alt={top ? alt : ''}
+        draggable={false}
+        loading={eager ? 'eager' : 'lazy'}
+        decoding={eager ? 'auto' : 'async'}
+        className={cn('max-w-full max-h-full object-contain select-none will-change-transform', imgClassName)}
+        style={layer.look.fitStyle}
+        onError={top ? onError : undefined}
+      />
+    </div>
+  );
+}
+
+function SwapImageLayers({
+  src,
+  look,
+  direction,
+  alt,
+  imgClassName,
+  eager,
+  onError,
+}: {
+  src: string;
+  look: ImageLook;
+  direction: SwapDirection;
+  alt: string;
+  imgClassName?: string;
+  eager: boolean;
+  onError: () => void;
+}) {
+  const { reduce } = useMotionPref();
+  const [layers, setLayers] = useState(() => initialImageLayers(src, look));
+  const [target, setTarget] = useState(src);
+  // 그림이 바뀐 그 렌더에서 바로 층을 고친다(이펙트를 기다리면 옛 그림이 새 모습으로 한 번 그려진다).
+  if (target !== src) {
+    setTarget(src);
+    setLayers((current) => imageLayersOnTarget(current, src, direction, look));
+  } else if (!sameLook(layers[layers.length - 1].look, look)) {
+    setLayers((current) => imageLayersWithTopLook(current, look, sameLook));
+  }
+  const onReadyRef = useRef((ready: string) => setLayers((current) => imageLayersOnReady(current, ready)));
+  const onSettledRef = useRef((settled: string) => setLayers((current) => imageLayersOnSettled(current, settled)));
+
+  return (
+    <>
+      {layers.map((layer, index) => (
+        <SwapImageLayer
+          key={layer.src}
+          layer={layer}
+          top={index === layers.length - 1}
+          alt={alt}
+          imgClassName={imgClassName}
+          eager={eager}
+          reduce={reduce}
+          onReady={onReadyRef.current}
+          onSettled={onSettledRef.current}
+          onError={onError}
+        />
+      ))}
+    </>
+  );
+}
+
 export function CharacterImageFrame({
   url,
   alt,
@@ -53,6 +217,7 @@ export function CharacterImageFrame({
   eager = false,
   onClick,
   onContextMenu,
+  swapDirection,
 }: {
   url: string | null | undefined;
   alt: string;
@@ -64,6 +229,12 @@ export function CharacterImageFrame({
   eager?: boolean;
   onClick?: () => void;
   onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
+  /**
+   * 넘기면 그림이 바뀔 때 옛 그림 위로 새 그림이 겹쳐 떠오른다(움직임 폴리싱 11번).
+   * -1: 왼쪽(‹)에서, 1: 오른쪽(›)에서, 0: 제자리에서. 넘기지 않으면 지금처럼 그 자리에서 바뀐다.
+   * 이 프레임의 크기가 바깥(className)으로 정해진 표면에서만 쓴다 — 그림이 겹친 층이 프레임을 꽉 채운다.
+   */
+  swapDirection?: SwapDirection;
 }) {
   const normalized = normalizeCharacterImageFit(fit);
   const fitStyle = getCharacterImageFitTransformStyle(normalized);
@@ -80,6 +251,9 @@ export function CharacterImageFrame({
     setRetryNonce((next) => next + 1);
   };
 
+  // 겹쳐 바꾸기 중에는 층마다 자기 배경을 칠한다 — 틀이 새 배경을 먼저 칠하면 옛 그림이 새 배경 위에 비친다.
+  const layered = Boolean(url && !failed && swapDirection !== undefined);
+
   const handleFrameClick = () => {
     if (url && failed) {
       retryImage();
@@ -93,7 +267,7 @@ export function CharacterImageFrame({
       role={onClick || failed ? 'button' : undefined}
       tabIndex={onClick || failed ? 0 : undefined}
       className={cn('relative overflow-hidden flex items-center justify-center', (onClick || failed) && 'cursor-pointer', className)}
-      style={backgroundStyle(background)}
+      style={layered ? undefined : backgroundStyle(background)}
       onClick={onClick || failed ? handleFrameClick : undefined}
       onContextMenu={onContextMenu}
       onKeyDown={(e) => {
@@ -104,7 +278,17 @@ export function CharacterImageFrame({
         }
       }}
     >
-      {url && !failed ? (
+      {url && layered ? (
+        <SwapImageLayers
+          src={withRetryNonce(url, retryNonce)}
+          look={{ background, fitStyle }}
+          direction={swapDirection ?? 0}
+          alt={alt}
+          imgClassName={imgClassName}
+          eager={eager}
+          onError={() => setFailed(true)}
+        />
+      ) : url && !failed ? (
         <img
           src={withRetryNonce(url, retryNonce)}
           alt={alt}

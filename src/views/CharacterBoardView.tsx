@@ -16,6 +16,7 @@ import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator, SlideToneLayers } from '@/components/ui/SlidingIndicator';
 import { EpisodeAssetBoard } from './EpisodeAssetBoard';
 import { CharacterImageContextMenu } from '@/components/characters/CharacterImageContextMenu';
 import { TagPill } from '@/components/characters/TagChips';
@@ -31,6 +32,9 @@ import { effectiveHeightPx } from '@/utils/characterHeight';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { matchesCharacterStatusFilter, collectCharacterAssignees, type CharacterStatusFilterValue } from '@/utils/characterStatusFilter';
 import type { CharacterBoardTab } from '@/types';
+import { useGridFlip } from '@/hooks/useGridFlip';
+import { CARD_DROP_FLIP } from '@/utils/gridFlip';
+import { useMotionPref } from '@/hooks/useMotionPref';
 
 type BoardTab = 'board' | 'episode-assets';
 
@@ -41,6 +45,13 @@ const CHARACTER_STATUS_FILTER_LABELS: Record<CharacterStatusFilterValue, string>
   'in-progress': '진행중',
   done: '완료',
 };
+/** 상태 필터 알약의 색 층(미끄러지는 표시 안에 겹쳐 두고 opacity 만 바꾼다). */
+const CHARACTER_STATUS_FILTER_TONES: Record<CharacterStatusFilterValue, string> = {
+  all: 'bg-accent/20',
+  'not-started': 'bg-red-500/20',
+  'in-progress': 'bg-yellow-500/20',
+  done: 'bg-green-500/20',
+};
 
 /** 보기 방식 토글 옵션 (피드백 40). */
 const VIEW_MODE_OPTIONS: { mode: CharacterBoardViewMode; label: string; Icon: typeof LayoutGrid }[] = [
@@ -49,12 +60,14 @@ const VIEW_MODE_OPTIONS: { mode: CharacterBoardViewMode; label: string; Icon: ty
   { mode: 'list', label: '리스트 보기', Icon: List },
 ];
 
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function TabButton({ slideKey, active, onClick, children }: { slideKey: string; active: boolean; onClick: () => void; children: React.ReactNode }) {
+  // 선택 배경은 부모의 미끄러지는 알약이 맡는다(움직임 폴리싱 7번) — 여기서는 글자색만.
   return (
     <button
       type="button"
+      data-slide-key={slideKey}
       onClick={onClick}
-      className={cn('px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer', active ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/40')}
+      className={cn('relative px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer', active ? 'text-accent' : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/40')}
     >
       {children}
     </button>
@@ -394,6 +407,10 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
     setDraggingCardId(null);
     setDropTargetId(null);
   }, []);
+  // 내가 카드를 놓아 순서가 바뀐 순간만, 밀려난 카드들이 새 자리로 미끄러진다(움직임 폴리싱 15번).
+  // 팀원 쪽 순서 변경·검색 등은 그대로 바로 바뀐다. 카드가 40장을 넘으면 생략.
+  const cardGridRef = useRef<HTMLDivElement>(null);
+  const cardFlipArmedUntilRef = useRef(0);
   const handleCardDrop = useCallback((targetId: string) => {
     const dragId = draggingCardIdRef.current;
     draggingCardIdRef.current = null;
@@ -402,8 +419,15 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
     if (!dragId || dragId === targetId) return;
     // 전체 characters 배열 기준으로 이동 계산 — active/archived 가 같은 sort_order 공간을 쓰므로 전 구간 재부여로 중복 방지.
     const allIds = useCharacterBoardStore.getState().characters.map((c) => c.id);
+    cardFlipArmedUntilRef.current = Date.now() + CARD_DROP_FLIP.armMs;
     void reorderCharacters(moveCostumeInOrder(allIds, dragId, targetId));
   }, [reorderCharacters]);
+  const { reduce: reduceMotion } = useMotionPref();
+  useGridFlip(cardGridRef, cardOrderIds.join('|'), {
+    disabled: reduceMotion || Date.now() > cardFlipArmedUntilRef.current,
+    maxItems: CARD_DROP_FLIP.maxItems,
+    enter: false,
+  });
 
   if (!loaded) {
     if (loadError) {
@@ -442,7 +466,8 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
   return (
     <div className="flex flex-col gap-4">
       {/* 검색·버튼·필터 칩 — 스크롤해도 상단에 붙는다 (피드백 38). 배경은 토큰 기반이라 라이트/다크 자동 대응. */}
-      <div ref={stickyHeaderRef} className="sticky top-0 z-20 -mx-6 bg-bg-primary/85 px-6 pt-4 pb-3 backdrop-blur-md flex flex-col gap-2.5">
+      {/* 스크롤 따라오는 위쪽 띠 — 흐림(backdrop-blur)은 스크롤할 때마다 다시 계산돼 빼고, 바탕을 더 불투명하게(움직임 폴리싱 바탕 C) */}
+      <div ref={stickyHeaderRef} className="sticky top-0 z-20 -mx-6 bg-bg-primary/[0.97] px-6 pt-4 pb-3 flex flex-col gap-2.5">
         {/* 사용자 정의 탭 (피드백 41) */}
         <BoardTabStrip
           tabs={tabs}
@@ -464,19 +489,21 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
               role="group"
               aria-label="보기 방식"
               title={heightCompareMode ? '키 비교 보기 중에는 카드 보기로 고정돼요' : undefined}
-              className={cn('flex items-center rounded-lg border border-bg-border p-0.5 shrink-0', heightCompareMode && 'opacity-45')}
+              className={cn('relative flex items-center rounded-lg border border-bg-border p-0.5 shrink-0', heightCompareMode && 'opacity-45')}
             >
+              <SlidingIndicator activeKey={heightCompareMode ? null : viewMode} axis="both" className="rounded-md bg-accent/20" />
               {VIEW_MODE_OPTIONS.map(({ mode, label, Icon }) => (
                 <button
                   key={mode}
+                  data-slide-key={mode}
                   type="button"
                   aria-label={label}
                   title={heightCompareMode ? undefined : label}
                   disabled={heightCompareMode}
                   onClick={() => changeViewMode(mode)}
                   className={cn(
-                    'flex h-7 w-7 items-center justify-center rounded-md transition-colors cursor-pointer disabled:cursor-default',
-                    viewMode === mode && !heightCompareMode ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary',
+                    'relative flex h-7 w-7 items-center justify-center rounded-md transition-colors cursor-pointer disabled:cursor-default',
+                    viewMode === mode && !heightCompareMode ? 'text-accent' : 'text-text-secondary hover:text-text-primary',
                   )}
                 >
                   <Icon size={14} />
@@ -516,7 +543,7 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
           </div>
         </div>
         {/* 작업자/상태 필터 (피드백 48) — 씬 카드 필터와 같은 구성 */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex flex-wrap items-center gap-3">
           <GlassDropdown
             options={assigneeOptions}
             value={assigneeFilter ?? '__all__'}
@@ -528,18 +555,23 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
             minWidth={130}
           />
           <div className="w-px h-7 bg-bg-border" />
+          {/* 상태 필터 — 색 알약 하나가 미끄러지고 색은 겹친 층이 바뀐다(움직임 폴리싱 7번). */}
+          <SlidingIndicator activeKey={statusFilter} axis="both">
+            <SlideToneLayers active={statusFilter} tones={CHARACTER_STATUS_FILTER_TONES} className="rounded-lg" />
+          </SlidingIndicator>
           {(['all', 'not-started', 'in-progress', 'done'] as CharacterStatusFilterValue[]).map((f) => (
             <button
               key={f}
+              data-slide-key={f}
               type="button"
               onClick={() => setStatusFilter(f)}
               className={cn(
-                'inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
+                'relative inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer',
                 statusFilter === f
-                  ? f === 'done' ? 'bg-green-500/20 text-green-400'
-                    : f === 'not-started' ? 'bg-red-500/20 text-red-400'
-                    : f === 'in-progress' ? 'bg-yellow-500/20 text-yellow-400'
-                    : 'bg-accent/20 text-accent'
+                  ? f === 'done' ? 'text-green-400'
+                    : f === 'not-started' ? 'text-red-400'
+                    : f === 'in-progress' ? 'text-yellow-400'
+                    : 'text-accent'
                   : 'text-text-secondary hover:text-text-primary',
               )}
             >
@@ -615,7 +647,7 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
           </button>
         </div>
       ) : (
-        <div className={heightCompareMode
+        <div ref={cardGridRef} className={heightCompareMode
           ? 'flex flex-wrap items-end gap-4'
           : viewMode === 'list'
             ? 'flex flex-col gap-1.5'
@@ -752,9 +784,10 @@ export function CharacterBoardView() {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1.5 border-b border-bg-border pb-2">
-          <TabButton active={tab === 'board'} onClick={() => setTab('board')}>캐릭터 현황판</TabButton>
-          <TabButton active={tab === 'episode-assets'} onClick={() => setTab('episode-assets')}>에피소드 에셋</TabButton>
+        <div className="relative flex items-center gap-1.5 border-b border-bg-border pb-2">
+          <SlidingIndicator activeKey={tab} axis="both" className="rounded-lg bg-accent/20" />
+          <TabButton slideKey="board" active={tab === 'board'} onClick={() => setTab('board')}>캐릭터 현황판</TabButton>
+          <TabButton slideKey="episode-assets" active={tab === 'episode-assets'} onClick={() => setTab('episode-assets')}>에피소드 에셋</TabButton>
         </div>
       </div>
 

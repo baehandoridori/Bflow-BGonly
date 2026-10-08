@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
@@ -7,7 +7,11 @@ import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Episode, Department, Stage } from '@/types';
 import { cn } from '@/utils/cn';
+import { cardCascadeClass, cardCascadeStyle } from '@/utils/viewTransitionMotion';
+import { useCardCascadeWindow } from '@/hooks/useCardCascadeWindow';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
+import { useGridFlip } from '@/hooks/useGridFlip';
+import { useMotionPref } from '@/hooks/useMotionPref';
 
 /* ────────────────────────────────────────────────
    담당자별 통계
@@ -135,8 +139,8 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
     <div
       className={cn(
         'rounded-xl border border-bg-border/50 bg-bg-card overflow-hidden',
-        'transition-shadow transition-border duration-200 ease-out',
-        'hover:shadow-md hover:shadow-black/15 hover:border-bg-border/80',
+        // 정보 카드 hover: 테두리만 밝아짐(카드 전체를 누르지 않고 안의 '씬 목록'만 누른다)
+        'bf-card-hover bf-card-hover--info',
       )}
     >
       {/* 헤더 */}
@@ -263,6 +267,10 @@ export function AssigneeView() {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const [sortBy, setSortBy] = useState<SortOption>('seniority');
   const [sortAsc, setSortAsc] = useState(false);
+  // 정렬을 바꾸면 카드가 순간이동하지 않고 새 자리로 미끄러진다(움직임 폴리싱 15번).
+  const cardGridRef = useRef<HTMLDivElement>(null);
+  const { reduce } = useMotionPref();
+  useGridFlip(cardGridRef, `${sortBy}:${sortAsc}`, { disabled: reduce, enter: false });
 
   const assignees = useMemo(() => {
     const data = buildAssigneeData(episodes, episodeTitles);
@@ -278,6 +286,9 @@ export function AssigneeView() {
     });
     return sorted;
   }, [episodes, episodeTitles, sortBy, sortAsc]);
+
+  // 차례 등장(12번)은 처음 그려질 때만 — 정렬(15번 미끄러짐)로 옮겨진 카드가 등장을 다시 틀지 않게(통합).
+  const cascading = useCardCascadeWindow(assignees.length > 0);
 
   const summary = useMemo(() => {
     const totalAssignees = assignees.filter((a) => a.name !== '미배정').length;
@@ -356,16 +367,12 @@ export function AssigneeView() {
             <p className="text-sm">담당자 데이터가 없습니다</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div ref={cardGridRef} className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            {/* 움직임 폴리싱 12번: 차례 등장은 20ms 간격·최대 200ms 지연(20명이어도 0.4초면 모두 도착) — 마운트 때 한 번 */}
             {assignees.map((data, i) => (
-              <motion.div
-                key={data.name}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: i * 0.03 }}
-              >
+              <div key={data.name} data-flip-id={data.name} className={cardCascadeClass(cascading)} style={cardCascadeStyle(i)}>
                 <AssigneeCard data={data} onClickScene={handleClickScene} />
-              </motion.div>
+              </div>
             ))}
           </div>
         )}

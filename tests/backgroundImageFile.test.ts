@@ -89,10 +89,14 @@ test('linked image reader shrinks large transparent images to the dimension and 
   assert.ok(result.dataUrl.length <= MAX_BACKGROUND_IMAGE_DATA_URL);
 });
 
-test('linked image reader keeps WebP transparency and only encodes actual JPEG sources as JPEG', async () => {
-  const webp = Buffer.from('RIFF0000WEBPfixture'), decoder = decoderFixture();
-  const webpResult = await readBackgroundImageFile('C:\\source.webp', { ...fileFixture(webp), ...decoder });
-  assert.match(webpResult.dataUrl, /^data:image\/png;/); assert.equal(decoder.state().jpegCalls, 0);
+test('linked image reader refuses WebP paths before opening them and only encodes actual JPEG sources as JPEG', async () => {
+  const webp = fileFixture(Buffer.from('RIFF0000WEBPfixture')), decoder = decoderFixture();
+  // The production decoder (nativeImage) reads PNG and JPEG only: say so instead of reporting a healthy file as corrupt.
+  await assert.rejects(readBackgroundImageFile('C:\\source.webp', { ...webp, ...decoder }), /WebP 파일은 경로로 연결할 수 없습니다/);
+  assert.equal(webp.state().opened, 0);
+  // WebP bytes behind a .png name are refused by content, not handed to the decoder.
+  await assert.rejects(readBackgroundImageFile('C:\\renamed.png', { ...fileFixture(Buffer.from('RIFF0000WEBPfixture')), ...decoder }), /지원하지 않는 형식/);
+  assert.equal(decoder.state().jpegCalls, 0);
   const jpegResult = await readBackgroundImageFile('C:\\source.jpg', { ...fileFixture(Buffer.from([255, 216, 255, 217])), ...decoder });
   assert.match(jpegResult.dataUrl, /^data:image\/jpeg;/); assert.equal(decoder.state().jpegCalls, 1);
 });

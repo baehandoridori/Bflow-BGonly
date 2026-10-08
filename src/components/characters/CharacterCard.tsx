@@ -9,6 +9,7 @@ import { cn } from '@/utils/cn';
 import { useCostumeEditingPresence, useCostumeCollisionWarn } from '@/stores/useEditingPresenceStore';
 import { editingBeamClass } from '@/utils/editingPresence';
 import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
+import type { SwapDirection } from '@/utils/contentSwap';
 
 // 복장 없는 캐릭터에 매 렌더 새 [] 를 만들면 memo 비교가 항상 실패한다 — 안정 참조 하나를 공유 (CQ-6).
 export const EMPTY_COSTUMES: CharacterCostume[] = [];
@@ -63,10 +64,13 @@ export const CharacterCard = memo(function CharacterCard({
   // (원래 휠로 넘겼으나 preventDefault 가 페이지 스크롤을 하이재킹해 카드가 많은 화면에서 충돌 — 버튼으로 교체.)
   const imaged = costumes.filter((c) => c.featuredImageUrl);
   const [activeIdx, setActiveIdx] = useState(0);
+  // 누른 쪽에서 새 그림이 겹쳐 떠오른다(‹ 는 왼쪽, › 는 오른쪽 — 움직임 폴리싱 11번).
+  const [swapDirection, setSwapDirection] = useState<SwapDirection>(0);
   useEffect(() => { if (activeIdx >= imaged.length) setActiveIdx(0); }, [imaged.length, activeIdx]);
   const shown = imaged[activeIdx] ?? imaged[0] ?? null;
 
   const stepCostume = (dir: 1 | -1) => {
+    setSwapDirection(dir);
     setActiveIdx((i) => {
       const count = imaged.length;
       if (count <= 1) return i;
@@ -77,6 +81,7 @@ export const CharacterCard = memo(function CharacterCard({
   return (
     <button
       type="button"
+      data-flip-id={character.id}
       draggable={!!onDragStartCard}
       onDragStart={onDragStartCard ? (e) => {
         e.dataTransfer.effectAllowed = 'move';
@@ -90,10 +95,11 @@ export const CharacterCard = memo(function CharacterCard({
       onContextMenu={(event) => onContextMenu(character.id, event, shown?.id)}
       style={{ ...(imageHeightPx ? { width: Math.round(imageHeightPx * 3 / 4) } : null), overflow: 'visible' }}
       className={cn(
-        'group relative text-left bg-bg-card border border-bg-border rounded-xl hover:border-accent/50 flex flex-col cursor-pointer',
+        'group relative text-left bg-bg-card border border-bg-border rounded-xl flex flex-col cursor-pointer',
         // 실시간 편집 프레즌스 — 회전 무지개 테두리(래퍼 없이 클래스만, 복장 유니온). 씬 카드와 동일 패턴.
         editingBeamClass(presenceEditors.length > 0, presenceWarn),
-        'transition-[transform,opacity,border-color] duration-200 ease-out motion-reduce:transition-none',
+        // 누를 수 있는 카드 hover(2px 떠오름·밝은 테두리·그림자) + 끌기 축소·흐림·드롭 테두리 전환을 함께 정한다.
+        'bf-card-hover',
         // 드래그 중 소스는 살짝 작아지며 흐려져 "고스트로 들려 나갔다"는 느낌을 준다.
         dragging ? 'opacity-30 scale-[0.97] motion-reduce:scale-100' : 'scale-100',
         dropTarget && !dragging && 'border-accent/60',
@@ -111,8 +117,12 @@ export const CharacterCard = memo(function CharacterCard({
           )}
         />
       )}
+      {/* 그림 칸의 폭은 w-full 로 직접 준다. 카드 루트가 <button> 인데, 앱이 쓰는 엔진(Electron 33 = Chromium 130)은
+          button 의 기본 align-items 가 flex-start 라 자식이 가로로 늘어나지 않는다. 예전엔 흐름 안의 <img> 가 폭을
+          만들어 줬지만, 그림이 겹친 층(absolute)이 된 뒤로는 내용 폭이 0 이라 칸이 0×0 으로 접혀 그림이 사라졌다
+          (v1.128.0 회귀 — 최신 Chrome 은 button 도 늘려 줘서 거기서는 멀쩡했다). */}
       {!compact && (
-        <div style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
+        <div style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative w-full aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
           {shown ? (
             <CharacterImageFrame
               url={shown.featuredImageUrl}
@@ -120,6 +130,7 @@ export const CharacterCard = memo(function CharacterCard({
               background={shown.imageBackground}
               fit={shown.imageFit}
               className="w-full h-full"
+              swapDirection={swapDirection}
             />
           ) : (
             <ImageIcon size={28} className="text-text-secondary/40" />

@@ -1,8 +1,8 @@
 -- Background library maps: optional vertical-axis fields for the shared plan/3D map editor.
 -- Prerequisite: 2026-09-21-background-library.sql. Apply this file right after it, in the same rollout.
--- The background library has never been released. Both files must be applied together before its
--- first release: the base file alone rejects every map that carries one of the fields below.
--- Not applied to production by the task that added it; so far only the local contract tests run it.
+-- Both files are applied together: the base file alone rejects every map that carries one of the
+-- fields below. Applied to production on 2026-10-08 as 20261008035155 (background_map_3d), right
+-- after the base file (20261008035103, background_library).
 -- Re-run this file after every run of 2026-09-21-background-library.sql, not only after the first one.
 -- The base file is re-runnable and puts back its own validator, which does not know the fields below.
 -- Stored maps stay readable and nothing is lost, but each write re-checks every stored map, so one map

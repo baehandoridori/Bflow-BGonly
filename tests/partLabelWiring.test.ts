@@ -81,7 +81,9 @@ test('tree navigation shows the alias while keeping the original part id visible
 test('aliases are stored as part metadata, never as a part id rewrite', async () => {
   const hook = await readRepoFile('src', 'hooks', 'usePartMemos.ts');
 
-  assert.match(hook, /readPartMetadataValue\('part-label', sheetName\)/);
+  assert.match(hook, /readPartMetadataMaps\(\)/);
+  const helpers = await readRepoFile('src', 'utils', 'partMemoHelpers.ts');
+  assert.match(helpers, /label: 'part-label'/);
   assert.match(hook, /writeMetadata\('part-label', sheetName, normalizedLabel\)/);
   // partId 자체를 바꾸는 경로가 생기면 과거 댓글·리테이크 주소가 깨진다.
   assert.doesNotMatch(hook, /supabaseRenamePart|updatePartId/);
@@ -90,7 +92,7 @@ test('aliases are stored as part metadata, never as a part id rewrite', async ()
 test('spotlight finds parts by alias and by the original A파트 form', async () => {
   const spotlight = await readRepoFile('src', 'components', 'spotlight', 'SpotlightSearch.tsx');
 
-  assert.match(spotlight, /readMetadata\('part-label'/);
+  assert.match(spotlight, /readPartMetadataMaps\(\)/);
   assert.match(spotlight, /const partAliasText = partLabels\[part\.sheetName\] \?\? '';/);
   assert.match(spotlight, /fuzzyScore\(q, partOriginLabel\)/);
 });

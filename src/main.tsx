@@ -53,7 +53,21 @@ import './index.css';
 import './styles/path-link.css';
 import './styles/activity-widget.css';
 import './styles/scene-effects.css';
+// 움직임 폴리싱(2026-10): 갈래마다 자기 파일 하나만 고친다 — 같은 줄을 동시에 고쳐 충돌하지 않게.
+// 전역 CSS 뒤에 두어 같은 특이도의 기존 규칙을 순서로 덮을 수 있다(컴포넌트가 지연 로드하는 CSS 는 예외).
+// 위젯 팝업 창(#widget-popup)도 이 진입점을 그대로 쓴다.
+import './styles/motion-foundation.css';
+import './styles/motion-scene-check.css';
+import './styles/motion-scene-flow.css';
+import './styles/motion-view-entry.css';
+import './styles/motion-comments-notify.css';
+import './styles/motion-chrome-popups.css';
+import './styles/motion-live-drag.css';
+import './styles/motion-popups-panels.css';
+import './styles/motion-view-transition.css';
 import { hasUsableElectronAPI, installDevElectronAPI } from './mocks/devElectronAPI';
+import { AppMotionConfig } from './components/common/AppMotionConfig';
+import { startMotionLevelSync } from './services/motionLevelSync';
 
 function shouldInstallBrowserElectronMock(): boolean {
   if (hasUsableElectronAPI(window.electronAPI)) return false;
@@ -69,6 +83,9 @@ async function bootstrap() {
     installDevElectronAPI();
   }
 
+  // 앱 설정 '움직임'(기본/가볍게/최소)을 <html data-motion> 에 맞추고 다른 창의 변경도 받는다.
+  startMotionLevelSync();
+
   // 해시로 위젯 팝업 모드 감지: #widget-popup/{widgetId}?key=val
   const hash = window.location.hash;
   const popupMatch = hash.match(/^#widget-popup\/([^?]+)(\?.*)?$/);
@@ -83,13 +100,16 @@ async function bootstrap() {
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      {popupMatch ? (
-        <WidgetPopup widgetId={decodeURIComponent(popupMatch[1])} extraParams={popupParams} />
-      ) : PreviewApp ? (
-        <PreviewApp />
-      ) : (
-        <App />
-      )}
+      {/* 움직임 폴리싱 바탕 B: 동작 줄이기(OS)·'움직임: 최소'를 framer 움직임 전체가 따르게 */}
+      <AppMotionConfig>
+        {popupMatch ? (
+          <WidgetPopup widgetId={decodeURIComponent(popupMatch[1])} extraParams={popupParams} />
+        ) : PreviewApp ? (
+          <PreviewApp />
+        ) : (
+          <App />
+        )}
+      </AppMotionConfig>
     </React.StrictMode>
   );
 }

@@ -7,6 +7,8 @@ import { calcEpisodeDetailStats } from '@/utils/calcStats';
 import { HorizontalBar } from '../charts/HorizontalBar';
 import { DonutChart } from '../charts/DonutChart';
 import { StatCard } from '../charts/StatCard';
+import { RollingNumber } from '@/components/ui/RollingNumber';
+import { useDashboardRollKey } from '@/hooks/useDashboardRollKey';
 import type { ChartType } from '@/types';
 
 const SUPPORTED_CHARTS: ChartType[] = ['donut', 'horizontal-bar', 'stat-card'];
@@ -22,6 +24,7 @@ export function EpOverallProgressWidget() {
     () => (epNum !== null ? calcEpisodeDetailStats(episodes, epNum) : null),
     [episodes, epNum],
   );
+  const rollKey = useDashboardRollKey();
 
   if (!stats || epNum === null) return null;
 
@@ -35,6 +38,9 @@ export function EpOverallProgressWidget() {
   const totalScenes = isAll
     ? stats.totalScenes
     : stats.perDept[dashboardFilter]?.totalScenes ?? 0;
+
+  // 탭·에피소드를 바꾼 직후, 데이터가 처음 도착한 순간에는 숫자를 굴리지 않는다.
+  const pctNumber = <RollingNumber value={pct} decimals={1} suffix="%" resetKey={`${rollKey}|${totalScenes > 0 ? 'ready' : 'empty'}`} />;
 
   const title = isAll
     ? `${displayName} 통합 진행률`
@@ -74,7 +80,7 @@ export function EpOverallProgressWidget() {
     if (activeChart === 'stat-card') {
       return (
         <StatCard
-          value={`${pct.toFixed(1)}%`}
+          value={pctNumber}
           label={title}
           subValue={`${totalScenes}씬`}
           pct={pct}
@@ -93,7 +99,7 @@ export function EpOverallProgressWidget() {
     return (
       <DonutChart
         segments={segments}
-        centerValue={`${pct.toFixed(1)}%`}
+        centerValue={pctNumber}
         centerLabel={`${totalScenes}씬`}
       />
     );

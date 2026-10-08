@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { prefersReducedMotion } from '@/utils/motion';
+import { claimHighlightScroll, highlightScrollKey } from '@/utils/notificationArrival';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { MessageCircle, Trash2 } from 'lucide-react';
@@ -14,6 +16,9 @@ import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { EntityText } from '@/components/common/EntityText';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { Confetti } from '@/components/ui/Confetti';
+import { RollingNumber } from '@/components/ui/RollingNumber';
+import { SceneCompletionFx } from './SceneCompletionFx';
+import { pressStartsOnCardControl } from '@/utils/sceneCardSelection';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -31,9 +36,11 @@ import { RevisionCornerFlag } from './RevisionCornerFlag';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { EditingNameLabels } from './EditingNameLabels';
+import { SceneRemoteFlash } from './SceneRemoteFlash';
 import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEditingPresenceStore';
 import { editingBeamClass } from '@/utils/editingPresence';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
+import { useMotionArmed } from '@/hooks/useMotionArmed';
 import {
   persistLengthChangeAtomic,
   saveLengthChangeField,
@@ -81,6 +88,8 @@ interface UnifiedSceneCardProps {
   onAssigneeActPhaseStateClick?: (sheetName: string, sceneId: string, assigneeName: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActFeedbackRequest?: (sheetName: string, sceneId: string, assigneeName: string, sceneUuid?: string | null, sceneIndex?: number) => void;
   onAssigneeActRoundBump?: (sheetName: string, sceneId: string, assigneeName: string, kind: 'work' | 'feedback', delta: 1 | -1, sceneUuid?: string | null, sceneIndex?: number) => void;
+  /** 체크로 필터에서 빠질 카드가 잠깐 머무는 동안 — 'hold' 옅게(곧 빠짐), 'leaving' 사라지는 중 (움직임 폴리싱 15번). */
+  lingering?: 'hold' | 'leaving' | null;
 }
 
 export function UnifiedSceneCard({
@@ -110,6 +119,7 @@ export function UnifiedSceneCard({
   onAssigneeActPhaseStateClick,
   onAssigneeActFeedbackRequest,
   onAssigneeActRoundBump,
+  lingering = null,
 }: UnifiedSceneCardProps) {
   const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
@@ -132,6 +142,8 @@ export function UnifiedSceneCard({
   });
 
   const cardRootRef = useRef<HTMLDivElement>(null);
+  // 선택 체크는 선택될 때만 상자가 생긴다 — '톡'은 한 번 그려진 카드에서만(처음부터 선택된 채 그려지면 바로).
+  useMotionArmed(cardRootRef);
   const prevHighlightedRef = useRef(false);
 
   // 우클릭 컨텍스트 메뉴 상태
@@ -181,11 +193,12 @@ export function UnifiedSceneCard({
   })();
 
   useEffect(() => {
-    if (isHighlighted && !prevHighlightedRef.current) {
-      cardRootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // 같은 강조는 한 번만 데려다준다 — 카드가 다시 마운트돼도 끌어당기지 않는다(움직임 폴리싱 18번).
+    if (isHighlighted && !prevHighlightedRef.current && claimHighlightScroll(highlightScrollKey([bgSheetName, actSheetName], primaryScene?.sceneId ?? ''))) {
+      cardRootRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
     }
     prevHighlightedRef.current = isHighlighted;
-  }, [isHighlighted]);
+  }, [isHighlighted, primaryScene?.sceneId, bgSheetName, actSheetName]);
 
   if (!primaryScene) return null;
 
@@ -198,6 +211,20 @@ export function UnifiedSceneCard({
   const hasImages = !!(bgScene?.storyboardUrl || bgScene?.guideUrl);
   const layoutId = bgScene?.layoutId || actScene?.layoutId;
 
+  // 단계 버튼은 누르는 순간 바뀌어 카드가 밀릴 수 있다 — 누름이 카드 안 버튼에서 시작했으면 이어지는 click 은 선택으로 보지 않는다
+  // (검증 지적 acc-scene-check-4).
+  const pressStartedOnControlRef = useRef(false);
+  const handlePointerDownCapture = (e: React.PointerEvent) => {
+    pressStartedOnControlRef.current = pressStartsOnCardControl(e.target);
+  };
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (pressStartedOnControlRef.current) {
+      pressStartedOnControlRef.current = false;
+      e.preventDefault();
+      return;
+    }
+    handleClick(e);
+  };
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
@@ -296,6 +323,7 @@ export function UnifiedSceneCard({
     <motion.div
       data-scene-id={mergedKey}
       data-continuity-card
+      data-lingering={lingering ?? undefined}
       className={cn(
         'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer',
         'shadow-[0_2px_6px_rgba(0,0,0,0.08),0_8px_20px_rgba(0,0,0,0.12)]',
@@ -314,7 +342,8 @@ export function UnifiedSceneCard({
       style={{
         overflow: 'visible',
       }}
-      onClick={handleClick}
+      onPointerDownCapture={handlePointerDownCapture}
+      onClick={handleCardClick}
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}
       ref={cardRootRef}
@@ -324,6 +353,9 @@ export function UnifiedSceneCard({
         transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
       } : {})}
     >
+        {/* 17번: 완료 초록빛 번짐·카드 '톡'(동작 줄이기면 완료 칸 빛) — 카드 루트의 첫 자식이어야 한다. */}
+        <SceneCompletionFx celebrating={celebrating} tinted={completionTintEnabled && isMergedComplete} />
+
         {isHighlighted && <div className="scene-highlight-bg" />}
 
         {/* 실시간 편집 프레즌스 — 무지개 이름표(좌상단, 개별 BG/ACT 카드와 동일 위치). BG/ACT 유니온. */}
@@ -331,6 +363,9 @@ export function UnifiedSceneCard({
           editors={unionEditors}
           className="absolute -top-3 left-3 z-20"
         />
+
+        {/* 팀원이 바꾼 순간 — 테두리 빛 + 위 가운데 이름표(BG·ACT 중 최근 것) */}
+        <SceneRemoteFlash sceneUuids={[bgScene?.id, actScene?.id]} variant="card" />
 
         <SceneWorkLinkBadges
           bgSceneUuid={bgScene?.id}
@@ -344,14 +379,17 @@ export function UnifiedSceneCard({
           resolved={openRevCount <= 0 && resolvedRevCount > 0}
         />
 
-        {isSelected && (
-          <div className={cn(
-            'absolute right-2.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30',
+        {/* 선택 체크마크 — 늘 그려 두고 data-on 으로 '톡' 튀어나오며 체크가 그려진다(움직임 폴리싱 6번). */}
+        <div
+          aria-hidden="true"
+          data-on={isSelected}
+          className={cn(
+            'scene-select-check absolute right-2.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30',
             openRevCount > 0 || resolvedRevCount > 0 ? 'top-9' : 'top-2.5',
-          )}>
-            <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </div>
-        )}
+          )}
+        >
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path className="scene-select-check-mark" d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
 
         {/* ── 헤더: 씬 ID + 전체 진행률 배지 ── */}
         <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
@@ -401,7 +439,7 @@ export function UnifiedSceneCard({
               </span>
             )}
             <span className="bg-bg-primary/80 border border-bg-border/45 text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
-              {combinedPct}%
+              <RollingNumber value={combinedPct} suffix="%" countUp={false} />
             </span>
           </div>
         </div>

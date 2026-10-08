@@ -75,10 +75,17 @@ export function useCommentPanelWidth(commentCount: number): UseCommentPanelWidth
 
   const viewportW = useViewportWidth();
 
+  // 움직임 폴리싱(14번 '창 틀은 제자리'): 창이 열려 있는 동안 자동 폭은 늘어나기만 한다.
+  // 상세 창은 가운데 정렬이라 씬을 넘길 때 댓글 수(6개·16개 기준)에 따라 폭이 줄면 창 틀 전체가 좌우로 20px 덜컹였다.
+  // 지금까지 본 가장 많은 댓글 수로 계산하고, 창을 다시 열 때(이 훅이 새로 붙을 때) 새로 센다. 화면 폭 변화는 그대로 따른다.
+  const [peakCount, setPeakCount] = useState(commentCount);
+  if (commentCount > peakCount) setPeakCount(commentCount);
+  const autoCount = Math.max(peakCount, commentCount);
+
   const width = useMemo(() => {
     if (savedWidth != null) return savedWidth;
-    return computeAutoCommentPanelWidth(viewportW, commentCount);
-  }, [savedWidth, viewportW, commentCount]);
+    return computeAutoCommentPanelWidth(viewportW, autoCount);
+  }, [savedWidth, viewportW, autoCount]);
 
   const setWidth = useCallback(async (px: number | null) => {
     if (px == null) {

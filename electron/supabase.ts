@@ -8,6 +8,15 @@ import {
 import { deleteImage as storageDeleteImage } from './storage';
 import { createRetryManager } from './retry-utils';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds, type CharacterCommentSummaries } from '../src/shared/characterCommentSummary';
+import {
+  chunkForInQuery,
+  collectAllPages,
+  collectAllPagesByKey,
+  POSTGREST_IN_CHUNK_SIZE,
+  POSTGREST_PAGE_SIZE,
+} from '../src/shared/postgrestPaging';
+import { defaultEpisodeTitle } from '../src/shared/episodeTitle';
+import { withHttpStatusMark } from '../src/shared/saveFailureMark';
 import type {
   PersonalTodoLabelColorKey,
   PersonalTodoLabelRecord,
@@ -247,6 +256,14 @@ function throwIfError(error: { message: string } | null) {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * throwIfError + HTTP 상태 표시(' [HTTP 503]'). IPC 래퍼가 오류를 문구로만 넘기므로, 단계 체크 저장의
+ * 자동 재전송(src/utils/saveRetry.ts)이 '다시 보내 볼 만한 실패(5xx)'를 가릴 수 있게 상태를 문구에 싣는다.
+ */
+function throwIfErrorWithStatus(error: { message: string } | null, status: number | null | undefined) {
+  if (error) throw new Error(withHttpStatusMark(error.message, status));
+}
+
 type SupabaseErrorLike = {
   code?: string | null;
   message?: string | null;
@@ -339,20 +356,17 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     // 이미 존재하는 번호를 "다음 번호"로 제안해 UNIQUE(part_id, scene_number) 위반(중복 키)으로
     // 추가가 실패한다. → range() 로 페이지를 끝까지 받아 전체 씬을 적재한다.
     // sort_order 동률이 있어도 페이지 경계에서 누락/중복이 없도록 고유키(id)로 2차 정렬한다.
-    const SCENE_PAGE_SIZE = 1000;
-    for (let from = 0; ; from += SCENE_PAGE_SIZE) {
+    scenes = await collectAllPages<typeof scenes[number]>(async (from, to) => {
       const { data: sceneRows, error: sceneErr } = await supabase
         .from('scenes')
         .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change, created_at, updated_at, scene_state, work_round, feedback_round')
         .in('part_id', partIds)
         .order('sort_order')
         .order('id')
-        .range(from, from + SCENE_PAGE_SIZE - 1);
+        .range(from, to);
       throwIfError(sceneErr);
-      if (!sceneRows || sceneRows.length === 0) break;
-      scenes.push(...sceneRows);
-      if (sceneRows.length < SCENE_PAGE_SIZE) break;
-    }
+      return (sceneRows ?? []) as typeof scenes;
+    }, POSTGREST_PAGE_SIZE);
   }
 
   const sceneCompletionById = new Map<string, { completedBy: string; completedAt: string }>();
@@ -363,10 +377,8 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     // 스튜디오 규모 확장(에피소드당 150~300씬 × 수십 에피소드)에 대비해 배치 분할.
     // 100개 배치 = URL 약 3.7KB, 10,000개 씬도 100회 RTT 로 커버 가능.
     // 향후 데이터가 수만 건 규모로 커지면 PostgreSQL RPC 함수로 POST 1회 호출로 전환 고려.
-    const BATCH = 100;
     const completionRows: Array<{ key: string; value: string | null }> = [];
-    for (let i = 0; i < sceneIds.length; i += BATCH) {
-      const chunk = sceneIds.slice(i, i + BATCH);
+    for (const chunk of chunkForInQuery(sceneIds, POSTGREST_IN_CHUNK_SIZE)) {
       const { data, error } = await supabase
         .from('metadata')
         .select('key, value')
@@ -401,7 +413,9 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     const epParts = partsByEp.get(ep.id) || [];
     return {
       episodeNumber: ep.episode_number,
-      title: ep.title || '',
+      // 제목은 metadata(type='episode-title')에 저장되므로 episodes.title 은 보통 비어 있다.
+      // 커스텀 제목이 없을 때 이름 없는 줄이 생기지 않도록 EP.xx 폴백을 준다.
+      title: ep.title || defaultEpisodeTitle(ep.episode_number),
       memo: ep.memo || '',
       reelFilePath: (ep as { reel_file_path?: string | null }).reel_file_path ?? null,
       parts: epParts.map((p) => {
@@ -526,7 +540,7 @@ export async function readArchivedEpisodes(): Promise<{
   throwIfError(error);
   return (data || []).map((e) => ({
     episodeNumber: e.episode_number,
-    title: e.title || '',
+    title: e.title || defaultEpisodeTitle(e.episode_number),
     archivedBy: e.archived_by || '',
     archivedAt: e.archived_at || '',
     archiveMemo: e.archive_memo || '',
@@ -701,8 +715,8 @@ export async function updateSceneStage(
   // 0행이 돼 affected=false → 재체크·중복저장에 대한 오적립을 막는다(NULL 안전: is.false 또는 is.null).
   const base = supabase.from('scenes').update(update).eq('id', sceneUuid);
   const mutation = value === true ? base.or(`${stage}.is.false,${stage}.is.null`) : base;
-  const { data: rows, error } = await mutation.select('id, parts(department)');
-  throwIfError(error);
+  const { data: rows, error, status } = await mutation.select('id, parts(department)');
+  throwIfErrorWithStatus(error, status);
   const updatedRow = Array.isArray(rows) ? rows[0] : null;
   const affected = !!updatedRow;
   const partsField = (updatedRow as { parts?: unknown } | null)?.parts;
@@ -755,8 +769,8 @@ export async function updateScenePhase(
   };
   if (updatedBy) update.updated_by = updatedBy;
   // 실제 바뀐 행을 결과로 받아 existed 를 판정(pre-read 이후 삭제된 씬은 0행 update 로 잡힌다).
-  const { data: rows, error } = await supabase.from('scenes').update(update).eq('id', sceneUuid).select('id');
-  throwIfError(error);
+  const { data: rows, error, status } = await supabase.from('scenes').update(update).eq('id', sceneUuid).select('id');
+  throwIfErrorWithStatus(error, status);
   const existed = Array.isArray(rows) && rows.length > 0;
   broadcastScenePhaseUpdate(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
   // legacy stage 도 broadcast — 다른 view 가 즉시 반영하도록 4개 컬럼 각각
@@ -1098,6 +1112,24 @@ export async function bulkUpdateSceneStages(
   return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
 }
 
+/** 씬 UUID 목록으로 씬 행을 전량 조회 — URL 길이/응답 행수 한계를 넘지 않게 100개씩 끊어 읽는다.
+ *  한 묶음이라도 실패하면 결과가 반쪽이 된 줄 모른 채 진행하지 않도록 즉시 throw 한다. */
+async function readScenesByUuidChunks(
+  sceneUuids: string[],
+  select: string,
+  failureLabel: string,
+): Promise<Array<Record<string, unknown>>> {
+  const unique = Array.from(new Set(sceneUuids.filter(Boolean)));
+  if (unique.length === 0) return [];
+  const rows: Array<Record<string, unknown>> = [];
+  for (const chunk of chunkForInQuery(unique, POSTGREST_IN_CHUNK_SIZE)) {
+    const { data, error } = await supabase.from('scenes').select(select).in('id', chunk);
+    if (error) throw new Error(`${failureLabel}: ${error.message}`);
+    rows.push(...((data ?? []) as unknown as Array<Record<string, unknown>>));
+  }
+  return rows;
+}
+
 /** 대량 씬 삭제 (부분 실패 허용) — RPC 경유.
  *  bulk_delete_scenes 는 부분 성공을 허용하므로, Storage 이미지는
  *  "RPC 에서 성공적으로 DB 삭제된 씬"에 대해서만 정리해야 한다.
@@ -1114,11 +1146,17 @@ export async function bulkDeleteScenes(
     episodeNumber: number | null; department: string | null;
   }> = [];
   {
-    const { data: scenes } = await supabase
-      .from('scenes')
-      .select('id, scene_number, storyboard_url, guide_url, parts(part_id, department, episodes(episode_number))')
-      .in('id', sceneUuids);
-    for (const s of (scenes ?? []) as Array<{
+    // 씬 UUID 를 한 번에 .in() 으로 넣으면 두 곳에서 조용히 깨진다:
+    //  (1) UUID 36자 × N 이 쿼리 URL 길이 한계를 넘겨 400 — 예전에는 error 를 받지도 않고 버렸다.
+    //  (2) 250개를 넘겨도 응답은 1000행에서 잘린다(scenes 는 현재 2,512행).
+    // 어느 쪽이든 사전조회가 비어버리는데, 삭제 자체는 그대로 진행되므로
+    // 그 씬들의 이미지가 스토리지에 주인 없이 남는다. → 100개씩 끊고 실패는 드러낸다.
+    const scenes = await readScenesByUuidChunks(
+      sceneUuids,
+      'id, scene_number, storyboard_url, guide_url, parts(part_id, department, episodes(episode_number))',
+      '삭제할 씬 정보를 불러오지 못했습니다',
+    );
+    for (const s of scenes as Array<{
       id: string; scene_number: string;
       storyboard_url: string | null; guide_url: string | null;
       parts?: { part_id?: string; department?: string; episodes?: { episode_number?: number } };
@@ -1177,11 +1215,14 @@ export async function bulkUpdateSceneFields(
   // 활동 기록 메타 사전 조회 (RPC 도 자동 조회 fallback 있지만 클라이언트 측 전달로 안전성 강화 — Codex P1)
   const metaByUuid = new Map<string, { sceneLabel: string; episodeNumber: number | null; department: string | null }>();
   if (userName) {
-    const { data: metaRows } = await supabase
-      .from('scenes')
-      .select('id, scene_number, parts(part_id, department, episodes(episode_number))')
-      .in('id', updates.map((u) => u.sceneUuid));
-    for (const r of (metaRows ?? []) as Array<{
+    // 삭제 쪽과 같은 이유로 100개씩 끊어 읽는다. 여기서 조용히 잘리면 활동 기록에
+    // "EP02 A #013" 대신 "씬 #013" 만 남아, 나중에 어느 편 작업이었는지 추적이 끊긴다.
+    const metaRows = await readScenesByUuidChunks(
+      updates.map((u) => u.sceneUuid),
+      'id, scene_number, parts(part_id, department, episodes(episode_number))',
+      '씬 정보를 불러오지 못했습니다',
+    );
+    for (const r of metaRows as Array<{
       id: string; scene_number: string;
       parts?: { part_id?: string; department?: string; episodes?: { episode_number?: number } };
     }>) {
@@ -1520,14 +1561,40 @@ export async function fetchMissedMentions(
   return matched;
 }
 
-/** 파트별 댓글 읽기 */
+/** 한 스레드(파트 또는 캐릭터)의 댓글을 전량 로드. 페이지는 고유키(id)로 끊고, 오래된 순으로 돌려준다. */
+async function readAllCommentsBy(
+  column: 'part_id' | 'character_id',
+  value: string,
+): Promise<Array<Record<string, any>>> {
+  const rows = await collectAllPagesByKey<Record<string, any>>(
+    async (afterId, limit) => {
+      let query = supabase
+        .from('comments')
+        .select('*')
+        .eq(column, value)
+        .order('id', { ascending: true })
+        .limit(limit);
+      if (afterId !== null) query = query.gt('id', afterId);
+      const { data, error } = await query;
+      throwIfError(error);
+      return (data || []) as Array<Record<string, any>>;
+    },
+    (row) => String(row.id ?? ''),
+    POSTGREST_PAGE_SIZE,
+  );
+  return rows.sort((a, b) =>
+    String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
+    || String(a.id ?? '').localeCompare(String(b.id ?? '')));
+}
+
+/** 파트별 댓글 읽기.
+ *
+ *  comments 는 이미 1,569행이고 한 파트에 216개까지 쌓여 있다. 한 파트가 1000개를 넘기면
+ *  단일 select 는 created_at 오름차순 기준 앞쪽 1000개만 돌려준다 — 즉 **최신 댓글부터** 사라진다.
+ *  방금 쓴 댓글이 새로고침 후 안 보이는 모습이라 저장 실패로 오해하기 딱 좋다.
+ *  → 고유키(id)로 끊어 전량을 받고, 표시 순서는 받은 뒤 시간순으로 맞춘다. */
 export async function readCommentsForPart(partUuid: string): Promise<SupabaseComment[]> {
-  const { data, error } = await supabase
-    .from('comments')
-    .select('*')
-    .eq('part_id', partUuid)
-    .order('created_at');
-  throwIfError(error);
+  const data = await readAllCommentsBy('part_id', partUuid);
   return (data || []).map((c) => ({
     id: c.id,
     partId: c.part_id,
@@ -1551,12 +1618,7 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
  * readCommentsForPart 미러 — 같은 comments 테이블, character_id 로 필터. part_id/scene_id 는 NULL.
  */
 export async function readCommentsForCharacter(characterId: string): Promise<SupabaseComment[]> {
-  const { data, error } = await supabase
-    .from('comments')
-    .select('*')
-    .eq('character_id', characterId)
-    .order('created_at');
-  throwIfError(error);
+  const data = await readAllCommentsBy('character_id', characterId);
   return (data || []).map((c) => ({
     id: c.id,
     partId: c.part_id,
@@ -2641,27 +2703,38 @@ export async function readSceneWorkLinks(sceneUuids?: string[]): Promise<Supabas
   return rows;
 }
 
+/** 한 묶음의 작업 링크를 전량 로드.
+ *
+ *  예전에는 sort_order 로 정렬한 채 offset 페이지네이션을 했는데, 이 테이블은 379행 **전부**가
+ *  sort_order=0 이다. 2차 정렬로 쓰던 updated_at 도 링크를 수정할 때마다 값이 바뀐다.
+ *  즉 정렬 기준이 사실상 없는 상태라, 행이 1000개를 넘는 순간 페이지 경계에서 어떤 링크는
+ *  두 번 오고 어떤 링크는 아예 오지 않는다(씬에 걸어둔 작업 폴더가 사라진 것처럼 보인다).
+ *  → 페이지는 고유키(id)로 끊고, 표시 순서는 전량을 받은 뒤 아래에서 맞춘다. */
 async function readSceneWorkLinkChunk(sceneUuidChunk: string[] | null): Promise<SupabaseSceneWorkLink[]> {
-  const rows: SupabaseSceneWorkLink[] = [];
-  for (let offset = 0; ; offset += SCENE_WORK_LINK_QUERY_PAGE_SIZE) {
-    const page = await readSceneWorkLinkPage(sceneUuidChunk, offset);
-    rows.push(...page);
-    if (page.length < SCENE_WORK_LINK_QUERY_PAGE_SIZE) break;
-  }
-  return rows;
+  const rows = await collectAllPagesByKey<SupabaseSceneWorkLink>(
+    (afterId, limit) => readSceneWorkLinkPage(sceneUuidChunk, afterId, limit),
+    (row) => row.id,
+    SCENE_WORK_LINK_QUERY_PAGE_SIZE,
+  );
+  // 기존 표시 순서(sort_order 오름차순 → 최근 수정 먼저)를 유지하되, 완전 동률이면 id 로 고정한다.
+  return rows.sort((a, b) =>
+    a.sortOrder - b.sortOrder
+    || b.updatedAt.localeCompare(a.updatedAt)
+    || a.id.localeCompare(b.id));
 }
 
 async function readSceneWorkLinkPage(
   sceneUuidChunk: string[] | null,
-  offset: number,
+  afterId: string | null,
+  limit: number,
 ): Promise<SupabaseSceneWorkLink[]> {
   let query = supabase
     .from('scene_work_links')
     .select(SCENE_WORK_LINK_SELECT)
-    .order('sort_order', { ascending: true })
-    .order('updated_at', { ascending: false })
-    .range(offset, offset + SCENE_WORK_LINK_QUERY_PAGE_SIZE - 1);
+    .order('id', { ascending: true })
+    .limit(limit);
 
+  if (afterId !== null) query = query.gt('id', afterId);
   if (sceneUuidChunk && sceneUuidChunk.length > 0) {
     query = query.in('scene_uuid', sceneUuidChunk);
   }
@@ -2757,13 +2830,27 @@ export async function deleteSceneWorkLink(
 // METADATA
 // ═══════════════════════════════════════════════
 
-/** 모든 메타데이터 읽기 */
+/** 모든 메타데이터 읽기.
+ *
+ *  PostgREST 는 한 응답을 기본 1000행으로 제한한다. metadata 는 씬 완료 기록(scene-completion)이
+ *  쌓이면서 이미 1000행을 훌쩍 넘겼고, 단일 select 로 읽으면 뒤쪽 행이 통째로 누락된다.
+ *  누락되는 행에는 에피소드 제목(episode-title)과 담당자별 진행률(scene-assignee-progress)이 섞여 있어서
+ *  "에피소드 이름을 바꿔도 되돌아온다", "두 명이 같이 맡은 씬의 체크가 되돌아온다"로 나타난다.
+ *  게다가 upsert 로 행이 갱신될 때마다 물리적 위치가 바뀌어 잘려나가는 행이 계속 달라지므로
+ *  증상이 "간헐적"으로 보인다. → range() 로 끝까지 받아 전량을 적재한다.
+ *  페이지 경계에서 누락/중복이 없도록 고유키(id)로 정렬한다. */
 export async function readAllMetadata(): Promise<{ type: string; key: string; value: string; updatedAt: string }[]> {
-  const { data, error } = await supabase
-    .from('metadata')
-    .select('type, key, value, updated_at');
-  throwIfError(error);
-  return (data || []).map((m) => ({
+  type MetadataRow = { type: string; key: string; value: string | null; updated_at: string | null };
+  const rows = await collectAllPages<MetadataRow>(async (from, to) => {
+    const { data, error } = await supabase
+      .from('metadata')
+      .select('type, key, value, updated_at')
+      .order('id', { ascending: true })
+      .range(from, to);
+    throwIfError(error);
+    return (data || []) as MetadataRow[];
+  }, POSTGREST_PAGE_SIZE);
+  return rows.map((m) => ({
     type: m.type,
     key: m.key,
     value: m.value || '',
@@ -2776,26 +2863,26 @@ export async function readMetadata(
   type: string,
   key: string,
 ): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
-  const { data, error } = await supabase
+  const { data, error, status } = await supabase
     .from('metadata')
     .select('type, key, value, updated_at')
     .eq('type', type)
     .eq('key', key)
     .maybeSingle();
-  throwIfError(error);
+  throwIfErrorWithStatus(error, status);
   if (!data) return null;
   return { type: data.type, key: data.key, value: data.value || '', updatedAt: data.updated_at || '' };
 }
 
 /** 메타데이터 쓰기 (upsert) */
 export async function writeMetadata(type: string, key: string, value: string): Promise<void> {
-  const { error } = await supabase
+  const { error, status } = await supabase
     .from('metadata')
     .upsert(
       { type, key, value, updated_at: new Date().toISOString() },
       { onConflict: 'type,key' },
     );
-  throwIfError(error);
+  throwIfErrorWithStatus(error, status);
   broadcastDataChange('metadata', 'UPSERT');
 }
 
@@ -4213,17 +4300,31 @@ export interface CompositingStateRow {
   updated_by: string | null;
 }
 
-/** 한 에피소드의 모든 컴포지팅 상태 row */
+/** 한 에피소드의 모든 컴포지팅 상태 row.
+ *
+ *  현재 가장 큰 편이 220행이라 아직 여유가 있지만, 편이 커지면 1000행을 넘을 수 있다.
+ *  넘는 순간 scene_id 뒤쪽 씬들이 통째로 빠져서 대시보드에 "아직 시작 안 함"으로 보이고,
+ *  진행률도 그만큼 낮게 나온다. → 고유키(id)로 끊어 전량을 받고 scene_id 순으로 정렬한다. */
 export async function loadCompositingStates(
   episodeNumber: number,
 ): Promise<CompositingStateRow[]> {
-  const { data, error } = await supabase
-    .from('compositing_states')
-    .select('*')
-    .eq('episode_number', episodeNumber)
-    .order('scene_id', { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as CompositingStateRow[];
+  const rows = await collectAllPagesByKey<CompositingStateRow>(
+    async (afterId, limit) => {
+      let query = supabase
+        .from('compositing_states')
+        .select('*')
+        .eq('episode_number', episodeNumber)
+        .order('id', { ascending: true })
+        .limit(limit);
+      if (afterId !== null) query = query.gt('id', afterId);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []) as CompositingStateRow[];
+    },
+    (row) => row.id,
+    POSTGREST_PAGE_SIZE,
+  );
+  return rows.sort((a, b) => a.scene_id.localeCompare(b.scene_id) || a.id.localeCompare(b.id));
 }
 
 /** UPSERT — (episode_number, scene_id) 유니크. INSERT or UPDATE 한 번에. */
@@ -4376,29 +4477,62 @@ export interface EpisodeCharacterMapRow {
   created_at: string;
 }
 
-/** PostgREST 1000 행 제한 회피 — .range() 페이지네이션 반복 로드 (project_postgrest_1000_row_cap). */
+/** PostgREST 1000 행 제한 회피 — 고유키(id) 커서 페이지네이션 전량 로드 (project_postgrest_1000_row_cap).
+ *
+ *  예전에는 `order.column` 하나로 정렬한 채 offset 페이지네이션을 했는데, 이 컬럼들은 고유하지 않다.
+ *  실제 데이터에서 character_costumes 는 189행 중 99행이 sort_order=0, character_costume_images 는
+ *  196행 중 183행이 sort_order=0 이라 사실상 전면 동률이다. 동률 구간이 페이지 경계에 걸치면
+ *  DB 가 그 안의 순서를 보장하지 않으므로 같은 행이 두 번 오거나 어떤 행은 한 번도 오지 않는다.
+ *  (화면에서는 복장/이미지가 중복으로 보이거나 아예 사라진 것처럼 보인다.)
+ *
+ *  그래서 페이지 경계는 항상 고유키(id)로 끊고, 보여줄 순서는 전량을 받은 뒤 여기서 맞춘다.
+ *  같은 값이면 id 로 다시 정렬해 매 로드마다 같은 순서가 나오게 한다. */
 async function loadAllRows<T>(
   table: string,
   select: string,
   order: { column: string; ascending: boolean },
 ): Promise<T[]> {
-  const PAGE = 1000;
-  const all: T[] = [];
-  let from = 0;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(select)
-      .order(order.column, { ascending: order.ascending })
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as T[];
-    all.push(...rows);
-    if (rows.length < PAGE) break;
-    from += PAGE;
-  }
-  return all;
+  // id 는 커서로 반드시 필요하다. select 에 빠져 있으면 붙여준다('*' 는 이미 포함).
+  const selectWithId = select === '*' || /(^|,)\s*id\s*(,|$)/.test(select) ? select : `id, ${select}`;
+  const rows = await collectAllPagesByKey<T>(
+    async (afterKey, limit) => {
+      let query = supabase
+        .from(table)
+        .select(selectWithId)
+        .order('id', { ascending: true })
+        .limit(limit);
+      if (afterKey !== null) query = query.gt('id', afterKey);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []) as unknown as T[];
+    },
+    (row) => String(rowField(row, 'id') ?? ''),
+    POSTGREST_PAGE_SIZE,
+  );
+  return sortRowsForDisplay(rows, order);
+}
+
+function rowField<T>(row: T, column: string): unknown {
+  return (row as Record<string, unknown>)[column];
+}
+
+/** 전량 로드 결과를 표시 순서로 정렬. 같은 값이면 고유키(id)로 다시 정렬해 순서를 고정한다. */
+function sortRowsForDisplay<T>(rows: T[], order: { column: string; ascending: boolean }): T[] {
+  const direction = order.ascending ? 1 : -1;
+  return rows.sort((a, b) => {
+    const compared = compareOrderValues(rowField(a, order.column), rowField(b, order.column));
+    if (compared !== 0) return compared * direction;
+    return String(rowField(a, 'id') ?? '').localeCompare(String(rowField(b, 'id') ?? ''));
+  });
+}
+
+/** 값이 없는 행은 방향과 무관하게 뒤로 보낸다. 숫자는 숫자로, 나머지는 문자열로 비교. */
+function compareOrderValues(a: unknown, b: unknown): number {
+  const aMissing = a === null || a === undefined;
+  const bMissing = b === null || b === undefined;
+  if (aMissing || bMissing) return aMissing && bMissing ? 0 : aMissing ? 1 : -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b));
 }
 
 /** 모든 캐릭터 (active + archived). 페이지네이션 반복. */

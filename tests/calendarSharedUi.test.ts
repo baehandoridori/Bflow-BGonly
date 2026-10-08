@@ -117,6 +117,7 @@ type ScheduleGridProps = {
   showWeekends?: boolean;
   highlightedEventIdentities?: ReadonlySet<string>;
   reduceMotion?: boolean;
+  filterRevealAt?: number;
   onEventClick(event: ScheduleCalendarEvent): void;
   onDragStart(event: ScheduleCalendarEvent, mode: 'move' | 'resize-start' | 'resize-end', anchorDate: string): void;
   onEventContextMenu(event: ScheduleCalendarEvent, mouse: { preventDefault(): void; stopPropagation(): void; clientX: number; clientY: number }): void;
@@ -293,6 +294,7 @@ let calendarState: {
   toggleCalendarVisible(id: string): void;
   toggleTag(id: string): void;
   resetTagsAllOn(): void;
+  toggleAllTags(includeVacation: boolean): void;
   toggleMuted(id: string): void;
   upsertCalendarOptimistically(actorId: string, calendar: BflowCalendar): void;
   removeCalendarOptimistically(actorId: string, calendarId: string): void;
@@ -854,6 +856,15 @@ function resetHarness(): void {
     },
     resetTagsAllOn() {
       calendarState.enabledTagIds = {};
+    },
+    toggleAllTags(includeVacation) {
+      const ids = calendarState.tags.map(tag => tag.id).filter(id => !id.startsWith('optimistic-tag:'));
+      if (includeVacation) ids.push('builtin-vacation');
+      const allEnabled = ids.every(id => calendarState.enabledTagIds[id] !== false);
+      for (const id of ids) {
+        if (allEnabled) calendarState.enabledTagIds[id] = false;
+        else delete calendarState.enabledTagIds[id];
+      }
     },
     toggleMuted(id) {
       calendarState.mutedCalendarIds = calendarState.mutedCalendarIds.includes(id)
@@ -1537,7 +1548,7 @@ async function loadScheduleView(): Promise<ScheduleViewComponent> {
           }),
         };
       }
-      if (id === '@/hooks/useCalendarDragCreate') return { useCalendarDragCreate: () => ({ handleCellMouseDown() {}, isDateInRange: () => false }) };
+      if (id === '@/hooks/useCalendarDragCreate') return { useCalendarDragCreate: () => ({ dragState: { isDragging: false, startDate: null, endDate: null, anchorElement: null }, handleCellMouseDown() {}, isDateInRange: () => false }) };
       if (id === '@/stores/useCalendarStore') {
         const useCalendarStore = Object.assign(
           (selector: (state: typeof calendarState) => unknown) => selector(calendarState),
@@ -1705,7 +1716,9 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
           },
           useMemo: (factory: () => unknown) => factory(),
           useRef: (initial: unknown) => ({ current: initial }),
+          useCallback: (fn: unknown) => fn,
           useEffect: (effect: () => void | (() => void)) => { pendingCalendarGridEffects.push(effect); },
+          useLayoutEffect: (effect: () => void | (() => void)) => { pendingCalendarGridEffects.push(effect); },
         };
       }
       if (id === '@/stores/useCalendarStore') return { useCalendarStore: (selector: (state: typeof calendarState) => unknown) => selector(calendarState) };
@@ -1718,6 +1731,7 @@ async function loadCalendarGrid(): Promise<CalendarGridComponent> {
       if (id === 'lucide-react') return {
         CheckSquare: () => jsxRuntime.jsx('span', { 'data-linked-todo-icon': true }),
         Palmtree: emptyComponent,
+        Plus: emptyComponent,
         X: emptyComponent,
       };
       if (id === '@/utils/cn') return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
@@ -2016,7 +2030,7 @@ async function loadCalendarSettingsModal(): Promise<CalendarSettingsModalCompone
     const evaluate = new Function('require', 'module', 'exports', result.outputFiles[0].text);
     evaluate((id: string) => {
       // The panel has its own async/session harness; avoid sharing parent hook slots.
-      if (id === './CalendarSubscriptionPanel') return { CalendarSubscriptionPanel: () => null };
+      if (id === './CalendarSubscriptionPanel') return { CalendarSubscriptionPanel: (props: { calendarId: string; isAdminOverview?: boolean }) => jsxRuntime.jsx('div', { 'aria-label': '구독 패널', 'data-calendar-id': props.calendarId, 'data-admin-overview': props.isAdminOverview, children: '구독 안내' }) };
       if (id === './inputs') return calendarInputsTestModule;
       if (id === './EventTagManagerButton') return { EventTagManagerButton: () => null };
       if (id === './useEventTagTooltip') return { useEventTagTooltip: () => ({ bind: () => ({}), tooltip: null }) };
@@ -2186,6 +2200,8 @@ async function loadWeekScrollView(): Promise<WeekScrollViewModule> {
           useMemo: (factory: () => unknown) => factory(),
           useRef: (initial: unknown) => ({ current: initial }),
           useCallback: (fn: unknown) => fn,
+          // 주 넘김 미끄러짐(useStackFlip)은 그린 직후 DOM 을 잰다. 하네스에는 DOM 이 없으니 건너뛴다.
+          useLayoutEffect: () => {},
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -2235,6 +2251,8 @@ async function loadDayScrollView(): Promise<DayScrollViewComponent> {
           useMemo: (factory: () => unknown) => factory(),
           useRef: (initial: unknown) => ({ current: initial }),
           useCallback: (fn: unknown) => fn,
+          // 주 넘김 미끄러짐(useStackFlip)은 그린 직후 DOM 을 잰다. 하네스에는 DOM 이 없으니 건너뛴다.
+          useLayoutEffect: () => {},
         };
       }
       if (id === 'react/jsx-runtime') return jsxRuntime;
@@ -2833,11 +2851,17 @@ test('CalendarRail renders four grouped sections and drives visibility, menu per
   buttonByLabel(tree, '리드 회의 메뉴 열기').props.onClick?.({ stopPropagation() {} });
   tree = await renderRail(false);
   assert.ok(findButtons(tree).some((button) => textContent(button).includes('알림 끄기')), 'non-manageable shared calendar keeps its mute action');
-  assert.equal(findButtons(tree).some((button) => textContent(button).includes('설정 열기')), false, 'non-manageable shared calendar has no settings action');
+  assert.ok(findButtons(tree).some((button) => textContent(button).includes('설정 열기')), 'shared editors can open subscription settings without management permission');
   buttonByText(tree, '알림 끄기').props.onClick?.();
   assert.deepEqual(calendarState.mutedCalendarIds, ['editable-share']);
   tree = await renderRail(false);
   assert.ok(nodeByAriaLabel(tree, '리드 회의 알림이 꺼짐'), 'muted calendar exposes its BellOff state');
+
+  buttonByLabel(tree, '외부 보기 메뉴 열기').props.onClick?.({ stopPropagation() {} });
+  tree = await renderRail(false);
+  buttonByText(tree, '설정 열기').props.onClick?.();
+  assert.equal(openedSettings.at(-1)?.id, 'view-share', 'view-only readers can open settings');
+  openedSettings.length = 0;
 
   buttonByLabel(tree, 'EP 마일스톤 메뉴 열기').props.onClick?.({ stopPropagation() {} });
   tree = await renderRail(false);
@@ -2878,6 +2902,21 @@ test('TagBar independently toggles tags, resets every chip, and forwards the cli
   assert.deepEqual(calendarState.enabledTagIds, {}, '전체 restores every tag using the store reset action');
 
   tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  buttonByLabel(tree, '전체 태그 끄기').props.onClick?.();
+  tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  for (const label of ['회의 태그', '검수 태그', '휴가 태그']) {
+    assert.equal(buttonByLabel(tree, label).props['aria-pressed'], false, `${label} turns off with all`);
+  }
+  buttonByLabel(tree, '전체 태그 켜기').props.onClick?.();
+  tree = await renderTagBar(true, (anchorRect) => openedAnchors.push(anchorRect));
+  assert.equal(buttonByLabel(tree, '전체 태그 끄기').props['aria-pressed'], true);
+  calendarState.enabledTagIds['builtin-vacation'] = false;
+  tree = await renderTagBar(false, (anchorRect) => openedAnchors.push(anchorRect));
+  assert.equal(buttonByLabel(tree, '전체 태그 끄기').props['aria-pressed'], true, 'disconnected vacation does not affect all state');
+  buttonByLabel(tree, '전체 태그 끄기').props.onClick?.();
+  tree = await renderTagBar(false, (anchorRect) => openedAnchors.push(anchorRect));
+  buttonByLabel(tree, '전체 태그 켜기').props.onClick?.();
+  assert.equal(calendarState.enabledTagIds['builtin-vacation'], false, 'all does not modify a disconnected vacation chip');
   const anchor = { left: 17, top: 29, width: 84, height: 28 } as DOMRect;
   buttonByLabel(tree, '태그 관리').props.onClick?.({
     currentTarget: { getBoundingClientRect: () => anchor },
@@ -5103,7 +5142,7 @@ test('ScheduleView todo navigation prefers the unique linked identity over a raw
 });
 
 test('ScheduleView reconciles an open calendar settings modal without closing create mode', async (t) => {
-  await t.test('same-id metadata replaces the stale object and missing or unmanaged rows close the modal', async () => {
+  await t.test('same-id metadata updates read-only settings and only missing rows close the modal', async () => {
     resetHarness();
     let tree = await renderScheduleView();
     tree = await renderScheduleView();
@@ -5127,8 +5166,8 @@ test('ScheduleView reconciles an open calendar settings modal without closing cr
     tree = await renderScheduleView();
     assert.equal(
       findElements(tree, (element) => element.props['aria-label'] === '캘린더 설정 모달').length,
-      0,
-      'loss of manage permission closes the modal',
+      1,
+      'loss of manage permission keeps the modal available for read-only subscriptions',
     );
 
     calendarState.calendars = calendarState.calendars.map((calendar) => (
@@ -6299,7 +6338,8 @@ test('the month grid explains an empty month without blocking the create path', 
   resetHarness();
   const emptyTree = await renderCalendarGrid([]);
   assert.match(textContent(emptyTree), /이번 달 일정이 없습니다/);
-  assert.match(textContent(emptyTree), /날짜를 눌러 새 일정을 만들어 보세요/);
+  // 생성 시작점이 칸 전체에서 + 버튼으로 좁혀졌으므로 안내도 그쪽을 가리켜야 한다.
+  assert.match(textContent(emptyTree), /날짜 옆 \+ 버튼을 눌러 새 일정을 만들어 보세요/);
 
   const notice = findElements(emptyTree, (node) => (
     typeof node.props.className === 'string'
@@ -6310,7 +6350,7 @@ test('the month grid explains an empty month without blocking the create path', 
   assert.match(
     String(notice.props.className),
     /pointer-events-none/,
-    '날짜 셀 클릭이 곧 생성 경로이므로 안내가 클릭을 가리면 안 된다',
+    '안내가 날짜 칸의 + 버튼을 가리면 안 된다',
   );
 
   // 이번 달에 걸치는 일정이 하나라도 있으면 안내를 숨긴다.
@@ -6757,7 +6797,8 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
     tagBarReducedMotion = false;
   }
 
-  // 필터가 바뀌면 결과 컨테이너는 다시 마운트되지 않고 짧게 페이드로 이어진다.
+  // 필터가 바뀌어도 결과 컨테이너는 다시 마운트되지 않고, 달력 전체가 옅어지지도 않는다(움직임 폴리싱 15번).
+  // 바뀌지 않은 일정까지 깜빡이던 것을 없애고, 필터를 바꾼 시각만 그리드에 넘겨 새로 보이게 된 막대만 떠오르게 한다.
   resetHarness();
   const clock = installScheduleFakeClock();
   const calendarBody = (tree: ReactNode) => findElements(tree, (node) => (
@@ -6771,57 +6812,57 @@ test('tag chips pop on toggle and the filtered result fades instead of jumping',
 
     const body = calendarBody(tree);
     assert.ok(body, '캘린더 본체 컨테이너가 있다');
-    assert.deepEqual((body.props as { animate?: unknown }).animate, { opacity: 1, y: 0 });
+    // transform 을 문자열로 넘겨야 합성 스레드(WAAPI)에서 돈다(y 는 메인 스레드가 매 프레임 계산).
+    // 끝나면 'none' 으로 돌려 남은 transform 이 안쪽 fixed 요소의 기준 상자를 바꾸지 않게 한다.
+    assert.deepEqual(
+      (body.props as { animate?: unknown }).animate,
+      { opacity: 1, transform: 'translateY(0px)', transitionEnd: { transform: 'none' } },
+    );
     assert.deepEqual(
       (body.props as { transition?: unknown }).transition,
       { duration: 0.2, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.12 } },
       '보기 전환은 200ms를 유지하고 필터 페이드만 120ms를 쓴다',
     );
 
+    const revealAtBefore = scheduleGridProps.at(-1)?.filterRevealAt ?? 0;
+    clock.advance(50);
     calendarState.toggleTag('tag-meeting');
     tree = await renderScheduleView();
     await flushScheduleMountEffects();
     tree = await renderScheduleView();
     assert.equal(
       (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      0.55,
-      '필터가 바뀌면 결과가 잠깐 옅어진다',
+      1,
+      '필터가 바뀌어도 달력 전체가 옅어지지 않는다',
     );
     assert.equal(
       calendarBody(tree)?.props.key,
       body.props.key,
       '필터 변화는 컨테이너를 다시 마운트하지 않는다',
     );
+    const revealAt = scheduleGridProps.at(-1)?.filterRevealAt ?? 0;
+    assert.ok(revealAt > revealAtBefore, '필터를 바꾼 시각을 그리드에 넘겨 새로 생긴 막대만 떠오르게 한다');
 
     clock.advance(120);
     tree = await renderScheduleView();
     assert.equal(
-      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      1,
-      '120ms 뒤에는 원래 농도로 돌아온다',
+      scheduleGridProps.at(-1)?.filterRevealAt,
+      revealAt,
+      '필터가 그대로면 기준 시각도 그대로다(나중에 생긴 막대는 떠오르지 않는다)',
     );
 
-    // 페이드 도중 OS '동작 줄이기'가 켜져도 반투명으로 굳지 않는다.
+    // OS '동작 줄이기'면 기준 시각을 넘기지 않아 막대가 떠오르지 않고, 화면도 옅어지지 않는다.
+    scheduleReducedMotion = true;
     calendarState.toggleTag('tag-review');
     tree = await renderScheduleView();
     await flushScheduleMountEffects();
     tree = await renderScheduleView();
     assert.equal(
       (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
-      0.55,
-      '다시 페이드가 시작된다',
-    );
-
-    scheduleReducedMotion = true;
-    calendarState.toggleTag('tag-meeting');
-    tree = await renderScheduleView();
-    await flushScheduleMountEffects();
-    tree = await renderScheduleView();
-    assert.equal(
-      (calendarBody(tree)?.props as { animate?: { opacity?: number } }).animate?.opacity,
       1,
-      "페이드 중 '동작 줄이기'가 켜져도 화면이 반투명으로 굳지 않는다",
+      "'동작 줄이기'에서도 화면이 반투명해지지 않는다",
     );
+    assert.equal(scheduleGridProps.at(-1)?.filterRevealAt, 0, "'동작 줄이기'면 새 막대도 떠오르지 않는다");
   } finally {
     scheduleReducedMotion = false;
     clock.restore();
@@ -6850,11 +6891,17 @@ test('the event create backdrop dims the background like the calendar settings m
   );
 });
 
-test('CalendarGrid fades in the chip tooltip and limits chip hover to transform and filter', async () => {
+test('CalendarGrid pins the chip card above the bar and lights the bar without resizing it', async () => {
+  // 움직임 폴리싱 2번(tooltip-anchor): 카드는 막대에 들어온 순간의 막대 위에 고정되고(마우스를 따라오지 않음),
+  // 막대는 커지거나 밝아지는 대신 미리 그려 둔 테두리·그림자 층만 떠오른다. 등장 효과는 WAAPI(동작 줄이기면 투명도만)라
+  // 이 하네스에서는 그려지는 구조만 확인한다(실제 움직임은 갈래 화면 점검에서 확인).
   resetHarness();
   const clock = installScheduleFakeClock();
   const previousDocument = globalThis.document;
   globalThis.document = { body: {}, addEventListener() {}, removeEventListener() {} } as unknown as Document;
+  const isCard = (node: ReactElement<Record<string, unknown>>) => (
+    typeof node.props.className === 'string' && node.props.className.includes('calendar-event-card')
+  );
 
   try {
     const events = [calendarListEvent({ id: 'tooltip-chip', title: '툴팁 대상' })];
@@ -6863,61 +6910,37 @@ test('CalendarGrid fades in the chip tooltip and limits chip hover to transform 
     assert.ok(chip, '월 그리드 칩이 있다');
 
     const chipClass = String(chip.props.className ?? '');
-    assert.match(
-      chipClass,
-      /transition-\[transform,filter\]/,
-      'hover 트랜지션은 transform과 filter로만 제한한다',
+    assert.doesNotMatch(chipClass, /scale-\[|brightness-|transition-all|transition-\[transform/, '마우스를 올려도 막대 크기·밝기를 바꾸지 않는다(작은 글씨가 번졌다)');
+    assert.equal(chip.props.onMouseMove, undefined, '마우스가 움직일 때마다 카드 자리를 다시 정하지 않는다');
+    assert.ok(
+      findElements(chip, (node) => String(node.props.className ?? '').includes('calendar-event-bar-ring')).length === 1,
+      '테두리·그림자 층이 미리 그려져 있다(투명도만 바뀐다)',
     );
-    assert.doesNotMatch(chipClass, /transition-all/, 'transition-all은 레이아웃 속성까지 애니메이션한다');
 
-    // 툴팁은 400ms 지연 뒤 나타난다.
-    (chip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
+    // 막대 rect 로 자리를 한 번 정하고, 400ms 뒤에 카드가 뜬다.
+    const rect = { left: 100, right: 300, top: 200, bottom: 226 };
+    (chip.props.onMouseEnter as (event: unknown) => void)({ clientX: 120, clientY: 210, currentTarget: { getBoundingClientRect: () => rect } });
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.equal(findElements(tree, isCard).length, 0, '400ms 전에는 카드가 없다');
     clock.advance(400);
     tree = await renderCalendarGrid(events, {}, true);
+    const card = findElements(tree, isCard)[0];
+    assert.ok(card, '400ms 뒤 카드가 나타난다');
+    assert.equal(card.props.role, 'tooltip');
+    assert.equal((card.props.style as { backdropFilter?: unknown }).backdropFilter, undefined, '카드 뒤 흐림은 쓰지 않는다');
+    assert.equal((card.props.style as { transform?: unknown }).transform, undefined, '자리는 바깥 상자가 transform 하나로 맡는다');
+    assert.match(textContent(card), /툴팁 대상/);
 
-    const tooltip = findElements(tree, (node) => (
-      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
-    ))[0];
-    assert.ok(tooltip, '400ms 뒤 툴팁이 나타난다');
-    assert.deepEqual(
-      tooltip.props.initial,
-      { opacity: 0, scale: 0.96, x: '-50%', y: '-100%' },
-      '툴팁은 사라진 상태에서 등장하고 커서 위 중앙 앵커를 유지한다',
-    );
-    assert.deepEqual(
-      tooltip.props.animate,
-      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
-      'framer가 transform을 직접 관리하므로 앵커도 motion value로 넘긴다',
-    );
-    assert.equal(
-      (tooltip.props.style as { transform?: unknown }).transform,
-      undefined,
-      'style의 정적 transform은 덮어써지므로 남겨 두지 않는다',
-    );
-    assert.deepEqual(
-      tooltip.props.transition,
-      { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
-      '툴팁 등장은 200ms 공용 이징을 쓴다',
-    );
-
-    // 동작 줄이기에서는 등장 애니메이션을 쓰지 않는다.
-    resetHarness();
-    let reducedTree = await renderCalendarGrid(events, { reduceMotion: true });
-    const reducedChip = findElements(reducedTree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
-    (reducedChip.props.onMouseEnter as ((event: unknown) => void) | undefined)?.({ clientX: 120, clientY: 200 });
-    clock.advance(400);
-    reducedTree = await renderCalendarGrid(events, { reduceMotion: true }, true);
-    const reducedTooltip = findElements(reducedTree, (node) => (
-      typeof node.props.className === 'string' && node.props.className.includes('max-w-[260px]')
-    ))[0];
-    assert.ok(reducedTooltip);
-    assert.equal(reducedTooltip.props.initial, false, '동작 줄이기에서는 등장 애니메이션을 건너뛴다');
-    assert.deepEqual(
-      reducedTooltip.props.animate,
-      { opacity: 1, scale: 1, x: '-50%', y: '-100%' },
-      '동작 줄이기에서도 앵커는 그대로다',
-    );
-    assert.deepEqual(reducedTooltip.props.transition, { duration: 0 });
+    // 떠난 뒤 바로 다른 막대에 들어오면(웜업) 기다리지 않는다.
+    const leaveTree = await renderCalendarGrid(events, {}, true);
+    const shownChip = findElements(leaveTree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    (shownChip.props.onMouseLeave as () => void)();
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.equal(findElements(tree, isCard).length, 0, '막대를 떠나면 카드가 사라진다');
+    const againChip = findElements(tree, (node) => node.props['data-event-id'] === 'tooltip-chip')[0];
+    (againChip.props.onMouseEnter as (event: unknown) => void)({ clientX: 200, clientY: 210, currentTarget: { getBoundingClientRect: () => rect } });
+    tree = await renderCalendarGrid(events, {}, true);
+    assert.ok(findElements(tree, isCard)[0], '숨긴 지 300ms 안이면 기다림 없이 바로 뜬다');
   } finally {
     calendarGridEffectCleanups.splice(0).forEach((cleanup) => cleanup());
     globalThis.document = previousDocument;
@@ -7400,9 +7423,10 @@ test('ScheduleView opens quick edit from a right click in the weekly, timetable 
   }
 });
 
-test('quick edit closing animation is owned by exactly one presence boundary', () => {
-  // framer-motion 10.x는 중첩 AnimatePresence로 exit를 전파하지 않는다. 빠른 편집이
-  // 자기 자신을 감싸면 닫힘 애니메이션이 죽으므로, presence는 ScheduleView가 소유한다.
+test('quick edit presence is owned by exactly one boundary and closes immediately', () => {
+  // framer-motion 10.x는 중첩 AnimatePresence로 exit를 전파하지 않는다. presence는 ScheduleView가 소유한다.
+  // 움직임 폴리싱 8번(창·메뉴 공통 박자): 우클릭한 지점 쪽 모서리에서 피어나고(.bf-pop), 닫힘은 바로 사라진다
+  // — 예전의 가운데에서 커지는 열림·0.15초 닫힘 움직임(exit)은 없앴다.
   const quickEditSource = readFileSync('src/components/calendar/EventQuickEdit.tsx', 'utf8');
   const scheduleSource = readFileSync('src/views/ScheduleView.tsx', 'utf8');
 
@@ -7411,11 +7435,9 @@ test('quick edit closing animation is owned by exactly one presence boundary', (
     /<AnimatePresence/,
     '빠른 편집은 자기 presence를 소유하지 않는다',
   );
-  assert.match(
-    quickEditSource,
-    /exit=\{\{ opacity: 0, scale: 0\.95 \}\}/,
-    '빠른 편집 motion.div는 exit 상태를 유지한다',
-  );
+  assert.doesNotMatch(quickEditSource, /\bexit=\{/, '빠른 편집은 닫힘 움직임을 두지 않는다');
+  assert.match(quickEditSource, /popClassName\(popOrigin\)/, '빠른 편집은 공통 메뉴 박자(.bf-pop)로 피어난다');
+  assert.match(quickEditSource, /popOriginFromPoint\(position,/, '피어나는 기준점은 우클릭한 지점');
   assert.match(
     scheduleSource,
     /<AnimatePresence>\s*\{quickEdit && \(/,
@@ -7945,6 +7967,37 @@ test('ScheduleView duplicates a subscribed (ICS) event into the editable persona
   );
   assert.equal(scheduleAddedEvents[0].source, undefined);
   assert.equal(scheduleAddedEvents[0].sourceCalendarId, undefined);
+});
+
+test('CalendarSettingsModal gives readers and event editors subscription access without calendar management controls', async (t) => {
+  for (const canEdit of [false, true]) {
+    await t.test(canEdit ? 'event editor' : 'read-only member', async () => {
+      resetHarness();
+      const shared = calendar({ id: 'subscription-shared', name: '공유 제작 일정', ownerId: 'other-owner', visibility: 'members', canManage: false, canEdit });
+      const tree = await renderCalendarSettingsModal(shared);
+      assert.match(textContent(tree), /공유 제작 일정/);
+      assert.match(textContent(tree), /설정을 변경할 수 없어요/);
+      assert.equal(nodeByAriaLabel(tree, '구독 패널').props['data-calendar-id'], shared.id);
+      assert.equal(findElements(tree, (node) => node.props['aria-label'] === '캘린더 이름' || node.props['aria-label'] === '멤버 검색').length, 0);
+      assert.equal(findElements(tree, (node) => node.type === 'input').length, 0);
+      assert.equal(findButtons(tree).some((button) => /저장|삭제|제거|권한|색상/.test(textContent(button) + String(button.props['aria-label'] ?? ''))), false);
+      buttonByText(tree, '닫기').props.onClick?.();
+      assert.equal(settingsCloseCount, 1);
+      assert.deepEqual(settingsApiCalls, []);
+    });
+  }
+});
+
+test('CalendarSettingsModal switches to read-only when management is revoked and flags administrator-only access', async () => {
+  resetHarness();
+  const managed = calendar({ id: 'manage-revoked', canManage: true });
+  let tree = await renderCalendarSettingsModal(managed);
+  assert.ok(buttonByText(tree, '저장'));
+  tree = await renderCalendarSettingsModal({ ...managed, canManage: false, isAdminOverview: true });
+  assert.equal(findButtons(tree).some((button) => textContent(button) === '저장'), false);
+  assert.match(textContent(tree), /관리자 조회/);
+  assert.equal(nodeByAriaLabel(tree, '구독 패널').props['data-admin-overview'], true);
+  assert.deepEqual(settingsApiCalls, []);
 });
 
 test('CalendarSettingsModal creates a members calendar atomically and reloads before closing', async () => {
@@ -9303,3 +9356,98 @@ test('EventCreateModal restores draft tag selection after an optimistic tag dele
   let tree=await renderScheduleView();assert.equal(scheduleUpdateCalls.length,0);assert.ok(buttonByText(tree,'전체 일정'));
   stateSlots[0]=[{...event,title:'동료가 변경함'}];tree=await renderScheduleView();buttonByText(tree,'전체 일정').props.onClick?.();await new Promise(resolve=>setImmediate(resolve));assert.equal(scheduleUpdateCalls.length,0);assert.match(textContent(await renderScheduleView()),/최신 일정을 다시 선택/);
  });
+
+test('CalendarGrid month layer slides on the compositor and exits toward the latest navigation direction', async () => {
+  resetHarness();
+  const events = [calendarListEvent({ id: 'month-layer-event', title: '월 전환 대상' })];
+  const monthLayer = (tree: ReactNode) => findElements(tree, (node) => (
+    (node.props.style as { gridArea?: string } | undefined)?.gridArea === '1 / 1'
+  ))[0];
+  const resolveVariant = (layer: ReactElement<Record<string, unknown>>, name: string) => {
+    const variant = (layer.props.variants as Record<string, unknown>)[name];
+    return (typeof variant === 'function' ? (variant as (custom: unknown) => unknown)(layer.props.custom) : variant) as Record<string, unknown>;
+  };
+
+  const forward = monthLayer(await renderCalendarGrid(events, { monthKey: '2026-8', monthDirection: 1 } as Partial<CalendarGridProps>));
+  assert.ok(forward, '달 한 장이 겹침 칸(1/1)에 놓인다 — 나가는 달을 측정해 띄우지 않는다');
+  assert.equal(forward.props.initial, 'enter');
+  assert.deepEqual(resolveVariant(forward, 'enter'), { opacity: 0, transform: 'translateY(24px)' }, '다음 달은 아래에서 올라온다');
+  assert.deepEqual(resolveVariant(forward, 'center').transitionEnd, { transform: 'none' }, '끝나면 transform 을 남기지 않는다');
+  assert.equal(resolveVariant(forward, 'exit').transform, 'translateY(-24px)', '다음 달로 갈 때 나가는 달은 위로 빠진다');
+
+  // 나가는 달은 AnimatePresence custom 으로 '지금' 방향을 받는다 — 이전 달로 돌아가면 아래로 빠진다.
+  const backward = monthLayer(await renderCalendarGrid(events, { monthKey: '2026-7', monthDirection: -1 } as Partial<CalendarGridProps>));
+  assert.deepEqual(backward.props.custom, { direction: -1, instant: false });
+  assert.equal(resolveVariant(backward, 'exit').transform, 'translateY(24px)');
+  assert.equal(resolveVariant(backward, 'enter').transform, 'translateY(-24px)', '이전 달은 위에서 내려온다');
+
+  // 연타·동작 줄이기에서는 미끄러지지 않고 바로 바꾼다(나가는 달도 즉시 사라진다).
+  const rapid = monthLayer(await renderCalendarGrid(events, { monthKey: '2026-9', monthDirection: 1, instantTransition: true } as Partial<CalendarGridProps>));
+  assert.equal(rapid.props.initial, false);
+  assert.deepEqual(resolveVariant(rapid, 'exit'), { opacity: 0, transition: { duration: 0 } });
+  const reduced = monthLayer(await renderCalendarGrid(events, { monthKey: '2026-9', monthDirection: 1, reduceMotion: true }));
+  assert.equal(reduced.props.initial, false, '동작 줄이기에서는 슬라이드하지 않는다');
+});
+
+test('ScheduleView period navigation keeps the same event state when the canonical content did not change', async () => {
+  resetHarness();
+  const steady = calendarListEvent({ id: 'steady-event', title: '그대로인 일정' });
+  const edited = calendarListEvent({ id: 'edited-event', title: '바뀔 일정', startDate: '2026-08-12', endDate: '2026-08-12' });
+  scheduleCanonicalEvents = [steady, edited];
+  let tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  tree = await renderScheduleView();
+  const before = stateSlots[0] as ScheduleCalendarEvent[];
+  assert.equal(before.length, 2, '첫 정본이 들어왔다');
+
+  // 정본 캐시는 기간을 넘길 때마다 같은 내용의 새 객체를 만든다.
+  scheduleCanonicalEvents = [{ ...steady }, { ...edited }];
+  buttonByLabel(tree, '다음 기간').props.onClick?.();
+  tree = await renderScheduleView();
+  await flushScheduleMountEffects();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.ok(scheduleEventRanges.length >= 2, '달을 넘기면 새 범위로 정본을 다시 읽는다');
+  assert.equal(stateSlots[0], before, '내용이 같으면 상태 배열을 바꾸지 않는다 — 전환 도중 화면 전체가 다시 그려지지 않는다');
+
+  // 실제로 바뀐 일정만 새 객체로 들어오고, 그대로인 일정은 이전 객체를 유지한다.
+  scheduleCanonicalEvents = [{ ...steady }, { ...edited, title: '동료가 바꾼 제목' }];
+  await dispatchScheduleWindowEvent('bflow:calendar-changed');
+  const after = stateSlots[0] as ScheduleCalendarEvent[];
+  assert.notEqual(after, before);
+  assert.equal(after[0], before[0], '그대로인 일정은 같은 객체(편집기·메모가 흔들리지 않는다)');
+  assert.equal(after[1].title, '동료가 바꾼 제목');
+});
+
+test('WeekScrollView ignores the inertial wheel that has just reached the end of the card list', async () => {
+  resetHarness();
+  const weekModule = await loadWeekScrollView();
+  const requested: number[] = [];
+  const tree = resolveComponents(weekModule.default({
+    currentMonth: 7,
+    currentYear: 2026,
+    events: [],
+    today: '2026-08-25',
+    onEventClick() {},
+    activeWeekIndex: 30,
+    onWeekChange: (index) => requested.push(index),
+  }));
+  const surface = findElements(tree, (element) => typeof element.props.onWheel === 'function')[0];
+  assert.ok(surface, 'the weekly card surface owns its wheel policy');
+  // 카드 안 일정 목록이 맨 아래에 닿아 있다.
+  const list = { scrollHeight: 800, clientHeight: 400, scrollTop: 400 };
+  const target = { closest: () => list };
+  const realNow = Date.now;
+  let now = 10_000;
+  Date.now = () => now;
+  try {
+    (surface.props.onScrollCapture as (event: unknown) => void)({ target });
+    (surface.props.onWheel as (event: unknown) => void)({ deltaY: 1, target });
+    assert.deepEqual(requested, [], '방금까지 목록이 움직였다면 끝에 닿은 관성 휠은 주를 넘기지 않는다');
+    now += 400;
+    (surface.props.onWheel as (event: unknown) => void)({ deltaY: 1, target });
+    assert.deepEqual(requested, [31], '잠깐 멈춘 뒤 다시 굴리면 다음 주로 넘어간다');
+  } finally {
+    Date.now = realNow;
+  }
+});

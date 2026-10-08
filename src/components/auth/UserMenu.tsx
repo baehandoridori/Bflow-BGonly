@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { User, LogOut, KeyRound, AlertTriangle, Palmtree } from 'lucide-react';
 import { logout } from '@/services/userService';
+import { flushSceneSavesBeforeLogout } from '@/services/sceneSaveRetry';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 
@@ -21,6 +22,9 @@ export function UserMenu() {
   }, [open]);
 
   const handleLogout = async () => {
+    // 아직 내 로그인 세션이 살아 있을 때, 다시 보내기를 기다리던 씬 체크 저장을 한 번 보낸다(최대 3초).
+    // 그래도 남은 저장은 로그아웃으로 세션이 바뀌는 순간 그만둔다 — 다음 사람 세션 중에 내 값으로 보내지 않는다.
+    await flushSceneSavesBeforeLogout();
     await logout();
     setCurrentUser(null);
     setOpen(false);
@@ -46,7 +50,7 @@ export function UserMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-52 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[100]">
+        <div className="bf-pop absolute right-0 top-full mt-1 w-52 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[100]">
           {/* 사용자 정보 */}
           <div className="px-3 py-2.5 border-b border-bg-border">
             <p className="text-sm text-text-primary font-medium">{currentUser.name}</p>

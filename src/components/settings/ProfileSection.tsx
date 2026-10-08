@@ -12,6 +12,7 @@ import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { fetchVacationStatus, fetchVacationLog, cancelVacationRequest } from '@/services/vacationService';
 import { useOnVacationChange } from '@/hooks/useOnVacationChange';
+import { createVacationGuardRetry } from '@/utils/vacationGuardRetry';
 import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { VacationRegisterModal } from '@/components/vacation/VacationRegisterModal';
@@ -137,6 +138,14 @@ export function ProfileSection() {
 
   // 변경(등록/삭제) 후 캐시 유예 — 30초간 캐시 저장 안 함
   const mutationTimeRef = useRef(0);
+  // 가드 때문에 서버 결과를 버렸으면 가드가 끝난 직후 한 번 다시 읽는다(예약은 늘 하나, 언마운트 때 정리)
+  const [guardRetry] = useState(createVacationGuardRetry);
+  const loadVacationDataRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+  // 언마운트하면 남은 예약을 지우고, 그 뒤에 끝나는 로드도 새 예약을 못 잡게 한다(StrictMode 재마운트 때 다시 붙인다)
+  useEffect(() => {
+    guardRetry.activate();
+    return () => guardRetry.dispose();
+  }, [guardRetry]);
 
   // 대휴 드롭다운 외부 클릭 닫기
   useEffect(() => {
@@ -158,8 +167,8 @@ export function ProfileSection() {
     if (!force) {
       const cache = useAppStore.getState().vacationCache;
       if (cache && cache.userName === currentUser.name && Date.now() - cache.lastFetch < 300_000) {
-        // mutation guard 기간에는 캐시도 적용하지 않음 (낙관적 값 유지)
-        if (Date.now() - mutationTimeRef.current > 30_000) {
+        // mutation guard 기간에는 캐시도 적용하지 않음 (낙관적 값 유지) — 가드가 끝나면 다시 읽는다
+        if (!guardRetry.deferIfGuarded(mutationTimeRef.current, Date.now(), () => { void loadVacationDataRef.current(true); })) {
           setVacStatus(cache.status);
           setVacLog(cache.log);
         }
@@ -173,8 +182,9 @@ export function ProfileSection() {
         fetchVacationStatus(currentUser.name),
         fetchVacationLog(currentUser.name, new Date().getFullYear(), 20),
       ]);
-      // 변경(등록/삭제) 직후 30초간은 낙관적 상태 유지 (서버 데이터가 아직 stale일 수 있음)
-      if (Date.now() - mutationTimeRef.current > 30_000) {
+      // 변경(등록/삭제) 직후 30초간은 낙관적 상태 유지 (서버 데이터가 아직 stale일 수 있음).
+      // 이때 버린 결과(슬랙 등에서 온 변경 신호의 재조회 포함)는 가드가 끝난 직후 한 번 다시 읽어 따라잡는다.
+      if (!guardRetry.deferIfGuarded(mutationTimeRef.current, Date.now(), () => { void loadVacationDataRef.current(true); })) {
         setVacStatus(status);
         setVacLog(log);
         setVacationCache({ userName: currentUser.name, status, log, lastFetch: Date.now() });
@@ -184,13 +194,14 @@ export function ProfileSection() {
     } finally {
       setVacLoading(false);
     }
-  }, [currentUser, vacationConnected, setVacationCache]);
+  }, [currentUser, vacationConnected, setVacationCache, guardRetry]);
+  useEffect(() => { loadVacationDataRef.current = loadVacationData; }, [loadVacationData]);
 
   useEffect(() => {
     loadVacationData();
   }, [loadVacationData]);
 
-  // 이 창 밖에서 휴가가 바뀌면 5분 캐시를 건너뛰고 다시 읽는다(30초 낙관 가드는 유지).
+  // 이 창 밖에서 휴가가 바뀌면 5분 캐시를 건너뛰고 다시 읽는다(30초 낙관 가드는 유지 — 끝나면 다시 읽는다).
   useOnVacationChange(() => { void loadVacationData(true); });
 
   // C3: 연차/대휴 초과 사용 경고 토스트
@@ -441,7 +452,7 @@ export function ProfileSection() {
             <span className="text-[13px] font-semibold text-text-primary">나의 휴가 관리</span>
             <ChevronDown
               size={14}
-              className={cn('text-text-secondary/60 transition-transform group-hover:text-text-primary', vacationCollapsed && '-rotate-90')}
+              className={cn('text-text-secondary/60 transition-[transform,color] group-hover:text-text-primary', vacationCollapsed && '-rotate-90')}
             />
           </button>
           {!vacationCollapsed && vacationConnected && !vacLoading && (

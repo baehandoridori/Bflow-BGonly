@@ -1,6 +1,7 @@
 -- Background library: one CAS-protected entity per row, server sessions, no direct Data API access.
 -- Prerequisites: public.users, public.episodes, public.app_session_user_id(text).
 -- Apply separately from the application release. This file never seeds production demo data.
+-- Applied to production on 2026-10-08 as 20261008035103 (background_library).
 -- Follow-up: 2026-10-07-background-map-3d.sql widens background_library_validate_entity for the
 -- vertical-axis map fields. This file restores the narrower validator, so after EVERY run of this
 -- file run the 3D file again; until then saves that touch a map carrying those fields are rejected.
@@ -209,7 +210,7 @@ RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_tem
 DECLARE actor TEXT:=public.app_session_user_id(p_session_token); v_kind TEXT; action TEXT; item_id UUID; expected BIGINT;
  candidate JSONB; previous public.background_library_entities%ROWTYPE; receipt JSONB; can_manage BOOLEAN; operations JSONB; operation JSONB;
 BEGIN
- SELECT role='admin' INTO can_manage FROM public.users WHERE id=actor FOR SHARE;
+ SELECT COALESCE(role='admin',false) INTO can_manage FROM public.users WHERE id=actor FOR SHARE;
  IF can_manage IS NULL THEN RAISE EXCEPTION '로그인 세션이 필요합니다.' USING ERRCODE='42501'; END IF;
  PERFORM public.background_library_require(public.background_library_uuid(to_jsonb(p_request_id)),'올바른 요청 식별자가 필요합니다.');
  PERFORM public.background_library_require(jsonb_typeof(p_command)='object' AND octet_length(p_command::text)<=28000000,'배경 요청이 올바르지 않거나 너무 큽니다.');
@@ -273,9 +274,14 @@ BEGIN
  PERFORM public.background_library_validate();
  INSERT INTO public.background_library_receipts(actor_id,request_id,command) VALUES(actor,p_request_id,p_command);
  -- Realtime public channel carries no user, identifiers or entity content. Missing local extension is harmless.
- IF to_regprocedure('realtime.send(jsonb,text,text,boolean)') IS NOT NULL THEN
-  EXECUTE 'SELECT realtime.send($1,$2,$3,$4)' USING '{}'::jsonb,'changed','background-library',false;
- END IF;
+ -- A failed signal must not undo the save: other clients catch up on their next read.
+ BEGIN
+  IF to_regprocedure('realtime.send(jsonb,text,text,boolean)') IS NOT NULL THEN
+   EXECUTE 'SELECT realtime.send($1,$2,$3,$4)' USING '{}'::jsonb,'changed','background-library',false;
+  END IF;
+ EXCEPTION WHEN OTHERS THEN
+  RAISE WARNING '[background-library] realtime 변경 신호 전송 실패: %', SQLERRM;
+ END;
  RETURN public.background_library_snapshot(actor);
 END $$;
 

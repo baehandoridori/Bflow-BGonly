@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -50,6 +50,20 @@ import { describeActivity, deptPrefix } from './activityLabels';
 import { useOptimisticSceneImageUrl } from '@/hooks/useOptimisticSceneImageUrl';
 import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { useSceneFlip, useSavedFlash } from '@/hooks/useSceneFlip';
+import {
+  EMPTY_IMAGE_SAVE,
+  beginImageSave,
+  clearImageSave,
+  finishImageSave,
+  imageSaveView,
+  preloadImage,
+  sceneModalMotion,
+  showImageSavePreview,
+  type ImageSaveState,
+  type ImageSlotType,
+} from '@/utils/sceneFlip';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -90,6 +104,12 @@ interface SceneDetailModalProps {
   focusCommentId?: string;
   /** 리테이크 카드 내부 댓글 스레드에서 강조할 댓글 id. */
   focusRevisionCommentId?: string;
+  /** 바깥(#화·#파트 점프 등)에서 닫으라는 신호. 값이 바뀌면 Esc·바깥 클릭과 같은 부드러운 닫힘을 거친다. */
+  closeRequestToken?: number;
+  /** 가라앉기(닫힘)를 시작한 순간. 부모는 이때부터 onClose 까지 새 열기 요청을 미룬다(닫히는 창이 새 대상을 지우지 않게). */
+  onCloseStart?: () => void;
+  /** 아래 점(도트)으로 여러 칸 떨어진 씬에 한 번에 간다(목록 순번). 없으면 점은 한 칸씩만 넘긴다. */
+  onNavigateTo?: (index: number) => void;
 }
 
 // ─── 속성 행 컴포넌트 ──────────────────────────────
@@ -219,7 +239,10 @@ interface ImageSlotProps {
   label: string;
   url: string;
   loading: boolean;
+  /** 미리보기를 띄운 채 저장 중 — 그림을 살짝 어둡게 + 아래 얇은 줄. */
   uploading?: boolean;
+  /** 저장이 끝난 시각 — '저장됨 ✓' 칩. */
+  savedAt?: number;
   onPickFile: () => void;
   onPasteClipboard: () => void;
   onRemove: () => void;
@@ -233,6 +256,7 @@ function ImageSlot({
   url,
   loading,
   uploading,
+  savedAt,
   onPickFile,
   onPasteClipboard,
   onRemove,
@@ -242,6 +266,7 @@ function ImageSlot({
 }: ImageSlotProps) {
   const [dragOver, setDragOver] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'paste-hint'>('idle');
+  const showSaved = useSavedFlash(savedAt);
 
   const handleEmptyClick = () => {
     if (phase === 'idle') {
@@ -289,7 +314,8 @@ function ImageSlot({
               src={url}
               alt={label}
               className={cn(
-                'w-full max-h-60 object-contain bg-bg-primary rounded-xl transition-all',
+                'sf-img w-full max-h-60 object-contain bg-bg-primary rounded-xl',
+                uploading && 'sf-img--saving',
                 dragOver && 'brightness-50 blur-[1px]',
               )}
               draggable={false}
@@ -312,46 +338,42 @@ function ImageSlot({
                 <span className="text-sm font-semibold text-accent drop-shadow">여기에 놓으면 이미지 교체</span>
               </div>
             )}
-            {/* 업로드 중 오버레이 */}
-            {uploading && (
-              <div className="absolute inset-0 bg-overlay/40 rounded-xl flex items-center justify-center">
-                <div className="flex items-center gap-2 text-sm text-white bg-black/40 px-3 py-1.5 rounded-lg backdrop-blur-sm">
-                  <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  업로드중...
-                </div>
+            {/* 저장 중: 붙여넣은 그림은 바로 보이되 살짝 어둡고, 아래 얇은 줄이 흐른다(칸 크기는 그대로). */}
+            {uploading && <span role="progressbar" aria-label="이미지 저장 중" className="sf-upload-bar" />}
+            {showSaved && <span key={savedAt} className="sf-saved-chip">저장됨 ✓</span>}
+            {/* 호버 오버레이 — 0.15초에 떠오른다(겹친 층의 투명도만, 배경색·흐림 전환 없음). 저장 중에는 감춘다. */}
+            {!uploading && (
+              <div className="absolute inset-0 bg-overlay/50 rounded-xl flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                <button
+                  onClick={onView}
+                  className="p-3.5 bg-black/45 hover:bg-black/60 rounded-xl text-white transition-transform hover:scale-110"
+                  title="확대 보기"
+                >
+                  <Eye size={26} />
+                </button>
+                <button
+                  onClick={onPasteClipboard}
+                  className="p-3 bg-black/45 hover:bg-black/60 rounded-xl text-white transition-transform hover:scale-110"
+                  title="클립보드에서 교체"
+                >
+                  <ClipboardPaste size={22} />
+                </button>
+                <button
+                  onClick={onPickFile}
+                  className="p-3 bg-black/45 hover:bg-black/60 rounded-xl text-white transition-transform hover:scale-110"
+                  title="파일로 교체"
+                >
+                  <ImagePlus size={22} />
+                </button>
+                <button
+                  onClick={onRemove}
+                  className="p-3 bg-black/45 hover:bg-red-500/60 rounded-xl text-white transition-transform hover:scale-110"
+                  title="이미지 삭제"
+                >
+                  <Trash2 size={22} />
+                </button>
               </div>
             )}
-            {/* 호버 오버레이 — 아이콘 확대 */}
-            <div className="absolute inset-0 bg-overlay/0 group-hover:bg-overlay/50 transition-colors rounded-xl flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100">
-              <button
-                onClick={onView}
-                className="p-3.5 bg-white/20 hover:bg-white/35 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
-                title="확대 보기"
-              >
-                <Eye size={26} />
-              </button>
-              <button
-                onClick={onPasteClipboard}
-                className="p-3 bg-white/20 hover:bg-white/35 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
-                title="클립보드에서 교체"
-              >
-                <ClipboardPaste size={22} />
-              </button>
-              <button
-                onClick={onPickFile}
-                className="p-3 bg-white/20 hover:bg-white/35 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
-                title="파일로 교체"
-              >
-                <ImagePlus size={22} />
-              </button>
-              <button
-                onClick={onRemove}
-                className="p-3 bg-white/20 hover:bg-red-500/60 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
-                title="이미지 삭제"
-              >
-                <Trash2 size={22} />
-              </button>
-            </div>
           </div>
         </div>
       ) : (
@@ -453,8 +475,9 @@ function ReadOnlyImagePreview({
           draggable={false}
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
-        <div className="absolute inset-0 bg-overlay/0 group-hover:bg-overlay/30 transition-colors rounded-xl flex items-center justify-center">
-          <span className="opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 rounded-md bg-bg-card/80 border border-bg-border text-xs text-text-primary backdrop-blur-sm">
+        {/* hover 안내 — 고정 배경 위 투명도만 0.15초(배경색·흐림 전환 없음, 씬 넘김 고스트에 흐림이 복제되지 않게). */}
+        <div className="absolute inset-0 bg-overlay/30 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <span className="px-3 py-1.5 rounded-md bg-bg-card/95 border border-bg-border text-xs text-text-primary">
             클릭하여 확대
           </span>
         </div>
@@ -493,9 +516,78 @@ export function SceneDetailModal({
   focusRevisionId,
   focusCommentId,
   focusRevisionCommentId,
+  closeRequestToken,
+  onCloseStart,
+  onNavigateTo,
 }: SceneDetailModalProps) {
-  const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const { reduce } = useMotionPref();
+  const modalMotion = sceneModalMotion(reduce);
+
+  // ── 부드러운 닫힘 (움직임 폴리싱 14번) ──
+  // 부모가 바로 언마운트하면 exit 이 돌지 않고 창과 댓글 패널이 '뚝' 사라졌다. 닫기 요청은 여기서 closing 으로 받아
+  // 0.16초 가라앉힌 뒤 부모 onClose 를 부른다(Esc·바깥 클릭·닫기 버튼·바깥 닫기 신호 closeRequestToken).
+  // 부서 전환(DeptToggle)은 같은 컷을 곧바로 다시 여는 흐름이라 부모 onClose 를 바로 부른다.
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const closedRef = useRef(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const onCloseStartRef = useRef(onCloseStart);
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+    onCloseStartRef.current = onCloseStart;
+  }, [onClose, onCloseStart]);
+  const finishClose = useCallback(() => {
+    if (!closingRef.current || closedRef.current) return;
+    closedRef.current = true;
+    onCloseRef.current();
+  }, []);
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    onCloseStartRef.current?.();
+    // 가라앉는 동안 창 안 클릭은 막는다(뒤 막이 클릭을 받아 흘려보내지 않는다 — 연타 무시).
+    if (shellRef.current) shellRef.current.style.pointerEvents = 'none';
+    setClosing(true);
+  }, []);
+  useEffect(() => {
+    if (!closing) return;
+    // exit 완료 신호가 어떤 이유로 오지 않아도 반드시 닫힌다.
+    const timer = setTimeout(finishClose, 600);
+    return () => clearTimeout(timer);
+  }, [closing, finishClose]);
+  // 닫히는 도중에 부모가 먼저 언마운트해도 부모 상태 정리는 빠뜨리지 않는다.
+  useEffect(() => () => finishClose(), [finishClose]);
+  const closeTokenRef = useRef(closeRequestToken);
+  useEffect(() => {
+    if (closeRequestToken === closeTokenRef.current) return;
+    closeTokenRef.current = closeRequestToken;
+    requestClose();
+  }, [closeRequestToken, requestClose]);
+
+  // ── 씬 넘김: 카드가 왼쪽·오른쪽으로 지나간다 (움직임 폴리싱 14번, 한솔 결정 2026-10-03) ──
+  // 창 틀(머리줄·댓글 패널)은 제자리, 본문만 지나가고 씬 번호·제목은 같은 방향으로 짧게 굴러 바뀐다.
+  const flipViewportRef = useRef<HTMLDivElement>(null);
+  const flipLayerRef = useRef<HTMLDivElement>(null);
+  const flipTitleRef = useRef<HTMLDivElement>(null);
+  const flipPeekRef = useRef<HTMLDivElement>(null);
+  const flip = useSceneFlip({
+    identity: `${sheetName}:${scene.id ?? scene.no}:${sceneIndex}`,
+    reduce,
+    layerRef: flipLayerRef,
+    viewportRef: flipViewportRef,
+    titleRef: flipTitleRef,
+    peekHostRef: flipPeekRef,
+    // 본문이 스크롤 상자 안에 있어, 옆으로 밀리는 동안만 가로를 잘라 가로 스크롤바가 생기지 않게 한다.
+    clipX: true,
+    hasPrev,
+    hasNext,
+  });
+  const navigate = useCallback((dir: 'prev' | 'next') => {
+    flip.prepare(dir === 'next' ? 1 : -1);
+    onNavigate?.(dir);
+  }, [flip, onNavigate]);
   // 실시간 편집 프레즌스 — 이 씬(단일 파일) 편집자. 모달 본체 전체를 회전 무지개 링으로 감쌈.
   const editingUsers = useSceneEditingPresence([scene.id]);
   const sceneActivities = useSceneActivities([scene.id], 200);
@@ -640,10 +732,48 @@ export function SceneDetailModal({
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
 
-  // 이미지 즉시 프리뷰용 낙관적 URL (업로드 중 base64 표시)
-  const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
+  // 칸마다 저장 상태(바로 보일 미리보기·저장 중·저장됨 시각)를 '어느 씬의 몇 번째 저장인지'와 함께 둔다.
+  // 저장 중 다른 씬으로 넘기거나 같은 칸에 또 붙여넣어도 서로의 표시를 건드리지 않는다(리뷰 반영).
+  const [imageSave, setImageSave] = useState<ImageSaveState>(EMPTY_IMAGE_SAVE);
+  const imageSaveTokenRef = useRef(0);
+  const imageSceneKey = `${sheetName}:${scene.id || scene.no}`;
   const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
   const { persistLatestImageUrl } = useOptimisticSceneImageUrl('SceneDetailModal');
+
+  /**
+   * 그림 저장 한 번: 바로 미리보기 → 올리기 → 값 저장(낙관적) → 원격 그림을 미리 받아 그린 뒤 미리보기를 걷고 '저장됨 ✓'.
+   * 미리 받기 전에 걷으면 원격 그림이 오는 동안 칸이 비었다가 커지며 아래 내용이 덜컹 밀렸다.
+   * 대상 씬(시트·순번·씬 키)은 시작할 때의 값으로 끝까지 간다.
+   */
+  const saveSlotImage = useCallback(async (
+    imageType: ImageSlotType,
+    readDataUrl: () => Promise<string | null>,
+    failure: { log: string; toast: string },
+  ) => {
+    const token = ++imageSaveTokenRef.current;
+    setImageSave((s) => beginImageSave(s, imageType, imageSceneKey, token));
+    try {
+      const dataUrl = await readDataUrl();
+      if (!dataUrl) {
+        setImageSave((s) => finishImageSave(s, imageType, token, null));
+        return;
+      }
+      // 즉시 프리뷰: 저장이 끝나기 전에도 붙여넣은 그림을 보여 준다
+      setImageSave((s) => showImageSavePreview(s, imageType, token, dataUrl));
+      const { saveImage: si } = await import('@/utils/imageUtils');
+      const url = await si(dataUrl, sheetName, scene.sceneId || String(scene.no), imageType);
+      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+      onFieldUpdate(sceneIndex, field, url);
+      await preloadImage(url);
+      setImageSave((s) => finishImageSave(s, imageType, token, Date.now()));
+    } catch (err) {
+      console.error(failure.log, err);
+      setImageSave((s) => finishImageSave(s, imageType, token, null));
+      sonnerToast.error(`${failure.toast}: ${err instanceof Error ? err.message : err}`);
+    }
+  }, [imageSceneKey, sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate]);
+  const storyboardSave = imageSaveView(imageSave, 'storyboard', imageSceneKey);
+  const guideSave = imageSaveView(imageSave, 'guide', imageSceneKey);
 
   useEffect(() => {
     setLatestImageUrls({});
@@ -660,7 +790,7 @@ export function SceneDetailModal({
       const previousUrl = imageType === 'storyboard' ? scene.storyboardUrl : scene.guideUrl;
 
       setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
-      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+      setImageSave((s) => clearImageSave(s, imageType, imageSceneKey));
 
       persistLatestImageUrl({
         sceneUuid: scene.id,
@@ -672,7 +802,7 @@ export function SceneDetailModal({
         },
       });
     },
-    [department, scene.id, scene.storyboardUrl, scene.guideUrl, persistLatestImageUrl],
+    [department, scene.id, scene.storyboardUrl, scene.guideUrl, persistLatestImageUrl, imageSceneKey],
   );
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
@@ -695,13 +825,14 @@ export function SceneDetailModal({
   // ESC 닫기 + 좌우 화살표 씬 이동 (이미지 뷰어 열려있으면 이미지 모달만 닫기)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (closingRef.current) return; // 가라앉는 중에는 단축키를 받지 않는다
       if (e.key === 'Escape') {
         if (showImageModal) {
           // 이미지 모달만 닫기 (상세 모달은 유지)
           setShowImageModal(false);
           return;
         }
-        onClose();
+        requestClose();
         return;
       }
       // 입력 중이면 화살표 무시
@@ -709,17 +840,27 @@ export function SceneDetailModal({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       // 이미지 모달이 열려있으면 방향키를 이미지 전환에 양보
       if (showImageModal) return;
-      if (e.key === 'ArrowLeft' && hasPrev) onNavigate?.('prev');
-      if (e.key === 'ArrowRight' && hasNext) onNavigate?.('next');
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (!onNavigate) return;
+      const dir = e.key === 'ArrowRight' ? 1 : -1;
+      // 맨 끝에서 더 넘기면 살짝 튕겨 돌아온다(누르고 있어도 한 번만).
+      if (!(dir > 0 ? hasNext : hasPrev)) {
+        if (!e.repeat) flip.bounce(dir);
+        return;
+      }
+      // 키를 누르고 있으면 약 0.14초마다 한 장씩 착착 넘긴다.
+      if (!flip.allowKey(e.repeat)) return;
+      navigate(dir > 0 ? 'next' : 'prev');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, onNavigate, hasPrev, hasNext, showImageModal]);
+  }, [requestClose, navigate, flip, onNavigate, hasPrev, hasNext, showImageModal]);
 
   // ── 글로벌 Ctrl+V 이미지 붙여넣기 ──
   useEffect(() => {
     const onPaste = async (e: ClipboardEvent) => {
       if (showImageModal) return;
+      if (closingRef.current) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       const items = e.clipboardData?.items;
@@ -731,113 +872,44 @@ export function SceneDetailModal({
           if (!blob) continue;
           // 스토리보드가 없으면 스토리보드에, 아니면 가이드에
           const imageType: 'storyboard' | 'guide' = !scene.storyboardUrl ? 'storyboard' : 'guide';
-          try {
-            setImageLoading(imageType);
-            const base64 = await resizeBlob(blob);
-            // 즉시 프리뷰: base64를 낙관적으로 표시
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
-            const { saveImage: si } = await import('@/utils/imageUtils');
-            const url = await si(
-              base64,
-              sheetName,
-              scene.sceneId || String(scene.no),
-              imageType,
-
-            );
-            const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-            onFieldUpdate(sceneIndex, field, url);
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-          } catch (err) {
-            console.error('[Ctrl+V 실패]', err);
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-            sonnerToast.error(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
-          } finally {
-            setImageLoading(null);
-          }
+          await saveSlotImage(imageType, () => resizeBlob(blob), { log: '[Ctrl+V 실패]', toast: '이미지 붙여넣기 실패' });
           return;
         }
       }
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [showImageModal, scene.storyboardUrl, sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate]);
+  }, [showImageModal, scene.storyboardUrl, saveSlotImage]);
 
-  // ── 이미지 핸들러 ──
+  // ── 이미지 핸들러 ── (모두 saveSlotImage 한 길: 바로 미리보기 → 저장 → 미리 받은 뒤 걷기)
 
   const pickFile = useCallback(
     (imageType: 'storyboard' | 'guide') => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
-      input.onchange = async () => {
+      input.onchange = () => {
         const file = input.files?.[0];
         if (!file) return;
-        try {
-          setImageLoading(imageType);
-          const { resizeBlob: rb, saveImage: si } = await import(
-            '@/utils/imageUtils'
-          );
-          const base64 = await rb(file);
-          // 즉시 프리뷰
-          setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
-          const url = await si(
-            base64,
-            sheetName,
-            scene.sceneId || String(scene.no),
-            imageType,
-
-          );
-          const field =
-            imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-          onFieldUpdate(sceneIndex, field, url);
-          setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-        } catch (err) {
-          console.error('[파일 선택 실패]', err);
-          setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-          sonnerToast.error(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
-        } finally {
-          setImageLoading(null);
-        }
+        void saveSlotImage(imageType, () => resizeBlob(file), { log: '[파일 선택 실패]', toast: '이미지 저장 실패' });
       };
       input.click();
     },
-    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
+    [saveSlotImage],
   );
 
   const pasteClipboard = useCallback(
-    async (imageType: 'storyboard' | 'guide') => {
-      try {
-        setImageLoading(imageType);
+    (imageType: 'storyboard' | 'guide') => saveSlotImage(
+      imageType,
+      async () => {
         // 클립보드에서 이미지 읽기 → 즉시 프리뷰
         const dataUrl = await window.electronAPI.clipboardReadImage();
-        if (!dataUrl) {
-          sonnerToast.error('클립보드에 이미지가 없습니다.');
-          setImageLoading(null);
-          return;
-        }
-        // 즉시 프리뷰 표시
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: dataUrl }));
-        // 백그라운드 업로드
-        const { saveImage: si } = await import('@/utils/imageUtils');
-        const url = await si(
-          dataUrl,
-          sheetName,
-          scene.sceneId || String(scene.no),
-          imageType,
-        );
-        const field =
-          imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-        onFieldUpdate(sceneIndex, field, url);
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-      } catch (err) {
-        console.error('[클립보드 붙여넣기 실패]', err);
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-        sonnerToast.error(`클립보드 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
-      } finally {
-        setImageLoading(null);
-      }
-    },
-    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
+        if (!dataUrl) sonnerToast.error('클립보드에 이미지가 없습니다.');
+        return dataUrl || null;
+      },
+      { log: '[클립보드 붙여넣기 실패]', toast: '클립보드 붙여넣기 실패' },
+    ),
+    [saveSlotImage],
   );
 
   const handlePasteEvent = useCallback(
@@ -849,67 +921,21 @@ export function SceneDetailModal({
           e.preventDefault();
           const blob = item.getAsFile();
           if (!blob) continue;
-          try {
-            setImageLoading(imageType);
-            const base64 = await resizeBlob(blob);
-            // 즉시 프리뷰
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
-            const { saveImage: si } = await import('@/utils/imageUtils');
-            const url = await si(
-              base64,
-              sheetName,
-              scene.sceneId || String(scene.no),
-              imageType,
-
-            );
-            const field =
-              imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-            onFieldUpdate(sceneIndex, field, url);
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-          } catch (err) {
-            console.error('[Ctrl+V 실패]', err);
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-            sonnerToast.error(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
-          } finally {
-            setImageLoading(null);
-          }
+          await saveSlotImage(imageType, () => resizeBlob(blob), { log: '[Ctrl+V 실패]', toast: '이미지 붙여넣기 실패' });
           return;
         }
       }
     },
-    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
+    [saveSlotImage],
   );
 
   const handleDrop = useCallback(
     async (e: React.DragEvent, imageType: 'storyboard' | 'guide') => {
       const file = e.dataTransfer?.files?.[0];
       if (!file || !file.type.startsWith('image/')) return;
-      try {
-        setImageLoading(imageType);
-        const base64 = await resizeBlob(file);
-        // 즉시 프리뷰
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
-        const { saveImage: si } = await import('@/utils/imageUtils');
-        const url = await si(
-          base64,
-          sheetName,
-          scene.sceneId || String(scene.no),
-          imageType,
-
-        );
-        const field =
-          imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-        onFieldUpdate(sceneIndex, field, url);
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-      } catch (err) {
-        console.error('[드롭 실패]', err);
-        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-        sonnerToast.error(`이미지 드롭 실패: ${err instanceof Error ? err.message : err}`);
-      } finally {
-        setImageLoading(null);
-      }
+      await saveSlotImage(imageType, () => resizeBlob(file), { log: '[드롭 실패]', toast: '이미지 드롭 실패' });
     },
-    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
+    [saveSlotImage],
   );
 
   const confirmRemoveImage = useCallback(
@@ -923,62 +949,73 @@ export function SceneDetailModal({
       // 3) DB 필드 비우기
       onFieldUpdate(sceneIndex, field, '');
       setLatestImageUrls((prev) => ({ ...prev, [deleteConfirm]: '' }));
-      setPreviewUrls((prev) => ({ ...prev, [deleteConfirm]: undefined }));
+      setImageSave((s) => clearImageSave(s, deleteConfirm, imageSceneKey));
       setDeleteConfirm(null);
     },
-    [sceneIndex, onFieldUpdate, deleteConfirm, scene.storyboardUrl, scene.guideUrl],
+    [sceneIndex, onFieldUpdate, deleteConfirm, scene.storyboardUrl, scene.guideUrl, imageSceneKey],
   );
 
   // 씬 네비게이션 도트 표시 여부 (2개 이상일 때만)
   const showSceneDots = totalScenes > 1;
 
   return (
-    <AnimatePresence>
-      {/* 백드롭 — data-no-lasso: 모달 내부 드래그가 뒤쪽 씬 그리드 라쏘를 트리거하지 않도록 */}
+    <>
+    <AnimatePresence onExitComplete={finishClose}>
+      {/* 백드롭 — data-no-lasso: 모달 내부 드래그가 뒤쪽 씬 그리드 라쏘를 트리거하지 않도록.
+          닫을 때(closing) 이 묶음이 빠지며 창이 가라앉고 뒤 화면이 밝아진다 → 끝나면 finishClose 가 부모 onClose. */}
+      {!closing && (
       <motion.div
         key="detail-backdrop"
         data-no-lasso
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
+        exit={modalMotion.backdropExit}
+        transition={modalMotion.backdropTransition}
         className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm"
         onMouseDown={(e) => {
           // 모달 안 드래그가 backdrop 에서 끝나도 닫히지 않도록 mousedown 시작 위치 추적
           backdropMouseDownRef.current = e.target === e.currentTarget;
         }}
         onClick={(e) => {
-          if (backdropMouseDownRef.current && e.target === e.currentTarget) onClose();
+          if (backdropMouseDownRef.current && e.target === e.currentTarget) requestClose();
           backdropMouseDownRef.current = false;
         }}
       >
-        {/* 모달 래퍼 — 좌: 본체 + 우: 댓글 패널 (항상 표시) */}
+        {/* 모달 래퍼 — 좌: 본체 + 우: 댓글 패널 (항상 표시). 닫을 때 다 같이 살짝 작아지며 가라앉는다. */}
         <motion.div
+          ref={shellRef}
+          exit={modalMotion.shellExit}
           className="relative flex gap-3 items-stretch max-w-full max-h-full overflow-x-auto overflow-y-hidden pb-1"
           onClick={(e) => e.stopPropagation()}
         >
-            {/* 모달 본체 — 프레즌스 빔 래퍼(비스크롤): 스크롤은 안쪽 본체에서, 링은 래퍼 가장자리에 고정 */}
+            {/* 모달 본체 — 프레즌스 빔 래퍼(비스크롤): 스크롤은 안쪽 본체에서, 링은 래퍼 가장자리에 고정.
+                ←/→ 에 마우스를 올리면 이 래퍼 가장자리에 다음 카드 모서리가 비친다(.sf-peek). */}
             <div
+              ref={flipPeekRef}
               className={cn(
                 'relative flex rounded-2xl',
                 editingModalBeamClass(editingUsers.length > 0, isWarnPresence(editingUsers)),
               )}
             >
+            <div aria-hidden className="sf-peek sf-peek--prev" />
+            <div aria-hidden className="sf-peek sf-peek--next" />
             <motion.div
               key="detail-modal"
-              initial={{ opacity: 0, scale: 0.95, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 16 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
+              initial={modalMotion.body.initial}
+              animate={modalMotion.body.animate}
+              transition={modalMotion.body.transition}
               className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border w-[42rem] max-h-[90vh] overflow-y-auto"
             >
-              {/* ── 헤더 ── */}
-              <div className="sticky top-0 z-10 flex items-center gap-3 px-6 py-4 bg-bg-card/95 backdrop-blur-md border-b border-bg-border rounded-t-2xl">
-                {/* 이전/다음 씬 네비게이션 */}
+              {/* ── 헤더 ── 창 틀이라 씬을 넘겨도 제자리.
+                  뒤 흐림(backdrop-blur)은 본문이 밑으로 지나갈 때마다 다시 계산돼 불투명 배경으로 바꿨다(겉모습 같음). */}
+              <div className="sticky top-0 z-10 flex items-center gap-3 px-6 py-4 bg-bg-card border-b border-bg-border rounded-t-2xl">
+                {/* 이전/다음 씬 네비게이션 — 마우스를 올리면 그쪽에 다음 카드 모서리가 비친다 */}
                 {onNavigate && (
                   <div className="flex items-center gap-1 mr-1">
                     <button
-                      onClick={() => onNavigate('prev')}
+                      onClick={() => navigate('prev')}
+                      onMouseEnter={() => flip.peek('prev')}
+                      onMouseLeave={() => flip.peek(null)}
                       disabled={!hasPrev}
                       className={cn(
                         'p-1.5 rounded-lg transition-all',
@@ -991,7 +1028,9 @@ export function SceneDetailModal({
                       <ChevronLeft size={18} />
                     </button>
                     <button
-                      onClick={() => onNavigate('next')}
+                      onClick={() => navigate('next')}
+                      onMouseEnter={() => flip.peek('next')}
+                      onMouseLeave={() => flip.peek(null)}
                       disabled={!hasNext}
                       className={cn(
                         'p-1.5 rounded-lg transition-all',
@@ -1005,12 +1044,17 @@ export function SceneDetailModal({
                     </button>
                   </div>
                 )}
-                <span className="text-lg font-mono font-bold" style={{ color: deptConfig.color }}>
-                  #{scene.no}
-                </span>
-                <span className="text-lg font-semibold text-text-primary flex-1">
-                  {scene.sceneId || '(씬번호 없음)'}
-                </span>
+                {/* 씬 번호·제목 — 본문과 같은 방향으로 짧게 굴러 바뀐다(useSceneFlip 이 고스트를 이 칸 안에 깐다). */}
+                <div className="sf-title-slot flex-1 min-w-0 flex">
+                  <div ref={flipTitleRef} className="flex items-center gap-3 min-w-0">
+                    <span className="text-lg font-mono font-bold" style={{ color: deptConfig.color }}>
+                      #{scene.no}
+                    </span>
+                    <span className="text-lg font-semibold text-text-primary">
+                      {scene.sceneId || '(씬번호 없음)'}
+                    </span>
+                  </div>
+                </div>
                 {/* 진행률 */}
                 <span className="text-sm font-mono text-text-secondary mr-2">
                   {Math.round(pct)}%
@@ -1020,14 +1064,16 @@ export function SceneDetailModal({
                 <DeptToggle scene={scene} sceneIdName={scene.sceneId || String(scene.no)} sheetName={sheetName} onClose={onClose} />
 
                 <button
-                  onClick={onClose}
+                  onClick={requestClose}
                   className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-primary rounded-lg transition-colors cursor-pointer"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="px-6 py-5 flex flex-col gap-8">
+              {/* 본문 — 씬을 넘기면 이 카드가 옆으로 지나가고(고스트), 새 씬이 반대쪽에서 들어온다. */}
+              <div ref={flipViewportRef} className="sf-flip-viewport">
+              <div ref={flipLayerRef} className="px-6 py-5 flex flex-col gap-8">
                 {/* ── 진행 단계 (프로세스 트랙) ── */}
                 <section>
                   <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">
@@ -1047,6 +1093,7 @@ export function SceneDetailModal({
                       <ScenePhaseToggle
                         scene={scene}
                         iconDisplay="always"
+                        roundBadgePlacement="above"
                         onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next)}
                         onRequestFeedback={() => onActFeedbackRequest(sheetName, scene.sceneId)}
                         onRoundBump={(kind, delta) => onActRoundBump(sheetName, scene.sceneId, kind, delta)}
@@ -1120,9 +1167,10 @@ export function SceneDetailModal({
                     <div className="flex flex-col gap-5 px-4">
                       <ImageSlot
                         label="스토리보드"
-                        url={previewUrls.storyboard ?? latestImageUrls.storyboard ?? scene.storyboardUrl}
-                        loading={imageLoading === 'storyboard' && !previewUrls.storyboard}
-                        uploading={!!previewUrls.storyboard}
+                        url={storyboardSave.preview ?? latestImageUrls.storyboard ?? scene.storyboardUrl}
+                        loading={storyboardSave.saving && !storyboardSave.preview}
+                        uploading={storyboardSave.saving && !!storyboardSave.preview}
+                        savedAt={storyboardSave.savedAt}
                         onPickFile={() => pickFile('storyboard')}
                         onPasteClipboard={() => pasteClipboard('storyboard')}
                         onRemove={() => setDeleteConfirm('storyboard')}
@@ -1132,9 +1180,10 @@ export function SceneDetailModal({
                       />
                       <ImageSlot
                         label="가이드"
-                        url={previewUrls.guide ?? latestImageUrls.guide ?? scene.guideUrl}
-                        loading={imageLoading === 'guide' && !previewUrls.guide}
-                        uploading={!!previewUrls.guide}
+                        url={guideSave.preview ?? latestImageUrls.guide ?? scene.guideUrl}
+                        loading={guideSave.saving && !guideSave.preview}
+                        uploading={guideSave.saving && !!guideSave.preview}
+                        savedAt={guideSave.savedAt}
                         onPickFile={() => pickFile('guide')}
                         onPasteClipboard={() => pasteClipboard('guide')}
                         onRemove={() => setDeleteConfirm('guide')}
@@ -1169,6 +1218,7 @@ export function SceneDetailModal({
                   </section>
                 ) : null}
               </div>
+              </div>
 
               {/* ── 하단 씬 네비게이션 도트 ── */}
               {showSceneDots && (
@@ -1193,18 +1243,21 @@ export function SceneDetailModal({
                       <button
                         key={i}
                         onClick={() => {
-                          if (i < currentSceneIndex && onNavigate) {
-                            for (let j = 0; j < currentSceneIndex - i; j++) {
-                              setTimeout(() => onNavigate('prev'), j * 30);
-                            }
-                          } else if (i > currentSceneIndex && onNavigate) {
-                            for (let j = 0; j < i - currentSceneIndex; j++) {
-                              setTimeout(() => onNavigate('next'), j * 30);
-                            }
+                          if (i === currentSceneIndex || !onNavigate) return;
+                          const dir = i < currentSceneIndex ? 'prev' : 'next';
+                          // 여러 칸 떨어진 씬도 목표 순번으로 한 번에 가고 카드는 한 번만 넘긴다(검증 지적 acc-scene-flow-7).
+                          //   예전엔 onNavigate 를 칸 수만큼 불렀는데, 부모가 그 렌더의 순번을 닫아 두어 매번 같은 '다음'으로
+                          //   가서 한 칸만 움직이고 넘김도 돌지 않았다. 목표로 가는 길이 없으면 한 칸만 넘긴다.
+                          if (onNavigateTo) {
+                            flip.prepare(dir === 'next' ? 1 : -1);
+                            onNavigateTo(i);
+                          } else {
+                            navigate(dir);
                           }
                         }}
                         className={cn(
-                          'rounded-full transition-all duration-300 cursor-pointer',
+                          // 폭(w-1.5↔w-5)은 바로 바꾼다 — transition-all 이 되살아나 폭이 0.3초 늘어나며 줄을 밀었다.
+                          'rounded-full transition-colors cursor-pointer',
                           isCurrent
                             ? 'w-5 h-1.5 bg-accent'
                             : 'w-1.5 h-1.5 bg-text-secondary/30 hover:bg-text-secondary/50',
@@ -1228,7 +1281,7 @@ export function SceneDetailModal({
                   exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
                   transition={{ delay: 0.2, duration: 0.2 }}
                   onClick={() => setShowRevisions(true)}
-                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer"
+                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-colors cursor-pointer"
                   style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
                   title="컴포지팅 리테이크"
                 >
@@ -1300,7 +1353,10 @@ export function SceneDetailModal({
           />
         </motion.div>
       </motion.div>
+      )}
+    </AnimatePresence>
 
+    <AnimatePresence>
       {/* ── 이미지 삭제 확인 팝업 ── */}
       <AnimatePresence>
         {deleteConfirm && (
@@ -1379,6 +1435,7 @@ export function SceneDetailModal({
         />
       )}
     </AnimatePresence>
+    </>
   );
 }
 
@@ -1457,7 +1514,7 @@ function DeptToggle({ scene, sceneIdName, sheetName, onClose }: { scene: Scene; 
           key={d}
           onClick={() => handle(d)}
           className={cn(
-            'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
+            'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-colors whitespace-nowrap',
             selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
           )}
           style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}

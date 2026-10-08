@@ -1,8 +1,6 @@
 # CLAUDE.md — B flow
 
-> **배경 평면/3D 후속 작업 (2026-10-07):** [Opus 5.5 구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md)와 [실행 계획](docs/superpowers/plans/2026-10-07-background-3d-editor.md)을 먼저 읽는다. 같은 배치의 평면/3D 전환, 고정 기본점에 카메라 생성, 기즈모 이동·회전, 3D 카메라 편집 중 동시 2D 확인이 요구사항이다. 2026-10-07에 구현과 로컬 검증을 마쳤다(미커밋·미배포). 구현 결과·확정한 결정·미검증 항목은 인수인계 문서 §13, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)의 2026-10-07 절을 본다.
-
-> **배경 라이브러리 작업 재개 안내 (2026-10-06):** 이 워크트리의 미커밋 구현은 보존 중이다. [상세 인수인계](DEVLOG/background-library-handoff-2026-10-06.md)를 먼저 읽는다. 작업 위치는 `C:\Bflow-BGonly\.worktrees\background-library`이며, 상위 checkout과 미추적 파일을 덮어쓰거나 정리하지 않는다. 마지막 완료 항목은 에피소드별 배경 UI이며 운영 DB 적용·배포는 미실행이다.
+> **배경 라이브러리 시험 공개 (v1.130.0, 2026-10-08):** 배경 라이브러리(장소·도면·배경·에피소드별 배경)와 평면/3D 공동 도면을 main에 통합했다. **메뉴와 화면은 배한솔 계정에만 열려 있다** — 사이드바 노출과 화면 진입이 모두 `src/features/playground/featureFlag.ts`의 `canAccessBackgroundLibrary`를 거치므로, 공개 범위를 넓힐 때는 그 함수만 바꾼다(화면 노출만 막는 장치다. 서버 권한은 별개로, 읽기는 로그인한 누구나·장소/도면/배경 편집은 관리자·에피소드별 사용 기록은 팀원도 가능하다). 운영 DB에는 2026-10-08에 `2026-09-21-background-library.sql` → `2026-10-07-background-map-3d.sql` 순서로 적용했다(기본 파일을 다시 실행하면 3D 파일도 다시 실행한다). 결정·미검증 항목은 [구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md) §13~§14, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)을 본다.
 
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
@@ -68,7 +66,13 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 텍스트: #E8E8EE | 텍스트 약: #8B8DA3 | 액센트: #6C5CE7
 
 단계: LO=#74B9FF  완료=#A29BFE  검수=#FDCB6E  PNG=#00B894
+
+모션: 빠름 120ms / 보통 180ms / 느림 260ms (--motion-fast/base/slow)
+      곡선 --ease-out(.16,1,.3,1) · --ease-in · --ease-std · --ease-spring · --ease-snap
+      JS 는 src/utils/motion.ts (motionPreset·transformPreset·animateEl)
 ```
+
+**움직임 규칙 (v1.128.0)**: 움직임은 transform/opacity 중심(framer 는 transform 문자열 + `transitionEnd: { transform: 'none' }`), 반복·움직이는 요소에 backdrop-filter 금지, 레이아웃 속성·무한 paint 애니메이션 금지. 설정 '움직임: 최소'와 OS 동작 줄이기는 같게 처리하되 **정보를 알려 주는 표시는 정적 대체로 남긴다**(useMotionPref → { reduce, lite, level }). 갈래 CSS 에는 동작 줄이기(@media reduce) 규칙만 쓰면 빌드 때 `scripts/postcss-motion-minimal.cjs` 가 '최소' 짝을 만든다. '가볍게'·'최소'를 CSS 에서 고를 땐 html 의 존재 속성 `[data-motion-lite]`·`[data-motion-minimal]` 만 쓴다(값 비교 `[data-motion='…']` 선택자는 모든 요소의 스타일 계산을 무겁게 한다). 전역 전환 규칙은 `:where()` 로 특이도 0 — 컴포넌트 전환을 덮지 않게. 상세: tasks/lessons.md 2026-10-02·2026-10-03.
 
 ---
 
@@ -89,7 +93,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 1. **플랜 우선**: 비자명한 작업(3단계+)은 플랜 모드 진입. 틀어지면 STOP 후 재계획.
 2. **서브에이전트 활용**: 리서치/탐색/병렬 분석은 서브에이전트에 위임. 메인 컨텍스트 깨끗하게 유지.
 3. **자기개선**: 수정 받으면 `tasks/lessons.md`에 패턴 기록. 동일 실수 반복 방지.
-4. **완료 전 검증**: 작동 증명 없이 완료 표시 금지. typecheck + 관련 테스트 + 빌드 + 동작 확인.
+4. **완료 전 검증**: 작동 증명 없이 완료 표시 금지. typecheck + 관련 테스트 + 빌드 + 동작 확인. **화면을 바꿨으면 앱과 같은 엔진으로 본다** — 앱은 Electron 33(Chromium 130)이고 PC 의 Chrome 은 훨씬 새 버전이라 같은 코드가 다르게 놓일 수 있다(`npm run preview:electron`, tasks/lessons.md 2026-10-06).
 5. **자율 버그 수정**: 버그 리포트 받으면 지시 없이 바로 수정. 로그/오류 직접 추적.
 6. **단순함 우선**: 최소한의 코드 영향. 과잉 설계 금지. 근본 원인 해결.
 
@@ -121,6 +125,8 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
   - `tldr_for_users.md` 처럼 슬랙에 그대로 공유해도 어색하지 않은 톤이 기준. 한솔이 직접 팀에 안내할 때 그대로 쓸 수 있어야 한다.
   - 같은 룰을 PR 본문의 `📋 업데이트 요약` 섹션에도 적용한다 (상세 기술 설명 섹션은 개발자 톤 OK).
 - 배포용 `manifest.json`은 `BFLOW-Setup.exe`가 있을 때만 생성한다. `--allow-missing-installer`는 개발용 `build:vite`에서만 사용한다.
+- **휴가 연동 토큰은 배포 빌드에 항상 넣는다 (v1.128.1~)**: 값(`BFLOW_VACATION_TOKEN`)은 레포에 커밋하지 않고 메인 체크아웃의 `.env.local` 에만 둔다. `scripts/vacation-token.cjs` 가 환경변수 → 빌드 폴더 → 메인 체크아웃 순서로 찾으므로 워크트리 빌드에도 들어간다. `npm run build` 는 토큰이 없으면 첫 단계에서 멈추고, 묶음에 토큰이 없으면 `manifest.json` 을 만들지 않는다 — 이 확인을 끄거나 우회하지 말 것. 토큰 값은 로그·PR·문서에 적지 않는다.
+- **앱 안에 빌드 산출물을 다시 담지 않는다 (v1.129.1~)**: 화면 묶음 폴더와 electron-builder 출력 폴더가 둘 다 `dist` 다. `package.json` `build.files` 의 `dist/**/*` 바로 뒤 `!dist/…` 제외 규칙 세 줄을 지우거나 순서를 바꾸지 말 것(런타임 한 벌이 앱 안에 더 들어가 설치 파일이 115MB → 192MB 로 커진다). 출력 폴더(`directories.output`)도 바꾸지 않는다. `generate-manifest.js` 는 앱의 화면 폴더에 다른 것이 섞이면 `manifest.json` 을 만들지 않는다.
 - 토스트가 떴다는 것만으로 업데이트 성공으로 판단하지 말고, 다음 실행 버전과 `swap.log`의 `[installer-main]`/`[installer]` 로그, `installer-pending` 정리 여부를 확인한다.
 - 설치/적용 중에는 사용자가 상황을 알 수 있어야 한다. renderer는 `applying` 상태를 표시하고, 앱 종료 후 helper는 별도 진행 창을 띄운다.
 - PowerShell helper를 TypeScript 백틱 문자열 안에 넣을 때 PowerShell 변수는 `$($name)` 형태로 쓴다. `${name}`은 JavaScript 보간으로 실행되어 helper 시작 전 `ReferenceError`를 만들 수 있다.
@@ -151,5 +157,5 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 ---
 
-*문서 버전: 2026-05-08*
+*문서 버전: 2026-10-03*
 *작성: Claude × 한솔 (Studio JBBJ)*

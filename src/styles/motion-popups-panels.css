@@ -1,0 +1,125 @@
+/* 이 갈래 전용 움직임 CSS — popups-panels 갈래 (창·메뉴 박자, 상세 창 내용 교체) */
+
+/* ═══════════════════════════════════════════════════════════
+   8. 창·메뉴 공통 박자 (popup-rhythm)
+   - 기준점 계산은 src/utils/popupMotion.ts, 박자 값은 POPUP_MS 와 같아야 한다.
+   - 모두 들어올 때만 움직인다(fill-mode backwards — 끝나면 요소 자기 스타일로 돌아간다).
+     닫힘은 바로 사라진다(퇴장 움직임 없음 — 다음 동작을 막지 않게).
+   - transform 으로 자리를 잡은 요소(-translate-x-1/2 등)에 직접 붙이지 말 것 — 움직이는 동안 그 transform 을 덮는다.
+     그런 곳은 바깥 래퍼가 자리를 맡고 안쪽에 붙인다(일괄 변경 바 참고).
+   - 흐림(backdrop-filter) 판은 자기 자신에게만 붙인다. 흐림 판의 조상이 opacity 를 움직이면
+     그동안 흐림이 바깥을 못 봐 '꺼졌다 켜지는' 것처럼 보인다(Backdrop Root).
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes bf-scrim-in {
+  from { opacity: 0; }
+}
+
+@keyframes bf-modal-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+}
+
+@keyframes bf-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+}
+
+@keyframes bf-pop-in-up {
+  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+}
+
+@keyframes bf-bulk-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+}
+
+@keyframes bf-fade-in {
+  from { opacity: 0; }
+}
+
+/* 큰 창 뒤 배경 — 흐림 없이 어두워지기만 */
+.bf-scrim-in {
+  animation: bf-scrim-in 150ms var(--ease-out) backwards;
+}
+
+/* 큰 창 — 살짝 아래·살짝 작은 크기에서 떠오름 */
+.bf-modal-in {
+  animation: bf-modal-in var(--motion-base) var(--ease-out) backwards;
+}
+
+/* 작은 메뉴 — 누른 자리 쪽 모서리에서 피어남. 기준점은 인라인 --pop-origin(popOriginStyle), 없으면 오른쪽 위. */
+.bf-pop {
+  animation: bf-pop-in 140ms var(--ease-out) backwards;
+  transform-origin: var(--pop-origin, top right);
+}
+.bf-pop.bf-pop-up {
+  animation-name: bf-pop-in-up;
+}
+
+/* 컴포지팅 아래 일괄 변경 바 — 아래에서 살짝 올라옴. 떠 있는 동안은 다시 재생되지 않는다(마운트 한 번). */
+.bf-bulk-in {
+  animation: bf-bulk-in var(--motion-base) var(--ease-out) backwards;
+  transform-origin: bottom center;
+}
+
+/* 타임라인 프로젝트·폴더 창(<dialog>) — 같은 큰 창 박자 */
+.gantt-modal[open] {
+  animation: bf-modal-in var(--motion-base) var(--ease-out) backwards;
+}
+.gantt-modal[open]::backdrop {
+  animation: bf-scrim-in 150ms var(--ease-out) backwards;
+}
+
+/* 동작 줄이기 — 움직임 없이 opacity 만 100ms. 전역 규칙(index.css 의 * {animation-duration:.01ms !important})보다
+   특이도가 높아야 이긴다(클래스 선택자 + !important). */
+@media (prefers-reduced-motion: reduce) {
+  .bf-scrim-in,
+  .bf-modal-in,
+  .bf-pop,
+  .bf-bulk-in,
+  .gantt-modal[open],
+  .gantt-modal[open]::backdrop {
+    animation: bf-fade-in 100ms linear backwards !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   11. 항목을 바꿔 볼 때 창 틀은 제자리, 내용만 스르륵 (content-swap-in-place)
+   - 박자는 src/utils/contentSwap.ts 의 CONTENT_SWAP_MS 와 같아야 한다.
+   - 창 틀(바깥 셸)은 첫 열림·닫힘만 움직이고(framer, sidePanelPreset), 다른 항목을 누르면
+     안쪽 내용만 key 로 새로 그려 아래 클래스로 떠오른다. 첫 열림에는 붙이지 않는다(useSwapIn).
+   - 들어올 때만 움직인다(fill-mode backwards) — 다 그려진 뒤에는 요소 자기 스타일로 돌아간다.
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes bf-swap-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+@keyframes bf-inspector-in {
+  from { opacity: 0; transform: translateX(16px); }
+}
+
+/* 열린 상세 창의 내용 교체 — 제목·날짜·메모만 4px 아래에서 떠오른다 */
+.bf-swap-in {
+  animation: bf-swap-in 140ms var(--ease-out) backwards;
+}
+/* 휴가 '선택한 날짜' 카드 — 작은 카드라 조금 더 짧게 */
+.bf-swap-in.bf-swap-quick {
+  animation-duration: 120ms;
+}
+
+/* 타임라인 상세 창 — 처음 열릴 때만 오른쪽에서 밀려 들어온다.
+   작업을 바꿔도 같은 요소라 다시 재생되지 않는다. 연결 캘린더 창은 작업마다 새로 그려지므로 바깥 셸에 건다.
+   간트 CSS 는 화면이 나중에 불러오므로 .gantt 를 붙여 특이도로 이긴다. 너비는 움직이지 않는다.
+   셸의 자리 잡기(flex 로 안쪽 창을 꽉 채움)는 GanttView 의 클래스가 맡는다. */
+.gantt .gantt-inspector,
+.gantt .gantt-inspector-shell {
+  animation: bf-inspector-in 200ms var(--ease-out) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bf-swap-in,
+  .bf-swap-in.bf-swap-quick,
+  .gantt .gantt-inspector,
+  .gantt .gantt-inspector-shell {
+    animation: bf-fade-in 100ms linear backwards !important;
+  }
+}

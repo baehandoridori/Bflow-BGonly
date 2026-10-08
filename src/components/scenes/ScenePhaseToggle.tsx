@@ -14,12 +14,15 @@
  */
 
 import { CheckCircle2, ChevronDown, ChevronUp, Clock, MessageSquareWarning, PlayCircle } from 'lucide-react';
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { Scene, ScenePhaseState } from '@/types';
 import { SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { cn } from '@/utils/cn';
+import { shouldSkipClickAfterPointer } from '@/utils/pointerClickGuard';
 import { useStageLabelDisplayMode } from './useStageLabelDisplayMode';
+import { StageRollbackFlash, useStageSaveStatus } from './StageSaveStatus';
+import { phaseCellId } from './stageSaveFeedback';
 
 export interface ScenePhaseToggleProps {
   scene: Scene;
@@ -35,6 +38,12 @@ export interface ScenePhaseToggleProps {
   compact?: boolean;
   /** 아이콘 노출 방식. 좁은 카드/시트는 텍스트를 우선한다. */
   iconDisplay?: 'always' | 'wide' | 'never' | 'auto';
+  /**
+   * '작업중 N차' 자리. 어느 쪽이든 흐름에서 빠져(absolute) 높이를 바꾸지 않는다.
+   * - corner(기본): 칩 묶음 위 모서리에 걸침 — 위 여백이 좁은 카드·시트용
+   * - above: 칩 묶음 바로 위 — 제목 줄 오른쪽이 비어 있는 상세 창용
+   */
+  roundBadgePlacement?: 'corner' | 'above';
 }
 
 const PHASE_ICON_BY_STATE: Record<ScenePhaseState, ReactNode> = {
@@ -52,13 +61,18 @@ export function ScenePhaseToggle({
   disabled = false,
   compact = false,
   iconDisplay = 'auto',
+  roundBadgePlacement = 'corner',
 }: ScenePhaseToggleProps) {
   const activeState: ScenePhaseState = scene.sceneState ?? 'wait';
   // v1.25.7: 작업중일 때만 차수 헤더 노출. 리테이크/대기/완료는 차수 숨김.
   const showWorkRound = activeState === 'work';
   const workRound = scene.workRound ?? 1;
+  // pointerdown 이 이미 토글했고 그 누름의 click 이 아직 안 왔는지 — 타이머 없이 누름과 click 을 짝지운다(acc-scene-flow-6).
   const pointerHandledRef = useRef(false);
   const { modeOf, setNode } = useStageLabelDisplayMode(SCENE_PHASE_LABELS_SHORT, compact, iconDisplay === 'auto');
+  // 20번: 저장이 실패해 다시 보내는 중인 칩(점선·흐림)과 끝내 되돌린 칩(도리도리·빨간 테두리).
+  const { pending, rollback } = useStageSaveStatus(scene.id);
+  const activePending = pending.has(phaseCellId(activeState));
   const phaseIconClassName =
     (compact && iconDisplay !== 'auto') || iconDisplay === 'never'
       ? 'hidden'
@@ -87,56 +101,65 @@ export function ScenePhaseToggle({
       event.stopPropagation();
       pointerHandledRef.current = true;
       handleChipClick(target);
-      window.setTimeout(() => {
-        pointerHandledRef.current = false;
-      }, 600);
     },
     [handleChipClick],
   );
 
-  return (
-    <div className="w-full flex flex-col gap-1.5">
-      {/* v1.25.7: 작업중 활성 시 차수 헤더. 우측 정렬 작은 박스. */}
-      {showWorkRound && (
-        <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full font-bold tabular-nums',
-              compact ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0.5 text-[11px]',
-            )}
-            style={{
-              background: `${SCENE_PHASE_COLORS.work}26`,
-              color: SCENE_PHASE_COLORS.work,
-            }}
-          >
-            작업중
-            <RoundCounter
-              value={workRound}
-              onBump={(delta) => onRoundBump('work', delta)}
-              disabled={disabled}
-              compact={compact}
-            />
-            차
-          </span>
-        </div>
-      )}
+  const activeIndex = SCENE_PHASES.indexOf(activeState);
 
+  return (
+    // 움직임 폴리싱 6번: 차수 표시는 흐름에서 빼고(absolute) 칩 묶음 위 모서리에 걸친다 — '작업중'을 눌러도 카드·시트 줄 높이가 그대로.
+    <div className="relative w-full">
       {/* 칩 4개 — 텍스트 우선, 아이콘은 뒤쪽에 배치해 좁은 칸에서 라벨을 먼저 보존한다. */}
       <div
         className={cn(
-          'flex w-full rounded-lg bg-bg-primary/70 border border-bg-border/40',
+          'relative flex w-full rounded-lg bg-bg-primary/70 border border-bg-border/40',
           compact ? 'p-0.5 gap-0.5' : 'p-1 gap-0.5',
         )}
         role="radiogroup"
         aria-label="액팅 씬 단계"
       >
+        {/* 색 알약 하나가 고른 칩 자리로 미끄러진다. 색은 4겹의 opacity 로 바뀐다(배경색 전환 X). */}
+        {activeIndex >= 0 && (
+          <span
+            aria-hidden="true"
+            className={cn('stage-seg-pill rounded-md', disabled && 'opacity-40')}
+            data-save-pending={activePending || undefined}
+            style={{
+              '--stage-pill-index': activeIndex,
+              '--stage-pill-count': SCENE_PHASES.length,
+              '--stage-pill-pad': compact ? '2px' : '4px',
+              '--stage-pill-gap': '2px',
+            } as CSSProperties}
+          >
+            {SCENE_PHASES.map((state) => (
+              <span
+                key={state}
+                className="stage-seg-pill-layer"
+                data-on={activeState === state}
+                data-glow
+                style={{
+                  '--stage-seg-color': SCENE_PHASE_COLORS[state],
+                  '--stage-seg-glow': `${SCENE_PHASE_COLORS[state]}40`,
+                } as CSSProperties}
+              />
+            ))}
+          </span>
+        )}
         {SCENE_PHASES.map((state) => {
           const isActive = activeState === state;
+          const cellId = phaseCellId(state);
+          const savePending = pending.has(cellId);
           return (
             <div
               key={state}
               ref={setNode(state)}
               data-continuity-stage-segment
+              data-on={isActive}
+              data-celebrate-cell={isActive && state === 'done' ? true : undefined}
+              data-stage-key={cellId}
+              data-save-pending={savePending || undefined}
+              aria-busy={savePending || undefined}
               role="radio"
               aria-checked={isActive}
               aria-disabled={disabled || undefined}
@@ -145,7 +168,7 @@ export function ScenePhaseToggle({
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (pointerHandledRef.current) {
+                if (shouldSkipClickAfterPointer(pointerHandledRef.current, e.detail)) {
                   pointerHandledRef.current = false;
                   return;
                 }
@@ -159,20 +182,15 @@ export function ScenePhaseToggle({
                 }
               }}
               className={cn(
-                'compact-label-container flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-medium select-none',
-                'transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
+                'stage-seg compact-label-container flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-semibold select-none',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
                 compact ? 'px-1 py-1 text-[10px]' : 'px-1.5 py-2 text-[11px]',
-                !isActive && 'text-text-secondary/70 hover:text-text-primary hover:bg-bg-border/25 cursor-pointer',
+                !isActive && 'text-text-secondary/70 hover:text-text-primary cursor-pointer',
                 disabled && 'opacity-40 cursor-not-allowed',
               )}
               style={
                 isActive
-                  ? {
-                      backgroundColor: SCENE_PHASE_COLORS[state],
-                      color: state === 'wait' ? '#fff' : '#0F1117',
-                      fontWeight: 700,
-                      boxShadow: `0 2px 8px ${SCENE_PHASE_COLORS[state]}40`,
-                    }
+                  ? { color: state === 'wait' ? '#fff' : '#0F1117' }
                   : undefined
               }
             >
@@ -191,10 +209,43 @@ export function ScenePhaseToggle({
                       : 'both'
                 }
               />
+              {rollback?.cells.includes(cellId) && <StageRollbackFlash key={rollback.at} />}
             </div>
           );
         })}
       </div>
+
+      {/* v1.25.7: 작업중 활성 시 차수 표시. 우측 작은 박스 — 칩 묶음 위 모서리에 걸쳐 살짝 떠오르며 나타난다. */}
+      {showWorkRound && (
+        <div
+          className={cn(
+            'stage-round-badge',
+            compact && 'stage-round-badge--compact',
+            roundBadgePlacement === 'above' && 'stage-round-badge--above',
+          )}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full font-bold tabular-nums leading-none',
+              compact ? 'h-3 px-1.5 text-[10px]' : 'h-4 px-2 text-[11px]',
+            )}
+            style={{
+              '--stage-round-tint': `${SCENE_PHASE_COLORS.work}26`,
+              color: SCENE_PHASE_COLORS.work,
+            } as CSSProperties}
+          >
+            작업중
+            <RoundCounter
+              value={workRound}
+              onBump={(delta) => onRoundBump('work', delta)}
+              disabled={disabled}
+              compact={compact}
+            />
+            차
+          </span>
+        </div>
+      )}
     </div>
   );
 }

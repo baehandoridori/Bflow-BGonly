@@ -14,6 +14,7 @@ import { useEffect, useRef } from 'react';
 import { File, Folder } from 'lucide-react';
 import { LengthIcon } from './LengthIcon';
 import type { SceneWorkLink } from '@/types';
+import { popClassName, popOriginFromPoint, popOriginStyle } from '@/utils/popupMotion';
 
 export interface SceneContextMenuProps {
   x: number;
@@ -61,19 +62,22 @@ export function SceneContextMenu({ x, y, current, onSelect, onClose, sceneLabel,
   const menuHeight = workLinks ? 376 : 168;
   const adjustedX = Math.max(4, Math.min(x, window.innerWidth - menuWidth - 8));
   const adjustedY = Math.max(4, Math.min(y, window.innerHeight - menuHeight - 8));
+  // 누른 지점에서 피어나기(움직임 폴리싱 8번) — 화면 끝에서 밀려나면 기준점도 반대 모서리로.
+  const origin = popOriginFromPoint({ x, y }, { left: adjustedX, top: adjustedY, width: menuWidth, height: menuHeight });
 
   return (
     <div
       ref={ref}
       role="menu"
       style={{
+        ...popOriginStyle(origin),
         position: 'fixed',
         left: adjustedX,
         top: adjustedY,
         zIndex: 9999,
         width: menuWidth,
       }}
-      className="bg-bg-card border border-bg-border rounded-lg shadow-2xl p-1.5 select-none"
+      className={`${popClassName(origin)} bg-bg-card border border-bg-border rounded-lg shadow-2xl p-1.5 select-none`}
       onContextMenu={(e) => e.preventDefault()}
       // v1.16.0 fix (Codex 라운드 5): 메뉴 컨테이너 click 도 부모 (카드/시트 행) 로 bubble 막음 — 안전망
       onClick={(e) => e.stopPropagation()}

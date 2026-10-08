@@ -16,6 +16,8 @@ import type { CalendarEvent, CalendarEventType } from '@/types/calendar';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { fmtDate } from '@/utils/calendarDate';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { sidePanelPreset } from '@/utils/contentSwap';
+import { prefersReducedMotion } from '@/utils/motion';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { CalendarDateRangePicker, CalendarTimeInput, CalendarDurationButtons } from './inputs';
 
@@ -235,13 +237,12 @@ export function EventCreateModal({ initialDate, initialEndDate, initialStartTime
     <>
       {/* 배경색 유틸이 없어 농도만 있던 투명막이었다. 캘린더 설정 모달과 같은 농도로 통일한다. */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.16 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-black" onClick={onClose} />
+      {/* 옆 상세 창과 같은 박자(움직임 폴리싱 11번) — 오른쪽 24px 에서 250ms, 닫힐 때 180ms.
+          움직이는 창이라 흐림은 끄고, 뒤 글자가 비치지 않게 배경은 불투명하게. */}
       <motion.div
-        initial={{ opacity: 0, x: 40 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 40 }}
-        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        {...sidePanelPreset(prefersReducedMotion())}
         className="absolute right-0 top-0 bottom-0 z-50 w-[24rem] max-h-full overflow-y-auto"
-        style={{ ...floatingGlassStyle, background: 'rgb(var(--color-bg-card) / 0.96)', borderLeft: '1px solid rgb(var(--color-bg-border) / 0.42)', boxShadow: '-14px 0 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.22))' }}
+        style={{ ...floatingGlassStyle, backdropFilter: 'none', WebkitBackdropFilter: 'none', background: 'rgb(var(--color-bg-card))', borderLeft: '1px solid rgb(var(--color-bg-border) / 0.42)', boxShadow: '-14px 0 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.22))' }}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">

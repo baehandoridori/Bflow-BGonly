@@ -4,6 +4,11 @@ import type { CalendarEvent } from '@/types/calendar';
 import { tooltipGlassStyle } from '@/utils/glassStyles';
 import { EventTagBadges } from './EventTagBadges';
 
+export type EventTagTooltipBind = (event: CalendarEvent) => {
+  onMouseEnter: (mouse: MouseEvent) => void;
+  onMouseLeave: () => void;
+};
+
 /** Shared hover surface; it never participates in the event's fixed grid geometry. */
 export function useEventTagTooltip() {
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -16,7 +21,7 @@ export function useEventTagTooltip() {
     document.addEventListener('keydown', onKey);
     return () => { clearTimeout(timer.current); document.removeEventListener('scroll', hide, true); document.removeEventListener('pointerdown', hide, true); document.removeEventListener('keydown', onKey); };
   }, []);
-  const bind = (event: CalendarEvent) => ({
+  const bind: EventTagTooltipBind = (event: CalendarEvent) => ({
     onMouseEnter: (mouse: MouseEvent) => {
       clearTimeout(timer.current);
       const { clientX: x, clientY: y } = mouse;

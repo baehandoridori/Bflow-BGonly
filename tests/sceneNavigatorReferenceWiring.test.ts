@@ -7,7 +7,8 @@ const sidebar = readFileSync('src/components/layout/Sidebar.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
 
 test('scene filter controls stay sticky for card and sheet views', () => {
-  assert.match(scenesView, /className="sticky top-0 z-30 flex flex-col gap-2 bg-bg-card\/95/);
+  // 움직임 폴리싱 바탕 C: 흐림을 빼고 바탕 95% → 97%
+  assert.match(scenesView, /className="sticky top-0 z-30 flex flex-col gap-2 bg-bg-card\/\[0\.97\]/);
   assert.match(scenesView, /sceneViewMode === 'card'/);
   assert.match(scenesView, /sceneViewMode === 'sheet'/);
 });

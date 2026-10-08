@@ -275,7 +275,8 @@ async function bundleCalendarConsumer(
   evaluate((id: string) => {
     if (id === 'react') return runtime.reactMock(react);
     if (id === 'react/jsx-runtime') return jsxRuntime;
-    if (id === 'framer-motion') return { AnimatePresence: ({ children }: { children: ReactNode }) => children, motion };
+    // 위젯·카드 보기는 '동작 줄이기'(useMotionPref → useReducedMotion)를 읽는다.
+    if (id === 'framer-motion') return { AnimatePresence: ({ children }: { children: ReactNode }) => children, motion, useReducedMotion: () => false };
     if (id === 'lucide-react') return new Proxy({}, { get: () => emptyComponent });
     if (id === '@/stores/useDataStore') {
       const data = { episodes: [], episodeTitles: {}, episodeMemos: {} };

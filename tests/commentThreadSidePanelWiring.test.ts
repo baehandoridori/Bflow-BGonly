@@ -11,7 +11,8 @@ const settingsService = readFileSync('src/services/settingsService.ts', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /const \[activeThreadRootId, setActiveThreadRootId\] = useState<string \| null>\(null\)/);
-  assert.match(commentPanel, /const activeThreadRootIdRef = useRef<string \| null>\(activeThreadRootId\);\s*activeThreadRootIdRef\.current = activeThreadRootId/);
+  // 움직임 폴리싱 19번: 실패한 스레드 메시지는 입력칸으로 되돌리지 않고 말풍선으로 남는다 — 되돌릴 스레드를 확인하던 ref 는 없다.
+  assert.doesNotMatch(commentPanel, /activeThreadRootIdRef/);
   assert.match(commentPanel, /const openThreadReply = useCallback/);
   assert.match(commentPanel, /const threadRootId = threadTarget\.parentCommentId/);
   assert.match(commentPanel, /setActiveThreadRootId\(threadRootId\)/);
@@ -111,13 +112,15 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /images: submittedThreadImageUrls/);
   assert.match(commentPanel, /setThreadAttachedImages\(\[\]\)/);
   assert.match(commentPanel, /threadAttachedImagesRef\.current = \[\]/);
-  assert.match(commentPanel, /activeThreadRootIdRef\.current === threadRoot\?\.id/);
   assert.match(commentPanel, /threadSubmitRequestRef\.current === submitRequestId/);
   assert.match(commentPanel, /threadSubmitRequestRef\.current = null/);
-  assert.match(commentPanel, /current\.filter\(\(c\) => c\.id !== comment\.id\)/);
-  assert.match(commentPanel, /threadAttachedImagesRef\.current\.length === 0/);
-  assert.match(commentPanel, /setThreadAttachedImages\(submittedThreadAttached\)/);
-  assert.match(commentPanel, /cleanupSubmittedThreadDraft\(\)/);
+  // 움직임 폴리싱 19번: 실패하면 말풍선을 남겨 '다시 보내기·지우기'(지우기가 목록에서 뺀다). 남길 자리가 없을 때만 첨부 정리.
+  assert.match(commentPanel, /const keptForRetry = sceneKeyRef\.current === panelSceneKey && failCommentSend\(comment\.id\)/);
+  // 첨부는 서버에서 같은 id 를 지운 뒤에만 정리(저장됐는데 응답만 끊긴 댓글의 그림을 깨지 않게).
+  assert.match(commentPanel, /attached: submittedThreadAttached,/);
+  assert.match(commentPanel, /void dropUnsentComment\(sendDraft, '\[스레드 댓글 전송 실패\]'\)/);
+  assert.match(commentPanel, /current\.filter\(\(c\) => c\.id !== commentId\)/);
+  assert.doesNotMatch(commentPanel, /setThreadAttachedImages\(submittedThreadAttached\)/);
   assert.match(commentPanel, /parentCommentId: activeRevisionThreadId \? null : threadRoot!\.id/);
   assert.match(commentPanel, /data-comment-thread-attachments/);
   assert.match(commentPanel, /data-comment-thread-input/);

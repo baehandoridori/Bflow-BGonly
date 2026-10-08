@@ -35,6 +35,7 @@ import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { SceneContextMenu } from './SceneContextMenu';
 import { SceneWorkLinkBadges } from './SceneWorkLinkBadges';
 import { EditingNameLabels } from './EditingNameLabels';
+import { SceneRemoteFlash } from './SceneRemoteFlash';
 import { useEditingPresenceStore } from '@/stores/useEditingPresenceStore';
 import { editingBeamRowClassName, selectEditorsForScenes } from '@/utils/editingPresence';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -930,10 +931,9 @@ export function SceneSheetView({
                       </td>
                     </tr>
                   )}
-                  <motion.tr
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.15, delay: Math.min(rowIndex * 0.01, 0.2) }}
+                  {/* 움직임 폴리싱 12번: 줄마다 따로 늦게 떠오르던 등장(메인 스레드 y)을 없앴다 — 파트를 바꾸면
+                      씬 목록이 표 전체를 한 덩어리로 미끄러뜨린다. */}
+                  <tr
                     className={cn(
                       'border-b border-bg-border/30 transition-colors group',
                       rowIndex % 2 === 0 ? 'bg-bg-card/20' : 'bg-bg-primary/10',
@@ -961,6 +961,8 @@ export function SceneSheetView({
                   >
                   {/* 씬번호 */}
                   <td className="px-2 py-1.5 font-mono text-xs relative" style={{ overflow: 'visible' }}>
+                    {/* 팀원이 바꾼 순간 — 씬번호 칸 빛 + 이름표 */}
+                    <SceneRemoteFlash sceneUuids={[scene.id]} variant="row" />
                     {sheetWorkLinkBadgesVisible && (
                       <SceneWorkLinkBadges
                         bgSceneUuid={department === 'bg' ? scene.id : null}
@@ -1085,7 +1087,7 @@ export function SceneSheetView({
                       <Trash2 size={13} />
                     </button>
                   </td>
-                  </motion.tr>
+                  </tr>
                 </Fragment>
               );
             })}

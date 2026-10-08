@@ -1,0 +1,64 @@
+/* 이 갈래 전용 움직임 CSS — view-transition 갈래 (화면·파트·에피소드 전환) */
+
+/* ─── 화면 전환 덮개 (MainLayout) ─────────────────────────────
+   본문 위 배경색 한 장. 평소엔 opacity 0·클릭 통과, 화면이 바뀔 때만 WAAPI 로 1→0 (180ms, 동작 줄이기 120ms).
+   본문 자체에 opacity/transform 을 걸지 않으려고 덮개를 따로 둔다(위젯 흐림·fixed 기준 보호).
+   z 35: 본문 sticky 헤더(z-30) 위, 앱 헤더(z-40)·모달(z-50) 아래. */
+.bf-view-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  pointer-events: none;
+  background: rgb(var(--color-bg-primary));
+  opacity: 0;
+}
+
+/* ─── 헤더 화면 제목 — 바뀔 때 120ms 페이드 (key 로 다시 마운트될 때만 한 번) ─── */
+@keyframes bf-view-title-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.bf-view-title {
+  animation: bf-view-title-in var(--motion-fast) var(--ease-out) backwards;
+}
+
+/* ─── 카드 차례 등장 (인원별·팀원·에피소드) ───────────────────
+   마운트 때 한 번만: opacity + translateY(8px→0) 200ms, 지연은 style 의 animation-delay(20ms 간격, 최대 200ms).
+   backwards 라 끝나면 transform 이 남지 않는다. */
+@keyframes bf-card-cascade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.bf-card-cascade {
+  animation: bf-card-cascade-in 200ms var(--ease-out) backwards;
+}
+
+/* ─── 컴포지팅: 카드 cascade 는 처음 들어왔을 때·↻ 직후에만 ──────
+   EP 를 바꾸면 카드 영역 전체가 한 덩어리로 미끄러져 들어온다(useGroupSwapMotion) — 새로 생긴 카드만 따로 떠오르지 않게.
+   EP 가 바뀐 뒤로만 붙는 클래스라 연타 토글이 아니다(↻ 은 래퍼를 다시 만들어 새로 armed).
+   카드 셸(.bf-cascade-item)의 등장만 끈다. 팀원이 단계를 바꿀 때의 물듦은 셸이 아니라 앞면 위 색 층
+   (.bf-status-wash, motion-live-drag.css — 5번)이 따로 돌므로 이 규칙에 걸리지 않는다.
+   통합: 예전 .scene-card.flashing(셸 animation 을 덮어쓰던 방식)은 5번이 없앴다 — 그래서 :not(.flashing) 예외도 뺐다. */
+.bf-cascade-quiet .bf-cascade-item {
+  animation: none;
+}
+
+/* 휴가 동기화 막대는 바탕 B 의 .bf-sync-sweep(motion-foundation.css)이 맡는다 — 같은 막대를 두 갈래가 따로 CSS 로 옮겨 통합 때 하나로 합쳤다. */
+
+/* ─── 대시보드 위젯 판 ───────────────────────────────────────
+   위젯 자리 이동 전환(transform 0.35s)은 끌어 옮길 때 밀려나는 위젯용이다. '동작 줄이기'에서는 끈다.
+   widget-animations.css 는 대시보드가 나중에 불러오므로 순서로 못 이긴다 → 특이도를 올린다. */
+@media (prefers-reduced-motion: reduce) {
+  .react-grid-layout .react-grid-item,
+  .react-grid-layout .react-grid-item.widget-settling {
+    transition: none !important;
+  }
+}
+
+/* ─── 동작 줄이기 ─────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .bf-view-title,
+  .bf-card-cascade {
+    animation: none;
+  }
+}

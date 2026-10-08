@@ -238,6 +238,8 @@ Three를 React 화면에 직접 연결하거나 React 래퍼를 사용하는 것
 
 ### 13.1 작업 위치 — 먼저 읽을 것
 
+> 2026-10-08 갱신: 아래 네 줄은 구현 당시 기록이다. 지금은 main에 통합되어 있으며 현재 상태는 §14가 기준이다.
+
 - 구현은 **세션 전용 격리 워크트리** `C:/Bflow-BGonly/.claude/worktrees/background-library-2d-3d-editor-a0ed8c`(브랜치 `claude/background-library-2d-3d-editor-a0ed8c`)에 있다. 이 세션은 세션 폴더 밖 파일을 편집하지 못하게 막혀 있어, 원래 워크트리(`C:/Bflow-BGonly/.worktrees/background-library`, HEAD e6c7e0e4)의 미커밋·미추적 파일 69개를 해시 일치로 복제한 뒤 그 위에서 작업했다. 브랜치도 같은 커밋(e6c7e0e4)에 맞췄다.
 - 원래 워크트리의 기존 구현은 그대로다. 예외는 하나: 막히기 직전에 `three`·`@types/three` 설치가 원래 워크트리에도 들어갔다(package.json, package-lock.json, node_modules). 코드에서 쓰지 않으므로 동작 영향은 없다.
 - **원래 워크트리로 옮기는 일은 아직 하지 않았다.** 옮길 대상은 13.4의 새 파일과 바뀐 파일이며 `.claude/launch.json`(프리뷰 실행 설정 한 항목 추가)은 옮기지 않아도 된다.
@@ -308,3 +310,41 @@ Three를 React 화면에 직접 연결하거나 React 래퍼를 사용하는 것
 - 프리뷰: 이 워크트리에서 `npm run dev:renderer`를 `PORT=5318`로 실행한다(`.claude/launch.json`의 `bg-preview-5318`). 주소와 테스트 계정은 기존과 같다.
 - 화면이 숨겨진 브라우저 창에서는 화면 갱신이 멈춰 3D가 그려지지 않는다. 보이는 창에서 확인하거나, Electron을 `offscreen` 창으로 띄우고 `webContents.sendInputEvent`·`capturePage`로 확인한다(이번 검증 방식). 그때 페이지 포커스가 없으면 숫자 칸이 갱신되지 않아 보이므로 포커스를 켠다.
 - DB 실행 검사는 `BFLOW_PGLITE_MODULE`에 `@electric-sql/pglite`의 `dist/index.js` 경로를 지정한다. 지정하지 않으면 3개가 생략되며 통과와 구분해 보고한다.
+
+## 14. main 통합과 시험 공개 (2026-10-08, v1.130.0)
+
+사용자가 프리뷰를 직접 확인한 뒤 "테스트 버전이지만 배포해 보자"고 요청했고, 노출 범위는 **배한솔 계정만**, 진행 범위는 통합 → PR → 머지 → 운영 DB → 빌드 → 배포 전체로 정했다(코덱스 리뷰 생략).
+
+### 14.1 통합
+
+- 세션 워크트리의 작업을 한 커밋(ab050bd3)으로 묶고 `origin/main`(d0ef2cb3, v1.129.2)을 병합했다. 충돌 6개(package.json, package-lock.json, src/App.tsx, Sidebar.tsx, update-notes.json, tasks/lessons.md)를 풀었고 main의 화면 지연 로드 구조(`src/views/viewLoaders.ts`)에 배경 화면을 맞췄다.
+- 버전은 1.130.0. `test:background`를 `build`·`build:vite` 순서에 넣었다(위치는 `test:gantt` 뒤 — `tests/motion/motionScaffold.test.ts`가 `test:vacation && test:motion && vite build` 순서를 고정한다).
+- three.js는 3D 화면 묶음에만 들어가므로 설치본에 패키지 폴더를 다시 담지 않게 `build.files`에 `!node_modules/three/**`를 더했다.
+- 원래 워크트리(`C:/Bflow-BGonly/.worktrees/background-library`)는 손대지 않았다. 내용은 모두 main에 들어갔으므로 그 워크트리의 미커밋 파일은 이제 사본이다.
+
+### 14.2 노출 범위 (시험 공개)
+
+- `canAccessBackgroundLibrary`(`src/features/playground/featureFlag.ts`)가 배플레이그라운드와 같은 계정 판정을 쓴다. 사이드바 메뉴 필터와 `resolveAllowedView`(화면 진입)가 모두 이 함수를 거친다. `tests/backgroundAccess.test.ts`가 둘 다 고정한다.
+- 화면 노출만 막는 장치다. 메인 프로세스의 배경 IPC와 서버 함수는 계정을 가리지 않는다(읽기는 로그인 사용자, 자산 편집은 관리자, 에피소드별 사용 기록은 팀원도 가능 — 기존 설계 그대로).
+- 검토에서 확인한 진입 경로: 사이드바(접힘·펼침 공통 목록), 단축키, 검색, 새 창 목록, 딥링크, 시작 화면 설정, 뒤로 가기, 화면 미리 받기. 배경으로 들어가는 길은 사이드바와 화면 전환 한 곳뿐이다.
+- 알고 넘어간 것: 한솔 계정이 배경 화면을 본 뒤 **같은 실행 중인 앱에서** 다른 계정으로 바꿔 로그인하면 머리줄의 뒤로 가기 버튼에 "배경 라이브러리" 이름이 남을 수 있다. 눌러도 대시보드로 간다(뒤로 가기 기록이 계정 전환 때 비워지지 않는 기존 동작).
+- 공개 범위를 넓힐 때: 이 함수만 바꾸고, update-notes에 팀 공개 항목을 새로 쓴다. 그 전에 §13.6의 미확인 항목(관리자 아닌 계정 화면, 큰 도면 성능)을 확인한다.
+
+### 14.3 운영 DB
+
+- 2026-10-08 적용: `2026-09-21-background-library.sql`(기록 이름 `background_library`, 20261008035103) → `2026-10-07-background-map-3d.sql`(`background_map_3d`, 20261008035155). 프로젝트 `mpqifkpxalwxgcrddchv`.
+- 적용 전 읽기 전용 확인: 같은 이름의 기존 객체 0개, `users.id`(text, PK)·`users.role`·`episodes.episode_number`·`app_session_user_id(text)`·`realtime.send`·`scene-images` 버킷과 업로드 정책, 역할 값이 비어 있는 계정 0명, 한솔 계정은 관리자.
+- 적용 후 확인: 함수 13개의 본문 md5가 저장소 파일과 모두 일치(검증 함수는 3D 파일 본문), 실행 권한은 `background_library_read`·`background_library_execute` 두 개만 anon/authenticated에 있고 PUBLIC에는 없음, 두 표는 RLS 켜짐·정책 0·직접 권한 없음·행 0개·실시간 publication 없음. anon으로 잘못된 토큰 읽기는 42501, 표 직접 읽기는 42501.
+- 적용 직전에 고친 SQL 두 곳(통합 검토 지적): 역할 값이 NULL인 계정을 일반 팀원으로 처리(`COALESCE(role='admin',false)`), 변경 신호 전송 실패가 저장을 되돌리지 않게 예외 블록으로 감쌈(기존 간트·팀 할 일 신호와 같은 방식).
+- 실제 저장(쓰기) 호출은 운영에서 실행해 보지 않았다. 운영 세션을 만들지 않기 위해서이며, 첫 저장은 배포된 앱에서 한솔 계정으로 확인한다.
+
+### 14.4 통합 뒤 검증
+
+- `npm run typecheck` 통과. `npm run build:vite` 종료 코드 0. 수치는 [누적 검증 기록](background-library-verification-2026-09-21.md)의 2026-10-08 절.
+- 앱 엔진(Electron 33.4.11)을 보이지 않게 띄워 실제 입력으로 다시 확인: 일반 팀원 시험 계정에는 배경 메뉴가 없음, 한솔 시험 계정에는 메뉴가 있고 도면 열기 → 3D 전환 → 카메라 추가(500, 340, 높이 120) → 화살표로 가로만 이동 → 되돌리기/다시 실행 → 높이 화살표 → 회전 고리 → 저장 → 새로 고침 뒤 값 유지, 740×900 창에서 3D와 보조 평면도 동시 표시.
+- 독립 검토 4갈래(병합 결과, 노출 범위, 운영 DB 변경, 전체 사용자 영향)와 갈래별 반증 검증. 배포를 막는 문제 없음, 확정 5건(커밋 누락 위험, 문서, 역할 NULL, 설치 용량, WebP 경로 안내)을 모두 반영했다.
+
+### 14.5 확인하지 못한 것 (§13.6에 더해)
+
+- 설치된 앱에서의 실제 저장·이미지 업로드·실시간 신호(운영 DB/Storage). 배포 뒤 한솔 계정 실기 확인 대상이다.
+- 팀원 PC에서 메뉴가 보이지 않는지(코드와 미리보기 시험 계정으로만 확인).

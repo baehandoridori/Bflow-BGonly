@@ -9,6 +9,8 @@ import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
+import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
+import { cardCascadeStyle } from '@/utils/viewTransitionMotion';
 
 /* ────────────────────────────────────────────────
    그라데이션 프로그레스 바
@@ -99,18 +101,17 @@ function EpisodeCard({
   const isComplete = pct >= 100;
 
   return (
-    <motion.button
+    <button
+      type="button"
       onClick={() => onNavigate(episode)}
       onContextMenu={(e) => onContextMenu?.(e, episode)}
       className={cn(
         'relative w-full text-left rounded-xl p-5 cursor-pointer',
         'border border-bg-border/60 bg-bg-card',
-        'transition-shadow transition-border duration-200 ease-out',
-        'hover:shadow-md hover:shadow-black/20 hover:border-bg-border',
+        // 누를 수 있는 카드 hover: 2px 떠오름 + 테두리 밝아짐 + 그림자(미리 그린 층) — framer y 대신 CSS 공통 클래스
+        'bf-card-hover',
         isComplete && 'border-status-high/30',
       )}
-      whileHover={{ y: -2 }}
-      transition={{ duration: 0.2 }}
     >
       {/* 상단: 에피소드 제목 + 진행률 */}
       <div className="flex items-center justify-between mb-3">
@@ -200,7 +201,7 @@ function EpisodeCard({
           );
         })}
       </div>
-    </motion.button>
+    </button>
   );
 }
 
@@ -453,27 +454,30 @@ export function EpisodeView() {
           </div>
         </div>
 
-        {/* 뷰 모드 토글 */}
-        <div className="flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+        {/* 뷰 모드 토글 — 알약 하나가 미끄러진다(움직임 폴리싱 7번). */}
+        <div className="relative flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+          <SlidingIndicator activeKey={viewMode} axis="both" className="rounded-md bg-accent/20" />
           <button
+            data-slide-key="card"
             onClick={() => setViewMode('card')}
             className={cn(
-              'px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
+              'relative px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
               'transition-colors duration-150',
               viewMode === 'card'
-                ? 'bg-accent/20 text-accent'
+                ? 'text-accent'
                 : 'text-text-secondary hover:text-text-primary',
             )}
           >
             카드
           </button>
           <button
+            data-slide-key="matrix"
             onClick={() => setViewMode('matrix')}
             className={cn(
-              'px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
+              'relative px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
               'transition-colors duration-150',
               viewMode === 'matrix'
-                ? 'bg-accent/20 text-accent'
+                ? 'text-accent'
                 : 'text-text-secondary hover:text-text-primary',
             )}
           >
@@ -502,14 +506,10 @@ export function EpisodeView() {
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {epData.map(({ ep, stats }, i) => (
-                  <motion.div
-                    key={ep.episodeNumber}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: i * 0.04 }}
-                  >
+                  // 움직임 폴리싱 12번: 차례 등장은 20ms 간격·최대 200ms 지연 — 마운트 때 한 번
+                  <div key={ep.episodeNumber} className="bf-card-cascade" style={cardCascadeStyle(i)}>
                     <EpisodeCard episode={ep} stats={stats} onNavigate={handleNavigate} onContextMenu={handleEpContextMenu} />
-                  </motion.div>
+                  </div>
                 ))}
               </div>
 
@@ -553,7 +553,7 @@ export function EpisodeView() {
                             </div>
                             <button
                               onClick={() => handleUnarchive(archived.episodeNumber)}
-                              className="p-1 opacity-0 group-hover:opacity-100 text-text-secondary/30 hover:text-accent transition-opacity shrink-0"
+                              className="p-1 opacity-0 group-hover:opacity-100 text-text-secondary/30 hover:text-accent transition-[opacity,color] shrink-0"
                               title="아카이빙 해제 (복원)"
                             >
                               <RotateCcw size={12} />

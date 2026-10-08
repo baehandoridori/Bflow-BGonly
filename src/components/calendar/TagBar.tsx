@@ -47,7 +47,7 @@ export function TagBar({ vacationConnected, onOpenTagManager }: TagBarProps) {
   const tags = useCalendarStore((state) => state.tags);
   const enabledTagIds = useCalendarStore((state) => state.enabledTagIds);
   const toggleTag = useCalendarStore((state) => state.toggleTag);
-  const resetTagsAllOn = useCalendarStore((state) => state.resetTagsAllOn);
+  const toggleAllTags = useCalendarStore((state) => state.toggleAllTags);
   const { reduce } = useMotionPref();
   const orderedTags = useMemo(() => [...tags].sort((a, b) => a.sortOrder - b.sortOrder), [tags]);
   const allEnabled = orderedTags.every((tag) => enabledTagIds[tag.id] !== false)
@@ -58,9 +58,9 @@ export function TagBar({ vacationConnected, onOpenTagManager }: TagBarProps) {
       <span className="mr-1 text-xs font-medium text-text-secondary">태그</span>
       <button
         type="button"
-        aria-label="전체 태그 켜기"
+        aria-label={allEnabled ? '전체 태그 끄기' : '전체 태그 켜기'}
         aria-pressed={allEnabled}
-        onClick={resetTagsAllOn}
+        onClick={() => toggleAllTags(vacationConnected)}
         className={allEnabled
           ? 'rounded-full border border-accent/40 bg-accent/15 px-2.5 py-1 text-xs font-medium text-text-primary transition-colors cursor-pointer'
           : 'rounded-full border border-text-secondary/30 px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-text-primary cursor-pointer'}

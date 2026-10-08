@@ -1,5 +1,8 @@
+import type { ReactNode } from 'react';
+
 interface StatCardProps {
-  value: string;
+  /** 큰 숫자. 진행률이면 <RollingNumber /> 를 넘겨 막대와 같은 박자로 굴린다. */
+  value: ReactNode;
   label: string;
   subValue?: string;
   color?: string;
@@ -22,7 +25,7 @@ export function StatCard({ value, label, subValue, color, pct }: StatCardProps) 
       {pct !== undefined && (
         <div className="w-32 h-2 bg-bg-primary rounded-full overflow-hidden mt-1">
           <div
-            className="h-full rounded-full transition-all duration-700 ease-out"
+            className="bf-progress-bar bf-entry-fill-x h-full rounded-full"
             style={{
               width: `${pct}%`,
               backgroundColor: color ?? 'rgb(var(--color-accent))',

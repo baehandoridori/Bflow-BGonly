@@ -15,12 +15,12 @@ function nodes(tree: any): any[] { return Array.isArray(tree) ? tree.flatMap(nod
 function text(tree: any): string { return typeof tree === 'string' || typeof tree === 'number' ? String(tree) : Array.isArray(tree) ? tree.map(text).join('') : isValidElement(tree) ? text((tree.props as any).children) : ''; }
 
 /** Real panel and handlers; only React scheduling and its external store/API boundaries are controlled. */
-async function harness(options: { owner?: string; disabled?: boolean; status?: () => Promise<Status>; manage?: (request: any) => Promise<Status> } = {}) {
+async function harness(options: { owner?: string; disabled?: boolean; isAdminOverview?: boolean; status?: () => Promise<Status>; manage?: (request: any) => Promise<Status> } = {}) {
   const slots: any[] = [], effects: Array<() => void> = [], subscribers = new Set<(next: any, previous: any) => void>();
   const listeners = new Map<string, Set<() => void>>(), reads: string[] = [], commands: any[] = [], copied: string[] = [];
   let cursor = 0, dirty = false, tree: any, auth = { currentUser: { id: 'actor', name: '소유자' } };
   let calendars = [{ id: 'calendar', ownerId: options.owner ?? 'actor' }];
-  let props = { calendarId: 'calendar', disabled: options.disabled ?? false };
+  let props = { calendarId: 'calendar', disabled: options.disabled ?? false, isAdminOverview: options.isAdminOverview ?? false };
   let readImpl = options.status ?? (() => Promise.resolve(off));
   const changed = (a: any[] | undefined, b: any[] | undefined) => !a || !b || a.length !== b.length || a.some((value, index) => !Object.is(value, b[index]));
   const react = { ...require('react'), useState(initial: any) { const index = cursor++; if (!(index in slots)) slots[index] = { value: typeof initial === 'function' ? initial() : initial }; const state = slots[index]; state.set ??= (value: any) => { const next = typeof value === 'function' ? value(state.value) : value; if (!Object.is(next, state.value)) { state.value = next; dirty = true; } }; return [state.value, state.set]; }, useRef(initial: any) { return slots[cursor++] ??= { current: initial }; }, useEffect(fn: any, deps: any[]) { const index = cursor++, before = slots[index]; if (!before || changed(before.deps, deps)) { slots[index] = { deps }; effects.push(() => { before?.cleanup?.(); slots[index].cleanup = fn(); }); } } };
@@ -41,8 +41,12 @@ async function harness(options: { owner?: string; disabled?: boolean; status?: (
   return { render, settle, button, click, urls, reads, commands, copied, content: () => text(render()), setRead(fn: () => Promise<Status>) { readImpl = fn; }, focus() { listeners.get('focus')?.forEach(fn => fn()); render(); }, setActor(id: string) { const before = auth; auth = { currentUser: { id, name: '갱신된 사용자' } }; subscribers.forEach(fn => fn(auth, before)); render(); }, setCalendars(next: typeof calendars) { calendars = next; render(); }, setCalendar(id: string) { props = { ...props, calendarId: id }; render(); }, dispose() { for (const slot of slots) slot?.cleanup?.(); for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); } } };
 }
 
-test('subscription panel: owner-only mounting and disabled settings never issue commands', async () => {
-  const reader = await harness({ owner: 'another' }); try { await reader.settle(); assert.equal(reader.render(), null); assert.deepEqual(reader.reads, []); } finally { reader.dispose(); }
+test('subscription panel: readers can read but never manage; disabled settings never issue commands', async () => {
+  const reader = await harness({ owner: 'another', status: async () => ({ ...on, url: 'https://feed.test/shared' }) }); try {
+    await reader.settle(); assert.deepEqual(reader.reads, ['calendar']); assert.deepEqual(reader.urls(), ['https://feed.test/shared']);
+    assert.ok(reader.content().includes('보기 전용')); assert.ok(!reader.content().includes('주소 교체'));
+    reader.click('주소 복사'); await reader.settle(); assert.deepEqual(reader.copied, ['https://feed.test/shared']); assert.deepEqual(reader.commands, []);
+  } finally { reader.dispose(); }
   const disabled = await harness({ disabled: true }); try { await disabled.settle(); assert.equal(disabled.button('구독 주소 발급').props.disabled, true); disabled.click('구독 주소 발급'); assert.equal(disabled.commands.length, 0); } finally { disabled.dispose(); }
 });
 test('subscription panel: issue is single-flight, uses expected revision, copies one-time address', async () => {
@@ -71,8 +75,31 @@ test('subscription panel: status refresh preserves same-revision address and cle
 });
 test('subscription panel: late issue response after actor or ownership change cannot reveal bearer address', async () => {
   for (const change of ['actor', 'owner']) {
-    const pending = deferred<Status>(), h = await harness({ manage: () => pending.promise }); try { await h.settle(); h.click('구독 주소 발급'); if (change === 'actor') h.setActor('another'); else h.setCalendars([{ id: 'calendar', ownerId: 'another' }]); pending.resolve({ ...on, url: 'https://feed.test/secret' }); await h.settle(); assert.equal(h.render(), null); assert.deepEqual(h.urls(), []); } finally { h.dispose(); }
+    const pending = deferred<Status>(), h = await harness({ manage: () => pending.promise }); try { await h.settle(); h.click('구독 주소 발급'); if (change === 'actor') h.setActor('another'); else h.setCalendars([{ id: 'calendar', ownerId: 'another' }]); pending.resolve({ ...on, url: 'https://feed.test/secret' }); await h.settle(); assert.deepEqual(h.urls(), []); assert.ok(!h.content().includes('주소 교체')); } finally { h.dispose(); }
   }
+});
+
+test('subscription panel: reopening restores the server address and revocation clears it', async () => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const h = await harness({ owner: 'other', status: async () => ({ ...on, url: 'https://feed.test/persistent' }) });
+    try {
+      await h.settle(); assert.deepEqual(h.urls(), ['https://feed.test/persistent']);
+      h.setRead(async () => off); h.focus(); await h.settle(); assert.deepEqual(h.urls(), []);
+      assert.ok(h.content().includes('소유자가 구독 주소를 발급하면'));
+    } finally { h.dispose(); }
+  }
+});
+
+test('subscription panel: removed calendar discards a late status containing a URL', async () => {
+  const pending = deferred<Status>(), h = await harness({ owner: 'other', status: () => pending.promise });
+  try { h.setCalendars([]); pending.resolve({ ...on, url: 'https://feed.test/removed' }); await h.settle(); assert.equal(h.render(), null); assert.deepEqual(h.urls(), []); }
+  finally { h.dispose(); }
+});
+
+test('subscription panel: admin overview does not read or reveal subscription addresses', async () => {
+  const h = await harness({ owner: 'other', isAdminOverview: true, status: async () => ({ ...on, url: 'https://feed.test/hidden' }) });
+  try { await h.settle(); assert.deepEqual(h.reads, []); assert.deepEqual(h.urls(), []); assert.ok(h.content().includes('관리자 조회만으로는')); }
+  finally { h.dispose(); }
 });
 test('subscription panel: a late status for previous calendar does not replace current calendar state', async () => {
   const first = deferred<Status>(), h = await harness({ status: () => first.promise }); try { h.setCalendars([{ id: 'calendar', ownerId: 'actor' }, { id: 'new', ownerId: 'actor' }]); h.setRead(async () => ({ ...off, calendarId: 'new' })); h.setCalendar('new'); await h.settle(); first.resolve(on); await h.settle(); assert.ok(h.content().includes('외부 구독 꺼짐')); h.click('구독 주소 발급'); assert.equal(h.commands[0].calendarId, 'new'); assert.equal(h.commands[0].expectedRevision, null); } finally { h.dispose(); }

@@ -1,8 +1,6 @@
 # AGENTS.md — B flow
 
-> **배경 평면/3D 후속 작업 (2026-10-07):** [Opus 5.5 구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md)와 [실행 계획](docs/superpowers/plans/2026-10-07-background-3d-editor.md)을 먼저 읽는다. 같은 배치의 평면/3D 전환, 고정 기본점에 카메라 생성, 기즈모 이동·회전, 3D 카메라 편집 중 동시 2D 확인이 요구사항이다. 2026-10-07에 구현과 로컬 검증을 마쳤다(미커밋·미배포). 구현 결과·확정한 결정·미검증 항목은 인수인계 문서 §13, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)의 2026-10-07 절을 본다.
-
-> **배경 라이브러리 작업 재개 안내 (2026-10-06):** 이 워크트리의 미커밋 구현은 보존 중이다. [상세 인수인계](DEVLOG/background-library-handoff-2026-10-06.md)를 먼저 읽는다. 작업 위치는 `C:\Bflow-BGonly\.worktrees\background-library`이며, 상위 checkout과 미추적 파일을 덮어쓰거나 정리하지 않는다. 마지막 완료 항목은 에피소드별 배경 UI이며 운영 DB 적용·배포는 미실행이다.
+> **배경 라이브러리 시험 공개 (v1.130.0, 2026-10-08):** 배경 라이브러리(장소·도면·배경·에피소드별 배경)와 평면/3D 공동 도면을 main에 통합했다. **메뉴와 화면은 배한솔 계정에만 열려 있다** — 사이드바 노출과 화면 진입이 모두 `src/features/playground/featureFlag.ts`의 `canAccessBackgroundLibrary`를 거치므로, 공개 범위를 넓힐 때는 그 함수만 바꾼다(화면 노출만 막는 장치다. 서버 권한은 별개로, 읽기는 로그인한 누구나·장소/도면/배경 편집은 관리자·에피소드별 사용 기록은 팀원도 가능하다). 운영 DB에는 2026-10-08에 `2026-09-21-background-library.sql` → `2026-10-07-background-map-3d.sql` 순서로 적용했다(기본 파일을 다시 실행하면 3D 파일도 다시 실행한다). 결정·미검증 항목은 [구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md) §13~§14, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)을 본다.
 
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
@@ -33,10 +31,10 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 
 **동기화**: 체크박스 토글 → 로컬 즉시 반영(낙관적) → Supabase 저장 → 실패 시 롤백. 다른 사용자 변경은 Realtime WebSocket으로 수신.
 
-### 외부 캘린더 구독 (v1.124.0)
+### 외부 캘린더 구독 (v1.126.0)
 
-- 캘린더 설정에서 소유자가 명시적으로 발급한 주소만 공개한다. `calendarSubscriptionIpc`는 canonical 세션 epoch를 검사하고 `calendar_session_feed_status/manage`는 서버 세션으로 소유자를 확인한다.
-- `calendar_external_feeds`는 256비트 구독 토큰의 SHA256만 보관한다. 원문 주소는 발급 응답에만 포함하며 로그·설정 파일에 보관하지 않는다. revision 비교로 오래된 창의 교체·중지를 거절한다.
+- 캘린더 설정에서 소유자가 명시적으로 발급한 주소만 공개한다. `calendarSubscriptionIpc`는 canonical 세션 epoch를 검사하고 상태 조회는 서버 세션으로 소유자·팀 공유·명시적 공유 멤버를 확인하고, 발급·교체·중지는 소유자만 허용한다. 관리자 전체 조회만으로 구독 주소를 읽을 수 없다.
+- `calendar_external_feeds`는 256비트 구독 토큰의 SHA256만 보관한다. 재조회용 별칭 원문은 Supabase Vault에 암호화하고 `calendar_feed_private.aliases`는 해시·비밀 참조만 보관한다. 기존 발급 주소도 계속 유효하며, 공유 멤버는 상태 조회로 별칭 주소를 반복 확인한다. 원문 주소는 로그·개인 설정에 보관하지 않는다. revision 비교로 오래된 창의 교체·중지를 거절한다.
 - `calendar-feed` Edge Function은 URL 토큰을 직접 인증하므로 이 함수만 `verify_jwt=false`다. 서비스 전용 `calendar_feed_read`가 해당 캘린더의 원본·간트 projection만 반환한다. 링크 중지·교체·소유권 이전·삭제로 기존 주소를 무효화한다.
 - 종일 일정 종료일은 ICS에서 다음 날로 변환하고, 시간 일정은 서울 시간에서 UTC로 변환한다. 읽기 전용 URL 구독이며 외부 앱의 갱신 주기를 따른다. 프리뷰 주소는 `.invalid`로 실제 외부 구독이 불가능함을 표시한다.
 
@@ -101,8 +99,9 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - **아케이드 포인트**: 지갑·출석·게임 기록·도전과제는 Supabase가 정본이며, 모든 포인트 변경은 원장과 같은 트랜잭션의 RPC(`playground_arcade_read`/`playground_arcade_execute`)를 거친다. renderer는 IPC → main `ArcadeService`만 경유하고, 밸런스 수치는 `src/features/playground/arcade/constants.ts`가 정본이다(SQL·계약 테스트로 동기화). 우상단 포인트 배지·출석/업무 적립·게임별 순위표가 여기에 연결된다.
 - **아케이드 게임**: 스네이크·테트리스 엔진은 부작용 없는 순수 모듈이다. 난수는 `crypto` 시드 → 결정론 PRNG로만 만들고 `Math.random()`/`Date.now()`를 엔진에 쓰지 않는다(리플레이·테스트 재현성). 게임 시작/종료는 `request_id` 멱등이라 재시도·중복 제출에도 입장료 중복 차감·이중 지급이 없다. 신기록 슬랙은 전체 최고 기록 경신 + 관리 토글 on + 주소 설정 시에만 발송된다.
 
-### 배경 라이브러리 데이터 경계 (v1.126.0)
+### 배경 라이브러리 데이터 경계 (v1.130.0 시험 공개)
 
+- **노출 범위**: 메뉴와 화면은 `canAccessBackgroundLibrary`(배플레이그라운드와 같은 계정 판정)를 통과한 계정에만 보인다. 사이드바 필터와 `resolveAllowedView`가 같은 함수를 쓰며 `tests/backgroundAccess.test.ts`가 둘 다 고정한다. 새 진입 경로(단축키·검색·새 창·딥링크)를 더할 때도 이 함수를 거치게 한다. 서버와 메인 프로세스는 계정을 가리지 않으므로 이 장치는 화면 노출용이다.
 - `src/features/backgrounds`는 장소·도면·배경/변형/수정본·시점 묶음·에피소드 사용을 분리한다. 도면 노드 삭제는 원본 자산과 사용 기록을 지우지 않는다.
 - 도면 노드는 공간·카메라·`symbol`(문/사물 기호)로 구분한다. 기호는 배경 시점 ID를 갖지 않으며 같은 도면의 공간에만 연결한다. 공간 변형에 소속 기호도 따라가되 잠금은 보존하고 공간 삭제 시 연결만 해제한다. 기호 종류·치수·경첩/열림 방향은 공용 domain과 SQL에서 함께 검증한다.
 - preload epoch → `backgroundIpc.ts` → `backgroundStore.ts` → `background_library_read/execute`로 저장한다. DB는 `app_session_user_id`로 사용자를 확정하고 관리자는 자산 편집, 로그인 사용자는 에피소드 연결을 편집한다.

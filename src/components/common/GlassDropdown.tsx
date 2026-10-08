@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
-import { floatingGlassStyle } from '@/utils/glassStyles';
+import { floatingSolidStyle } from '@/utils/glassStyles';
 
 export interface GlassDropdownOption<T extends string | number = string> {
   value: T;
@@ -186,7 +186,7 @@ export function GlassDropdown<T extends string | number = string>({
         <ChevronDown
           size={14}
           className={cn(
-            'shrink-0 text-text-secondary transition-transform duration-200 motion-reduce:transition-none',
+            'shrink-0 text-text-secondary transition-transform duration-200 ease-snap motion-reduce:transition-none',
             open && 'rotate-180',
           )}
         />
@@ -222,7 +222,8 @@ export function GlassDropdown<T extends string | number = string>({
               aria-label={label || selectedLabel}
               className="rounded-xl overflow-hidden py-1.5 max-h-[320px] overflow-y-auto"
               style={{
-                ...floatingGlassStyle,
+                // 열리며 움직이는 메뉴라 뒤 흐림 없는 짝을 쓴다(움직임 폴리싱 바탕 C)
+                ...floatingSolidStyle,
                 maxHeight: placement.maxHeight,
               }}
             >

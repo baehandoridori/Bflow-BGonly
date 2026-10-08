@@ -7,6 +7,7 @@ import type {
 } from '../src/shared/calendarApiContract';
 // 채널 이름은 렌더러·메인이 공유하는 계약이다. preload는 값 import가 가능하므로 여기서 쓴다.
 import { ICS_IPC_CHANNELS } from '../src/shared/icsApiContract';
+import { QUIT_FLUSH_CHANNEL, QUIT_FLUSHED_CHANNEL, createQuitFlushRegistry } from './rendererQuitFlush';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
 import type { CalendarTodoPatch, PersonalTodoCreateInput, PersonalTodoLabelColorKey, PersonalTodoOrderMutation, PersonalTodoPatch } from './personalTodoService';
 import type { SessionActionResult } from './sessionManager';
@@ -106,6 +107,13 @@ function opaquePrivacyReplacementContinuation(
   };
 }
 
+// ─── 앱 종료 직전 끝낼 일 ──────────────────────────────
+// 메인이 종료 전에 모든 창에 신호를 보낸다(대기 작업과 상관없이). 화면이 맡긴 일을 모두 끝낸 뒤(실패해도) 같은 표로 답한다.
+const quitFlushRegistry = createQuitFlushRegistry();
+ipcRenderer.on(QUIT_FLUSH_CHANNEL, (_event: unknown, token: unknown) => {
+  void quitFlushRegistry.run().then(() => ipcRenderer.send(QUIT_FLUSHED_CHANNEL, token));
+});
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // 앱 설정
   getDataPath: () => ipcRenderer.invoke('settings:get-path'),
@@ -181,6 +189,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('app:saving-before-quit', handler);
     return () => { ipcRenderer.removeListener('app:saving-before-quit', handler); };
   },
+
+  // 앱 종료 직전에 끝낼 일(되돌리기를 기다리는 댓글 삭제 등) — 메인은 모든 창이 끝냈다고 답할 때까지(최대 몇 초) 종료를 미룬다.
+  // 맡긴 일이 끝나면(돌려준 Promise) 답한다. 맡긴 일이 없으면 곧바로 답한다.
+  onBeforeQuitFlush: (callback: () => Promise<void> | void) => quitFlushRegistry.add(callback),
 
   // v1.22.1: 자동 업데이트 알림 — 백그라운드 fetch 완료 시 토스트 띄우기
   getUpdateState: () => ipcRenderer.invoke('update:get-state'),
@@ -752,6 +764,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: unknown, data: { date: string; todoId: string }) => callback(data);
     ipcRenderer.on('widget:navigate-to-date', handler);
     return () => ipcRenderer.removeListener('widget:navigate-to-date', handler);
+  },
+  // 새 창으로 띄운 화면(캘린더 등) → 본체 화면 이동 (widget:navigate-main 패턴 미러링)
+  widgetNavigateView: (payload: unknown) =>
+    ipcRenderer.invoke('widget:navigate-view', payload),
+  onWidgetNavigateView: (callback: (payload: unknown) => void) => {
+    const handler = (_event: unknown, data: unknown) => callback(data);
+    ipcRenderer.on('widget:navigate-view', handler);
+    return () => ipcRenderer.removeListener('widget:navigate-view', handler);
   },
   widgetGetSize: (widgetId: string) =>
     ipcRenderer.invoke('widget:get-size', widgetId) as Promise<{ x: number; y: number; width: number; height: number } | null>,

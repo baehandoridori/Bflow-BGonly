@@ -85,6 +85,8 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
       getCanonicalRevisions: () => new Promise<any[]>((resolve, reject) => lookups.push({ resolve, reject })),
       getCanonicalRevision: (revisionId: string) => new Promise<any>((resolve, reject) => lookups.push({ revisionId, resolve, reject })) },
     '@/utils/retakeNavigation': { openRetakeInApp: (id: string) => navigated.push(id) },
+    // 움직임 폴리싱 18번: 실시간 다시 알림은 종·배지에 도착 신호를 주고, 알림 카드에 종류별 색 막대를 단다.
+    '@/utils/notificationHelper': { noteLiveNotificationArrival: () => {}, notificationToastDecor: () => ({}) },
   });
   module.useRetakeNotifications();
   return { effects, notices, read, navigated, toasts, lookups, auth, app, notifications, revisions, api, loadModes, deliveryFailures,

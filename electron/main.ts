@@ -40,6 +40,7 @@ import {
   type IcsHttpResponse,
 } from './icsSubscriptions';
 import { registerIcsSubscriptionIpc } from './icsSubscriptionIpc';
+import { chunkForInQuery } from '../src/shared/postgrestPaging';
 import {
   broadcastCalendarNotificationToSessionWindows,
   broadcastCommittedCalendarDeleteToWindows,
@@ -98,6 +99,8 @@ import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy'
 import { compareVersions, readManifest } from './autoUpdate/manifest';
 import { resolveChildFolderPath } from './pathCreateFolder';
 import { parseFileNameWBuffer, imageMimeForPath } from './clipboardFiles';
+import { fitWidgetPopupBounds, fitWidgetPopupSize, WIDGET_POPUP_MIN_HEIGHT, WIDGET_POPUP_MIN_WIDTH } from './widgetPopupBounds';
+import { QUIT_FLUSHED_CHANNEL, waitForRendererQuitFlush } from './rendererQuitFlush';
 import {
   initVacation,
   isVacationConnected,
@@ -2218,22 +2221,28 @@ ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, 
       console.warn('[bulk-assignee-sender-name] 조회 실패 — default 사용:', err);
     }
   }
+  // 이전 담당자를 UPDATE 전에 캡처해 두고, 새로 *추가된* 사람에게만 알림을 보낸다.
+  // 이 조회가 비면 prevAssignee 가 빈 문자열이 되어 차집합이 전체가 되고,
+  // 이미 그 씬을 맡고 있던 사람들에게까지 "새로 배정됐다" 알림이 다시 날아간다.
+  // 그래서 (1) URL 길이·응답 행수 한계에 걸리지 않게 100개씩 끊어 읽고,
+  //        (2) 값을 못 받은 씬은 '모름'으로 남겨 알림을 아예 보내지 않는다 (잘못 보내는 것보다 낫다).
   const prevAssigneeByUuid = new Map<string, string>();
   if (senderId) {
     const sceneUuidsWithAssigneeChange = updates
       .filter((u) => typeof u.fields.assignee === 'string')
       .map((u) => u.sceneUuid);
-    if (sceneUuidsWithAssigneeChange.length > 0) {
+    for (const chunk of chunkForInQuery(Array.from(new Set(sceneUuidsWithAssigneeChange)))) {
       try {
-        const { data: prevRows } = await supabaseClient
+        const { data: prevRows, error } = await supabaseClient
           .from('scenes')
           .select('id, assignee')
-          .in('id', sceneUuidsWithAssigneeChange);
+          .in('id', chunk);
+        if (error) throw new Error(error.message);
         for (const r of ((prevRows ?? []) as Array<{ id: string; assignee?: string | null }>)) {
           prevAssigneeByUuid.set(r.id, (r.assignee ?? '').toString().trim());
         }
       } catch (err) {
-        console.warn('[bulk-assignee-prev-fetch] 실패:', err);
+        console.warn('[bulk-assignee-prev-fetch] 실패 — 해당 묶음은 알림을 건너뜁니다:', err);
       }
     }
   }
@@ -2249,7 +2258,12 @@ ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, 
     }
     // 담당자 변경 시 알림 분기 (단일 핸들러와 동일 로직)
     if (senderId && typeof u.fields.assignee === 'string' && u.fields.assignee.trim()) {
-      const prevAssignee = prevAssigneeByUuid.get(u.sceneUuid) ?? '';
+      const prevAssignee = prevAssigneeByUuid.get(u.sceneUuid);
+      if (prevAssignee === undefined) {
+        // 이전 담당자를 못 읽은 씬. 빈 문자열로 진행하면 기존 담당자 전원에게 재배정 알림이 간다.
+        console.warn('[bulk-assignee-prev-fetch] 이전 담당자 미확인 — 알림 생략:', u.sceneUuid);
+        continue;
+      }
       await notifyAssigneeChange(u.sceneUuid, prevAssignee, u.fields.assignee.trim(), senderId, senderName);
     }
   }
@@ -4454,8 +4468,10 @@ ipcMain.handle('clipboard:read-image-file', async () => {
 // ─── IPC 핸들러: 위젯 팝업 윈도우 ──────────────────────────────
 
 // 위젯별 첫 오픈 기본값 — 캐릭터 현황판처럼 화면형 팝업은 위젯 기본(420×360·AOT)이 맞지 않는다 (피드백 36).
+// 'schedule' 은 캘린더 화면 전체를 띄우는 새 창이다(대시보드 캘린더 위젯 'calendar'·'calendar-<시각>' 과 다르다).
 const WIDGET_POPUP_DEFAULTS: Record<string, { width: number; height: number; alwaysOnTop?: boolean }> = {
   'character-board': { width: 1160, height: 780, alwaysOnTop: false },
+  'schedule': { width: 1280, height: 820, alwaysOnTop: false },
 };
 
 function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<string, string>): { ok: boolean } {
@@ -4469,8 +4485,16 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   // 저장된 위치/크기 복원 (Phase 0-6)
   const savedPos = widgetPositionCache.get(widgetId);
   const preset = WIDGET_POPUP_DEFAULTS[widgetId];
-  const initWidth = savedPos ? Math.max(280, savedPos.width) : preset?.width ?? 420;
-  const initHeight = savedPos ? Math.max(200, savedPos.height) : preset?.height ?? 360;
+  // 창이 뜰 화면 — 기억한 자리가 있으면 그 자리의 화면, 처음이면 주 화면(Electron 이 가운데에 띄우는 곳).
+  // 크기를 이 화면의 작업 영역 안으로 줄인다: 큰 모니터에서 쓰던 크기를 작은 화면(노트북·원격 접속)에서 되살리면
+  // 아래·오른쪽이 화면 밖으로 나가 내용과 크기 조절 모서리에 손이 닿지 않는다 (코덱스 지적).
+  const targetWorkArea = (savedPos
+    ? screen.getDisplayNearestPoint({ x: savedPos.x, y: savedPos.y })
+    : screen.getPrimaryDisplay()).workArea;
+  const { width: initWidth, height: initHeight } = fitWidgetPopupSize(
+    savedPos ?? { width: preset?.width ?? 420, height: preset?.height ?? 360 },
+    targetWorkArea,
+  );
   const initAOT = savedPos ? savedPos.alwaysOnTop : preset?.alwaysOnTop ?? true;
 
   // 호출 시점 extra가 우선. 없으면 이전에 저장된 extra 복원.
@@ -4480,8 +4504,8 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   const popupWin = new BrowserWindow({
     width: initWidth,
     height: initHeight,
-    minWidth: 280,
-    minHeight: 200,
+    minWidth: WIDGET_POPUP_MIN_WIDTH,
+    minHeight: WIDGET_POPUP_MIN_HEIGHT,
     frame: false,
     transparent: false,
     alwaysOnTop: initAOT,
@@ -4498,13 +4522,13 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
     },
   });
 
-  // 저장된 위치 적용 + 스크린 범위 검증
+  // 저장된 위치 적용 + 스크린 범위 검증 (크기까지 그 화면 안으로 맞춘 값)
   if (savedPos) {
-    const display = screen.getDisplayNearestPoint({ x: savedPos.x, y: savedPos.y });
-    const wa = display.workArea;
-    const cx = Math.max(wa.x, Math.min(wa.x + wa.width - initWidth, savedPos.x));
-    const cy = Math.max(wa.y, Math.min(wa.y + wa.height - initHeight, savedPos.y));
-    popupWin.setBounds({ x: cx, y: cy, width: initWidth, height: initHeight });
+    const restored = fitWidgetPopupBounds(savedPos, targetWorkArea);
+    popupWin.setBounds(restored);
+    // 창은 주 화면에서 만들어진다. 배율(확대 비율)이 다른 모니터로 옮겨 갈 때는 한 번으로는 크기가 '배율 비율'만큼
+    // 어긋난다(실측: 주 화면 150%·대상 100% 에서 600×500 → 400×333). 창이 그 화면에 놓인 뒤 한 번 더 주면 맞는다.
+    popupWin.setBounds(restored);
   }
 
   // 저장된 opacity 적용
@@ -4715,6 +4739,18 @@ ipcMain.handle('widget:navigate-to-date', (_e, payload: { date: string; todoId: 
     mainWindow.show();
     mainWindow.focus();
     mainWindow.webContents.send('widget:navigate-to-date', payload);
+  }
+});
+
+// 새 창으로 띄운 화면(캘린더 등)의 '다른 화면으로 가는' 버튼 → 본체 윈도우를 앞으로 + 그 화면으로 이동.
+// 새 창에는 그 화면 하나뿐이라 자기 창에서는 갈 곳이 없다. 받은 값은 그대로 넘기고,
+// 아는 화면인지는 본체 렌더러가 확인한다(src/utils/widgetViewNavigation.ts 의 parseWidgetViewNavigation).
+ipcMain.handle('widget:navigate-view', (_e, payload: unknown) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('widget:navigate-view', payload);
   }
 });
 
@@ -5522,6 +5558,20 @@ app.on('before-quit', (e) => {
     }
   }
 
+  // 창이 미뤄 둔 저장(5초 되돌리기를 기다리는 댓글 삭제 등)을 끝낼 시간 — 위 대기 작업과 상관없이 모든 창에 알린다.
+  // 창은 기다릴 일이 없으면 곧바로 답한다. 답이 없어도 최대 QUIT_FLUSH_TIMEOUT_MS 만 미룬다.
+  const rendererFlush = waitForRendererQuitFlush({
+    targets: [mainWindow, ...widgetWindows.values()]
+      .filter((win): win is BrowserWindow => !!win && !win.isDestroyed())
+      .map((win) => ({ id: win.webContents.id, send: (channel: string, token: string) => win.webContents.send(channel, token) })),
+    token: `quit-${Date.now()}`,
+    subscribeAck: (listener) => {
+      const handler = (event: Electron.IpcMainEvent, token: unknown) => listener(event.sender.id, token);
+      ipcMain.on(QUIT_FLUSHED_CHANNEL, handler);
+      return () => { ipcMain.removeListener(QUIT_FLUSHED_CHANNEL, handler); };
+    },
+  }).catch(() => 'timeout' as const);
+
   const watchWithTimeout = Promise.race([
     watchCleanup,
     new Promise<void>((r) => setTimeout(r, totalPending > 0 ? 5000 : 2000)),
@@ -5537,6 +5587,7 @@ app.on('before-quit', (e) => {
           personalTodoService.waitForIdle(15000),
           marketAccountService.waitForIdle(15000),
           calendarNotificationDrain.waitForNotificationIdle(15000),
+          rendererFlush,
         ]);
         if (!sheetsDone || !vacDone || !personalDone || !marketDone || !calendarNotificationDone) {
           console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
@@ -5549,6 +5600,7 @@ app.on('before-quit', (e) => {
           personalTodoService.waitForIdle(15000),
           marketAccountService.waitForIdle(15000),
           calendarNotificationDrain.waitForNotificationIdle(15000),
+          rendererFlush,
         ]);
       }
 

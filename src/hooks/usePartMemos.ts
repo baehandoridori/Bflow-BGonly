@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { readMetadata, writeMetadata } from '@/services/supabaseService';
+import { readPartMetadataMaps, writeMetadata } from '@/services/supabaseService';
 import type { Episode, Part, ScenesDeptFilter } from '@/types';
 import {
   applyPartLabelToSheets,
@@ -11,6 +11,7 @@ import {
   getCombinedPartMemo,
   getCombinedPartReelWorker,
   listVisiblePartMemoSheetNames,
+  pickPartMetadataMaps,
   rollbackFailedPartLabelSheets,
   rollbackFailedPartMemoSheets,
   rollbackFailedPartReelWorkerSheets,
@@ -49,36 +50,25 @@ export function usePartMemos({
     let cancelled = false;
     const sheetNamesToLoad = visibleSheetNamesKey ? visibleSheetNamesKey.split('|') : [];
 
-    // 한 파트의 메모/릴 담당/표시 이름은 서로 독립이라 같이 읽는다.
-    // 읽기 실패는 항목별로 삼켜서, 하나가 비어도 나머지 정보는 그대로 보이게 한다.
-    const readPartMetadataValue = async (type: string, sheetName: string): Promise<string> => {
-      try {
-        const data = await readMetadata(type, sheetName);
-        return data?.value ?? '';
-      } catch {
-        return '';
-      }
-    };
-
+    // 파트마다 따로 읽지 않고 한 번에 읽는다 (partMemoHelpers 의 PART_METADATA_TYPES 주석 — 2026-10-02 사고).
+    // 읽기에 실패하면 지금 보이는 값을 그대로 둔다(빈 값으로 덮지 않는다).
     const loadPartMetadata = async () => {
-      const memos: Record<string, string> = {};
-      const reelWorkers: Record<string, string> = {};
-      const labels: Record<string, string> = {};
-      for (const sheetName of sheetNamesToLoad) {
-        const [memo, reelWorker, label] = await Promise.all([
-          readPartMetadataValue('part-memo', sheetName),
-          readPartMetadataValue('part-reel-worker', sheetName),
-          readPartMetadataValue('part-label', sheetName),
-        ]);
-        if (memo) memos[sheetName] = memo;
-        if (reelWorker) reelWorkers[sheetName] = reelWorker;
-        if (label) labels[sheetName] = label;
+      if (sheetNamesToLoad.length === 0) {
+        setPartMemos({});
+        setPartReelWorkers({});
+        setPartLabels({});
+        return;
       }
-
+      let maps;
+      try {
+        maps = pickPartMetadataMaps(await readPartMetadataMaps(), sheetNamesToLoad);
+      } catch {
+        return;
+      }
       if (!cancelled) {
-        setPartMemos(memos);
-        setPartReelWorkers(reelWorkers);
-        setPartLabels(labels);
+        setPartMemos(maps.memos);
+        setPartReelWorkers(maps.reelWorkers);
+        setPartLabels(maps.labels);
       }
     };
 

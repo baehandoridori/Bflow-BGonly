@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 
 const notificationPanel = readFileSync('src/components/NotificationPanel.tsx', 'utf8');
 const notificationHelper = readFileSync('src/utils/notificationHelper.ts', 'utf8');
+// 움직임 폴리싱 18번: 종류별 아이콘·색 표는 알림 창 줄과 알림 카드가 함께 쓰도록 공용 파일로 옮겼다.
+const notificationTypeVisual = readFileSync('src/utils/notificationTypeVisual.ts', 'utf8');
 const notificationDomainRead = readFileSync('src/utils/notificationDomainRead.ts', 'utf8');
 const notificationSceneAction = readFileSync('src/utils/notificationSceneAction.ts', 'utf8');
 const notificationStore = readFileSync('src/stores/useNotificationStore.ts', 'utf8');
@@ -58,8 +60,9 @@ test('all notification click paths mark domain read state before navigating', ()
 });
 
 test('calendar date entry points store a durable schedule request instead of racing a custom event', () => {
-  assert.match(notificationPanel, /CalendarDays/);
-  assert.match(notificationPanel, /case 'calendar': return \{ icon: CalendarDays, color: '#74B9FF', label: '일정' \}/);
+  assert.match(notificationPanel, /notificationTypeVisual\(n\.type\)/);
+  assert.match(notificationTypeVisual, /CalendarDays/);
+  assert.match(notificationTypeVisual, /case 'calendar': return \{ icon: CalendarDays, color: '#74B9FF', label: '일정' \}/);
   assert.match(notificationPanel, /if \(n\.type === 'calendar'\) \{[\s\S]*?navigateToScheduleDate\(date \? \{ date \} : undefined\)/);
   assert.match(myTasksWidget, /navigateToScheduleDate\(todo\.startDate \? \{ date: todo\.startDate, todoId: todo\.id \} : undefined\)/);
   assert.match(app, /onWidgetNavigateToDate\?\.\(\(payload\) => \{[\s\S]*?navigateToScheduleDate\([\s\S]*?date: payload\.date, todoId: payload\.todoId/);

@@ -22,6 +22,8 @@ import { EVENT_COLORS, type BflowCalendar, type CalendarMember } from '@/types/c
 import { avatarColor } from '@/utils/avatarColor';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle } from '@/utils/glassStyles';
+import { sidePanelPreset } from '@/utils/contentSwap';
+import { prefersReducedMotion } from '@/utils/motion';
 
 interface CalendarSettingsModalProps {
   calendar?: BflowCalendar;
@@ -413,7 +415,8 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
   const viewCount = members.length - editCount;
   const showMembers = !isPersonal && visibility !== 'private';
   const createdDate = calendar?.createdAt?.slice(0, 10) || '-';
-  const canSubmit = Boolean(name.trim() && currentUser && !saving && !reconciliationRequired);
+  const isReadOnly = Boolean(calendar && !calendar.canManage);
+  const canSubmit = Boolean(!isReadOnly && name.trim() && currentUser && !saving && !reconciliationRequired);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -669,6 +672,7 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
     const trimmedName = name.trim();
     if (
       !trimmedName
+      || isReadOnly
       || !currentUser
       || saving
       || mutationsLocked
@@ -789,14 +793,15 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
         role="dialog"
         aria-modal="true"
         aria-label={isCreate ? '새 캘린더' : '캘린더 설정'}
-        initial={{ opacity: 0, x: 40 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 40 }}
-        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        // 옆 상세 창과 같은 박자(움직임 폴리싱 11번) — 오른쪽 24px 에서 250ms, 닫힐 때 180ms.
+        {...sidePanelPreset(prefersReducedMotion())}
         className="absolute bottom-0 right-0 top-0 z-50 flex w-[29rem] max-w-full flex-col overflow-hidden"
         style={{
           ...floatingGlassStyle,
-          background: 'rgb(var(--color-bg-card) / 0.97)',
+          // 움직이는 창이라 흐림은 끈다. 흐림 없이 뒤 글자가 비치지 않게 배경은 불투명하게.
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          background: 'rgb(var(--color-bg-card))',
           borderLeft: '1px solid rgb(var(--color-bg-border) / 0.52)',
           boxShadow: '-14px 0 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.22))',
         }}
@@ -825,6 +830,17 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
         </header>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          {isReadOnly ? (
+            <section>
+              <h4 className="text-sm font-semibold text-text-primary">{calendar?.name}</h4>
+              <p className="mt-2 text-xs leading-5 text-text-secondary">
+                {calendar?.isAdminOverview
+                  ? '관리자 조회로 보고 있는 캘린더예요. 이 화면에서는 캘린더 설정을 변경할 수 없어요.'
+                  : '이 캘린더의 설정을 변경할 수 없어요. 구독 주소를 이용하면 다른 캘린더 앱에서도 일정을 볼 수 있어요.'}
+              </p>
+            </section>
+          ) : (
+          <>
           <section>
             <label className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary">이름</label>
             <input
@@ -1007,7 +1023,9 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
               </p>
             </section>
           )}
-          {calendar && ownerId === currentUser?.id && <CalendarSubscriptionPanel calendarId={calendar.id} disabled={saving || reconciliationRequired} />}
+          </>
+          )}
+          {calendar && <CalendarSubscriptionPanel calendarId={calendar.id} isAdminOverview={calendar.isAdminOverview} disabled={saving || reconciliationRequired} />}
         </div>
 
         {reconciliationRequired && (
@@ -1038,10 +1056,10 @@ export function CalendarSettingsModal({ calendar, eventCount, onClose }: Calenda
             )}
           </div>
           <div className="flex shrink-0 gap-2">
-            <button type="button" onClick={onClose} disabled={saving} className="rounded-lg px-3 py-2 text-xs text-text-secondary hover:bg-bg-primary hover:text-text-primary disabled:opacity-40 cursor-pointer">취소</button>
-            <button type="button" onClick={handleSave} disabled={!canSubmit} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-30 cursor-pointer">
+            <button type="button" onClick={onClose} disabled={saving} className="rounded-lg px-3 py-2 text-xs text-text-secondary hover:bg-bg-primary hover:text-text-primary disabled:opacity-40 cursor-pointer">{isReadOnly ? '닫기' : '취소'}</button>
+            {!isReadOnly && <button type="button" onClick={handleSave} disabled={!canSubmit} className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-30 cursor-pointer">
               {saving ? '저장 중…' : '저장'}
-            </button>
+            </button>}
           </div>
         </footer>
       </motion.div>

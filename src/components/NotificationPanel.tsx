@@ -1,9 +1,33 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus, CalendarDays, ChevronDown, ChevronRight } from 'lucide-react';
-import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { motion } from 'framer-motion';
+import { Bell, Check, Trash2, ExternalLink } from 'lucide-react';
+import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { EASE_CSS, MOTION_MS, animateEl, transformPreset } from '@/utils/motion';
+import {
+  BADGE_POP_EASING,
+  BADGE_POP_KEYFRAMES,
+  BADGE_POP_MS,
+  BADGE_ROLL_MS,
+  BELL_RING_KEYFRAMES,
+  BELL_RING_MS,
+  BELL_RING_ORIGIN,
+  INITIAL_BELL_CLOCK,
+  NOTIFICATION_ROW_EXIT_KEYFRAMES,
+  NOTIFICATION_ROW_EXIT_MS,
+  NOTIFICATION_ROW_SHIFT_MS,
+  badgeRollKeyframes,
+  decideBellReaction,
+  notificationRowShifts,
+  subscribeLiveNotificationArrival,
+  takeLiveNotificationArrival,
+  type BellReactionClock,
+  type NotificationRowPosition,
+} from '@/utils/notificationArrival';
+import { notificationTypeVisual } from '@/utils/notificationTypeVisual';
 import { useNotificationPanelSize, useNotificationPanelResizer } from '@/hooks/useNotificationPanelSize';
 import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
 import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles';
@@ -27,6 +51,15 @@ import {
 } from '@/utils/notificationGrouping';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { tokenizeGPaths } from '@/utils/pathLink';
+import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
+import { UNDO_TOAST_CLASS, showUndoToast } from '@/components/common/UndoToast';
+import {
+  NOTIFICATION_CLEAR_FADE_MS,
+  NOTIFICATION_RESTORE_FADE_MS,
+  markNotificationRestoreFade,
+  shownNotificationMarks,
+  takeNotificationRestoreFade,
+} from '@/utils/undoDelete';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
@@ -43,26 +76,41 @@ function timeAgo(iso: string): string {
   return `${day}일 전`;
 }
 
-// ─── 타입별 아이콘/색상 ──────────────────────────────
-function typeConfig(type: NotificationType) {
-  switch (type) {
-    case 'scene_change': return { icon: RefreshCw, color: '#74B9FF', label: '씬 변경' };
-    case 'comment': return { icon: MessageSquare, color: '#8B8DA3', label: '댓글' };
-    // v1.24.0: 멘션 — '@' 아이콘 + accent 색상. 댓글과 명확히 구분.
-    case 'mention': return { icon: AtSign, color: 'rgb(var(--color-accent))', label: '멘션' };
-    case 'milestone': return { icon: Award, color: '#00B894', label: '마일스톤' };
-    case 'system': return { icon: Bell, color: '#8B8DA3', label: '시스템' };
-    // v1.18.0: 리테이크 알림 — MessageSquareWarning 아이콘 + accent 색상.
-    case 'revision': return { icon: MessageSquareWarning, color: 'rgb(var(--color-accent))', label: '리테이크' };
-    // v1.25.5: 액팅 피드백 요청 — 검수 요청 (강한 톤, mention 시각 처리와 동일).
-    case 'acting_feedback': return { icon: MessageSquareWarning, color: '#FDCB6E', label: '피드백' };
-    // v1.25.8: 씬 담당자 배정 — 본인이 새 담당자 (강한 톤, mention 동일 시각 처리).
-    case 'scene_assignment': return { icon: UserPlus, color: 'rgb(var(--color-accent))', label: '배정' };
-    case 'calendar': return { icon: CalendarDays, color: '#74B9FF', label: '일정' };
-    // v1.29.0: 댓글 이모지 반응 — 차분 톤(comment 동등). 아이콘은 NotificationItem 에서 metadata.reactionEmojis 의
-    //   마지막 원소(또는 fallback 💬) 로 덮어 그리므로 여기 icon 값은 placeholder.
-    case 'comment_reaction': return { icon: MessageSquare, color: '#8B8DA3', label: '반응' };
-  }
+// ─── 움직임 (움직임 폴리싱 18번 notification-journey) ─────────
+// 타입별 아이콘/색상은 알림 카드와 같은 표(@/utils/notificationTypeVisual)를 쓴다.
+
+/** 지운 줄을 내보낼 때 부르는 함수 — 줄 요소를 넘겨 받아 밀어낸 뒤 실제로 지운다. */
+type RemoveNotificationRow = (id: string, row: HTMLElement | null) => void;
+
+/** 알림 창 — 종 아래(오른쪽 위 모서리)에서 0.14초 만에 피어난다(작은 메뉴 박자, popup-rhythm 과 같은 값). 닫힘은 바로. */
+const PANEL_POP_FROM = 'translateY(-4px) scale(0.97)';
+const PANEL_POP = transformPreset({ from: PANEL_POP_FROM, duration: 140 });
+const PANEL_POP_REDUCED = transformPreset({ from: PANEL_POP_FROM }, true);
+
+/** 흐림 없는 판 — 바탕이 거의 불투명이라 흐림은 눈에 안 보이는데, 열리며 움직이는 동안·뒤 배경이 움직이는 동안 매 프레임
+ *  다시 계산했다. 흐림이 없으면 뒤 글자가 또렷이 비치므로 알파를 .92 → .985 로 올린다(.97 에서도 대시보드 글자가 비쳤다). */
+const panelSolidStyle: CSSProperties = {
+  ...floatingGlassStyle,
+  background: 'rgb(var(--color-bg-card) / 0.985)',
+  backdropFilter: 'none',
+  WebkitBackdropFilter: 'none',
+};
+
+/** '전체 삭제'를 마친 뒤 — 옅어진 채 멈춰 있던 목록 상자를 풀고, 남은 줄(옅어지는 사이 새로 온 알림) 또는 '알림이 없습니다'를 옅게 띄운다. */
+function revealClearedList(fade: Animation | null, list: HTMLElement | null, reduce: boolean): void {
+  fade?.cancel();
+  if (list) list.style.pointerEvents = '';
+  animateEl(list, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION_MS.fast, easing: EASE_CSS.out }, reduce);
+}
+
+/** 알림 목록 안 움직이는 줄(낱개 줄·묶음·묶음 안 줄)의 지금 위치. */
+function measureNotificationRows(list: HTMLElement | null): NotificationRowPosition[] {
+  if (!list) return [];
+  return Array.from(list.querySelectorAll<HTMLElement>('[data-noti-flip]')).map((element) => ({
+    key: element.dataset.notiFlip ?? '',
+    top: element.getBoundingClientRect().top,
+    parentKey: element.parentElement?.closest<HTMLElement>('[data-noti-flip]')?.dataset.notiFlip ?? null,
+  }));
 }
 
 function NotificationGroupItem({
@@ -70,21 +118,23 @@ function NotificationGroupItem({
   collapsed,
   onToggle,
   onNavigate,
+  onRemove,
 }: {
   group: Extract<NotificationDisplayItem, { kind: 'group' }>;
   collapsed: boolean;
   onToggle: () => void;
   onNavigate: (n: AppNotification) => void;
+  onRemove: RemoveNotificationRow;
 }) {
   return (
-    <div className="rounded-lg border border-bg-border/35 bg-bg-primary/20 overflow-hidden">
+    <div data-noti-flip={`g:${group.key}`} className="rounded-lg border border-bg-border/35 bg-bg-primary/20 overflow-hidden">
       <button
         type="button"
         onClick={onToggle}
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-bg-border/20 transition-colors"
         title={collapsed ? '묶음 펼치기' : '묶음 접기'}
       >
-        {collapsed ? <ChevronRight size={13} className="text-text-secondary/70" /> : <ChevronDown size={13} className="text-text-secondary/70" />}
+        <DisclosureChevron expanded={!collapsed} size={13} className="text-text-secondary/70" />
         <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-text-primary">{group.title}</span>
         {group.unreadCount > 0 && (
           <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[9px] font-bold text-accent">
@@ -96,7 +146,7 @@ function NotificationGroupItem({
       {!collapsed && (
         <div className="space-y-0.5 border-t border-bg-border/25 p-1">
           {group.notifications.map((notification) => (
-            <NotificationItem key={notification.id} n={notification} onNavigate={onNavigate} />
+            <NotificationItem key={notification.id} n={notification} onNavigate={onNavigate} onRemove={onRemove} />
           ))}
         </div>
       )}
@@ -105,10 +155,10 @@ function NotificationGroupItem({
 }
 
 // ─── 알림 항목 ───────────────────────────────────────
-function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (n: AppNotification) => void }) {
+function NotificationItem({ n, onNavigate, onRemove }: { n: AppNotification; onNavigate: (n: AppNotification) => void; onRemove: RemoveNotificationRow }) {
   const markAsRead = useNotificationStore((s) => s.markAsRead);
-  const removeNotification = useNotificationStore((s) => s.removeNotification);
-  const cfg = typeConfig(n.type);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const cfg = notificationTypeVisual(n.type);
   const Icon = cfg.icon;
   // 멘션·댓글 알림은 metadata 가 부족해도 이동 버튼을 만든다.
   // 노출 방식은 기존 알림 액션과 동일하게 hover/focus 때만 보여준다.
@@ -128,12 +178,16 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
 
   return (
     <div
+      ref={rowRef}
       role="button"
       tabIndex={0}
+      data-noti-flip={`n:${n.id}`}
+      data-noti-read={n.isRead ? 'true' : 'false'}
       onClick={handleItemClick}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleItemClick(); } }}
       className={cn(
-        'group/noti relative w-full text-left px-3 py-2.5 flex gap-2.5 transition-colors cursor-pointer rounded-lg',
+        // 읽음 처리: 배경·글자색이 0.2초에 걸쳐 차분해진다(굵기 차이는 안 읽음 구분용이라 바로 바뀜).
+        'group/noti relative w-full text-left px-3 py-2.5 flex gap-2.5 transition-colors duration-200 cursor-pointer rounded-lg',
         n.isRead
           ? 'hover:bg-bg-border/15'
           // v1.24.0: 멘션은 카드 배경 더 진하게, 자동 알림은 차분.
@@ -142,15 +196,15 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
             : 'bg-accent/[0.04] hover:bg-accent/[0.08]',
       )}
     >
-      {/* 미읽 바 — v1.24.0: 멘션은 액센트 색, 자동은 회색 (시각 차별화) */}
+      {/* 미읽 바 — v1.24.0: 멘션은 액센트 색, 자동은 회색 (시각 차별화).
+          읽으면 색은 그대로 둔 채 위아래로 접히듯 사라진다(scaleY + opacity 200ms, motion-comments-notify.css). */}
       <div
-        className="flex-shrink-0 w-[3px] self-stretch rounded-full"
+        aria-hidden
+        className="bf-noti-unread-bar flex-shrink-0 w-[3px] self-stretch rounded-full"
         style={{
-          backgroundColor: n.isRead
-            ? 'transparent'
-            : isMention
-              ? 'rgb(var(--color-accent))'
-              : 'rgb(var(--color-bg-border) / 1.4)',
+          backgroundColor: isMention
+            ? 'rgb(var(--color-accent))'
+            : 'rgb(var(--color-bg-border) / 1.4)',
         }}
       />
 
@@ -158,7 +212,7 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
       <div className="flex-shrink-0 mt-0.5">
         {n.type === 'comment_reaction' && n.metadata?.reactionEmojis?.length ? (
           <span
-            className="text-[14px] leading-none"
+            className="text-[14px] leading-none transition-opacity duration-200"
             style={{ opacity: n.isRead ? 0.55 : 1 }}
           >
             {lastReactionEmoji(n.metadata.reactionEmojis)}
@@ -174,7 +228,7 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
           <p
             title={n.title}
             className={cn(
-              'text-[12px] leading-tight truncate flex-1 min-w-0',
+              'text-[12px] leading-tight truncate flex-1 min-w-0 transition-colors duration-200',
               n.isRead ? 'text-text-secondary/80' : isMention ? 'text-text-primary font-semibold' : 'text-text-primary font-medium',
             )}
           >
@@ -228,7 +282,7 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
         <button
           type="button"
           title="삭제"
-          onClick={(e) => { e.stopPropagation(); removeNotification(n.id); }}
+          onClick={(e) => { e.stopPropagation(); onRemove(n.id, rowRef.current); }}
           className="inline-flex items-center justify-center w-5 h-5 rounded text-[#FF7675] bg-[#FF7675]/10 border border-[#FF7675]/30 hover:bg-[#FF7675]/20"
         >
           <Trash2 size={11} />
@@ -240,18 +294,80 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
 
 // ─── 벨 아이콘 버튼 ──────────────────────────────────
 export function NotificationBell() {
-  const { unreadCount, unreadMentionCount, panelOpen, togglePanel } = useNotificationStore();
+  const { unreadCount, unreadMentionCount, panelOpen, togglePanel, activeUserId } = useNotificationStore();
   // v1.24.0: 시각 강조 분기 — 멘션 우선, 자동 알림은 차분한 글로우, 안 읽음 0개면 일반.
   const hasMention = unreadMentionCount > 0;
   const hasUnread = unreadCount > 0;
+
+  // 움직임 폴리싱 18번: 실시간으로 방금 온 알림에만 반응한다(앱 시작 때 쌓인 알림·계정 전환은 신호가 없다).
+  // 나를 부른 알림이면 종 '딩동', 아니면 배지만 '톡' + 새 숫자가 아래에서 굴러 올라온다.
+  // 움직임은 모두 WAAPI(transform) — 종 빛(::after 무한 애니메이션)을 클래스로 껐다 켜지 않아 깜빡이지 않는다.
+  const { reduce } = useMotionPref();
+  const reduceRef = useRef(reduce);
+  reduceRef.current = reduce;
+  const ringRef = useRef<HTMLSpanElement>(null);
+  const badgeRef = useRef<HTMLSpanElement>(null);
+  const badgeNumberRef = useRef<HTMLSpanElement>(null);
+  const badgeRollRef = useRef<Animation | null>(null);
+  const clockRef = useRef<BellReactionClock>(INITIAL_BELL_CLOCK);
+  const shownCountRef = useRef({ userId: activeUserId, count: unreadCount });
+
+  const rollBadgeNumber = useCallback((direction: 'up' | 'down') => {
+    badgeRollRef.current?.cancel();
+    badgeRollRef.current = animateEl(
+      badgeNumberRef.current,
+      badgeRollKeyframes(direction),
+      { duration: BADGE_ROLL_MS, easing: EASE_CSS.out },
+      reduceRef.current,
+    );
+  }, []);
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const unsubscribe = subscribeLiveNotificationArrival(() => {
+      // 같은 순간 여러 개가 와도 한 번 — 새 숫자가 그려진 다음 차례에 몰아서 처리한다.
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const state = useNotificationStore.getState();
+        const arrival = takeLiveNotificationArrival(state.activeUserId);
+        if (!arrival || state.unreadCount === 0) return;
+        const decision = decideBellReaction(arrival, clockRef.current, Date.now());
+        clockRef.current = decision.clock;
+        if (decision.ring) {
+          animateEl(ringRef.current, BELL_RING_KEYFRAMES, { duration: BELL_RING_MS, easing: 'ease-out' }, reduceRef.current);
+        }
+        if (decision.pop) {
+          animateEl(badgeRef.current, BADGE_POP_KEYFRAMES, { duration: BADGE_POP_MS, easing: BADGE_POP_EASING }, reduceRef.current);
+          rollBadgeNumber('up');
+        }
+      }, 0);
+    });
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [rollBadgeNumber]);
+
+  // 읽거나 지워서 줄면 숫자가 위에서 내려온다. 계정이 바뀐 순간·배지가 사라질 때는 그냥 바뀐다.
+  useEffect(() => {
+    const previous = shownCountRef.current;
+    shownCountRef.current = { userId: activeUserId, count: unreadCount };
+    if (previous.userId !== activeUserId) return;
+    if (unreadCount > 0 && unreadCount < previous.count) rollBadgeNumber('down');
+  }, [activeUserId, unreadCount, rollBadgeNumber]);
+
+  const bellLabel = hasMention ? `멘션 ${unreadMentionCount}개 포함 ${unreadCount}개 새 알림` : `${unreadCount}개 새 알림`;
 
   return (
     <div className="relative">
       <button
         onClick={togglePanel}
-        title={hasMention ? `멘션 ${unreadMentionCount}개 포함 ${unreadCount}개 새 알림` : `${unreadCount}개 새 알림`}
+        aria-label={bellLabel}
+        aria-expanded={panelOpen}
+        // 알림 창이 열려 있으면 설명 말풍선을 띄우지 않는다 — 종 아래로 뜨는 말풍선이 창 머리의 '모두 읽음·전체 삭제'를 덮었다.
+        title={panelOpen ? undefined : bellLabel}
         className={cn(
-          'p-2 rounded-lg transition-colors relative cursor-pointer',
+          'bf-press p-2 rounded-lg relative cursor-pointer',
           panelOpen
             ? 'bg-accent/15 text-accent'
             : 'hover:bg-bg-border/50',
@@ -260,15 +376,22 @@ export function NotificationBell() {
           !panelOpen && hasMention && 'bell-glow-mention',
         )}
       >
-        <Bell size={18} className={cn(hasMention && !panelOpen && 'text-accent')} />
+        {/* 흔들리는 축은 종 꼭대기(50% 15%) — 버튼(누름 scale)과 따로 움직이게 안쪽 칸만 돌린다. */}
+        <span ref={ringRef} className="block" style={{ transformOrigin: BELL_RING_ORIGIN }}>
+          <Bell size={18} className={cn(hasMention && !panelOpen && 'text-accent')} />
+        </span>
         {hasUnread && (
           <span
+            ref={badgeRef}
             className={cn(
-              'absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full text-white text-[9px] font-bold leading-none',
+              'absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center overflow-hidden rounded-full text-white text-[9px] font-bold leading-none',
               hasMention ? 'badge-grad-strong' : 'badge-grad',
             )}
           >
-            {unreadCount > 99 ? '99+' : unreadCount}
+            {/* 숫자만 굴린다 — 배지 밖으로 나간 부분은 가려져 계기판처럼 보인다. */}
+            <span ref={badgeNumberRef} className="block">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
           </span>
         )}
       </button>
@@ -280,9 +403,144 @@ export function NotificationBell() {
 
 // ─── 드롭다운 패널 ───────────────────────────────────
 function NotificationDropdown() {
-  const { notifications, markAllAsRead, clearAll, setPanelOpen, unreadCount } = useNotificationStore();
+  const { notifications, markAllAsRead, setPanelOpen, unreadCount } = useNotificationStore();
   const ref = useRef<HTMLDivElement>(null);
   const showDevTools = isDevPreviewNotificationToolsEnabled();
+  const { reduce } = useMotionPref();
+
+  // 움직임 폴리싱 18번: 지운 줄은 오른쪽으로 밀려나고(150ms), 아래 줄은 그 자리로 미끄러져 올라온다(220ms).
+  const listRef = useRef<HTMLDivElement>(null);
+  const rowShiftBeforeRef = useRef<Map<string, number> | null>(null);
+  const removingIdsRef = useRef(new Set<string>());
+  const handleRemove = useCallback<RemoveNotificationRow>((id, row) => {
+    if (removingIdsRef.current.has(id)) return;
+    // 누른 순간 보이던 그 알림만 지운다 — 밀려나는 사이 같은 알림에 새 내용이 오면(만든 시각이 바뀜) 지우지 않는다.
+    const { notifications: shown, activeUserId: userId } = useNotificationStore.getState();
+    const marks = shownNotificationMarks(shown.filter((n) => n.id === id));
+    if (marks.length === 0) return;
+    removingIdsRef.current.add(id);
+    const exit = animateEl(
+      row,
+      NOTIFICATION_ROW_EXIT_KEYFRAMES,
+      { duration: NOTIFICATION_ROW_EXIT_MS, easing: EASE_CSS.in, fill: 'forwards' },
+      reduce,
+    );
+    const commit = () => {
+      removingIdsRef.current.delete(id);
+      // 지우기 직전 위치를 잰다 — 지운 뒤(useLayoutEffect) 새 위치와 비교해 아래 줄을 되돌렸다 푼다.
+      rowShiftBeforeRef.current = reduce
+        ? null
+        : new Map(measureNotificationRows(listRef.current).map((position) => [position.key, position.top]));
+      if (useNotificationStore.getState().removeShownNotifications(marks, userId).length > 0) return;
+      // 지우지 않았다(그사이 새 내용이 옴·이미 사라짐·계정 전환) — 목록이 그대로라 잰 위치는 버리고 밀려난 줄을 되돌린다.
+      rowShiftBeforeRef.current = null;
+      exit?.cancel();
+      if (row) row.style.pointerEvents = '';
+    };
+    if (!exit || !row) {
+      commit();
+      return;
+    }
+    // 밀려나는 동안 다시 누르지 못하게. 창이 닫혀도 지우기는 끝까지 간다(타이머는 저장소만 건드린다).
+    row.style.pointerEvents = 'none';
+    const duration = Number(exit.effect?.getTiming().duration) || NOTIFICATION_ROW_EXIT_MS;
+    window.setTimeout(commit, duration);
+  }, [reduce]);
+
+  useLayoutEffect(() => {
+    const before = rowShiftBeforeRef.current;
+    rowShiftBeforeRef.current = null;
+    const list = listRef.current;
+    if (!before || !list) return;
+    const rows = Array.from(list.querySelectorAll<HTMLElement>('[data-noti-flip]'));
+    // 앞서 미끄러지던 줄은 지금 보이는 자리(before 에 이미 담김)에서 새로 출발한다.
+    rows.forEach((row) => row.getAnimations().forEach((animation) => { if (animation.id === 'noti-row-shift') animation.cancel(); }));
+    const shifts = notificationRowShifts(before, measureNotificationRows(list));
+    rows.forEach((row) => {
+      const key = row.dataset.notiFlip ?? '';
+      const shift = shifts.get(key);
+      // 밀려나는 중인 줄은 그대로 사라지게 둔다.
+      if (!shift || removingIdsRef.current.has(key.slice(2))) return;
+      const animation = animateEl(
+        row,
+        [{ transform: `translateY(${shift}px)` }, { transform: 'translateY(0)' }],
+        { duration: NOTIFICATION_ROW_SHIFT_MS, easing: EASE_CSS.out },
+        reduce,
+      );
+      if (animation) animation.id = 'noti-row-shift';
+    });
+  }, [notifications, reduce]);
+
+  // 움직임 폴리싱 20번: '전체 삭제' — 줄들이 0.15초에 옅어진 뒤 비우고, 오른쪽 아래에 '알림을 모두 지웠어요 · 되돌리기'.
+  // 되돌리면 지운 알림이 그대로 돌아오고 줄들이 0.18초에 다시 나타난다. 창이 닫혀도 비우기는 끝까지 간다(타이머는 저장소만 건드린다).
+  // 지우는 것은 누른 순간 보이던 알림뿐이다(코덱스 2차 지적) — 옅어지는 사이 실시간으로 온 알림은 한 번도 보이지 못한 채
+  // 읽음 처리·삭제되면 안 된다. 그 알림은 남아 다시 나타나고, '되돌리기'도 실제로 지운 알림만 되살린다.
+  const clearFadeRef = useRef<Animation | null>(null);
+  const clearingRef = useRef(false);
+  /** 비우기를 마쳤다 — 다음 그림(목록이 바뀐 뒤)에서 옅어진 목록을 푼다. 남은 줄이 있어도 푼다. */
+  const clearCommittedRef = useRef(false);
+  const handleClearAll = useCallback(() => {
+    if (clearingRef.current) return;
+    const { notifications: shown, activeUserId: userId } = useNotificationStore.getState();
+    const marks = shownNotificationMarks(shown);
+    if (marks.length === 0) return;
+    clearingRef.current = true;
+    const commit = () => {
+      clearingRef.current = false;
+      // 옅어지는 중이었으면 목록이 바뀐 다음 그림(useLayoutEffect)에서 푼다.
+      clearCommittedRef.current = clearFadeRef.current !== null;
+      const removed = useNotificationStore.getState().removeShownNotifications(marks, userId);
+      if (removed.length === 0) {
+        // 지운 것이 없다(그사이 모두 사라짐·계정 전환) — 목록이 그대로라 다시 그려지지 않으니 여기서 푼다.
+        clearCommittedRef.current = false;
+        if (clearFadeRef.current) revealClearedList(clearFadeRef.current, listRef.current, reduce);
+        clearFadeRef.current = null;
+        return;
+      }
+      showUndoToast({
+        message: '알림을 모두 지웠어요',
+        onUndo: () => {
+          markNotificationRestoreFade();
+          useNotificationStore.getState().restoreNotifications(removed, userId);
+        },
+        // 로컬 목록만 지우는 일이라 기다렸다 할 일이 없다 — 시간이 지나면 되돌릴 수 없게 될 뿐.
+        onExpire: () => {},
+      });
+    };
+    const fade = animateEl(
+      listRef.current,
+      [{ opacity: 1 }, { opacity: 0 }],
+      { duration: NOTIFICATION_CLEAR_FADE_MS, easing: EASE_CSS.in, fill: 'forwards' },
+      reduce,
+    );
+    if (!fade) {
+      commit();
+      return;
+    }
+    clearFadeRef.current = fade;
+    // 옅어지는 동안 줄을 다시 누르지 못하게.
+    if (listRef.current) listRef.current.style.pointerEvents = 'none';
+    window.setTimeout(commit, NOTIFICATION_CLEAR_FADE_MS);
+  }, [reduce]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    // 비운 뒤: 옅어진 채 멈춰 있던 목록 상자를 풀고 남은 줄(옅어지는 사이 새로 온 알림) 또는 '알림이 없습니다'를 옅게 띄운다.
+    // 옅어지는 동안 새 알림이 와서 다시 그려질 때는 풀지 않는다(아직 비우기 전).
+    if (clearFadeRef.current && clearCommittedRef.current) {
+      clearCommittedRef.current = false;
+      revealClearedList(clearFadeRef.current, list, reduce);
+      clearFadeRef.current = null;
+      return;
+    }
+    // 되돌린 뒤(창이 열려 있으면): 줄들이 다시 나타난다.
+    if (notifications.length > 0 && takeNotificationRestoreFade()) {
+      clearFadeRef.current?.cancel();
+      clearFadeRef.current = null;
+      if (list) list.style.pointerEvents = '';
+      animateEl(list, [{ opacity: 0 }, { opacity: 1 }], { duration: NOTIFICATION_RESTORE_FADE_MS, easing: EASE_CSS.out }, reduce);
+    }
+  }, [notifications, reduce]);
 
   // v1.27.0: 패널 너비/높이 사용자 조절 + preferences 저장.
   const { width, height, commit, isUserOverride } = useNotificationPanelSize();
@@ -316,6 +574,8 @@ function NotificationDropdown() {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dragAxis) return;
+      // 움직임 폴리싱 20번: '되돌리기' 카드를 누를 때는 닫지 않는다 — 되살아나는 알림을 그 자리에서 보게.
+      if ((e.target as Element | null)?.closest?.(`.${UNDO_TOAST_CLASS}`)) return;
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setPanelOpen(false);
       }
@@ -348,15 +608,17 @@ function NotificationDropdown() {
   };
 
   return (
-    <div
+    <motion.div
       ref={ref}
+      {...(reduce ? PANEL_POP_REDUCED : PANEL_POP)}
       className="absolute right-0 top-full mt-2 z-[9999] rounded-xl"
       style={{
-        ...floatingGlassStyle,
+        ...panelSolidStyle,
         width: effectiveWidth,
         height: effectiveHeight,
         // overflow-hidden 빼고 visible — 좌측/하단/코너 핸들 hover glow 가 contour 밖으로 살짝 나가도록.
         overflow: 'visible',
+        transformOrigin: 'top right',
       }}
     >
       {/* 안쪽 컨텐츠 컨테이너 — 둥근 모서리 깨끗하게 clip. */}
@@ -406,7 +668,7 @@ function NotificationDropdown() {
             )}
             {notifications.length > 0 && (
               <button
-                onClick={clearAll}
+                onClick={handleClearAll}
                 className="text-[10px] text-text-secondary/55 hover:text-red-400 flex items-center gap-1 cursor-pointer"
               >
                 <Trash2 size={11} />
@@ -418,7 +680,9 @@ function NotificationDropdown() {
 
         {/* 알림 목록 */}
         <div
-          className="overflow-y-auto p-1.5 space-y-0.5"
+          ref={listRef}
+          // overflow-x-hidden: 지운 줄이 오른쪽으로 밀려나는 동안 가로 스크롤바가 깜빡 생기지 않게.
+          className="overflow-y-auto overflow-x-hidden p-1.5 space-y-0.5"
           style={{ maxHeight: listMaxHeight }}
         >
           {notifications.length === 0 ? (
@@ -435,9 +699,10 @@ function NotificationDropdown() {
                   collapsed={groupCollapsedKeys.has(item.key)}
                   onToggle={() => toggleGroup(item.key)}
                   onNavigate={handleNavigate}
+                  onRemove={handleRemove}
                 />
               ) : (
-                <NotificationItem key={item.notification.id} n={item.notification} onNavigate={handleNavigate} />
+                <NotificationItem key={item.notification.id} n={item.notification} onNavigate={handleNavigate} onRemove={handleRemove} />
               )
             ))
           )}
@@ -518,6 +783,6 @@ function NotificationDropdown() {
       {/* 드래그 중에만 좌측/하단 변에서 파티클 사르르. */}
       <ResizeHandleParticles edge="w" active={dragAxis === 'w' || dragAxis === 'sw'} />
       <ResizeHandleParticles edge="s" active={dragAxis === 's' || dragAxis === 'sw'} />
-    </div>
+    </motion.div>
   );
 }

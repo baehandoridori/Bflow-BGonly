@@ -89,7 +89,7 @@ export function EpisodeSummaryWidget() {
                       </span>
                       <div className="flex-1 h-2 bg-bg-border rounded-full overflow-hidden">
                         <div
-                          className="h-full rounded-full transition-all duration-700 ease-out"
+                          className="bf-entry-fill-x h-full rounded-full transition-all duration-700 ease-out"
                           style={{
                             width: `${d.pct}%`,
                             backgroundColor: d.config.color,
@@ -112,7 +112,7 @@ export function EpisodeSummaryWidget() {
                       </span>
                       <div className="flex-1 h-2 bg-bg-border rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-accent rounded-full transition-all duration-700 ease-out"
+                          className="bf-entry-fill-x h-full bg-accent rounded-full transition-all duration-700 ease-out"
                           style={{ width: `${part.pct}%` }}
                         />
                       </div>

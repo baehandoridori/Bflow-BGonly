@@ -1,0 +1,558 @@
+/* 이 갈래 전용 움직임 CSS — motion-live-drag (공통 토큰은 src/index.css :root 의 --motion-*·--ease-*, JS 는 src/utils/motion.ts) */
+
+/* ═══ 5. 컴포지팅 카드 (compositing-card-fixes) ═══════════════════════════
+   - 단계가 바뀐 카드: 앞면 위 색 층의 opacity 만 0 → .28(25%) → 0, 0.9초. 배경색 애니메이션 X.
+     예전 .scene-card.flashing 은 셸의 차례 등장 animation 을 덮어써, 클래스가 빠질 때 카드가 다시 떠올랐다.
+     이제 물듦·배지·라벨은 각자 자기 요소에서만 돈다(셸 animation 은 건드리지 않는다).
+   - 보낸 사람 이름 동그라미: scale .6 → 1 '톡'(220ms) 나타났다가, highlight 가 끝나는 2.5초에 맞춰 조용히 사라진다.
+   - 선택 체크·핀 배지: 나타날 때 '톡'(220ms). 핀 카드의 단계 라벨: 옆에서 살짝 밀려 들어옴(160ms).
+   재생은 React key/마운트로만 한다(클래스로 animation:none 토글 금지 — 끝날 때 깜빡인다). */
+
+.bf-status-wash {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-status-wash 900ms ease-out forwards;
+}
+
+@keyframes bf-status-wash {
+  0% { opacity: 0; }
+  25% { opacity: 0.28; }
+  100% { opacity: 0; }
+}
+
+@keyframes bf-comp-pop-in {
+  from { opacity: 0; transform: scale(0.6); }
+}
+
+@keyframes bf-comp-label-in {
+  from { opacity: 0; transform: translateX(-4px); }
+}
+
+@keyframes bf-comp-fade-away {
+  to { opacity: 0; transform: scale(0.85); }
+}
+
+.bf-comp-pop-in {
+  animation: bf-comp-pop-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.bf-comp-label-in {
+  animation: bf-comp-label-in 160ms var(--ease-out);
+}
+
+/* 2200ms + 300ms = HIGHLIGHT_DURATION_MS(2500) — 배지가 사라지는 순간 언마운트된다. */
+.bf-comp-avatar {
+  animation:
+    bf-comp-pop-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    bf-comp-fade-away 300ms var(--ease-in) 2200ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 동작 줄이기: 물듦만 200ms 한 번(움직임이 없는 색 층). 배지·라벨·등장은 전역 규칙대로 즉시. */
+  .bf-status-wash {
+    animation-duration: 200ms !important;
+  }
+}
+
+/* ═══ 9. 팀원이 바꾼 순간 (teammate-live) ═══════════════════════════════════
+   - 씬 카드: 테두리 링(1.5px 액센트 90%) opacity 0 → 1(15%) → 0, 1.5초(일괄 0.9초). 그림자는 고정값이고
+     움직이는 건 링의 opacity 뿐이다. 카드 위 가운데 이름표는 120ms 뒤 6px 위에서 내려오며(180ms) 나타나
+     2.2초에 220ms 동안 사라진다(일괄 판정이 뒤늦게 이름표를 거둘 때 보이기 전에 거둬지도록 120ms 늦춤).
+   - 시트: 씬번호 칸에 같은 박자의 옅은 물듦 + 왼쪽 막대, 이름표는 칸 위쪽 왼편.
+   - 담당자 카드: 바탕 아래 보라 18% 층 opacity 0 → 1(15%) → 0, 1.3초. 씬 완료 때만 '+N씬' 이 4px 아래에서
+     10px 위로 떠오르며 사라진다(1.1초).
+   - 최근 작업: 새 줄 opacity 250ms + 보라 12% 바탕이 1.6초 동안 남았다 빠진다(목록 내려오기는 WAAPI).
+   다시 틀 때는 React key 로 새로 붙인다 — 클래스로 animation 을 껐다 켜지 않는다. */
+
+.scene-remote-ring {
+  position: absolute;
+  inset: -1px;
+  z-index: 15;
+  border-radius: inherit;
+  border: 1.5px solid rgb(var(--color-accent) / 0.9);
+  box-shadow: 0 0 14px rgb(var(--color-accent) / 0.32);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-remote-glow 1500ms var(--ease-out) forwards;
+}
+
+.scene-remote-ring.is-bulk,
+.scene-remote-row-flash.is-bulk {
+  animation-duration: 900ms;
+}
+
+@keyframes bf-remote-glow {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.scene-remote-tag-anchor {
+  position: absolute;
+  top: -10px;
+  left: 0;
+  right: 0;
+  z-index: 21;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.scene-remote-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  max-width: calc(100% - 24px);
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--color-accent));
+  background: rgb(var(--color-bg-card));
+  color: rgb(var(--color-text-primary));
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.22);
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  animation:
+    bf-remote-tag-in 180ms var(--ease-out) 120ms both,
+    bf-remote-tag-out 220ms var(--ease-in) 2200ms forwards;
+}
+
+@keyframes bf-remote-tag-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+@keyframes bf-remote-tag-out {
+  to { opacity: 0; transform: translateY(-4px); }
+}
+
+/* 시트 씬번호 칸 — 칸 전체 옅은 물듦 + 왼쪽 막대(고정 그림자), opacity 만 움직인다. */
+.scene-remote-row-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgb(var(--color-accent) / 0.14);
+  box-shadow: inset 3px 0 0 rgb(var(--color-accent) / 0.9);
+  opacity: 0;
+  animation: bf-remote-glow 1500ms var(--ease-out) forwards;
+}
+
+/* 시트 이름표 — 씬번호 위쪽 왼편. 고정 머리줄(z-10) 아래로 지나간다. */
+.scene-remote-tag.scene-remote-tag--row {
+  position: absolute;
+  top: -11px;
+  left: 6px;
+  z-index: 5;
+  height: 18px;
+  max-width: none;
+  font-size: 10.5px;
+}
+
+/* 고정 머리줄과 맞닿은 줄(맨 위 줄·스크롤 중 머리줄 바로 아래 줄)은 위쪽에 걸면 머리줄 밑에 가린다
+   — 칸 아래쪽에 건다(SceneRemoteFlash 가 붙는 순간 한 번 재서 정한다). */
+.scene-remote-tag.scene-remote-tag--row.is-below {
+  top: auto;
+  bottom: -11px;
+}
+
+/* 담당자 카드 — 카드(relative isolate) 바탕 바로 위, 글자 아래에 깔리는 층. */
+.assignee-flash {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: rgb(var(--color-accent) / 0.18);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-remote-glow 1300ms var(--ease-out) forwards;
+}
+
+.assignee-delta {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: 5px;
+  color: rgb(var(--color-accent-sub));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: inherit;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-assignee-delta 1100ms var(--ease-out) forwards;
+}
+
+@keyframes bf-assignee-delta {
+  0% { opacity: 0; transform: translateY(4px); }
+  25% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+
+/* 최근 작업 — 새 줄. */
+.feed-row-new {
+  animation: bf-feed-row-in 250ms var(--ease-out) both;
+}
+
+@keyframes bf-feed-row-in {
+  from { opacity: 0; }
+}
+
+.feed-row-new-wash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgb(var(--color-accent) / 0.12);
+  opacity: 0;
+  animation: bf-feed-wash 1600ms var(--ease-in) forwards;
+}
+
+@keyframes bf-feed-wash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 동작 줄이기: 움직임 없이 1.5초 그대로 보였다가 사라진다(전역 0.01ms 규칙보다 특이도가 높다). */
+  .scene-remote-ring,
+  .scene-remote-row-flash,
+  .scene-remote-tag,
+  .assignee-flash,
+  .feed-row-new-wash {
+    animation: bf-remote-hold 1500ms linear forwards !important;
+  }
+
+  .assignee-delta {
+    animation: bf-remote-hold 1100ms linear forwards !important;
+  }
+}
+
+@keyframes bf-remote-hold {
+  0%, 99.9% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ═══ 16. 끌어서 옮기기 — 잡았다 → 옮긴다 → 놓았다 (drag-landing) ═════════════════
+   - 잡았다: 끄는 막대·블록은 흐린 점선 대신 진하게 1.02배 들리고(개별 scale 속성 180ms), 밑에 미리 그린
+     그림자 층이 opacity 로 깔린다(그림자 자체는 움직이지 않는다). 월 보기는 원래 자리에 흐린 점선 흔적
+     (opacity .3, 1px dashed)이 남는다.
+   - 옮긴다: 칸을 넘을 때의 미끄러짐은 DragSlideAnchor(WAAPI translate 120ms, src/components/ui/DragLanding.tsx).
+   - 놓았다: DropLanding — 부모 '톡'(scale 1 → 1.03 → 1, WAAPI 420ms) + 아래 링(opacity .9 → 0, 450ms).
+     놓는 즉시 돌고 저장을 기다리지 않는다. 다시 틀 때는 React key 로 새로 붙인다(animation:none 토글 X).
+   - 만들기: 유리 막대 opacity 1 → 0 150ms, 같은 자리 진짜 막대 opacity 0 → 1 + scale .96 → 1 320ms,
+     빛 링 .8 → 0 600ms.
+   동작 줄이기: 들림·미끄러짐·톡·굳어짐 없이 테두리 링만(전역 0.01ms 규칙보다 특이도가 높은 규칙으로 살린다). */
+
+.bf-land-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 8px;
+  border: 2px solid var(--land-color, rgb(var(--color-accent)));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--land-color, rgb(var(--color-accent))) 55%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-land-ring 450ms var(--ease-std) forwards;
+}
+
+.bf-land-ring.is-born {
+  animation: bf-born-ring 600ms var(--ease-std) forwards;
+}
+
+@keyframes bf-land-ring {
+  from { opacity: 0.9; }
+  to { opacity: 0; }
+}
+
+@keyframes bf-born-ring {
+  from { opacity: 0.8; }
+  to { opacity: 0; }
+}
+
+/* 월 보기 일정 막대 — 호버 확대(transform)와 들림(scale)·미끄러짐(translate)·톡(scale, WAAPI)은 서로 다른 속성.
+   호버용 transform·filter 전환(Tailwind transition-[transform,filter] duration-150)에 들림 scale 만 덧붙인다. */
+.calendar-bar-motion {
+  transition-property: transform, filter, scale;
+  transition-duration: 150ms, 150ms, 180ms;
+  transition-timing-function: var(--ease-std), var(--ease-std), cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* 들렸을 때만 보이는 그림자 층. 막대가 반투명이라 카드색 바탕을 함께 깔아 진하게 보이게 한다. */
+.calendar-bar-motion::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 6px;
+  background: rgb(var(--color-bg-card));
+  box-shadow: 0 10px 22px rgb(0 0 0 / 0.38);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.calendar-bar-lifted {
+  scale: 1.02;
+}
+
+.calendar-bar-lifted::after {
+  opacity: 1;
+}
+
+/* 끄는 동안 원래 자리 흔적. 색은 인라인 borderColor(일정 색). */
+.calendar-bar-origin {
+  position: absolute;
+  z-index: 5;
+  height: 26px;
+  border: 1px dashed;
+  border-radius: 2px;
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.calendar-bar-origin.is-start {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+
+.calendar-bar-origin.is-end {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+/* 방금 만든 일정 — 굳어지듯 진해진다. 끝값이 평소 모습이라 클래스가 빠져도 깜빡이지 않는다. */
+.calendar-bar-born {
+  animation: bf-bar-born 320ms var(--ease-out) both;
+}
+
+@keyframes bf-bar-born {
+  from { opacity: 0; scale: 0.96; }
+}
+
+/* '만들기'를 누르면 유리 막대가 녹아 사라진다(저장에 실패해 창이 남으면 다시 보인다). */
+.calendar-drag-ghost-layer {
+  transition: opacity 150ms var(--ease-in);
+}
+
+.calendar-drag-ghost-layer.is-leaving {
+  opacity: 0;
+}
+
+/* 주 시간표 블록 — 들림은 개별 scale(framer 의 transform 과 섞이지 않는다). */
+.time-grid-block {
+  transition: scale 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.time-grid-block.time-grid-lifted {
+  z-index: 15;
+  scale: 1.02;
+}
+
+/* 블록은 overflow:hidden 이라 링을 안쪽에 그린다. */
+.time-grid-block > .bf-land-ring.time-grid-land-ring {
+  inset: 0;
+  border-radius: inherit;
+}
+
+/* 대시보드 위젯 — 잡으면 1.02배 + 깊은 그림자 층(opacity 0 → 1, 180ms), 나머지는 흐림 없이 어두운 덮개만(200ms).
+   쓰레기통 위에서는 .92배 + 흐려져(150ms) '곧 버려짐'을 보이고, 놓으면 즉시 사라진다.
+   칸으로 튕겨 안착하는 움직임·밀려나는 위젯은 widget-animations.css(transform 만). */
+.widget-lift {
+  position: relative;
+  height: 100%;
+  transition:
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 150ms var(--ease-std);
+}
+
+[data-lifted] > .widget-lift {
+  transform: scale(1.02);
+}
+
+[data-doomed] > .widget-lift {
+  transform: scale(0.92);
+  opacity: 0.7;
+  transition-duration: 150ms;
+}
+
+.widget-lift-shadow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 16px;
+  box-shadow: 0 28px 56px rgb(0 0 0 / 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[data-lifted] > .widget-lift > .widget-lift-shadow {
+  opacity: 1;
+}
+
+[data-doomed] > .widget-lift > .widget-lift-shadow {
+  opacity: 0;
+}
+
+/* 잡은 동안의 테두리 — 깜빡이지 않는다(예전 glowPulse 무한 반복 제거). */
+.widget-drag-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 17px;
+  border: 1.5px solid rgb(var(--color-accent) / 0.5);
+  box-shadow: 0 0 20px rgb(var(--color-accent) / 0.2), inset 0 0 20px rgb(var(--color-accent) / 0.06);
+  pointer-events: none;
+}
+
+/* 놓는 즉시 한 번 빛나는 안착 링. */
+.widget-land-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 17px;
+  border: 1.5px solid rgb(var(--color-accent) / 0.45);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-widget-land 450ms var(--ease-std) forwards;
+}
+
+@keyframes bf-widget-land {
+  from { opacity: 0.7; }
+  to { opacity: 0; }
+}
+
+/* 나머지 위젯 덮개 — 늘 그려 두고 opacity 만 바꾼다(흐림 없음). */
+.widget-dim {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background: rgb(var(--color-bg-primary) / 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease-std);
+}
+
+[data-dimmed] > .widget-dim {
+  opacity: 1;
+}
+
+/* 쓰레기통 — 커짐은 이 상자의 transform 하나(150ms), 빨간 상태는 겹친 층의 opacity. 흐림 없음. */
+.dashboard-trash {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 110px;
+  height: 90px;
+  padding: 16px 24px;
+  border-radius: 16px;
+  white-space: nowrap;
+  background: rgb(var(--color-bg-card) / 0.95);
+  border: 2px dashed rgb(var(--color-bg-border) / 0.5);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
+  transition: transform 150ms var(--ease-out);
+}
+
+.dashboard-trash.is-hot {
+  transform: scale(1.08);
+}
+
+.dashboard-trash-hot {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: rgb(255 107 107 / 0.3);
+  border: 2px dashed rgb(255 107 107 / 0.7);
+  box-shadow: 0 8px 32px rgb(255 107 107 / 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms var(--ease-std);
+}
+
+.dashboard-trash.is-hot .dashboard-trash-hot {
+  opacity: 1;
+}
+
+/* 타임라인 막대 — 손을 그대로 따라오는 막대(나머지 거리는 GanttCanvas 가 transform 으로 직접 적음),
+   들린 그림자(정적, 나타날 때만 opacity), 원래 자리 흐린 점선 흔적, 지금 놓으면 들어갈 칸 점선.
+   gantt.css 는 화면이 나중에 불러오므로 .gantt-canvas-wrap 으로 특이도를 올린다. */
+.gantt-canvas-wrap .gantt-bar-position.is-lifted {
+  z-index: 5;
+}
+
+.gantt-canvas-wrap .gantt-bar > .gantt-lift-shadow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 4px;
+  box-shadow:
+    0 8px 18px rgb(0 0 0 / 0.35),
+    0 0 0 1px color-mix(in srgb, var(--gantt-color) 45%, transparent);
+  pointer-events: none;
+  animation: bf-gantt-lift 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes bf-gantt-lift {
+  from { opacity: 0; }
+}
+
+.gantt-canvas-wrap .gantt-drop-slot {
+  position: absolute;
+  top: 8px;
+  height: 24px;
+  z-index: 1;
+  border-radius: 4px;
+  border: 1px dashed var(--gantt-color);
+  background: color-mix(in srgb, var(--gantt-color) 10%, transparent);
+  pointer-events: none;
+}
+
+.gantt-canvas-wrap .gantt-origin-trace {
+  position: absolute;
+  top: 10px;
+  height: 20px;
+  z-index: 1;
+  border-radius: 3px;
+  border: 1px dashed var(--gantt-color);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.gantt-canvas-wrap .gantt-bar > .bf-land-ring.gantt-land-ring {
+  --land-color: var(--gantt-color);
+  inset: -4px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 동작 줄이기: 들림·미끄러짐·톡·굳어짐·쓰레기통 커짐 없이 테두리 링만 남긴다. */
+  .bf-land-ring {
+    animation-duration: 450ms !important;
+  }
+
+  .bf-land-ring.is-born {
+    animation-duration: 600ms !important;
+  }
+
+  .widget-land-ring {
+    animation-duration: 450ms !important;
+  }
+
+  .calendar-bar-lifted,
+  .time-grid-block.time-grid-lifted {
+    scale: none;
+  }
+
+  [data-lifted] > .widget-lift,
+  [data-doomed] > .widget-lift,
+  .dashboard-trash.is-hot {
+    transform: none;
+  }
+}

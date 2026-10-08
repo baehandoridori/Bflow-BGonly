@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import type { CalendarEvent } from '@/types/calendar';
 import { WEEKDAYS, fmtDate, addDays } from '@/utils/calendarDate';
+import { useMotionPref } from '@/hooks/useMotionPref';
 
 // ─── Props ───────────────────────────────────────
 export interface MiniCalendarProps {
@@ -13,21 +14,27 @@ export interface MiniCalendarProps {
   events: CalendarEvent[];
   activeWeekStart?: string; // YYYY-MM-DD (Sunday of the active week)
   selectedDate?: string;
+  /** 오늘(YYYY-MM-DD). memo 로 감싸 두었으니 날짜가 바뀌면 부모가 새 값을 넘겨 다시 그리게 한다. */
+  today?: string;
 }
 
 // ─── Utility functions ───────────────────────────
 // ─── Component ───────────────────────────────────
-export function MiniCalendar({
+// 캘린더 화면의 다른 상태(호버·펄스·패널 등)가 바뀔 때마다 사이드바 달력까지 다시 그리지 않는다.
+export const MiniCalendar = memo(function MiniCalendar({
   currentMonth,
   onMonthChange,
   onDateSelect,
   events,
   activeWeekStart,
   selectedDate,
+  today: todayProp,
 }: MiniCalendarProps) {
+  // transform 문자열은 MotionConfig 의 '동작 줄이기'가 막지 못한다. 직접 끄고 투명도만 남긴다(예전과 같은 결과).
+  const { reduce } = useMotionPref();
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
-  const today = fmtDate(new Date());
+  const today = todayProp ?? fmtDate(new Date());
 
   // Active week range (Sunday ~ Saturday)
   const activeWeekRange = useMemo(() => {
@@ -143,13 +150,14 @@ export function MiniCalendar({
         ))}
       </div>
 
-      {/* Calendar grid with month transition */}
+      {/* Calendar grid with month transition — transform 문자열이라 합성 스레드(WAAPI)에서 돈다.
+          끝값은 'none' 으로 둬 남은 transform 이 없게 한다. */}
       <AnimatePresence mode="wait">
         <motion.div
           key={monthKey}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
+          initial={reduce ? { opacity: 0 } : { opacity: 0, transform: 'translateX(20px)' }}
+          animate={reduce ? { opacity: 1 } : { opacity: 1, transform: 'translateX(0px)', transitionEnd: { transform: 'none' } }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, transform: 'translateX(-20px)' }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
           className="grid grid-cols-7 gap-px"
         >
@@ -213,4 +221,4 @@ export function MiniCalendar({
       </AnimatePresence>
     </div>
   );
-}
+});

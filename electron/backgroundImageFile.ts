@@ -31,7 +31,9 @@ function validatePath(input: string): string {
   if (/^\\\\[?.][\\/]/.test(filePath) || (!drivePath && !uncPath && !path.posix.isAbsolute(filePath))) {
     throw new Error('웹 주소가 아닌 로컬 또는 공유 드라이브의 전체 파일 경로를 입력해 주세요.');
   }
-  if (!/\.(?:png|jpe?g|webp)$/i.test(filePath)) throw new Error('PNG, JPG, JPEG, WebP 이미지 파일만 연결할 수 있습니다.');
+  // The main process decodes PNG and JPEG only. WebP works through the file picker, where the renderer re-encodes it.
+  if (/\.webp$/i.test(filePath)) throw new Error('WebP 파일은 경로로 연결할 수 없습니다. 파일 선택으로 등록하거나 PNG, JPG 파일의 경로를 입력해 주세요.');
+  if (!/\.(?:png|jpe?g)$/i.test(filePath)) throw new Error('PNG, JPG, JPEG 이미지 파일만 경로로 연결할 수 있습니다.');
   return filePath;
 }
 
@@ -74,8 +76,7 @@ export async function readBackgroundImageFile(input: string, deps: BackgroundIma
   const buffer = await readBounded(filePath, deps.openFile ?? (filePath => open(filePath, 'r')));
   const png = buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   const jpeg = buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255;
-  const webp = buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
-  if (!png && !jpeg && !webp) throw new Error('이미지 파일이 손상되었거나 지원하지 않는 형식입니다.');
+  if (!png && !jpeg) throw new Error('이미지 파일이 손상되었거나 지원하지 않는 형식입니다.');
   let image: BackgroundDecodedImage;
   try { image = deps.decode(buffer); } catch { throw new Error('이미지 파일을 읽을 수 없습니다. 파일이 손상되었는지 확인해 주세요.'); }
   const size = image.getSize();
@@ -86,7 +87,7 @@ export async function readBackgroundImageFile(input: string, deps: BackgroundIma
   let width = Math.max(1, Math.round(size.width * ratio));
   let height = Math.max(1, Math.round(size.height * ratio));
   if (ratio < 1) image = image.resize({ width, height });
-  // Only genuine JPEG sources become JPEG; PNG/WebP retain transparency.
+  // Only genuine JPEG sources become JPEG; PNG retains transparency.
   for (;;) {
     const data = jpeg ? image.toJPEG(85) : image.toPNG();
     const dataUrl = `data:image/${jpeg ? 'jpeg' : 'png'};base64,${data.toString('base64')}`;

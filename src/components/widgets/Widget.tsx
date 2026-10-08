@@ -69,9 +69,11 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
     <div
       className={cn(
         'border border-bg-border/30 rounded-2xl flex flex-col h-full overflow-hidden',
-        'shadow-sm',
-        'hover:shadow-lg hover:border-bg-border/50',
-        'transition-all duration-200 ease-out',
+        // 정보 카드 hover: 테두리만 밝아짐(미리 그린 고리의 opacity). 그림자는 아래 인라인 boxShadow 가 정하므로
+        // shadow-*·hover:shadow-* 유틸은 효과가 없다. 테마 전환 때 바탕·테두리 색만 부드럽게 바뀐다.
+        'bf-card-hover bf-card-hover--info',
+        'transition-colors duration-base',
+        // 끌 때 들림(1.02배)은 대시보드의 바깥 래퍼(.widget-lift)가 맡는다(움직임 폴리싱 16번).
         className
       )}
       style={{
@@ -106,8 +108,8 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
         </div>
       </div>
 
-      {/* 내용 */}
-      <div className="flex-1 overflow-auto p-4">{children}</div>
+      {/* 내용 — data-widget-body: 대시보드 탭을 바꿀 때 유리 셸은 그대로 두고 이 안쪽만 다시 드러낸다(움직임 폴리싱 12번) */}
+      <div data-widget-body className="flex-1 overflow-auto p-4">{children}</div>
     </div>
   );
 }

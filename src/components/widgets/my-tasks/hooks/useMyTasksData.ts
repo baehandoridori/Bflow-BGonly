@@ -12,6 +12,7 @@ import {
   persistSequentialStagePatchWithRollback,
   SEQUENTIAL_STAGE_ORDER,
 } from '@/utils/sceneStageProgression';
+import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import * as supabaseService from '@/services/supabaseService';
 import type { CharacterTaskItem, SceneKey, PersonalTodo, PersonalTodoLabel, FlatScene, StageSaveBaseline, PersonalTodoStatus } from '../types';
 import { createStageSaveBaseline } from '../types';
@@ -119,6 +120,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const episodes = useDataStore((s) => s.episodes);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
+  const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
   const currentUser = useAuthStore((s) => s.currentUser);
   const { pendingCharacterTasks, doneCharacterTasks } = useMyCharacterTasks();
   const personalTodos = usePersonalTodos();
@@ -252,6 +254,14 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
   // 토글 핸들러 (씬 단계 순차 토글)
   const handleSceneToggle = useCallback(async (flat: FlatScene, stage: Stage) => {
     const { sheetName, scene, sceneIndex } = flat;
+    // 담당자가 둘 이상인 씬의 4단계는 담당자 전원의 공통 진행이라 개인 체크박스가 아니다.
+    // 여기서 저장하면 (a) 내 것만 바꿔도 공통 진행이 안 움직여 되돌아가고,
+    // (b) 전원을 맞추면 앞서간 사람의 기록을 끌어내린다. 씬 목록의 담당자별 줄로 안내한다.
+    // (씬 뷰도 다중 담당이면 공통 칩 대신 담당자별 줄을 보여준다 — 같은 규칙.)
+    if (hasMultiAssigneeProgress(scene)) {
+      toast.info('담당자가 둘 이상인 씬은 씬 목록에서 담당자별로 체크해주세요.');
+      return;
+    }
     const stagePatch = buildSequentialStagePatch(scene, stage);
     const changedStages = getChangedSequentialStages(scene, stagePatch);
     if (changedStages.length === 0) return;
@@ -288,6 +298,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
       };
     };
 
+
     const immediateCompletionMeta = buildCompletionMeta(scene);
 
     if (immediateCompletionMeta) {
@@ -308,7 +319,9 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
         updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', queuedCompletionMeta.nextCompletedAt);
       }
 
-      if (queuedChangedStages.length === 0 && !queuedCompletionMeta) return;
+      if (queuedChangedStages.length === 0 && !queuedCompletionMeta) {
+        return;
+      }
 
       try {
         const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
@@ -353,7 +366,7 @@ export function useMyTasksData(isPopup: boolean): UseMyTasksDataResult {
     if (!stageSaveQueueRef.current.has(saveQueueKey)) {
       stageSaveBaselineRef.current.delete(saveQueueKey);
     }
-  }, [updateSceneFieldOptimistic, currentUser, notifyChange]);
+  }, [updateSceneFieldOptimistic, updateSceneByUuid, currentUser, notifyChange]);
 
   // 인라인 필드 편집
   const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {

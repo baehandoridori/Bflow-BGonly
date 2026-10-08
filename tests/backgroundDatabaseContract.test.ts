@@ -33,7 +33,7 @@ const entityValidator=(text:string)=>{const start=text.indexOf('CREATE OR REPLAC
 
 test('3D migration widens only the map node validator with the app ranges, never injects defaults and keeps the lockdown',()=>{
   const body=code(sql3d);
-  assert.match(sql3d,/^-- Prerequisite: 2026-09-21-background-library\.sql/m);assert.match(sql3d,/^-- .*not applied to production/im);
+  assert.match(sql3d,/^-- Prerequisite: 2026-09-21-background-library\.sql/m);assert.match(sql3d,/^-- .*Applied to production on 2026-10-08 as 20261008035155/m);
   assert.match(body,/^BEGIN;\r?\nSET LOCAL lock_timeout = '5s';\r?\nSET LOCAL statement_timeout = '45s';/m);assert.match(body,/^COMMIT;\s*$/m);
   assert.deepEqual(body.match(/CREATE OR REPLACE FUNCTION public\.\w+/g),['CREATE OR REPLACE FUNCTION public.background_library_validate_entity']);
   assert.match(body,/to_regprocedure\('public\.background_library_validate_entity\(text,jsonb\)'\) IS NULL/);
@@ -90,7 +90,7 @@ async function boot(){
     await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated;
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon,authenticated;
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon,authenticated;
-      CREATE TABLE public.users(id TEXT PRIMARY KEY,role TEXT NOT NULL);
+      CREATE TABLE public.users(id TEXT PRIMARY KEY,role TEXT DEFAULT 'user');
       CREATE TABLE public.episodes(episode_number INTEGER PRIMARY KEY);
       INSERT INTO users VALUES('admin','admin'),('member','user');INSERT INTO episodes VALUES(1),(2);
       CREATE SCHEMA realtime;CREATE TABLE realtime.messages(payload JSONB,event TEXT,topic TEXT,private BOOLEAN);
@@ -148,6 +148,20 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       const otherPlace=place('다른 장소');await save('place',otherPlace);
       await assert.rejects(save('group',{...group,id:id(),placeId:otherPlace.id}),{code:'22023'});
       const duplicate=view(classroom.id);duplicate.variants[0].id=asset.variants[0].id;await assert.rejects(save('view',duplicate),{code:'22023'});
+    });
+    await t.test('a member whose role is empty stays a normal member instead of being told to log in again',async()=>{
+      // users.role is nullable in production; the rest of the app reads an empty role as 'user'.
+      await db.exec('RESET ROLE');await db.exec("UPDATE users SET role=NULL WHERE id='member'");await db.exec('SET ROLE anon');
+      try {
+        assert.equal((await read('member')).canManage,false);
+        await assert.rejects(save('place',place('권한 없는 장소'),null,'member'),/관리자만/);
+        const usage={id:id(),revision:0,episodeNumber:2,placeId:classroom.id,variantIds:[],memo:'역할이 비어 있는 팀원의 기록'};
+        const saved=await save('usage',usage,null,'member');
+        assert.equal(saved.usages.some((item:any)=>item.id===usage.id),true);
+        await run({type:'delete',kind:'usage',id:usage.id,expectedRevision:1},'member');
+      } finally {
+        await db.exec('RESET ROLE');await db.exec("UPDATE users SET role='user' WHERE id='member'");await db.exec('SET ROLE anon');
+      }
     });
     await t.test('map placement removal preserves original assets and usage while local references stay valid',async()=>{
       const m=map(classroom.id);const s=space(classroom.id);m.nodes=[s];await save('map',m);

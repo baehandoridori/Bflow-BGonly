@@ -55,6 +55,8 @@ dist/
 
 **핵심**: `package.json` 의 `"asar": false` 설정으로 모든 파일이 풀린 상태. 이전에 모듈 누락 이슈로 명시적으로 끈 결정 (커밋 `08656e0`).
 
+**크기 기준 (v1.129.1~)**: `win-unpacked` 약 396MB(7,140개), `BFLOW-Setup.exe` 약 115MB. `win-unpacked/resources/app/dist/` 안에는 화면 묶음(`index.html`·`assets/`·`splash/`)만 있어야 한다. v1.129.0 까지는 이 안에 런타임 한 벌(`win-unpacked`, 268MB)이 더 들어가 664MB / 192MB 였다. 막는 규칙과 확인은 `AUTO_UPDATE_OPERATIONS.md` '앱 안에 빌드 산출물을 다시 담지 않는다'.
+
 ---
 
 ## 4. 배포 방식 (폐기된 기존 방식)
@@ -156,6 +158,8 @@ DB 스키마 변경 시:
 8. **버전 버튼 UX**: 좌하단 버전 버튼은 업데이트가 없어도 항상 열려야 한다. 모달은 열자마자 자동 확인하지 않고, 모달 안의 `새로고침`을 눌렀을 때만 `update:check-now` IPC로 배포 manifest를 다시 읽어 현재/최신 버전과 버전별 업데이트 내역을 갱신한다. 새로고침 중에는 기존 표시 내용을 유지해 중간 상태 때문에 레이아웃이 흔들리지 않게 한다.
 9. **helper PowerShell 보간 주의**: `helperSwap.ts`/`installerApply.ts`의 PowerShell 스크립트는 TypeScript 백틱 문자열 안에 있다. PowerShell 변수는 `$($stepName)`처럼 쓰고 `${stepName}`을 쓰면 JavaScript 변수로 평가되어 helper가 시작되기 전에 실패한다.
 10. **업데이트 내역 보존**: `DEVLOG/update-notes.json`의 과거 항목은 앱 모달에서 펼쳐 볼 수 있는 기록이다. 새 버전 추가 시 기존 항목을 삭제하지 말고 최신 항목을 맨 위에 추가한다.
+11. **휴가 연동 토큰**: 배포 빌드에는 휴가 API 토큰(`BFLOW_VACATION_TOKEN`)이 꼭 들어가야 한다. 값은 메인 체크아웃 `C:\Bflow-BGonly\.env.local` 에만 있고(레포에 커밋하지 않음), 워크트리에서 빌드하면 거기서 자동으로 찾는다. `npm run build` 는 토큰이 없으면 처음에 멈추고, 묶음에 토큰이 안 들어갔으면 `manifest.json` 을 만들지 않는다. 상세는 `AUTO_UPDATE_OPERATIONS.md` '휴가 연동 토큰'.
+12. **앱 안에 빌드 산출물을 다시 담지 않기**: 화면 묶음 폴더와 electron-builder 출력 폴더가 둘 다 `dist` 라서, `build.files` 의 `!dist/…` 제외 규칙 세 줄이 없으면 런타임·이전 설치 파일이 앱 안으로 한 번 더 들어간다. 규칙을 지우거나 순서를 바꾸지 않는다. 화면 폴더에 다른 것이 섞이면 `manifest.json` 을 만들지 않는다. 상세는 `AUTO_UPDATE_OPERATIONS.md` '앱 안에 빌드 산출물을 다시 담지 않는다'.
 
 ---
 

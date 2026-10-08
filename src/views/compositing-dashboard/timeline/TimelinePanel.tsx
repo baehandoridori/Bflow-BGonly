@@ -25,6 +25,8 @@ import { PartBadge } from '@/components/compositing-dashboard/common/PartBadge';
 const PART_BOX_H = 96;
 const CAROUSEL_CARD_WIDTH = 112;
 const CAROUSEL_SIDE_CARD_WIDTH = 92;
+/** 가운데 카드 높이. 옆 카드는 같은 크기 상자를 scale 로 줄여 보인다(움직임 폴리싱 바탕 C). */
+const CAROUSEL_CARD_HEIGHT = 120;
 const CAROUSEL_SLOT_GAP = 78;
 /** 캐러셀 포털 레이어 z — 핀 카드(20)보다 위, 헤더(z-30)·사이드바(z-40)·모달(z-50+)보다 아래 (피드백 30). */
 const CAROUSEL_LAYER_Z = 25;
@@ -660,12 +662,16 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
             const centerAmount = Math.max(0, 1 - Math.min(distance, 1));
             const visibleAmount = Math.max(0, 1 - Math.min(distance, 2.25) / 2.25);
             const isCenter = sceneIndex === carousel.selection.selectedIndex;
-            const width = CAROUSEL_SIDE_CARD_WIDTH + ((CAROUSEL_CARD_WIDTH - CAROUSEL_SIDE_CARD_WIDTH) * centerAmount);
-            const x = carousel.anchorX + (offset * CAROUSEL_SLOT_GAP) - (width / 2);
+            // 움직임 폴리싱 바탕 C: 마우스를 따라 카드가 바뀔 때 폭·높이·filter·배경·그림자를 전환하면 매 프레임
+            // 레이아웃과 다시 칠하기가 일어난다. 상자는 가운데 카드 크기로 고정하고 옆 카드의 작은 크기는 scale 로,
+            // 어둡게(예전 brightness)는 검은 막의 투명도로, 가운데 강조(색 테두리·바탕·빛)는 미리 그린 층의
+            // 투명도로 바꾼다 — 움직이는 값은 transform·opacity 뿐이다. 뒤 흐림(backdrop-blur)도 뺐다.
+            const sizeRatio = (CAROUSEL_SIDE_CARD_WIDTH + ((CAROUSEL_CARD_WIDTH - CAROUSEL_SIDE_CARD_WIDTH) * centerAmount)) / CAROUSEL_CARD_WIDTH;
+            const x = carousel.anchorX + (offset * CAROUSEL_SLOT_GAP) - (CAROUSEL_CARD_WIDTH / 2);
             const y = 18 - (18 * centerAmount) + Math.min(distance, 2) * 3;
-            const scale = 0.82 + (0.18 * centerAmount);
-            const height = 98 + (22 * centerAmount);
+            const scale = (0.82 + (0.18 * centerAmount)) * sizeRatio;
             const opacity = 0.12 + (0.88 * visibleAmount);
+            const dimOpacity = isCenter ? 0 : 0.18 - (0.12 * centerAmount);
 
             return (
               <button
@@ -687,29 +693,35 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
                 }}
                 aria-label={`${scene.sceneId} 핀, 더블클릭으로 상세 열기`}
                 className={cn(
-                  'absolute rounded-xl border text-left overflow-hidden backdrop-blur-md',
-                  'transition-[transform,width,height,opacity,filter,background,border-color,box-shadow] duration-150 ease-out cursor-pointer',
+                  'absolute rounded-xl border text-left',
+                  'transition-[transform,opacity] duration-150 ease-out cursor-pointer',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
                 )}
                 style={{
                   pointerEvents: 'auto',
-                  width,
-                  height,
+                  width: CAROUSEL_CARD_WIDTH,
+                  height: CAROUSEL_CARD_HEIGHT,
                   transform: `translate3d(${x}px, ${y}px, 0) scale(${scale})`,
                   transformOrigin: 'center top',
                   opacity,
-                  filter: isCenter ? 'saturate(1) brightness(1)' : `saturate(${0.72 + centerAmount * 0.18}) brightness(${0.82 + centerAmount * 0.12})`,
-                  borderColor: isCenter
-                    ? `color-mix(in srgb, var(${tokenVar}) 62%, rgb(var(--color-bg-border)))`
-                    : 'rgb(var(--color-bg-border) / 0.42)',
-                  background: isCenter
-                    ? `linear-gradient(145deg, color-mix(in srgb, var(${tokenVar}) 14%, rgb(var(--color-bg-card))), rgb(var(--color-bg-card) / 0.94))`
-                    : 'rgb(var(--color-bg-card) / 0.74)',
-                  boxShadow: isCenter
-                    ? `0 14px 28px rgb(0 0 0 / 0.32), 0 0 16px color-mix(in srgb, var(${tokenVar}) 18%, transparent)`
-                    : '0 8px 18px rgb(0 0 0 / 0.22)',
+                  borderColor: 'rgb(var(--color-bg-border) / 0.42)',
+                  background: 'rgb(var(--color-bg-card) / 0.92)',
+                  boxShadow: '0 8px 18px rgb(0 0 0 / 0.22)',
                 }}
               >
+                {/* 가운데 카드 강조 층(상태색 테두리·바탕·빛) — 투명도만 바뀐다 */}
+                <div
+                  aria-hidden="true"
+                  data-compositing-carousel-focus-layer="true"
+                  className="pointer-events-none absolute -inset-px rounded-[inherit] border transition-opacity duration-150 ease-out"
+                  style={{
+                    opacity: isCenter ? 1 : 0,
+                    borderColor: `color-mix(in srgb, var(${tokenVar}) 62%, rgb(var(--color-bg-border)))`,
+                    background: `linear-gradient(145deg, color-mix(in srgb, var(${tokenVar}) 14%, rgb(var(--color-bg-card))), rgb(var(--color-bg-card) / 0.94))`,
+                    boxShadow: `0 14px 28px rgb(0 0 0 / 0.32), 0 0 16px color-mix(in srgb, var(${tokenVar}) 18%, transparent)`,
+                  }}
+                />
+                <div className="relative h-full overflow-hidden rounded-[inherit]">
                 <div
                   className="absolute left-0 right-0 top-0 h-0.5"
                   style={{ background: `linear-gradient(90deg, transparent, var(${tokenVar}), transparent)` }}
@@ -754,6 +766,13 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
                     </div>
                   )}
                 </div>
+                </div>
+                {/* 옆 카드 어둡게 — 예전 filter(brightness) 대신 검은 막의 투명도 */}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 rounded-[inherit] bg-black transition-opacity duration-150 ease-out"
+                  style={{ opacity: dimOpacity }}
+                />
               </button>
             );
           })}

@@ -276,6 +276,8 @@ test('authenticated splash does not expose the signed-out update entry', async (
 test('App mounts the shared update dialog in the signed-out return branch', () => {
   const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const signedOutReturn = source.slice(source.indexOf('// 로그인 화면 (비로그인 상태)'), source.indexOf('// 스플래시 랜딩 (로그인 상태에서도 앱 시작 시 표시)'));
-  assert.match(signedOutReturn, /<LoginScreen\b/);
+  // 로그인 화면은 첫 진입 덮개(entryOverlay, 움직임 폴리싱 13번)로 그려진다 — 로그인 뒤에도 같은 자리에서 걷히도록 변수 하나를 함께 쓴다.
+  assert.match(signedOutReturn, /\{entryOverlay\}/);
+  assert.match(source, /const entryOverlay = entryOverlayVisible \? \(\s*<LoginScreen\b/);
   assert.match(signedOutReturn, /<UpdateCenterModal\s*\/>/, 'the real dialog must be mounted alongside the login screen');
 });

@@ -17,6 +17,25 @@ import { DahyuDeleteModal } from '@/components/vacation/DahyuDeleteModal';
 import { VACATION_COLOR } from '@/types/vacation';
 import type { VacationStatus, VacationLogEntry, VacationEvent } from '@/types/vacation';
 import { cn } from '@/utils/cn';
+import {
+  layoutVacationBars, vacationWeekRenderModel, VACATION_BAR_LAYOUT, type VacationEventBar,
+} from '@/utils/vacationCalendarLayout';
+import { createVacationGuardRetry } from '@/utils/vacationGuardRetry';
+import { useSwapIn } from '@/hooks/useContentSwap';
+import { dateCardPreset, swapInClassName } from '@/utils/contentSwap';
+import {
+  createMonthSlideVariants, MONTH_LAYER_STYLE, MONTH_STACK_STYLE, type MonthSlide,
+} from '@/components/calendar/monthSlideMotion';
+import { useMotionPref } from '@/hooks/useMotionPref';
+import { createRapidGate } from '@/utils/viewTransitionMotion';
+
+/* 달 넘김 — 캘린더 월 화면(CalendarGrid)과 같은 값: 나가는 달과 들어오는 달이 한 칸에 겹쳐 넘어간다.
+   transform 문자열이라 합성 스레드에서 돈다(움직임 폴리싱 12번). */
+const VACATION_MONTH_SLIDE_VARIANTS = createMonthSlideVariants(
+  24,
+  { duration: 0.32, ease: [0.16, 1, 0.3, 1], opacity: { duration: 0.2, ease: 'easeOut' } },
+  { duration: 0.22, ease: [0.4, 0, 1, 1], opacity: { duration: 0.16, ease: 'easeIn' } },
+);
 
 /* ───────────── date helpers ───────────── */
 
@@ -35,80 +54,6 @@ function parseDate(s: string): Date {
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const DAHYU_ADMINS = ['허혜원', '배한솔'] as const;
 const TYPE_COLORS = ['#00B894', '#6C5CE7', '#FDCB6E', '#74B9FF', '#FD79A8'];
-
-/* ───────────── event bar layout ───────────── */
-
-interface EventBar {
-  event: VacationEvent;
-  row: number;
-  startCol: number;
-  span: number;
-  isStart: boolean;
-  isEnd: boolean;
-}
-
-function layoutEventBars(
-  events: VacationEvent[],
-  weekStart: Date,
-  weekEnd: Date,
-  cols: number,
-): EventBar[] {
-  const weekStartStr = fmtDate(weekStart);
-  const weekEndStr = fmtDate(weekEnd);
-
-  const relevant = events
-    .filter((e) => e.endDate >= weekStartStr && e.startDate <= weekEndStr)
-    .sort((a, b) => {
-      const aSpan = Math.round((parseDate(a.endDate).getTime() - parseDate(a.startDate).getTime()) / 86400000) + 1;
-      const bSpan = Math.round((parseDate(b.endDate).getTime() - parseDate(b.startDate).getTime()) / 86400000) + 1;
-      const dSpan = bSpan - aSpan;
-      if (dSpan !== 0) return dSpan;
-      return a.startDate.localeCompare(b.startDate);
-    });
-
-  const rows: string[][] = [];
-  const bars: EventBar[] = [];
-
-  for (const ev of relevant) {
-    const evStart = parseDate(ev.startDate);
-    const evEnd = parseDate(ev.endDate);
-    const clampStart = evStart < weekStart ? weekStart : evStart;
-    const clampEnd = evEnd > weekEnd ? weekEnd : evEnd;
-
-    const startCol = Math.round((clampStart.getTime() - weekStart.getTime()) / 86400000);
-    const endCol = Math.round((clampEnd.getTime() - weekStart.getTime()) / 86400000);
-    const span = endCol - startCol + 1;
-
-    const evKey = `${ev.name}-${ev.startDate}-${ev.endDate}`;
-
-    let placed = -1;
-    for (let r = 0; r < rows.length; r++) {
-      let free = true;
-      for (let c = startCol; c <= endCol; c++) {
-        if (rows[r][c]) { free = false; break; }
-      }
-      if (free) { placed = r; break; }
-    }
-    if (placed === -1) {
-      placed = rows.length;
-      rows.push(new Array(cols).fill(''));
-    }
-    for (let c = startCol; c <= endCol; c++) {
-      rows[placed][c] = evKey;
-    }
-
-    bars.push({
-      event: ev,
-      row: placed,
-      startCol,
-      span,
-      isStart: evStart >= weekStart,
-      isEnd: evEnd <= weekEnd,
-    });
-  }
-
-  return bars;
-}
 
 /* ───────────── sub-components ───────────── */
 
@@ -251,13 +196,9 @@ function VacationDeleteListModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.15 }}
-        className="bg-bg-card border border-bg-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 backdrop-blur-sm bf-scrim-in" onClick={onClose}>
+      <div
+        className="bf-modal-in bg-bg-card border border-bg-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border/50">
@@ -317,7 +258,7 @@ function VacationDeleteListModal({
             </div>
           )}
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }
@@ -333,16 +274,32 @@ export function VacationView() {
 
   // 변경(등록/삭제) 후 캐시 유예 — 30초간 캐시 저장 안 함
   const mutationTimeRef = useRef(0);
+  // 가드 때문에 서버 결과를 버렸으면 가드가 끝난 직후 한 번 다시 읽는다(예약은 늘 하나, 언마운트 때 정리)
+  const [guardRetry] = useState(createVacationGuardRetry);
+  const loadMyDataRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+  // 언마운트하면 남은 예약을 지우고, 그 뒤에 끝나는 로드도 새 예약을 못 잡게 한다(StrictMode 재마운트 때 다시 붙인다)
+  useEffect(() => {
+    guardRetry.activate();
+    return () => guardRetry.dispose();
+  }, [guardRetry]);
 
   // ── 월 탐색 ──
   const todayStr = fmtDate(new Date());
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(todayStr);
+  // 다른 날짜를 누르면 카드 틀은 그대로, 안의 날짜·명단만 바뀐다(움직임 폴리싱 11번).
+  const { reduce } = useMotionPref();
+  const dateSwapIn = useSwapIn(selectedDate);
   const [direction, setDirection] = useState(0);
+  // 달을 300ms 안에 연달아 넘기면 미끄러지지 않고 바로 바꾼다(캘린더 기간 넘김과 같은 규칙). 동작 줄이기는 위 reduce 를 같이 쓴다.
+  const [monthNavGate] = useState(createRapidGate);
+  const [rapidMonthNav, setRapidMonthNav] = useState(false);
+  const markMonthNavigation = () => setRapidMonthNav(monthNavGate.hit(performance.now()));
 
   const goToday = () => {
     const now = new Date();
+    markMonthNavigation();
     setDirection(0);
     setYear(now.getFullYear());
     setMonth(now.getMonth());
@@ -350,12 +307,14 @@ export function VacationView() {
   };
 
   const goPrev = () => {
+    markMonthNavigation();
     setDirection(-1);
     if (month === 0) { setYear((y) => y - 1); setMonth(11); }
     else setMonth((m) => m - 1);
   };
 
   const goNext = () => {
+    markMonthNavigation();
     setDirection(1);
     if (month === 11) { setYear((y) => y + 1); setMonth(0); }
     else setMonth((m) => m + 1);
@@ -408,8 +367,8 @@ export function VacationView() {
     if (!force) {
       const cache = useAppStore.getState().vacationCache;
       if (cache && cache.userName === currentUser.name && Date.now() - cache.lastFetch < 300_000) {
-        // mutation guard 기간에는 캐시도 적용하지 않음 (낙관적 값 유지)
-        if (Date.now() - mutationTimeRef.current > 30_000) {
+        // mutation guard 기간에는 캐시도 적용하지 않음 (낙관적 값 유지) — 가드가 끝나면 다시 읽는다
+        if (!guardRetry.deferIfGuarded(mutationTimeRef.current, Date.now(), () => { void loadMyDataRef.current(true); })) {
           setVacStatus(cache.status);
           setVacLog(cache.log);
         }
@@ -422,8 +381,9 @@ export function VacationView() {
         fetchVacationStatus(currentUser.name),
         fetchVacationLog(currentUser.name, new Date().getFullYear(), 20),
       ]);
-      // 변경(등록/삭제) 직후 30초간은 낙관적 상태 유지 (서버 데이터가 아직 stale일 수 있음)
-      if (Date.now() - mutationTimeRef.current > 30_000) {
+      // 변경(등록/삭제) 직후 30초간은 낙관적 상태 유지 (서버 데이터가 아직 stale일 수 있음).
+      // 이때 버린 결과(슬랙 등에서 온 변경 신호의 재조회 포함)는 가드가 끝난 직후 한 번 다시 읽어 따라잡는다.
+      if (!guardRetry.deferIfGuarded(mutationTimeRef.current, Date.now(), () => { void loadMyDataRef.current(true); })) {
         setVacStatus(status);
         setVacLog(log);
         setVacationCache({ userName: currentUser.name, status, log, lastFetch: Date.now() });
@@ -433,7 +393,8 @@ export function VacationView() {
     } finally {
       setLoading(false);
     }
-  }, [currentUser, vacationConnected, setVacationCache]);
+  }, [currentUser, vacationConnected, setVacationCache, guardRetry]);
+  useEffect(() => { loadMyDataRef.current = loadMyData; }, [loadMyData]);
 
   const loadEvents = useCallback(async () => {
     if (!vacationConnected) return;
@@ -451,7 +412,7 @@ export function VacationView() {
   useEffect(() => { loadMyData(); }, [loadMyData]);
   useEffect(() => { loadEvents(); }, [loadEvents]);
   // 이 창 밖(슬랙·다른 사람·관리자)에서 휴가가 바뀌면 캐시를 건너뛰고 다시 읽는다.
-  // 방금 이 창에서 등록·취소했다면 loadMyData 의 30초 낙관 가드가 그대로 지켜진다.
+  // 방금 이 창에서 등록·취소했다면 loadMyData 의 30초 낙관 가드가 그대로 지켜지고, 가드가 끝나면 다시 읽는다.
   useOnVacationChange(() => {
     void loadMyData(true);
     void loadEvents();
@@ -459,15 +420,36 @@ export function VacationView() {
 
   // ── 이벤트 바 레이아웃 (주별) ──
   const weeklyBars = useMemo(() => {
-    const result: Map<number, EventBar[]> = new Map();
+    const result: Map<number, VacationEventBar[]> = new Map();
     for (let weekIdx = 0; weekIdx < 6; weekIdx++) {
       const weekStart = parseDate(calendarDays[weekIdx * 7].dateStr);
       const weekEnd = parseDate(calendarDays[weekIdx * 7 + 6].dateStr);
-      const bars = layoutEventBars(allEvents, weekStart, weekEnd, 7);
+      const bars = layoutVacationBars(allEvents, weekStart, weekEnd, 7);
       result.set(weekIdx, bars);
     }
     return result;
   }, [calendarDays, allEvents]);
+
+  // ── 주 행 높이 → 그릴 막대 줄 수 ──
+  // 휴가가 몰린 날 막대가 주 행 높이를 넘으면 다음 주 칸 위에 겹쳐 그려졌다.
+  // 여섯 주 행은 높이가 같으므로 첫 주 행을 재서, 들어가는 줄만 그리고 나머지는 날짜 칸마다 '+N' 칩으로 묶는다.
+  const [weekRowHeight, setWeekRowHeight] = useState(0);
+  const weekRowObserverRef = useRef<ResizeObserver | null>(null);
+  const measureWeekRow = useCallback((el: HTMLDivElement | null) => {
+    // 달 넘김 동안 나가는 달과 들어오는 달이 함께 있다. 나가는 달이 나중에 떨어질 때(null) 들어온 달의
+    // 관찰까지 끊지 않도록, 새 행이 붙을 때만 이전 관찰을 끊는다(화면을 떠날 때는 아래 effect 가 끊는다).
+    if (!el) return;
+    weekRowObserverRef.current?.disconnect();
+    weekRowObserverRef.current = null;
+    // clientHeight: 테두리를 뺀 안쪽 높이 — absolute 막대의 top 기준과 같다
+    const update = () => setWeekRowHeight(el.clientHeight);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    weekRowObserverRef.current = observer;
+  }, []);
+  useEffect(() => () => weekRowObserverRef.current?.disconnect(), []);
 
   // 선택된 날짜의 이벤트
   const selectedDateEvents = useMemo(() => {
@@ -670,44 +652,40 @@ export function VacationView() {
     }
   }, [vacStatus, setToast]);
 
+  const monthKey = `${year}-${month}`;
+  // (훅이라 미연동 조기 반환보다 앞에 둔다)
+  // 같은 달로 금방 되돌아와도(A→B→A) 나가는 중인 층을 다시 쓰지 않게 넘길 때마다 새 키(CalendarGrid 와 같은 이유).
+  const monthLayerKeyRef = useRef({ monthKey, seq: 0 });
+  if (monthLayerKeyRef.current.monthKey !== monthKey) {
+    monthLayerKeyRef.current = { monthKey, seq: monthLayerKeyRef.current.seq + 1 };
+  }
+  const monthLayerKey = `${monthKey}#${monthLayerKeyRef.current.seq}`;
+  const monthSlide: MonthSlide = { direction, instant: rapidMonthNav || reduce };
+
   // ── 미연동 상태 ──
   if (!vacationConnected) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-center h-full"
-      >
+      <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <Palmtree size={48} className="text-text-secondary/20 mx-auto mb-4" />
           <p className="text-text-secondary/60 text-sm">휴가 연동이 필요합니다</p>
           <p className="text-text-secondary/40 text-xs mt-1">설정 → 연동에서 휴가 API URL을 등록하세요</p>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
-  const monthKey = `${year}-${month}`;
   const hasTypeStats = vacStatus?.found && typeStats.total > 0;
   const hasMonthSummary = monthSummary.count > 0;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="h-full flex flex-col overflow-hidden"
-    >
+    // 화면 들어올 때의 드러남은 본문 덮개(MainLayout)가 맡는다 — 화면마다 따로 미끄러지지 않는다.
+    <div className="h-full flex flex-col overflow-hidden">
       {/* ════════ 동기화 로딩 바 ════════ */}
+      {/* 훑는 움직임은 CSS(.bf-sync-sweep, motion-foundation.css) — 합성 스레드에서 돌고 동작 줄이기·'최소'면 멈춘다 */}
       {syncing && (
         <div className="shrink-0 h-0.5 w-full bg-bg-border/30 overflow-hidden">
-          <motion.div
-            className="h-full rounded-full"
-            style={{ background: VACATION_COLOR }}
-            initial={{ x: '-100%', width: '40%' }}
-            animate={{ x: '250%' }}
-            transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
-          />
+          <div className="bf-sync-sweep" style={{ background: VACATION_COLOR }} />
         </div>
       )}
 
@@ -758,7 +736,7 @@ export function VacationView() {
                 <ChevronDown size={10} className={cn('transition-transform', dahyuDropdownOpen && 'rotate-180')} />
               </button>
               {dahyuDropdownOpen && (
-                <div className="absolute right-0 top-full mt-1 w-40 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[50]">
+                <div className="bf-pop absolute right-0 top-full mt-1 w-40 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[50]">
                   <button
                     onClick={() => { setShowDahyuModal(true); setDahyuDropdownOpen(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"
@@ -800,22 +778,30 @@ export function VacationView() {
             ))}
           </div>
 
-          {/* 캘린더 그리드 */}
-          <AnimatePresence mode="wait" initial={false}>
+          {/* 캘린더 그리드 — 나가는 달과 들어오는 달을 같은 격자 칸에 겹쳐 둔다(빈 화면 없이 넘김) */}
+          <div className="grid flex-1 min-h-0" style={MONTH_STACK_STYLE}>
+          <AnimatePresence initial={false} custom={monthSlide}>
             <motion.div
-              key={monthKey}
-              initial={{ opacity: 0, x: direction * 40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: direction * -40 }}
-              transition={{ duration: 0.2 }}
-              className="flex-1 grid grid-rows-6"
+              key={monthLayerKey}
+              custom={monthSlide}
+              variants={VACATION_MONTH_SLIDE_VARIANTS}
+              initial={monthSlide.instant ? false : 'enter'}
+              animate="center"
+              exit="exit"
+              className="grid grid-rows-6 min-h-0"
+              style={MONTH_LAYER_STYLE}
             >
               {Array.from({ length: 6 }).map((_, weekIdx) => {
                 const weekDays = calendarDays.slice(weekIdx * 7, weekIdx * 7 + 7);
-                const bars = weeklyBars.get(weekIdx) ?? [];
+                // 그릴 막대·'+N' 칩(개수·자리)은 순수 함수가 정한다 — 여기서는 그 결과만 그린다
+                const week = vacationWeekRenderModel(weeklyBars.get(weekIdx) ?? [], weekRowHeight, 7);
 
                 return (
-                  <div key={weekIdx} className="grid grid-cols-7 border-b border-bg-border/20 relative min-h-0">
+                  <div
+                    key={weekIdx}
+                    ref={weekIdx === 0 ? measureWeekRow : undefined}
+                    className="grid grid-cols-7 border-b border-bg-border/20 relative min-h-0 overflow-hidden"
+                  >
                     {weekDays.map((day) => {
                       const isSelected = selectedDate !== null && day.dateStr === selectedDate;
                       const hasEvent = allEvents.some((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
@@ -851,11 +837,11 @@ export function VacationView() {
                       );
                     })}
 
-                    {/* 이벤트 바 오버레이 */}
-                    {bars.map((bar, bi) => {
+                    {/* 이벤트 바 오버레이 — 행 높이에 들어가는 줄만 */}
+                    {week.bars.map(({ bar, topPx }, bi) => {
                       const left = `${(bar.startCol / 7) * 100}%`;
                       const width = `${(bar.span / 7) * 100}%`;
-                      const top = `${28 + bar.row * 22}px`;
+                      const top = `${topPx}px`;
                       const label = bar.event.type === '연차'
                         ? bar.event.name
                         : `${bar.event.name} ${bar.event.type}`;
@@ -864,7 +850,7 @@ export function VacationView() {
                         <div
                           key={`${bar.event.name}-${bar.event.startDate}-${bi}`}
                           className="absolute overflow-hidden pointer-events-none z-10"
-                          style={{ left, width, top, height: '18px', padding: '0 1px' }}
+                          style={{ left, width, top, height: `${VACATION_BAR_LAYOUT.heightPx}px`, padding: '0 1px' }}
                         >
                           <div
                             className={cn(
@@ -879,11 +865,38 @@ export function VacationView() {
                         </div>
                       );
                     })}
+
+                    {/* 넘친 막대 — 날짜 칸마다 '+N 더보기' (일정 뷰 월 보기와 같은 칩). 누르면 그 날짜를 골라 오른쪽에 명단이 나온다 */}
+                    {week.chips.map((chip) => {
+                      const day = weekDays[chip.col];
+                      return (
+                        <div
+                          key={`more-${day.dateStr}`}
+                          className="absolute z-20 flex items-center justify-center pointer-events-none"
+                          style={{
+                            left: `${(chip.col / 7) * 100}%`,
+                            width: `${100 / 7}%`,
+                            top: `${chip.topPx}px`,
+                            height: `${VACATION_BAR_LAYOUT.heightPx}px`,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDate(day.dateStr)}
+                            aria-label={`${day.dateStr} 휴가 ${chip.count}건 더 보기`}
+                            className="pointer-events-auto whitespace-nowrap text-[9px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded-full hover:bg-accent/20 cursor-pointer"
+                          >
+                            +{chip.count} 더보기
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}
             </motion.div>
           </AnimatePresence>
+          </div>
         </div>
 
         {/* ──── 우측: 사이드 패널 (35%) ──── */}
@@ -1000,60 +1013,62 @@ export function VacationView() {
             </div>
           )}
 
-          {/* ── 선택 날짜 상세 (날짜 선택 시에만 표시) ── */}
-          <AnimatePresence mode="wait">
+          {/* ── 선택 날짜 상세 (날짜 선택 시에만 표시) ──
+              카드 틀(key 고정)은 처음 날짜를 고를 때·닫을 때만 움직이고, 다른 날짜를 누르면 틀은 그대로 두고
+              안쪽만 날짜 key 로 새로 그려 살짝 떠오른다 — 아래 '내 휴가 내역'이 들썩이지 않는다.
+              높이는 움직이지 않는다. 움직이는 카드라 흐림은 뺀다 — 뒤가 단색 바탕이라 옆 카드들과 눈에는 같다. */}
+          <AnimatePresence>
             {selectedDate && (
               <motion.div
-                key={selectedDate}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.15 }}
-                className="bg-bg-card/60 rounded-xl border border-bg-border/30 p-4 backdrop-blur-sm"
+                key="selected-date-detail"
+                {...dateCardPreset(reduce)}
+                className="bg-bg-card/60 rounded-xl border border-bg-border/30 p-4"
               >
-                <div className="flex items-center gap-2 mb-3">
-                  <CalendarDays size={15} className="text-accent" />
-                  <span className="text-[13px] font-semibold text-text-primary">
-                    {(() => {
-                      const d = parseDate(selectedDate);
-                      return `${d.getMonth() + 1}/${d.getDate()} (${WEEKDAYS[d.getDay()]})`;
-                    })()}
-                    {selectedDate === todayStr && (
-                      <span className="ml-1.5 text-[10px] text-accent font-normal">오늘</span>
-                    )}
-                  </span>
-                  <button
-                    onClick={() => setSelectedDate(null)}
-                    className="ml-auto p-0.5 rounded hover:bg-bg-border/50 cursor-pointer transition-colors"
-                  >
-                    <X size={12} className="text-text-secondary/40" />
-                  </button>
-                </div>
-
-                {selectedDateEvents.length === 0 ? (
-                  <p className="text-xs text-text-secondary/40 py-2">이 날짜에 휴가가 없습니다</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {selectedDateEvents.map((ev, i) => (
-                      <div
-                        key={`${ev.name}-${ev.startDate}-${i}`}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-border/20 transition-colors duration-200"
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ background: VACATION_COLOR }}
-                        />
-                        <span className="text-sm font-medium text-text-primary">{ev.name}</span>
-                        <span className="text-xs text-text-secondary/60">{ev.type}</span>
-                        {ev.startDate !== ev.endDate && (
-                          <span className="text-[10px] text-text-secondary/40 ml-auto">
-                            {ev.startDate} ~ {ev.endDate}
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                <div key={selectedDate} className={swapInClassName(dateSwapIn, true) || undefined}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <CalendarDays size={15} className="text-accent" />
+                    <span className="text-[13px] font-semibold text-text-primary">
+                      {(() => {
+                        const d = parseDate(selectedDate);
+                        return `${d.getMonth() + 1}/${d.getDate()} (${WEEKDAYS[d.getDay()]})`;
+                      })()}
+                      {selectedDate === todayStr && (
+                        <span className="ml-1.5 text-[10px] text-accent font-normal">오늘</span>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => setSelectedDate(null)}
+                      className="ml-auto p-0.5 rounded hover:bg-bg-border/50 cursor-pointer transition-colors"
+                    >
+                      <X size={12} className="text-text-secondary/40" />
+                    </button>
                   </div>
-                )}
+
+                  {selectedDateEvents.length === 0 ? (
+                    <p className="text-xs text-text-secondary/40 py-2">이 날짜에 휴가가 없습니다</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {selectedDateEvents.map((ev, i) => (
+                        <div
+                          key={`${ev.name}-${ev.startDate}-${i}`}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-border/20 transition-colors duration-200"
+                        >
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ background: VACATION_COLOR }}
+                          />
+                          <span className="text-sm font-medium text-text-primary">{ev.name}</span>
+                          <span className="text-xs text-text-secondary/60">{ev.type}</span>
+                          {ev.startDate !== ev.endDate && (
+                            <span className="text-[10px] text-text-secondary/40 ml-auto">
+                              {ev.startDate} ~ {ev.endDate}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -1195,6 +1210,6 @@ export function VacationView() {
           />
         </>
       )}
-    </motion.div>
+    </div>
   );
 }
