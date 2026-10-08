@@ -1,0 +1,104 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { planNodeHandles } from '../src/features/backgrounds/mapPlanEdit.ts';
+import type { PlanNodeHandles } from '../src/features/backgrounds/mapPlanEdit.ts';
+import type { BackgroundCamera, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
+
+const near = (actual: number, expected: number, label = '') =>
+  assert.ok(Math.abs(actual - expected) < 1e-9, `${label} ${actual} != ${expected}`);
+
+const room: BackgroundSpace = { id: 'room', type: 'space', name: '교실', placeId: null, childMapId: null, x: 100, y: 100, width: 200, height: 100, rotation: 0, shape: 'rect', points: [], locked: false };
+const chair: BackgroundSymbol = { id: 'chair', type: 'symbol', name: '의자', symbol: 'chair', spaceId: null, x: 300, y: 300, width: 40, height: 40, rotation: 0, locked: false, hinge: 'left', swing: 'inward' };
+const camera: BackgroundCamera = { id: 'camera', type: 'camera', name: '카메라 1', x: 500, y: 340, spaceId: null, angle: 0, fov: 60, viewIds: [], locked: false };
+const polygonRoom = (...points: BackgroundPoint[]): BackgroundSpace => ({ ...room, shape: 'polygon', points });
+/** The polygon a rectangle turns into: it keeps a point on the bottom-right corner. */
+const squared = polygonRoom({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 });
+
+const boxOf = (node: BackgroundNode, scale: number, vertexHandles = false) => {
+  const handles = planNodeHandles(node, scale, vertexHandles);
+  assert.equal(handles.kind, 'box');
+  return handles as Extract<PlanNodeHandles, { kind: 'box' }>;
+};
+const cameraOf = (node: BackgroundNode, scale: number) => {
+  const handles = planNodeHandles(node, scale, false);
+  assert.equal(handles.kind, 'camera');
+  return handles as Extract<PlanNodeHandles, { kind: 'camera' }>;
+};
+
+test('at scale 1 the handles stand where the editor drew them in map units', () => {
+  assert.deepEqual(planNodeHandles(room, 1, false), { kind: 'box', radius: 7, lift: 28, resize: { x: 194, y: 94, size: 12, shifted: false } });
+  assert.deepEqual(planNodeHandles(chair, 1, false), { kind: 'box', radius: 7, lift: 25, resize: { x: 34, y: 34, size: 12, shifted: false } });
+  // A level fan reaches the handle, so there is nothing to bridge.
+  assert.deepEqual(planNodeHandles(camera, 1, false), { kind: 'camera', distance: 80, radius: 7, guide: null });
+  const tilted = cameraOf({ ...camera, pitch: 60 }, 1);
+  assert.equal(tilted.distance, 80); assert.equal(tilted.radius, 7);
+  near(tilted.guide!.from, 40, 'from'); assert.equal(tilted.guide!.to, 73);
+  // A fan shorter than the camera body starts the guide at the body, a vertical one at its ring.
+  const steep = cameraOf({ ...camera, pitch: 85 }, 1);
+  assert.deepEqual(steep.guide, { from: 12, to: 73 });
+  assert.deepEqual(planNodeHandles({ ...camera, pitch: 90 }, 1, false), { kind: 'camera', distance: 80, radius: 7, guide: { from: 18, to: 73 } });
+});
+
+test('handles keep their size on screen at any zoom', () => {
+  for (const scale of [0.25, 4]) {
+    const handles = boxOf(room, scale);
+    assert.equal(handles.radius / scale, 7); assert.equal(handles.lift / scale, 28);
+    assert.equal(handles.resize!.size / scale, 12);
+    assert.equal((room.width - handles.resize!.x) / scale, 6); assert.equal((room.height - handles.resize!.y) / scale, 6);
+    assert.equal(handles.resize!.shifted, false);
+    assert.equal(boxOf(chair, scale).lift / scale, 25);
+    assert.equal(cameraOf(camera, scale).radius / scale, 7);
+  }
+});
+
+test('the camera direction handle sits on the fan end but never closer than 40px on screen', () => {
+  assert.equal(cameraOf(camera, 1).distance, 80);
+  assert.equal(cameraOf(camera, 2).distance, 80);
+  assert.equal(cameraOf(camera, 2).guide, null);
+  // Zoomed far out the handle stands beyond the fan and the guide bridges the gap.
+  assert.deepEqual(planNodeHandles(camera, 5, false), { kind: 'camera', distance: 200, radius: 35, guide: { from: 80, to: 165 } });
+});
+
+test('the camera guide is drawn only while the fan ends more than 8px short of the handle', () => {
+  // Pitch 25 leaves a 72.5 fan, pitch 30 a 69.3 one.
+  assert.equal(cameraOf({ ...camera, pitch: 25 }, 1).guide, null);
+  const short = cameraOf({ ...camera, pitch: 30 }, 1).guide!;
+  near(short.from, 80 * Math.cos(Math.PI / 6), 'from'); assert.equal(short.to, 73);
+  // At scale 2 the same 8px are 16 map units.
+  assert.equal(cameraOf({ ...camera, pitch: 30 }, 2).guide, null);
+  // Exactly 8px short (handle at 100, level fan at 80, scale 2.5) still gets none.
+  assert.deepEqual(planNodeHandles(camera, 2.5, false), { kind: 'camera', distance: 100, radius: 17.5, guide: null });
+});
+
+test('a node whose long side is under 12px on screen has no resize square', () => {
+  const dot: BackgroundSymbol = { ...chair, width: 10, height: 10 };
+  assert.deepEqual(planNodeHandles(dot, 1, false), { kind: 'box', radius: 7, lift: 25, resize: null });
+  assert.deepEqual(boxOf(dot, 0.5).resize, { x: 7, y: 7, size: 6, shifted: false });
+  assert.deepEqual(boxOf({ ...chair, width: 12, height: 12 }, 1).resize, { x: 6, y: 6, size: 12, shifted: false });
+  const wall: BackgroundSpace = { ...room, width: 400, height: 12 };
+  assert.deepEqual(boxOf(wall, 1).resize, { x: 394, y: 6, size: 12, shifted: false });
+  // The long side decides: 200px by 6px keeps the square, 10px by 0.3px loses it.
+  assert.deepEqual(boxOf(wall, 2).resize, { x: 388, y: 0, size: 24, shifted: false });
+  assert.equal(boxOf(wall, 40).resize, null);
+});
+
+test('the resize square steps outside the corner when a point handle sits on it', () => {
+  assert.deepEqual(boxOf(squared, 1, true).resize, { x: 208, y: 108, size: 12, shifted: true });
+  assert.deepEqual(boxOf(squared, 1, false).resize, { x: 194, y: 94, size: 12, shifted: false });
+  // 20px across from the corner: the point's hit area no longer reaches the square.
+  const cleared = polygonRoom({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.9, y: 1 }, { x: 0, y: 1 });
+  assert.deepEqual(boxOf(cleared, 1, true).resize, { x: 194, y: 94, size: 12, shifted: false });
+  // 14px across and 10px up: still within reach on both axes.
+  const close = polygonRoom({ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.93, y: 0.9 }, { x: 0, y: 1 });
+  assert.equal(boxOf(close, 1, true).resize!.shifted, true);
+  assert.deepEqual(boxOf(squared, 2, true).resize, { x: 216, y: 116, size: 24, shifted: true });
+  // The reach is a screen distance too: the same 20 map units are 10px at scale 2.
+  assert.equal(boxOf(cleared, 2, true).resize!.shifted, true);
+  // Only a polygon shows point handles, whatever a rectangle or an ellipse still carries in `points`.
+  for (const vertexHandles of [false, true]) {
+    assert.deepEqual(boxOf(room, 1, vertexHandles).resize, { x: 194, y: 94, size: 12, shifted: false });
+    assert.equal(boxOf({ ...squared, shape: 'rect' }, 1, vertexHandles).resize!.shifted, false);
+    assert.equal(boxOf({ ...squared, shape: 'ellipse' }, 1, vertexHandles).resize!.shifted, false);
+    assert.deepEqual(boxOf(chair, 1, vertexHandles).resize, { x: 34, y: 34, size: 12, shifted: false });
+  }
+});
