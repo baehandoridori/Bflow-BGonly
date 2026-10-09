@@ -35,14 +35,14 @@ function vertexHandle(gesture: Extract<PlanGesture, { mode: 'vertex' }>, initial
 }
 
 /**
- * The node a group move is measured from: the pressed one, or the moving space that carries it, since the stored
- * position of a carried member cannot be set by itself. Pressed on a node that does not move, the first that does.
+ * The node a group move is measured from: the pressed one, or the first that moves when the pressed one does not.
+ * Where a moving space carries that node, the space instead: the stored position of a carried member cannot be set by itself.
  */
 function groupAnchorId(initial: BackgroundMap, moving: readonly string[], pressedId: string): string {
-  if (!moving.includes(pressedId)) return moving[0];
-  const pressed = initial.nodes.find(node => node.id === pressedId);
-  const carrier = pressed && pressed.type !== 'space' ? initial.nodes.find(node => node.type === 'space' && node.id === pressed.spaceId) : undefined;
-  return carrier && moving.includes(carrier.id) ? carrier.id : pressedId;
+  const id = moving.includes(pressedId) ? pressedId : moving[0];
+  const node = initial.nodes.find(item => item.id === id);
+  const carrier = node && node.type !== 'space' ? initial.nodes.find(item => item.type === 'space' && item.id === node.spaceId) : undefined;
+  return carrier && moving.includes(carrier.id) ? carrier.id : id;
 }
 
 /** Snap targets of one gesture, from the map as it was at the press. */

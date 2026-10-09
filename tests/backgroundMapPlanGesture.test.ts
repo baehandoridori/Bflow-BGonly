@@ -684,6 +684,11 @@ test('a free group move is the listed nodes moved together by as far as the poin
     assert.deepEqual(preview, { map: moveMapNode(seatedCourt, 'B', between(grip, by)), guides: [] }, nodeId);
     near(preview!.map.nodes[SEAT_B].x, 320, 'chair x'); near(preview!.map.nodes[SEAT_B].y, 135, 'chair y');
   }
+  // Two rooms of one group both go, and the chair of one of them still goes once.
+  const pair = previewPlanGesture(group('B', ['A', 'B', 'chairB']), seatedCourt, grip, by, null)!;
+  assert.deepEqual(pair, { map: moveMapNode(moveMapNode(seatedCourt, 'A', between(grip, by)), 'B', between(grip, by)), guides: [] });
+  assert.deepEqual(pair.map.nodes[BLOCK_A], { ...blockA, x: 110, y: 105 }); near(pair.map.nodes[BLOCK_B].x, 310.4, 'second room x'); near(pair.map.nodes[BLOCK_B].y, 125.3, 'second room y');
+  near(pair.map.nodes[SEAT_B].x, 320, 'chair x'); near(pair.map.nodes[SEAT_B].y, 135, 'chair y'); assert.equal(pair.map.nodes[CRATE], crate);
 });
 
 test('a snapped group move sticks by the box around the group, and the group keeps its own distances', () => {
@@ -737,9 +742,28 @@ test('a snapped group move is measured from the pressed node, or from the room t
   assert.deepEqual(alone.guides, [{ axis: 'y', at: 120.3, from: 258, to: 360.4 }]);
   assert.equal(alone.map.nodes[BLOCK_B], held.nodes[BLOCK_B]);
   assert.deepEqual(alone, snapped({ mode: 'move', nodeId: 'chairB' }, held, grip, point));
+  // Left out of the group, the room stays too, although it is not locked: the chair is measured from itself again,
+  // and the top of the box around chair and crate sticks to the top of that room. Measured from the room, which
+  // does not move, nothing could stick: the chair would stand on 122.4 with no guide.
+  const loose = snapped(group('chairB', ['chairB', 'free']), seatedCourt, grip, point);
+  assert.equal(loose.map.nodes[SEAT_B].x, 258); assert.equal(loose.map.nodes[SEAT_B].y, 124.05);
+  near(loose.map.nodes[CRATE].x, 348.5, 'crate x'); near(loose.map.nodes[CRATE].y, 120.3, 'crate y');
+  assert.deepEqual(loose.guides, [{ axis: 'y', at: 120.3, from: 258, to: 378.5 }]);
+  assert.equal(loose.map.nodes[BLOCK_B], blockB); assert.equal(loose.map.nodes[BLOCK_A], blockA);
   // A pressed node that does not move is no anchor: the first moving node in map order is, however the ids are listed.
   for (const nodeId of ['A', 'missing']) {
     assert.deepEqual(snapped(group(nodeId, ['free', 'B']), court, grip, point), snapped(group('B'), court, grip, point), nodeId);
+  }
+  // That first node may be a chair stored before the room that carries it: the room is what the move is measured from
+  // then as well. Measured from the chair, the whole number would be the y of the chair (123) with the room on 112.75,
+  // and the edge of the room, reached by adding the travel, would miss the last digit of 244.65.
+  const farRoom: BackgroundSpace = { ...blockB, x: 512.7, y: 420.3 }, farSeat: BackgroundSymbol = { ...seatB, x: 522.7, y: 430.55 };
+  const early: BackgroundMap = { ...court, nodes: [blockA, farSeat, farRoom] }, brought = hauled({ x: -264.3, y: -307.6 });
+  for (const nodeId of ['A', 'missing', 'chairB', 'B']) {
+    const landed = snapped(group(nodeId, ['B', 'chairB']), early, grip, brought);
+    assert.equal(landed.map.nodes[2].x, 244.65, nodeId); assert.equal(landed.map.nodes[2].y, 113, nodeId);
+    near(landed.map.nodes[1].x, 254.65, `${nodeId} chair x`); near(landed.map.nodes[1].y, 123.25, `${nodeId} chair y`);
+    assert.deepEqual(landed.guides, [{ axis: 'x', at: 244.65, from: 100, to: 180 }], nodeId);
   }
 });
 

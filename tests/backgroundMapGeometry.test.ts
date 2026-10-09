@@ -935,6 +935,19 @@ test('several nodes move in one step: locked ones stay, and a member is carried 
   assert.deepEqual(moveMapNodes(crowd, [...ids].reverse(), delta), moved);
   assert.deepEqual(moveMapNodes(crowd, [...ids, ...ids], delta), moved);
 
+  // Two rooms that move: each is moved on the map the one before it left, so both stand where they went.
+  const both = moveMapNodes(crowd, ['A', 'B', 'chairB'], delta);
+  stands(both, 'A', 110, 95); stands(both, 'B', 310.4, 115.3); stands(both, 'chairB', 320, 125); stands(both, 'camB', 330, 135);
+  for (const id of ['lockedB', 'free', 'LS', 'mLS']) assert.equal(nodeOf(both, id), nodeOf(crowd, id), id);
+  assert.deepEqual(both, moveMapNode(moveMapNode(crowd, 'A', delta), 'B', delta));
+  assert.deepEqual(moveMapNodes(crowd, ['chairB', 'B', 'A'], delta), both);
+  // A chair in each of the two, both listed: each goes once, with its own room.
+  const chairA = groupSeat('chairA', 120, 110, 20, 'A'), seated: BackgroundMap = { ...crowd, nodes: [chairA, ...crowd.nodes] };
+  const pair = moveMapNodes(seated, ['chairA', 'A', 'B', 'chairB'], delta);
+  assert.deepEqual(pair, moveMapNode(moveMapNode(seated, 'A', delta), 'B', delta));
+  tight(nodeOf(pair, 'chairA').x, 130, 'chairA x'); tight(nodeOf(pair, 'chairA').y, 105, 'chairA y');
+  stands(pair, 'A', 110, 95); stands(pair, 'B', 310.4, 115.3); stands(pair, 'chairB', 320, 125);
+
   // One id is the move of that node.
   assert.deepEqual(moveMapNodes(crowd, ['B'], delta), moveMapNode(crowd, 'B', delta));
   assert.deepEqual(moveMapNodes(crowd, ['free'], delta), moveMapNode(crowd, 'free', delta));
@@ -958,6 +971,11 @@ test('an anchored group move stores the very position given for the anchor, and 
   // Everything else that moves goes by the delta.
   stands(placed, 'free', 410.5, 195.25); stands(placed, 'mLS', 630, 315);
   for (const id of ['LS', 'lockedB', 'A']) assert.equal(nodeOf(placed, id), nodeOf(crowd, id), id);
+  // A second room of the group goes by the delta as well, while the anchor is placed.
+  const paired = moveMapNodes(crowd, ['A', 'B', 'chairB'], delta, { id: 'B', position });
+  assert.deepEqual(nodeOf(paired, 'B'), { ...roomB, ...position }); stands(paired, 'A', 110, 95);
+  stands(paired, 'chairB', 254.25, 122.7); stands(paired, 'camB', 264.25, 132.7);
+  assert.deepEqual(paired, placeMapNode(moveMapNode(crowd, 'A', delta), 'B', position));
 
   // A node that is no space is placed the same way.
   const seated = moveMapNodes(crowd, ids, delta, { id: 'free', position: { x: 344.75, y: 119 } });
