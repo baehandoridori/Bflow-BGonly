@@ -51,8 +51,10 @@ const handler = {
   commitName: () => piece(editor, 'const commitName = useEvent(', 'const cancelName = useEvent('),
   pointerDown: () => piece(editor, 'function pointerDown(', 'function pointerMove('),
   pointerMove: () => piece(editor, 'function pointerMove(', 'function pointerUp('),
-  pointerUp: () => piece(editor, 'function pointerUp(', 'function canvasDoubleClick('),
+  pointerUp: () => piece(editor, 'function pointerUp(', 'function doubleClickIntent('),
+  doubleClickIntent: () => piece(editor, 'function doubleClickIntent(', 'function canvasDoubleClick('),
   canvasDoubleClick: () => piece(editor, 'function canvasDoubleClick(', 'function zoomBy('),
+  openSpace: () => piece(editor, 'function openSpace(', 'function beginRename('),
   fitView: () => piece(editor, 'function fitView(', 'function keyboard('),
   keyboard: () => piece(editor, 'function keyboard(', 'const selectNode = useEvent('),
 };
@@ -96,31 +98,41 @@ test('anchor 4: the name of a node just drawn joins the drawing step only while 
   assert.match(editor, /setRenaming\(\{ mapId: current\.id, nodeId: id, created: created \? value : null \}\);/);
 });
 
-test('anchor 5: the step to the next pile item is taken by the click on the SVG, not by the release and not by a double-click while editing', () => {
+test('anchor 5: the step to the next pile item is taken by the click on the SVG, never by the release, and a repeated click never steps through spaces', () => {
   const click = piece(canvasTag(), 'onClick={event => {', '}}');
+  // A pile of spaces is settled by the click count alone, before the double-click is asked.
   inOrder(click, 'const cycle = pendingCycle.current; pendingCycle.current = null;',
-    'if (!cycle || (event.detail >= 2 && canEdit)) return;',
-    'select(cycle.ids[(cycle.ids.indexOf(cycle.nodeId) + 1) % cycle.ids.length], cycle.mapId);');
-  // The release only asks for the step.
+    'if (!cycle || (event.detail >= 2 && (cycle.spaces || doubleClickIntent(pointFrom(event))))) return;',
+    'const next = cycle.ids[(cycle.ids.indexOf(cycle.from) + 1) % cycle.ids.length];',
+    'select(next, cycle.mapId);');
+  assert.equal(count(editor, /if \(!cycle \|\| \(event\.detail >= 2 && \(cycle\.spaces \|\| doubleClickIntent\(pointFrom\(event\)\)\)\)\) return;/g), 1, 'one condition for the step');
+  // The release only asks for the step, and says what kind of pile it is.
   const up = handler.pointerUp();
-  assert.match(up, /pendingCycle\.current = \{ ids, nodeId: session\.node\.id, mapId: session\.mapId \};/);
-  assert.doesNotMatch(up, /select\(ids\[/);
-  // The release selects once, the node of the gesture that ended: no step under another spelling.
-  assert.match(up, /if \(session\.node\) select\(session\.node\.id, session\.mapId\);/);
-  assert.equal(count(up, /\bselect\(/g), 1, 'the release selects nowhere else');
-  const asking = up.slice(positions(up, 'if (!cancel && !session.moved && session.stack && session.node)')[0]);
-  assert.doesNotMatch(asking, /\bselect\(/);
+  assert.match(up, /pendingCycle\.current = \{ ids: click\.ids, from: click\.from, mapId: session\.mapId, spaces: click\.spaces \};/);
+  // The release selects twice, the node of the drag that ended and what the click picks: no step under any spelling.
+  assert.equal(count(up, /\bselect\(/g), 2, 'the release selects nowhere else');
+  assert.match(up, /select\(session\.node\.id, session\.mapId\)/);
+  assert.match(up, /select\(click\.id, session\.mapId\)/);
+  assert.doesNotMatch(up, /click\.ids\[/);
+  assert.doesNotMatch(up, /indexOf\(click\.from/);
+  // A group that was dragged stays the selection.
+  assert.match(up, /if \(!session\.groupIds && session\.node\) select\(session\.node\.id, session\.mapId\);/);
 });
 
-test('anchor 6: double-clicks are handled in one place, the SVG, from the presses that pointerDown logged', () => {
+test('anchor 6: double-clicks are handled in one place, the SVG, and what one does is decided once, from the presses that pointerDown logged', () => {
   // A press that captured the pointer sends its dblclick to the SVG: a handler on a node or on a handle would never run.
   assert.equal(count(`${editor}${overlays}`, /onDoubleClick(?:Capture)?=/g), 1);
   assert.match(canvasTag(), /onDoubleClick=\{canvasDoubleClick\}/);
-  assert.match(handler.canvasDoubleClick(), /const \[first, last\] = pressLog\.current;/);
-  // What the log is read for, before anything opens: no double-click on a handle, and both presses on the same node.
+  // No double-click on a handle. What it does is asked in one place, and a space that is entered is picked on the way.
   inOrder(handler.canvasDoubleClick(), 'if (!current || !last || last.handle || Date.now() - lastDrag.current <= 450) return;',
-    'if (!first || first.hitId !== last.hitId) return;', 'openSpace(', 'beginRename(');
-  assert.match(handler.pointerDown(), /pressLog\.current = \[pressLog\.current\[1\], \{ hitId: node\?\.id \?\? null, targetId: handle \? null : target\?\.id \?\? null, handle: !!handle \}\];/);
+    'doubleClickIntent(', "openSpace(intent.node.id, tool !== 'hand')", 'beginRename(');
+  // What the log is read for: both presses on the same node. The node of the first press is asked first, then the topmost one.
+  inOrder(handler.doubleClickIntent(), 'pressLog.current', 'first.hitId !== last.hitId', 'doubleClickNodeId(first.targetId, node.id, pile)',
+    'for (const item of target === node ? [node] : [target, node])', 'planDoubleClickAction(item,');
+  // The step of a click and the double-click itself ask the same question, and nothing else does.
+  assert.equal(count(editor, /(?<!function )\bdoubleClickIntent\(/g), 2, 'the step and the double-click');
+  inOrder(handler.openSpace(), 'if (pick && id !== singleId) select(id);', 'navigate(');
+  assert.match(handler.pointerDown(), /pressLog\.current = press \? \[pressLog\.current\[1\], press\] : NO_PRESSES;/);
 });
 
 test('anchor 7: the name box keeps Escape and compositions to itself, hands the history over only untouched, and never commits while it is taken down', () => {

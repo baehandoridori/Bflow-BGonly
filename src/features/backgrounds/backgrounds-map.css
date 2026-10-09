@@ -74,6 +74,8 @@
 /* Shown only while a drag is stuck to something. */
 .bmap-snap-guides line { stroke:#ff7aa8; stroke-width:1; vector-effect:non-scaling-stroke; pointer-events:none; }
 [data-color-mode="light"] .bmap-snap-guides line { stroke:#d6336c; }
+/* The selection box while it is dragged. Its line keeps one width on screen at any zoom. */
+.bmap-marquee { fill:rgb(var(--color-accent) / .08); stroke:rgb(var(--color-accent-sub)); stroke-width:1; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; pointer-events:none; }
 /* Point handles of the selected polygon. The first circle of a handle is the wider area that takes the press and shows nothing; the second is the dot. */
 .bmap-vertex-handle { cursor:move; }
 .bmap-vertex-add { cursor:copy; }

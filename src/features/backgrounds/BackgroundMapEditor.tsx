@@ -6,18 +6,20 @@ import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './Bac
 import { BackgroundMapGallery } from './BackgroundMapGallery';
 import { BackgroundMapPanels } from './BackgroundMapPanels';
 import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
-import { MapNodeHandles, MapSnapGuides, MapVertexHandles } from './BackgroundMapPlanOverlays';
+import { MapMarquee, MapNodeHandles, MapSnapGuides, MapVertexHandles } from './BackgroundMapPlanOverlays';
 import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { addMapCamera, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removePolygonVertex, renameMapNode, replaceMapNode, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapSelection, mapViewport, pickAction, revealPlanPoint, singleViewId, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
-import { MAP_EDIT_MARK, POLYGON_POINT_LIMIT, doubleClickNodeId, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
+import { MAP_EDIT_MARK, POLYGON_POINT_LIMIT, doubleClickNodeId, planDoubleClickAction, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
 import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
 import type { PlanGesture } from './mapPlanGesture';
 import { MAP_SNAP, sameSnapGuides } from './mapSnap';
 import type { SnapCandidates, SnapGuide } from './mapSnap';
-import { planNodeCovers, planStackUnder } from './mapPlanPreview';
+import { planPileAt } from './mapPlanPreview';
+import { planMarkCovers, planMarqueeIds, planRect, resolvePlanPress, sameSpotAgain } from './mapPlanSelect';
+import type { PlanPressClick, PlanRect, PlanSpot } from './mapPlanSelect';
 import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
 import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode } from './mapCanvas';
@@ -33,13 +35,20 @@ type Tool = 'select' | 'hand' | 'rect' | 'ellipse' | 'polygon' | 'symbol';
 type CreateForm = { id: string; name: string; parentId: string | null; spaceId: string | null; placeId: string | null };
 /** The handle of the selected node a press landed on. The object is a point handle of a polygon: that point, or with `insert` the + of the edge that starts at it. */
 type PlanHandle = 'resize' | 'rotate' | { index: number; insert: boolean };
-/** One pressed pointer on the plan. `pan` and `click` never touch the document. */
+/** One pressed pointer on the plan. `pan` and `marquee` never touch the document. */
 type PointerSession = {
-  mode: 'pan' | 'click' | 'move' | 'resize' | 'rotate' | 'draw' | 'vertex'; pointerId: number;
+  mode: 'pan' | 'marquee' | 'move' | 'resize' | 'rotate' | 'draw' | 'vertex'; pointerId: number;
   mapId: string; initial: BackgroundMap; node?: BackgroundNode; start: BackgroundPoint;
   clientX: number; clientY: number; matrix: DOMMatrix; view: MapViewport; moved: boolean;
-  /** Overlapping cameras and symbols under the press: a plain click steps to the next one. */
-  stack: string[] | null;
+  /** `move`: every selected node that travels along, or null for the one node. */
+  groupIds: readonly string[] | null;
+  /** What a release without movement does. */
+  click: PlanPressClick;
+  /**
+   * The topmost node of a select-tool press that the press log took. Null for every other press. Written to `lastSpot`
+   * on release, unless the press was dragged into a pan or a marquee (9.3).
+   */
+  spotId: string | null;
   /** Map units per CSS pixel at the press: the snap tolerance and reach of the whole gesture. */
   scale: number;
   /** `vertex` mode: the dragged point, or the edge a new point is pulled out of. */
@@ -61,6 +70,7 @@ type NameEdit = { mapId: string; nodeId: string; /** The draft value right after
 const NO_GUIDES: readonly SnapGuide[] = [];
 /** The press log with nothing in it: no double-click can be resolved from it. */
 const NO_PRESSES: readonly [PlanPress | null, PlanPress | null] = [null, null];
+const NO_CLICK: PlanPressClick = { kind: 'none' };
 const message = (error: unknown) => error instanceof Error ? error.message : '도면을 저장하지 못했습니다. 다시 시도해 주세요.';
 const normalizeAngle = (value: number) => ((value % 360) + 360) % 360;
 const uuid = () => crypto.randomUUID();
@@ -81,11 +91,8 @@ const ASPECT_PRESETS = [{ label: '16:9', value: 16 / 9 }, { label: '4:3', value:
 const PITCH_PRESETS = [{ label: '수평', pitch: 0 }, { label: '수직 위', pitch: 90 }, { label: '수직 아래', pitch: -90 }];
 /** Saved bounds of plan positions and sizes. */
 const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
-/** What the plan draws for a camera or symbol lies under this point: the camera's dot (ring when vertical) or fan, the symbol's box. */
-const onPlanMark = (node: BackgroundNode, point: BackgroundPoint) =>
-  planNodeCovers(node, point, node.type !== 'camera' ? 0 : projectCameraToPlan(node).vertical ? 18 : 12, 80);
 /**
- * The plan gesture a pressed pointer performs. Only the sessions that edit the map have one (`pan` and `click`
+ * The plan gesture a pressed pointer performs. Only the sessions that edit the map have one (`pan` and `marquee`
  * never ask): any other names no node, so nothing is previewed for it. The editing modes are told apart by
  * exclusion: a mode added to the session does not compile here until it has a gesture of its own.
  */
@@ -93,7 +100,8 @@ function planGestureOf(session: PointerSession): PlanGesture {
   const { mode, node, vertex } = session;
   if (mode === 'draw' && node?.type === 'space') return { mode, node };
   if (mode === 'vertex' && node && vertex) return { mode, nodeId: node.id, ...vertex };
-  if (node && mode !== 'pan' && mode !== 'click' && mode !== 'draw' && mode !== 'vertex') return { mode, nodeId: node.id };
+  if (mode === 'move' && node && session.groupIds) return { mode: 'move-group', nodeId: node.id, ids: session.groupIds };
+  if (node && mode !== 'pan' && mode !== 'marquee' && mode !== 'draw' && mode !== 'vertex') return { mode, nodeId: node.id };
   return { mode: 'move', nodeId: '' };
 }
 
@@ -188,6 +196,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (sameSnapGuides(shownGuides.current, next)) return;
     shownGuides.current = next; setGuides(next);
   };
+  /** The selection box being dragged, in plan coordinates. Screen state only: it is no gesture of the document. */
+  const [marquee, setMarquee] = useState<PlanRect | null>(null);
+  /** A pan session has moved past the drag threshold. */
+  const [panning, setPanning] = useState(false);
   /** The point of a polygon that was pressed last, the one Delete removes. Read it through `activeIndex`, never directly. */
   const [activeVertex, setActiveVertex] = useState<{ mapId: string; nodeId: string; index: number } | null>(null);
   const [renaming, setRenamingState] = useState<NameEdit | null>(null);
@@ -209,7 +221,14 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   /** The last two presses on the plan, the older one first. */
   const pressLog = useRef(NO_PRESSES);
   /** The step to the next item of a pile, asked for by a press that did not move. The click that follows takes it. */
-  const pendingCycle = useRef<{ ids: string[]; nodeId: string; mapId: string } | null>(null);
+  const pendingCycle = useRef<{ ids: readonly string[]; from: string; mapId: string; spaces: boolean } | null>(null);
+  /**
+   * The spot where the select tool last picked or moved a node: the topmost node there, and the one node that press (and
+   * the step its click took) left selected. A press that was dragged into a pan or a marquee leaves none.
+   */
+  const lastSpot = useRef<PlanSpot | null>(null);
+  /** Space is held for panning: what a press reads. */
+  const spaceHeld = useRef(false);
   /** Orbit pose of the 3D viewport per map. UI state only: never history, never a render. */
   const viewStates = useRef<Record<string, Map3DViewState>>({});
   const focusNonce = useRef(0);
@@ -227,6 +246,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const selected = mode === 'plan' && multiple ? undefined : current?.nodes.find(node => node.id === singleId);
   /** The selected nodes, in map order: what the summary counts and the group actions work on. */
   const groupNodes = useMemo(() => current ? current.nodes.filter(node => selection.ids.includes(node.id)) : [], [current, selection]);
+  const marqueeIds = useMemo(() => marquee && current ? planMarqueeIds(current, marquee) : null, [marquee, current]);
+  // While a box is drawn, what it touches is shown as the selection it will become.
+  const shownIds = useMemo(() => new Set(marqueeIds ?? selection.ids), [marqueeIds, selection]);
   const disabled = pending || busy;
   const editing = !!draft && snapshot.canManage;
   const canEdit = editing && !disabled;
@@ -298,6 +320,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (session && svgRef.current?.hasPointerCapture(session.pointerId)) svgRef.current.releasePointerCapture(session.pointerId);
     doc.cancelGesture();
     showGuides(NO_GUIDES);
+    setMarquee(null); setPanning(false);
   });
   // Another map, the other display mode, a save starting or lost edit rights never commit a half-done drag.
   useLayoutEffect(() => { abortGesture(); }, [abortGesture, current?.id, mode, canEdit]);
@@ -355,6 +378,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function select(id: string | null, mapId = current?.id) {
     if (mapId) doc.dispatch(pickAction(mapId, id, mode === '3d' && mapId === current?.id, selection));
   }
+  /** The selection as the store has it right now (a handler may run before the next render), read against `map`. */
+  function liveSelection(mapId: string, map: BackgroundMap): MapSelection { return mapSelection(map, mapViewport(doc.getState(), mapId).selectedIds); }
   function updateView(changes: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>>, mapId = current?.id) { if (mapId) doc.setViewport(mapId, changes); }
   function focusCanvas() { (mode === 'plan' ? svgRef.current : stageRef.current)?.focus({ preventScroll: true }); }
   function navigate(id: string) { if (disabled) return; abortGesture(); setCurrentId(id); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); setConfirmation(null); }
@@ -553,9 +578,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     updateMap({ ...current, nodes: [...current.nodes, node] }); select(node.id); setPolygon([]); setTool('select'); setError('');
     beginRename(node.id, true);
   }
-  function openSpace(id: string) {
+  /** Enters the detail map of a space. `pick`: the space is picked first, unless it is the one node in hand already. */
+  function openSpace(id: string, pick = false) {
     const node = current?.nodes.find(item => item.id === id);
-    if (node?.type === 'space' && node.childMapId && maps.some(map => map.id === node.childMapId)) navigate(node.childMapId);
+    if (disabled || node?.type !== 'space' || !node.childMapId || !maps.some(map => map.id === node.childMapId)) return;
+    if (pick && id !== singleId) select(id);
+    navigate(node.childMapId);
   }
   /** Opens the name box. `created` true: the node was just drawn, so its name joins that undo step. */
   function beginRename(id: string, created = false) {
@@ -613,18 +641,27 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     // Taking the focus ends a number entry that was still open, and that may have edited the map just now:
     // everything below starts from the map as it is at this moment, not as it was drawn.
     const live = mapDraft(doc.getState(), current.id)?.value ?? current;
-    let target = node && (live.nodes.find(item => item.id === node.id) ?? node), stack: string[] | null = null;
-    if (event.button === 0 && tool !== 'hand' && !handle && (tool === 'select' || !editing)) {
-      // The topmost item of a pile takes every press. The one already picked from the pile stays the target,
-      // as long as it is really under the pointer: a camera on the centre of a table is no part of a press on the table's corner.
-      const ids = node && node.type !== 'space' ? planStackUnder(live, node.id, undefined, item => onPlanMark(item, point)) : [];
-      const picked = ids.length > 1 && view.selectedId && ids.includes(view.selectedId) ? live.nodes.find(item => item.id === view.selectedId) : undefined;
-      if (picked) { target = picked; stack = ids; }
-      else select(node?.id ?? null);
-    }
-    // The pointerdown comes before any capture, so it reached the element that was really pressed: `node` is the topmost one there.
-    pressLog.current = [pressLog.current[1], { hitId: node?.id ?? null, targetId: handle ? null : target?.id ?? null, handle: !!handle }];
-    if (canEdit && event.button === 0 && !handle && tool === 'polygon') {
+    const hit = node && (live.nodes.find(item => item.id === node.id) ?? node);
+    // The wheel button, the hand tool and a held Space only move the view, whatever was pressed.
+    const panning = event.button === 1 || tool === 'hand' || spaceHeld.current;
+    const drawing = canEdit && (tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || tool === 'symbol');
+    const held = liveSelection(current.id, live);                                       // the selection at this very moment
+    // The same spot again: the select tool pressed this same topmost node last, and the one node that press left selected
+    // is still the selection. Every press the canvas takes ends that memory; a select-tool press that picks or moves the node it
+    // landed on writes it anew on release (a press dragged into a pan or a marquee does not).
+    // An emptied press log (a press outside the canvas since then) ends it as well: it is read here, before this press is logged.
+    const spot = pressLog.current[1] ? lastSpot.current : null; lastSpot.current = null;
+    const again = sameSpotAgain(spot, current.id, hit?.id ?? null, held);
+    // The select tool (while viewing: any tool but the hand): what this press does is decided in one pure place.
+    const plan = panning || drawing || handle ? null : resolvePlanPress({ canEdit, shift: event.shiftKey, hit: hit ?? null,
+      pile: hit ? planPileAt(live, hit.id, point, undefined, item => planMarkCovers(item, point)) : [],
+      selection: held, again, node: id => live.nodes.find(item => item.id === id) });
+    if (plan?.selectAtPress !== undefined) select(plan.selectAtPress);
+    // A press with Space held, and one the plan does not log (Shift), is no half of a double-click.
+    const press: PlanPress | null = plan ? (plan.logged ? { hitId: hit?.id ?? null, targetId: plan.targetId, handle: false } : null)
+      : spaceHeld.current ? null : { hitId: hit?.id ?? null, targetId: handle ? null : hit?.id ?? null, handle: !!handle };
+    pressLog.current = press ? [pressLog.current[1], press] : NO_PRESSES;
+    if (!panning && canEdit && !handle && tool === 'polygon') {
       setPolygon(previous => {
         // A space stores at most this many points; past it the outline could neither be saved nor trimmed.
         if (previous.length >= POLYGON_POINT_LIMIT) return previous;
@@ -633,19 +670,19 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
         return last && Math.hypot(last.x - point.x, last.y - point.y) < MAP_EDIT_MARK.polygonDot * screenScale ? previous : [...previous, point];
       }); setError(''); return;
     }
-    if (canEdit && event.button === 0 && !handle && tool === 'symbol') { placeSymbol(point, live); return; }
-    let mode: PointerSession['mode'] = 'pan';
-    if (canEdit && event.button === 0 && tool !== 'hand') {
-      if (tool === 'rect' || tool === 'ellipse') { mode = 'draw'; target = newSpace(tool, point); }
-      else if (target) mode = target.locked ? 'click' : typeof handle === 'object' ? 'vertex' : handle ?? 'move';
-    } else if (node && tool !== 'hand' && event.button !== 1) mode = 'click';
-    if (mode === 'click' && !stack) return;
-    // One drag is one gesture of the shared document: previews until release, then at most one undo step.
-    if (mode !== 'pan' && mode !== 'click' && !doc.beginGesture(current.id)) return;
+    if (!panning && canEdit && !handle && tool === 'symbol') { placeSymbol(point, live); return; }
+    let mode: PointerSession['mode'] = 'pan', target = hit;
+    if (!panning) {
+      if (canEdit && (tool === 'rect' || tool === 'ellipse')) { mode = 'draw'; target = newSpace(tool, point); }
+      else if (plan) { mode = plan.drag; target = plan.nodeId === null ? undefined : live.nodes.find(item => item.id === plan.nodeId); }
+      else if (handle && canEdit && target && !target.locked) mode = typeof handle === 'object' ? 'vertex' : handle;
+    }
+    // One drag is one gesture of the shared document. A pan and a marquee never touch it.
+    if (mode !== 'pan' && mode !== 'marquee' && !doc.beginGesture(current.id)) return;
     const vertex = mode === 'vertex' && typeof handle === 'object' ? handle : null;
     // A pressed point is the picked one, dragged or not. A + is no point yet: the one it makes is picked on release.
     if (vertex && target && !vertex.insert) setActiveVertex({ mapId: current.id, nodeId: target.id, index: vertex.index });
-    pointerRef.current = { mode, pointerId: event.pointerId, mapId: current.id, initial: live, node: target, start: point, clientX: event.clientX, clientY: event.clientY, matrix, view: { ...view }, moved: false, stack, scale: screenScale, vertex, candidates: null };
+    pointerRef.current = { mode, pointerId: event.pointerId, mapId: current.id, initial: live, node: target, start: point, clientX: event.clientX, clientY: event.clientY, matrix, view: { ...view }, moved: false, groupIds: plan?.groupIds ?? null, click: plan?.click ?? NO_CLICK, spotId: plan?.logged && hit ? hit.id : null, scale: screenScale, vertex, candidates: null };
     if (event.altKey) altDrag.current = true;
     svgRef.current?.setPointerCapture(event.pointerId);
   }
@@ -655,10 +692,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (event.altKey) altDrag.current = true;
     const point = pointFrom(event, session.matrix); if (!point) return;
     if (!session.moved && Math.hypot(event.clientX - session.clientX, event.clientY - session.clientY) < 4) return;
+    const first = !session.moved;                                                       // the first move past the threshold
     session.moved = true;
     const delta = { x: point.x - session.start.x, y: point.y - session.start.y };
-    if (session.mode === 'pan') { updateView({ x: session.view.x - delta.x, y: session.view.y - delta.y }, session.mapId); return; }
-    if (session.mode === 'click' || !canEdit || !session.node) return;
+    if (session.mode === 'pan') { if (first) setPanning(true); updateView({ x: session.view.x - delta.x, y: session.view.y - delta.y }, session.mapId); return; }
+    if (session.mode === 'marquee') { setMarquee(planRect(session.start, point)); return; }
+    if (!canEdit || !session.node) return;
     const gesture = planGestureOf(session);
     // Alt is read at every move: held it frees the drag, released the drag sticks again. The distances are
     // screen pixels at the zoom of the press.
@@ -681,12 +720,19 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (session.mode === 'vertex') setError('');
     if (svgRef.current?.hasPointerCapture(event.pointerId)) svgRef.current.releasePointerCapture(event.pointerId);
     if (session.moved) lastDrag.current = Date.now();
-    if (session.mode === 'pan') return;
-    if (session.mode !== 'click') {
+    setPanning(false);
+    if (session.mode === 'marquee') {
+      setMarquee(null);
+      if (!cancel && session.moved && canEdit) {
+        const live = mapDraft(doc.getState(), session.mapId)?.value, point = pointFrom(event, session.matrix);
+        if (live && point) doc.selectMany(session.mapId, planMarqueeIds(live, planRect(session.start, point)));
+      }
+    } else if (session.mode !== 'pan') {
       if (cancel || !canEdit || !session.moved) doc.cancelGesture();
       else {
         doc.finishGesture();
-        if (session.node) select(session.node.id, session.mapId);
+        // A group stays selected as it is; a single node is the selection after its own drag.
+        if (!session.groupIds && session.node) select(session.node.id, session.mapId);
         if (session.mode === 'draw') { setTool('select'); if (session.node) beginRename(session.node.id, true); }
         // A + that was pulled out: its point is the picked one, but only when the polygon really gained a point.
         // A drag whose every position was refused changes nothing, and `index + 1` would then be the point that
@@ -701,31 +747,54 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
         }
       }
     }
-    // A press on a pile that did not move asks for the next item. The click that follows takes the step:
-    // only a click knows whether it is the second one of a double-click.
-    if (!cancel && !session.moved && session.stack && session.node) {
-      const ids = session.stack;
-      pendingCycle.current = { ids, nodeId: session.node.id, mapId: session.mapId };
+    const liveMap = mapDraft(doc.getState(), session.mapId)?.value ?? session.initial;       // while viewing there is no draft
+    // A press that did not move does what resolvePlanPress said: pick, add or remove, or ask for the step to the next pile item.
+    if (!cancel && !session.moved) {
+      const click = session.click;
+      if (click.kind === 'select') select(click.id, session.mapId);
+      else if (click.kind === 'toggle') {
+        // Added to or taken out of the selection as it is now: the id of a node that is gone is dropped here, never carried along.
+        const ids = liveSelection(session.mapId, liveMap).ids;
+        doc.selectMany(session.mapId, ids.includes(click.id) ? ids.filter(id => id !== click.id) : [...ids, click.id]);
+      }
+      else if (click.kind === 'step') pendingCycle.current = { ids: click.ids, from: click.from, mapId: session.mapId, spaces: click.spaces };
     }
+    // A select-tool press that picked or moved the node it landed on is remembered with the one node it left selected:
+    // the next press on the same spot may go on from it. A press dragged into a pan or a marquee picked nothing there.
+    if (!cancel && session.spotId !== null && !(session.moved && session.mode !== 'move')) {
+      const left = liveSelection(session.mapId, liveMap);
+      lastSpot.current = { mapId: session.mapId, hitId: session.spotId, pickedId: left.ids.length === 1 ? left.primaryId : null };
+    }
+  }
+  /** What the double-click made of the last two presses does, and to which node. Null: nothing (the second click then steps on through cameras and symbols, never through spaces). */
+  function doubleClickIntent(point: BackgroundPoint | null): { node: BackgroundNode; action: 'open' | 'rename' } | null {
+    const [first, last] = pressLog.current;
+    if (!current || !first || !last || last.handle || last.hitId === null || first.hitId !== last.hitId || Date.now() - lastDrag.current <= 450) return null;
+    const node = current.nodes.find(item => item.id === last.hitId);
+    if (!node) return null;
+    const pile = point ? planPileAt(current, node.id, point, undefined, item => planMarkCovers(item, point)) : [node.id];
+    const target = current.nodes.find(item => item.id === doubleClickNodeId(first.targetId, node.id, pile)) ?? node;
+    // The node of the first press comes first. With nothing to do there, the topmost node is asked: a linked room that
+    // can be seen is entered even while a space picked from under it can be neither opened nor renamed.
+    for (const item of target === node ? [node] : [target, node]) {
+      const action = planDoubleClickAction(item, { tool, canEdit,
+        hasDetailMap: item.type === 'space' && !!item.childMapId && maps.some(map => map.id === item.childMapId) });
+      if (action) return { node: item, action };
+    }
+    return null;
   }
   /**
    * Double-clicks reach the canvas only: a press that captured the pointer sends its click and dblclick to the SVG,
    * never to the node. What was pressed is read from the press log.
    */
   function canvasDoubleClick(event: ReactMouseEvent<SVGSVGElement>) {
-    const [first, last] = pressLog.current;
+    const [, last] = pressLog.current;
     if (!current || !last || last.handle || Date.now() - lastDrag.current <= 450) return;
     if (last.hitId === null) { if (tool === 'polygon') finishPolygon(); return; }        // empty canvas: the first press is not looked at
-    if (!first || first.hitId !== last.hitId) return;                                    // the first press was off the canvas, or on another node
-    const node = current.nodes.find(item => item.id === last.hitId), point = pointFrom(event);
-    if (!node) return;
-    const pile = node.type === 'space' || !point ? [node.id] : planStackUnder(current, node.id, undefined, item => onPlanMark(item, point));
-    const target = current.nodes.find(item => item.id === doubleClickNodeId(first.targetId, node.id, pile)) ?? node;
-    if (target.type === 'space' && target.childMapId && maps.some(map => map.id === target.childMapId)) {
-      if (tool === 'select' || tool === 'hand') openSpace(target.id);                    // a space with a detail map opens it, before any renaming
-      return;
-    }
-    if (tool === 'select') beginRename(target.id);                                       // edit rights and the lock are checked there
+    const intent = doubleClickIntent(pointFrom(event));
+    // The space that is entered is the selected one when this map is come back to. The hand tool selects nothing.
+    if (intent?.action === 'open') openSpace(intent.node.id, tool !== 'hand');
+    else if (intent) beginRename(intent.node.id);
   }
   function zoomBy(factor: number) {
     if (pointerRef.current) return;
@@ -739,9 +808,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   }
   function keyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
-      // A gesture in progress is cancelled first; the tool is left as it is.
       if (event.nativeEvent === handledEscape.current) return;
-      if (doc.isGestureActive()) { abortGesture(); return; }
+      // A drag in progress, a marquee included, is cancelled first; the tool is left as it is.
+      if (pointerRef.current?.mode === 'marquee' || doc.isGestureActive()) { abortGesture(); return; }
       setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setActiveVertex(null);
     }
     const target = event.target as HTMLElement;
@@ -786,7 +855,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (id && current) select(id);
     setLookThrough(id && current ? { mapId: current.id, id } : null);
   });
-  const openSpaceFrom3D = useEvent((id: string) => { if (tool !== 'symbol') openSpace(id); });
+  const openSpaceFrom3D = useEvent((id: string) => { if (tool !== 'symbol') openSpace(id, tool !== 'hand'); });
   const gallery = useMemo(() => settledCurrent ? <BackgroundMapGallery key={settledCurrent.id} snapshot={snapshot} maps={settledMaps} current={settledCurrent} selected={settledSelected} onClearSelection={clearSelection} onOpenView={openView} onOpenCatalog={openCatalog} /> : null,
     [snapshot, settledMaps, settledCurrent, settledSelected, clearSelection, openView, openCatalog]);
 
@@ -862,12 +931,18 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
           </div>
           {mode === 'plan' ? <svg ref={svgRef} className={`bmap-canvas tool-${tool}`} style={{ '--bmap-label-scale': labelScale } as CSSProperties} viewBox={`${view.x} ${view.y} ${1000 / view.zoom} ${680 / view.zoom}`} aria-label={`${current.name} 도면`} tabIndex={0} onPointerDown={event => pointerDown(event)} onPointerMove={pointerMove} onPointerUp={event => pointerUp(event)} onPointerCancel={event => pointerUp(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) pointerUp(event, true); }} onClick={event => {
             const cycle = pendingCycle.current; pendingCycle.current = null;
-            if (!cycle || (event.detail >= 2 && canEdit)) return;        // while editing, a repeated click is a double-click, not another step
-            select(cycle.ids[(cycle.ids.indexOf(cycle.nodeId) + 1) % cycle.ids.length], cycle.mapId);
+            // A repeated click (the second click of a double-click, and every one after it) never steps through spaces, whatever the
+            // double-click does: only a click that starts a new click sequence does. Through cameras and symbols it steps unless
+            // that double-click renames or opens a node.
+            if (!cycle || (event.detail >= 2 && (cycle.spaces || doubleClickIntent(pointFrom(event))))) return;
+            const next = cycle.ids[(cycle.ids.indexOf(cycle.from) + 1) % cycle.ids.length];
+            select(next, cycle.mapId);
+            // The step is what that press left selected: a press on the same spot goes on from it.
+            if (lastSpot.current?.mapId === cycle.mapId) lastSpot.current = { ...lastSpot.current, pickedId: next };
           }} onDoubleClick={canvasDoubleClick}>
             {current.imageUrl && <image href={current.imageUrl} x="0" y="0" width="1000" height="680" preserveAspectRatio="xMidYMid meet" opacity="0.65" pointerEvents="none" />}
             {stackedSpaces(current).map(node => {
-              const isSelected = node.id === selected?.id;
+              const isSelected = shownIds.has(node.id);
               return <g key={node.id} className={`bmap-space ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                 {node.shape === 'ellipse' ? <ellipse cx={node.width / 2} cy={node.height / 2} rx={node.width / 2} ry={node.height / 2} /> : node.shape === 'polygon' ? <polygon points={node.points.map(point => `${point.x * node.width},${point.y * node.height}`).join(' ')} /> : <rect width={node.width} height={node.height} rx="4" />}
                 <text x={node.width / 2} y={node.height / 2} textAnchor="middle" dominantBaseline="central" pointerEvents="none">{node.locked ? '🔒 ' : ''}{node.name}</text>
@@ -875,7 +950,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               </g>;
             })}
             {current.nodes.filter((node): node is BackgroundSymbol => node.type === 'symbol').map(node => {
-              const isSelected = node.id === selected?.id, tilt = nodeAngles(node);
+              const isSelected = shownIds.has(node.id), tilt = nodeAngles(node);
               return <Fragment key={node.id}>
                 {/* A tilted object casts the outline of its whole box; its own plan size is untouched. */}
                 {(tilt.pitch !== 0 || tilt.roll !== 0) && <polygon className={`bmap-symbol-tilt ${isSelected ? 'is-selected' : ''}`} points={nodePlanOutline(node).map(point => `${point.x},${point.y}`).join(' ')} pointerEvents="none" />}
@@ -893,7 +968,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               const plan = projectCameraToPlan(node), reach = Math.hypot(plan.direction.x, plan.direction.y);
               const half = node.fov / 2 * Math.PI / 180, radius = 80 * reach;
               const tilt = Math.abs(plan.pitch) >= 0.5 ? cameraPitchLabel(plan.pitch) : '';
-              return <g key={node.id} className={`bmap-camera ${node.id === selected?.id ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-camera ${shownIds.has(node.id) ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
                 {plan.vertical ? <>
                   <circle className="bmap-camera-ring" r="17" /><circle r="11" />
                   {plan.vertical === 'up' ? <circle className="bmap-camera-mark" r="3.5" /> : <path className="bmap-camera-mark" d="M -4.5 -4.5 L 4.5 4.5 M 4.5 -4.5 L -4.5 4.5" />}
@@ -903,6 +978,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             })}
             {!!polygon.length && <g className="bmap-polygon-preview" pointerEvents="none"><polyline points={polygon.map(point => `${point.x},${point.y}`).join(' ')} />{polygon.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={MAP_EDIT_MARK.polygonDot * screenScale} />)}</g>}
             <MapSnapGuides guides={guides} scale={screenScale} />
+            {marquee && <MapMarquee rect={marquee} />}
             {/* Handles are drawn last, so an item picked from under others can still be turned and resized. */}
             {selected && canEdit && !selected.locked && <MapNodeHandles node={selected} scale={screenScale} vertexHandles={!!vertexHandles} onHandleDown={(event, handle) => pointerDown(event, selected, handle)} />}
             {/* The point handles come over the turn and resize handles: the + of each edge first, the points on top. */}

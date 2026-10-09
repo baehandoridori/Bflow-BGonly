@@ -1,6 +1,7 @@
 import type { JSX, PointerEvent as ReactPointerEvent } from 'react';
 import { MAP_EDIT_MARK, planNodeHandles } from './mapPlanEdit';
 import type { PlanVertexHandles } from './mapPlanEdit';
+import type { PlanRect } from './mapPlanSelect';
 import type { SnapGuide } from './mapSnap';
 import type { BackgroundNode } from './types';
 
@@ -13,6 +14,11 @@ export function MapSnapGuides({ guides, scale }: { guides: readonly SnapGuide[];
       ? <line key={index} x1={guide.at} x2={guide.at} y1={guide.from - overhang} y2={guide.to + overhang} />
       : <line key={index} x1={guide.from - overhang} x2={guide.to + overhang} y1={guide.at} y2={guide.at} />)}
   </g>;
+}
+
+/** The selection box while it is dragged, in plan coordinates. It draws what it is given. */
+export function MapMarquee({ rect }: { rect: PlanRect }): JSX.Element {
+  return <rect className="bmap-marquee" x={rect.left} y={rect.top} width={rect.right - rect.left} height={rect.bottom - rect.top} pointerEvents="none" aria-hidden="true" />;
 }
 
 /** Rotate and resize handles of the selected node. Their sizes come from `planNodeHandles`, so they stay the same on screen at any zoom. */
