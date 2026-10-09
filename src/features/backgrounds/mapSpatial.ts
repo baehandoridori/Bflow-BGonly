@@ -243,8 +243,13 @@ function stripCentreLine(outline: readonly BackgroundPoint[], start: number): Ba
   }
   const line = Array.from({ length: half }, (_, i) => ({ x: (a(i).x + b(i).x) / 2, y: (a(i).y + b(i).y) / 2 }));
   // An inner rung crosses the road: 60 degrees or more from the way the line passes it. The two ends may be cut at a slant.
+  // That way is the bisector of the two parts of the line that meet at the rung, each taken at length one: the rung of a
+  // mitred corner is square to it however long the legs are. (The chord from the middle before to the middle after leans
+  // toward the longer leg, and a square corner would fail once one leg is some 3.7 times the other.) No part is without
+  // length here, as its cell would not be convex; one would leave NaN and fail the check all the same.
   for (let i = 1; i < half - 1; i++) {
-    const rung = { x: b(i).x - a(i).x, y: b(i).y - a(i).y }, along = { x: line[i + 1].x - line[i - 1].x, y: line[i + 1].y - line[i - 1].y };
+    const rung = { x: b(i).x - a(i).x, y: b(i).y - a(i).y }, before = distance(line[i - 1], line[i]), after = distance(line[i], line[i + 1]);
+    const along = { x: (line[i].x - line[i - 1].x) / before + (line[i + 1].x - line[i].x) / after, y: (line[i].y - line[i - 1].y) / before + (line[i + 1].y - line[i].y) / after };
     const across = Math.hypot(rung.x, rung.y), run = Math.hypot(along.x, along.y);
     if (!(across > 0 && run > 0 && Math.abs(rung.x * along.x + rung.y * along.y) <= 0.5 * across * run)) return null;
   }

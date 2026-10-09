@@ -44,21 +44,33 @@ const LINES: [string, BackgroundSpace, Pair[]][] = [
   ['square four points', strip(200, 200, [0, 0], [1, 0], [1, 1], [0, 1]), [[-100, 0], [100, 0]]],
   ['L', strip(200, 200, [0, 0], [1, 0], [1, 1], [0.6, 1], [0.6, 0.4], [0, 0.4]), [[-100, -60], [60, -60], [60, 100]]],
   ['L listed from its next point', strip(200, 200, [1, 0], [1, 1], [0.6, 1], [0.6, 0.4], [0, 0.4], [0, 0]), [[60, 100], [60, -60], [-100, -60]]],
+  // One leg nearly five times the other. The corner rung is square to the way the line turns there, though only 57 degrees from
+  // the chord between the middles on either side of it, which leans toward the long leg.
+  ['L with one leg much longer than the other', strip(400, 100, [0, 0], [1, 0], [1, 1], [0.9, 1], [0.9, 0.4], [0, 0.4]), [[-200, -30], [180, -30], [180, 50]]],
   ['six-point strip', strip(300, 100, [0, 0], [0.5, 0], [1, 0], [1, 1], [0.5, 1], [0, 1]), [[-150, 0], [0, 0], [150, 0]]],
   ['six-point strip listed from its next point', strip(300, 100, [0.5, 0], [1, 0], [1, 1], [0.5, 1], [0, 1], [0, 0]), [[150, 0], [0, 0], [-150, 0]]],
-  // Inner rungs at 82 and 72 degrees to the road.
+  // Parts of 160, 120 and 240: both inner rungs are mitres, square to the turn of the line (82 and 72 degrees to the chords).
   ['road with two bends', strip(400, 200, [0, 0], [0.5, 0], [0.5, 0.6], [1, 0.6], [1, 1], [0.3, 1], [0.3, 0.4], [0, 0.4]), [[-200, -60], [-40, -60], [-40, 60], [200, 60]]],
   // The end rungs are at 56 degrees to the road, and the ends are not measured.
   ['chevron cut upright at both ends', strip(300, 200, [0, 0.5], [0.5, 0], [1, 0.5], [1, 1], [0.5, 0.5], [0, 1]), [[-150, 50], [0, -50], [150, 50]]],
+  // Its ends are 80 apart and its rungs are 100: the length is measured along the line (215), not from end to end.
+  ['narrow chevron', strip(80, 200, [0, 0.5], [0.5, 0], [1, 0.5], [1, 1], [0.5, 0.5], [0, 1]), [[-40, 50], [0, -50], [40, 50]]],
   ['slanted road', strip(200, 100, [0, 0], [0.5, 0], [1, 1], [0.5, 1]), [[-50, -50], [50, 50]]],
   // 68 degrees.
   ['facing points a little apart', strip(400, 100, [0, 0], [0.25, 0], [1, 0], [1, 1], [0.35, 1], [0, 1]), [[-200, 0], [-80, 0], [200, 0]]],
+  // 60.75 degrees. The same road at 59.04 is the first of the shapes without a line.
+  ['facing points apart, just over 60 degrees', strip(400, 100, [0, 0], [0.25, 0], [1, 0], [1, 1], [0.39, 1], [0, 1]), [[-200, 0], [-72, 0], [200, 0]]],
   // As long as it is wide: read as a strip, like the square.
   ['hexagon as long as it is wide', strip(200, 200, ...HEXAGON), [[0, -100], [0, 0], [0, 100]]],
 ];
 const NO_LINE: [string, BackgroundSpace][] = [
+  // 59.04 degrees.
+  ['facing points apart, just under 60 degrees', strip(400, 100, [0, 0], [0.25, 0], [1, 0], [1, 1], [0.4, 1], [0, 1])],
   ['facing points far apart, 51 degrees', strip(400, 100, [0, 0], [0.25, 0], [1, 0], [1, 1], [0.45, 1], [0, 1])],
   ['facing points far apart, 27 degrees', strip(400, 100, [0, 0], [0.25, 0], [1, 0], [1, 1], [0.75, 1], [0, 1])],
+  // At a bend the angle is taken from the way the line turns there. The end piece is turned 63 degrees and the rung before it is
+  // square to the long part: 58 degrees from that way, though 79 from the chord between the middles on either side of it.
+  ['square joint before an end piece turned 63 degrees', strip(400, 120, [0, 0], [0.9, 0], [1, 2 / 3], [1, 1], [0.9, 1 / 3], [0, 1 / 3])],
   ['two points on one side only', strip(400, 100, [0, 0], [0.25, 0], [0.75, 0], [1, 0], [1, 1], [0, 1])],
   ['L with only its outer corner rounded', strip(200, 200, [0, 0], [0.75, 0], [0.925, 0.075], [1, 0.25], [1, 1], [0.75, 1], [0.75, 0.2], [0, 0.2])],
   ['pointed ends', strip(400, 100, [0, 0.5], [0.25, 0], [0.75, 0], [1, 0.5], [0.75, 1], [0.25, 1])],
@@ -67,6 +79,9 @@ const NO_LINE: [string, BackgroundSpace][] = [
   ['T', strip(300, 250, [0, 0], [1, 0], [1, 0.32], [0.6, 0.32], [0.6, 1], [0.4, 1], [0.4, 0.32], [0, 0.32])],
   ['points added on the two ends', strip(300, 100, [0, 0], [1, 0], [1, 0.5], [1, 1], [0, 1], [0, 0.5])],
   ['hexagon wider than it is long', strip(200, 160, ...HEXAGON)],
+  // Wider than it is long at one end only: every rung is measured, the first and the last as well.
+  ['wedge that is widest at its far end', strip(100, 200, [0, 0.4], [1, 0], [1, 1], [0, 0.6])],
+  ['wedge that is widest at its near end', strip(100, 200, [0, 0], [1, 0.4], [1, 0.6], [0, 1])],
   ['tangled eight points', strip(300, 300, [0.8, 0.7], [0.2, 0.7], [0, 0.3], [0.7, 0], [0.3, 0.6], [0.6, 0.6], [0, 0.2], [0.7, 0.2])],
   // The same line the other way round: now its first part is inside the road and a later one is not.
   ['tangled eight points listed from the fifth', strip(300, 300, [0.3, 0.6], [0.6, 0.6], [0, 0.2], [0.7, 0.2], [0.8, 0.7], [0.2, 0.7], [0, 0.3], [0.7, 0])],
