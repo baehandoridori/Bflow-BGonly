@@ -18,7 +18,7 @@ import type { MapGesture } from '../src/features/backgrounds/mapEditSession.ts';
 import { addMapCamera } from '../src/features/backgrounds/mapGeometry.ts';
 import { planCameraGlyph, planCameraReadout, planReadoutText } from '../src/features/backgrounds/mapPlanPreview.ts';
 import { DEFAULT_MAP_CAMERA_POSE, SYMBOL_VOLUME_HEIGHTS, cameraOrientation, cameraPitchLabel, nodePlanOutline, nodeWorldPose, roadCentrePlanLine, verticalFov } from '../src/features/backgrounds/mapSpatial.ts';
-import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
+import type { BackgroundCamera, BackgroundCameraColor, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
 const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
 const near = (actual: number, expected: number, label = '', tolerance = 1e-6) =>
@@ -527,6 +527,95 @@ test('a camera looking straight up or down keeps a finite orientation', () => {
     assert.equal(pickMapNode(cast(scene, [node.x, (node.elevation ?? 120) + 4, 900], [0, 0, -1])), node.id);
   }
   scene.dispose();
+});
+
+/** What a camera is painted with, except its lens: the body and the finder, the lines of sight and to the floor, the frame, the ring on the floor. */
+const CAMERA_TINTED = ['camera-body', 'camera-finder', 'camera-frustum', 'camera-frame', 'camera-drop', 'camera-ring'];
+/** The paint of a part of a camera. The drop line and the ring stand on the floor with its companions, which are listed like the roots. */
+const cameraPaint = (scene: Map3DScene, node: BackgroundCamera, name: string): Paint => {
+  const root = rootOf(scene, node), onFloor = name === 'camera-drop' || name === 'camera-ring';
+  const holder = onFloor ? named(scene.scene, 'map-companions').children[named(scene.scene, 'map-nodes').children.indexOf(root)] : root;
+  return (named(holder, name) as Mesh).material as Paint;
+};
+
+test('a camera is drawn in the colour it was given, with one set of materials per colour on either theme, and its lens stays dark', () => {
+  const dark = MAP3D_DARK_PALETTE, scene = new Map3DScene(dark);
+  const plain = camera(30, { x: 150, y: 200 }), red = camera(31, { x: 350, y: 200, color: 'red' }), twin = camera(32, { x: 550, y: 200, color: 'red' });
+  const odd = camera(33, { x: 750, y: 200, color: 'purple' as BackgroundCameraColor });
+  const map = mapOf([plain, red, twin, odd]);
+  const paint = (node: BackgroundCamera, name: string) => cameraPaint(scene, node, name);
+  const colours = (node: BackgroundCamera) => CAMERA_TINTED.map(name => paint(node, name).color.getHex());
+  const all = (value: number) => CAMERA_TINTED.map(() => value);
+  const strength = (node: BackgroundCamera) => ['camera-frustum', 'camera-drop', 'camera-frame'].map(name => paint(node, name).opacity);
+  const released = new Map<object, number>();
+  const watch = (items: Iterable<Material>) => {
+    for (const item of items) {
+      if (released.has(item)) continue;
+      released.set(item, 0);
+      item.addEventListener('dispose', () => { released.set(item, (released.get(item) ?? 0) + 1); });
+    }
+  };
+
+  scene.sync(map, null);
+  assert.deepEqual(colours(red), all(0xf2726b), 'a red camera on the dark theme');
+  assert.deepEqual(colours(plain), all(dark.camera), 'a camera without a colour keeps the amber');
+  assert.deepEqual(colours(odd), all(dark.camera), 'a name the colour table does not know keeps the amber');
+  for (const node of [plain, red, twin, odd]) assert.equal(paint(node, 'camera-lens').color.getHex(), dark.cameraLens, `${node.name}: lens`);
+  // One set per colour: cameras of one colour share it, and it is not the set of the cameras without a colour.
+  for (const name of CAMERA_TINTED) {
+    same(paint(twin, name), paint(red, name), `${name}: two red cameras share one material`);
+    assert.ok(paint(red, name) !== paint(plain, name), `${name}: a red camera and one without a colour do not share`);
+  }
+  same(paint(red, 'camera-lens'), paint(plain, 'camera-lens'), 'one lens material for every camera');
+  watch(resources(scene).materials);
+
+  // Selected: the same colour, with the stronger lines and frame of any selected camera.
+  assert.deepEqual(strength(red), [0.6, 0.6, 0.1], 'quiet');
+  scene.sync(map, red.id);
+  assert.deepEqual(colours(red), all(0xf2726b), 'a selected red camera is still red');
+  assert.deepEqual(strength(red), [1, 1, 0.24], 'selected');
+  assert.deepEqual([colours(twin), strength(twin)], [all(0xf2726b), [0.6, 0.6, 0.1]], 'the other red camera stays quiet');
+  const redOn = paint(red, 'camera-frustum');
+  watch(resources(scene).materials);
+  scene.sync(map, plain.id);
+  assert.deepEqual([colours(plain), strength(plain)], [all(dark.camera), [1, 1, 0.24]], 'a selected camera without a colour');
+  assert.equal(paint(plain, 'camera-lens').color.getHex(), dark.cameraLens);
+  watch(resources(scene).materials);
+  scene.sync(map, null);
+
+  // Another colour is another look: the camera is built again inside the same root, and its neighbours are not.
+  const root = rootOf(scene, red), parts = [...root.children], neighbour = [...rootOf(scene, twin).children];
+  const blue: BackgroundCamera = { ...red, color: 'blue' };
+  scene.sync(mapOf([plain, blue, twin, odd]), null);
+  same(rootOf(scene, blue), root, 'a recoloured camera keeps its root');
+  assert.ok(!sameList(root.children, parts), 'a recoloured camera is built again');
+  assert.ok(sameList(rootOf(scene, twin).children, neighbour), 'its neighbour is not');
+  assert.deepEqual(colours(blue), all(0x63a9f7), 'blue on the dark theme');
+  assert.deepEqual(colours(twin), all(0xf2726b), 'the other camera stays red');
+  const blueBody = paint(blue, 'camera-body');
+  watch(resources(scene).materials);
+  // Back to the default (the key is gone): the materials of the cameras without a colour.
+  const cleared: BackgroundCamera = { ...blue };
+  delete cleared.color;
+  scene.sync(mapOf([plain, cleared, twin, odd]), null);
+  for (const name of CAMERA_TINTED) same(paint(cleared, name), paint(plain, name), `${name}: back to the default`);
+  assert.ok([...released.values()].every(count => count === 0), 'a colour that was used once stays until the theme changes');
+
+  // The other theme: every material of the old one is released, drawn at that moment or not, and each colour has its value for that theme.
+  const light = { ...MAP3D_DARK_PALETTE, light: true };
+  scene.setPalette(light);
+  assert.ok([...released.values()].every(count => count === 1), 'every material of the old theme is released exactly once');
+  assert.deepEqual([released.get(redOn), released.get(blueBody)], [1, 1], 'also the ones no camera is drawn with at that moment');
+  assert.deepEqual(colours(twin), all(0xc2362f), 'a red camera on the light theme');
+  assert.deepEqual(colours(plain), all(light.camera), 'a camera without a colour is painted from the palette, as before');
+  assert.deepEqual(colours(odd), all(light.camera), 'and so is an unknown name');
+  assert.equal(paint(twin, 'camera-lens').color.getHex(), light.cameraLens, 'lens on the light theme');
+  assert.equal(scene.resourceCount().materials, resources(scene).materials.size, 'nothing of the old theme is kept');
+  watch(resources(scene).materials);
+
+  scene.dispose();
+  assert.ok([...released.values()].every(count => count === 1), 'the materials of both themes are released exactly once');
+  assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
 });
 
 test('picking prefers cameras and symbols; walls never swallow a click', () => {
@@ -1299,9 +1388,15 @@ test('the floor is the base extent without a dot grid, and a palette change keep
 test('dispose releases every geometry and material', () => {
   const scene = new Map3DScene();
   scene.sync(everything, tiltedTable.id);
-  scene.sync({ ...everything, nodes: [...everything.nodes, camera(60, { x: 800, y: 500, locked: true })] }, polygon.id);
+  // Two cameras with a colour of their own: the materials of a colour are tracked and released with the rest.
+  const redLens = camera(61, { x: 700, y: 500, color: 'red' }), tealLens = camera(62, { x: 760, y: 560, color: 'teal' });
+  scene.sync({ ...everything, nodes: [...everything.nodes, camera(60, { x: 800, y: 500, locked: true }), redLens, tealLens] }, polygon.id);
   const { geometries, materials } = resources(scene), counted = scene.resourceCount();
   assert.ok(geometries.size > 10 && materials.size > 5);
+  for (const [node, value] of [[redLens, 0xf2726b], [tealLens, 0x45cfc4]] as const) for (const name of CAMERA_TINTED) {
+    assert.equal(cameraPaint(scene, node, name).color.getHex(), value, `${node.name}: ${name}`);
+    assert.ok(materials.has(cameraPaint(scene, node, name)), `${node.name}: ${name} is among the materials that are watched`);
+  }
   assert.ok(counted.geometries >= geometries.size && counted.materials >= materials.size, 'everything drawn is tracked');
   const released = new Map<object, number>();
   for (const item of [...geometries, ...materials]) item.addEventListener('dispose', () => { released.set(item, (released.get(item) ?? 0) + 1); });
