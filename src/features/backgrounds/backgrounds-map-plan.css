@@ -104,3 +104,5 @@
 @media (prefers-reduced-motion: reduce) {
   .bmap-plan-toggle>svg { transition:none; }
 }
+/* A camera with a colour of its own: the four camera variables of this plan follow it, on both themes. */
+.bmap-plan-preview [data-camera-color] { --bmap-plan-cam:rgb(var(--bmap-cam)); --bmap-plan-cam-line:rgb(var(--bmap-cam)); --bmap-plan-cam-edge:rgb(var(--color-bg-primary)); --bmap-plan-cam-soft:rgb(var(--bmap-cam) / .18); }

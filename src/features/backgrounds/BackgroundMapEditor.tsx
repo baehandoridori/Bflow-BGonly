@@ -1,7 +1,7 @@
 import { Component, Fragment, Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { Move3d, Orbit, Rotate3d, Scale3d } from 'lucide-react';
-import type { BackgroundCamera, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSnapshot, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbol, BackgroundSymbolKind } from './types';
+import type { BackgroundCamera, BackgroundCameraColor, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSnapshot, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbol, BackgroundSymbolKind } from './types';
 import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './BackgroundUI';
 import { BackgroundMapGallery } from './BackgroundMapGallery';
 import { BackgroundMapPanels } from './BackgroundMapPanels';
@@ -9,7 +9,8 @@ import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
 import { MapMarquee, MapNodeHandles, MapSnapGuides, MapVertexHandles } from './BackgroundMapPlanOverlays';
 import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { BackgroundMapSelectionSummary } from './BackgroundMapSelectionSummary';
-import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setSpaceSurface, transformMapSpace } from './mapGeometry';
+import { BackgroundMapCameraColor } from './BackgroundMapCameraColor';
+import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapSelection, mapViewport, pickAction, revealPlanPoint, singleViewId, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
@@ -172,7 +173,7 @@ const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, onS
     <div className="bmap-section-heading"><strong>오브젝트</strong><span className="bmap-badge">{ordered.length}개</span></div>
     {ordered.length ? <ul className="bmap-node-list">{ordered.map(node => <li key={node.id}>
       <button type="button" className={selectedIds.includes(node.id) ? 'is-selected' : ''} aria-current={node.id === primaryId ? 'true' : undefined} aria-label={`${node.name || '이름 없음'}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}`} onClick={() => onSelect(node.id)}>
-        <span className={`bmap-node-kind is-${node.type}`} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : isRoadSpace(node) ? '═' : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
+        <span className={`bmap-node-kind is-${node.type}`} data-camera-color={node.type === 'camera' ? node.color : undefined} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : isRoadSpace(node) ? '═' : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
         <span className="bmap-node-name">{node.name || '이름 없음'}</span>
         {node.locked && <span className="bmap-node-lock" aria-hidden="true">🔒</span>}
         <span className="bmap-node-type" aria-hidden="true">{kindLabel(node)}</span>
@@ -488,6 +489,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (!current || selected?.type !== 'space' || !canEdit) return;
     const next = setSpaceSurface(selected, surface);
     if (next !== selected) updateMap(replaceMapNode(current, next));     // one update, one undo step; the members stay where they are
+  }
+  function changeCameraColor(color: BackgroundCameraColor | null) {
+    if (!current || selected?.type !== 'camera' || !canEdit) return;
+    const next = setCameraColor(selected, color);
+    if (next !== selected) updateMap(replaceMapNode(current, next));     // one update per pick, one undo step
   }
   function duplicateSymbol() {
     if (!current || selected?.type !== 'symbol' || !canEdit || pointerRef.current || doc.isGestureActive()) return;
@@ -1038,7 +1044,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               const plan = projectCameraToPlan(node), reach = Math.hypot(plan.direction.x, plan.direction.y);
               const half = node.fov / 2 * Math.PI / 180, radius = 80 * reach;
               const tilt = Math.abs(plan.pitch) >= 0.5 ? cameraPitchLabel(plan.pitch) : '';
-              return <g key={node.id} className={`bmap-camera ${shownIds.has(node.id) ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-camera ${shownIds.has(node.id) ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} data-camera-color={node.color} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
                 {plan.vertical ? <>
                   <circle className="bmap-camera-ring" r="17" /><circle r="11" />
                   {plan.vertical === 'up' ? <circle className="bmap-camera-mark" r="3.5" /> : <path className="bmap-camera-mark" d="M -4.5 -4.5 L 4.5 4.5 M 4.5 -4.5 L -4.5 4.5" />}
@@ -1111,6 +1117,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             {selected.type === 'camera' && (() => {
               const angles = cameraAngles(selected), aspect = cameraAspect(selected), preset = ASPECT_PRESETS.find(item => Math.abs(item.value - aspect) < 0.005);
               return <>
+                {editing && <BackgroundMapCameraColor color={selected.color} disabled={fieldLocked} onChange={changeCameraColor} />}
                 {editing ? <section className="bmap-camera-properties" key={`camera-${selected.id}`} aria-label="카메라 설정">
                   <div className="bmap-field-pair"><NumberField label="카메라 높이" value={nodeElevation(selected)} min={MAP_SPATIAL_LIMITS.elevation.min} max={MAP_SPATIAL_LIMITS.elevation.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} /><NumberField label="방향 (°)" value={selected.angle} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={angleValue => patchNode({ angle: normalizeAngle(angleValue) }, 'angle')} /></div>
                   <div className="bmap-field-pair"><NumberField label="위아래 각도 (°)" value={angles.pitch} min={MAP_SPATIAL_LIMITS.pitch.min} max={MAP_SPATIAL_LIMITS.pitch.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="기울기 (°)" value={angles.roll} min={MAP_SPATIAL_LIMITS.roll.min} max={MAP_SPATIAL_LIMITS.roll.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>

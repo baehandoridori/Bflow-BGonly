@@ -271,3 +271,85 @@ test('a camera colour has one value on the dark theme and another on the light o
   assert.equal(cameraColorHex('purple' as BackgroundCameraColor, false), null);
   assert.equal(cameraColorHex('purple' as BackgroundCameraColor, true), null);
 });
+
+test('the stylesheet holds the camera palette as one set with the colour table: six names on each theme, and the amber as the default of both', () => {
+  const lines = sheet('backgrounds-map.css');
+  // The 3D view paints from the table and the DOM from these rules: the numbers are computed from the table.
+  for (const item of MAP_CAMERA_COLORS) {
+    assert.ok(lines.includes(`.bmap-layout [data-camera-color="${item.id}"] { --bmap-cam:${triple(item.dark)}; }`), `${item.id} on the dark theme`);
+    assert.ok(lines.includes(`[data-color-mode="light"] .bmap-layout [data-camera-color="${item.id}"] { --bmap-cam:${triple(item.light)}; }`), `${item.id} on the light theme`);
+  }
+  // No other name has a rule, in either stylesheet: the amber is no colour to pick, and purple was left out.
+  const text = `${lines.join('\n')}\n${sheet('backgrounds-map-plan.css').join('\n')}`;
+  for (const name of ['purple', 'amber']) assert.ok(!text.includes(`data-camera-color="${name}"`), `no rule for ${name}`);
+  const named = [...text.matchAll(/data-camera-color="([^"]*)"/g)].map(match => match[1]);
+  assert.deepEqual(named.sort(), [...BACKGROUND_CAMERA_COLORS, ...BACKGROUND_CAMERA_COLORS].sort(), 'each name has its two rules and nothing else is named');
+  // A camera without the key: the amber it always was, and the dark mark inside it. The light theme has no value of its own.
+  const base = lines.filter(line => line.startsWith('.bmap-layout {') && line.includes('--bmap-cam:'));
+  assert.equal(base.length, 1, 'one rule sets the default camera colour on the editor');
+  assert.ok(base[0].includes('--bmap-cam:230 181 120;') && base[0].includes('--bmap-cam-mark:55 39 21;'), base[0]);
+  for (const line of lines.filter(line => line.startsWith('[data-color-mode="light"] .bmap-layout {'))) assert.ok(!line.includes('--bmap-cam'), line);
+  // Inside a camera with a colour the mark is the background colour: dark on a bright body, bright on a dark one.
+  assert.ok(lines.includes('.bmap-layout [data-camera-color] { --bmap-cam-mark:var(--color-bg-primary); }'), 'the mark of a coloured camera');
+});
+
+/** The rules that paint a camera on the plan and its direction handle, and what each must paint with: [selector, declarations]. */
+const CAMERA_PLAN_RULES: [string, string[]][] = [
+  ['.bmap-camera circle {', ['fill:rgb(var(--bmap-cam))']],
+  ['.bmap-camera .bmap-camera-cone {', ['fill:rgb(var(--bmap-cam) /', 'stroke:rgb(var(--bmap-cam) /']],
+  ['.bmap-camera line {', ['stroke:rgb(var(--bmap-cam))']],
+  ['.bmap-camera .bmap-camera-arrow {', ['fill:rgb(var(--bmap-cam-mark))']],
+  ['.bmap-camera.is-selected .bmap-camera-cone {', ['fill:rgb(var(--bmap-cam) /', 'stroke:rgb(var(--bmap-cam))']],
+  ['.bmap-camera .bmap-camera-ring {', ['fill:rgb(var(--bmap-cam) /', 'stroke:rgb(var(--bmap-cam))']],
+  ['.bmap-camera.is-selected .bmap-camera-ring {', ['fill:rgb(var(--bmap-cam) /']],
+  ['.bmap-camera .bmap-camera-mark {', ['fill:rgb(var(--bmap-cam-mark))', 'stroke:rgb(var(--bmap-cam-mark))']],
+  ['.bmap-handles .bmap-camera-direction {', ['stroke:rgb(var(--bmap-cam))']],
+  ['.bmap-handles .bmap-camera-guide {', ['stroke:rgb(var(--bmap-cam))']],
+];
+
+test('a camera on the plan and its direction handle are painted from the camera variables alone: no amber is written into their rules', () => {
+  const lines = sheet('backgrounds-map.css').filter(line => line.startsWith('.bmap-camera') || line.startsWith('.bmap-handles .bmap-camera-'));
+  assert.ok(lines.length >= 10, `the rules of a camera are read: ${lines.length} lines`);
+  // One amber left in a rule keeps that part of a coloured camera amber. With two more digits it is the same colour, see-through.
+  for (const line of lines) assert.ok(!/#e6b578|#372715|230 181 120|55 39 21/i.test(line), line);
+  const text = lines.join('\n');
+  assert.ok(text.includes('var(--bmap-cam)'), 'the camera colour is used');
+  assert.ok(text.includes('var(--bmap-cam-mark)'), 'the mark colour is used');
+  // Each part by its own rule: a rule that lost its colour would be painted by the shared rule of the handles, or not at all.
+  for (const [selector, declarations] of CAMERA_PLAN_RULES) {
+    const line = rule('backgrounds-map.css', selector);
+    for (const declaration of declarations) assert.ok(line.includes(declaration), line);
+  }
+});
+
+test('on the companion plan a camera with a colour of its own sets the four camera variables of that plan from it', () => {
+  // The attribute alone changes nothing: the marks of that plan are painted from these four.
+  const line = rule('backgrounds-map-plan.css', '.bmap-plan-preview [data-camera-color] {');
+  for (const name of ['--bmap-plan-cam:', '--bmap-plan-cam-line:', '--bmap-plan-cam-edge:', '--bmap-plan-cam-soft:']) assert.ok(line.includes(name), `${name} ${line}`);
+  assert.ok(line.includes('var(--bmap-cam)'), line);
+  // The light theme gives the line and the edge an amber of their own on the root: each of the four is set here, or that one stays amber.
+  for (const declaration of ['--bmap-plan-cam:rgb(var(--bmap-cam));', '--bmap-plan-cam-line:rgb(var(--bmap-cam));', '--bmap-plan-cam-edge:rgb(var(--color-bg-primary));', '--bmap-plan-cam-soft:rgb(var(--bmap-cam) /'])
+    assert.ok(line.includes(declaration), `${declaration} ${line}`);
+});
+
+test('in the object list the colour of a camera wins over the amber of the light theme', () => {
+  const map = sheet('backgrounds-map.css').join('\n');
+  const own = map.indexOf('.bmap-node-kind.is-camera[data-camera-color]'), light = map.indexOf('[data-color-mode="light"] .bmap-node-kind.is-camera');
+  assert.ok(own > -1, 'a camera with a colour has a rule of its own');
+  assert.ok(light > -1, 'the light theme rule is there');
+  // The two are as specific as each other: the later one wins.
+  assert.ok(own > light, 'the rule of a coloured camera comes after the light theme rule');
+  assert.ok(rule('backgrounds-map.css', '.bmap-node-kind.is-camera[data-camera-color] {').includes('color:rgb(var(--bmap-cam))'));
+});
+
+test('a colour circle is painted with its own colour, marks the current colour with a ring, and keeps its focus ring outside that ring', () => {
+  const lines = sheet('backgrounds-map.css');
+  // The shared focus ring sits exactly on the ring of the pressed colour: moved out, both are seen.
+  assert.ok(lines.includes('.bg-library .bmap-color-swatch:focus-visible { outline-offset:5px; }'), 'the focus ring of a circle is moved out');
+  // The shared rules of a button give it a background, and their hover another: both are replaced by the colour of the circle.
+  assert.ok(rule('backgrounds-map.css', '.bg-library .bmap-color-swatch {').includes('background:rgb(var(--bmap-cam))'));
+  assert.ok(rule('backgrounds-map.css', '.bg-library button.bmap-color-swatch:hover:not(:disabled) {').includes('background:rgb(var(--bmap-cam))'));
+  // Not by colour alone: the current colour has a ring, and 'back to the default colour' with nothing to reset is dimmed under the pointer too.
+  assert.ok(rule('backgrounds-map.css', '.bg-library .bmap-color-swatch[aria-pressed="true"] {').includes('box-shadow:'));
+  assert.ok(rule('backgrounds-map.css', '.bg-library .bmap-color-reset[aria-disabled="true"],.bg-library .bmap-color-reset[aria-disabled="true"]:hover {').includes('color:rgb(var(--color-text-secondary) /'));
+});
