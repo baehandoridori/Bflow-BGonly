@@ -7,6 +7,13 @@
 -- The base file is re-runnable and puts back its own validator, which does not know the fields below.
 -- Stored maps stay readable and nothing is lost, but each write re-checks every stored map, so one map
 -- with a vertical field makes every background write fail with 22023 until this file is applied again.
+-- After this file, run 2026-10-09-background-map-elements.sql again as well: it replaces the same
+-- function with a wider one (symbol 'stairs', space.surface, camera.color), and this file puts back
+-- the validator without them. Run alone after that file, this one rejects with 22023 every write that
+-- leaves a map with a stair, a road or a camera colour stored (in practice every edit).
+-- "Every write" above and here means every write that leaves such a map stored: deleting the map, or
+-- saving it without those nodes, passes. Do not get past the error that way (a deleted map cannot be
+-- brought back): apply the chain again.
 --
 -- Replaces public.background_library_validate_entity and nothing else. The body is the base body with
 -- the map node branches widened; tests/backgroundDatabaseContract.test.ts fails if the two drift apart.

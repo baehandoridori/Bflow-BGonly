@@ -142,6 +142,28 @@ test('SQL의 닫힌 목록은 앱이 검증에 쓰는 상수와 같다',()=>{
   assert.deepEqual(Object.keys(SYMBOL_VOLUME_HEIGHTS).sort(),[...BACKGROUND_SYMBOL_KINDS].sort());
 });
 
+test('세 파일의 머리말과 운영 문서가 사슬 전체를 말하고, 옛 두 파일 규칙이 남아 있지 않다',()=>{
+  const elements='2026-10-09-background-map-elements.sql';
+  const header=(text:string)=>{const at=text.indexOf('BEGIN;');assert.ok(at>=0);return text.slice(0,at);};
+  const doc=(name:string)=>readFileSync(new URL(`../${name}`,import.meta.url),'utf8').split(/\r?\n/);
+  assert.match(header(sqlElements),/^-- Chain: base -> 3D -> this file\./m);
+  assert.match(header(sqlElements),/^-- Re-run this file after every run of either of them/m);
+  assert.ok(header(sql).includes(elements));assert.equal(header(sql).includes('run the 3D file again'),false);
+  assert.match(header(sql3d),/^-- After this file, run 2026-10-09-background-map-elements\.sql again as well/m);
+  // "Re-run the 3D file after the base file" is a wrong instruction now: followed, it leaves the 3D validator in place.
+  for(const name of ['CLAUDE.md','AGENTS.md']){
+    const lines=doc(name);assert.ok(lines.length>1,name);
+    assert.deepEqual(lines.filter(line=>line.includes('다시 실행')&&(line.includes('3D 파일도')||line.includes('이 SQL도'))),[],name);
+  }
+  // Pinned only where later rounds append: the notice on line 3 of both documents is rewritten when the screen opens to the team.
+  assert.ok(doc('AGENTS.md').some(line=>line.includes('background_library_validate_entity')&&line.includes(elements)&&line.includes('그 뒤의 파일을 모두 순서대로 다시 실행한다')));
+  // The handoff keeps the two-file decision as history, so each line that states it is corrected on the same line.
+  const handoff=doc('DEVLOG/background-3d-opus-handoff-2026-10-07.md');
+  const rerun=handoff.filter(line=>line.includes('3D SQL도 다시 실행한다')),noted=handoff.filter(line=>line.includes('3D SQL 재실행'));
+  assert.equal(rerun.length,1);assert.ok(rerun[0].includes(elements));
+  assert.ok(noted.length>=1);for(const line of noted)assert.ok(line.includes(elements),line);
+});
+
 test('적용된 두 파일의 본문은 그대로다',()=>{
   // Production holds these bodies (function md5 was compared there); only the comment lines above BEGIN; may change.
   const applied:Record<string,string>={
