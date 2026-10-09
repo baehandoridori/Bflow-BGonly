@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PLAN_FALLBACK_SIZE, PLAN_KIND_LABELS, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_VIEW,
-  nextPlanSelection, planArrowTip, planCameraGlyph, planCameraReadout, planDegrees, planNodeCovers, planNodeLabel, planNodeReadout, planNodeSummary,
+  nextPlanSelection, planArrowTip, planCameraGlyph, planCameraReadout, planDegrees, planKindLabel, planNodeCovers, planNodeLabel, planNodeReadout, planNodeSummary,
   planNumber, planOutlinePoints, planPileAt, planReadoutText, planSelectedNode, planSideView, planSightMark, planStackUnder, planUnitsPerPixel, planViewBox, planVolumeReadout,
 } from '../src/features/backgrounds/mapPlanPreview.ts';
 import { addMapCamera } from '../src/features/backgrounds/mapGeometry.ts';
@@ -299,6 +299,42 @@ test('the side view arrow follows the pitch exactly, straight up and down includ
   assert.equal(planSideView(room, cameraAt({ pitch: Number.NaN })).tip.y, planSideView(room, cameraAt({ pitch: 0 })).tip.y);
 });
 
+const legacyRoad: BackgroundSpace = { ...legacySpace, id: 'road', name: '큰길', surface: 'road' };
+
+test('the side view takes a road by its floor level alone: no wall height, no room and no yardstick of its own', () => {
+  const box = PLAN_SIDE_VIEW, travel = box.bottom - box.top;
+  // A road on the ground that still stores a wall height from its time as a room: the picture is that of a map without spaces.
+  const street = freeze(mapOf([{ ...legacyRoad, volumeHeight: 400 }]));
+  for (const elevation of [-90, 0, 90, 120, 180, 360]) for (const spaceId of [null, 'road']) {
+    assert.deepEqual(planSideView(street, cameraAt({ elevation, spaceId })), planSideView(mapOf(), cameraAt({ elevation, spaceId })), `${elevation} on ${spaceId}`);
+  }
+  // The default room height stays the yardstick, so lifting the camera still moves it: neither the stored 400 nor the road's flat top sets the scale.
+  near(planSideView(street, cameraAt()).camera.y, box.bottom - travel * 120 / 180);
+  // A camera that belongs to the road has no room around it.
+  assert.equal(planSideView(street, cameraAt({ spaceId: 'road' })).room, null);
+
+  // A raised road widens the range up to its floor and no further, with or without a stored wall height.
+  for (const volumeHeight of [undefined, 400]) {
+    const raised = planSideView(freeze(mapOf([{ ...legacyRoad, elevation: 300, ...(volumeHeight === undefined ? {} : { volumeHeight }) }])), cameraAt({ spaceId: 'road' }));
+    near(raised.camera.y, 46, `stored ${volumeHeight}`); near(raised.camera.y, box.bottom - travel * 120 / 300); near(raised.floorY, box.bottom); assert.equal(raised.room, null);
+  }
+  near(planSideView(mapOf(), cameraAt()).camera.y, box.bottom - travel * 120 / 180, 'without the road');
+  // A sunken road widens it downwards: the floor line moves up to make room, and the default height is still the top.
+  const sunken = planSideView(freeze(mapOf([{ ...legacyRoad, elevation: -90, volumeHeight: 400 }])), cameraAt());
+  near(sunken.floorY, box.bottom - travel * 90 / 270); near(sunken.camera.y, box.bottom - travel * 210 / 270); assert.equal(sunken.room, null);
+
+  // Beside a room a road changes nothing while its floor lies within the room's range, whichever of the two the camera belongs to.
+  const room = freeze(mapOf([legacySpace])), both = freeze(mapOf([{ ...legacyRoad, elevation: 60, volumeHeight: 400 }, legacySpace]));
+  for (const elevation of [-90, 0, 120, 180, 720]) for (const spaceId of [null, 'space', 'road']) {
+    assert.deepEqual(planSideView(both, cameraAt({ elevation, spaceId })), planSideView(room, cameraAt({ elevation, spaceId })), `${elevation} on ${spaceId}`);
+  }
+  assert.deepEqual(planSideView(both, cameraAt({ spaceId: 'space' })).room, { top: box.top, bottom: box.bottom });
+  assert.equal(planSideView(both, cameraAt({ spaceId: 'road' })).room, null);
+  // Above the room's range its floor sets the scale like any other level: the room shrinks below it.
+  const over = planSideView(mapOf([legacySpace, { ...legacyRoad, elevation: 300 }]), cameraAt({ spaceId: 'space' }));
+  near(over.camera.y, 46); near(over.room!.top, box.bottom - travel * 180 / 300); near(over.room!.bottom, box.bottom);
+});
+
 test('readout strings name direction, up or down view, height and field of view', () => {
   assert.deepEqual(texts(cameraAt({ angle: 137, pitch: -45 })), ['방향 137°', '아래 45°', '높이 120', '화각 60°']);
   assert.deepEqual(texts(cameraAt({ angle: 137, pitch: 30, elevation: 80.4, fov: 34.6 })), ['방향 137°', '위 30°', '높이 80', '화각 35°']);
@@ -332,6 +368,27 @@ test('readout strings name direction, up or down view, height and field of view'
   assert.equal(planNodeLabel(legacyCamera), '전경, 카메라'); assert.equal(planNodeLabel(legacySpace), '교실, 공간'); assert.equal(planNodeLabel(legacySymbol), '출입문, 기호');
   assert.equal(planNodeLabel({ ...legacyCamera, name: '   ' }), '이름 없음, 카메라');
   assert.equal(planReadoutText({ key: 'pitch', label: '', value: '수평' }), '수평');
+});
+
+test('a road is called a road on the companion plan and only its floor level is read out', () => {
+  assert.equal(planKindLabel(legacyRoad), '도로'); assert.equal(planKindLabel(legacySpace), '공간'); assert.equal(planKindLabel(legacySymbol), '기호'); assert.equal(planKindLabel(legacyCamera), '카메라');
+  // The shape has no say in it.
+  assert.equal(planKindLabel({ ...legacyRoad, shape: 'ellipse' }), '도로');
+  assert.equal(planKindLabel({ ...legacyRoad, shape: 'polygon', points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0.5, y: 1 }] }), '도로');
+  assert.equal(planNodeLabel(legacyRoad), '큰길, 도로'); assert.equal(planNodeLabel({ ...legacyRoad, name: '  ' }), '이름 없음, 도로');
+
+  assert.deepEqual(planVolumeReadout(legacyRoad), { name: '큰길', kind: '도로', vertical: null, items: [{ key: 'floor', label: '바닥 높이', value: '0' }] });
+  assert.deepEqual(planNodeReadout(legacyRoad), planVolumeReadout(legacyRoad));
+  assert.equal(planNodeSummary(legacyRoad), '큰길 · 바닥 높이 0');
+  // A wall height left from its time as a room stays stored and is not read out.
+  const kept = freeze({ ...legacyRoad, elevation: 25.4, volumeHeight: 400 });
+  assert.deepEqual(planVolumeReadout(kept), { name: '큰길', kind: '도로', vertical: null, items: [{ key: 'floor', label: '바닥 높이', value: '25' }] });
+  assert.deepEqual(texts(kept), ['바닥 높이 25']);
+  assert.equal(planNodeSummary(kept), '큰길 · 바닥 높이 25');
+  assert.equal(kept.volumeHeight, 400);
+  // The same space without the key is a room and reads both lines.
+  const asRoom: BackgroundSpace = { ...kept }; delete asRoom.surface;
+  assert.equal(planKindLabel(asRoom), '공간'); assert.deepEqual(texts(asRoom), ['바닥 높이 25', '입체 높이 400']);
 });
 
 test('outlines keep the real shape of rectangles, ellipses, polygons and tilted objects', () => {
