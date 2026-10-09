@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spacePlanArea, spaceStackRanks, spacesAt, stackedSpaces } from '../src/features/backgrounds/mapStack.ts';
+import { spacePlanArea, spaceStackRanks, spacesAt, spacesOverlap, stackedSpaces } from '../src/features/backgrounds/mapStack.ts';
 import { containsPoint } from '../src/features/backgrounds/mapGeometry.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
@@ -202,4 +202,77 @@ test('stacking roads hands back the nodes it was given and leaves the map as it 
   assert.equal(map.nodes, nodes);
   assert.deepEqual(ids(map.nodes), ['closet', 'street', 'room', 'site', 'lane', 'floor', 'chair', 'camera']);
   assert.equal(JSON.stringify(map), before);
+});
+
+// --- Overlap -----------------------------------------------------------------------------------
+// The road of most lines is the street: (0, 300), 1000 by 80, so its lower edge runs along y 380.
+const road = (id: string, x: number, y: number, width: number, height: number): BackgroundSpace => space(id, x, y, width, height, { surface: 'road' });
+/** Asked both ways round: the order of the two spaces never changes the answer. */
+const overlap = (a: BackgroundSpace, b: BackgroundSpace, expected: boolean, label: string) => {
+  assert.equal(spacesOverlap(a, b), expected, label);
+  assert.equal(spacesOverlap(b, a), expected, `${label}, the other way round`);
+};
+
+test('spaces that only share an edge or a corner, or lie apart, do not overlap', () => {
+  // A building set against the street: its upper edge on the lower edge of the road.
+  overlap(space('beside', 25, 380, 150, 150), street, false, 'an edge');
+  overlap(space('corner', 1000, 380, 100, 100), street, false, 'a corner');
+  overlap(space('apart', 25, 500, 150, 150), street, false, 'apart');
+});
+
+test('an overlap thinner than the slack is none, and a hundredth is one', () => {
+  // One rounding step into the street.
+  overlap(space('step', 25, 379.99999999999994, 150, 150), street, false, 'a rounding step deep');
+  // A billionth into the side of a road: the strip the two share is thinner than the slack.
+  overlap(space('sliver', 39.999999999, 100, 100, 100), road('alley', 0, 0, 40, 680), false, 'a billionth wide');
+  overlap(space('over', 25, 379.99, 150, 150), street, true, 'a hundredth deep');
+});
+
+test('a space inside another, on shared edges, with the same outline, half over it or across it overlaps it', () => {
+  overlap(room, road('ground', 0, 0, 1000, 680), true, 'inside');
+  // Three of its edges on the edges of the street.
+  overlap(space('end', 0, 300, 100, 80), street, true, 'inside, on shared edges');
+  overlap(space('twin', 0, 300, 1000, 80), street, true, 'the same outline');
+  // Neither has a corner inside the other in these two: every corner is on an edge of the other, or outside it.
+  overlap(space('left', 0, 0, 2, 2), road('right', 1, 0, 2, 2), true, 'half over');
+  overlap(space('across', 400, 0, 200, 680), street, true, 'a cross');
+});
+
+test('a polygon, an ellipse and a turned room overlap by the outline they are drawn with, not by their box', () => {
+  const diamond = (y: number) => polygon('diamond', 100, y, 100, 100, [0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]);
+  overlap(diamond(380), street, false, 'a diamond with its point on the edge');
+  overlap(diamond(370), street, true, 'a diamond with its point in the road');
+  const oval = (y: number) => space('oval', 100, y, 200, 100, { shape: 'ellipse' });
+  overlap(oval(380), street, false, 'an ellipse on the edge');
+  overlap(oval(375), street, true, 'an ellipse in the road');
+  // Turned an eighth the corner of the room reaches 106 above its centre.
+  const turned = (y: number) => space('turned', 100, y, 150, 150, { rotation: 45 });
+  overlap(turned(400), street, true, 'a turned room whose corner is in the road');
+  overlap(turned(460), street, false, 'a turned room below the road');
+  // An L round the end of a road: the boxes overlap, the shapes do not.
+  overlap(polygon('hook', 900, 200, 300, 300, [0, 0], [1, 0], [1, 1], [0.4, 1], [0.4, 0.3], [0, 0.3]), road('stub', 0, 300, 1010, 80), false, 'an L round the end of the road');
+  // A road that fills the slot of a U touches it on three sides.
+  overlap(polygon('slot', 0, 0, 300, 300, [0, 0], [1, 0], [1, 1], [0.7, 1], [0.7, 0.3], [0.3, 0.3], [0.3, 1], [0, 1]), road('filling', 90, 90, 120, 210), false, 'a road in the slot of a U');
+});
+
+test('a vertical line is inside an outline between its 1st and 2nd crossing and between its 3rd and 4th, and it is read in the middle of a strip', () => {
+  // A U on its side, open to the right: from x 90 to 300 a vertical line is inside it from y 0 to 90 and from 210 to 300.
+  const open = polygon('open', 0, 0, 300, 300, [0, 0], [1, 0], [1, 0.3], [0.3, 0.3], [0.3, 0.7], [1, 0.7], [1, 1], [0, 1]);
+  overlap(open, road('between', 90, 90, 210, 120), false, 'a road between the arms of a U on its side');
+  overlap(open, road('under', 150, 220, 100, 60), true, 'a road on the lower arm of a U on its side');
+  // A wedge with its point to the left: it spans one strip, and at either end of that strip a vertical line meets no area of it.
+  overlap(polygon('wedge', 0, 0, 100, 100, [0, 0.5], [1, 0], [1, 1]), road('around', -100, -100, 500, 300), true, 'a wedge inside a road');
+});
+
+test('outlines that meet only between their corners overlap, and so does an outline that crosses itself', () => {
+  // A slanted band through a long thin road: the outlines cross away from every corner, and of the strips between the xs of the corners alone none has its middle on the ground the two share.
+  overlap(polygon('band', 500, -50, 220, 1000, [0, 0], [20 / 220, 0], [1, 1], [200 / 220, 1]), road('thin', -1000, 0, 2000, 10), true, 'a slanted band');
+  // A bow tie inside a road: the middle of the one strip it spans is the point where it crosses itself.
+  const bow = polygon('bow', 0, 0, 300, 100, [0, 0], [1, 1], [1, 0], [0, 1]);
+  assert.equal(containsPoint(bow, { x: 75, y: 50 }), true); assert.equal(containsPoint(bow, { x: 225, y: 50 }), true);
+  overlap(bow, road('around', -100, -100, 500, 300), true, 'a bow tie');
+});
+
+test('a space with a value that is no number overlaps nothing', () => {
+  overlap(space('broken', 25, 300, NaN, 150), street, false, 'a width that is no number');
 });

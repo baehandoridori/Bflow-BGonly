@@ -436,3 +436,23 @@ test('a press is decided by its input alone, which is left as it was', () => {
   assert.deepEqual(resolvePlanPress(input), first);
   assert.equal(JSON.stringify(input), before);
 });
+
+// A road drawn inside a larger room. A road lies under every room, so the yard covers all of it: the yard is what a press
+// on the body of the road meets, and the road is the next of the pile. The lines of rooms above, as they fall on a road.
+const yard = freeze(space('yard', 100, 100, 400, 300)), inner = freeze(space('inner', 150, 220, 300, 60, { surface: 'road' }));
+const onRoadInYard = (again: boolean): PlanPressPlan =>
+  press(yard, picked('inner'), { pile: ['yard', 'inner'], again, node: among([inner, yard]) });
+
+test('a first press on the body of a selected road inside a larger room takes the room: the drag moves the room', () => {
+  // The road was just drawn or picked in the object list: neither leaves a pressed spot behind.
+  const pileAt = { x: 300, y: 250 };
+  assert.deepEqual(planPileAt(mapOf([inner, yard]), 'yard', pileAt, undefined, node => planMarkCovers(node, pileAt)), ['yard', 'inner']);
+  // The room is selected at the press and nothing is left for the release: the road is no longer the selection.
+  assert.deepEqual(onRoadInYard(false), planned('move', NONE, 'yard', grab('yard')));
+});
+
+test('the same spot pressed again, down to that road, drags the road and asks for the step on from it', () => {
+  const plan = onRoadInYard(true);
+  assert.deepEqual(plan, planned('move', step(['yard', 'inner'], 'inner', true), 'inner', { nodeId: 'inner' }));
+  assert.equal('selectAtPress' in plan, false);
+});
