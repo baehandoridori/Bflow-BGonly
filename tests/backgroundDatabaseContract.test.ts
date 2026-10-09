@@ -82,11 +82,31 @@ test('요소 파일은 검증 함수 하나만 바꿔 넣고, 기본값을 넣�
   // Refuses to run without the base file, and on the base validator: the applied chain stays base -> 3D -> this file.
   assert.match(body,/to_regprocedure\('public\.background_library_validate_entity\(text,jsonb\)'\) IS NULL/);
   assert.match(body,/position\('n-spatial' IN body\)=0/);assert.equal(body.match(/ERRCODE='55000'/g)?.length,2);
+  // The strings above being present does not mean the second guard can fire: without the prosrc read, with the
+  // raise in a dead branch, or placed below the function it never does. So what runs before the function is pinned whole.
+  const lines=sqlElements.split(/\r?\n/),begin=lines.indexOf('BEGIN;'),create=lines.indexOf('CREATE OR REPLACE FUNCTION public.background_library_validate_entity(kind TEXT, v JSONB)');
+  assert.ok(begin>=0&&create>begin);
+  assert.deepEqual(lines.slice(begin,create),[
+    'BEGIN;',"SET LOCAL lock_timeout = '5s';","SET LOCAL statement_timeout = '45s';",'',
+    'DO $$ DECLARE body TEXT; BEGIN',
+    " IF to_regprocedure('public.background_library_validate_entity(text,jsonb)') IS NULL THEN",
+    "  RAISE EXCEPTION '2026-09-21-background-library.sql 을 먼저 적용해야 합니다.' USING ERRCODE='55000';",
+    ' END IF;',
+    " SELECT p.prosrc INTO body FROM pg_proc p WHERE p.oid='public.background_library_validate_entity(text,jsonb)'::regprocedure;",
+    " IF position('n-spatial' IN body)=0 THEN",
+    "  RAISE EXCEPTION '2026-10-07-background-map-3d.sql 을 먼저 적용해야 합니다.' USING ERRCODE='55000';",
+    ' END IF;',
+    'END $$;','',
+  ]);
   assert.match(body,/RETURNS VOID LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp/);
   assert.doesNotMatch(body,/jsonb_set|jsonb_insert|jsonb_build_object|jsonb_strip_nulls|COALESCE|\|\||DEFAULT|\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE TABLE)\b/i);
   assert.match(body,/REVOKE ALL PRIVILEGES ON FUNCTION %s FROM PUBLIC/);assert.match(body,/REVOKE ALL PRIVILEGES ON FUNCTION %s FROM %I/);
   assert.match(body,/GRANT EXECUTE ON FUNCTION public\.background_library_read\(text\),public\.background_library_execute\(text,text,jsonb\) TO %I/);
   assert.match(body,/^NOTIFY pgrst, 'reload schema';/m);
+  // From the end of the function on, the file is the 3D file's, character for character: the three format strings
+  // above also match a lockdown with a narrower revoke loop or with one more grant after it.
+  const closing=(text:string)=>{const start=text.indexOf('CREATE OR REPLACE FUNCTION public.background_library_validate_entity('),end=text.indexOf('END $$;',start);assert.ok(start>=0&&end>start);return text.slice(end).split(/\r?\n/);};
+  assert.deepEqual(closing(sqlElements),closing(sql3d));
 });
 
 test('요소 파일은 3D 검증 함수의 모든 규칙을 글자 그대로 두고 정확히 셋을 더한다',()=>{
