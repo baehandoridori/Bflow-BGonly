@@ -12,7 +12,7 @@ import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim
 import type { MapPickHit } from '../src/features/backgrounds/map3dScene.ts';
 import { MAP_GIZMO_COLORS, MAP_GIZMO_SHAPE, mapGizmoSize, MapNodeGizmo, mapGizmoSetup, previewMapFromRoot, rootWorldPose, styleMapGizmo } from '../src/features/backgrounds/BackgroundMapCameraGizmo.ts';
 import type { Map3DProps, Map3DViewState } from '../src/features/backgrounds/mapCanvas.ts';
-import { createMapDocumentStore, mapDraft, mapViewport } from '../src/features/backgrounds/mapDocument.ts';
+import { createMapDocumentStore, mapDraft, mapSelection, mapViewport, pickAction, singleViewId } from '../src/features/backgrounds/mapDocument.ts';
 import { beginMapGesture, finishMapGesture, previewMapGesture } from '../src/features/backgrounds/mapEditSession.ts';
 import type { MapGesture } from '../src/features/backgrounds/mapEditSession.ts';
 import { addMapCamera } from '../src/features/backgrounds/mapGeometry.ts';
@@ -1301,6 +1301,10 @@ function installFakeDom(): void {
   const documentTarget = Object.assign(new EventTarget(), { pointerLockElement: null, documentElement: new FakeElement('html'), createElement: (tag: string) => new FakeElement(tag) });
   const windowTarget = Object.assign(new EventTarget(), { devicePixelRatio: 1, setTimeout, clearTimeout,
     matchMedia: () => Object.assign(new EventTarget(), { matches: true }) });
+  // In a browser a boolean third argument is the capture flag, for removing a listener as for adding one. Node's
+  // EventTarget reads it only when adding, so a listener added with `true` would never come off this stand-in.
+  const removeListener = windowTarget.removeEventListener.bind(windowTarget);
+  windowTarget.removeEventListener = (type: string, listener: Any, options?: Any) => removeListener(type, listener, typeof options === 'boolean' ? { capture: options } : options);
   let nextFrame = 1;
   scope.window = windowTarget;
   scope.document = documentTarget;
@@ -1427,6 +1431,8 @@ async function mountViewport(overrides: Partial<EditorState> = {}, size: [number
     const make = () => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { clientX: at.x, clientY: at.y, pageX: at.x, pageY: at.y, button: 0, buttons: 1,
       pointerId: 1, pointerType: 'mouse', isPrimary: true, ctrlKey: false, metaKey: false, shiftKey: false, deltaY: 0, deltaMode: 0, ...extra });
     const event = make();
+    // On its way down a press passes the window with the canvas as its target; the viewport listens there for presses elsewhere.
+    if (type === 'pointerdown') (globalThis as Any).window.dispatchEvent(Object.defineProperty(make(), 'target', { value: canvas() }));
     canvas().dispatchEvent(event);
     // Bubbling to the document, where OrbitControls listens while a pointer is down.
     if (type === 'pointermove' || type === 'pointerup') (globalThis as Any).document.dispatchEvent(make());
@@ -1849,6 +1855,271 @@ test('viewport: a click and a double click take the room whose floor is under th
   editor.fire('dblclick', editor.at(200, 0, 300));
   assert.deepEqual(editor.log.filter(entry => entry[0] === 'open'), [['open', nook.id], ['open', classroom.id]]);
   editor.viewport.dispose();
+});
+
+// A linked room drawn inside a linked classroom. Under `onNook` both floors lie on one level, the nook on top;
+// under `besideNook` only the classroom's does.
+const pileClassroom = space(1, { name: '교실', x: 100, y: 100, width: 400, height: 260, childMapId: id(901) });
+const pileNook = space(3, { name: '안쪽 방', x: 300, y: 150, width: 120, height: 100, childMapId: id(903) });
+const pileRooms = mapOf([pileNook, pileClassroom]);
+const unlinked = (room: BackgroundSpace): BackgroundSpace => ({ ...room, childMapId: null });
+type MountedViewport = Awaited<ReturnType<typeof mountViewport>>;
+const onNook = (editor: MountedViewport): ScreenPoint => editor.at(360, 0, 200);
+const besideNook = (editor: MountedViewport): ScreenPoint => editor.at(200, 0, 300);
+/** One click as the browser sends it: `detail` 1 starts a click sequence, 2 is the quick second click of a double click. */
+const clickNth = (editor: MountedViewport, at: ScreenPoint, detail = 1) => { editor.press(at, { detail }); editor.release(at); };
+/** The same on the centre handle of the move gizmo, which covers the selected item. The press never moves. */
+const clickCentreHandle = (editor: MountedViewport, nodeId: string, detail = 1) => {
+  editor.frame();
+  const centre = editor.screen(nodeId);
+  editor.move(centre);
+  assert.equal(editor.dev().transform.axis, 'XYZ', 'the centre handle is under the pointer');
+  clickNth(editor, centre, detail);
+};
+const selects = (editor: MountedViewport) => editor.log.filter(entry => entry[0] === 'select').map(entry => entry[1]);
+const opened = (editor: MountedViewport) => editor.log.filter(entry => entry[0] === 'open').map(entry => entry[1]);
+
+test('viewport: the same spot clicked again slowly steps on to the room under it, and a quick click never does', async () => {
+  const nook = pileNook.id, classroom = pileClassroom.id;
+  const slow = await mountViewport({ map: pileRooms, canEdit: false });
+  for (const expected of [nook, classroom, nook]) { clickNth(slow, onNook(slow)); assert.equal(slow.state.selectedId, expected); }
+  slow.viewport.dispose();
+
+  // The second click of a double click steps nowhere, and the double click enters the room on top.
+  const quick = await mountViewport({ map: pileRooms, canEdit: false });
+  clickNth(quick, onNook(quick), 1); clickNth(quick, onNook(quick), 2);
+  quick.fire('dblclick', onNook(quick));
+  assert.deepEqual([selects(quick), opened(quick)], [[nook], [nook]]);
+  quick.viewport.dispose();
+
+  // Rooms without a detail map: the double click has nothing to do, and the quick clicks still leave the room on top selected.
+  const inner = unlinked(pileNook), outer = unlinked(pileClassroom);
+  const plain = await mountViewport({ map: mapOf([inner, outer]), canEdit: false });
+  clickNth(plain, onNook(plain), 1); clickNth(plain, onNook(plain), 2);
+  assert.equal(plain.state.selectedId, inner.id);
+  plain.fire('dblclick', onNook(plain));
+  assert.deepEqual(opened(plain), [inner.id], 'reported as before: the editor opens nothing for a room without a detail map');
+  clickNth(plain, onNook(plain), 3);
+  assert.deepEqual(selects(plain), [inner.id, inner.id, inner.id], 'a repeated click only reports the same room again');
+  plain.viewport.dispose();
+  const unhurried = await mountViewport({ map: mapOf([inner, outer]), canEdit: false });
+  clickNth(unhurried, onNook(unhurried)); clickNth(unhurried, onNook(unhurried));
+  assert.deepEqual(selects(unhurried), [inner.id, outer.id], 'the same two rooms, clicked slowly');
+  unhurried.viewport.dispose();
+
+  // Three rooms inside one another, stepped down to the middle one: a quick pair takes one more step and stops there.
+  const small = space(4, { x: 400, y: 260, width: 160, height: 140 }), middle = space(5, { x: 300, y: 200, width: 400, height: 280 });
+  const big = space(3, { x: 100, y: 80, width: 800, height: 520 });
+  const nested = await mountViewport({ map: mapOf([big, small, middle]), canEdit: false });
+  for (const detail of [1, 1, 1, 2]) clickNth(nested, nested.at(480, 0, 330), detail);
+  assert.deepEqual(selects(nested), [small.id, middle.id, big.id, big.id]);
+  nested.viewport.dispose();
+  // A first click on a spot takes the room on top there, wherever the click before went and whichever room is selected.
+  const spots = await mountViewport({ map: mapOf([big, small, middle]), canEdit: false });
+  for (const [x, z] of [[480, 330], [350, 230], [480, 330]]) clickNth(spots, spots.at(x, 0, z));
+  assert.deepEqual(selects(spots), [small.id, middle.id, small.id], 'beside the small room and back: the small room, not the one under the middle room');
+  spots.render({ selectedId: middle.id });
+  clickNth(spots, spots.at(480, 0, 330));
+  assert.equal(spots.state.selectedId, small.id, 'the middle room picked in the object list');
+  spots.viewport.dispose();
+
+  // Cameras on one spot step on every click as before, however quick, and whichever of them was picked some other way.
+  let piled = mapOf([viewRoom, viewChair]);
+  const stacked = [50, 51, 52].map(id);
+  for (const cameraId of stacked) piled = addMapCamera(piled, cameraId).map;
+  const cameras = await mountViewport({ map: piled, canEdit: false });
+  const pile = cameras.screen(stacked[0]), visited: (string | null)[] = [];
+  for (const detail of [1, 2, 3, 4]) { clickNth(cameras, pile, detail); visited.push(cameras.state.selectedId); }
+  assert.deepEqual(new Set(visited.slice(0, 3)), new Set(stacked));
+  assert.equal(visited[3], visited[0]);
+  for (const [index, from] of stacked.entries()) {
+    cameras.render({ selectedId: from });
+    clickNth(cameras, pile);
+    assert.equal(cameras.state.selectedId, stacked[(index + 1) % 3], 'picked in the object list, then clicked');
+  }
+  cameras.viewport.dispose();
+});
+
+test('viewport: a double click enters the linked room its first click was aimed at, and the room on top when that one has no detail map', async () => {
+  const nook = pileNook.id, classroom = pileClassroom.id;
+  const doubleClick = (editor: MountedViewport, at: ScreenPoint) => { clickNth(editor, at, 1); clickNth(editor, at, 2); editor.fire('dblclick', at); };
+  // The classroom picked beside the nook: a first click on the nook takes the nook, which is no step.
+  const editor = await mountViewport({ map: pileRooms, canEdit: false });
+  clickNth(editor, besideNook(editor)); clickNth(editor, onNook(editor));
+  assert.deepEqual(selects(editor), [classroom, nook]);
+  editor.viewport.dispose();
+  // The classroom picked in the object list: a double click on the nook enters the nook.
+  const listed = await mountViewport({ map: pileRooms, canEdit: false, selectedId: classroom });
+  doubleClick(listed, onNook(listed));
+  assert.deepEqual([selects(listed), opened(listed)], [[nook], [nook]]);
+  listed.viewport.dispose();
+  // Three double clicks in a row, the editor selecting the room it entered each time: never the classroom.
+  const thrice = await mountViewport({ map: pileRooms, canEdit: false });
+  for (let round = 0; round < 3; round++) { doubleClick(thrice, onNook(thrice)); thrice.render({ selectedId: nook }); }
+  assert.deepEqual(opened(thrice), [nook, nook, nook]);
+  thrice.viewport.dispose();
+  // Stepped down to the classroom first: the double click is aimed at the classroom and enters it.
+  const stepped = await mountViewport({ map: pileRooms, canEdit: false });
+  clickNth(stepped, onNook(stepped)); clickNth(stepped, onNook(stepped));
+  assert.equal(stepped.state.selectedId, classroom);
+  doubleClick(stepped, onNook(stepped));
+  assert.deepEqual(opened(stepped), [classroom]);
+  stepped.viewport.dispose();
+  // The same with a classroom that has no detail map: the nook on top is entered, and the second click steps nowhere.
+  const loose = await mountViewport({ map: mapOf([pileNook, unlinked(pileClassroom)]), canEdit: false });
+  for (let times = 0; times < 3; times++) clickNth(loose, onNook(loose));
+  assert.deepEqual(selects(loose), [nook, classroom, nook]);
+  clickNth(loose, onNook(loose), 2);
+  assert.deepEqual(selects(loose), [nook, classroom, nook], 'the second click of the double click selects nothing');
+  loose.fire('dblclick', onNook(loose));
+  assert.deepEqual(opened(loose), [nook]);
+  loose.viewport.dispose();
+  // The look tool picks nothing and drops what the select tool was aimed at: its double click enters what is under the pointer.
+  const looking = await mountViewport({ map: pileRooms, canEdit: false });
+  clickNth(looking, besideNook(looking));
+  assert.equal(looking.state.selectedId, classroom);
+  looking.render({ tool: 'look' }); looking.clear();
+  doubleClick(looking, onNook(looking));
+  assert.deepEqual([selects(looking), opened(looking)], [[], [nook]]);
+  looking.viewport.dispose();
+  // Another map is another place: what the last click was aimed at on the old one is dropped with it.
+  const moved = await mountViewport({ map: pileRooms, canEdit: false });
+  for (let times = 0; times < 3; times++) clickNth(moved, onNook(moved));
+  moved.fire('dblclick', onNook(moved));
+  assert.deepEqual(opened(moved), [classroom], 'the third click stepped on from the classroom: it was aimed at it');
+  moved.render({ map: { ...pileRooms, id: id(950) } }); moved.clear();
+  moved.fire('dblclick', onNook(moved));
+  assert.deepEqual(opened(moved), [nook]);
+  moved.viewport.dispose();
+});
+
+test('viewport: a press on the handles of the selected room steps on only from the same spot again, and never picks anything else', async () => {
+  const nook = pileNook.id, classroom = pileClassroom.id;
+  // Clicking the nook puts its gizmo on the very spot: the same spot again lands on the centre handle and still steps on.
+  const editor = await mountViewport({ map: pileRooms });
+  clickNth(editor, onNook(editor));
+  clickCentreHandle(editor, nook);
+  assert.deepEqual(selects(editor), [nook, classroom]);
+  assert.deepEqual([editor.count('preview'), editor.undo.length, editor.count('cancel')], [0, 0, 0], 'stepping edits nothing');
+  editor.viewport.dispose();
+  // A handle that was not reached by clicking the spot picks nothing, also with the floor of another room under it.
+  const inset = space(3, { name: '안쪽 방', x: 240, y: 180, width: 120, height: 100, childMapId: id(903) });
+  const fresh = await mountViewport({ map: mapOf([inset, pileClassroom]), selectedId: classroom });
+  clickCentreHandle(fresh, classroom);
+  assert.deepEqual(selects(fresh), []);
+  fresh.render({ canEdit: false });
+  clickNth(fresh, fresh.screen(classroom));
+  assert.deepEqual(selects(fresh), [inset.id], 'without the handles the same click picks the room whose floor is there');
+  fresh.viewport.dispose();
+  // The quick second click of a double click on the handle steps nowhere; a slow one there does.
+  const inner = unlinked(pileNook), outer = unlinked(pileClassroom);
+  const quick = await mountViewport({ map: mapOf([inner, outer]) });
+  clickNth(quick, onNook(quick));
+  clickCentreHandle(quick, inner.id, 2);
+  assert.deepEqual([selects(quick), quick.state.selectedId], [[inner.id], inner.id]);
+  clickCentreHandle(quick, inner.id, 1);
+  assert.deepEqual(selects(quick), [inner.id, outer.id]);
+  quick.viewport.dispose();
+  // A double click whose first click is already on the handle enters the room and selects nothing.
+  const first = await mountViewport({ map: pileRooms, selectedId: nook });
+  clickCentreHandle(first, nook, 1); clickCentreHandle(first, nook, 2);
+  first.fire('dblclick', first.screen(nook));
+  assert.deepEqual([selects(first), opened(first), first.undo.length], [[], [nook], 0]);
+  first.viewport.dispose();
+  // A handle that does not lie over the selected room is a click on nothing: the double click there enters the room
+  // on top, not the room an earlier click was aimed at. Three linked rooms inside one another, clicked round to the
+  // small one: the last click stepped on from the big room.
+  const small = space(4, { x: 400, y: 260, width: 160, height: 140, childMapId: id(904) }), middle = space(5, { x: 300, y: 200, width: 400, height: 280, childMapId: id(905) });
+  const big = space(3, { x: 100, y: 80, width: 800, height: 520, childMapId: id(903) });
+  const nested = await mountViewport({ map: mapOf([big, small, middle]), canEdit: false });
+  for (let times = 0; times < 4; times++) clickNth(nested, nested.at(480, 0, 330));
+  assert.deepEqual(selects(nested), [small.id, middle.id, big.id, small.id]);
+  nested.render({ canEdit: true }); nested.frame(); nested.clear();
+  // On the arrow of the small room's gizmo, past its wall: only the floors of the middle and the big room are there.
+  const onArrow = nested.at(630, 0, 330);
+  nested.move(onArrow);
+  assert.equal(nested.dev().transform.axis, 'X');
+  clickNth(nested, onArrow, 1); clickNth(nested, onArrow, 2);
+  nested.fire('dblclick', onArrow);
+  assert.deepEqual([selects(nested), opened(nested), nested.undo.length], [[], [middle.id], 0]);
+  nested.viewport.dispose();
+});
+
+test('viewport: the memory of the clicked spot ends with a selection made elsewhere, a press that picks nothing and a press outside the canvas', async () => {
+  const nook = pileNook.id, classroom = pileClassroom.id;
+  type Between = (editor: MountedViewport, at: ScreenPoint) => void;
+  const drag = (editor: MountedViewport, at: ScreenPoint, down: Record<string, unknown>, held: Record<string, unknown>, up: Record<string, unknown>) => {
+    const to = { x: at.x + 30, y: at.y };
+    editor.press(at, down); editor.move(to, held); editor.release(to, up);
+  };
+  const moved = (editor: MountedViewport, act: () => void) => { const before = editor.view(); act(); assert.notDeepEqual(editor.view(), before, 'the view moved'); };
+  const rightDrag: Between = (editor, at) => moved(editor, () => drag(editor, at, { button: 2, buttons: 2 }, { buttons: 2 }, { button: 2, buttons: 0 }));
+  const pressOutside: Between = () => { (globalThis as Any).window.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0, isPrimary: true })); };
+  // What happens between two clicks on the nook, and the room the second click leaves selected.
+  const cases: [string, Between, string][] = [
+    ['nothing', () => {}, classroom],
+    ['a wheel zoom', (editor, at) => moved(editor, () => { editor.fire('wheel', at, { deltaY: -120 }); }), classroom],
+    ['a right drag that turns the world', rightDrag, nook],
+    ['a right press that never moves', (editor, at) => { editor.press(at, { button: 2, buttons: 2 }); editor.release(at, { button: 2, buttons: 0 }); }, nook],
+    ['a wheel-button drag that pans', (editor, at) => moved(editor, () => drag(editor, at, { button: 1, buttons: 4 }, { buttons: 4 }, { button: 1, buttons: 0 })), nook],
+    ['a press outside the canvas', pressOutside, nook],
+    ['a drag with the look tool', (editor, at) => { editor.render({ tool: 'look' }); moved(editor, () => drag(editor, at, {}, {}, {})); editor.render({ tool: 'select' }); }, nook],
+    ['a click with the look tool', (editor, at) => { editor.render({ tool: 'look' }); clickNth(editor, at); editor.render({ tool: 'select' }); }, nook],
+    ['an empty drag with the select tool', (editor, at) => drag(editor, at, {}, {}, {}), nook],
+    ['a click that places an object', (editor, at) => { editor.render({ placing: true }); clickNth(editor, at); editor.render({ placing: false }); }, nook],
+    ['a cancelled pointer', (editor, at) => { editor.press(at); editor.fire('pointercancel', at); }, nook],
+    ['a selection made elsewhere and put back', editor => { editor.render({ selectedId: classroom }); editor.render({ selectedId: nook }); }, nook],
+    ['another map with the same rooms', editor => editor.render({ map: { ...pileRooms, id: id(950) } }), nook],
+  ];
+  for (const [label, between, expected] of cases) {
+    const editor = await mountViewport({ map: pileRooms, canEdit: false });
+    clickNth(editor, onNook(editor));
+    between(editor, onNook(editor));
+    editor.frame();
+    // The view may have moved: the spot is found again on screen.
+    clickNth(editor, onNook(editor));
+    assert.deepEqual(selects(editor), [nook, expected], label);
+    editor.viewport.dispose();
+  }
+  // The same for the click that lands on the handles of the selected room: after such a press it steps nowhere.
+  for (const [label, between] of [['a right drag', rightDrag], ['a press outside the canvas', pressOutside]] as [string, Between][]) {
+    const editor = await mountViewport({ map: pileRooms });
+    clickNth(editor, onNook(editor));
+    editor.frame();
+    between(editor, besideNook(editor));
+    clickCentreHandle(editor, nook);
+    assert.deepEqual(selects(editor), [nook], label);
+    editor.viewport.dispose();
+  }
+  // What a click left selected has to be the selection still. With an owner that keeps its own selection it never is,
+  // so every click on the spot is a first press: the room on top, not a step on from the selected middle room.
+  const small = space(4, { x: 400, y: 260, width: 160, height: 140 }), middle = space(5, { x: 300, y: 200, width: 400, height: 280 });
+  const big = space(3, { x: 100, y: 80, width: 800, height: 520 }), told: (string | null)[] = [];
+  const stubborn = await mountViewport({ map: mapOf([big, small, middle]), canEdit: false, selectedId: middle.id }, [800, 500], () => ({ onSelect: value => { told.push(value); } }));
+  for (let times = 0; times < 3; times++) clickNth(stubborn, stubborn.at(480, 0, 330));
+  assert.deepEqual(told, [small.id, small.id, small.id]);
+  stubborn.viewport.dispose();
+});
+
+test('viewport: a finished gizmo drag keeps the memory of the clicked spot, and a cancelled one ends it', async () => {
+  const nook = pileNook.id, classroom = pileClassroom.id;
+  for (const cancelled of [false, true]) {
+    const editor = await mountViewport({ map: pileRooms });
+    clickNth(editor, onNook(editor));
+    editor.frame();
+    const arrow = editor.handle(nook, 'X'), to = { x: arrow.x + 20, y: arrow.y };
+    editor.move(arrow);
+    assert.equal(editor.dev().transform.axis, 'X');
+    editor.press(arrow); editor.move(to); editor.frame();
+    assert.ok((editor.node(nook) as BackgroundSpace).x > pileNook.x, 'the nook is dragged along inside the classroom');
+    if (cancelled) { (globalThis as Any).window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape' })); editor.settle(); }
+    editor.release(to);
+    assert.deepEqual([editor.count('finish'), editor.count('cancel'), editor.undo.length], cancelled ? [0, 1, 0] : [1, 0, 1]);
+    // The handle in the middle of the nook, where it stands now, is the spot that was clicked.
+    clickCentreHandle(editor, nook);
+    assert.deepEqual(selects(editor), cancelled ? [nook] : [nook, classroom], cancelled ? 'cancelled: a first press again' : 'moved: still the same spot');
+    editor.viewport.dispose();
+  }
 });
 
 test('viewport: a press at the centre of the size gizmo never scales, and the axis handles still do', async () => {
@@ -2275,14 +2546,109 @@ test('integration: a gizmo drag reaches the shared document, the 3D scene and th
   (unsubscribe as (() => void) | null)?.();
 });
 
+// The 3D mode of the editor over its real map document: a pick goes through pickAction, and the viewport is handed
+// the one node singleViewId names. Several nodes selected on the plan are a group the 3D view never touches.
+test('integration: with several selected on the plan, a pick in 3D moves only the one node the view works on', async () => {
+  const chair = symbol(12, 'chair', { x: 130, y: 280, spaceId: pileClassroom.id }), table = symbol(13, 'table', { x: 700, y: 450, width: 180, height: 110 });
+  const lens = camera(20, { x: 600, y: 200, angle: 135 });
+  const stacked = [50, 51, 52].map(index => camera(index, { x: 760, y: 140 }));
+  const map = mapOf([pileNook, pileClassroom, chair, table, lens, ...stacked]);
+  const open = async (ids: string[], overrides: Partial<EditorState> = {}) => {
+    const store = createMapDocumentStore();
+    store.dispatch({ type: 'begin-editing', map });
+    store.dispatch({ type: 'select-many', mapId: map.id, ids });
+    const read = () => {
+      const draft = mapDraft(store.getState(), map.id), viewport = mapViewport(store.getState(), map.id);
+      assert.ok(draft);
+      const selection = mapSelection(draft.value, viewport.selectedIds);
+      return { draft, selection, selectedIds: viewport.selectedIds, single: singleViewId(draft.value, selection, viewport.selectedId) };
+    };
+    const picked: (string | null)[] = [];
+    let unsubscribe: (() => void) | null = null, notified = 0;
+    const editor = await mountViewport({ map: read().draft.value, selectedId: read().single, ...overrides }, [800, 500], (state, changed) => {
+      unsubscribe ??= store.subscribe(() => { notified++; state.map = read().draft.value; state.selectedId = read().single; changed(); });
+      return {
+        onSelect: value => { picked.push(value); store.dispatch(pickAction(map.id, value, true, read().selection)); },
+        onBeginGesture: () => store.dispatch({ type: 'gesture-begin', mapId: map.id }),
+        onPreview: next => store.dispatch({ type: 'gesture-preview', map: next }),
+        onFinishGesture: () => store.dispatch({ type: 'gesture-finish' }),
+        onCancelGesture: () => store.dispatch({ type: 'gesture-cancel' }),
+      };
+    });
+    return { editor, store, read, picked, group: read().selectedIds, notified: () => notified,
+      close: () => { editor.viewport.dispose(); (unsubscribe as (() => void) | null)?.(); } };
+  };
+
+  // The chair and the lens are selected; the 3D view works on the lens, the last one picked. Dragging it keeps the group.
+  const pair = await open([chair.id, lens.id]);
+  const { editor, read, group } = pair;
+  assert.deepEqual([group, read().single], [[chair.id, lens.id], lens.id]);
+  same(editor.dev().transform.object, editor.root(lens.id), 'the gizmo is on the one node of the view');
+  editor.frame();
+  const arrow = editor.handle(lens.id, 'X');
+  editor.move(arrow); editor.press(arrow); editor.move({ x: arrow.x + 30, y: arrow.y }); editor.frame(); editor.release({ x: arrow.x + 30, y: arrow.y });
+  assert.equal(read().draft.past.length, 1, 'one drag, one undo step');
+  same(read().selectedIds, group, 'a gizmo drag leaves the group alone');
+  // Whatever is clicked in 3D, the group stays the very same list.
+  editor.render({ canEdit: false }); editor.frame();
+  const told = pair.notified();
+  clickNth(editor, editor.screen(lens.id));
+  assert.deepEqual([pair.picked, read().single, pair.notified() - told], [[lens.id], lens.id, 0], 'the node the view already works on: the document is not even touched');
+  same(read().selectedIds, group, 'after the click on the lens');
+  const clicks: [string, () => ScreenPoint, string | null][] = [['in the group', () => editor.screen(chair.id), chair.id], ['outside the group', () => editor.screen(table.id), table.id],
+    ['the bare ground', () => editor.at(300, 0, 520), null], ['in the group again', () => editor.screen(chair.id), chair.id]];
+  for (const [label, at, expected] of clicks) {
+    clickNth(editor, at());
+    assert.deepEqual([read().single, editor.state.selectedId], [expected, expected], label);
+    same(read().selectedIds, group, label);
+  }
+  // Selecting the same list on the plan again brings the single views back to its last node.
+  pair.store.dispatch({ type: 'select-many', mapId: map.id, ids: [chair.id, lens.id] });
+  assert.equal(mapViewport(pair.store.getState(), map.id).selectedId, lens.id);
+  same(read().selectedIds, group, 'the same list is the same array');
+  pair.close();
+
+  // The one node is the second of three cameras on one spot: clicking it steps to the third, which is no part of the
+  // group, and on round. While editing the click lands on the handles of the highlighted camera, with the same result.
+  for (const canEdit of [false, true]) {
+    const piled = await open([chair.id, stacked[1].id], { canEdit });
+    const visited: (string | null)[] = [];
+    for (let turn = 0; turn < 3; turn++) {
+      if (canEdit) clickCentreHandle(piled.editor, piled.read().single ?? '');
+      else clickNth(piled.editor, piled.editor.screen(stacked[1].id));
+      visited.push(piled.read().single);
+      same(piled.read().selectedIds, piled.group, `canEdit ${canEdit}, click ${turn + 1}`);
+    }
+    assert.deepEqual(visited, [stacked[2].id, stacked[0].id, stacked[1].id], `canEdit ${canEdit}`);
+    assert.deepEqual([piled.picked, piled.read().draft.past.length], [visited, 0], `canEdit ${canEdit}: told by the viewport, and no edit`);
+    piled.close();
+  }
+
+  // The one node is a room: the same spot clicked again slowly steps on to the classroom under it, which is no part of the group.
+  const rooms = await open([chair.id, pileNook.id], { canEdit: false });
+  clickNth(rooms.editor, onNook(rooms.editor)); clickNth(rooms.editor, onNook(rooms.editor));
+  assert.deepEqual([rooms.picked, rooms.read().single], [[pileNook.id, pileClassroom.id], pileClassroom.id]);
+  same(rooms.read().selectedIds, rooms.group, 'stepping through rooms');
+  rooms.close();
+
+  // With one node selected nothing has changed: a pick in 3D is the selection.
+  const one = await open([chair.id], { canEdit: false });
+  clickNth(one.editor, one.editor.screen(table.id));
+  assert.deepEqual(one.read().selectedIds, [table.id]);
+  clickNth(one.editor, one.editor.at(300, 0, 520));
+  assert.deepEqual(one.read().selectedIds, []);
+  one.close();
+});
+
 test('viewport: after dispose nothing listens, draws or reports any more', async () => {
   const editor = await mountViewport({ selectedId: viewLens.id });
   const canvas = editor.canvas(), { renderer } = editor;
   editor.frame();
-  const point = editor.screen(viewChair.id);
+  const point = editor.screen(viewChair.id), scope = globalThis as Any;
+  assert.equal(getEventListeners(scope.window, 'pointerdown').length, 1, 'while it lives, the viewport hears the presses outside its canvas');
   editor.viewport.dispose();
   editor.viewport.dispose();
-  const drawn = renderer.renders, scope = globalThis as Any;
+  const drawn = renderer.renders;
   // The context-lost listener goes first, before the context is dropped on purpose; nothing else stays on the canvas either.
   for (const type of ['webglcontextlost', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture', 'dblclick', 'wheel', 'contextmenu', 'mousedown']) {
     assert.equal(getEventListeners(canvas, type).length, 0, `canvas ${type}`);
@@ -2298,7 +2664,7 @@ test('viewport: after dispose nothing listens, draws or reports any more', async
   assert.equal(renderer.renders, drawn);
   assert.deepEqual(editor.names(), []);
   // Every viewport of this file is disposed by now: no listener may be left on the window or the document.
-  for (const type of ['keydown', 'keyup', 'pointermove', 'pointerup']) {
+  for (const type of ['keydown', 'keyup', 'pointerdown', 'pointermove', 'pointerup']) {
     assert.equal(getEventListeners(scope.window, type).length, 0, `window ${type}`);
     assert.equal(getEventListeners(scope.document, type).length, 0, `document ${type}`);
   }
