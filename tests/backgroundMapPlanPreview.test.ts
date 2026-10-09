@@ -314,7 +314,8 @@ test('the side view takes a road by its floor level alone: no wall height, no ro
   assert.equal(planSideView(street, cameraAt({ spaceId: 'road' })).room, null);
 
   // A raised road widens the range up to its floor and no further, with or without a stored wall height.
-  for (const volumeHeight of [undefined, 400]) {
+  // The stored value is not read at all while it is a road: one that is no number does not take the road's floor out of the range either.
+  for (const volumeHeight of [undefined, 400, Number.NaN, Number.POSITIVE_INFINITY]) {
     const raised = planSideView(freeze(mapOf([{ ...legacyRoad, elevation: 300, ...(volumeHeight === undefined ? {} : { volumeHeight }) }])), cameraAt({ spaceId: 'road' }));
     near(raised.camera.y, 46, `stored ${volumeHeight}`); near(raised.camera.y, box.bottom - travel * 120 / 300); near(raised.floorY, box.bottom); assert.equal(raised.room, null);
   }
