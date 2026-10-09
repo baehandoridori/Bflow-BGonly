@@ -60,6 +60,29 @@ test('background store forwards vertical-axis map fields untouched both ways and
   assert.equal(calls.length,3);
 });
 
+test('background store forwards stairs, roads and camera colours untouched both ways and stops unknown ones before SQL',async()=>{
+  const {createBackgroundStore}=await load('electron/backgroundStore.ts');const calls:any[]=[];
+  const room={id:randomUUID(),type:'space',name:'교실',placeId:null,childMapId:null,x:100,y:110,width:470,height:300,rotation:0,shape:'rect',points:[],locked:false};
+  const road={id:randomUUID(),type:'space',name:'큰길',placeId:null,childMapId:null,x:0,y:450,width:1000,height:80,rotation:0,shape:'rect',points:[],locked:false,surface:'road'};
+  const bend={id:randomUUID(),type:'space',name:'꺾인 길',placeId:null,childMapId:null,x:600,y:0,width:80,height:450,rotation:0,shape:'polygon',points:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],locked:false,surface:'road'};
+  const lens={id:randomUUID(),type:'camera',name:'빨간 카메라',spaceId:room.id,x:500,y:340,angle:90,fov:55,viewIds:[],locked:false,color:'red'};
+  const stairs={id:randomUUID(),type:'symbol',name:'계단',symbol:'stairs',spaceId:room.id,x:200,y:200,width:120,height:200,rotation:0,locked:false,hinge:'left',swing:'inward'};
+  const plain={id:randomUUID(),type:'camera',name:'기본 카메라',spaceId:null,x:10,y:20,angle:0,fov:60,viewIds:[],locked:false};
+  const map={id:randomUUID(),revision:0,name:'새 요소 도면',parentId:null,placeId:null,imageUrl:'',nodes:[room,road,bend,lens,stairs,plain]};
+  const stored={...empty(true),maps:[{...map,revision:1}]};
+  const store=createBackgroundStore({rpc:async(name:string,args:any)=>{calls.push({name,args});return {data:structuredClone(stored),error:null};}},{tokenFor:()=>'token'});
+  const batch={requestId:randomUUID(),command:{type:'save-maps',maps:[{entity:map,expectedRevision:null}]}},single={requestId:randomUUID(),command:{type:'save',kind:'map',entity:{...map,name:'이름만 변경'},expectedRevision:1}};
+  const sent=[JSON.stringify(batch.command),JSON.stringify(single.command)];
+  assert.deepEqual(await store.execute('admin',batch),stored);assert.deepEqual(await store.execute('admin',single),stored);assert.deepEqual(await store.read('admin'),stored);
+  assert.deepEqual(calls.map(call=>call.name),['background_library_execute','background_library_execute','background_library_read']);
+  assert.deepEqual(calls.slice(0,2).map(call=>JSON.stringify(call.args.p_command)),sent);
+  // Neither key is added on the way: the room stays a room and the plain camera keeps the default colour.
+  assert.equal(JSON.stringify(calls[0].args.p_command.maps[0].entity.nodes[0]),JSON.stringify(room));assert.equal(JSON.stringify(calls[0].args.p_command.maps[0].entity.nodes[5]),JSON.stringify(plain));
+  const save=(node:unknown)=>store.execute('admin',{requestId:randomUUID(),command:{type:'save-maps',maps:[{entity:{...map,nodes:[room,node]},expectedRevision:null}]}});
+  for(const [bad,reason] of [[{...road,surface:'river'},/공간 종류/],[{...lens,color:'purple'},/카메라 색/],[{...lens,color:null},/카메라 색/],[{...stairs,symbol:'elevator'},/사물 기호/],[{...lens,surface:'road'},/속성/],[{...road,color:'red'},/속성/]] as const)await assert.rejects(save(bad),reason);
+  assert.equal(calls.length,3);
+});
+
 test('background store surfaces migration, session and conflict errors without returning demo data',async()=>{
   const {createBackgroundStore}=await load('electron/backgroundStore.ts');
   for(const [code,message,pattern] of [['PGRST202','missing',/저장소 준비/],['42501','로그인 만료',/로그인 만료/],['40001','먼저 변경했습니다',/먼저 변경/]] as const){

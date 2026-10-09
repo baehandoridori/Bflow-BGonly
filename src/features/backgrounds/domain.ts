@@ -1,8 +1,12 @@
-import type { BackgroundActor, BackgroundCommand, BackgroundEntities, BackgroundGroup, BackgroundKind, BackgroundRequest, BackgroundSnapshot, BackgroundUsage, BackgroundVariant, BackgroundView } from './types.ts';
+import type { BackgroundActor, BackgroundCameraColor, BackgroundCommand, BackgroundEntities, BackgroundGroup, BackgroundKind, BackgroundRequest, BackgroundSnapshot, BackgroundSpaceSurface, BackgroundSymbolKind, BackgroundUsage, BackgroundVariant, BackgroundView } from './types.ts';
 
 export const backgroundCollections = { place:'places', map:'maps', view:'views', group:'groups', usage:'usages' } as const;
 /** Vertical-axis bounds of map nodes. Single source for mapSpatial; mirrored by the 3D migration SQL. */
 export const BACKGROUND_SPATIAL_LIMITS = { elevation:{min:-100000,max:100000}, volumeHeight:{min:1,max:100000}, pitch:{min:-90,max:90}, roll:{min:-180,max:180}, aspect:{min:0.1,max:10} } as const;
+/** Closed lists of the stored map shape. Mirrored by DEVLOG/migrations/2026-10-09-background-map-elements.sql. */
+export const BACKGROUND_SYMBOL_KINDS: readonly BackgroundSymbolKind[] = ['door', 'desk', 'chair', 'table', 'sofa', 'bed', 'cabinet', 'plant', 'custom', 'stairs'];
+export const BACKGROUND_SPACE_SURFACES: readonly BackgroundSpaceSurface[] = ['road'];
+export const BACKGROUND_CAMERA_COLORS: readonly BackgroundCameraColor[] = ['red', 'lime', 'green', 'teal', 'blue', 'pink'];
 const kinds = Object.keys(backgroundCollections) as BackgroundKind[];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function requireValue(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
@@ -38,18 +42,20 @@ export function validateBackgroundEntity(kind: BackgroundKind, value: unknown): 
       number(n.x,-100000,100000,'가로 좌표');number(n.y,-100000,100000,'세로 좌표');requireValue(typeof n.locked==='boolean','잠금 상태를 확인해 주세요.');
       const base=['id','type','name','x','y','locked'];
       if(n.type==='space') {
-        onlyKeys(n,[...base,'placeId','childMapId','width','height','rotation','shape','points','elevation','volumeHeight']);id(n.placeId,true);id(n.childMapId,true);
+        onlyKeys(n,[...base,'placeId','childMapId','width','height','rotation','shape','points','elevation','volumeHeight','surface']);id(n.placeId,true);id(n.childMapId,true);
         number(n.width,10,100000,'공간 가로 길이');number(n.height,10,100000,'공간 세로 길이');number(n.rotation,-360,360,'회전');
         spatial(n,'elevation','바닥 높이');spatial(n,'volumeHeight','입체 높이');
+        if('surface' in n)requireValue(BACKGROUND_SPACE_SURFACES.includes(n.surface as BackgroundSpaceSurface),'공간 종류가 올바르지 않습니다.');
         requireValue(['rect','ellipse','polygon'].includes(n.shape as string),'공간 모양이 올바르지 않습니다.');array(n.points,200);
         if(n.shape==='polygon') requireValue(n.points.length>=3,'다각형에는 꼭짓점이 3개 이상 필요합니다.');
         for(const p of n.points){object(p);onlyKeys(p,['x','y']);number(p.x,0,1,'꼭짓점 좌표');number(p.y,0,1,'꼭짓점 좌표');}
       } else if(n.type==='camera') {
-        onlyKeys(n,[...base,'spaceId','angle','fov','viewIds','elevation','pitch','roll','aspect']);id(n.spaceId,true);number(n.angle,-360,360,'카메라 방향');number(n.fov,1,179,'카메라 시야');ids(n.viewIds);
+        onlyKeys(n,[...base,'spaceId','angle','fov','viewIds','elevation','pitch','roll','aspect','color']);id(n.spaceId,true);number(n.angle,-360,360,'카메라 방향');number(n.fov,1,179,'카메라 시야');ids(n.viewIds);
         spatial(n,'elevation','카메라 높이');spatial(n,'pitch','위아래 각도');spatial(n,'roll','기울기');spatial(n,'aspect','화면 비율');
+        if('color' in n)requireValue(BACKGROUND_CAMERA_COLORS.includes(n.color as BackgroundCameraColor),'카메라 색이 올바르지 않습니다.');
       } else {
         requireValue(n.type==='symbol','지원하지 않는 도면 오브젝트입니다.');onlyKeys(n,[...base,'symbol','spaceId','width','height','rotation','hinge','swing','elevation','volumeHeight','pitch','roll']);id(n.spaceId,true);
-        requireValue(['door','desk','chair','table','sofa','bed','cabinet','plant','custom'].includes(n.symbol as string),'사물 기호가 올바르지 않습니다.');
+        requireValue(BACKGROUND_SYMBOL_KINDS.includes(n.symbol as BackgroundSymbolKind),'사물 기호가 올바르지 않습니다.');
         number(n.width,10,100000,'기호 가로 길이');number(n.height,10,100000,'기호 세로 길이');number(n.rotation,-360,360,'회전');
         requireValue(['left','right'].includes(n.hinge as string),'문의 경첩 방향이 올바르지 않습니다.');requireValue(['inward','outward'].includes(n.swing as string),'문 열림 방향이 올바르지 않습니다.');
         spatial(n,'elevation','바닥 높이');spatial(n,'volumeHeight','입체 높이');spatial(n,'pitch','위아래 각도');spatial(n,'roll','기울기');

@@ -56,6 +56,25 @@ test('preview 저장은 높이·기울기·화면 비율을 그대로 보존하�
   assert.equal(renamed.maps[0].revision,2);assert.deepEqual(renamed.maps[0].nodes,nodes);
   assert.deepEqual(await createBackgroundPreviewGateway(actor,options).read(),renamed);
 });
+test('preview 저장은 계단·도로·카메라 색을 그대로 보존하고 다시 열어도 그대로 읽는다',async()=>{
+  const options=environment(),actor={id:randomUUID(),canManage:true},g=createBackgroundPreviewGateway(actor,options);
+  const room:BackgroundNode={id:randomUUID(),type:'space',name:'교실',placeId:null,childMapId:null,x:100,y:110,width:470,height:300,rotation:0,shape:'rect',points:[],locked:false};
+  const nodes:BackgroundNode[]=[room,
+    {id:randomUUID(),type:'space',name:'큰길',placeId:null,childMapId:null,x:0,y:450,width:1000,height:80,rotation:0,shape:'rect',points:[],locked:false,surface:'road'},
+    {id:randomUUID(),type:'space',name:'꺾인 길',placeId:null,childMapId:null,x:600,y:0,width:80,height:450,rotation:0,shape:'polygon',points:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],locked:false,surface:'road'},
+    ...(['red','lime','green','teal','blue','pink'] as const).map((color,index):BackgroundNode=>({id:randomUUID(),type:'camera',name:`${color} 카메라`,spaceId:room.id,x:150+index*60,y:300,angle:0,fov:60,viewIds:[],locked:false,color})),
+    {id:randomUUID(),type:'symbol',name:'계단',symbol:'stairs',spaceId:room.id,x:200,y:150,width:120,height:200,rotation:0,locked:false,hinge:'left',swing:'inward'},
+    {id:randomUUID(),type:'camera',name:'기본 카메라',spaceId:null,x:10,y:20,angle:0,fov:60,viewIds:[],locked:false}];
+  const map={...blankMap('새 요소 도면'),nodes};
+  const save:BackgroundRequest={requestId:randomUUID(),command:{type:'save-maps',maps:[{entity:map,expectedRevision:null}]}};
+  const saved=await g.execute(save);assert.deepEqual(saved.maps,[{...map,revision:1}]);
+  const reopened=createBackgroundPreviewGateway(actor,options);assert.deepEqual(await reopened.read(),saved);
+  // The room and the plain camera gain neither key.
+  for(const index of [0,nodes.length-1])for(const key of ['surface','color'])assert.equal(Object.hasOwn(saved.maps[0].nodes[index],key),false,`${index}.${key}`);
+  const renamed=await reopened.execute({requestId:randomUUID(),command:{type:'save',kind:'map',entity:{...saved.maps[0],name:'이름만 변경'},expectedRevision:1}});
+  assert.equal(renamed.maps[0].revision,2);assert.deepEqual(renamed.maps[0].nodes,nodes);
+  assert.deepEqual(await createBackgroundPreviewGateway(actor,options).read(),renamed);
+});
 test('preview는 잘못된 높이 값을 저장하지 않고 높이 값이 없는 이전 저장분은 그대로 읽고 다시 저장한다',async()=>{
   const options=environment(),actor={id:randomUUID(),canManage:true};
   // A store written before the vertical-axis fields existed.

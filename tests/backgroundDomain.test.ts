@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { inspect } from 'node:util';
-import { BACKGROUND_SPATIAL_LIMITS, applyBackgroundCommand, emptyBackgroundSnapshot, filterBackgroundViews, mergeBackgroundGroup, validateBackgroundRequest, validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
+import { BACKGROUND_CAMERA_COLORS, BACKGROUND_SPACE_SURFACES, BACKGROUND_SPATIAL_LIMITS, BACKGROUND_SYMBOL_KINDS, applyBackgroundCommand, emptyBackgroundSnapshot, filterBackgroundViews, mergeBackgroundGroup, validateBackgroundRequest, validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
 import type { BackgroundPlace, BackgroundView, BackgroundMap, BackgroundGroup, BackgroundUsage, BackgroundSymbol, BackgroundSpace, BackgroundCamera, BackgroundNode } from '../src/features/backgrounds/types.ts';
 import { addMapCamera, applyNodeWorldPose } from '../src/features/backgrounds/mapGeometry.ts';
 import { MAP_SPATIAL_DEFAULTS, SYMBOL_VOLUME_HEIGHTS, cameraOrientation, createMapCamera, nodeOrientation } from '../src/features/backgrounds/mapSpatial.ts';
@@ -110,7 +110,7 @@ const symbol=(spaceId:string|null=null):BackgroundSymbol=>({id:randomUUID(),type
 
 test('문 열림 방향과 가구 기호를 공간 및 카메라와 함께 보존하고 관리 권한을 적용한다',()=>{
   const {s,classroom,view}=fixture(),room={...mapLink(randomUUID()),childMapId:null},door=symbol(room.id);
-  const kinds=['door','desk','chair','table','sofa','bed','cabinet','plant','custom'] as const;
+  const kinds=BACKGROUND_SYMBOL_KINDS;
   const map:BackgroundMap={...blankMap(),placeId:classroom.id,nodes:[room,{id:randomUUID(),type:'camera',name:'전경',spaceId:room.id,x:100,y:100,angle:0,fov:60,viewIds:[view.id],locked:false},...kinds.map(kind=>({...door,id:randomUUID(),symbol:kind}))]};
   const command={type:'save' as const,kind:'map' as const,entity:map,expectedRevision:null};
   assert.throws(()=>applyBackgroundCommand(s,command,{canManage:false}),/관리자/);
@@ -279,7 +279,8 @@ test('고정 위치에 추가한 카메라와 3D 편집 결과는 한계 밖으�
 
 test('읽을 때 쓰는 기본값과 새 카메라의 고정 자세는 저장 범위 안이고 사물 종류 목록도 저장 검증과 같다',()=>{
   const defaults=MAP_SPATIAL_DEFAULTS,kinds=Object.keys(SYMBOL_VOLUME_HEIGHTS) as BackgroundSymbol['symbol'][];
-  assert.deepEqual([...kinds].sort(),['bed','cabinet','chair','custom','desk','door','plant','sofa','table']);
+  assert.deepEqual([...kinds].sort(),['bed','cabinet','chair','custom','desk','door','plant','sofa','stairs','table']);
+  assert.deepEqual([...BACKGROUND_SYMBOL_KINDS].sort(),[...kinds].sort());
   assert.doesNotThrow(()=>checkNodes([
     {...planSpace(),elevation:defaults.spaceElevation,volumeHeight:defaults.spaceVolumeHeight},
     {...planCamera(),elevation:defaults.cameraElevation,pitch:defaults.pitch,roll:defaults.roll,aspect:defaults.aspect},
@@ -287,4 +288,46 @@ test('읽을 때 쓰는 기본값과 새 카메라의 고정 자세는 저장 �
     ...kinds.map(kind=>({...symbol(),id:randomUUID(),symbol:kind,elevation:defaults.symbolElevation,volumeHeight:SYMBOL_VOLUME_HEIGHTS[kind],pitch:defaults.pitch,roll:defaults.roll})),
   ]));
   assert.throws(()=>checkNodes([{...symbol(),symbol:'lamp'}]),/사물 기호/);
+});
+
+// Stored shapes added with the stairs, the road and the camera colour: a tenth symbol kind and two optional keys.
+// The three lists are spelled out on purpose: the elements migration SQL mirrors them in this order.
+test('닫힌 목록 상수 셋은 저장 계약의 값과 순서 그대로다',()=>{
+  assert.deepEqual(BACKGROUND_SYMBOL_KINDS,['door','desk','chair','table','sofa','bed','cabinet','plant','custom','stairs']);
+  assert.deepEqual(BACKGROUND_SPACE_SURFACES,['road']);
+  assert.deepEqual(BACKGROUND_CAMERA_COLORS,['red','lime','green','teal','blue','pink']);
+  for(const list of [BACKGROUND_SPACE_SURFACES,BACKGROUND_CAMERA_COLORS] as readonly (readonly string[])[])for(const name of ['purple','amber'])assert.equal(list.includes(name),false,name);
+});
+
+const newShapeNodes=():BackgroundNode[]=>{
+  const room=planSpace();
+  return [{...symbol(),symbol:'stairs'},{...planSpace(),surface:'road'},{...planSpace(),shape:'polygon',points:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],surface:'road'},
+    ...BACKGROUND_CAMERA_COLORS.map(color=>({...planCamera(),color})),room,planCamera(room.id),symbol(room.id)];
+};
+
+test('계단·도로·카메라 색은 단일 저장, 이름만 바꾼 저장, 묶음 저장에서 보낸 그대로 보존된다',()=>{
+  const nodes=newShapeNodes(),sent=structuredClone(nodes),map={...blankMap('새 요소 도면'),nodes},actor={canManage:true};
+  let s=applyBackgroundCommand(emptyBackgroundSnapshot(true),{type:'save',kind:'map',entity:map,expectedRevision:null},actor);
+  assert.deepEqual(s.maps[0],{...map,revision:1});assert.doesNotThrow(()=>validateBackgroundSnapshot(s));
+  assert.deepEqual(s.maps[0].nodes.map(node=>node.type==='symbol'?node.symbol:node.type==='space'?node.surface??null:node.color??null),['stairs','road','road',...BACKGROUND_CAMERA_COLORS,null,null,'door']);
+  // Only what was set is stored: the plain room, camera and symbol stay without the new keys.
+  for(const node of s.maps[0].nodes.slice(-3))for(const key of ['surface','color'])assert.equal(Object.hasOwn(node,key),false,`${node.type}.${key}`);
+  s=applyBackgroundCommand(s,{type:'save',kind:'map',entity:{...s.maps[0],name:'이름만 변경'},expectedRevision:1},actor);
+  assert.equal(s.maps[0].name,'이름만 변경');assert.equal(s.maps[0].revision,2);assert.deepEqual(s.maps[0].nodes,sent);
+  const added={...blankMap('함께 저장'),nodes:[{...planSpace(),surface:'road' as const},{...planCamera(),color:'pink' as const}]};
+  s=applyBackgroundCommand(s,{type:'save-maps',maps:[{entity:{...s.maps[0],name:'묶음 저장'},expectedRevision:2},{entity:added,expectedRevision:null}]},actor);
+  assert.equal(s.maps[0].revision,3);assert.deepEqual(s.maps[0].nodes,sent);assert.deepEqual(s.maps[1],{...added,revision:1});
+  assert.doesNotThrow(()=>validateBackgroundSnapshot(s));assert.deepEqual(nodes,sent);
+});
+
+test('공간 종류와 카메라 색은 닫힌 목록의 값만 받고 목록 밖의 기호 종류도 거부한다',()=>{
+  for(const value of ['river','room','',null,undefined,true,1,[],{}])assert.throws(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
+  for(const value of ['purple','amber','#ff0000','',null,undefined,7,true,[],{}])assert.throws(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
+  assert.throws(()=>checkNodes([{...symbol(),symbol:'elevator'}]),/사물 기호/);
+  assert.doesNotThrow(()=>checkNodes([{...planSpace(),surface:'road'},...BACKGROUND_CAMERA_COLORS.map(color=>({...planCamera(),color})),{...symbol(),symbol:'stairs'}]));
+});
+
+test('공간 종류는 공간에만, 카메라 색은 카메라에만 붙는다',()=>{
+  for(const node of [{...planCamera(),surface:'road'},{...symbol(),surface:'road'},{...planSpace(),color:'red'},{...symbol(),color:'red'}])
+    assert.throws(()=>checkNodes([node]),/속성/,`${node.type} ${'surface' in node?'surface':'color'}`);
 });

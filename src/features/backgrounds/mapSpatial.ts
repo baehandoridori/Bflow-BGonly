@@ -29,6 +29,7 @@ export const MAP_SPATIAL_DEFAULTS = { spaceElevation: 0, spaceVolumeHeight: 180,
 /** Legacy kinds render as the generic object, so they share its height. */
 export const SYMBOL_VOLUME_HEIGHTS: Readonly<Record<BackgroundSymbolKind, number>> = {
   door: 160, chair: 70, table: 60, bed: 45, custom: 80, desk: 80, sofa: 80, cabinet: 80, plant: 80,
+  stairs: 180, // A flight climbs one storey: the default room height.
 };
 /** Every new camera starts here, whatever is clicked, selected or visible. */
 export const DEFAULT_MAP_CAMERA_POSE = { x: 500, y: 340, elevation: 120, angle: 0, pitch: 0, roll: 0, fov: 60, aspect: 16 / 9 } as const;
