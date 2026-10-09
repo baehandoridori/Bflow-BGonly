@@ -28,7 +28,7 @@ const tabs = [
 export default function BackgroundLibraryView() {
   const user = useAuthStore((state) => state.currentUser),
     allEpisodes = useDataStore((state) => state.episodes);
-  const { snapshot, loading, pending, error, execute } = useBackgroundStore();
+  const { snapshot, loading, pending, error, updateRequired, execute } = useBackgroundStore();
   const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("maps"),
     [selectedViewId, setSelectedViewId] = useState<string | null>(null),
     [refreshing, setRefreshing] = useState(false);
@@ -93,9 +93,11 @@ export default function BackgroundLibraryView() {
               ? "저장 중…"
               : loading
                 ? "불러오는 중…"
-                : snapshot.canManage
-                  ? "관리자 편집 가능"
-                  : "라이브러리 보기"}
+                : updateRequired
+                  ? "업데이트 필요"
+                  : snapshot.canManage
+                    ? "관리자 편집 가능"
+                    : "라이브러리 보기"}
           </span>
           <button
             type="button"
@@ -109,69 +111,81 @@ export default function BackgroundLibraryView() {
           </button>
         </div>
       </header>
-      <nav className="bg-library-tabs" aria-label="배경 라이브러리 메뉴">
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            className={cn(tab === id && "selected")}
-            aria-current={tab === id ? "page" : undefined}
-            onClick={() => setTab(id)}
-          >
-            <Icon size={17} />
-            {label}
-          </button>
-        ))}
-      </nav>
-      {error && (
-        <div className="bg-error bg-global-error" role="alert">
-          {error}
-        </div>
-      )}
-      {loading && !snapshot.maps.length && !snapshot.places.length ? (
-        <div className="bg-loading" role="status">
-          배경 라이브러리를 불러오고 있습니다…
+      {updateRequired ? (
+        // Stored data from a newer app: no tabs, no error strip, no body. Nothing can be seen or edited until a read succeeds.
+        <div className="bg-empty" role="alert">
+          <RefreshCw size={28} strokeWidth={1.4} aria-hidden="true" />
+          <h3>업데이트가 필요해요</h3>
+          <p>이 PC의 B flow보다 새 버전에서 만든 도면 자료가 저장돼 있어서, 지금 버전으로는 배경 화면을 열 수 없어요. 화면 왼쪽 아래의 버전 버튼을 눌러 업데이트한 뒤 다시 열어 주세요. 저장된 자료는 그대로 안전하고, 업데이트하기 전까지 이 PC에서는 보거나 고칠 수 없어요.</p>
+          <button type="button" className="bg-button bg-primary" disabled={loading || refreshing} onClick={() => void refresh()}>다시 확인</button>
         </div>
       ) : (
-        <div className="bg-library-body" key={user?.id || "signed-out"}>
-          <div hidden={tab !== "maps"} className="bg-tab-content">
-            <BackgroundMapEditor
-              snapshot={snapshot}
-              pending={pending}
-              execute={execute}
-              onOpenView={(id, variantId) => setMapAsset({ id, variantId })}
-              onOpenCatalog={() => setTab('assets')}
-            />
-          </div>
-          <div hidden={tab !== "assets"} className="bg-tab-content">
-            <BackgroundAssetPanel
-              snapshot={snapshot}
-              episodes={episodes}
-              pending={pending}
-              execute={execute}
-              selectedViewId={selectedViewId}
-              onSelectedViewChange={setSelectedViewId}
-            />
-          </div>
-          <div hidden={tab !== "groups"} className="bg-tab-content">
-            <BackgroundGroupPanel
-              snapshot={snapshot}
-              pending={pending}
-              execute={execute}
-            />
-          </div>
-          <div hidden={tab !== "episodes"} className="bg-tab-content">
-            <BackgroundEpisodePanel
-              snapshot={snapshot}
-              episodes={episodes}
-              episodeLabels={episodeLabels}
-              onOpenView={(id, variantId) => setMapAsset({ id, variantId, usageReadOnly: true })}
-              pending={pending}
-              execute={execute}
-            />
-          </div>
-          {mapAssetView && <AssetDialog key={`${mapAssetView.id}:${mapAsset?.variantId || ''}`} view={mapAssetView} initialVariantId={mapAsset?.variantId} readOnly={mapAsset?.usageReadOnly} usageReadOnly={mapAsset?.usageReadOnly} placeId={mapAssetView.placeId} snapshot={snapshot} episodes={episodes} pending={pending} execute={execute} onClose={() => setMapAsset(null)} />}
-        </div>
+        <>
+          <nav className="bg-library-tabs" aria-label="배경 라이브러리 메뉴">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className={cn(tab === id && "selected")}
+                aria-current={tab === id ? "page" : undefined}
+                onClick={() => setTab(id)}
+              >
+                <Icon size={17} />
+                {label}
+              </button>
+            ))}
+          </nav>
+          {error && (
+            <div className="bg-error bg-global-error" role="alert">
+              {error}
+            </div>
+          )}
+          {loading && !snapshot.maps.length && !snapshot.places.length ? (
+            <div className="bg-loading" role="status">
+              배경 라이브러리를 불러오고 있습니다…
+            </div>
+          ) : (
+            <div className="bg-library-body" key={user?.id || "signed-out"}>
+              <div hidden={tab !== "maps"} className="bg-tab-content">
+                <BackgroundMapEditor
+                  snapshot={snapshot}
+                  pending={pending}
+                  execute={execute}
+                  onOpenView={(id, variantId) => setMapAsset({ id, variantId })}
+                  onOpenCatalog={() => setTab('assets')}
+                />
+              </div>
+              <div hidden={tab !== "assets"} className="bg-tab-content">
+                <BackgroundAssetPanel
+                  snapshot={snapshot}
+                  episodes={episodes}
+                  pending={pending}
+                  execute={execute}
+                  selectedViewId={selectedViewId}
+                  onSelectedViewChange={setSelectedViewId}
+                />
+              </div>
+              <div hidden={tab !== "groups"} className="bg-tab-content">
+                <BackgroundGroupPanel
+                  snapshot={snapshot}
+                  pending={pending}
+                  execute={execute}
+                />
+              </div>
+              <div hidden={tab !== "episodes"} className="bg-tab-content">
+                <BackgroundEpisodePanel
+                  snapshot={snapshot}
+                  episodes={episodes}
+                  episodeLabels={episodeLabels}
+                  onOpenView={(id, variantId) => setMapAsset({ id, variantId, usageReadOnly: true })}
+                  pending={pending}
+                  execute={execute}
+                />
+              </div>
+              {mapAssetView && <AssetDialog key={`${mapAssetView.id}:${mapAsset?.variantId || ''}`} view={mapAssetView} initialVariantId={mapAsset?.variantId} readOnly={mapAsset?.usageReadOnly} usageReadOnly={mapAsset?.usageReadOnly} placeId={mapAssetView.placeId} snapshot={snapshot} episodes={episodes} pending={pending} execute={execute} onClose={() => setMapAsset(null)} />}
+            </div>
+          )}
+        </>
       )}
     </section>
   );
