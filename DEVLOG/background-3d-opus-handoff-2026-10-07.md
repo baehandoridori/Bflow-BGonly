@@ -421,7 +421,7 @@ v1.130.0 시험 공개 뒤 한솔이 보낸 도면 피드백 2차의 첫 묶음�
 | BackgroundMap3D.tsx | `Press.repeat`, `turn`·`aimed`, `click`·`clickHandle`을 `pick` 하나로, `opens`·`doubleClickNode`, `turn`을 끝내는 줄들과 창 캡처 `pointerdown`(`onPressElsewhere`) |
 | BackgroundMapEditor.tsx | 선택을 읽는 값(`selection`·`singleId`·`selected`), 포인터 흐름(`resolvePlanPress` 배선, 상자, 묶음 이동, Shift, `lastSpot`), 스페이스(`onSpaceKey`), 도구줄·힌트 문구, 넘기기와 `doubleClickIntent`·`openSpace`, `select`의 3D 규칙(`pickAction`), 묶음 삭제·잠금·Delete와 그 뒤의 포커스, Esc의 상자 취소, 속성 칸 분기, `ObjectList` props, 쌓임 순서로 그리기, 새 기호의 소속. 판정은 순수 모듈에, 요약은 새 컴포넌트에 있고 편집기에는 배선만 늘었다 |
 | backgrounds-map.css | `.bmap-marquee`, 커서 규칙 셋 |
-| tests/backgroundMapEditorWiring.test.ts | 소스 앵커 39개: ①의 20개(5·6은 이번에 고쳐 썼다), 설계 12.8의 15개(21~35), 구현 중 리뷰에서 더한 넷(36~39). 아래 16.3의 규칙 대부분을 글자로 고정한다 |
+| tests/backgroundMapEditorWiring.test.ts | 소스 앵커 39개: ①의 20개(5·6은 이번에 고쳐 썼고, 10은 3D 파일이 import하지 않는 목록에 `mapPlanSelect`를 더했다), 설계 12.8의 15개(21~35), 구현 중 리뷰에서 더한 넷(36~39). 아래 16.3의 규칙 대부분을 글자로 고정한다 |
 
 모듈 의존은 `mapStack.ts` → `mapGeometry.ts` → `mapSpatial.ts`, `mapPlanPreview.ts` → `mapStack.ts`, `mapPlanSelect.ts` → `mapPlanEdit.ts`·`mapPlanPreview.ts`·`mapSpatial.ts`(`mapDocument.ts`에서는 타입만), `map3dScene.ts` → `mapStack.ts` 한 방향이다. `mapGeometry.ts`·`mapDocument.ts`는 새 모듈을 import하지 않고, 3D 파일(BackgroundMap3D.tsx, map3dScene.ts, BackgroundMapCameraGizmo.ts)은 `mapPlanSelect`·`mapPlanEdit`·`mapPlanGesture`·`mapSnap`을 import하지 않는다.
 
@@ -431,6 +431,7 @@ v1.130.0 시험 공개 뒤 한솔이 보낸 도면 피드백 2차의 첫 묶음�
 - 열린 창(`dialog`) 안에서 누른 Delete는 배치를 지우려 하지 않는다 — 하나든 묶음이든(앵커 38).
 - 보조 평면도 위에서 누른 뒤 밖에서 떼거나 취소되어 클릭이 되지 못한 누름도 자리 기억을 끝낸다(창 캡처 `pointerup`·`pointercancel`, 앵커 39).
 - 3D의 연속 클릭은 선택된 공간과 그 클릭이 고르는 것이 모두 포인터 아래 바닥 더미에 있을 때만 선택을 그대로 둔다. 위에 카메라·기호가 있거나 선택된 공간이 벽으로만 맞았으면 고른 것 그대로다(`mapClickStep`, `tests/backgroundMap3dScene.test.ts`).
+- 함께 옮길 때의 기준 노드(`groupAnchorId`)는 누른 것이 움직이지 않아 첫 움직이는 노드로 넘어갈 때도, 그 노드가 움직이는 공간에 실려 가는 항목이면 그 공간이다. 설계 6.3은 그때 `moving[0]` 그대로였다. 도면 순서에서 의자가 제 방보다 앞에 있으면 의자가 기준이 되어, 스냅으로 붙은 방의 가장자리가 소수 끝자리에서 어긋났다(`tests/backgroundMapPlanGesture.test.ts`).
 
 ### 16.3 뒤 차례가 지켜야 할 것
 
