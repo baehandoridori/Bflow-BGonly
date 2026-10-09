@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { ChevronLeft, ChevronRight, Image as ImageIcon } from 'lucide-react';
 import type { Character, CharacterCostume } from '@/types';
 import { CharacterImageFrame } from '@/components/characters/CharacterImageFrame';
@@ -10,6 +10,7 @@ import { useCostumeEditingPresence, useCostumeCollisionWarn } from '@/stores/use
 import { editingBeamClass } from '@/utils/editingPresence';
 import { EditingNameLabels } from '@/components/scenes/EditingNameLabels';
 import type { SwapDirection } from '@/utils/contentSwap';
+import { COSTUME_WHEEL_IDLE, costumeWheelStep } from '@/utils/costumeWheel';
 
 // 복장 없는 캐릭터에 매 렌더 새 [] 를 만들면 memo 비교가 항상 실패한다 — 안정 참조 하나를 공유 (CQ-6).
 export const EMPTY_COSTUMES: CharacterCostume[] = [];
@@ -61,8 +62,10 @@ export const CharacterCard = memo(function CharacterCard({
   const presenceWarn = useCostumeCollisionWarn(costumes.map((c) => c.id));
 
   // B8→피드백 53: 이미지 있는 복장을 좌/우 버튼으로 순환 미리보기. 전환한 복장은 클릭/우클릭에도 그대로 이어진다.
-  // (원래 휠로 넘겼으나 preventDefault 가 페이지 스크롤을 하이재킹해 카드가 많은 화면에서 충돌 — 버튼으로 교체.)
+  // (원래 휠로 넘겼으나 preventDefault 가 페이지 스크롤을 하이재킹해 카드가 많은 화면에서 충돌 — 버튼으로 교체.
+  //  v1.132.1 에 Shift 를 누른 휠만 넘김으로 되살렸다. 그냥 휠은 건드리지 않는다 — 아래 휠 처리 참고.)
   const imaged = costumes.filter((c) => c.featuredImageUrl);
+  const imagedCount = imaged.length;
   const [activeIdx, setActiveIdx] = useState(0);
   // 누른 쪽에서 새 그림이 겹쳐 떠오른다(‹ 는 왼쪽, › 는 오른쪽 — 움직임 폴리싱 11번).
   const [swapDirection, setSwapDirection] = useState<SwapDirection>(0);
@@ -77,6 +80,26 @@ export const CharacterCard = memo(function CharacterCard({
       return ((i + dir) % count + count) % count;
     });
   };
+
+  // 그림 위에서 Shift 를 누른 채 휠을 굴리면 복장이 넘어간다. React 의 onWheel 은 막을 수 없는(passive) 등록이라
+  // 그림 칸에 직접 건다. 넘김으로 읽히지 않은 휠(Shift 없는 휠, 복장이 한 벌 이하)은 막기 전에 돌려보내 화면이 평소처럼 움직인다.
+  const imageBoxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = imageBoxRef.current;
+    if (!box || imagedCount < 2) return;
+    let state = COSTUME_WHEEL_IDLE;
+    const onWheel = (event: WheelEvent) => {
+      const result = costumeWheelStep(state, event, imagedCount);
+      state = result.state;
+      if (!result.consume) return;
+      event.preventDefault();
+      if (result.dir) stepCostume(result.dir);
+    };
+    box.addEventListener('wheel', onWheel, { passive: false });
+    return () => box.removeEventListener('wheel', onWheel);
+    // stepCostume 은 복장 수만 읽는다 — 복장 수가 바뀌거나 그림 칸이 생겼다 없어질 때(compact) 다시 건다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imagedCount, compact]);
 
   return (
     <button
@@ -122,7 +145,7 @@ export const CharacterCard = memo(function CharacterCard({
           만들어 줬지만, 그림이 겹친 층(absolute)이 된 뒤로는 내용 폭이 0 이라 칸이 0×0 으로 접혀 그림이 사라졌다
           (v1.128.0 회귀 — 최신 Chrome 은 button 도 늘려 줘서 거기서는 멀쩡했다). */}
       {!compact && (
-        <div style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative w-full aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
+        <div ref={imageBoxRef} style={imageHeightPx ? { height: imageHeightPx } : undefined} className="relative w-full aspect-[3/4] bg-bg-border/30 flex items-center justify-center overflow-hidden rounded-t-xl">
           {shown ? (
             <CharacterImageFrame
               url={shown.featuredImageUrl}
@@ -141,6 +164,7 @@ export const CharacterCard = memo(function CharacterCard({
               <span
                 role="button"
                 aria-label="이전 복장"
+                title="이전 복장 · Shift+휠로도 넘겨요"
                 draggable={false}
                 onClick={(e) => { e.stopPropagation(); stepCostume(-1); }}
                 className="absolute left-1 top-1/2 z-[2] flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 opacity-0 transition-opacity duration-150 hover:bg-black/65 group-hover:opacity-100 motion-reduce:transition-none cursor-pointer"
@@ -150,6 +174,7 @@ export const CharacterCard = memo(function CharacterCard({
               <span
                 role="button"
                 aria-label="다음 복장"
+                title="다음 복장 · Shift+휠로도 넘겨요"
                 draggable={false}
                 onClick={(e) => { e.stopPropagation(); stepCostume(1); }}
                 className="absolute right-1 top-1/2 z-[2] flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 opacity-0 transition-opacity duration-150 hover:bg-black/65 group-hover:opacity-100 motion-reduce:transition-none cursor-pointer"

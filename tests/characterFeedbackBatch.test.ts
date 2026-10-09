@@ -52,8 +52,10 @@ test('B6→피드백 35: 사이드바 캐릭터 + 버튼 제거 — 배선 잔�
 });
 
 test('B8→피드백 53: 카드 좌/우 버튼으로 복장 전환 + 전환 복장을 클릭/우클릭/상세로 전달', () => {
-  // 피드백 53: 휠 하이재킹 제거 — wheel 리스너가 되살아나면 스크롤 충돌 회귀.
-  assert.doesNotMatch(card, /addEventListener\('wheel'/);
+  // 피드백 53 → v1.132.1: 그냥 휠을 가로채면 스크롤 충돌 회귀. 휠은 Shift 를 누른 때만 넘김으로 읽고
+  //   (판정과 순서는 tests/characterCostumeWheel.test.ts), 넘김이 아닌 휠은 막기 전에 돌려보낸다.
+  assert.match(card, /if \(!result\.consume\) return;\s+event\.preventDefault\(\);/);
+  assert.doesNotMatch(card, /onWheel=\{/);
   assert.match(card, /aria-label="이전 복장"/);
   assert.match(card, /aria-label="다음 복장"/);
   assert.match(card, /e\.stopPropagation\(\); stepCostume\(-1\);/);
