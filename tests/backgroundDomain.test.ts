@@ -320,11 +320,20 @@ test('계단·도로·카메라 색은 단일 저장, 이름만 바꾼 저장, �
   assert.doesNotThrow(()=>validateBackgroundSnapshot(s));assert.deepEqual(nodes,sent);
 });
 
+// What the validator refuses comes in two kinds, and the "update required" notice reads the kind, never the sentence:
+// unknown (a key, or a string outside a closed list: most likely written by a newer app) and broken (everything else).
+// Both are refused whole, with the sentence they always had.
+const unknownKind=(run:()=>void,sentence:RegExp,label:string)=>{assert.throws(run,BackgroundUnsupportedError,label);assert.throws(run,sentence,label);};
+const brokenKind=(run:()=>void,sentence:RegExp,label:string)=>assert.throws(run,(error:unknown)=>error instanceof Error&&!(error instanceof BackgroundUnsupportedError)&&sentence.test(error.message),label);
+
 test('공간 종류와 카메라 색은 닫힌 목록의 값만 받고 목록 밖의 기호 종류도 거부한다',()=>{
-  // The last two of each list: a listed name inside an array, or in another letter case, is not that name.
+  // A string outside the list is an unknown value and anything that is not a string is a broken one: the sentence is the same.
+  // The last of each list: a listed name in another letter case, or inside an array, is not that name.
   // The server compares the stored text as it is, so neither may pass here by being turned into a string or lower-cased.
-  for(const value of ['river','room','',null,undefined,true,1,[],{},['road'],'Road'])assert.throws(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
-  for(const value of ['purple','amber','#ff0000','',null,undefined,7,true,[],{},['red'],'RED'])assert.throws(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
+  for(const value of ['river','room','','Road'])unknownKind(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
+  for(const value of [null,undefined,true,1,[],{},['road']])brokenKind(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
+  for(const value of ['purple','amber','#ff0000','','RED'])unknownKind(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
+  for(const value of [null,undefined,7,true,[],{},['red']])brokenKind(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
   for(const value of ['elevator',['stairs'],'Stairs'])assert.throws(()=>checkNodes([{...symbol(),symbol:value}]),/사물 기호/,`symbol=${inspect(value)}`);
   assert.doesNotThrow(()=>checkNodes([{...planSpace(),surface:'road'},...BACKGROUND_CAMERA_COLORS.map(color=>({...planCamera(),color})),{...symbol(),symbol:'stairs'}]));
 });
@@ -334,13 +343,8 @@ test('공간 종류는 공간에만, 카메라 색은 카메라에만 붙는다'
     assert.throws(()=>checkNodes([node]),/속성/,`${node.type} ${'surface' in node?'surface':'color'}`);
 });
 
-// What the validator refuses comes in two kinds, and the "update required" notice reads the kind, never the sentence:
-// unknown (a key, or a string outside a closed list: most likely written by a newer app) and broken (everything else).
-// Both are refused whole, with the sentence they always had.
 type Raw=Record<string,unknown>;
 type StoredRaw=Raw&{places:Raw[];maps:(Raw&{nodes:Raw[]})[];views:(Raw&{variants:Raw[]})[]};
-const unknownKind=(run:()=>void,sentence:RegExp,label:string)=>{assert.throws(run,BackgroundUnsupportedError,label);assert.throws(run,sentence,label);};
-const brokenKind=(run:()=>void,sentence:RegExp,label:string)=>assert.throws(run,(error:unknown)=>error instanceof Error&&!(error instanceof BackgroundUnsupportedError)&&sentence.test(error.message),label);
 // A stored library holding one of everything the cases change: a place, a view with a variant, and a map with a space, a camera and a symbol (in that order).
 function storedLibrary(){
   const {s,classroom,view}=fixture(),room={...planSpace(),placeId:classroom.id};
@@ -385,6 +389,10 @@ test('조회 결과의 깨진 값은 "모르는 것"이 아닌 오류로 거절�
     ['time: 0',/시간대 분류/,raw=>{raw.views[0].variants[0].time=0;}],
     ['no type',/지원하지 않는 도면 오브젝트/,raw=>{const {type:_type,...rest}=raw.maps[0].nodes[2];raw.maps[0].nodes[2]=rest;}],
     ['type: 7',/지원하지 않는 도면 오브젝트/,raw=>{raw.maps[0].nodes[2].type=7;}],
+    // The kind is read from an object: a node that is not one is refused as such, before anything is read from it.
+    ['node is null',/올바른 배경 데이터/,raw=>{raw.maps[0].nodes.push(null as unknown as Raw);}],
+    ['node is a string',/올바른 배경 데이터/,raw=>{raw.maps[0].nodes.push('note' as unknown as Raw);}],
+    ['node is an array',/올바른 배경 데이터/,raw=>{raw.maps[0].nodes.push([] as unknown as Raw);}],
     ['fov out of range',/카메라 시야/,raw=>{raw.maps[0].nodes[1].fov=180;}],
     ['elevation out of range',/바닥 높이/,raw=>{raw.maps[0].nodes[0].elevation=100001;}],
     ['NaN coordinate',/가로 좌표/,raw=>{raw.maps[0].nodes[1].x=NaN;}],
@@ -410,13 +418,6 @@ test('무엇을 몰랐는지는 detail에만 실리고 문장에는 섞이지 �
   assert.equal(caught(reading(raw=>{raw.places[0]['k'.repeat(300)]=1;})).detail,`keys "${'k'.repeat(80)}"`);
   const many=caught(reading(raw=>{for(let index=0;index<10;index++)raw.maps[0].nodes[0][`future${index}`]=index;}));
   assert.equal(many.detail,`keys ${Array.from({length:8},(_,index)=>`"future${index}"`).join(', ')}`);
-});
-
-test('공간 종류와 카메라 색의 목록 밖 문자열은 모르는 값이고 문자열이 아닌 것은 깨진 값이다',()=>{
-  for(const value of ['river','room','','Road'])unknownKind(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
-  for(const value of [null,undefined,true,1,[],{},['road']])brokenKind(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
-  for(const value of ['purple','amber','#ff0000','','RED'])unknownKind(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
-  for(const value of [null,undefined,7,true,[],{},['red']])brokenKind(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
 });
 
 test('저장 요청도 같은 검사를 지나되 요청 자체의 분류와 종류는 깨진 값으로만 거절된다',()=>{
