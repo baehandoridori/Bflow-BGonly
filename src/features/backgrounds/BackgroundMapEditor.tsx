@@ -976,9 +976,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             </div></>}
             {editing && <><span className="bmap-divider" /><button type="button" className="bmap-toolbar-named bmap-toolbar-camera" title="정해진 기본 위치에 새 카메라를 만들어요" aria-label="카메라 추가" disabled={!canEdit} onClick={addCamera}><span aria-hidden="true">◉</span><span>카메라 추가</span></button></>}
             {editing && <div className="bmap-symbol-picker">
-              <button type="button" className={tool === 'symbol' || symbolPaletteOpen ? 'is-active' : ''} title="문과 사물 기호" aria-label="기호" aria-expanded={symbolPaletteOpen} aria-controls="bmap-symbol-palette" disabled={disabled} onClick={() => setSymbolPaletteOpen(value => !value)}><SymbolIcon symbol={symbolKind} size={20} /><span>기호</span><small>⌄</small></button>
+              <button type="button" className={tool === 'symbol' || symbolPaletteOpen ? 'is-active' : ''} title="문·계단·사물 기호" aria-label="기호" aria-expanded={symbolPaletteOpen} aria-controls="bmap-symbol-palette" disabled={disabled} onClick={() => setSymbolPaletteOpen(value => !value)}><SymbolIcon symbol={symbolKind} size={20} /><span>기호</span><small>⌄</small></button>
               {symbolPaletteOpen && <div className="bmap-symbol-palette" id="bmap-symbol-palette" role="group" aria-label="배치할 기호">
-                <div className="bmap-palette-heading">문과 사물</div>
+                <div className="bmap-palette-heading">문·계단·사물</div>
                 <div className="bmap-symbol-options">{symbolCatalog.map(item => <button key={item.id} type="button" aria-label={`${item.label} 배치`} disabled={!canEdit} onClick={() => { setSymbolKind(item.id); setTool('symbol'); setPolygon([]); setSymbolPaletteOpen(false); focusCanvas(); }}><SymbolIcon symbol={item.id} size={28} /><span>{item.label}</span></button>)}</div>
                 <p>{mode === 'plan' ? '기호를 고른 뒤 도면을 클릭하세요.' : '기호를 고른 뒤 놓을 바닥을 클릭하세요.'}</p>
               </div>}

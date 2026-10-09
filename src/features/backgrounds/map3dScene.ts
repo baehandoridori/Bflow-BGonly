@@ -513,6 +513,10 @@ export class Map3DScene {
       part('bed-headboard', -0.41, 0.41, 0, 1, -0.45, -0.37);
       part('bed-pillow', -0.32, -0.05, 0.62, 0.76, -0.31, -0.16);
       part('bed-pillow', 0.05, 0.32, 0.62, 0.76, -0.31, -0.16);
+    } else if (kind === 'stairs') {
+      // Solid steps from the floor up, the lowest at the plan bottom (+Z) and the highest at the plan top (-Z), where the plan arrow points.
+      const steps = Math.min(16, Math.max(3, Math.round(tall / 18)));
+      for (let index = 0; index < steps; index++) part('stairs-step', -0.5, 0.5, 0, (index + 1) / steps, 0.5 - (index + 1) / steps, 0.5 - index / steps);
     } else {
       // Generic object: a dashed outline box. Its lines are built at real size so the dashes stay even.
       part('object-fill', -0.5, 0.5, 0, 1, -0.5, 0.5, this.material(selected ? 'symbolFillOn' : 'symbolFill'));

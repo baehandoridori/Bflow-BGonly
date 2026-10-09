@@ -181,14 +181,16 @@ test('symbols are simple solids sized by width, volume height and plan depth', (
   const scene = new Map3DScene();
   const parts: Record<string, string[]> = {
     door: ['door-leaf', 'door-sill', 'door-swing'], chair: ['chair-seat', 'chair-back', 'chair-leg'], table: ['table-top', 'table-leg'],
-    bed: ['bed-mattress', 'bed-headboard', 'bed-pillow'], custom: ['object-fill', 'object-outline'],
+    bed: ['bed-mattress', 'bed-headboard', 'bed-pillow'], stairs: ['stairs-step'], custom: ['object-fill', 'object-outline'],
   };
-  for (const kind of ['door', 'chair', 'table', 'bed', 'custom', 'desk', 'sofa', 'cabinet', 'plant'] as const) {
+  // 'plant' stays last: the line after the loop looks at whatever kind was synced last.
+  for (const kind of ['door', 'chair', 'table', 'bed', 'stairs', 'custom', 'desk', 'sofa', 'cabinet', 'plant'] as const) {
     const node = symbol(30, kind, { width: 120, height: 90 });
     scene.sync(mapOf([node]), null);
     const root = rootOf(scene, node), body = named(root, 'symbol-body');
     assert.deepEqual(body.scale.toArray(), [120, SYMBOL_VOLUME_HEIGHTS[kind], 90], `${kind} body size`);
     for (const name of parts[kind] ?? parts.custom) named(root, name);
+    if (kind !== 'stairs') assert.ok(!root.getObjectByName('stairs-step'), kind);
     assert.equal(named(root, 'symbol-proxy').userData.nodeId, node.id);
   }
   assert.ok(!rootOf(scene, symbol(30, 'plant')).getObjectByName('table-top'), 'a removed kind renders as the generic object');
@@ -216,6 +218,58 @@ test('symbols are simple solids sized by width, volume height and plan depth', (
   scene.sync(mapOf([chair]), chair.id);
   named(rootOf(scene, chair), 'selection-outline');
   scene.dispose();
+});
+
+test('stairs are solid steps from the floor that climb to the plan top, as many as the volume height asks for', () => {
+  const scene = new Map3DScene();
+  const stairs = symbol(40, 'stairs', { x: 100, y: 100, width: 120, height: 240 }), chair = symbol(41, 'chair', { x: 600, y: 400 });
+  // Lowest step first.
+  const stepsOf = (node: BackgroundSymbol) => named(rootOf(scene, node), 'symbol-body').children.filter(child => child.name === 'stairs-step')
+    .sort((a, b) => a.scale.y - b.scale.y);
+  const at = (step: Object3D) => step.getWorldPosition(new Vector3());
+  scene.sync(mapOf([stairs, chair]), null);
+  // The default height (180) is one step for every 18: ten steps, each a full-width slab standing on the floor.
+  const steps = stepsOf(stairs);
+  assert.equal(steps.length, 10);
+  assert.deepEqual(named(rootOf(scene, stairs), 'symbol-body').scale.toArray(), [120, 180, 240]);
+  steps.forEach((step, index) => {
+    near(step.scale.y, (index + 1) / 10, `step ${index} height`);
+    near(step.scale.x, 1, `step ${index} width`); near(step.scale.z, 1 / 10, `step ${index} depth`);
+    nearVec(at(step), { x: 160, y: 0, z: 328 - 24 * index }, `step ${index}`);
+  });
+  assert.ok(at(steps[9]).z < at(steps[0]).z, 'the flight climbs towards the plan top (-Z), where the plan arrow points');
+  // Turned a quarter, the climb turns with it: the plan top is now the plan right.
+  const turned = { ...stairs, rotation: 90 };
+  scene.sync(mapOf([turned, chair]), null);
+  nearVec(at(stepsOf(turned)[0]), { x: 52, y: 0, z: 220 }, 'turned lowest step');
+  nearVec(at(stepsOf(turned)[9]), { x: 268, y: 0, z: 220 }, 'turned highest step');
+  // The height sets the count: rounded, never fewer than three and never more than sixteen.
+  for (const [volumeHeight, count] of [[20, 3], [54, 3], [60, 3], [63, 4], [288, 16], [1000, 16]] as const) {
+    const node = { ...stairs, volumeHeight };
+    scene.sync(mapOf([node, chair]), null);
+    const flight = stepsOf(node);
+    assert.equal(flight.length, count, `${volumeHeight} high`);
+    assert.deepEqual(named(rootOf(scene, node), 'symbol-body').scale.toArray(), [120, volumeHeight, 240]);
+    flight.forEach((step, index) => near(step.scale.y, (index + 1) / count, `${volumeHeight} high, step ${index}`));
+  }
+  // Nothing new to release: every step is the shared unit box in the shared symbol material.
+  scene.sync(mapOf([stairs, chair]), null);
+  const seat = named(rootOf(scene, chair), 'chair-seat') as Mesh, proxy = named(rootOf(scene, stairs), 'symbol-proxy'), targets = scene.pickTargets();
+  for (const step of stepsOf(stairs) as Mesh[]) {
+    same(step.geometry, seat.geometry, 'a step is the shared box');
+    same(step.material, seat.material, 'a step is drawn like every other solid');
+    assert.ok(targets.includes(step), 'a step can be clicked');
+    assert.deepEqual([step.userData.nodeId, step.userData.pickPart], [stairs.id, 'solid']);
+  }
+  // The box around the flight is clickable too, and at full height: only a door shrinks it to the floor.
+  assert.ok(targets.includes(proxy));
+  assert.deepEqual([proxy.userData.nodeId, proxy.userData.pickPart, proxy.scale.y], [stairs.id, 'box', 1]);
+  assert.equal(targets.filter(object => object.userData.nodeId === stairs.id).length, 11);
+  assert.ok(!rootOf(scene, stairs).getObjectByName('selection-outline'), 'no outline before selection');
+  scene.sync(mapOf([stairs, chair]), stairs.id);
+  named(rootOf(scene, stairs), 'selection-outline');
+  scene.dispose();
+  assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
 });
 
 test('placed cameras show sight, frame shape, and a drop line to the floor', () => {

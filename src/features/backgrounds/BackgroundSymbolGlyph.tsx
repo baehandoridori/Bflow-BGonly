@@ -57,6 +57,14 @@ export function BackgroundSymbolGlyph({
           <path d="M19 86H81" opacity={0.45} />
         </>
       )}
+      {symbol === "stairs" && (
+        <>
+          <rect x={10} y={4} width={80} height={92} fill="currentColor" fillOpacity={0.06} />
+          <path d="M10 19.33H90M10 34.67H90M10 50H90M10 65.33H90M10 80.67H90" strokeWidth={2} opacity={0.65} />
+          <path d="M50 86V16M40 28L50 14L60 28" />
+          <circle cx={50} cy={88} r={3.5} fill="currentColor" stroke="none" />
+        </>
+      )}
       {symbol === "custom" && (
         <>
           <rect x={7} y={10} width={86} height={80} rx={5} fill="currentColor" fillOpacity={0.05} strokeDasharray="7 5" />
