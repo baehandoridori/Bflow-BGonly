@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planMarkCovers, planMarqueeIds, planRect, planRectTouches } from '../src/features/backgrounds/mapPlanSelect.ts';
-import type { PlanRect } from '../src/features/backgrounds/mapPlanSelect.ts';
+import { planMarkCovers, planMarqueeIds, planRect, planRectTouches, resolvePlanPress, sameSpotAgain } from '../src/features/backgrounds/mapPlanSelect.ts';
+import type { PlanPressClick, PlanPressPlan, PlanRect, PlanSpot } from '../src/features/backgrounds/mapPlanSelect.ts';
+import type { MapSelection } from '../src/features/backgrounds/mapDocument.ts';
 import { containsPoint } from '../src/features/backgrounds/mapGeometry.ts';
-import { planNodeCovers } from '../src/features/backgrounds/mapPlanPreview.ts';
+import { planNodeCovers, planPileAt } from '../src/features/backgrounds/mapPlanPreview.ts';
 import { createMapCamera, nodePlanOutline, projectCameraToPlan } from '../src/features/backgrounds/mapSpatial.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
@@ -248,4 +249,190 @@ test('what lies under a plan point: the body, ring and fan of a camera and the b
   // Spaces never count, wherever the point is.
   assert.equal(planMarkCovers(R, { x: 150, y: 130 }), false);
   assert.equal(planMarkCovers(E, { x: 200, y: 150 }), false);
+});
+
+/** A selection as `mapSelection` reads it: the last picked id is the primary. */
+const picked = (...ids: string[]): MapSelection => freeze({ ids, primaryId: ids.length ? ids[ids.length - 1] : null });
+
+test('a spot is pressed again when the remembered press was on this topmost node and the node it left selected is still the one selection', () => {
+  const spot: PlanSpot = freeze({ mapId: 'm', hitId: 'I', pickedId: 'O' });
+  assert.equal(sameSpotAgain(spot, 'm', 'I', picked('O')), true);
+  assert.equal(sameSpotAgain(spot, 'm', 'I', picked('I')), false, 'not what that press left selected');
+  assert.equal(sameSpotAgain(spot, 'm', 'I', picked('O', 'c')), false, 'several are selected');
+  assert.equal(sameSpotAgain(spot, 'm', 'I', picked('c', 'O')), false, 'several are selected, the remembered one last');
+  assert.equal(sameSpotAgain(spot, 'm', 'I', picked()), false, 'nothing is selected');
+  assert.equal(sameSpotAgain(spot, 'm', 'J', picked('O')), false, 'another topmost node');
+  assert.equal(sameSpotAgain(spot, 'm', null, picked('O')), false, 'empty canvas');
+  assert.equal(sameSpotAgain(spot, 'n', 'I', picked('O')), false, 'another map');
+  assert.equal(sameSpotAgain(null, 'm', 'I', picked('O')), false, 'nothing is remembered');
+  assert.equal(sameSpotAgain(null, 'm', null, picked()), false);
+  // A press that ended with a group selected left no single node behind.
+  const group: PlanSpot = freeze({ mapId: 'm', hitId: 'I', pickedId: null });
+  for (const selection of [picked(), picked('I'), picked('O'), picked('I', 'O')])
+    assert.equal(sameSpotAgain(group, 'm', 'I', selection), false, `selected: ${selection.ids.join(', ') || 'nothing'}`);
+});
+
+// The presses of the select tool: room `I` lies inside room `O`, `L` is a locked room of its own and two cameras stand on one spot.
+const O = freeze(space('O', 100, 100, 400, 300)), I = freeze(space('I', 200, 200, 100, 100));
+const L = freeze(space('L', 600, 100, 100, 100, { locked: true }));
+const camA = freeze(cameraAt('camA')), camB = freeze(cameraAt('camB'));
+const lockedO = freeze({ ...O, locked: true }), lockedI = freeze({ ...I, locked: true });
+const pressMap = freeze(mapOf([O, I, chair, L, camA, camB]));
+/** The nodes that take turns where each node is pressed. */
+const PILES: Record<string, readonly string[]> = freeze({ I: ['I', 'O'], O: ['O'], c: ['c'], L: ['L'], camA: ['camA', 'camB'] });
+
+type Press = Parameters<typeof resolvePlanPress>[0];
+const among = (nodes: readonly BackgroundNode[]): Press['node'] => id => nodes.find(node => node.id === id);
+/** A press while editing, without Shift, on a spot not pressed before, unless `extra` says otherwise. */
+const press = (hit: BackgroundNode | null, selection: MapSelection, extra: Partial<Press> = {}): PlanPressPlan =>
+  resolvePlanPress({ canEdit: true, shift: false, hit, pile: hit ? PILES[hit.id] : [], selection, again: false, node: among(pressMap.nodes), ...extra });
+/** What a line does not name: no node to move, no group, and a press that is logged. */
+const planned = (drag: PlanPressPlan['drag'], click: PlanPressClick, targetId: string | null, rest: Partial<PlanPressPlan> = {}): PlanPressPlan =>
+  ({ drag, nodeId: null, groupIds: null, click, targetId, logged: true, ...rest });
+const NONE: PlanPressClick = { kind: 'none' };
+const pick = (id: string | null): PlanPressClick => ({ kind: 'select', id });
+const toggle = (id: string): PlanPressClick => ({ kind: 'toggle', id });
+const step = (ids: readonly string[], from: string, spaces: boolean): PlanPressClick => ({ kind: 'step', ids, from, spaces });
+/** A drag that moves the pressed node, which the press itself selects. */
+const grab = (id: string) => ({ nodeId: id, selectAtPress: id });
+
+test('the piles of the press tests are the ones the plan gives where those nodes are pressed', () => {
+  const pileAt = (hitId: string, x: number, y: number) => planPileAt(pressMap, hitId, { x, y }, undefined, node => planMarkCovers(node, { x, y }));
+  assert.deepEqual(pileAt('I', 250, 250), PILES.I);
+  assert.deepEqual(pileAt('O', 150, 150), PILES.O);
+  assert.deepEqual(pileAt('c', 320, 320), PILES.c);
+  assert.deepEqual(pileAt('L', 650, 150), PILES.L);
+  assert.deepEqual(pileAt('camA', 500, 340), PILES.camA);
+});
+
+test('while viewing, a press picks on release and every drag moves the view', () => {
+  const lines: [string, BackgroundNode | null, MapSelection, boolean, PlanPressPlan][] = [
+    ['empty canvas', null, picked(), false, planned('pan', pick(null), null)],
+    ['empty canvas, something selected', null, picked('I'), true, planned('pan', pick(null), null)],
+    ['a room', I, picked(), false, planned('pan', pick('I'), 'I')],
+    ['a locked room', L, picked(), false, planned('pan', pick('L'), 'L')],
+    // The same spot again: on to the next of the pile, from the one that is picked.
+    ['the picked room again', I, picked('I'), true, planned('pan', step(['I', 'O'], 'I', true), 'I')],
+    ['the same spot again, the room below picked', I, picked('O'), true, planned('pan', step(['I', 'O'], 'O', true), 'O')],
+    // A first press on a spot is after the room on top, whatever is selected.
+    ['a first press on the picked room', I, picked('I'), false, planned('pan', pick('I'), 'I')],
+    ['a first press, the room around it picked', I, picked('O'), false, planned('pan', pick('I'), 'I')],
+    // Several selected (a group stays selected after saving): no stepping.
+    ['a node of a group', chair, picked('I', 'c'), false, planned('pan', pick('c'), 'c')],
+    ['a node of a group, the same spot again', chair, picked('I', 'c'), true, planned('pan', pick('c'), 'c')],
+    ['a group whose last node lies below', I, picked('c', 'O'), true, planned('pan', pick('I'), 'I')],
+    ['a group of the two cameras', camA, picked('camA', 'camB'), false, planned('pan', pick('camA'), 'camA')],
+  ];
+  for (const [label, hit, selection, again, expected] of lines) {
+    const plan = press(hit, selection, { canEdit: false, again });
+    assert.deepEqual(plan, expected, label);
+    assert.equal('selectAtPress' in plan, false, `${label}: nothing is selected at the press`);
+    assert.deepEqual(press(hit, selection, { canEdit: false, again, shift: true }), expected, `${label}, with Shift`);
+  }
+});
+
+test('while editing, empty canvas draws a box and Shift adds or removes the node on top', () => {
+  assert.deepEqual(press(null, picked(), { shift: true }), planned('marquee', NONE, null, { logged: false }));
+  assert.deepEqual(press(null, picked('I', 'c'), { shift: true }), planned('marquee', NONE, null, { logged: false }));
+  assert.deepEqual(press(chair, picked(), { shift: true }), planned('marquee', toggle('c'), null, { logged: false }));
+  assert.deepEqual(press(L, picked('c'), { shift: true }), planned('marquee', toggle('L'), null, { logged: false }), 'a locked node');
+  assert.deepEqual(press(null, picked()), planned('marquee', pick(null), null));
+  assert.deepEqual(press(null, picked('I', 'c'), { again: true }), planned('marquee', pick(null), null));
+});
+
+test('Shift comes before every other line', () => {
+  // On a node of the group: out of the group, no group move.
+  assert.deepEqual(press(chair, picked('I', 'c'), { shift: true }), planned('marquee', toggle('c'), null, { logged: false }));
+  // On a pile whose lower member is picked: the node on top, no step from the picked one.
+  assert.deepEqual(press(I, picked('O'), { shift: true, again: true }), planned('marquee', toggle('I'), null, { logged: false }));
+  assert.deepEqual(press(camA, picked('camB'), { shift: true }), planned('marquee', toggle('camA'), null, { logged: false }));
+});
+
+test('a press on a node of the group moves the group when dragged and folds it to that node on release', () => {
+  const group = picked('I', 'c'), plan = press(chair, group);
+  assert.deepEqual(plan, planned('move', pick('c'), 'c', { nodeId: 'c', groupIds: ['I', 'c'] }));
+  assert.equal(plan.groupIds, group.ids, 'the list it was given');
+  assert.equal('selectAtPress' in plan, false, 'the group is kept at the press');
+  assert.deepEqual(press(I, group), planned('move', pick('I'), 'I', { nodeId: 'I', groupIds: ['I', 'c'] }), 'not the last picked one');
+  // A pile under the press changes nothing while several are selected.
+  assert.deepEqual(press(I, picked('I', 'O'), { again: true }), planned('move', pick('I'), 'I', { nodeId: 'I', groupIds: ['I', 'O'] }));
+  // A locked node of the group does not move: a box, and the node alone on release.
+  assert.deepEqual(press(L, picked('I', 'L')), planned('marquee', pick('L'), 'L'));
+  // A node outside the group is pressed like any other.
+  assert.deepEqual(press(chair, picked('I', 'O')), planned('move', NONE, 'c', grab('c')));
+  assert.deepEqual(press(L, picked('I', 'c')), planned('marquee', pick('L'), 'L'));
+  // One selected node is no group.
+  assert.deepEqual(press(chair, picked('c')), planned('move', NONE, 'c', grab('c')));
+});
+
+test('the same spot pressed again drags the room picked there and asks for the step to the next one', () => {
+  const plan = press(I, picked('O'), { again: true });
+  assert.deepEqual(plan, planned('move', step(['I', 'O'], 'O', true), 'O', { nodeId: 'O' }));
+  assert.equal('selectAtPress' in plan, false);
+  // A locked room on top does not hold the picked one below it.
+  assert.deepEqual(press(lockedI, picked('O'), { again: true, node: among([O, lockedI]) }), planned('move', step(['I', 'O'], 'O', true), 'O', { nodeId: 'O' }));
+});
+
+test('a first press on a spot takes the room on top, whichever room of the pile is selected', () => {
+  assert.deepEqual(press(I, picked('O')), planned('move', NONE, 'I', grab('I')));
+  // Four deep, the third one picked elsewhere.
+  const pile = ['closet', 'room', 'floor', 'site'], closet = space('closet', 300, 200, 80, 80);
+  const node = among([space('site', 0, 0, 1000, 680), space('floor', 100, 50, 500, 400), space('room', 280, 180, 200, 150), closet]);
+  assert.deepEqual(press(closet, picked('floor'), { pile, node }), planned('move', NONE, 'closet', grab('closet')));
+  assert.deepEqual(press(closet, picked('floor'), { pile, node, again: true }), planned('move', step(pile, 'floor', true), 'floor', { nodeId: 'floor' }));
+});
+
+test('a locked node picked from the pile is no drag target: the drag takes the node on top, or draws a box', () => {
+  // The step still goes on from the picked one, and a double-click counts for the node on top.
+  const outer = among([lockedO, I]);
+  assert.deepEqual(press(I, picked('O'), { again: true, node: outer }), planned('move', step(['I', 'O'], 'O', true), 'I', grab('I')));
+  assert.deepEqual(press(I, picked('O'), { node: outer }), planned('move', NONE, 'I', grab('I')), 'a first press');
+  // Both locked.
+  const both = among([lockedO, lockedI]), plan = press(lockedI, picked('O'), { again: true, node: both });
+  assert.deepEqual(plan, planned('marquee', step(['I', 'O'], 'O', true), 'O'));
+  assert.equal('selectAtPress' in plan, false);
+  assert.deepEqual(press(lockedI, picked('O'), { node: both }), planned('marquee', pick('I'), 'I'), 'a first press');
+});
+
+test('any other press takes the node under it: an unlocked one is selected at the press, a locked one on release', () => {
+  assert.deepEqual(press(I, picked()), planned('move', NONE, 'I', grab('I')));
+  assert.deepEqual(press(O, picked('c')), planned('move', NONE, 'O', grab('O')));
+  const plan = press(L, picked());
+  assert.deepEqual(plan, planned('marquee', pick('L'), 'L'));
+  assert.equal('selectAtPress' in plan, false);
+});
+
+test('a pile of cameras and symbols does not ask whether the spot was pressed before', () => {
+  // The lower camera, picked in the object list, is what a drag on that spot moves.
+  const cameras = step(['camA', 'camB'], 'camB', false);
+  assert.deepEqual(press(camA, picked('camB')), planned('move', cameras, 'camB', { nodeId: 'camB' }));
+  assert.deepEqual(press(camA, picked('camB'), { again: true }), planned('move', cameras, 'camB', { nodeId: 'camB' }));
+  assert.deepEqual(press(camA, picked('camB'), { canEdit: false }), planned('pan', cameras, 'camB'));
+  assert.deepEqual(press(camA, picked('camA')), planned('move', step(['camA', 'camB'], 'camA', false), 'camA', { nodeId: 'camA' }));
+  // A symbol on top of the pile.
+  const desk = symbol('desk', 480, 320, 40, 40), pile = ['desk', 'camB'];
+  assert.deepEqual(press(desk, picked('camB'), { pile, node: among([desk, camB]) }), planned('move', step(pile, 'camB', false), 'camB', { nodeId: 'camB' }));
+  // The lines of a locked picked node hold here as well.
+  const lockedB = among([camA, { ...camB, locked: true }]);
+  assert.deepEqual(press(camA, picked('camB'), { node: lockedB }), planned('move', cameras, 'camA', grab('camA')));
+  assert.deepEqual(press({ ...camA, locked: true }, picked('camB'), { node: lockedB }), planned('marquee', cameras, 'camB'));
+});
+
+test('there is nothing to go on from with several selected, a selection outside the pile or a pile of one', () => {
+  assert.deepEqual(press(I, picked('O', 'c'), { again: true }), planned('move', NONE, 'I', grab('I')), 'several selected');
+  assert.deepEqual(press(I, picked('c', 'O'), { again: true }), planned('move', NONE, 'I', grab('I')), 'several selected, a pile member last');
+  assert.deepEqual(press(camA, picked('c', 'camB')), planned('move', NONE, 'camA', grab('camA')), 'several selected, on the cameras');
+  assert.deepEqual(press(I, picked('c'), { again: true }), planned('move', NONE, 'I', grab('I')), 'the selected node is not in the pile');
+  assert.deepEqual(press(I, picked('I'), { again: true, pile: ['I'] }), planned('move', NONE, 'I', grab('I')), 'a pile of one');
+  assert.deepEqual(press(I, picked(), { again: true }), planned('move', NONE, 'I', grab('I')), 'nothing selected');
+});
+
+test('a press is decided by its input alone, which is left as it was', () => {
+  // The nodes, the selections and the piles above are frozen.
+  const input: Press = freeze({ canEdit: true, shift: false, hit: I, pile: PILES.I, selection: picked('O'), again: true, node: among(pressMap.nodes) });
+  const before = JSON.stringify(input), first = resolvePlanPress(input);
+  resolvePlanPress({ ...input, again: false });
+  resolvePlanPress({ ...input, canEdit: false, selection: picked('I') });
+  assert.deepEqual(resolvePlanPress(input), first);
+  assert.equal(JSON.stringify(input), before);
 });

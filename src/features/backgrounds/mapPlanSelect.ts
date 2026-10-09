@@ -1,10 +1,11 @@
 import { MAP_EDIT_MARK } from './mapPlanEdit.ts';
 import { planNodeCovers } from './mapPlanPreview.ts';
 import { nodePlanOutline, projectCameraToPlan } from './mapSpatial.ts';
+import type { MapSelection } from './mapDocument.ts';
 import type { BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace } from './types.ts';
 
 /**
- * Decisions of the plan's 'select' tool, without the DOM: the selection box and what lies under the pointer.
+ * Decisions of the plan's 'select' tool, without the DOM: the selection box, what lies under the pointer and what a press does.
  * A box is closed and in plan coordinates: what lies on its very edge is touched.
  */
 export type PlanRect = { left: number; top: number; right: number; bottom: number };
@@ -82,4 +83,89 @@ export function planMarqueeIds(map: BackgroundMap, rect: PlanRect): string[] {
 /** Whether a plan point lies on a camera or symbol as the main plan draws it (the editor's former onPlanMark). */
 export function planMarkCovers(node: BackgroundNode, point: BackgroundPoint): boolean {
   return planNodeCovers(node, point, node.type !== 'camera' ? 0 : projectCameraToPlan(node).vertical ? MAP_EDIT_MARK.cameraRing : MAP_EDIT_MARK.cameraBody, MAP_EDIT_MARK.cameraFan);
+}
+
+export type PlanPressClick =
+  | { kind: 'none' }
+  /** That node alone, or nothing (null). */
+  | { kind: 'select'; id: string | null }
+  /** Into the selection, or out of it. */
+  | { kind: 'toggle'; id: string }
+  /** On to the next of the pile, which the SVG's click carries out. `spaces`: the pile is one of spaces, which a repeated click never steps through. */
+  | { kind: 'step'; ids: readonly string[]; from: string; spaces: boolean };
+export type PlanPressPlan = {
+  /** What a drag past the threshold does. */
+  drag: 'pan' | 'marquee' | 'move';
+  /** `move`: the node the drag is anchored on. */
+  nodeId: string | null;
+  /** `move`: every selected node that travels along, or null for that one node. */
+  groupIds: readonly string[] | null;
+  /** A node to select at the press itself. Absent: the selection is left as it is. */
+  selectAtPress?: string;
+  /** What a release without movement does. */
+  click: PlanPressClick;
+  /** The node this press counts as for a double-click: the pile member that was already picked, else the node under it. Null on empty canvas. */
+  targetId: string | null;
+  /** False: the press is no half of a double-click (the press log is emptied). */
+  logged: boolean;
+};
+/**
+ * What a left press of the select tool does when it is off the handles and does not move the view. While viewing,
+ * every tool but the hand presses like this.
+ */
+export function resolvePlanPress(input: {
+  canEdit: boolean; shift: boolean;
+  /** Topmost node under the press, from the live draft. Null on empty canvas. */
+  hit: BackgroundNode | null;
+  /** The nodes that take turns at this point (planPileAt). Empty on empty canvas. */
+  pile: readonly string[];
+  /** The live selection. */
+  selection: MapSelection;
+  /**
+   * The same spot pressed again: the select tool pressed this same topmost node last, and the one node that press
+   * left selected is still the selection. Only a pile of spaces asks: without it a space under the top one is no target.
+   */
+  again: boolean;
+  /** A node of the live map. */
+  node(id: string): BackgroundNode | undefined;
+}): PlanPressPlan {
+  const { canEdit, shift, hit, pile, selection, again } = input;
+  const plan = (drag: PlanPressPlan['drag'], click: PlanPressClick, targetId: string | null, rest: Partial<PlanPressPlan> = {}): PlanPressPlan =>
+    ({ drag, nodeId: null, groupIds: null, click, targetId, logged: true, ...rest });
+  const pick = (id: string | null): PlanPressClick => ({ kind: 'select', id });
+  // Shift pressed twice adds and removes again: such a press is no half of a double-click.
+  const unlogged = { logged: false };
+  if (!hit) {
+    if (!canEdit) return plan('pan', pick(null), null);
+    return shift ? plan('marquee', { kind: 'none' }, null, unlogged) : plan('marquee', pick(null), null);
+  }
+  // The pile member already picked on this spot: the one selected node, when the pile holds it. A pile of spaces is every
+  // space around the point, so there it counts only on a spot pressed again: a first press is after the space on top.
+  const from = selection.ids.length === 1 && selection.primaryId !== null && pile.length > 1 && pile.includes(selection.primaryId)
+    && (hit.type !== 'space' || again) ? selection.primaryId : null;
+  const step = from === null ? null : { kind: 'step' as const, ids: pile, from, spaces: hit.type === 'space' };
+  // Viewing: every drag moves the view, and Shift means nothing.
+  if (!canEdit) return step ? plan('pan', step, step.from) : plan('pan', pick(hit.id), hit.id);
+  // Shift comes first and means the node on top: a node of the group is taken out of it, not dragged with it.
+  if (shift) return plan('marquee', { kind: 'toggle', id: hit.id }, null, unlogged);
+  // A drag never moves a locked node: without an unlocked one to take, it draws a box.
+  if (selection.ids.length > 1 && selection.ids.includes(hit.id)) {
+    // The group is kept at the press so that a drag moves all of it, and folds to the pressed node on release.
+    return hit.locked ? plan('marquee', pick(hit.id), hit.id) : plan('move', pick(hit.id), hit.id, { nodeId: hit.id, groupIds: selection.ids });
+  }
+  const grab = { nodeId: hit.id, selectAtPress: hit.id };
+  if (step) {
+    if (!input.node(step.from)?.locked) return plan('move', step, step.from, { nodeId: step.from });
+    // The picked one is locked: the drag takes the node on top, and the step still goes on from the picked one.
+    return hit.locked ? plan('marquee', step, step.from) : plan('move', step, hit.id, grab);
+  }
+  return hit.locked ? plan('marquee', pick(hit.id), hit.id) : plan('move', { kind: 'none' }, hit.id, grab);
+}
+
+/** What the select tool's last press on a node left behind: the topmost node there, and the one node it left selected (null: none, or several). */
+export type PlanSpot = { mapId: string; hitId: string; pickedId: string | null };
+/** Whether a press on the topmost node `hitId` of a map is the same spot pressed again: the remembered spot is that node, and the node left selected then is still the one selection. */
+export function sameSpotAgain(spot: PlanSpot | null, mapId: string, hitId: string | null, selection: MapSelection): boolean {
+  return spot !== null && hitId !== null && spot.mapId === mapId && spot.hitId === hitId
+    && selection.ids.length === 1 && selection.primaryId === spot.pickedId;
 }
