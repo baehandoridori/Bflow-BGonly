@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Map3DProps, Map3DViewState } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView } from './map3dScene';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView } from './map3dScene';
 import type { Map3DPalette, MapPickHit } from './map3dScene';
 import { MapNodeGizmo, mapGizmoSetup } from './BackgroundMapCameraGizmo';
 import { stackedMapNodeIds } from './mapGeometry';
@@ -562,7 +562,7 @@ class Map3DViewport {
     if (onHandle) {
       // Never a fresh pick from a handle: only the next of the pile the selected item is in.
       const selected = props.map.nodes.find(node => node.id === selectedId);
-      const pile = !selected ? [] : selected.type !== 'space' ? stackedMapNodeIds(props.map, selected.id) : again ? mapFloorPile(hits, props.map) : [];
+      const pile = !selected ? [] : selected.type !== 'space' ? stackedMapNodeIds(props.map, selected.id) : again ? mapSpacePile(hits, props.map) : [];
       if (!selected || next === null || next === selected.id || !pile.includes(selected.id) || !pile.includes(next)) return;
     }
     this.turn = top === null ? null : { hitId: top, pickedId: next };     // before onSelect: the props that come back must find it

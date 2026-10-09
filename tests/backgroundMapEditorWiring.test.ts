@@ -522,9 +522,10 @@ test('anchor 31: in 3D a click steps to the space underneath only on the same sp
   const scene = read('map3dScene.ts');
   assert.ok(piece(scene, 'export function resolveMapClick(', 'export function mapClickAim(').includes('return mapClickStep(map, selectedId, hits, again, repeat).next;'));
   const step = piece(scene, 'function mapClickStep(', 'export function resolveMapClick(');
-  inOrder(block(step, "if (map.nodes.some(node => node.id === selectedId && node.type === 'space')) {"), 'if (!again) return plain;', 'pile = mapFloorPile(hits, map);',
+  inOrder(block(step, "if (map.nodes.some(node => node.id === selectedId && node.type === 'space')) {"), 'if (!again) return plain;', 'pile = mapSpacePile(hits, map);',
     'if (repeat) return pile.includes(selectedId) && pile.includes(picked) ? { picked, next: selectedId, stepped: false } : plain;');
-  assert.equal(count(step, /mapFloorPile\(/g), 1, 'the floors are a pile nowhere else');
+  assert.equal(count(step, /mapSpacePile\(/g), 1, 'the spaces are a pile nowhere else');
+  assert.equal(count(step, /mapFloorPile\(/g), 0, 'the click never reads the floors alone');
 });
 
 test('anchor 32: the stacking and press modules stay pure: no three.js, no DOM', () => {

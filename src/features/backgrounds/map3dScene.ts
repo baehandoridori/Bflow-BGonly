@@ -10,7 +10,7 @@ import { MAP_PLAN_EXTENT, MAP_SPATIAL_DEFAULTS, cameraAspect, isRoadSpace, mapPl
   spaceWallHeight, verticalFov } from './mapSpatial.ts';
 import type { Vec3 } from './mapSpatial.ts';
 import { stackedMapNodeIds } from './mapGeometry.ts';
-import { spaceStackRanks } from './mapStack.ts';
+import { spaceStackRanks, spacesOverlap } from './mapStack.ts';
 import { getSymbolPreset } from './symbolCatalog.ts';
 
 /**
@@ -639,6 +639,14 @@ export function pickMapFloor(hits: readonly MapPickHit[], map?: BackgroundMap): 
   }
   return top;
 }
+/** The roads on a ray that lie under a room on the same ray: the two share ground on the plan (spacesOverlap). */
+function roadsUnderRooms(hits: readonly MapPickHit[], map: BackgroundMap): Set<string> {
+  const onRay = new Set<string>();
+  for (const hit of hits) { const node = hitNode(hit); if (node?.kind === 'space') onRay.add(node.id); }
+  const spaces = map.nodes.filter((node): node is BackgroundSpace => node.type === 'space' && onRay.has(node.id));
+  const rooms = spaces.filter(space => !isRoadSpace(space));
+  return new Set(spaces.filter(space => isRoadSpace(space) && rooms.some(room => spacesOverlap(room, space))).map(space => space.id));
+}
 /**
  * Node a ray selects. A camera or a solid part of an object comes first, the nearest one. The see-through box around
  * an object only counts when nothing solid is on the ray. Then the space whose floor is under the pointer, and a wall
@@ -646,17 +654,21 @@ export function pickMapFloor(hits: readonly MapPickHit[], map?: BackgroundMap): 
  * `map` settles floors on the same level.
  */
 export function pickMapNode(hits: readonly MapPickHit[], map?: BackgroundMap): string | null {
+  // A road lies under the rooms that stand on it: where the ray also meets such a room, on its floor or on a wall and
+  // at any height, the floor of that road takes no part in the click. Beside a room a road is a floor like any other.
+  const under = map ? roadsUnderRooms(hits, map) : null;
+  const list = under?.size ? hits.filter(hit => !under.has(String(hit.object.userData.nodeId))) : hits;
   type Near = { id: string; distance: number } | null;
   let solid: Near = null, box: Near = null, surface: Near = null;
   const nearer = (pick: Near, id: string, distance: number): Near => !pick || distance < pick.distance ? { id, distance } : pick;
-  for (const hit of hits) {
+  for (const hit of list) {
     const node = hitNode(hit);
     if (!node) continue;
     if (node.kind === 'space') surface = nearer(surface, node.id, hit.distance);
     else if (node.kind === 'symbol' && node.part === 'box') box = nearer(box, node.id, hit.distance);
     else solid = nearer(solid, node.id, hit.distance);
   }
-  const floor = solid || box ? null : pickMapFloor(hits, map);
+  const floor = solid || box ? null : pickMapFloor(list, map);
   return solid?.id ?? box?.id ?? (floor ? String(floor.object.userData.nodeId) : surface?.id ?? null);
 }
 /** The spaces whose floor a ray lands on, in the order a click picks them: the nearest level first, and floors on one level as the plan stacks them, the smaller first. */
@@ -674,6 +686,18 @@ export function mapFloorPile(hits: readonly MapPickHit[], map: BackgroundMap): s
     }
   }
   return pile;
+}
+/**
+ * The spaces a slow second click on one spot takes turns through: the floors under the pointer as mapFloorPile lists
+ * them, and in front of them the room that the click picks on a wall when every floor behind that wall is a road
+ * under a room on the ray. Without it such a road could not be reached there: the room takes every click.
+ */
+export function mapSpacePile(hits: readonly MapPickHit[], map: BackgroundMap): string[] {
+  const pile = mapFloorPile(hits, map), picked = pickMapNode(hits, map);
+  // A picked space that is no floor under the pointer was hit on a wall, and then every floor there is a road set
+  // aside by pickMapNode: any other floor would have been picked instead. A camera or an object on top is no part of
+  // a pile of spaces.
+  return picked !== null && pile.length > 0 && !pile.includes(picked) && map.nodes.some(node => node.id === picked && node.type === 'space') ? [picked, ...pile] : pile;
 }
 /**
  * One click, as resolveMapClick and mapClickAim both read it: what the ray picks, what the click leaves selected, and
@@ -694,13 +718,13 @@ function mapClickStep(map: BackgroundMap, selectedId: string | null, hits: reado
   if (map.nodes.some(node => node.id === selectedId && node.type === 'space')) {
     // A space has a pile only on the same spot again: a first click there takes what is on top.
     if (!again) return plain;
-    pile = mapFloorPile(hits, map);
-    // A repeated click neither steps on nor goes back to the top one. It keeps the selected space only while its floor
-    // and the floor the click picks are both in the pile: with a camera or an object on top, or with the selected space
+    pile = mapSpacePile(hits, map);
+    // A repeated click neither steps on nor goes back to the top one. It keeps the selected space only while it and
+    // what the click picks are both in the pile: with a camera or an object on top, or with the selected space
     // hit on a wall only, it is a plain pick (nextPlanSelection reads the pile first in the same way).
     if (repeat) return pile.includes(selectedId) && pile.includes(picked) ? { picked, next: selectedId, stepped: false } : plain;
   } else pile = stackedMapNodeIds(map, selectedId).filter(id => under.has(id));
-  // A space hit on a wall only is no part of the floors under the pointer.
+  // A space hit on a wall only is no part of the pile, but for the room picked on a wall in front of the roads under it (mapSpacePile).
   if (pile.length < 2 || !pile.includes(selectedId) || !pile.includes(picked)) return plain;
   return { picked, next: pile[(pile.indexOf(selectedId) + 1) % pile.length], stepped: true };
 }

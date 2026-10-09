@@ -8,7 +8,7 @@ import { build } from 'esbuild';
 import { Object3D, PerspectiveCamera, Raycaster, Texture, TextureLoader, Vector2, Vector3 } from 'three';
 import type { BufferGeometry, Material, Mesh } from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
 import type { MapPickHit } from '../src/features/backgrounds/map3dScene.ts';
 import { MAP_GIZMO_COLORS, MAP_GIZMO_SHAPE, mapGizmoSize, MapNodeGizmo, mapGizmoSetup, previewMapFromRoot, rootWorldPose, styleMapGizmo } from '../src/features/backgrounds/BackgroundMapCameraGizmo.ts';
 import type { Map3DProps, Map3DViewState } from '../src/features/backgrounds/mapCanvas.ts';
@@ -971,6 +971,203 @@ test('a selected space steps on to the floor under it only when the same spot is
     assert.ok(cameras.some(item => item.id === mapClickAim(crowded, id(8), onCameras, again)), `again ${again}`);
   }
   pile.dispose();
+});
+
+// A wide road with a house standing on it: seen from the front, the ray through the walls of the house lands on the road behind it.
+const wideRoad = road(1, { name: '도로', x: 0, y: 0, width: 1000, height: 680 }), houseOnRoad = space(2, { name: '건물', x: 300, y: 200, width: 200, height: 150 });
+const roadUnderHouse = mapOf([wideRoad, houseOnRoad]);
+// A street with five houses on each side, drawn up to its edges: they touch it and share no ground with it.
+const sideStreet = road(10, { name: '길', x: 0, y: 300, width: 1000, height: 80 });
+const nearHouses = [0, 1, 2, 3, 4].map(index => space(11 + index, { name: `눈 쪽 건물 ${index + 1}`, x: 25 + 200 * index, y: 380, width: 150, height: 150 }));
+const farHouses = [0, 1, 2, 3, 4].map(index => space(21 + index, { name: `먼 쪽 건물 ${index + 1}`, x: 25 + 200 * index, y: 150, width: 150, height: 150 }));
+const streetOf = (lane: BackgroundSpace, front: BackgroundSpace[]) => mapOf([lane, ...front, ...farHouses]);
+
+test('a road loses a click to the rooms it shares ground with, on a floor or a wall and at any height, and to no other room', () => {
+  const hit = (nodeId: string, pickPart: string | undefined, distance: number, nodeKind = 'space'): MapPickHit => ({ distance, object: { userData: { nodeId, nodeKind, pickPart } } });
+  const street = wideRoad, room = houseOnRoad;
+  const hall = space(3, { x: 100, y: 100, width: 700, height: 500 }), second = space(4, { x: 600, y: 400, width: 100, height: 100 });
+  // Along the lower edge of the road: the two touch and share no ground.
+  const beside = space(5, { x: 0, y: 680, width: 300, height: 100 });
+  // Two more roads: one runs under the room, the other far from it.
+  const alley = road(6, { x: 480, y: 0, width: 40, height: 680 }), farAlley = road(7, { x: 900, y: 0, width: 40, height: 680 });
+  const chair = symbol(12, 'chair', { x: 380, y: 100 }), lens = camera(20, { x: 400, y: 120 });
+  const floorOf = (hits: MapPickHit[], map: BackgroundMap) => pickMapFloor(hits, map)?.object.userData.nodeId;
+  // What the ray picks and the pile it leaves for the same spot clicked again, whatever order the hits arrive in.
+  const row = (label: string, map: BackgroundMap, hits: MapPickHit[], picked: string | null, pile: string[]) => {
+    for (const list of [hits, [...hits].reverse()]) {
+      assert.equal(pickMapNode(list, map), picked, `${label}: picked`);
+      assert.deepEqual(mapSpacePile(list, map), pile, `${label}: pile`);
+    }
+  };
+
+  // The floors of a room and of the road under it on one level: the room, as the plan stacks them, whatever the order in
+  // the map and however small the road.
+  const patch = road(8, { x: 350, y: 250, width: 20, height: 20 });
+  for (const lane of [street, patch]) for (const map of [mapOf([lane, room]), mapOf([room, lane])]) {
+    const level = [hit(lane.id, 'floor', 80), hit(room.id, 'floor', 80.00000001)];
+    row(`floors on one level, ${lane.name}`, map, level, room.id, [room.id, lane.id]);
+    assert.equal(floorOf(level, map), room.id);
+    assert.deepEqual(mapFloorPile(level, map), [room.id, lane.id]);
+  }
+
+  // A wall of the room, and behind it the floor of the road the room stands on: the room. The same spot again goes down to the road.
+  const onRoad = roadUnderHouse, pastWall = [hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)];
+  row('a wall of the room on the road', onRoad, pastWall, room.id, [room.id, street.id]);
+  assert.equal(pickMapNode(pastWall), street.id, 'without a map a floor beats a wall, as before');
+  // The floors under the pointer are left as they were: the road alone.
+  assert.deepEqual(mapFloorPile(pastWall, onRoad), [street.id]);
+  assert.equal(floorOf(pastWall, onRoad), street.id);
+  assert.equal(resolveMapClick(onRoad, room.id, pastWall, true), street.id, 'on to the road');
+  assert.equal(resolveMapClick(onRoad, street.id, pastWall, true), room.id, 'and round to the room');
+  for (const selected of [room.id, street.id, null]) {
+    assert.equal(resolveMapClick(onRoad, selected, pastWall, false), room.id, 'a first click takes the room');
+    assert.equal(resolveMapClick(onRoad, selected, pastWall, false, true), room.id, 'a repeated click that is no second click on the spot is a first click');
+  }
+  for (const selected of [room.id, street.id]) assert.equal(resolveMapClick(onRoad, selected, pastWall, true, true), selected, 'a repeated click on the same spot steps nowhere');
+  assert.equal(mapClickAim(onRoad, room.id, pastWall, true), room.id, 'stepping on to the road');
+  assert.equal(mapClickAim(onRoad, street.id, pastWall, true), street.id, 'stepping round to the room');
+  assert.equal(mapClickAim(onRoad, street.id, pastWall, false), room.id);
+
+  // A wall of a room that stands beside the road: the floor behind the wall, as with any other floor.
+  const besideRoad = mapOf([street, beside]), pastBeside = [hit(beside.id, 'wall', 40), hit(street.id, 'floor', 90)];
+  row('a wall of the room beside the road', besideRoad, pastBeside, street.id, [street.id]);
+  for (const again of [false, true]) for (const selected of [beside.id, street.id, null]) {
+    assert.equal(resolveMapClick(besideRoad, selected, pastBeside, again), street.id, `beside the road, again ${again}`);
+  }
+
+  // Two roads under the room: after the room the smaller one, then the larger, then the room again.
+  const crossing = mapOf([street, alley, room]), pastCrossing = [hit(room.id, 'wall', 40), hit(street.id, 'floor', 90), hit(alley.id, 'floor', 90.00000001)];
+  row('two roads under the room', crossing, pastCrossing, room.id, [room.id, alley.id, street.id]);
+  assert.deepEqual([room.id, alley.id, street.id].map(selected => resolveMapClick(crossing, selected, pastCrossing, true)), [alley.id, street.id, room.id]);
+  // A road under the room and one beside it: only the first is set aside, and the floor of the other beats the wall.
+  const apart = mapOf([street, farAlley, room]), pastApart = [hit(room.id, 'wall', 40), hit(street.id, 'floor', 90), hit(farAlley.id, 'floor', 90.00000001)];
+  row('a road under the room and one beside it', apart, pastApart, farAlley.id, [farAlley.id, street.id]);
+  assert.deepEqual(mapFloorPile(pastApart, apart), [farAlley.id, street.id]);
+
+  // A road raised over the room it shares ground with: its floor is nearer, and the room is picked all the same.
+  const raised: BackgroundSpace = { ...street, elevation: 200 };
+  const flyover = mapOf([raised, room]), underFlyover = [hit(raised.id, 'floor', 50), hit(room.id, 'floor', 90)];
+  row('a raised road over the room', flyover, underFlyover, room.id, [raised.id, room.id]);
+  assert.deepEqual(mapFloorPile(underFlyover, flyover), [raised.id, room.id]);
+  assert.equal(floorOf(underFlyover, flyover), raised.id, 'the floor under the pointer is still the nearer one');
+  assert.equal(resolveMapClick(flyover, room.id, underFlyover, true), raised.id);
+  assert.equal(resolveMapClick(flyover, raised.id, underFlyover, true), room.id);
+  for (const selected of [room.id, raised.id]) assert.equal(resolveMapClick(flyover, selected, underFlyover, false), room.id);
+  // The same on a wall of that room, with none of its floor on the ray: the raised road is the nearest space there, and
+  // it is set aside all the same.
+  const besideWall = [hit(raised.id, 'floor', 50), hit(room.id, 'wall', 70)];
+  row('a raised road in front of a wall of the room', flyover, besideWall, room.id, [room.id, raised.id]);
+  assert.deepEqual([room.id, raised.id].map(selected => resolveMapClick(flyover, selected, besideWall, true)), [raised.id, room.id]);
+  // Raised over a room it only touches: the nearer floor, as before.
+  const overNeighbour = mapOf([raised, beside]), underNeighbour = [hit(raised.id, 'floor', 50), hit(beside.id, 'floor', 90)];
+  row('a raised road beside the room', overNeighbour, underNeighbour, raised.id, [raised.id, beside.id]);
+
+  // Roads alone are floors like any other: the nearest, and on one level the smaller. A room of the map that the ray
+  // does not meet takes nothing away from them.
+  row('one road', crossing, [hit(street.id, 'floor', 80)], street.id, [street.id]);
+  row('two roads', crossing, [hit(street.id, 'floor', 80), hit(alley.id, 'floor', 80.00000001)], alley.id, [alley.id, street.id]);
+
+  // Rooms among themselves are as before: the floor of the larger room behind the wall is picked, and the room hit on a
+  // wall only is no part of the pile.
+  const inHall = mapOf([street, hall, room]), pastInHall = [hit(room.id, 'wall', 40), hit(hall.id, 'floor', 90.00000001), hit(street.id, 'floor', 90)];
+  row('a wall, the floor of a larger room and the road', inHall, pastInHall, hall.id, [hall.id, street.id]);
+  assert.equal(resolveMapClick(inHall, room.id, pastInHall, true), hall.id, 'picked, not stepped on to');
+  assert.equal(resolveMapClick(inHall, hall.id, pastInHall, true), street.id);
+  // Two walls and the road under both rooms: the room of the nearest wall.
+  const twoOnRoad = mapOf([street, second, room]);
+  row('two walls of rooms on the road', twoOnRoad, [hit(second.id, 'wall', 30), hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)], second.id, [second.id, street.id]);
+  // Only the room behind stands on the road: the road is set aside for it, and of the walls that are left the nearest one picks.
+  const mixed = mapOf([street, beside, room]);
+  row('a wall beside the road in front of a wall on it', mixed, [hit(beside.id, 'wall', 30), hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)], beside.id, [beside.id, street.id]);
+  // Walls only: the room, and no pile.
+  row('walls only', onRoad, [hit(room.id, 'wall', 40), hit(room.id, 'wall', 60)], room.id, []);
+
+  // A camera or an object on top is picked, and it is no part of a pile of spaces. Nor is the room behind it.
+  const furnished = mapOf([street, room, chair, lens]);
+  row('an object over the road', furnished, [hit(chair.id, 'box', 30, 'symbol'), hit(street.id, 'floor', 90)], chair.id, [street.id]);
+  row('a camera over the road', furnished, [hit(lens.id, undefined, 30, 'camera'), hit(street.id, 'floor', 90)], lens.id, [street.id]);
+  row('an object in front of the wall', furnished, [hit(chair.id, 'box', 30, 'symbol'), hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)], chair.id, [street.id]);
+  row('a camera in front of the wall', furnished, [hit(lens.id, undefined, 30, 'camera'), hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)], lens.id, [street.id]);
+
+  // Without a road nothing has changed.
+  const rooms = mapOf([hall, room]), pastRoom = [hit(room.id, 'wall', 40), hit(hall.id, 'floor', 90)];
+  row('no road', rooms, pastRoom, hall.id, [hall.id]);
+  assert.equal(resolveMapClick(rooms, room.id, pastRoom, true), hall.id);
+  for (const map of [onRoad, crossing, furnished, rooms, mapOf([])]) row('no hits', map, [], null, []);
+});
+
+test('seen in 3D: the walls of a house on a road pick the house, and a street is picked through the walls of the houses along it', () => {
+  const aim = (viewer: PerspectiveCamera, x: number, y: number, z: number): [[number, number, number], [number, number, number]] => {
+    const origin = viewer.position, target = new Vector3(x, y, z).sub(origin);
+    return [[origin.x, origin.y, origin.z], [target.x, target.y, target.z]];
+  };
+  const idsOf = (hits: MapPickHit[]) => new Set(hits.map(hit => hit.object.userData.nodeId));
+  const partsOf = (hits: MapPickHit[], nodeId: string) => new Set(hits.filter(hit => hit.object.userData.nodeId === nodeId).map(hit => hit.object.userData.pickPart));
+
+  // Through the walls of the house onto the road behind it, at (400, 180).
+  const street = wideRoad, house = houseOnRoad, scene = new Map3DScene();
+  const behindHouse: [[number, number, number], [number, number, number]] = [[400, 300, 800], [0, -300, 180 - 800]];
+  scene.sync(roadUnderHouse, null);
+  const through = cast(scene, ...behindHouse);
+  assert.deepEqual([partsOf(through, house.id), partsOf(through, street.id)], [new Set(['wall']), new Set(['floor'])]);
+  assert.equal(pickMapNode(through, roadUnderHouse), house.id);
+  assert.deepEqual(mapSpacePile(through, roadUnderHouse), [house.id, street.id]);
+  // The same ground as a room: rooms among themselves are as before, the floor behind the wall is picked.
+  const yard = asRoom(street), inYard = mapOf([yard, house]);
+  scene.sync(inYard, null);
+  const onYard = cast(scene, ...behindHouse);
+  assert.deepEqual([partsOf(onYard, house.id), partsOf(onYard, yard.id)], [new Set(['wall']), new Set(['floor'])]);
+  assert.equal(pickMapNode(onYard, inYard), yard.id);
+  assert.deepEqual(mapSpacePile(onYard, inYard), [yard.id]);
+  scene.dispose();
+
+  // Points all over the street, 56 along it by 7 across.
+  const samples = Array.from({ length: 392 }, (_, index): [number, number] => [9 + 17.85 * (index % 56), 306 + 11.3 * Math.floor(index / 56)]);
+  const lane = sideStreet.id, third = nearHouses[2].id;
+
+  // The houses touch the street: it is picked at once, also where it is seen behind their walls.
+  const touching = streetOf(sideStreet, nearHouses), town = new Map3DScene();
+  town.sync(touching, null);
+  const fitted = viewerFor(fitMapView(touching, 1.6), 1.6);
+  const middle = cast(town, ...aim(fitted, 500, 0, 340));
+  assert.deepEqual(idsOf(middle), new Set([third, lane]));
+  assert.deepEqual([partsOf(middle, third), partsOf(middle, lane)], [new Set(['wall']), new Set(['floor'])]);
+  assert.equal(pickMapNode(middle, touching), lane);
+  assert.deepEqual(mapSpacePile(middle, touching), [lane]);
+  for (const selected of [null, third, lane]) assert.equal(resolveMapClick(touching, selected, middle, true), lane);
+  let behindWalls = 0;
+  for (const [x, z] of samples) {
+    const hits = cast(town, ...aim(fitted, x, 0, z));
+    assert.equal(pickMapNode(hits, touching), lane, `the street at ${x},${z}`);
+    assert.deepEqual(mapSpacePile(hits, touching), [lane], `the pile at ${x},${z}`);
+    if (hits.some(hit => hit.object.userData.pickPart === 'wall' && nearHouses.some(item => item.id === hit.object.userData.nodeId))) behindWalls++;
+  }
+  assert.ok(behindWalls > samples.length / 2, `more than half of those points lie behind a wall of a house: ${behindWalls}`);
+  const above = viewerFor(topDownMapView(touching, 1.6), 1.6);
+  for (const [x, z] of samples) assert.equal(pickMapNode(cast(town, ...aim(above, x, 0, z)), touching), lane, `from above, the street at ${x},${z}`);
+  town.dispose();
+
+  // The near houses moved 1 onto the street: they share ground with it, and their walls pick them. The same spot again reaches the street.
+  const pushed = nearHouses.map(item => ({ ...item, y: 379 })), overlapping = streetOf(sideStreet, pushed), crowded = new Map3DScene();
+  crowded.sync(overlapping, null);
+  const viewer = viewerFor(fitMapView(overlapping, 1.6), 1.6);
+  let onStreet = 0, onHouse = 0;
+  for (const [x, z] of samples) {
+    const hits = cast(crowded, ...aim(viewer, x, 0, z)), picked = pickMapNode(hits, overlapping);
+    if (picked === lane) { onStreet++; continue; }
+    onHouse++;
+    assert.ok(pushed.some(item => item.id === picked), `the street or a near house at ${x},${z}`);
+    assert.deepEqual(partsOf(hits, String(picked)), new Set(['wall']), `the house at ${x},${z} is hit on its walls only`);
+    assert.deepEqual(mapFloorPile(hits, overlapping), [lane], `the floors at ${x},${z}`);
+    assert.deepEqual(mapSpacePile(hits, overlapping), [picked, lane], `the pile at ${x},${z}`);
+    assert.equal(resolveMapClick(overlapping, picked, hits, true), lane, `on to the street at ${x},${z}`);
+    assert.equal(resolveMapClick(overlapping, lane, hits, true), picked, `round to the house at ${x},${z}`);
+  }
+  assert.ok(onStreet > 0 && onHouse > onStreet, `both are picked somewhere, a house more often: ${onStreet} / ${onHouse}`);
+  const onMiddle = cast(crowded, ...aim(viewer, 500, 0, 340));
+  assert.equal(pickMapNode(onMiddle, overlapping), third);
+  assert.deepEqual([null, third, lane].map(selected => resolveMapClick(overlapping, selected, onMiddle, true)), [third, lane, third]);
+  crowded.dispose();
 });
 
 test('syncing again reuses unchanged nodes and only moves the ones that moved', () => {
@@ -2450,6 +2647,87 @@ test('viewport: a press on the handles of the selected room steps on only from t
   nested.fire('dblclick', onArrow);
   assert.deepEqual([selects(nested), opened(nested), nested.undo.length], [[], [middle.id], 0]);
   nested.viewport.dispose();
+});
+
+test('viewport: the walls of a house on a road pick the house, and the same spot clicked again slowly goes down to the road', async () => {
+  const street = wideRoad.id, house = houseOnRoad.id, linked = mapOf([{ ...wideRoad, childMapId: id(901) }, houseOnRoad]);
+  // On the road behind the house, seen through its walls.
+  const behindHouse = (editor: MountedViewport): ScreenPoint => {
+    const at = editor.at(400, 0, 180);
+    assert.deepEqual([partsUnder(editor, at, house), partsUnder(editor, at, street)], [new Set(['wall']), new Set(['floor'])]);
+    return at;
+  };
+  const slow = await mountViewport({ map: roadUnderHouse, canEdit: false });
+  for (const expected of [house, street, house]) { clickNth(slow, behindHouse(slow)); assert.equal(slow.state.selectedId, expected); }
+  slow.viewport.dispose();
+  // A double click there is about the house, also when the road under it has a detail map: the quick second click steps nowhere.
+  for (const map of [roadUnderHouse, linked]) {
+    const quick = await mountViewport({ map, canEdit: false });
+    const at = behindHouse(quick);
+    clickNth(quick, at, 1); clickNth(quick, at, 2);
+    quick.fire('dblclick', at);
+    assert.deepEqual([selects(quick), opened(quick)], [[house, house], [house]]);
+    quick.viewport.dispose();
+  }
+  // Stepped down to the linked road first: the double click is aimed at the road and enters it.
+  const stepped = await mountViewport({ map: linked, canEdit: false });
+  const spot = behindHouse(stepped);
+  clickNth(stepped, spot); clickNth(stepped, spot);
+  assert.deepEqual(selects(stepped), [house, street]);
+  clickNth(stepped, spot, 1); clickNth(stepped, spot, 2);
+  stepped.fire('dblclick', spot);
+  assert.deepEqual(opened(stepped), [street]);
+  stepped.viewport.dispose();
+  // The road picked in the object list: a first click on the spot takes the house.
+  const listed = await mountViewport({ map: roadUnderHouse, canEdit: false, selectedId: street });
+  clickNth(listed, behindHouse(listed));
+  assert.deepEqual(selects(listed), [house]);
+  // Where no part of the house is under the pointer the road is picked at once.
+  listed.viewport.topDown(); listed.frame();
+  const clear = listed.at(400, 0, 120);
+  assert.deepEqual([partsUnder(listed, clear, house), partsUnder(listed, clear, street)], [new Set(), new Set(['floor'])]);
+  clickNth(listed, clear);
+  assert.deepEqual(selects(listed), [house, street]);
+  listed.viewport.dispose();
+});
+
+test('viewport: a street along the houses is picked through their walls at once, and a double click there enters it', async () => {
+  const lane = sideStreet.id, third = nearHouses[2].id;
+  const editor = await mountViewport({ map: streetOf({ ...sideStreet, childMapId: id(901) }, nearHouses), canEdit: false });
+  const at = editor.at(500, 0, 340);
+  assert.deepEqual([partsUnder(editor, at, third), partsUnder(editor, at, lane)], [new Set(['wall']), new Set(['floor'])]);
+  for (let times = 0; times < 3; times++) clickNth(editor, at);
+  assert.deepEqual(selects(editor), [lane, lane, lane], 'nothing to step on to');
+  clickNth(editor, at, 1); clickNth(editor, at, 2);
+  editor.fire('dblclick', at);
+  assert.deepEqual(opened(editor), [lane]);
+  editor.viewport.dispose();
+});
+
+test('viewport: a press on a handle of a house on a road goes down to the road, from the same spot again only', async () => {
+  const street = wideRoad.id, house = houseOnRoad.id;
+  // The upright arrow of the move gizmo of the house, in the fitted view every viewport here opens with. A handle that
+  // was not reached by clicking the spot picks nothing.
+  const fresh = await mountViewport({ map: roadUnderHouse, selectedId: house });
+  fresh.frame();
+  const arrow = fresh.handle(house, 'Y', 0.3);
+  // Behind the arrow the ray crosses a wall of the house and lands on the road.
+  assert.deepEqual([partsUnder(fresh, arrow, house), partsUnder(fresh, arrow, street)], [new Set(['wall']), new Set(['floor'])]);
+  fresh.move(arrow);
+  assert.equal(fresh.dev().transform.axis, 'Y');
+  clickNth(fresh, arrow);
+  assert.deepEqual(selects(fresh), []);
+  fresh.viewport.dispose();
+  // Clicking that spot picks the house and puts the arrow under the pointer: the same spot again steps on to the road.
+  const editor = await mountViewport({ map: roadUnderHouse });
+  clickNth(editor, arrow);
+  assert.deepEqual(selects(editor), [house]);
+  editor.frame(); editor.move(arrow);
+  assert.equal(editor.dev().transform.axis, 'Y', 'the arrow is under the pointer');
+  clickNth(editor, arrow);
+  assert.deepEqual(selects(editor), [house, street]);
+  assert.deepEqual([editor.count('preview'), editor.undo.length, editor.count('cancel')], [0, 0, 0], 'stepping edits nothing');
+  editor.viewport.dispose();
 });
 
 test('viewport: the memory of the clicked spot ends with a selection made elsewhere, a press that picks nothing and a press outside the canvas', async () => {
