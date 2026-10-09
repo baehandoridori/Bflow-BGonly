@@ -226,6 +226,11 @@ test('an overlap thinner than the slack is none, and a hundredth is one', () => 
   // A billionth into the side of a road: the strip the two share is thinner than the slack.
   overlap(space('sliver', 39.999999999, 100, 100, 100), road('alley', 0, 0, 40, 680), false, 'a billionth wide');
   overlap(space('over', 25, 379.99, 150, 150), street, true, 'a hundredth deep');
+  // The slack is a millionth of a plan unit, in depth and in width: ten times that is an overlap, a tenth of it is none.
+  overlap(space('fine', 25, 379.99999, 150, 150), street, true, 'a hundred-thousandth deep');
+  overlap(space('finer', 25, 379.9999999, 150, 150), street, false, 'a ten-millionth deep');
+  overlap(space('thin', 39.99999, 100, 100, 100), road('alley', 0, 0, 40, 680), true, 'a hundred-thousandth wide');
+  overlap(space('thinner', 39.9999999, 100, 100, 100), road('alley', 0, 0, 40, 680), false, 'a ten-millionth wide');
 });
 
 test('a space inside another, on shared edges, with the same outline, half over it or across it overlaps it', () => {
@@ -236,6 +241,11 @@ test('a space inside another, on shared edges, with the same outline, half over 
   // Neither has a corner inside the other in these two: every corner is on an edge of the other, or outside it.
   overlap(space('left', 0, 0, 2, 2), road('right', 1, 0, 2, 2), true, 'half over');
   overlap(space('across', 400, 0, 200, 680), street, true, 'a cross');
+});
+
+test('the kind of the two spaces is not asked: two rooms overlap, and two roads', () => {
+  overlap(space('one', 0, 0, 100, 100), space('other', 50, 50, 100, 100), true, 'two rooms');
+  overlap(street, lane, true, 'two roads');
 });
 
 test('a polygon, an ellipse and a turned room overlap by the outline they are drawn with, not by their box', () => {
@@ -275,4 +285,6 @@ test('outlines that meet only between their corners overlap, and so does an outl
 
 test('a space with a value that is no number overlaps nothing', () => {
   overlap(space('broken', 25, 300, NaN, 150), street, false, 'a width that is no number');
+  // One corner is no number: the three that are left are a triangle inside the road.
+  overlap(polygon('gap', 0, 0, 100, 200, [0, 0], [0.5, 0.5], [0, 1], [NaN, 0.5]), road('around', -100, -100, 500, 500), false, 'a polygon with a corner that is no number');
 });
