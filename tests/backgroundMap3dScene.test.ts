@@ -194,6 +194,14 @@ test('symbols are simple solids sized by width, volume height and plan depth', (
     assert.equal(named(root, 'symbol-proxy').userData.nodeId, node.id);
   }
   assert.ok(!rootOf(scene, symbol(30, 'plant')).getObjectByName('table-top'), 'a removed kind renders as the generic object');
+  // The loop re-syncs one node, and the four removed kinds share the shape key of 'custom', so it never rebuilds their meshes: each is also built from nothing.
+  for (const [index, kind] of (['desk', 'sofa', 'cabinet', 'plant'] as const).entries()) {
+    const fresh = symbol(34 + index, kind);
+    scene.sync(mapOf([fresh]), null);
+    const root = rootOf(scene, fresh);
+    for (const name of parts.custom) named(root, name);
+    assert.ok(!root.getObjectByName('stairs-step'), `${kind} built from nothing is the generic object, not stairs`);
+  }
   // Stored volume height wins over the kind default; the pillow end of a bed is the plan top (-Z).
   const bed = symbol(31, 'bed', { x: 0, y: 0, width: 130, height: 210, volumeHeight: 50 });
   scene.sync(mapOf([bed]), null);
@@ -268,6 +276,13 @@ test('stairs are solid steps from the floor that climb to the plan top, as many 
   assert.ok(!rootOf(scene, stairs).getObjectByName('selection-outline'), 'no outline before selection');
   scene.sync(mapOf([stairs, chair]), stairs.id);
   named(rootOf(scene, stairs), 'selection-outline');
+  // Selected, the flight is still ten solid steps: in the selected colour (`seat` holds the unselected one) and every one of them clickable.
+  const lit = stepsOf(stairs) as Mesh[], litTargets = scene.pickTargets();
+  assert.equal(lit.length, 10);
+  for (const step of lit) {
+    assert.ok(step.material !== seat.material, 'a selected flight is drawn in the selected colour');
+    assert.ok(step.userData.pickPart === 'solid' && litTargets.includes(step), 'and its steps stay clickable');
+  }
   scene.dispose();
   assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
 });
