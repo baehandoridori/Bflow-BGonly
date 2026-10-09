@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { Object3D, PerspectiveCamera, Raycaster, Texture, TextureLoader, Vector3 } from 'three';
+import { Object3D, PerspectiveCamera, Raycaster, Texture, TextureLoader, Vector2, Vector3 } from 'three';
 import type { BufferGeometry, Material, Mesh } from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
@@ -1866,8 +1866,14 @@ const unlinked = (room: BackgroundSpace): BackgroundSpace => ({ ...room, childMa
 type MountedViewport = Awaited<ReturnType<typeof mountViewport>>;
 const onNook = (editor: MountedViewport): ScreenPoint => editor.at(360, 0, 200);
 const besideNook = (editor: MountedViewport): ScreenPoint => editor.at(200, 0, 300);
-/** One click as the browser sends it: `detail` 1 starts a click sequence, 2 is the quick second click of a double click. */
-const clickNth = (editor: MountedViewport, at: ScreenPoint, detail = 1) => { editor.press(at, { detail }); editor.release(at); };
+/**
+ * One click as the browser sends it: `detail` 1 starts a click sequence, 2 is the quick second click of a double click.
+ * Only the mousedown carries that count. The pointerdown of the same press says 0, whatever the click is.
+ */
+const clickNth = (editor: MountedViewport, at: ScreenPoint, detail = 1) => {
+  editor.fire('pointerdown', at, { detail: 0 }); editor.fire('mousedown', at, { detail });
+  editor.release(at);
+};
 /** The same on the centre handle of the move gizmo, which covers the selected item. The press never moves. */
 const clickCentreHandle = (editor: MountedViewport, nodeId: string, detail = 1) => {
   editor.frame();
@@ -1875,6 +1881,13 @@ const clickCentreHandle = (editor: MountedViewport, nodeId: string, detail = 1) 
   editor.move(centre);
   assert.equal(editor.dev().transform.axis, 'XYZ', 'the centre handle is under the pointer');
   clickNth(editor, centre, detail);
+};
+/** The parts of a node that the ray of a click on a screen point meets. */
+const partsUnder = (editor: MountedViewport, at: ScreenPoint, nodeId: string) => {
+  const box = editor.host.box, ray = new Raycaster();
+  editor.dev().scene.updateMatrixWorld();
+  ray.setFromCamera(new Vector2((at.x - box.left) / box.width * 2 - 1, 1 - (at.y - box.top) / box.height * 2), editor.dev().camera);
+  return new Set(ray.intersectObject(editor.dev().scene, true).filter(hit => hit.object.userData.nodeId === nodeId).map(hit => hit.object.userData.pickPart));
 };
 const selects = (editor: MountedViewport) => editor.log.filter(entry => entry[0] === 'select').map(entry => entry[1]);
 const opened = (editor: MountedViewport) => editor.log.filter(entry => entry[0] === 'open').map(entry => entry[1]);
@@ -2011,6 +2024,38 @@ test('viewport: a press on the handles of the selected room steps on only from t
   clickNth(fresh, fresh.screen(classroom));
   assert.deepEqual(selects(fresh), [inset.id], 'without the handles the same click picks the room whose floor is there');
   fresh.viewport.dispose();
+  // Nor does the handle of a selected camera pick an object whose solid part lies in front of it. Seen from above, a
+  // camera under a table top, away from the middle of the table: both are under the pointer, and they are no pile on the plan.
+  const table = symbol(13, 'table', { x: 400, y: 300, width: 200, height: 120, volumeHeight: 100 }), below = camera(21, { x: 450, y: 340, elevation: 40 });
+  const covered = await mountViewport({ map: mapOf([table, below]), selectedId: below.id });
+  covered.viewport.topDown(); covered.frame();
+  assert.equal(partsUnder(covered, covered.screen(below.id), below.id).size, 1, 'the selected camera is under the pointer, behind the table top');
+  clickCentreHandle(covered, below.id);
+  assert.deepEqual(selects(covered), []);
+  covered.render({ canEdit: false });
+  clickNth(covered, covered.screen(below.id));
+  assert.deepEqual(selects(covered), [table.id], 'without the handles the same click picks the table, whose top hides the camera');
+  covered.viewport.dispose();
+  // A step from a handle needs the floor of the selected room under the pointer, not just the room. A smaller room
+  // straddles a wall of the selected one, and the two were clicked round to the selected one on the floor they share.
+  // Seen from the far side, an arrow of its gizmo reaches past that wall: the ray crosses the wall and lands on the
+  // floor of the straddling room alone. That room is the one the last click landed on, so the press is taken for the
+  // same spot again, and it still picks nothing.
+  const held = space(4, { x: 400, y: 260, width: 160, height: 140 }), across = space(5, { x: 520, y: 300, width: 160, height: 60 });
+  const straddle = await mountViewport({ map: mapOf([held, across]), canEdit: false, initialView: { target: [480, 0, 330], position: [-300, 450, 800] } });
+  for (let times = 0; times < 2; times++) clickNth(straddle, straddle.at(540, 0, 330));
+  assert.deepEqual(selects(straddle), [across.id, held.id]);
+  straddle.render({ canEdit: true }); straddle.frame();
+  const pastWall = straddle.at(620, 0, 330);
+  straddle.move(pastWall);
+  assert.equal(straddle.dev().transform.axis, 'X');
+  assert.deepEqual([partsUnder(straddle, pastWall, held.id), partsUnder(straddle, pastWall, across.id)], [new Set(['wall']), new Set(['wall', 'floor'])]);
+  clickNth(straddle, pastWall);
+  assert.deepEqual(selects(straddle), [across.id, held.id]);
+  straddle.render({ canEdit: false });
+  clickNth(straddle, pastWall);
+  assert.deepEqual(selects(straddle), [across.id, held.id, across.id], 'without the handles the same click picks the room whose floor is there');
+  straddle.viewport.dispose();
   // The quick second click of a double click on the handle steps nowhere; a slow one there does.
   const inner = unlinked(pileNook), outer = unlinked(pileClassroom);
   const quick = await mountViewport({ map: mapOf([inner, outer]) });
@@ -2081,14 +2126,29 @@ test('viewport: the memory of the clicked spot ends with a selection made elsewh
     assert.deepEqual(selects(editor), [nook, expected], label);
     editor.viewport.dispose();
   }
+  // A click while looking through a placed camera picks nothing either: back in the orbit view the spot is pressed anew.
+  const lens = camera(20, { x: 600, y: 200, angle: 135 });
+  const through = await mountViewport({ map: mapOf([pileNook, pileClassroom, lens]), canEdit: false });
+  const spot = onNook(through);
+  clickNth(through, spot);
+  through.render({ lookThroughId: lens.id });
+  clickNth(through, spot);
+  through.render({ lookThroughId: null });
+  through.frame();
+  clickNth(through, onNook(through));
+  assert.deepEqual(selects(through), [nook, nook], 'a click while looking through a camera');
+  through.viewport.dispose();
   // The same for the click that lands on the handles of the selected room: after such a press it steps nowhere.
+  // A press on a handle that picks nothing is no pick to remember either: the handle pressed once more still steps nowhere.
   for (const [label, between] of [['a right drag', rightDrag], ['a press outside the canvas', pressOutside]] as [string, Between][]) {
     const editor = await mountViewport({ map: pileRooms });
     clickNth(editor, onNook(editor));
     editor.frame();
     between(editor, besideNook(editor));
-    clickCentreHandle(editor, nook);
-    assert.deepEqual(selects(editor), [nook], label);
+    for (const press of ['the first press', 'the press after it']) {
+      clickCentreHandle(editor, nook);
+      assert.deepEqual(selects(editor), [nook], `${label}: ${press} on the handle`);
+    }
     editor.viewport.dispose();
   }
   // What a click left selected has to be the selection still. With an owner that keeps its own selection it never is,
