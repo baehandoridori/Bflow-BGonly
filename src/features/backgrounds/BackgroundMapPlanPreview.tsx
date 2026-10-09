@@ -1,4 +1,4 @@
-import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import type { MapPlanPreviewProps } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types';
@@ -12,8 +12,11 @@ import type { PlanCameraGlyph, PlanReadout, PlanSize } from './mapPlanPreview';
 import { stackedSpaces } from './mapStack';
 import './backgrounds-map-plan.css';
 
-/** `point` is where a click landed on the plan; a keyboard pick has none and takes exactly its node. */
-type Activate = (id: string, cycle: boolean, point?: BackgroundPoint) => void;
+/**
+ * `point` is where a click landed on the plan; a keyboard pick has none and takes exactly its node.
+ * `repeat`: the click is a repeated one of its click sequence (the second click of a double click, and on).
+ */
+type Activate = (id: string, cycle: boolean, point?: BackgroundPoint, repeat?: boolean) => void;
 type NodeProps<T extends BackgroundNode> = { node: T; scale: number; selected: boolean; onActivate: Activate };
 
 const fixed = (value: number) => Math.round(value * 100) / 100 + 0;
@@ -29,7 +32,7 @@ function clickPoint(event: ReactMouseEvent<SVGGElement>): BackgroundPoint | unde
 function nodeButton(node: BackgroundNode, selected: boolean, onActivate: Activate) {
   return {
     role: 'button', tabIndex: 0, 'aria-label': planNodeLabel(node), 'aria-current': selected ? 'true' as const : undefined,
-    onClick: (event: ReactMouseEvent<SVGGElement>) => { event.stopPropagation(); onActivate(node.id, true, clickPoint(event)); },
+    onClick: (event: ReactMouseEvent<SVGGElement>) => { event.stopPropagation(); onActivate(node.id, true, clickPoint(event), event.detail >= 2); },
     onKeyDown: (event: ReactKeyboardEvent<SVGGElement>) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault(); event.stopPropagation(); onActivate(node.id, false);
@@ -161,11 +164,29 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanP
   // Latest props for the one stable click handler. Overwritten on every render and never drawn from.
   const latest = useRef({ map, selectedId, onSelect, scale });
   latest.current = { map, selectedId, onSelect, scale };
-  const activate = useCallback<Activate>((id, cycle, point) => {
+  /** What the last click landed on and what it left selected: the same spot clicked again is told from it. */
+  const turn = useRef<{ hitId: string; pickedId: string } | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  // A selection made elsewhere ends it (written during render like `latest`, never drawn from).
+  if (turn.current && turn.current.pickedId !== selectedId) turn.current = null;
+  // So does a press that is no left press on this plan: anywhere else (the 3D view, the inspector, the object list, the
+  // toolbar), or on the plan with another button. The same spot is pressed anew after it, as on the main plan.
+  useEffect(() => {
+    const forget = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !svgRef.current?.contains(event.target) || !event.isPrimary || event.button !== 0) turn.current = null;
+    };
+    window.addEventListener('pointerdown', forget, true);
+    return () => window.removeEventListener('pointerdown', forget, true);
+  }, []);
+  const activate = useCallback<Activate>((id, cycle, point, repeat = false) => {
     const now = latest.current;
     // On a zoomed-out plan, items that overlap on screen count as one stack. Only the ones under the pointer take turns.
     const covers = point && ((node: BackgroundNode) => planNodeCovers(node, point, (node.type === 'camera' ? PLAN_MARK.hit : PLAN_MARK.dot * 1.6) * now.scale));
-    now.onSelect(cycle ? nextPlanSelection(now.map, id, now.selectedId, Math.max(12, PLAN_MARK.dot * 2 * now.scale), covers) : id);
+    const again = cycle && turn.current?.hitId === id && turn.current.pickedId === now.selectedId;
+    const next = cycle ? nextPlanSelection(now.map, id, now.selectedId, Math.max(12, PLAN_MARK.dot * 2 * now.scale), covers, point, again, repeat) : id;
+    // Only a click leaves a spot behind. A keyboard pick (`cycle` false) pressed no spot: the first click after it is a first press.
+    turn.current = cycle ? { hitId: id, pickedId: next } : null;
+    now.onSelect(next);
   }, []);
 
   const selectedGlyph = viewBox && selected?.type === 'camera' ? planCameraGlyph(selected, scale) : null;
@@ -183,7 +204,7 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanP
       <div className="bmap-plan-body" id={bodyId} hidden={collapsed}>
         {viewBox && <>
           <div className="bmap-plan-stage" ref={stageRef}>
-            <svg className="bmap-plan-svg" viewBox={`${fixed(viewBox.x)} ${fixed(viewBox.y)} ${fixed(viewBox.width)} ${fixed(viewBox.height)}`} role="group" aria-label={`${map.name} 평면 보기`} onClick={() => onSelect(null)}>
+            <svg className="bmap-plan-svg" ref={svgRef} viewBox={`${fixed(viewBox.x)} ${fixed(viewBox.y)} ${fixed(viewBox.width)} ${fixed(viewBox.height)}`} role="group" aria-label={`${map.name} 평면 보기`} onClick={() => onSelect(null)}>
               <rect className="bmap-plan-extent" x="0" y="0" width={MAP_PLAN_EXTENT.width} height={MAP_PLAN_EXTENT.height} />
               {map.imageUrl && <image className="bmap-plan-underlay" href={map.imageUrl} x="0" y="0" width={MAP_PLAN_EXTENT.width} height={MAP_PLAN_EXTENT.height} preserveAspectRatio="xMidYMid meet" />}
               {stackedSpaces(map).map(node => <PlanShape key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
