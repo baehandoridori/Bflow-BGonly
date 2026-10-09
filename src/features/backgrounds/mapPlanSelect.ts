@@ -104,7 +104,7 @@ export type PlanPressPlan = {
   selectAtPress?: string;
   /** What a release without movement does. */
   click: PlanPressClick;
-  /** The node this press counts as for a double-click: the pile member that was already picked, else the node under it. Null on empty canvas. */
+  /** The node this press counts as for a double-click: the pile member that was already picked, else the node under it. Null on empty canvas, and on a Shift press (which is not logged). */
   targetId: string | null;
   /** False: the press is no half of a double-click (the press log is emptied). */
   logged: boolean;
