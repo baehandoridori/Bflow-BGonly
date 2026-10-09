@@ -663,9 +663,11 @@ function mapClickStep(map: BackgroundMap, selectedId: string | null, hits: reado
   if (map.nodes.some(node => node.id === selectedId && node.type === 'space')) {
     // A space has a pile only on the same spot again: a first click there takes what is on top.
     if (!again) return plain;
-    // A repeated click neither steps on nor goes back to the top one.
-    if (repeat) return { picked, next: selectedId, stepped: false };
     pile = mapFloorPile(hits, map);
+    // A repeated click neither steps on nor goes back to the top one. It keeps the selected space only while its floor
+    // and the floor the click picks are both in the pile: with a camera or an object on top, or with the selected space
+    // hit on a wall only, it is a plain pick (nextPlanSelection reads the pile first in the same way).
+    if (repeat) return pile.includes(selectedId) && pile.includes(picked) ? { picked, next: selectedId, stepped: false } : plain;
   } else pile = stackedMapNodeIds(map, selectedId).filter(id => under.has(id));
   // A space hit on a wall only is no part of the floors under the pointer.
   if (pile.length < 2 || !pile.includes(selectedId) || !pile.includes(picked)) return plain;
