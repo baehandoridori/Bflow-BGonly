@@ -19,6 +19,8 @@ const reversed = (source: BackgroundSpace): BackgroundSpace => ({ ...source, poi
 const triangle = polygon('triangle', 0, 0, 100, 50, [0, 0], [1, 0], [0.5, 1]);
 /** An L: the box without its bottom-right part. */
 const bent = polygon('bent', 0, 0, 200, 100, [0, 0], [1, 0], [1, 0.4], [0.4, 0.4], [0.4, 1], [0, 1]);
+/** A triangle with no corner at the origin of its box: the edge that closes it counts, and its terms differ in sign. */
+const peak = polygon('peak', 0, 0, 100, 50, [0.5, 0], [1, 1], [0, 1]);
 
 /** A building site, the floor on it, a room on the floor and a closet in the room: listed in no order of size. */
 const closet = space('closet', 320, 220, 60, 40), room = space('room', 300, 200, 200, 150);
@@ -32,8 +34,12 @@ test('the plan area of a space is the area of the shape the plan draws', () => {
   near(spacePlanArea(space('inner', 400, 260, 160, 140, { shape: 'ellipse' })), 17592.91886010284, 'ellipse');
   assert.equal(spacePlanArea(triangle), 2500);
   near(spacePlanArea(bent), 12800, 'bent');
+  assert.equal(spacePlanArea(peak), 2500);
   // With fewer than three points the plan draws the box.
   assert.equal(spacePlanArea(polygon('line', 0, 0, 100, 50, [0, 0], [1, 1])), 5000);
+  // Only a polygon is drawn from its points: a room or an ellipse that still carries some keeps its own shape.
+  assert.equal(spacePlanArea(space('room with points', 0, 0, 100, 50, { points: triangle.points })), 5000);
+  near(spacePlanArea(space('ellipse with points', 0, 0, 100, 50, { shape: 'ellipse', points: triangle.points })), 5000 * Math.PI / 4, 'ellipse with points');
 });
 
 test('turning a space does not change its area', () => {
@@ -44,6 +50,7 @@ test('turning a space does not change its area', () => {
 test('a polygon whose points run the other way round has the same area, not a negative one', () => {
   assert.equal(spacePlanArea(reversed(triangle)), 2500);
   near(spacePlanArea(reversed(bent)), 12800, 'bent');
+  assert.equal(spacePlanArea(reversed(peak)), 2500);
 });
 
 test('the smaller space is on top, whatever the order in the map', () => {
@@ -75,6 +82,13 @@ test('a space whose width is no number lies at the bottom', () => {
   const broken = space('broken', 0, 0, NaN, 10);
   assert.deepEqual(ids(stackedSpaces(mapOf([closet, broken, site]))), ['broken', 'site', 'closet']);
   assert.deepEqual(ids(stackedSpaces(mapOf([site, closet, broken]))), ['broken', 'site', 'closet']);
+});
+
+test('so does a space whose area is minus infinity', () => {
+  // A number, but not a finite one: kept as it is, it would be the smallest area and lie on top.
+  const endless = space('endless', 0, 0, -Infinity, 10);
+  assert.deepEqual(ids(stackedSpaces(mapOf([closet, endless, site]))), ['endless', 'site', 'closet']);
+  assert.deepEqual(ids(stackedSpaces(mapOf([site, closet, endless]))), ['endless', 'site', 'closet']);
 });
 
 test('stacking hands back the nodes it was given and leaves the map as it was', () => {
