@@ -9,7 +9,7 @@ import { addMapCamera, applyNodeWorldPose } from '../src/features/backgrounds/ma
 import { SYMBOL_VOLUME_HEIGHTS, cameraOrientation, nodeOrientation } from '../src/features/backgrounds/mapSpatial.ts';
 
 const migration=(name:string)=>readFileSync(new URL(`../DEVLOG/migrations/${name}`,import.meta.url),'utf8');
-// The 3D file replaces one function of the base file, so every run applies them in this order.
+// The 3D file replaces one function of the base file and the elements file replaces it again, so every run applies them in this order.
 const sql=migration('2026-09-21-background-library.sql'),sql3d=migration('2026-10-07-background-map-3d.sql'),sqlElements=migration('2026-10-09-background-map-elements.sql');
 const runtime=process.env.BFLOW_PGLITE_MODULE;
 const id=()=>randomUUID();
@@ -224,7 +224,7 @@ async function boot(){
 test('background RPC runtime validates sessions, permissions, CAS, idempotency and every entity reference',{skip:!runtime},async(t)=>{
   const db=await boot();
   try {
-    await db.exec(sql);await db.exec(sql);await db.exec(sql3d);await db.exec(sql3d);await db.exec('SET ROLE anon');
+    await db.exec(sql);await db.exec(sql);await db.exec(sql3d);await db.exec(sql3d);await db.exec(sqlElements);await db.exec(sqlElements);await db.exec('SET ROLE anon');
     const read=async(who:'admin'|'member'='admin')=>(await db.query('SELECT background_library_read($1) AS value',[tokens[who]])).rows[0].value;
     const run=async(command:any,who:'admin'|'member'='admin',requestId=id())=>(await db.query('SELECT background_library_execute($1,$2,$3) AS value',[tokens[who],requestId,command])).rows[0].value;
     const save=(kind:string,entity:any,expectedRevision:number|null=null,who:'admin'|'member'='admin')=>run({type:'save',kind,entity,expectedRevision},who);
@@ -289,7 +289,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
     });
     await t.test('mixed maps persist doors and furniture, keep canonical permissions and reject invalid symbol writes atomically',async()=>{
       const room=space(classroom.id),m=map(classroom.id),door=symbol(room.id);
-      m.nodes=[room,{...camera(room.id),viewIds:[asset.id]},...['door','desk','chair','table','sofa','bed','cabinet','plant','custom'].map(kind=>({...door,id:id(),symbol:kind}))];
+      m.nodes=[room,{...camera(room.id),viewIds:[asset.id]},...BACKGROUND_SYMBOL_KINDS.map(kind=>({...door,id:id(),symbol:kind}))];
       const before=await read();await assert.rejects(save('map',m,null,'member'),{code:'42501'});assert.deepEqual(await read(),before);
       await save('map',m);assert.deepEqual((await read('member')).maps.find((item:any)=>item.id===m.id).nodes,m.nodes);
       const edited={...m,nodes:m.nodes.map(node=>node.type==='symbol'?{...node,hinge:'right',swing:'outward'}:node)};
@@ -480,6 +480,42 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       assert.deepEqual(current.nodes.slice(0,3).map((node:any)=>[Math.abs(node.x)<=100000,Math.abs(node.y)<=100000]),Array.from({length:3},()=>[true,true]));
       assert.equal(current.nodes[1].pitch,-90);assert.equal(current.revision,1+edits.length);
     });
+    await t.test('계단·도로·카메라 색은 보낸 그대로 저장되고 없던 노드에는 아무것도 생기지 않는다',async()=>{
+      const m=map(classroom.id),find=(snapshot:any)=>snapshot.maps.find((item:any)=>item.id===m.id);
+      m.nodes=[{...symbol(),symbol:'stairs'},{...space(),surface:'road'},
+        {...space(),shape:'polygon',points:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],surface:'road',elevation:30},
+        ...BACKGROUND_CAMERA_COLORS.map(color=>({...camera(),color})),{...camera(),elevation:150,pitch:-20,color:'teal'},
+        space(),camera(),symbol()];
+      // Lost-reply recovery takes the batch command, so the first save is sent as one.
+      const command:any={type:'save-maps',maps:[{entity:m,expectedRevision:null}]},stored=await run(command);
+      assert.deepEqual(find(stored),{...m,revision:1});
+      // Keys that were never set stay unset: the server writes no surface or colour into plain nodes.
+      for(const node of find(stored).nodes.slice(-3))for(const key of ['surface','color'])assert.equal(Object.hasOwn(node,key),false,`${node.type}.${key}`);
+      assert.equal(mapSaveWasApplied(stored,command),true);
+      // Another colour, or a road sent as a room, is a different save.
+      for(const [index,node] of m.nodes.entries()){
+        if('color' in node){const other=structuredClone(command);other.maps[0].entity.nodes[index].color=BACKGROUND_CAMERA_COLORS.find(color=>color!==node.color);assert.equal(mapSaveWasApplied(stored,other),false,`color ${index}`);}
+        if('surface' in node){const other=structuredClone(command);delete other.maps[0].entity.nodes[index].surface;assert.equal(mapSaveWasApplied(stored,other),false,`surface ${index}`);}
+      }
+      const renamed=find(await save('map',{...find(stored),name:'이름만 바꾼 도면'},1));assert.deepEqual(renamed,{...m,name:'이름만 바꾼 도면',revision:2});
+      assert.deepEqual(find(await read('member')),renamed);
+    });
+    await t.test('모르는 값·잘못된 타입·잘못 붙은 키는 22023으로 거절되고 아무것도 바뀌지 않는다',async()=>{
+      const before=await read();
+      const refuse=async(type:NodeType,extra:Record<string,unknown>,message:RegExp)=>{
+        const entity={...map(),nodes:[{...plain[type](),...extra}]},label=`${type} ${JSON.stringify(extra)}`;
+        await assert.rejects(save('map',entity),{code:'22023',message},label);
+        // Also inside a batch next to an otherwise valid edit: nothing of the batch may land.
+        await assert.rejects(run({type:'save-maps',maps:[{entity:{...tall,name:'반영되면 안 됨'},expectedRevision:tall.revision},{entity,expectedRevision:null}]}),{code:'22023',message},label);
+        assert.deepEqual(await read(),before,label);
+      };
+      for(const value of ['river','room','Road','',null,true,1,[],{}])await refuse('space',{surface:value},/공간 종류/);
+      for(const value of ['purple','amber','#ff0000','Red','',null,7,true,[],{}])await refuse('camera',{color:value},/카메라 색/);
+      // Each key belongs to one node type; anywhere else it is an unknown key.
+      for(const type of ['camera','symbol'] as const)await refuse(type,{surface:'road'},/도면 배치 항목/);
+      for(const type of ['space','symbol'] as const)await refuse(type,{color:'red'},/도면 배치 항목/);
+      await refuse('symbol',{symbol:'elevator'},/사물 기호/);
+    });
     await t.test('role changes apply immediately and realtime never broadcasts entity content',async()=>{
       await db.exec('RESET ROLE');await db.exec("UPDATE users SET role='user' WHERE id='admin'");await db.exec('SET ROLE anon');
       assert.equal((await read('admin')).canManage,false);await assert.rejects(save('place',place()),{code:'42501'});
@@ -529,6 +565,90 @@ test('re-running the base migration over stored 3D maps loses nothing and is rep
     assert.deepEqual(renamed.maps.find((item:any)=>item.id===tall.id),{...tall,name:'이름만 바꾼 입체 도면',revision:2});
     assert.deepEqual(renamed.maps.find((item:any)=>item.id===flat.id),{...flat,revision:1});
     assert.equal((await save('place',place('새 장소'))).places.length,2);
+    for(const role of ['anon','authenticated']){
+      const open=(await db.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'background_library_%' AND has_function_privilege($1::name,p.oid,'EXECUTE') ORDER BY 1",[role])).rows;
+      assert.deepEqual(open.map((row:any)=>row.proname),['background_library_execute','background_library_read']);
+    }
+  } finally {await db.close();}
+});
+
+test('3D 파일까지만으로는 새 모양이 거절되므로 요소 파일은 그 위에만 얹는다',{skip:!runtime},async()=>{
+  const db=await boot();
+  try {
+    // On an empty database the file stops at its first check and leaves nothing behind.
+    await assert.rejects(db.exec(sqlElements),{code:'55000',message:/background-library/});await db.exec('ROLLBACK');
+    assert.equal((await db.query("SELECT count(*)::int AS total FROM pg_proc WHERE proname LIKE 'background_library_%'")).rows[0].total,0);
+    // On the base validator it stops at the second one and the validator stays the base one.
+    await db.exec(sql);await assert.rejects(db.exec(sqlElements),{code:'55000',message:/3d/});await db.exec('ROLLBACK');
+    assert.equal((await db.query("SELECT p.prosrc FROM pg_proc p WHERE p.oid='public.background_library_validate_entity(text,jsonb)'::regprocedure")).rows[0].prosrc.includes('n-spatial'),false);
+    await db.exec(sql3d);await db.exec('SET ROLE anon');
+    const store=async(entity:any)=>(await db.query('SELECT background_library_execute($1,$2,$3) AS value',[tokens.admin,id(),{type:'save',kind:'map',entity,expectedRevision:null}])).rows[0].value.maps.find((item:any)=>item.id===entity.id);
+    const plan={...map(),nodes:[space(),camera(),symbol()]};
+    const tall={...map(),nodes:[{...space(),elevation:5,volumeHeight:250},{...camera(),elevation:150,pitch:-20,roll:10,aspect:16/9},{...symbol(),elevation:12.5,volumeHeight:75,pitch:30,roll:-15}]};
+    assert.deepEqual(await store(plan),{...plan,revision:1});assert.deepEqual(await store(tall),{...tall,revision:1});
+    // The 3D validator knows neither: the kind fails its closed list, the two keys fail the key list of their node.
+    const shapes:[string,()=>any,RegExp][]=[['stairs',()=>({...symbol(),symbol:'stairs'}),/사물 기호/],['surface',()=>({...space(),surface:'road'}),/도면 배치 항목/],['color',()=>({...camera(),color:'red'}),/도면 배치 항목/]];
+    for(const [label,node,message] of shapes)await assert.rejects(store({...map(),nodes:[node()]}),{code:'22023',message},label);
+    await db.exec('RESET ROLE');await db.exec(sqlElements);await db.exec('SET ROLE anon');
+    for(const [label,node] of shapes){const entity={...map(),nodes:[node()]};assert.deepEqual(await store(entity),{...entity,revision:1},label);}
+    // Rows written before the elements file was applied read back untouched afterwards.
+    const maps=(await db.query('SELECT background_library_read($1) AS value',[tokens.admin])).rows[0].value.maps;
+    for(const entity of [plan,tall])assert.deepEqual(maps.find((item:any)=>item.id===entity.id),{...entity,revision:1});
+  } finally {await db.close();}
+});
+
+test('앞 파일을 다시 돌려도 잃는 것이 없고 사슬을 다시 적용하면 고쳐진다',{skip:!runtime},async()=>{
+  const db=await boot();
+  try {
+    await db.exec(sql);await db.exec(sql3d);await db.exec(sqlElements);await db.exec('SET ROLE anon');
+    const read=async()=>(await db.query('SELECT background_library_read($1) AS value',[tokens.admin])).rows[0].value;
+    const run=async(command:any)=>(await db.query('SELECT background_library_execute($1,$2,$3) AS value',[tokens.admin,id(),command])).rows[0].value;
+    const save=(kind:string,entity:any,expectedRevision:number|null=null)=>run({type:'save',kind,entity,expectedRevision});
+    const apply=async(text:string)=>{await db.exec('RESET ROLE');await db.exec(text);await db.exec('SET ROLE anon');};
+    const find=(snapshot:any,entity:any)=>snapshot.maps.find((item:any)=>item.id===entity.id);
+    const put=async(entity:any)=>{const value=find(await save('map',entity),entity);assert.deepEqual(value,{...entity,revision:1});return value;};
+    // fresh carries what only the elements file accepts, tall what the 3D file added, flat neither.
+    let fresh=await put({...map(),nodes:[{...symbol(),symbol:'stairs'},{...space(),surface:'road'},{...camera(),color:'pink'}]});
+    const tall=await put({...map(),nodes:[{...space(),elevation:5,volumeHeight:250},{...camera(),elevation:150,pitch:-90,roll:10,aspect:16/9},{...symbol(),elevation:12.5,volumeHeight:75,pitch:30,roll:-15}]});
+    let flat=await put({...map(),nodes:[space(),camera(),symbol()]});
+    await save('place',place());
+    // Four ordinary writes. Only the last one carries a new shape itself.
+    const writes=(label:string)=>[()=>save('place',place(`${label} 장소`)),()=>save('map',{...map(),name:`${label} 도면`}),
+      ()=>save('map',{...flat,name:`${label} 평면`},flat.revision),()=>save('map',{...fresh,name:`${label} 새 모양`},fresh.revision)];
+    const blocked=async(label:string,message:RegExp)=>{
+      const before=await read();
+      for(const write of writes(label))await assert.rejects(write(),{code:'22023',message},label);
+      assert.deepEqual(await read(),before,label);
+    };
+    const works=async(label:string)=>{
+      const before=await read();for(const write of writes(label))await write();
+      const after=await read();assert.equal(after.places.length,before.places.length+1,label);assert.equal(after.maps.length,before.maps.length+1,label);
+      flat={...flat,name:`${label} 평면`,revision:flat.revision+1};fresh={...fresh,name:`${label} 새 모양`,revision:fresh.revision+1};
+      // Renamed and nothing else: every node is still what was sent.
+      for(const entity of [fresh,tall,flat])assert.deepEqual(find(after,entity),entity,label);
+    };
+    let kept=await read();
+    // 1. The 3D file alone puts back the validator without the three additions. Each write re-checks every stored map,
+    // so the stored stair blocks the writes that carry none of them as well. Reading works and nothing is lost.
+    await apply(sql3d);assert.deepEqual(await read(),kept);await blocked('3D 파일만 다시',/사물 기호/);
+    await apply(sqlElements);assert.deepEqual(await read(),kept);await works('요소 파일 다시');
+    // 2. The base file alone puts back the plan-only validator, and the elements file refuses to run on it.
+    kept=await read();await apply(sql);assert.deepEqual(await read(),kept);await blocked('기본 파일만 다시',/도면 배치 항목|사물 기호/);
+    await db.exec('RESET ROLE');await assert.rejects(db.exec(sqlElements),{code:'55000',message:/3d/});await db.exec('ROLLBACK');await db.exec('SET ROLE anon');
+    // The 3D file is only half of the repair: the stair is still stored.
+    await apply(sql3d);await blocked('기본 파일 뒤 3D 파일까지',/사물 기호/);
+    await apply(sqlElements);assert.deepEqual(await read(),kept);await works('사슬을 끝까지 다시');
+    // 3. Not a way out, but the reason a 22023 is never answered by deleting the map: under the narrower validator the
+    // delete passes, every other write passes once the map is gone, and no command brings it back.
+    await apply(sql3d);await blocked('다시 3D 파일만',/사물 기호/);
+    await run({type:'delete',kind:'map',id:fresh.id,expectedRevision:fresh.revision});
+    await save('place',place('도면을 지운 뒤 장소'));
+    const renamed={...flat,name:'도면을 지운 뒤 평면',revision:flat.revision+1};await save('map',{...flat,name:renamed.name},flat.revision);
+    const after=await read();
+    assert.equal(find(after,fresh),undefined);assert.deepEqual(find(after,tall),tall);assert.deepEqual(find(after,flat),renamed);
+    // With the chain whole again new shapes are accepted, and the deleted map stays deleted.
+    await apply(sqlElements);await put({...map(),nodes:[{...symbol(),symbol:'stairs'}]});
+    for(const expected of [null,fresh.revision,fresh.revision+1])await assert.rejects(save('map',fresh,expected),{code:'40001'});
     for(const role of ['anon','authenticated']){
       const open=(await db.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'background_library_%' AND has_function_privilege($1::name,p.oid,'EXECUTE') ORDER BY 1",[role])).rows;
       assert.deepEqual(open.map((row:any)=>row.proname),['background_library_execute','background_library_read']);
