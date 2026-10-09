@@ -370,6 +370,7 @@ test('the floor under the pointer decides the space: a room behind another one, 
   const twinA = space(7, { x: 0, y: 0, width: 100, height: 100 }), twinB = space(8, { x: 50, y: 50, width: 100, height: 100 });
   assert.equal(pickMapNode([hit(twinA.id, 'floor', 80), hit(twinB.id, 'floor', 80.00000001)], mapOf([twinA, twinB])), twinB.id);
   assert.equal(pickMapNode([hit(twinA.id, 'floor', 80), hit(twinB.id, 'floor', 80.00000001)], mapOf([twinB, twinA])), twinA.id);
+  assert.equal(pickMapNode([hit(id(99), 'floor', 80), hit(outer.id, 'floor', 80.00000001)], mapOf([outer, inner])), outer.id, 'a floor that is no space of the map never outranks one that is');
   assert.equal(pickMapNode([hit(outer.id, 'floor', 80), hit(inner.id, 'floor', 81)], mapOf([outer, inner])), outer.id, 'a floor clearly behind does not take over');
   assert.equal(pickMapNode([hit(inner.id, 'floor', 80.00000001), hit(outer.id, 'floor', 80)]), outer.id, 'without a map the nearest floor wins');
 });
