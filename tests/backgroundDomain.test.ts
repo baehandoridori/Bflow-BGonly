@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { inspect } from 'node:util';
-import { BACKGROUND_CAMERA_COLORS, BACKGROUND_SPACE_SURFACES, BACKGROUND_SPATIAL_LIMITS, BACKGROUND_SYMBOL_KINDS, applyBackgroundCommand, emptyBackgroundSnapshot, filterBackgroundViews, mergeBackgroundGroup, validateBackgroundRequest, validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
+import { BACKGROUND_CAMERA_COLORS, BACKGROUND_SPACE_SURFACES, BACKGROUND_SPATIAL_LIMITS, BACKGROUND_SYMBOL_KINDS, BackgroundUnsupportedError, applyBackgroundCommand, emptyBackgroundSnapshot, filterBackgroundViews, mergeBackgroundGroup, validateBackgroundRequest, validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
 import type { BackgroundPlace, BackgroundView, BackgroundMap, BackgroundGroup, BackgroundUsage, BackgroundSymbol, BackgroundSpace, BackgroundCamera, BackgroundNode } from '../src/features/backgrounds/types.ts';
 import { addMapCamera, applyNodeWorldPose } from '../src/features/backgrounds/mapGeometry.ts';
 import { MAP_SPATIAL_DEFAULTS, SYMBOL_VOLUME_HEIGHTS, cameraOrientation, createMapCamera, nodeOrientation } from '../src/features/backgrounds/mapSpatial.ts';
@@ -332,4 +332,99 @@ test('공간 종류와 카메라 색은 닫힌 목록의 값만 받고 목록 �
 test('공간 종류는 공간에만, 카메라 색은 카메라에만 붙는다',()=>{
   for(const node of [{...planCamera(),surface:'road'},{...symbol(),surface:'road'},{...planSpace(),color:'red'},{...symbol(),color:'red'}])
     assert.throws(()=>checkNodes([node]),/속성/,`${node.type} ${'surface' in node?'surface':'color'}`);
+});
+
+// What the validator refuses comes in two kinds, and the "update required" notice reads the kind, never the sentence:
+// unknown (a key, or a string outside a closed list: most likely written by a newer app) and broken (everything else).
+// Both are refused whole, with the sentence they always had.
+type Raw=Record<string,unknown>;
+type StoredRaw=Raw&{places:Raw[];maps:(Raw&{nodes:Raw[]})[];views:(Raw&{variants:Raw[]})[]};
+const unknownKind=(run:()=>void,sentence:RegExp,label:string)=>{assert.throws(run,BackgroundUnsupportedError,label);assert.throws(run,sentence,label);};
+const brokenKind=(run:()=>void,sentence:RegExp,label:string)=>assert.throws(run,(error:unknown)=>error instanceof Error&&!(error instanceof BackgroundUnsupportedError)&&sentence.test(error.message),label);
+// A stored library holding one of everything the cases change: a place, a view with a variant, and a map with a space, a camera and a symbol (in that order).
+function storedLibrary(){
+  const {s,classroom,view}=fixture(),room={...planSpace(),placeId:classroom.id};
+  const map={...blankMap('저장된 도면'),placeId:classroom.id,nodes:[room,{...planCamera(room.id),viewIds:[view.id]},symbol(room.id)]};
+  return applyBackgroundCommand(s,{type:'save',kind:'map',entity:map,expectedRevision:null},{canManage:true});
+}
+const reading=(change:(raw:StoredRaw)=>void)=>{const snapshot=storedLibrary();change(snapshot as unknown as StoredRaw);return()=>validateBackgroundSnapshot(snapshot);};
+
+test('조회 결과의 모르는 종류·속성·값은 문장은 그대로인 채 "모르는 것"으로 거절된다',()=>{
+  assert.doesNotThrow(reading(()=>{}));
+  const cases:[string,RegExp,(raw:StoredRaw)=>void][]=[
+    ['symbol kind',/사물 기호/,raw=>{raw.maps[0].nodes[2].symbol='elevator';}],
+    // A node kind of a later version need not have a name or coordinates: the kind is read before anything else.
+    ['node kind',/지원하지 않는 도면 오브젝트/,raw=>{raw.maps[0].nodes.push({id:randomUUID(),type:'note',text:'메모'});}],
+    ['node kind alone',/지원하지 않는 도면 오브젝트/,raw=>{raw.maps[0].nodes.push({type:'note'});}],
+    ['space key',/속성/,raw=>{raw.maps[0].nodes[0].future=1;}],
+    ['camera key',/속성/,raw=>{raw.maps[0].nodes[1].future=1;}],
+    ['symbol key',/속성/,raw=>{raw.maps[0].nodes[2].future=1;}],
+    ['map key',/속성/,raw=>{raw.maps[0].future=1;}],
+    ['place key',/속성/,raw=>{raw.places[0].future=1;}],
+    ['variant key',/속성/,raw=>{raw.views[0].variants[0].future=1;}],
+    ['shape',/공간 모양/,raw=>{raw.maps[0].nodes[0].shape='star';}],
+    ['surface',/공간 종류/,raw=>{raw.maps[0].nodes[0].surface='river';}],
+    ['color',/카메라 색/,raw=>{raw.maps[0].nodes[1].color='purple';}],
+    ['hinge',/경첩 방향/,raw=>{raw.maps[0].nodes[2].hinge='middle';}],
+    ['swing',/문 열림 방향/,raw=>{raw.maps[0].nodes[2].swing='up';}],
+    ['shot',/구도 분류/,raw=>{raw.views[0].shot='aerial';}],
+    ['time',/시간대 분류/,raw=>{raw.views[0].variants[0].time='dawn';}],
+  ];
+  for(const [label,sentence,change] of cases)unknownKind(reading(change),sentence,label);
+});
+
+test('조회 결과의 깨진 값은 "모르는 것"이 아닌 오류로 거절된다',()=>{
+  const cases:[string,RegExp,(raw:StoredRaw)=>void][]=[
+    ['symbol: 42',/사물 기호/,raw=>{raw.maps[0].nodes[2].symbol=42;}],
+    ['color: 7',/카메라 색/,raw=>{raw.maps[0].nodes[1].color=7;}],
+    ['surface: true',/공간 종류/,raw=>{raw.maps[0].nodes[0].surface=true;}],
+    ['shape: null',/공간 모양/,raw=>{raw.maps[0].nodes[0].shape=null;}],
+    ['hinge: 1',/경첩 방향/,raw=>{raw.maps[0].nodes[2].hinge=1;}],
+    ['swing: []',/문 열림 방향/,raw=>{raw.maps[0].nodes[2].swing=[];}],
+    ['shot: null',/구도 분류/,raw=>{raw.views[0].shot=null;}],
+    ['time: 0',/시간대 분류/,raw=>{raw.views[0].variants[0].time=0;}],
+    ['no type',/지원하지 않는 도면 오브젝트/,raw=>{const {type:_type,...rest}=raw.maps[0].nodes[2];raw.maps[0].nodes[2]=rest;}],
+    ['type: 7',/지원하지 않는 도면 오브젝트/,raw=>{raw.maps[0].nodes[2].type=7;}],
+    ['fov out of range',/카메라 시야/,raw=>{raw.maps[0].nodes[1].fov=180;}],
+    ['elevation out of range',/바닥 높이/,raw=>{raw.maps[0].nodes[0].elevation=100001;}],
+    ['NaN coordinate',/가로 좌표/,raw=>{raw.maps[0].nodes[1].x=NaN;}],
+    ['space not in the map',/참조한 공간이 도면에 없습니다/,raw=>{raw.maps[0].nodes[1].spaceId=randomUUID();}],
+  ];
+  for(const [label,sentence,change] of cases)brokenKind(reading(change),sentence,label);
+});
+
+test('최상위에 모르는 모음이 더 있는 조회 결과는 지나간다',()=>{
+  assert.doesNotThrow(reading(raw=>{raw.notes=[];}));
+});
+
+test('무엇을 몰랐는지는 detail에만 실리고 문장에는 섞이지 않는다',()=>{
+  const caught=(run:()=>void):BackgroundUnsupportedError=>{try{run();}catch(error){assert.ok(error instanceof BackgroundUnsupportedError,String(error));return error;}return assert.fail('검증을 통과했다');};
+  const kind=caught(reading(raw=>{raw.maps[0].nodes[2].symbol='elevator';}));
+  assert.equal(kind.detail,'value "elevator"');assert.equal(kind.message,'사물 기호가 올바르지 않습니다.');assert.equal(kind.message.includes('elevator'),false);
+  assert.equal(kind.name,'BackgroundUnsupportedError');assert.ok(kind instanceof Error);
+  const key=caught(reading(raw=>{raw.maps[0].nodes[0].future=1;}));
+  assert.equal(key.detail,'keys "future"');assert.equal(key.message,'지원하지 않는 배경 속성이 포함되어 있습니다.');assert.equal(key.message.includes('future'),false);
+  // Cut short: a value and a key at 80 characters, the keys at eight.
+  const long=caught(reading(raw=>{raw.maps[0].nodes[2].symbol='x'.repeat(300);}));
+  assert.ok(long.detail.length<100,String(long.detail.length));assert.equal(long.detail,`value "${'x'.repeat(80)}"`);
+  assert.equal(caught(reading(raw=>{raw.places[0]['k'.repeat(300)]=1;})).detail,`keys "${'k'.repeat(80)}"`);
+  const many=caught(reading(raw=>{for(let index=0;index<10;index++)raw.maps[0].nodes[0][`future${index}`]=index;}));
+  assert.equal(many.detail,`keys ${Array.from({length:8},(_,index)=>`"future${index}"`).join(', ')}`);
+});
+
+test('공간 종류와 카메라 색의 목록 밖 문자열은 모르는 값이고 문자열이 아닌 것은 깨진 값이다',()=>{
+  for(const value of ['river','room','','Road'])unknownKind(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
+  for(const value of [null,undefined,true,1,[],{},['road']])brokenKind(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
+  for(const value of ['purple','amber','#ff0000','','RED'])unknownKind(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
+  for(const value of [null,undefined,7,true,[],{},['red']])brokenKind(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
+});
+
+test('저장 요청도 같은 검사를 지나되 요청 자체의 분류와 종류는 깨진 값으로만 거절된다',()=>{
+  unknownKind(()=>checkNodes([{...planSpace(),future:1}]),/속성/,'node key');
+  unknownKind(()=>checkNodes([{...symbol(),symbol:'elevator'}]),/사물 기호/,'symbol kind');
+  unknownKind(()=>checkNodes([{id:randomUUID(),type:'note'}]),/지원하지 않는 도면 오브젝트/,'node kind');
+  // The request is made by this app, not read from storage: its own kind and type are never "unknown".
+  const send=(command:unknown)=>()=>validateBackgroundRequest({requestId:randomUUID(),command});
+  brokenKind(send({type:'save',kind:'note',entity:blankMap(),expectedRevision:null}),/배경 분류/,'command kind');
+  brokenKind(send({type:'archive',kind:'map',id:randomUUID(),expectedRevision:1}),/알 수 없는 배경 요청/,'command type');
 });

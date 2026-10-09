@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import { randomUUID } from 'node:crypto';
 import { createBackgroundPreviewGateway } from '../src/features/backgrounds/previewGateway.ts';
+import { BackgroundUnsupportedError } from '../src/features/backgrounds/domain.ts';
 import type { BackgroundRequest, BackgroundMap, BackgroundNode } from '../src/features/backgrounds/types.ts';
 const request=():BackgroundRequest=>({requestId:randomUUID(),command:{type:'save',kind:'place',entity:{id:randomUUID(),revision:0,name:'학교',parentId:null,folderPath:''},expectedRevision:null}});
 function environment(){const values=new Map<string,string>();let tail=Promise.resolve();return {storage:{getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);}},locks:{request<T>(_key:string,fn:()=>Promise<T>):Promise<T>{const p=tail.then(fn);tail=p.then(()=>{},()=>{});return p;}},seed:false};}
@@ -89,4 +90,15 @@ test('preview는 잘못된 높이 값을 저장하지 않고 높이 값이 없�
   assert.deepEqual(renamed.maps,[{...old,name:'이름만 변경',revision:4}]);
   const raised=await g.execute({requestId:randomUUID(),command:{type:'save',kind:'map',entity:{...renamed.maps[0],nodes:old.nodes.map(node=>node.id===camera.id?{...node,elevation:180,pitch:-30}:node)},expectedRevision:4}});
   assert.deepEqual(raised.maps[0].nodes[1],{...camera,elevation:180,pitch:-30});assert.deepEqual(raised.maps[0].nodes[0],old.nodes[0]);
+});
+test('preview는 저장소에 든 모르는 종류를 모르는 것으로, 깨진 값을 그냥 오류로 거절하고 저장소는 그대로 둔다',async()=>{
+  const actor={id:randomUUID(),canManage:true},key='bflow-background-library-preview-v1';
+  // A store another build on the same origin wrote: one map holding one node.
+  const stored=(node:Record<string,unknown>)=>{const options=environment();options.storage.setItem(key,JSON.stringify({snapshot:{places:[],maps:[{...blankMap('다른 버전의 도면'),revision:1,nodes:[node]}],views:[],groups:[],usages:[],canManage:true},receipts:{},retired:[]}));return options;};
+  const lift={id:randomUUID(),type:'symbol',name:'승강기',symbol:'elevator',spaceId:null,x:200,y:150,width:120,height:200,rotation:0,locked:false,hinge:'left',swing:'inward'};
+  const newer=stored(lift),written=newer.storage.getItem(key);
+  await assert.rejects(createBackgroundPreviewGateway(actor,newer).read(),BackgroundUnsupportedError);
+  await assert.rejects(createBackgroundPreviewGateway(actor,newer).read(),/사물 기호/);
+  assert.equal(newer.storage.getItem(key),written);
+  await assert.rejects(createBackgroundPreviewGateway(actor,stored({...lift,symbol:'stairs',x:'a'})).read(),(error:unknown)=>error instanceof Error&&!(error instanceof BackgroundUnsupportedError)&&/가로 좌표/.test(error.message));
 });
