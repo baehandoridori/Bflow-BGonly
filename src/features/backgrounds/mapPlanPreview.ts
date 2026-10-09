@@ -1,6 +1,7 @@
 import { stackedMapNodeIds } from './mapGeometry.ts';
 import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraPitchLabel, mapPlanBounds, nodeElevation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees, projectCameraToPlan } from './mapSpatial.ts';
 import type { CameraPlanProjection } from './mapSpatial.ts';
+import { spacesAt } from './mapStack.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
 
 /**
@@ -136,6 +137,16 @@ export function planStackUnder(map: BackgroundMap, hitId: string, tolerance?: nu
   const stack = stackedMapNodeIds(map, hitId, tolerance);
   if (!covers) return stack;
   return stack.filter(id => id === hitId || map.nodes.some(node => node.id === id && covers(node)));
+}
+/**
+ * The nodes that take turns on a click at `point`, the first picked one first. Kinds are not mixed: on a camera or
+ * symbol it is the stack of planStackUnder; on a space it is every space that holds the point, the smallest first.
+ */
+export function planPileAt(map: BackgroundMap, hitId: string, point: BackgroundPoint, tolerance?: number, covers?: (node: BackgroundNode) => boolean): string[] {
+  if (map.nodes.find(node => node.id === hitId)?.type !== 'space') return planStackUnder(map, hitId, tolerance, covers);
+  const pile = spacesAt(map, point).map(space => space.id);
+  // The outer half of an outline is pressed without the space holding the point.
+  return pile.includes(hitId) ? pile : [hitId];
 }
 /**
  * Selection after a click on `hitId`. When the current selection already sits in the same stack,

@@ -71,6 +71,16 @@ export function doubleClickNodeId(firstPressId: string | null, hitId: string, pi
   return firstPressId !== null && (firstPressId === hitId || pile.includes(firstPressId)) ? firstPressId : hitId;
 }
 
+export type PlanDoubleClickAction = 'open' | 'rename' | null;
+/**
+ * What a double-click on a node does on the plan. A space with a detail map opens it, in view and edit mode, before
+ * any renaming; anything else that can be renamed here gets its name box.
+ */
+export function planDoubleClickAction(node: BackgroundNode, context: { tool: string; canEdit: boolean; hasDetailMap: boolean }): PlanDoubleClickAction {
+  if (node.type === 'space' && context.hasDetailMap) return context.tool === 'select' || context.tool === 'hand' ? 'open' : null;
+  return context.tool === 'select' && context.canEdit && !node.locked ? 'rename' : null;
+}
+
 /** Whether plan drags snap is remembered per device. */
 export const MAP_SNAP_PREFERENCE_KEY = 'bflow.background-map.snap.v1';
 /** On unless this device stored `off`: also when nothing is stored or there is no storage. */

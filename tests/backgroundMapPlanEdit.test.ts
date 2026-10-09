@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP_SNAP_PREFERENCE_KEY, POLYGON_POINT_LIMIT, doubleClickNodeId, planNodeHandles, planVertexHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
+import { MAP_SNAP_PREFERENCE_KEY, POLYGON_POINT_LIMIT, doubleClickNodeId, planDoubleClickAction, planNodeHandles, planVertexHandles, readSnapPreference, storeSnapPreference } from '../src/features/backgrounds/mapPlanEdit.ts';
 import type { PlanNodeHandles } from '../src/features/backgrounds/mapPlanEdit.ts';
 import { nodePlanOutline } from '../src/features/backgrounds/mapSpatial.ts';
 import type { BackgroundCamera, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
@@ -204,6 +204,41 @@ test('a double-click acts on the node its first press picked from the pile, else
   // A first press on a handle or on nothing acted on no node.
   assert.equal(doubleClickNodeId(null, 'a', ['a', 'b']), 'a');
   assert.equal(doubleClickNodeId(null, 'a', []), 'a');
+});
+
+const DRAWING_TOOLS = ['rect', 'ellipse', 'polygon', 'symbol'];
+const doubleClick = (node: BackgroundNode, tool: string, canEdit: boolean, hasDetailMap = false) => planDoubleClickAction(node, { tool, canEdit, hasDetailMap });
+
+test('a double-click opens the detail map of a linked space with the select and the hand tool, in view and edit mode', () => {
+  const linked: BackgroundSpace = { ...room, childMapId: 'detail' };
+  for (const node of [linked, { ...linked, locked: true }]) for (const canEdit of [true, false]) {
+    const label = `${node.locked ? 'locked' : 'unlocked'}, canEdit ${canEdit}`;
+    assert.equal(doubleClick(node, 'select', canEdit, true), 'open', label);
+    assert.equal(doubleClick(node, 'hand', canEdit, true), 'open', label);
+    // Any other tool does nothing there: the space is neither opened nor renamed.
+    for (const tool of DRAWING_TOOLS) assert.equal(doubleClick(node, tool, canEdit, true), null, `${tool}, ${label}`);
+  }
+});
+
+test('a double-click renames any other node with the select tool, while editing and unless it is locked', () => {
+  for (const node of [room, chair, camera]) {
+    assert.equal(doubleClick(node, 'select', true), 'rename', node.id);
+    assert.equal(doubleClick(node, 'select', false), null, `${node.id} in view mode`);
+    assert.equal(doubleClick({ ...node, locked: true }, 'select', true), null, `${node.id} locked`);
+    assert.equal(doubleClick({ ...node, locked: true }, 'select', false), null, `${node.id} locked in view mode`);
+    for (const tool of ['hand', ...DRAWING_TOOLS]) for (const canEdit of [true, false]) assert.equal(doubleClick(node, tool, canEdit), null, `${node.id} with ${tool}`);
+  }
+  // Whether there is a detail map is the caller's word: a space whose linked map is gone is renamed like any other.
+  const dangling: BackgroundSpace = { ...room, childMapId: 'gone' };
+  assert.equal(doubleClick(dangling, 'select', true), 'rename');
+  assert.equal(doubleClick(dangling, 'hand', true), null);
+  assert.equal(doubleClick(dangling, 'select', false), null);
+  // Only a space has one: on a symbol or a camera it changes nothing.
+  for (const node of [chair, camera]) {
+    assert.equal(doubleClick(node, 'select', true, true), 'rename', node.id);
+    assert.equal(doubleClick(node, 'hand', true, true), null, node.id);
+    assert.equal(doubleClick(node, 'select', false, true), null, node.id);
+  }
 });
 
 /** Runs `body` with `storage` in the place of the browser storage (with none at all for null), then puts back what was there. */

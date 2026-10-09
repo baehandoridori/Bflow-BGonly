@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   PLAN_FALLBACK_SIZE, PLAN_KIND_LABELS, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_VIEW,
   nextPlanSelection, planArrowTip, planCameraGlyph, planCameraReadout, planDegrees, planNodeCovers, planNodeLabel, planNodeReadout, planNodeSummary,
-  planNumber, planOutlinePoints, planReadoutText, planSelectedNode, planSideView, planSightMark, planStackUnder, planUnitsPerPixel, planViewBox, planVolumeReadout,
+  planNumber, planOutlinePoints, planPileAt, planReadoutText, planSelectedNode, planSideView, planSightMark, planStackUnder, planUnitsPerPixel, planViewBox, planVolumeReadout,
 } from '../src/features/backgrounds/mapPlanPreview.ts';
 import { addMapCamera } from '../src/features/backgrounds/mapGeometry.ts';
 import { cameraPitchLabel, createMapCamera, projectCameraToPlan } from '../src/features/backgrounds/mapSpatial.ts';
@@ -426,6 +426,60 @@ test('only what lies under the pointer takes part in a stack: a symbol pressed a
   assert.equal(nextPlanSelection(map, 'table', 'top', 45, companion({ x: 445, y: 380 })), 'table', '68 units from the cameras, 55 is their reach');
   assert.equal(nextPlanSelection(map, 'side', 'top', 45, companion(centre)), 'side');
   assert.equal(nextPlanSelection(map, 'side', 'side', 45, companion(centre)), 'table');
+});
+
+const spaceOf = (id: string, x: number, y: number, width: number, height: number): BackgroundSpace => ({ ...legacySpace, id, name: id, x, y, width, height });
+/**
+ * A building site, the floor on it, a room on the floor and a closet in the room, listed in no order of size, with a chair
+ * on the closet, a camera on the edge of the room and three cameras on one spot in the room.
+ */
+const building = () => freeze(mapOf([spaceOf('closet', 320, 220, 60, 40), spaceOf('room', 300, 200, 200, 150), spaceOf('site', 0, 0, 1000, 680), spaceOf('floor', 100, 80, 800, 520),
+  { ...legacySymbol, id: 'chair', symbol: 'chair', spaceId: null, x: 330, y: 230, width: 40, height: 40 }, cameraAt({ id: 'camera', x: 500, y: 340 }),
+  ...[1, 2, 3].map(index => cameraAt({ id: `cam-${index}`, x: 450, y: 300 }))]));
+/** What the main plan counts as under the pointer. */
+const onMainPlan = (point: BackgroundPoint) => (node: BackgroundNode) => planNodeCovers(node, point, node.type !== 'camera' ? 0 : projectCameraToPlan(node).vertical ? 18 : 12, 80);
+
+test('the pile on a space is every space that holds the point, the smallest first', () => {
+  const map = building();
+  assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }), ['closet', 'room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'room', { x: 450, y: 300 }), ['room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'floor', { x: 150, y: 100 }), ['floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'site', { x: 50, y: 50 }), ['site']);
+  // The point decides, not the pressed space: the pile starts at the top whichever of its spaces was pressed.
+  assert.deepEqual(planPileAt(map, 'room', { x: 340, y: 240 }), ['closet', 'room', 'floor', 'site']);
+  // The chair and the cameras that stand on these points are no part of it, whatever the tolerance and the cover test.
+  assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }, 1000, () => true), ['closet', 'room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'room', { x: 450, y: 300 }, 1000, () => true), ['room', 'floor', 'site']);
+});
+
+test('a pressed space that does not hold the point is a pile of its own', () => {
+  const map = building();
+  // The outer half of an outline is pressed, but the space does not hold that point: the spaces around it do.
+  assert.deepEqual(planPileAt(map, 'closet', { x: 319.5, y: 240 }), ['closet']);
+  assert.deepEqual(planPileAt(map, 'room', { x: 500.5, y: 300 }), ['room']);
+  assert.deepEqual(planPileAt(map, 'site', { x: -0.5, y: 300 }), ['site']);
+  // On the outline itself the space holds the point.
+  assert.deepEqual(planPileAt(map, 'closet', { x: 320, y: 240 }), ['closet', 'room', 'floor', 'site']);
+});
+
+test('the pile on a camera or symbol is its stack: spaces are never mixed into it', () => {
+  const map = building(), spot = { x: 450, y: 300 };
+  // The three cameras stand on a point that three spaces hold: a press on a camera takes turns through the cameras only.
+  assert.deepEqual(planPileAt(map, 'cam-3', spot), ['cam-1', 'cam-2', 'cam-3']);
+  assert.deepEqual(planPileAt(map, 'cam-3', spot, undefined, onMainPlan(spot)), ['cam-1', 'cam-2', 'cam-3']);
+  // The chair lies on the closet: pressed again and again it never goes down to the spaces under it.
+  assert.deepEqual(planPileAt(map, 'chair', { x: 340, y: 240 }), ['chair']);
+  assert.deepEqual(planPileAt(map, 'chair', { x: 340, y: 240 }, undefined, onMainPlan({ x: 340, y: 240 })), ['chair']);
+  // The tolerance and the cover test reach the stack as they are: the camera 64 units away joins within 70, unless only what is under the pointer counts.
+  assert.deepEqual(planPileAt(map, 'cam-3', spot, 70), ['camera', 'cam-1', 'cam-2', 'cam-3']);
+  assert.deepEqual(planPileAt(map, 'cam-3', spot, 70, onMainPlan(spot)), ['cam-1', 'cam-2', 'cam-3']);
+  assert.deepEqual(planPileAt(map, 'cam-3', spot, 70, () => false), ['cam-3']);
+  // The same list as planStackUnder, whatever is passed on.
+  for (const id of ['chair', 'camera', 'cam-1', 'cam-2', 'cam-3']) for (const tolerance of [undefined, 12, 70, 1000]) for (const covers of [undefined, onMainPlan(spot), () => false, () => true]) {
+    const pile = planPileAt(map, id, spot, tolerance, covers);
+    assert.deepEqual(pile, planStackUnder(map, id, tolerance, covers), `${id} within ${tolerance}`);
+    assert.ok(pile.every(member => map.nodes.find(node => node.id === member)?.type !== 'space'), `${id} within ${tolerance}`);
+  }
 });
 
 test('describing a map never writes to it', () => {
