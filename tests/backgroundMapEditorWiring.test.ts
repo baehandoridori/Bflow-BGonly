@@ -295,3 +295,21 @@ test('anchor 37: the selection box is drawn as a path, so a box dragged along on
   assert.match(box, /<path className="bmap-marquee" d=\{`M \$\{rect\.left\} \$\{rect\.top\} H \$\{rect\.right\} V \$\{rect\.bottom\} H \$\{rect\.left\} Z`\} /);
   assert.doesNotMatch(box, /<rect/);
 });
+
+// Numbered past 21-35 as well.
+test('anchor 38: Delete is not heard from inside an open dialog, for a point, a node or a group', () => {
+  // A dialog is a React child of the editor, so its keys reach keyboard(). The guard for buttons and fields lets the
+  // disclosure line of a dialog (a summary) through. Nodes deleted under the open settings dialog would come back
+  // with its save, which writes the map as it was when the dialog opened.
+  const keys = handler.keyboard();
+  const pointBranch = keys.indexOf("if (event.key === 'Delete'"), nodeLine = keys.indexOf("if (event.key === 'Delete'", pointBranch + 1);
+  assert.ok(pointBranch > -1 && nodeLine > pointBranch, 'the point branch and the line that deletes nodes are both there');
+  // The point branch looks for itself: it comes before the return below, and a Delete it does not take goes on.
+  assert.match(keys.slice(pointBranch, nodeLine), /^if \(event\.key === 'Delete' && activeIndex !== null && .*&& !target\.closest\('dialog'\)\) \{/);
+  // The line that asks about one node or about the group is reached only past a return for dialogs: nothing but
+  // comments stands between the two.
+  assert.match(keys.slice(0, nodeLine), /if \(target\.closest\('dialog'\)\) return;\s*$/);
+  // Both questions are asked there, and nowhere else in keyboard().
+  inOrder(keys.slice(nodeLine), "setConfirmation('delete-node')", "setConfirmation('delete-group')");
+  assert.equal(count(keys, /setConfirmation\('delete-(?:node|group)'\)/g), 2);
+});

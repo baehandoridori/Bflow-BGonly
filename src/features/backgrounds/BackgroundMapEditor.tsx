@@ -881,6 +881,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       else setError(selected.points.length <= 3 ? '다각형에는 꼭짓점이 3개 이상 필요해요. 이 점은 지울 수 없어요.' : '이 점을 지우면 공간이 너무 작아져요.');
       return;
     }
+    // Not from inside an open dialog either. The guard above lets its disclosure line (a summary) through, and nodes
+    // deleted under the open settings dialog would come back with its save, which writes the map as it was opened.
+    if (target.closest('dialog')) return;
     // Not on the repeats of a held key: the first one may have removed a picked point just now, and the rest
     // would go on to ask about the whole node. Several selected nodes are deleted together on the plan only.
     if (event.key === 'Delete' && !event.repeat && canEdit && !pointerRef.current && !doc.isGestureActive()) {
