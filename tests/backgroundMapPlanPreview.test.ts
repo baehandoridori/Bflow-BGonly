@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   PLAN_FALLBACK_SIZE, PLAN_KIND_LABELS, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_VIEW,
   nextPlanSelection, planArrowTip, planCameraGlyph, planCameraReadout, planDegrees, planNodeCovers, planNodeLabel, planNodeReadout, planNodeSummary,
-  planNumber, planOutlinePoints, planReadoutText, planSelectedNode, planSideView, planSightMark, planStackUnder, planUnitsPerPixel, planViewBox, planVolumeReadout,
+  planNumber, planOutlinePoints, planPileAt, planReadoutText, planSelectedNode, planSideView, planSightMark, planStackUnder, planUnitsPerPixel, planViewBox, planVolumeReadout,
 } from '../src/features/backgrounds/mapPlanPreview.ts';
 import { addMapCamera } from '../src/features/backgrounds/mapGeometry.ts';
 import { cameraPitchLabel, createMapCamera, projectCameraToPlan } from '../src/features/backgrounds/mapSpatial.ts';
@@ -426,6 +426,172 @@ test('only what lies under the pointer takes part in a stack: a symbol pressed a
   assert.equal(nextPlanSelection(map, 'table', 'top', 45, companion({ x: 445, y: 380 })), 'table', '68 units from the cameras, 55 is their reach');
   assert.equal(nextPlanSelection(map, 'side', 'top', 45, companion(centre)), 'side');
   assert.equal(nextPlanSelection(map, 'side', 'side', 45, companion(centre)), 'table');
+});
+
+const spaceOf = (id: string, x: number, y: number, width: number, height: number): BackgroundSpace => ({ ...legacySpace, id, name: id, x, y, width, height });
+/**
+ * A building site, the floor on it, a room on the floor and a closet in the room, listed in no order of size, with a chair
+ * on the closet, a camera on the edge of the room and three cameras on one spot in the room.
+ */
+const building = () => freeze(mapOf([spaceOf('closet', 320, 220, 60, 40), spaceOf('room', 300, 200, 200, 150), spaceOf('site', 0, 0, 1000, 680), spaceOf('floor', 100, 80, 800, 520),
+  { ...legacySymbol, id: 'chair', symbol: 'chair', spaceId: null, x: 330, y: 230, width: 40, height: 40 }, cameraAt({ id: 'camera', x: 500, y: 340 }),
+  ...[1, 2, 3].map(index => cameraAt({ id: `cam-${index}`, x: 450, y: 300 }))]));
+/** What the main plan counts as under the pointer. */
+const onMainPlan = (point: BackgroundPoint) => (node: BackgroundNode) => planNodeCovers(node, point, node.type !== 'camera' ? 0 : projectCameraToPlan(node).vertical ? 18 : 12, 80);
+
+test('the pile on a space is every space that holds the point, the smallest first', () => {
+  const map = building();
+  assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }), ['closet', 'room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'room', { x: 450, y: 300 }), ['room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'floor', { x: 150, y: 100 }), ['floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'site', { x: 50, y: 50 }), ['site']);
+  // The point decides, not the pressed space: the pile starts at the top whichever of its spaces was pressed.
+  assert.deepEqual(planPileAt(map, 'room', { x: 340, y: 240 }), ['closet', 'room', 'floor', 'site']);
+  // The chair and the cameras that stand on these points are no part of it, whatever the tolerance and the cover test.
+  assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }, 1000, () => true), ['closet', 'room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'room', { x: 450, y: 300 }, 1000, () => true), ['room', 'floor', 'site']);
+  // The cover test is about cameras and symbols. No space passes the one the plan uses, and every space that holds the point still takes its turn.
+  assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }, undefined, onMainPlan({ x: 340, y: 240 })), ['closet', 'room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }, undefined, () => false), ['closet', 'room', 'floor', 'site']);
+  // A locked space keeps its place, under the pressed one or pressed itself: it cannot be dragged, but a click still steps on from it.
+  const locked = freeze(mapOf(map.nodes.map(node => node.id === 'room' ? { ...node, locked: true } : node)));
+  assert.deepEqual(planPileAt(locked, 'closet', { x: 340, y: 240 }), ['closet', 'room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(locked, 'room', { x: 450, y: 300 }), ['room', 'floor', 'site']);
+});
+
+test('a pressed space that does not hold the point is a pile of its own', () => {
+  const map = building();
+  // The outer half of an outline is pressed, but the space does not hold that point: the spaces around it do.
+  assert.deepEqual(planPileAt(map, 'closet', { x: 319.5, y: 240 }), ['closet']);
+  assert.deepEqual(planPileAt(map, 'room', { x: 500.5, y: 300 }), ['room']);
+  assert.deepEqual(planPileAt(map, 'site', { x: -0.5, y: 300 }), ['site']);
+  // On the outline itself the space holds the point.
+  assert.deepEqual(planPileAt(map, 'closet', { x: 320, y: 240 }), ['closet', 'room', 'floor', 'site']);
+});
+
+test('the pile on a camera or symbol is its stack: spaces are never mixed into it', () => {
+  const map = building(), spot = { x: 450, y: 300 };
+  // The three cameras stand on a point that three spaces hold: a press on a camera takes turns through the cameras only.
+  assert.deepEqual(planPileAt(map, 'cam-3', spot), ['cam-1', 'cam-2', 'cam-3']);
+  assert.deepEqual(planPileAt(map, 'cam-3', spot, undefined, onMainPlan(spot)), ['cam-1', 'cam-2', 'cam-3']);
+  // The chair lies on the closet: pressed again and again it never goes down to the spaces under it.
+  assert.deepEqual(planPileAt(map, 'chair', { x: 340, y: 240 }), ['chair']);
+  assert.deepEqual(planPileAt(map, 'chair', { x: 340, y: 240 }, undefined, onMainPlan({ x: 340, y: 240 })), ['chair']);
+  // The tolerance and the cover test reach the stack as they are: the camera 64 units away joins within 70, unless only what is under the pointer counts.
+  assert.deepEqual(planPileAt(map, 'cam-3', spot, 70), ['camera', 'cam-1', 'cam-2', 'cam-3']);
+  assert.deepEqual(planPileAt(map, 'cam-3', spot, 70, onMainPlan(spot)), ['cam-1', 'cam-2', 'cam-3']);
+  assert.deepEqual(planPileAt(map, 'cam-3', spot, 70, () => false), ['cam-3']);
+  // The same list as planStackUnder, whatever is passed on.
+  for (const id of ['chair', 'camera', 'cam-1', 'cam-2', 'cam-3']) for (const tolerance of [undefined, 12, 70, 1000]) for (const covers of [undefined, onMainPlan(spot), () => false, () => true]) {
+    const pile = planPileAt(map, id, spot, tolerance, covers);
+    assert.deepEqual(pile, planStackUnder(map, id, tolerance, covers), `${id} within ${tolerance}`);
+    assert.ok(pile.every(member => map.nodes.find(node => node.id === member)?.type !== 'space'), `${id} within ${tolerance}`);
+  }
+});
+
+test('a click on a space steps on to the space under it only on the same spot again, and never as a repeated click', () => {
+  const map = building(), spot = { x: 340, y: 240 };
+  const click = (selectedId: string | null, again?: boolean, repeat?: boolean) => nextPlanSelection(map, 'closet', selectedId, undefined, undefined, spot, again, repeat);
+  // The same spot again: down through the pile, and from the bottom round to the top.
+  assert.equal(click('closet', true), 'room');
+  assert.equal(click('room', true), 'floor');
+  assert.equal(click('floor', true), 'site');
+  assert.equal(click('site', true), 'closet');
+  // A selection outside the pile starts at the top: a camera, the chair on this very spot, nothing, a node that is gone.
+  for (const selected of ['camera', 'chair', null, 'missing']) assert.equal(click(selected, true), 'closet', `from ${selected}`);
+  // A first press is always the top one, whatever is selected under it.
+  assert.equal(click('closet', false), 'closet');
+  assert.equal(click('room', false), 'closet');
+  assert.equal(click('floor', false), 'closet', 'not on to the site');
+  assert.equal(click('site', false), 'closet');
+  assert.equal(click('room'), 'closet', 'a point alone is no second press');
+  // A repeated click never steps through spaces: it neither goes on nor back to the top one.
+  assert.equal(click('closet', true, true), 'closet', 'not on to the room');
+  assert.equal(click('room', true, true), 'room', 'not back to the closet');
+  assert.equal(click('site', true, true), 'site', 'not round to the top');
+  for (const selected of ['camera', null, 'missing']) assert.equal(click(selected, true, true), 'closet', `from ${selected}`);
+  // A repeated click that is no second press on the spot is a first press.
+  for (const selected of ['closet', 'room', 'floor', 'site', 'camera', null]) assert.equal(click(selected, false, true), 'closet', `from ${selected}`);
+  // Without the pressed point there is no pile to step through, whatever the caller remembers.
+  assert.equal(nextPlanSelection(map, 'closet', 'closet', undefined, undefined, undefined, true), 'closet');
+  assert.equal(nextPlanSelection(map, 'closet', 'room', undefined, undefined, undefined, true), 'closet');
+  assert.equal(nextPlanSelection(map, 'closet', 'room', undefined, undefined, undefined, true, true), 'closet');
+  // The point decides the pile, not the pressed space alone: on the room beside the closet there are three, and the closet is none of them.
+  const beside = { x: 450, y: 300 };
+  assert.equal(nextPlanSelection(map, 'room', 'room', undefined, undefined, beside, true), 'floor');
+  assert.equal(nextPlanSelection(map, 'room', 'site', undefined, undefined, beside, true), 'room');
+  assert.equal(nextPlanSelection(map, 'room', 'closet', undefined, undefined, beside, true), 'room');
+  // The outer half of an outline is a pile of one: nothing to step on to.
+  assert.equal(nextPlanSelection(map, 'closet', 'closet', undefined, undefined, { x: 319.5, y: 240 }, true), 'closet');
+  assert.equal(nextPlanSelection(map, 'closet', 'room', undefined, undefined, { x: 319.5, y: 240 }, true), 'closet');
+  // The tolerance and the cover test are about cameras and symbols: the chair and the cameras never join the spaces.
+  assert.equal(nextPlanSelection(map, 'closet', 'closet', 1000, () => true, spot, true), 'room');
+  assert.equal(nextPlanSelection(map, 'closet', 'site', 1000, () => false, spot, true), 'closet');
+
+  // Cameras and symbols take turns on every click as before: the point, `again` and `repeat` are not looked at.
+  const cameras = { x: 450, y: 300 };
+  for (const again of [false, true]) for (const repeat of [false, true]) {
+    assert.equal(nextPlanSelection(map, 'cam-3', 'cam-2', undefined, undefined, cameras, again, repeat), 'cam-3', `again ${again} repeat ${repeat}`);
+    assert.equal(nextPlanSelection(map, 'cam-3', 'cam-3', undefined, undefined, cameras, again, repeat), 'cam-1', `again ${again} repeat ${repeat}`);
+    assert.equal(nextPlanSelection(map, 'cam-3', 'room', undefined, undefined, cameras, again, repeat), 'cam-3', `again ${again} repeat ${repeat}`);
+    assert.equal(nextPlanSelection(map, 'chair', 'closet', undefined, undefined, spot, again, repeat), 'chair', `again ${again} repeat ${repeat}`);
+    assert.equal(nextPlanSelection(map, 'chair', 'chair', undefined, undefined, spot, again, repeat), 'chair', `again ${again} repeat ${repeat}`);
+  }
+});
+
+test('click after click on one spot: slow clicks go down the pile, a fast one stays, and a forgotten spot starts at the top', () => {
+  const map = building(), spot = { x: 340, y: 240 };
+  // The companion plan's `activate`, with its memory carried by hand: what the last click landed on and what it left selected.
+  const plan = () => {
+    const state: { turn: { hitId: string; pickedId: string } | null; selected: string | null } = { turn: null, selected: null };
+    return {
+      state,
+      click(hitId: string, repeat = false): string {
+        const again = state.turn?.hitId === hitId && state.turn.pickedId === state.selected;
+        const next = nextPlanSelection(map, hitId, state.selected, undefined, undefined, spot, again, repeat);
+        state.turn = { hitId, pickedId: next }; state.selected = next;
+        return next;
+      },
+      // A keyboard pick presses no spot: it selects the node and leaves no memory.
+      key(id: string): string { state.turn = null; state.selected = id; return id; },
+      // A press anywhere else, or a selection made elsewhere.
+      forget(): void { state.turn = null; },
+    };
+  };
+  // Three slow clicks, then a fast pair: only its first click steps on.
+  const slow = plan();
+  assert.deepEqual([slow.click('closet'), slow.click('closet'), slow.click('closet')], ['closet', 'room', 'floor']);
+  assert.deepEqual([slow.click('closet', false), slow.click('closet', true)], ['site', 'site']);
+  assert.equal(slow.click('closet', true), 'site', 'a third fast click stays as well');
+  assert.equal(slow.click('closet'), 'closet', 'the next slow one goes round to the top');
+  // A fast pair from nothing leaves the top one selected.
+  const fast = plan();
+  assert.deepEqual([fast.click('closet', false), fast.click('closet', true)], ['closet', 'closet']);
+  // A press elsewhere in between: the same spot is pressed anew.
+  const away = plan();
+  assert.equal(away.click('closet'), 'closet');
+  away.forget();
+  assert.equal(away.click('closet'), 'closet', 'not on to the room');
+  assert.equal(away.click('closet'), 'room', 'and on from there without a press in between');
+  // Stepped down to the room, pressed elsewhere, back on the spot: the top one, not the floor.
+  const back = plan();
+  assert.deepEqual([back.click('closet'), back.click('closet')], ['closet', 'room']);
+  back.forget();
+  assert.equal(back.click('closet'), 'closet');
+  // The first click after a keyboard pick is a first press.
+  const keyboard = plan();
+  assert.equal(keyboard.key('closet'), 'closet');
+  assert.equal(keyboard.click('closet'), 'closet', 'not the room under it');
+  // Had the keyboard pick been remembered as a spot, that click would have stepped on.
+  const remembered = plan();
+  remembered.key('closet');
+  remembered.state.turn = { hitId: 'closet', pickedId: 'closet' };
+  assert.equal(remembered.click('closet'), 'room');
+  // A selection changed on another way is told from the memory: the spot is pressed anew.
+  const changed = plan();
+  assert.deepEqual([changed.click('closet'), changed.click('closet')], ['closet', 'room']);
+  changed.state.selected = 'site';
+  assert.equal(changed.click('closet'), 'closet');
 });
 
 test('describing a map never writes to it', () => {

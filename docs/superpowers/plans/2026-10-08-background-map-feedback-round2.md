@@ -31,6 +31,8 @@
 - 목표: '선택' 도구를 제대로 된 선택 도구로 바꿉니다. 빈 곳을 끌어 여러 개를 고르고 함께 옮기거나 지우며, 큰 네모 안의 작은 방도 헷갈리지 않고 잡히게 합니다.
 - 운영 DB: None for the default. Only if the owner picks the F8 reading that stores a relation between spaces would a new node key be needed; that variant moves into the B3 migration.
 - 순서 근거: The largest behaviour change of the editing round (the document's selection shape and what a blank drag does), so it ships alone after the smaller batch has settled. F5 is the visible face of F6, and the F8 default (inner rooms stay pickable, click-through for spaces) is required for clicking and box-selecting inside a big outline. The 3D contract and its test suite are deliberately untouched. The owner's F8 answer can add the rectangle split tool here.
+- 문서: 설계 [`docs/superpowers/specs/2026-10-09-background-map-selection-tools-design.md`](../specs/2026-10-09-background-map-selection-tools-design.md) · 구현 계획 [`docs/superpowers/plans/2026-10-09-background-map-selection-tools.md`](2026-10-09-background-map-selection-tools.md)
+- 상태: 2026-10-09 구현·수동 검증 완료(v1.132.0), 배포는 PR 머지 뒤
 
 ### B3 새 도면 요소
 
@@ -333,7 +335,7 @@ Resolved by opening the code (root C:/Bflow-BGonly/.claude/worktrees/background-
 | 묶음 | 설계 문서 | 상태 |
 |---|---|---|
 | ① 평면 편집 기본기 | `docs/superpowers/specs/2026-10-08-background-map-editing-basics-design.md` | 2026-10-08 구현·수동 검증 완료(v1.131.0), 배포는 PR 머지 뒤 |
-| ② 선택 도구 개편 | - | 대기 |
+| ② 선택 도구 개편 | `docs/superpowers/specs/2026-10-09-background-map-selection-tools-design.md` | 2026-10-09 구현·수동 검증 완료(v1.132.0), 배포는 PR 머지 뒤 |
 | ③ 새 도면 요소 | - | 대기 |
 | ④ 팀 공개와 편집 권한 | - | 대기 (결정 필요) |
 | ⑤ 도면 주석 | - | 대기 (결정 필요) |

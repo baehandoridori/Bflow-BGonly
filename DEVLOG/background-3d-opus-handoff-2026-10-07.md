@@ -387,3 +387,64 @@ v1.130.0 시험 공개 뒤 한솔이 보낸 도면 피드백 2차의 첫 묶음�
 - **더블클릭은 SVG에서 누름 기록으로**: 편집 중의 누름은 포인터를 캡처하므로 `click`·`dblclick`이 노드 `<g>`에 닿지 않는다. 더블클릭은 SVG의 `onDoubleClick={canvasDoubleClick}` 하나가 받고, 무엇을 눌렀는지는 `pointerDown`이 적어 둔 최근 두 번의 누름(`pressLog`)으로 판정한다. 노드 `<g>`에 `onDoubleClick`을 달지 않는다. **캔버스가 받지 않은 누름은 기록을 비운다** — SVG 밖의 누름은 창 단위 `pointerdown` 캡처 처리기가, SVG 안이지만 편집기가 받지 않은 누름(저장 중, 오른쪽 버튼 등)은 `pointerDown`의 가드가 비운다. 캔버스 위에 뜨는 버튼이나 창을 새로 더해도 이 규칙이 그 아래 노드의 이름 칸이 열리거나 상세 도면으로 들어가는 것을 막는다. 시간·거리 상수로 막지 않는다.
 - **②가 정해야 하는 넘기기 조건(설계 11절)**: 지금의 조건 `event.detail >= 2 && canEdit`은 "묶음에는 카메라·기호만 있고, 보기 모드의 더블클릭은 그것들에 아무 일도 하지 않는다"에 기댄 임시 조건이다. 공간이 묶음에 들어오면 깨진다 — 연결된 공간의 더블클릭은 보기 모드에서도 그 도면으로 들어가므로, 조건을 그대로 두면 보기 모드에서 두 번 넘긴 뒤 들어가게 된다. ②의 규칙은 "더블클릭이 첫 누름의 대상에 작용하는 경우(이름 고치기, 연결된 공간으로 들어가기)에는 보기 모드에서도 둘째 클릭이 넘기지 않는다"로 잡는다. 편집 중에 겹친 공간을 빠르게 두 번 누르면 '아래 공간으로'가 아니라 이름 고치기나 들어가기가 된다는 점도 ② 설계에서 한솔에게 보여 준다. `doubleClickNodeId`는 묶음 목록을 받으므로 묶음에 공간을 넣어 같은 길을 쓸 수 있다.
 - 그 밖에 설계 11절 '다음 묶음 ②를 막지 않는 점'에 적힌 것: 손잡이·점 손잡이는 "선택된 것 하나"일 때만 그린다(지금의 `selectedId`). 여러 개 선택이 들어오면 그 조건만 바꾼다.
+
+## 16. ② 선택 도구 개편 (v1.132.0)
+
+도면 피드백 2차의 둘째 묶음이다(라운드 계획 `docs/superpowers/plans/2026-10-08-background-map-feedback-round2.md`의 B2, 2026-10-09 설계 승인). 평면의 '선택' 도구를 고르고 옮기는 도구로 바꿨다: 빈 곳을 끌어 상자로 여러 개 고르기와 Shift+클릭, 함께 옮기기(스냅 포함)·지우기·잠그기, '화면 이동' 도구와 스페이스·휠 버튼, 겹친 공간에서 작은 방이 먼저 잡히고 같은 자리를 천천히 다시 누르면 아래 공간으로 넘어가기(평면·보조 평면도·3D). 저장 자료·운영 DB는 바꾸지 않았고 배경 메뉴는 계속 배한솔 계정에만 보인다. 브랜치는 `claude/bg-map-selection-tools`(main v1.131.0, a2cc1d38에서 갈라짐)이다. 2026-10-09에 구현을 마쳤고, 수동 검증(설계 13절)과 배포는 그 뒤의 일이다.
+
+### 16.1 문서 위치
+
+- 설계(계약): `docs/superpowers/specs/2026-10-09-background-map-selection-tools-design.md`. 거기 적힌 동작이 승인된 범위의 전부다. 하지 않는 것은 1.2절, 앱 엔진에서 확인할 것과 한솔에게 알릴 것은 16절에 있다. 승인 문구가 한 가지로 정하지 않던 한 곳(Q1: 상자는 공간의 벽에 닿아야 그 공간을 고른다)은 2026-10-09에 한솔이 설계의 답 그대로 확인했다(1.1의 표).
+- 구현 계획: `docs/superpowers/plans/2026-10-09-background-map-selection-tools.md`. Task 1~16이 설계 15절의 여덟 단계이며, 나눈 곳은 "순수 모듈 + 테스트" 커밋과 "배선" 커밋의 경계다.
+- 수동 검증(설계 13절)의 결과와 자동 검사 수치는 [누적 검증 기록](background-library-verification-2026-09-21.md)의 `## 2026-10-09 ② 선택 도구 개편 (v1.132.0)` 절에 적는다. 그 절은 13절 전체를 확인한 뒤에 쓴다 — 절이 아직 없으면 수동 검증이 끝나지 않은 것이다.
+
+### 16.2 파일
+
+새 파일 5개: `src/features/backgrounds/`의 mapStack.ts, mapPlanSelect.ts, BackgroundMapSelectionSummary.tsx / `tests/`의 backgroundMapStack, backgroundMapPlanSelect (.test.ts).
+
+바뀐 파일: mapDocument.ts, useBackgroundMapDocument.ts, mapGeometry.ts, mapPlanGesture.ts, mapPlanEdit.ts, mapPlanPreview.ts, BackgroundMapPlanPreview.tsx, BackgroundMapPlanOverlays.tsx, map3dScene.ts, BackgroundMap3D.tsx, BackgroundMapEditor.tsx, backgrounds-map.css / tests의 backgroundMapDocument, backgroundMapGeometry, backgroundMapPlanGesture, backgroundMapPlanEdit, backgroundMapPlanPreview, backgroundMap3dScene, backgroundMapEditorWiring / package.json, package-lock.json, DEVLOG/update-notes.json, AGENTS.md, ROADMAP.md, 이 문서, 라운드 계획. ①에서는 손대지 않던 보조 평면도(mapPlanPreview.ts, BackgroundMapPlanPreview.tsx)와 3D 파일 둘(map3dScene.ts, BackgroundMap3D.tsx), useBackgroundMapDocument.ts와 3D 테스트는 이번에 의도적으로 고쳤다. types.ts, domain.ts, mapSpatial.ts, mapEditSession.ts, mapSnap.ts, mapWorkflow.ts, mapCanvas.ts, mapGallery.ts, BackgroundMapGallery.tsx, BackgroundMapNameBox.tsx, BackgroundMapCameraGizmo.ts, BackgroundMapPanels.tsx, electron 쪽, SQL, `src/features/playground/featureFlag.ts`는 건드리지 않았다.
+
+| 파일 | 책임 |
+|---|---|
+| mapStack.ts | 겹친 공간의 쌓임 순서 하나: 넓이(`spacePlanArea`), 아래→위 목록(`stackedSpaces`), 번호표(`spaceStackRanks`), 한 점을 품은 공간들(`spacesAt`) (순수, three.js·DOM 없음. 평면과 3D가 함께 쓴다) |
+| mapPlanSelect.ts | '선택' 도구의 누름 판정(`resolvePlanPress`)과 같은 자리 판정(`PlanSpot`·`sameSpotAgain`), 상자(`planRect`·`planRectTouches`·`planMarqueeIds`), 카메라·기호의 "포인터 아래"(`planMarkCovers`) (순수) |
+| BackgroundMapSelectionSummary.tsx | 여러 개 선택의 속성 칸 요약(개수·구성·묶음 동작 버튼. 받은 값만 그린다) |
+| mapDocument.ts | `MapViewport.selectedIds`와 `selectedId`의 새 뜻(3D의 하나), 액션 `select-many`·`pick-one`, `select`의 규칙, 읽는 함수 `mapSelection`·`singleViewId`·`pickAction`. 문서 키는 그대로다 |
+| useBackgroundMapDocument.ts | `selectMany` |
+| mapGeometry.ts | `moveMapNodes`·`removeMapNodes`·`lockMapNodes` |
+| mapPlanGesture.ts | `PlanGesture`의 `move-group`, 그 미리보기와 스냅 후보 |
+| mapPlanEdit.ts | `planDoubleClickAction` |
+| mapPlanPreview.ts | `planPileAt`, `nextPlanSelection`의 여섯째~여덟째 인자(`point`, `again`, `repeat`) |
+| BackgroundMapPlanPreview.tsx | 공간을 쌓임 순서로 그리기, 클릭 점·`again`·연속 클릭 넘기기(`turn`, `Activate`의 넷째 인자), 밖의 누름과 클릭이 되지 못한 누름에 `turn` 지우기(`svgRef`, 창 캡처 `pointerdown`·`pointerup`·`pointercancel`) |
+| BackgroundMapPlanOverlays.tsx | `MapMarquee` |
+| map3dScene.ts | `pickMapFloor`의 순서, `mapFloorPile`·`mapClickAim`, `resolveMapClick`의 공간 더미와 `again`·`repeat` |
+| BackgroundMap3D.tsx | `Press.repeat`, `turn`·`aimed`, `click`·`clickHandle`을 `pick` 하나로, `opens`·`doubleClickNode`, `turn`을 끝내는 줄들과 창 캡처 `pointerdown`(`onPressElsewhere`) |
+| BackgroundMapEditor.tsx | 선택을 읽는 값(`selection`·`singleId`·`selected`), 포인터 흐름(`resolvePlanPress` 배선, 상자, 묶음 이동, Shift, `lastSpot`), 스페이스(`onSpaceKey`), 도구줄·힌트 문구, 넘기기와 `doubleClickIntent`·`openSpace`, `select`의 3D 규칙(`pickAction`), 묶음 삭제·잠금·Delete와 그 뒤의 포커스, Esc의 상자 취소, 속성 칸 분기, `ObjectList` props, 쌓임 순서로 그리기, 새 기호의 소속. 판정은 순수 모듈에, 요약은 새 컴포넌트에 있고 편집기에는 배선만 늘었다 |
+| backgrounds-map.css | `.bmap-marquee`, 커서 규칙 셋 |
+| tests/backgroundMapEditorWiring.test.ts | 소스 앵커 39개: ①의 20개(5·6은 이번에 고쳐 썼고, 10은 3D 파일이 import하지 않는 목록에 `mapPlanSelect`를 더했다), 설계 12.8의 15개(21~35), 구현 중 리뷰에서 더한 넷(36~39). 아래 16.3의 규칙 대부분을 글자로 고정한다 |
+
+모듈 의존은 `mapStack.ts` → `mapGeometry.ts` → `mapSpatial.ts`, `mapPlanPreview.ts` → `mapStack.ts`, `mapPlanSelect.ts` → `mapPlanEdit.ts`·`mapPlanPreview.ts`·`mapSpatial.ts`(`mapDocument.ts`에서는 타입만), `map3dScene.ts` → `mapStack.ts` 한 방향이다. `mapGeometry.ts`·`mapDocument.ts`는 새 모듈을 import하지 않고, 3D 파일(BackgroundMap3D.tsx, map3dScene.ts, BackgroundMapCameraGizmo.ts)은 `mapPlanSelect`·`mapPlanEdit`·`mapPlanGesture`·`mapSnap`을 import하지 않는다.
+
+설계의 글자와 다르게 지은 곳(구현 중 리뷰에서 고쳤고 테스트로 고정했다):
+
+- 상자는 `rect`가 아니라 `path`로 그린다. 너비나 높이가 0인 `rect`는 선도 그려지지 않아, 정확히 가로나 세로로만 끈 상자가 보이지 않았다(앵커 37).
+- 열린 창(`dialog`) 안에서 누른 Delete는 배치를 지우려 하지 않는다 — 하나든 묶음이든(앵커 38).
+- 보조 평면도 위에서 누른 뒤 밖에서 떼거나 취소되어 클릭이 되지 못한 누름도 자리 기억을 끝낸다(창 캡처 `pointerup`·`pointercancel`, 앵커 39).
+- 3D의 연속 클릭은 선택된 공간과 그 클릭이 고르는 것이 모두 포인터 아래 바닥 더미에 있을 때만 선택을 그대로 둔다. 위에 카메라·기호가 있거나 선택된 공간이 벽으로만 맞았으면 고른 것 그대로다(`mapClickStep`, `tests/backgroundMap3dScene.test.ts`).
+- 함께 옮길 때의 기준 노드(`groupAnchorId`)는 누른 것이 움직이지 않아 첫 움직이는 노드로 넘어갈 때도, 그 노드가 움직이는 공간에 실려 가는 항목이면 그 공간이다. 설계 6.3은 그때 `moving[0]` 그대로였다. 도면 순서에서 의자가 제 방보다 앞에 있으면 의자가 기준이 되어, 스냅으로 붙은 방의 가장자리가 소수 끝자리에서 어긋났다(`tests/backgroundMapPlanGesture.test.ts`).
+
+### 16.3 뒤 차례가 지켜야 할 것
+
+- **쌓임 순서는 `mapStack.ts` 한 곳**: 겹친 공간의 위아래(작은 넓이가 위, 같으면 배열 순서)는 이 모듈만 정하고, 평면 그리기·같은 자리를 다시 누를 때 넘어가는 목록(`planPileAt`)·보조 평면도·3D `pickMapFloor`·새 기호의 소속이 모두 읽는다. 배열(`nodes`)은 다시 정렬하지 않는다. ③의 도로(다른 공간 **아래**에 그린다)는 비교 함수의 **맨 앞 항 하나**(층: 도로 0, 그 밖 1)로 들어간다 — 읽는 곳들은 고칠 것이 없다(설계 7.6). 새 카메라의 "정확히 하나" 셈에서 도로를 빼는 것은 ③의 일이다.
+- **선택은 날것으로 두고 읽을 때 거른다. 선택 액션은 바꿔 넣기뿐이다**: 문서는 `selectedIds`를 그대로 들고(되돌리기·초안 버리기에서 건드리지 않는다) `mapSelection`이 읽을 때 사라진 노드를 거른다. `select`·`select-many`는 목록을 통째로 바꿔 넣는다. 날것 목록에 더하거나 빼는 액션을 만들면 사라진 노드가 묶음에 끼어든다 — 더하고 빼는 일(Shift+클릭)은 편집기가 살아 있는 선택에서 새 목록을 만들어 `selectMany`로 보낸다.
+- **`selected`의 뜻**: 편집기의 `selected`는 "하나를 다루는 도구가 붙는 노드"이며 평면의 여러 개 선택에서는 비어 있다. 여러 개를 다루는 코드는 `selection`(`ids`·`primaryId`)과 `groupNodes`를 읽는다.
+- **전환은 선택을 건드리지 않는다. `selectedId`는 선택이 아니라 3D의 하나다**: `switchMode`·`leave3D`·`navigate`는 선택 액션을 부르지 않는다. 3D·보조 평면도는 `singleViewId`로 읽은 하나(`singleId`)만 받고 `mapCanvas.ts`의 계약은 그대로다. 3D 모드의 고르기는 편집기의 `select` → `pickAction` 한 곳을 지나 묶음(`selectedIds`)을 건드리지 않는다(`pick-one`). 3D 모드에 고르는 길을 더할 때 `doc.select`를 직접 부르지 않는다. 묶음 동작과 묶음을 푸는 일은 평면에서만 한다.
+- **누름 판정은 `resolvePlanPress`에만**: '선택' 도구의 누름이 하는 일(누를 때 고르기, 끌면 옮기기·묶음 이동·상자·화면 이동, 떼면 고르기·더하고 빼기·넘기기)은 이 순수 함수가 정하고 편집기는 실행만 한다. 공간의 더미에서 아래 것이 대상이 되는 것은 `again`(같은 자리를 다시 누름)일 때뿐이다 — 이 조건을 빼면 큰 공간이 선택된 동안 안쪽 방의 누름·끌기·더블클릭이 모두 큰 공간에 작용한다.
+- **자리 기억이 끝나는 때는 평면·3D·보조 평면도가 같다**(설계 7.3 끝의 표): 고르는 누름이 아닌 캔버스 누름(화면만 옮기는 누름, 왼쪽 주 버튼이 아닌 누름, 취소된 끌기)과 캔버스 밖의 누름 뒤에는 그 자리를 다시 눌러도 처음 누름이다. 장치는 화면마다 다르다: 평면은 누름마다 `lastSpot`을 비우고, 눌린 노드를 고르거나 옮긴 누름이 뗄 때 새로 적는다. 3D와 보조 평면도는 고르는 클릭이 `turn`을 적고 그 밖의 누름이 지운다. 누름을 받는 길을 더할 때는 그 표에 맞춘다.
+- **공간의 더미는 연속 클릭에 넘어가지 않는다(세 화면 모두)**: 넘기는 것은 새 클릭 묶음을 시작하는 클릭뿐이다 — 그 더블클릭이 할 일이 있든 없든(평면: SVG `click`의 `cycle.spaces`, 3D: `resolveMapClick`의 `repeat`, 보조 평면도: `nextPlanSelection`의 `repeat`). 카메라·기호 더미만 "연속 클릭이고 그 더블클릭이 무언가를 할 때" 건너뛰며, 그 넘기기와 더블클릭은 `doubleClickIntent` 하나를 함께 쓴다(15.3에서 ②가 정하기로 한 넘기기 조건은 이 둘로 정해졌다).
+- **스페이스는 추적과 삼키기가 따로다**: 추적(누르고 있음을 적기)은 평면 모드이고 편집기가 보이면 포커스가 어디에 있든 한다 — 스페이스가 글자이거나 열린 창의 것일 때(`spaceEntry`)만 뺀다. 삼키기(기본 동작 막기)는 편집기 안의 빈 곳과 `body`에서만 한다. 추적 조건에 포커스 자리를 넣으면 밖의 버튼이나 잠금 체크 칸을 누른 직후의 스페이스+끌기가 방을 옮긴다.
+- **④에서 편집 권한이 넓어져도 묶음 동작은 `canEdit` 하나를 본다**: 상자·묶음 이동·함께 지우기·잠그기는 `canEdit`일 때만 된다. 권한 판정을 따로 더하지 않는다.
+
+### 16.4 뒤 차례가 정할 것
+
+- ⑤의 주석 핀이 상자에 잡히는지는 ⑤가 정한다. 이번 차례의 상자(`planRectTouches`·`planMarqueeIds`)·더미(`planPileAt`)·쌓임 순서(`mapStack.ts`) 코드는 공간·기호·카메라 세 종류만 읽고 주석 핀에 기대지 않는다.

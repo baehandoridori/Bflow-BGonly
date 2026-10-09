@@ -9,6 +9,7 @@ import type { Map3DViewState } from './mapCanvas.ts';
 import { MAP_PLAN_EXTENT, MAP_SPATIAL_DEFAULTS, cameraAspect, mapPlanBounds, nodeElevation, nodeVolumeHeight, nodeWorldPose, spaceOutline, verticalFov } from './mapSpatial.ts';
 import type { Vec3 } from './mapSpatial.ts';
 import { stackedMapNodeIds } from './mapGeometry.ts';
+import { spaceStackRanks } from './mapStack.ts';
 import { getSymbolPreset } from './symbolCatalog.ts';
 
 /**
@@ -591,14 +592,15 @@ function hitNode(hit: MapPickHit): { id: string; kind: NodeKind; part: unknown }
 }
 /**
  * The space floor a ray lands on: the nearest one. Floors on one level (a room drawn inside another)
- * are told apart as the plan stacks them: the space later in the map is on top.
+ * are told apart as the plan stacks them: the smaller space is on top.
  */
 export function pickMapFloor(hits: readonly MapPickHit[], map?: BackgroundMap): MapPickHit | null {
   let nearest: MapPickHit | null = null;
   const floors = hits.filter(hit => { const node = hitNode(hit); return node?.kind === 'space' && node.part === 'floor'; });
   for (const hit of floors) if (!nearest || hit.distance < nearest.distance) nearest = hit;
   if (!nearest || !map) return nearest;
-  const level = nearest.distance + 1e-6 * Math.max(1, nearest.distance), order = (hit: MapPickHit) => map.nodes.findIndex(node => node.id === hit.object.userData.nodeId);
+  const ranks = spaceStackRanks(map);
+  const level = nearest.distance + 1e-6 * Math.max(1, nearest.distance), order = (hit: MapPickHit) => ranks.get(String(hit.object.userData.nodeId)) ?? -1;
   let top = nearest, topOrder = order(nearest);
   for (const hit of floors) {
     const at = hit.distance <= level ? order(hit) : -1;
@@ -626,24 +628,64 @@ export function pickMapNode(hits: readonly MapPickHit[], map?: BackgroundMap): s
   const floor = solid || box ? null : pickMapFloor(hits, map);
   return solid?.id ?? box?.id ?? (floor ? String(floor.object.userData.nodeId) : surface?.id ?? null);
 }
+/** The spaces whose floor a ray lands on, in the order a click picks them: the nearest level first, and floors on one level as the plan stacks them, the smaller first. */
+export function mapFloorPile(hits: readonly MapPickHit[], map: BackgroundMap): string[] {
+  const ranks = spaceStackRanks(map), order = (hit: MapPickHit) => ranks.get(String(hit.object.userData.nodeId)) ?? -1;
+  const floors = hits.filter(hit => { const node = hitNode(hit); return node?.kind === 'space' && node.part === 'floor'; }).sort((a, b) => a.distance - b.distance);
+  const pile: string[] = [];
+  for (let from = 0, to = 0; from < floors.length; from = to) {
+    // One level is what pickMapFloor takes for one: every floor within the same margin of the nearest of them.
+    const level = floors[from].distance + 1e-6 * Math.max(1, floors[from].distance);
+    while (to < floors.length && floors[to].distance <= level) to++;
+    for (const hit of floors.slice(from, to).sort((a, b) => order(b) - order(a))) {
+      const id = String(hit.object.userData.nodeId);
+      if (!pile.includes(id)) pile.push(id);
+    }
+  }
+  return pile;
+}
 /**
- * Selection after a click. Clicking the selected camera or symbol again steps through the items stacked on its spot.
- * Only the part of the pile that is under the pointer takes part: an item on the same plan spot at another
- * height is clicked where it stands, and stepping onto it would leave the others out of reach.
+ * One click, as resolveMapClick and mapClickAim both read it: what the ray picks, what the click leaves selected, and
+ * whether it got there by stepping on from the selected node. Only the part of a pile that is under the pointer takes
+ * part: an item on the same plan spot at another height is clicked where it stands, and stepping onto it would leave
+ * the others out of reach.
  */
-export function resolveMapClick(map: BackgroundMap, selectedId: string | null, hits: readonly MapPickHit[]): string | null {
-  const picked = pickMapNode(hits, map);
-  if (!picked || !selectedId) return picked;
+function mapClickStep(map: BackgroundMap, selectedId: string | null, hits: readonly MapPickHit[], again: boolean, repeat: boolean): { picked: string | null; next: string | null; stepped: boolean } {
+  const picked = pickMapNode(hits, map), plain = { picked, next: picked, stepped: false };
+  if (!picked || !selectedId) return plain;
   const under = new Set<string>();
   for (const hit of hits) {
     const node = hitNode(hit);
     if (node) under.add(node.id);
   }
-  if (!under.has(selectedId)) return picked;
-  // A space is a pile of one, so it never steps.
-  const pile = stackedMapNodeIds(map, selectedId).filter(id => under.has(id));
-  if (pile.length < 2 || !pile.includes(picked)) return picked;
-  return pile[(pile.indexOf(selectedId) + 1) % pile.length];
+  if (!under.has(selectedId)) return plain;
+  let pile: string[];
+  if (map.nodes.some(node => node.id === selectedId && node.type === 'space')) {
+    // A space has a pile only on the same spot again: a first click there takes what is on top.
+    if (!again) return plain;
+    pile = mapFloorPile(hits, map);
+    // A repeated click neither steps on nor goes back to the top one. It keeps the selected space only while its floor
+    // and the floor the click picks are both in the pile: with a camera or an object on top, or with the selected space
+    // hit on a wall only, it is a plain pick (nextPlanSelection reads the pile first in the same way).
+    if (repeat) return pile.includes(selectedId) && pile.includes(picked) ? { picked, next: selectedId, stepped: false } : plain;
+  } else pile = stackedMapNodeIds(map, selectedId).filter(id => under.has(id));
+  // A space hit on a wall only is no part of the floors under the pointer.
+  if (pile.length < 2 || !pile.includes(selectedId) || !pile.includes(picked)) return plain;
+  return { picked, next: pile[(pile.indexOf(selectedId) + 1) % pile.length], stepped: true };
+}
+/**
+ * Selection after a click. `again`: the same spot clicked again (the caller remembers its last click). `repeat`: the
+ * click is a repeated one of its click sequence (the second click of a double click, and on). A selected camera or
+ * symbol steps through its pile as before, whatever the two say. A selected space steps on to the floor under it only
+ * with `again` and without `repeat`: a repeated click on the same spot leaves it selected.
+ */
+export function resolveMapClick(map: BackgroundMap, selectedId: string | null, hits: readonly MapPickHit[], again = false, repeat = false): string | null {
+  return mapClickStep(map, selectedId, hits, again, repeat).next;
+}
+/** The node a click is aimed at: the pile member that is already selected when the click steps on from it, else what the click picks. */
+export function mapClickAim(map: BackgroundMap, selectedId: string | null, hits: readonly MapPickHit[], again = false): string | null {
+  const click = mapClickStep(map, selectedId, hits, again, false);
+  return click.stepped ? selectedId : click.picked;
 }
 
 /** World box around the base extent and everything placed on the map. */

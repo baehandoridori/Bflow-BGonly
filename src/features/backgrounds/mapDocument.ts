@@ -10,7 +10,18 @@ import { MAP_PLAN_EXTENT, mapPlanBounds } from './mapSpatial.ts';
  * 3D is not an action here, so it can never change a draft, the selection or the history.
  */
 export type MapDraft = { value: BackgroundMap; baseRevision: number | null; past: BackgroundMap[]; future: BackgroundMap[] };
-export type MapViewport = { x: number; y: number; zoom: number; selectedId: string | null };
+export type MapViewport = { x: number; y: number; zoom: number;
+  /**
+   * The node the views that show one node (the 3D view, its companion plan) work on. `select` and `select-many` set it
+   * to the last id of `selectedIds` (the primary), or to null when nothing is selected. `pick-one` moves it alone and
+   * leaves the selection as it is: a pick in 3D while several are selected. Read through singleViewId.
+   */
+  selectedId: string | null;
+  /**
+   * Every selected node id in the order it was picked. Raw: an id whose node an undo, a discard or a refresh
+   * removed stays listed, and is left out where the selection is read (mapSelection).
+   */
+  selectedIds: readonly string[] };
 export type MapDocumentGesture = MapGesture & { mapId: string };
 export type MapDocumentState = {
   drafts: Record<string, MapDraft>;
@@ -39,12 +50,16 @@ export type MapDocumentAction =
   | { type: 'gesture-finish' }
   | { type: 'gesture-cancel' }
   | { type: 'select'; mapId: string; id: string | null }
+  | { type: 'select-many'; mapId: string; ids: readonly string[] }
+  | { type: 'pick-one'; mapId: string; id: string | null }
   | { type: 'set-viewport'; mapId: string; viewport: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>> };
 
 export const MAP_ZOOM_LIMITS = { min: 0.1, max: 4 } as const;
 /** Bounds of the label size factor. The upper bound follows the zoom floor. */
 export const MAP_LABEL_SCALE_LIMITS = { min: 0.4, max: 1 / MAP_ZOOM_LIMITS.min } as const;
-const DEFAULT_VIEWPORT: MapViewport = { x: 0, y: 0, zoom: 1, selectedId: null };
+/** The one empty selection, so that nothing selected is always the same list. */
+const NO_SELECTION: readonly string[] = [];
+const DEFAULT_VIEWPORT: MapViewport = { x: 0, y: 0, zoom: 1, selectedId: null, selectedIds: NO_SELECTION };
 const has = (record: object, key: string) => Object.prototype.hasOwnProperty.call(record, key);
 
 export function createMapDocument(): MapDocumentState {
@@ -66,6 +81,18 @@ function dropDrafts(state: MapDocumentState, mapIds: readonly string[]): MapDocu
 function withDraft(state: MapDocumentState, mapId: string, draft: MapDraft, rest?: Partial<MapDocumentState>): MapDocumentState {
   const drafts = draft === state.drafts[mapId] ? state.drafts : { ...state.drafts, [mapId]: draft };
   return { ...state, ...rest, drafts };
+}
+/**
+ * `select` and `select-many`: the list replaces the selection of the map, and the single views go to its last id.
+ * An id is not checked against the map: a viewer has no draft to look it up in.
+ */
+function withSelection(state: MapDocumentState, mapId: string, viewport: MapViewport, ids: readonly string[]): MapDocumentState {
+  const stored = viewport.selectedIds, same = ids.length === stored.length && ids.every((id, index) => id === stored[index]);
+  // An unchanged list keeps its array, so readers keyed on it do not recompute.
+  const selectedIds = same ? stored : ids.length ? ids : NO_SELECTION;
+  const selectedId = selectedIds.length ? selectedIds[selectedIds.length - 1] : null;
+  if (same && viewport.selectedId === selectedId) return state;
+  return { ...state, viewports: { ...state.viewports, [mapId]: { ...viewport, selectedId, selectedIds } }, coalescing: null };
 }
 
 export function reduceMapDocument(state: MapDocumentState, action: MapDocumentAction): MapDocumentState {
@@ -124,9 +151,14 @@ export function reduceMapDocument(state: MapDocumentState, action: MapDocumentAc
       if (!draft) return { ...state, gesture: null };
       return withDraft(state, gesture.mapId, replaceMapHistoryValue(draft, cancelMapGesture(gesture)), { gesture: null });
     }
-    case 'select': {
+    case 'select':
+      return withSelection(state, action.mapId, mapViewport(state, action.mapId), action.id === null ? NO_SELECTION : [action.id]);
+    case 'select-many':
+      return withSelection(state, action.mapId, mapViewport(state, action.mapId), [...new Set(action.ids)]);
+    case 'pick-one': {
       const viewport = mapViewport(state, action.mapId);
       if (viewport.selectedId === action.id) return state;
+      // The spread carries the same `selectedIds` array along: the selection is not touched.
       return { ...state, viewports: { ...state.viewports, [action.mapId]: { ...viewport, selectedId: action.id } }, coalescing: null };
     }
     case 'set-viewport': {
@@ -145,6 +177,34 @@ export function mapDraft(state: MapDocumentState, mapId: string | null | undefin
 /** Plan viewport and selection of a map; a map that was never touched reads as the default. */
 export function mapViewport(state: MapDocumentState, mapId: string | null | undefined): MapViewport {
   return mapId != null && has(state.viewports, mapId) ? state.viewports[mapId] : DEFAULT_VIEWPORT;
+}
+export type MapSelection = { /** Selected ids that are nodes of the map, in picked order. */ ids: readonly string[]; /** The last of them. */ primaryId: string | null };
+const NOTHING_SELECTED: MapSelection = { ids: NO_SELECTION, primaryId: null };
+/** The selection as it is on a map right now: the stored list (`MapViewport.selectedIds`) without the ids whose node is gone. Nothing is written. */
+export function mapSelection(map: BackgroundMap | undefined, selectedIds: readonly string[]): MapSelection {
+  if (!map || !selectedIds.length) return NOTHING_SELECTED;
+  const alive = new Set(map.nodes.map(node => node.id));
+  // All alive: the stored array itself. Otherwise a new array on every call, so a render reads this through a memo.
+  const ids = selectedIds.every(id => alive.has(id)) ? selectedIds : selectedIds.filter(id => alive.has(id));
+  return { ids, primaryId: ids.length ? ids[ids.length - 1] : null };
+}
+/**
+ * The node a view that shows one node (the 3D view, its companion plan) works on. With at most one node selected it is
+ * that selection. With several it is `selectedId` (`MapViewport.selectedId`), which such a view moves alone: null when
+ * nothing is picked there, and the primary again when the node it named is gone.
+ */
+export function singleViewId(map: BackgroundMap | undefined, selection: MapSelection, selectedId: string | null): string | null {
+  if (selection.ids.length <= 1) return selection.primaryId;
+  if (selectedId === null) return null;
+  return map?.nodes.some(node => node.id === selectedId) ? selectedId : selection.primaryId;
+}
+/**
+ * The action that picks one node, or none (`id` null). On the plan the pick is the selection (`select`). In a view that
+ * shows one node (`singleView`), while several are selected, it only moves the node that view works on (`pick-one`):
+ * the group is left as it is for the plan.
+ */
+export function pickAction(mapId: string, id: string | null, singleView: boolean, selection: MapSelection): MapDocumentAction {
+  return singleView && selection.ids.length > 1 ? { type: 'pick-one', mapId, id } : { type: 'select', mapId, id };
 }
 export function isMapGestureActive(state: MapDocumentState): boolean {
   return state.gesture !== null;

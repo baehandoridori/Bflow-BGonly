@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Map3DProps, Map3DViewState } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView } from './map3dScene';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView } from './map3dScene';
 import type { Map3DPalette, MapPickHit } from './map3dScene';
 import { MapNodeGizmo, mapGizmoSetup } from './BackgroundMapCameraGizmo';
 import { stackedMapNodeIds } from './mapGeometry';
@@ -20,7 +20,7 @@ const CLICK_SLOP = 4;
 const DOUBLE_CLICK_GUARD = 450;
 
 type ViewRect = { x: number; y: number; width: number; height: number };
-type Press = { pointerId: number; x: number; y: number; moved: boolean; gizmo: boolean };
+type Press = { pointerId: number; x: number; y: number; moved: boolean; gizmo: boolean; /** The second click of a double click, and on. */ repeat: boolean };
 type Map3DDevHandle = {
   scene: Scene; camera: PerspectiveCamera; renderer: WebGLRenderer; orbit: OrbitControls; transform: TransformControls;
   /** Client pixel position of a node's root: base centre of a space or symbol, lens of a camera. */
@@ -86,6 +86,10 @@ class Map3DViewport {
   private lookMissing: string | null = null;
   private reported: Map3DViewState | null = null;
   private press: Press | null = null;
+  /** What the last pick landed on (the node on top there) and what it left selected: the same spot clicked again is told from it. */
+  private turn: { hitId: string; pickedId: string | null } | null = null;
+  /** The node the last first click (mousedown detail 1) with the select tool was aimed at. Null after any other click. */
+  private aimed: string | null = null;
   private focusSeen: Map3DProps['focusRequest'];
   private pendingFocus: string | null = null;
   private boundsMap: BackgroundMap | null = null;
@@ -170,11 +174,8 @@ class Map3DViewport {
       // Members of a dragged space follow in the same frame; the props catch up with the same map object.
       onPreview: map => { this.syncScene(map); this.props.onPreview(map); },
       onFinishGesture: () => this.props.onFinishGesture(),
-      onCancelGesture: () => {
-        // The pointer may still be down: its late release is not a click.
-        if (this.press) this.press.moved = true;
-        this.props.onCancelGesture();
-      },
+      // The pointer may still be down: its late release is not a click. A cancelled drag ends the memory of the spot, as on the plan.
+      onCancelGesture: () => { if (this.press) this.press.moved = true; this.turn = null; this.props.onCancelGesture(); },
     }, { slop: CLICK_SLOP });
     this.scene3d.scene.add(this.gizmo.helper);
     this.gizmo.controls.addEventListener('change', this.requestRender);
@@ -196,6 +197,7 @@ class Map3DViewport {
     canvas.addEventListener('contextmenu', this.onContextMenu);
     canvas.addEventListener('mousedown', this.onMouseDown);
     canvas.addEventListener('webglcontextlost', this.onContextLost);
+    window.addEventListener('pointerdown', this.onPressElsewhere, true);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
     this.themeObserver = new MutationObserver(() => this.refreshPalette());
@@ -215,6 +217,8 @@ class Map3DViewport {
     this.props = props;
     // A drag only lives while everything it started with still holds; otherwise it is undone, never committed.
     if (this.gizmo.dragging && (mapChanged || props.gizmoMode !== previous.gizmoMode || !this.gizmoAllowed(props, this.gizmo.draggedId))) this.gizmo.cancel();
+    // A selection made some other way (the object list, the companion plan, the plan): the next click here is a first press.
+    if (this.turn && props.selectedId !== this.turn.pickedId) this.turn = null;
 
     const lookNode = findCamera(props.map, props.lookThroughId);
     if (props.lookThroughId && !lookNode) {
@@ -239,6 +243,7 @@ class Map3DViewport {
     if (mapChanged) {
       this.mapId = props.map.id;
       this.pendingFocus = null;
+      this.aimed = null; this.turn = null;
       this.openView(props.initialView);
     }
     this.applyGizmo();
@@ -296,6 +301,7 @@ class Map3DViewport {
     canvas.removeEventListener('dblclick', this.onDoubleClick);
     canvas.removeEventListener('contextmenu', this.onContextMenu);
     canvas.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('pointerdown', this.onPressElsewhere, true);
     this.orbit?.removeEventListener('change', this.requestRender);
     this.orbit?.removeEventListener('end', this.onOrbitEnd);
     this.orbit?.dispose();
@@ -520,8 +526,10 @@ class Map3DViewport {
     return { x: rect.left + view.x + (projected.x + 1) / 2 * view.width, y: rect.top + view.y + (1 - projected.y) / 2 * view.height };
   }
 
-  private click(clientX: number, clientY: number): void {
+  private click(clientX: number, clientY: number, repeat: boolean): void {
     const props = this.props;
+    // Only a pick with the select tool is remembered. After any other click a double click falls back to what is under the pointer.
+    if (this.look || props.placing || props.tool !== 'select') { this.aimed = null; this.turn = null; }
     // The camera preview is for looking only.
     if (this.look) return;
     if (props.placing) {
@@ -531,25 +539,50 @@ class Map3DViewport {
       return;
     }
     if (props.tool !== 'select') return;
-    props.onSelect(resolveMapClick(props.map, props.selectedId, this.cast(clientX, clientY)));
+    this.pick(clientX, clientY, repeat, false);
   }
-  /**
-   * A press on a handle that never moved. The handles cover the selected item, so on a pile (cameras
-   * created on the same spot) this click steps to the next one, as on the plan. Anything else is left alone.
-   */
-  private clickHandle(clientX: number, clientY: number): void {
-    const props = this.props, selectedId = props.selectedId;
-    if (!selectedId) return;
-    const hits = this.cast(clientX, clientY);
-    if (!hits.some(hit => hit.object.userData.nodeId === selectedId)) return;
-    const next = resolveMapClick(props.map, selectedId, hits);
-    if (next !== null && next !== selectedId && stackedMapNodeIds(props.map, selectedId).includes(next)) props.onSelect(next);
+  /** A press on a handle that never moved. The handles cover the selected item, so there only a step on from it is taken. */
+  private clickHandle(clientX: number, clientY: number, repeat: boolean): void { this.pick(clientX, clientY, repeat, true); }
+  private pick(clientX: number, clientY: number, repeat: boolean, onHandle: boolean): void {
+    const props = this.props, selectedId = props.selectedId, hits = this.cast(clientX, clientY);
+    // A handle press counts only while the selected item is under the pointer (as before).
+    if (onHandle && !(selectedId && hits.some(hit => hit.object.userData.nodeId === selectedId))) { this.aimed = null; return; }
+    const top = pickMapNode(hits, props.map);
+    // The same spot again: the last pick landed on this same top node, and what it left selected is still the selection.
+    const again = top !== null && this.turn?.hitId === top && this.turn.pickedId === selectedId;
+    if (!repeat) this.aimed = mapClickAim(props.map, selectedId, hits, again);
+    // The second click of a double click that opens a space steps nowhere.
+    else if (this.opens(this.doubleClickNode(hits))) return;
+    // A repeated click never steps through spaces, whether or not the double click does anything: with `again` and
+    // `repeat` the selected space stays (resolveMapClick). Cameras and symbols step on every click, as before.
+    const next = resolveMapClick(props.map, selectedId, hits, again, repeat);
+    if (onHandle) {
+      // Never a fresh pick from a handle: only the next of the pile the selected item is in.
+      const selected = props.map.nodes.find(node => node.id === selectedId);
+      const pile = !selected ? [] : selected.type !== 'space' ? stackedMapNodeIds(props.map, selected.id) : again ? mapFloorPile(hits, props.map) : [];
+      if (!selected || next === null || next === selected.id || !pile.includes(selected.id) || !pile.includes(next)) return;
+    }
+    this.turn = top === null ? null : { hitId: top, pickedId: next };     // before onSelect: the props that come back must find it
+    props.onSelect(next);
   }
+  /** Whether a double click on this node enters a detail map: a space with one. */
+  private opens(id: string | null): boolean {
+    return id !== null && this.props.map.nodes.some(node => node.id === id && node.type === 'space' && !!node.childMapId);
+  }
+  /** The node a double click here is about: what its first click was aimed at while that is a linked space still under the pointer, else what is on top. */
+  private doubleClickNode(hits: MapPickHit[]): string | null {
+    const aimed = this.aimed;
+    return aimed !== null && this.opens(aimed) && hits.some(hit => hit.object.userData.nodeId === aimed) ? aimed : pickMapNode(hits, this.props.map);
+  }
+  /** A press anywhere but on the canvas (the bar over it, the companion plan, the inspector, the object list, the toolbar, a dialog): the same spot is pressed anew after it. */
+  private readonly onPressElsewhere = (event: PointerEvent): void => { if (event.target !== this.canvas) this.turn = null; };
   private readonly onPointerDown = (event: PointerEvent): void => {
     this.host.focus({ preventScroll: true });
     // TransformControls has already seen this press, so its hover state tells whether a handle is under the pointer.
     this.press = event.isPrimary && event.button === 0
-      ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false, gizmo: this.gizmo.hovering || this.gizmo.dragging } : null;
+      ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false, gizmo: this.gizmo.hovering || this.gizmo.dragging, repeat: false } : null;
+    // Any other button (the right one turns the world, the wheel button pans it) and any other pointer picks nothing.
+    if (!this.press) this.turn = null;
   };
   private readonly onPointerMove = (event: PointerEvent): void => {
     const press = this.press;
@@ -569,21 +602,31 @@ class Map3DViewport {
     const press = this.press;
     if (!press || press.pointerId !== event.pointerId || event.button !== 0) return;
     this.press = null;
-    if (press.moved || Math.hypot(event.clientX - press.x, event.clientY - press.y) >= CLICK_SLOP) { this.lastDragAt = performance.now(); return; }
-    if (press.gizmo) this.clickHandle(event.clientX, event.clientY);
-    else this.click(event.clientX, event.clientY);
+    if (press.moved || Math.hypot(event.clientX - press.x, event.clientY - press.y) >= CLICK_SLOP) {
+      this.lastDragAt = performance.now();
+      // A left drag that was no gizmo drag turned the world (the look tool) or did nothing at all: it picked nothing.
+      // A gizmo drag keeps the memory, like a move on the plan.
+      if (!press.gizmo) this.turn = null;
+      return;
+    }
+    if (press.gizmo) this.clickHandle(event.clientX, event.clientY, press.repeat);
+    else this.click(event.clientX, event.clientY, press.repeat);
   };
-  private readonly onPointerCancel = (): void => { this.press = null; };
+  private readonly onPointerCancel = (): void => { this.press = null; this.turn = null; };
   private readonly onDoubleClick = (event: MouseEvent): void => {
     const props = this.props;
     if (event.button !== 0 || this.look || props.placing || this.gizmo.dragging || performance.now() - this.lastDragAt < DOUBLE_CLICK_GUARD) return;
     // The first click may have put the gizmo under the pointer; opening a space still works there.
-    const id = pickMapNode(this.cast(event.clientX, event.clientY), props.map);
+    const id = this.doubleClickNode(this.cast(event.clientX, event.clientY));
     if (id && props.map.nodes.some(node => node.id === id && node.type === 'space')) props.onOpenSpace(id);
   };
   private readonly onContextMenu = (event: Event): void => { event.preventDefault(); };
-  /** No browser auto-scroll on a middle-button drag: that button pans the view. */
-  private readonly onMouseDown = (event: MouseEvent): void => { if (event.button === 1) event.preventDefault(); };
+  private readonly onMouseDown = (event: MouseEvent): void => {
+    // No browser auto-scroll on a middle-button drag: that button pans the view.
+    if (event.button === 1) event.preventDefault();
+    // A release carries no click count; the mousedown of the same press does.
+    if (event.button === 0 && this.press) this.press.repeat = event.detail >= 2;
+  };
   private readonly onDragKey = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || !this.gizmo.dragging) return;
     event.preventDefault();

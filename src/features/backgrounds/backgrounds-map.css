@@ -74,6 +74,8 @@
 /* Shown only while a drag is stuck to something. */
 .bmap-snap-guides line { stroke:#ff7aa8; stroke-width:1; vector-effect:non-scaling-stroke; pointer-events:none; }
 [data-color-mode="light"] .bmap-snap-guides line { stroke:#d6336c; }
+/* The selection box while it is dragged. Its line keeps one width on screen at any zoom. */
+.bmap-marquee { fill:rgb(var(--color-accent) / .08); stroke:rgb(var(--color-accent-sub)); stroke-width:1; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; pointer-events:none; }
 /* Point handles of the selected polygon. The first circle of a handle is the wider area that takes the press and shows nothing; the second is the dot. */
 .bmap-vertex-handle { cursor:move; }
 .bmap-vertex-add { cursor:copy; }
@@ -194,6 +196,10 @@
 .bmap-symbol-tilt { fill:none; stroke:rgb(var(--color-accent-sub) / .55); stroke-width:1; stroke-dasharray:5 4; vector-effect:non-scaling-stroke; }
 .bmap-symbol-tilt.is-selected { stroke:rgb(var(--color-accent-sub)); }
 .bmap-symbol text { font-size:calc(11px * var(--bmap-label-scale,1)); fill:rgb(var(--color-text-primary)); paint-order:stroke; stroke:rgb(var(--color-bg-primary)); stroke-width:4; stroke-linejoin:round; transform:translateY(calc(10px * (var(--bmap-label-scale,1) - 1))); }
+/* The hand while the view can be dragged (the hand tool, Space held), over nodes and handles too. Kept after every other cursor rule of the canvas: a tool cursor weighs the same, so the later rule wins. */
+.bmap-canvas.is-space-pan { cursor:grab; }
+.bmap-canvas:is(.tool-hand,.is-space-pan) * { cursor:grab; }
+.bmap-canvas.is-panning, .bmap-canvas.is-panning * { cursor:grabbing; }
 .bmap-symbol-properties { margin:12px 0; }
 .bmap-symbol-preview { display:flex; align-items:center; gap:16px; padding:12px; margin-bottom:14px; border-radius:7px; background:rgb(var(--color-accent) / .065); color:rgb(var(--color-accent-sub)); }
 .bmap-symbol-preview>svg { width:66px; height:66px; overflow:visible; flex-shrink:0; }
