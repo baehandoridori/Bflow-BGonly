@@ -313,3 +313,23 @@ test('anchor 38: Delete is not heard from inside an open dialog, for a point, a 
   inOrder(keys.slice(nodeLine), "setConfirmation('delete-node')", "setConfirmation('delete-group')");
   assert.equal(count(keys, /setConfirmation\('delete-(?:node|group)'\)/g), 2);
 });
+
+// Numbered past 21-35 as well.
+test('anchor 39: on the companion plan a left press that never became a click there ends the spot memory', () => {
+  // The press listener lets a left press on the plan through: the click that follows needs the memory. Dragged off the
+  // plan and released there, that press is no click on the plan (the click goes to what holds both ends), and nothing
+  // was pressed elsewhere either. Without this listener the next slow click on the same room would step down.
+  const preview = read('BackgroundMapPlanPreview.tsx');
+  const effect = piece(preview, 'const release = (event: PointerEvent) => {', '}, []);');
+  // A release on the plan is the release of a click and keeps the memory. A cancelled press ends it wherever it was.
+  assert.match(effect, /^const release = \(event: PointerEvent\) => \{\s*if \(event\.type === 'pointercancel' \|\| !\(event\.target instanceof Node\) \|\| !svgRef\.current\?\.contains\(event\.target\)\) turn\.current = null;\s*\};/);
+  // On the window, in the capture phase, like the press listener: a release over a portal or over the 3D canvas is heard too.
+  for (const type of ['pointerup', 'pointercancel']) {
+    assert.ok(effect.includes(`window.addEventListener('${type}', release, true);`), `${type} is listened for`);
+    assert.ok(effect.includes(`window.removeEventListener('${type}', release, true);`), `${type} is let go of`);
+  }
+  inOrder(effect, "window.addEventListener('pointercancel', release, true);", 'return () => {', "window.removeEventListener('pointerup', release, true);");
+  // It stands next to the press listener and takes nothing from it: that one still forgets on the press alone.
+  inOrder(preview, 'const forget = (event: PointerEvent) => {', "window.addEventListener('pointerdown', forget, true);",
+    "return () => window.removeEventListener('pointerdown', forget, true);", 'const release = (event: PointerEvent) => {', 'const activate = useCallback<Activate>(');
+});

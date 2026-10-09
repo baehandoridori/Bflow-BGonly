@@ -178,6 +178,16 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanP
     window.addEventListener('pointerdown', forget, true);
     return () => window.removeEventListener('pointerdown', forget, true);
   }, []);
+  // And so does a left press on this plan that never became a click here: dragged off the plan and released there (the
+  // click then goes to whatever holds both ends), or cancelled. It picked nothing. A click is released on the plan.
+  useEffect(() => {
+    const release = (event: PointerEvent) => {
+      if (event.type === 'pointercancel' || !(event.target instanceof Node) || !svgRef.current?.contains(event.target)) turn.current = null;
+    };
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
+    return () => { window.removeEventListener('pointerup', release, true); window.removeEventListener('pointercancel', release, true); };
+  }, []);
   const activate = useCallback<Activate>((id, cycle, point, repeat = false) => {
     const now = latest.current;
     // On a zoomed-out plan, items that overlap on screen count as one stack. Only the ones under the pointer take turns.
