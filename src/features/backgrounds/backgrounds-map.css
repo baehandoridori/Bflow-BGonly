@@ -46,14 +46,21 @@
 .bmap-divider { width:1px; background:rgb(var(--color-bg-border)); margin:3px; }
 .bmap-canvas { width:100%; height:0; flex:1; min-height:0; touch-action:none; user-select:none; }
 .bmap-canvas.tool-hand { cursor:grab; }
-.bmap-canvas.tool-rect,.bmap-canvas.tool-ellipse,.bmap-canvas.tool-polygon { cursor:crosshair; }
+.bmap-canvas.tool-rect,.bmap-canvas.tool-ellipse,.bmap-canvas.tool-polygon,.bmap-canvas.tool-road { cursor:crosshair; }
 .bmap-space { cursor:pointer; }
 .bmap-space>rect,.bmap-space>ellipse,.bmap-space>polygon { fill:rgb(var(--color-accent) / .10); stroke:rgb(var(--color-accent-sub) / .52); stroke-width:1.5; vector-effect:non-scaling-stroke; }
 .bmap-space:hover>rect,.bmap-space:hover>ellipse,.bmap-space:hover>polygon { fill:rgb(var(--color-accent) / .18); stroke:rgb(var(--color-accent-sub)); }
 .bmap-space.is-selected>rect,.bmap-space.is-selected>ellipse,.bmap-space.is-selected>polygon { fill:rgb(var(--color-accent) / .21); stroke:rgb(var(--color-accent-sub)); stroke-width:2.5; }
 .bmap-space.is-locked>rect,.bmap-space.is-locked>ellipse,.bmap-space.is-locked>polygon { stroke-dasharray:6 3; }
+/* A road: a grey floor. No width and no dashes here: the selected width and the dashes of a locked space come from the rules above. */
+.bmap-space.is-road>rect,.bmap-space.is-road>ellipse,.bmap-space.is-road>polygon { fill:rgb(var(--bmap-road) / .22); stroke:rgb(var(--bmap-road) / .6); }
+.bmap-space.is-road:hover>rect,.bmap-space.is-road:hover>ellipse,.bmap-space.is-road:hover>polygon { fill:rgb(var(--bmap-road) / .3); stroke:rgb(var(--bmap-road)); }
+.bmap-space.is-road.is-selected>rect,.bmap-space.is-road.is-selected>ellipse,.bmap-space.is-road.is-selected>polygon { fill:rgb(var(--bmap-road) / .34); stroke:rgb(var(--color-accent-sub)); }
+.bmap-road-line { fill:none; stroke:rgb(var(--bmap-road-mark) / .85); stroke-width:1.5; stroke-dasharray:9 7; vector-effect:non-scaling-stroke; pointer-events:none; }
 .bmap-space text { font-size:calc(15px * var(--bmap-label-scale,1)); fill:rgb(var(--color-text-primary)); font-weight:550; }
 .bmap-space text.bmap-space-detail { font-size:calc(10px * var(--bmap-label-scale,1)); fill:rgb(var(--color-text-secondary)); font-weight:400; transform:translateY(calc(15px * (var(--bmap-label-scale,1) - 1))); }
+/* The name of a road sits on its centre line. The outline behind the letters is scaled like the letters, so it hides the line at any zoom. */
+.bmap-space.is-road text { paint-order:stroke; stroke:rgb(var(--color-bg-primary)); stroke-width:calc(4px * var(--bmap-label-scale,1)); stroke-linejoin:round; }
 .bmap-handles circle,.bmap-handles rect { fill:rgb(var(--color-bg-card)); stroke:rgb(var(--color-accent-sub)); stroke-width:2; vector-effect:non-scaling-stroke; }
 .bmap-handles line { stroke:rgb(var(--color-accent-sub)); stroke-width:1; vector-effect:non-scaling-stroke; }
 .bmap-resize-handle { cursor:nwse-resize; }

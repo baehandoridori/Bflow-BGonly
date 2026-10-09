@@ -164,3 +164,49 @@ test('the road colours are variables of the map editor: the dark values are thos
   assert.deepEqual([MAP3D_DARK_PALETTE.road, MAP3D_DARK_PALETTE.roadMark], [0x9aa1ad, 0xe3e6ec]);
   assert.ok(dark[0].includes(`--bmap-road:${triple(MAP3D_DARK_PALETTE.road)};`) && dark[0].includes(`--bmap-road-mark:${triple(MAP3D_DARK_PALETTE.roadMark)};`));
 });
+
+/** The one rule of a stylesheet that starts with this selector and its opening brace. */
+const rule = (name: string, opening: string): string => {
+  const found = sheet(name).filter(line => line.startsWith(opening));
+  assert.equal(found.length, 1, `${name}: one rule starts with "${opening}"`);
+  return found[0];
+};
+
+test('the centre line of a road is a line in both stylesheets: never filled, and as thick on screen at any zoom', () => {
+  // A bent polyline is filled black by default: without the rule the inside of a bent road would be painted over.
+  for (const [name, opening] of [['backgrounds-map.css', '.bmap-road-line {'], ['backgrounds-map-plan.css', '.bmap-plan-road-line {']]) {
+    const line = rule(name, opening);
+    assert.ok(line.includes('fill:none'), line);
+    assert.ok(line.includes('vector-effect:non-scaling-stroke'), line);
+  }
+});
+
+test('the outline behind the name of a road is as thick as the name is large, so the centre line never strikes it through', () => {
+  // A fixed width is in map units: on a zoomed-out plan it thins away under a name that keeps its size on screen.
+  const name = rule('backgrounds-map.css', '.bmap-space.is-road text {');
+  assert.ok(name.includes('stroke-width:calc(4px * var(--bmap-label-scale,1))'), name);
+});
+
+test('on the companion plan the colours of a road give way to the keyboard focus', () => {
+  const plan = sheet('backgrounds-map-plan.css').join('\n');
+  const roadRule = plan.indexOf('.bmap-plan-space.is-road>polygon'), focusRule = plan.indexOf('.bmap-plan-node:focus-visible>polygon');
+  assert.ok(roadRule > -1, 'the road has a rule of its own');
+  assert.ok(focusRule > -1, 'the focus rule is there');
+  // The two are as specific as each other: the later one wins, and that must be the focus.
+  assert.ok(roadRule < focusRule, 'the road rule comes before the focus rule');
+  // A plain hover rule of the road would be more specific than the focus rule and take its outline away.
+  assert.ok(plan.includes('.bmap-plan-space.is-road:hover:not(:focus-visible)>polygon'), 'the hover rule of a road steps back from a focused one');
+  assert.ok(!plan.includes('.bmap-plan-space.is-road:hover>polygon'), 'no hover rule of a road without that exception');
+  // A focused road under the pointer has no hover rule of its own, so the hover rule of a room reaches it. That one is as
+  // specific as the road rule: the road rule comes after it, or such a road would be filled like a room.
+  const roomHover = plan.indexOf('.bmap-plan-space:hover>polygon');
+  assert.ok(roomHover > -1 && roomHover < roadRule, 'the road rule comes after the hover rule of a room');
+});
+
+test('on the plan a selected road keeps the selection colour under the pointer', () => {
+  const map = sheet('backgrounds-map.css').join('\n');
+  // Right after a road is picked the pointer is still over it. The two rules are as specific as each other: the later one wins.
+  const hover = map.indexOf('.bmap-space.is-road:hover>rect'), selected = map.indexOf('.bmap-space.is-road.is-selected>rect');
+  assert.ok(hover > -1 && selected > -1, 'a road has a hover rule and a selected rule of its own');
+  assert.ok(hover < selected, 'the selected rule comes after the hover rule');
+});

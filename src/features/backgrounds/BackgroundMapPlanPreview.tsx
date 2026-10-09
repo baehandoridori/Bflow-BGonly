@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import type { MapPlanPreviewProps } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types';
-import { MAP_PLAN_EXTENT, cameraAngles, cameraPitchLabel } from './mapSpatial';
+import { MAP_PLAN_EXTENT, cameraAngles, cameraPitchLabel, isRoadSpace, roadCentrePlanLine } from './mapSpatial';
 import {
   PLAN_FALLBACK_SIZE, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_VIEW,
   nextPlanSelection, planCameraGlyph, planCameraReadout, planNodeCovers, planNodeLabel, planNodeSummary, planOutlinePoints, planReadoutText,
@@ -43,9 +43,12 @@ function nodeButton(node: BackgroundNode, selected: boolean, onActivate: Activat
 const PlanShape = memo(function PlanShape({ node, scale, selected, onActivate }: NodeProps<BackgroundSpace | BackgroundSymbol>) {
   const points = planOutlinePoints(node);
   if (!points) return null;
-  return <g className={`bmap-plan-node bmap-plan-${node.type}${node.locked ? ' is-locked' : ''}`} {...nodeButton(node, selected, onActivate)}>
+  const road = node.type === 'space' && isRoadSpace(node), centre = node.type === 'space' ? roadCentrePlanLine(node) : null;
+  return <g className={`bmap-plan-node bmap-plan-${node.type}${road ? ' is-road' : ''}${node.locked ? ' is-locked' : ''}`} {...nodeButton(node, selected, onActivate)}>
     <title>{planNodeLabel(node)}</title>
     <polygon points={points} />
+    {/* The attribute keeps a bent line unfilled even where the style rule is missing. */}
+    {centre && <polyline className="bmap-plan-road-line" fill="none" points={pointList(centre)} />}
     {/* Small objects keep a target that can be hit on a small plan. */}
     {node.type === 'symbol' && <circle className="bmap-plan-hit" cx={fixed(node.x + node.width / 2)} cy={fixed(node.y + node.height / 2)} r={fixed(PLAN_MARK.dot * 1.6 * scale)} />}
   </g>;
@@ -228,7 +231,7 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanP
             {selectedGlyph?.fan && <p className="bmap-plan-note"><svg className="bmap-plan-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path className="bmap-plan-fan" d="M 2 8 L 13 3 A 12 12 0 0 1 13 13 Z" /></svg>부채꼴: 방향 참고</p>}
           </div>
           {selected?.type === 'camera' ? <CameraReadout map={map} camera={selected} />
-            : readout ? <div className="bmap-plan-readout is-volume" role="group" aria-label={selected?.type === 'space' ? '선택한 공간' : '선택한 기호'}><ReadoutText readout={readout} /></div>
+            : readout ? <div className="bmap-plan-readout is-volume" role="group" aria-label={selected?.type === 'space' ? (isRoadSpace(selected) ? '선택한 도로' : '선택한 공간') : '선택한 기호'}><ReadoutText readout={readout} /></div>
               : <div className="bmap-plan-readout is-empty"><p className="bmap-plan-hint">{PLAN_PREVIEW_HINT}</p></div>}
         </>}
       </div>

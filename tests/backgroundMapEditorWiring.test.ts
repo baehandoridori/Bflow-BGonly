@@ -399,9 +399,9 @@ test('anchor 26: the wheel button, the hand tool and a held Space move the view,
   assert.match(down, /if \(!panning && canEdit && !handle && tool === 'symbol'\) \{ placeSymbol\(point, live\); return; \}/);
   assert.equal(count(down, /setPolygon\(/g), 1, 'points are added nowhere else');
   assert.equal(count(down, /placeSymbol\(/g), 1, 'a symbol is placed nowhere else');
-  // Nor does the select tool decide anything, so the selection stays. The same goes for a press of any of the four
+  // Nor does the select tool decide anything, so the selection stays. The same goes for a press of any of the five
   // drawing tools while editing: left to the select tool, a click with one of them would pick, toggle or step.
-  assert.ok(down.includes("const drawing = canEdit && (tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || tool === 'symbol');"));
+  assert.ok(down.includes("const drawing = canEdit && (isDrawTool(tool) || tool === 'symbol');"));
   assert.match(down, /const plan = panning \|\| drawing \|\| handle \? null : resolvePlanPress\(/);
   // A press with Space held is no half of a double-click, like a press the plan did not log (Shift). The wheel button
   // and the hand tool are logged as before: the hand tool enters a linked space on a double-click.
