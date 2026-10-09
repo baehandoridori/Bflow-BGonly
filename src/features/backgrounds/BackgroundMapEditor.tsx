@@ -76,11 +76,15 @@ const normalizeAngle = (value: number) => ((value % 360) + 360) % 360;
 const uuid = () => crypto.randomUUID();
 const round = (value: number) => Math.round(value * 100) / 100;
 const isDrawTool = (tool: Tool) => tool === 'rect' || tool === 'ellipse' || tool === 'polygon';
-/** Where a key is text. Both selectors below are built on it, so a new kind of text field reaches both. */
+/** Where a key is text. The selectors below are built on it, so a new kind of text field reaches both. */
 const textFields = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 const interactive = `${textFields}, button`;
 /** Where a key is text, or belongs to an open dialog: the plan shortcuts leave it alone. */
 const textEntry = `${textFields}, dialog`;
+/** Inputs Space ticks and never types into. For the Space key they are controls, like a button. */
+const tickInputs = 'input:is([type="checkbox"], [type="radio"])';
+/** Where Space is text (it types, or opens the list of a select) or belongs to an open dialog: `textEntry` without the inputs Space only ticks. */
+const spaceEntry = `:is(${textEntry}):not(${tickInputs})`;
 const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔어요. 편집 내용은 그대로예요.';
 const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string }[] = [
   { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기' },
@@ -227,8 +231,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
    * the step its click took) left selected. A press that was dragged into a pan or a marquee leaves none.
    */
   const lastSpot = useRef<PlanSpot | null>(null);
-  /** Space is held for panning: what a press reads. */
+  /** Space is held for panning. The ref is what a press reads; the state only drives the cursor. */
   const spaceHeld = useRef(false);
+  const [spacePan, setSpacePan] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);                 // the root of the editor, `.bmap-layout`
   /** Orbit pose of the 3D viewport per map. UI state only: never history, never a render. */
   const viewStates = useRef<Record<string, Map3DViewState>>({});
   const focusNonce = useRef(0);
@@ -348,6 +354,32 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     window.addEventListener('keydown', key, true); window.addEventListener('keyup', key, true); window.addEventListener('blur', forget);
     return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('keyup', key, true); window.removeEventListener('blur', forget); };
   }, []);
+  /**
+   * Space held over the plan. Heard on the window, like the Alt above: a press moves the focus to the canvas, and the
+   * release must still be seen. A window that loses the focus (Alt+Tab) never gets that release.
+   */
+  const onSpaceKey = useEvent((event: KeyboardEvent) => {
+    if (event.code !== 'Space') return;
+    const hold = (held: boolean) => { if (spaceHeld.current !== held) { spaceHeld.current = held; setSpacePan(held); } };
+    if (event.type === 'keyup') { hold(false); return; }
+    const root = rootRef.current, element = event.target instanceof Element ? event.target : null;
+    // Tracking: Space is held for the plan wherever the focus is while the plan is on show. On the canvas, on nothing at all
+    // (the body), on a button or a checkbox, inside the editor or outside it (a tab of the library, its refresh button, the
+    // app's sidebar): the next press on the canvas pans.
+    if (mode !== 'plan' || !root || root.offsetParent === null || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+    // Never where Space is text or belongs to an open dialog.
+    if (element?.closest(spaceEntry)) return;
+    hold(true);
+    // Swallowing is the narrower matter: only where Space would scroll the page and is nobody's key, which is inside the
+    // editor off its controls, and on the body. A button, a checkbox, a disclosure and everything outside the editor keep
+    // their own Space.
+    if (element === document.body || (element && root.contains(element) && !element.closest(`${interactive}, summary`))) event.preventDefault();
+  });
+  useEffect(() => {
+    const release = () => { if (spaceHeld.current) { spaceHeld.current = false; setSpacePan(false); } };
+    window.addEventListener('keydown', onSpaceKey, true); window.addEventListener('keyup', onSpaceKey, true); window.addEventListener('blur', release);
+    return () => { window.removeEventListener('keydown', onSpaceKey, true); window.removeEventListener('keyup', onSpaceKey, true); window.removeEventListener('blur', release); };
+  }, [onSpaceKey]);
   // A press the canvas did not take can never be the first half of a double-click on a node.
   useEffect(() => {
     const forget = (event: PointerEvent) => {
@@ -876,21 +908,24 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const spaceName = (id: string | null) => current?.nodes.find(node => node.type === 'space' && node.id === id)?.name ?? '공간 미지정';
   // In 3D the two tools keep their names in view: picking placements and looking around are separate operations.
   const toolItems: { id: Tool; label: string; title: string; icon: ReactNode; named?: boolean }[] = mode === 'plan'
-    ? [{ id: 'select', label: '선택', title: '선택', icon: '↖' }, { id: 'hand', label: '이동', title: '이동', icon: '✥' },
+    ? [{ id: 'select', label: '선택', title: editing ? '선택: 눌러 고르고 끌어 옮기기 · 빈 곳을 끌어 여러 개 고르기' : '선택: 눌러 고르기 · 끌면 화면이 움직여요', icon: '↖' },
+      { id: 'hand', label: '화면 이동', title: '화면 이동: 끌어서 화면만 옮기기 · 스페이스를 누른 채 끌거나 휠 버튼으로 끌어도 돼요', icon: '✥' },
       ...(editing ? [{ id: 'rect' as const, label: '사각형', title: '사각형', icon: '▭' }, { id: 'ellipse' as const, label: '타원', title: '타원', icon: '◯' }, { id: 'polygon' as const, label: '다각형', title: '다각형', icon: '⬡' }] : [])]
     : [{ id: 'select', label: '선택', title: editing ? '선택: 클릭해 고르고 손잡이로 옮기기' : '선택: 클릭해 고르기', icon: '↖', named: true },
       { id: 'hand', label: '둘러보기', title: '둘러보기: 끌어서 돌려 보기만 하고 배치는 그대로 둬요', icon: <Orbit size={17} strokeWidth={1.8} aria-hidden="true" />, named: true }];
   const footerHint = tool === 'symbol' ? `${getSymbolPreset(symbolKind).label} 놓을 ${mode === 'plan' ? '곳' : '바닥'}을 클릭 · Esc 취소`
     : mode === 'plan' ? (tool === 'polygon' ? '점을 차례로 찍고 다각형 완성 · Esc 취소'
-      : vertexHandles ? '점을 끌어 모양 고치기 · +를 끌어 점 추가 · 점 고르고 Delete'
-        // A polygon picked for editing whose point handles are hidden: it is too small on screen for them.
-        : canEdit && tool === 'select' && selected?.type === 'space' && selected.shape === 'polygon' && !selected.locked ? '확대하면 점을 고칠 수 있어요 · 휠로 확대'
-          : editing ? '끌어 옮기기 · 모서리로 크기 · 원으로 회전 · 더블클릭 이름 · 휠 확대' : '클릭해서 선택 · 공간 더블클릭으로 상세 도면 열기 · 휠로 확대')
+      : tool === 'hand' ? '끌어서 화면 이동 · 휠로 확대 · 배치는 움직이지 않아요'
+        : vertexHandles ? '점을 끌어 모양 고치기 · +를 끌어 점 추가 · 점 고르고 Delete'
+          // A polygon picked for editing whose point handles are hidden: it is too small on screen for them.
+          : canEdit && tool === 'select' && selected?.type === 'space' && selected.shape === 'polygon' && !selected.locked ? '확대하면 점을 고칠 수 있어요 · 휠로 확대'
+            : editing && multiple ? '끌어 함께 옮기기 · Shift+클릭으로 더하고 빼기 · Delete 삭제 · 빈 곳 클릭으로 풀기'
+              : editing ? '끌어 옮기기 · 빈 곳 끌어 여러 개 선택 · Shift+클릭 추가 · 더블클릭 이름' : '클릭해 선택 · 끌어 화면 이동 · 공간 더블클릭으로 상세 도면 · 휠 확대')
       : tool === 'hand' ? '끌어서 둘러보기 · 휠로 확대 · 배치는 움직이지 않아요'
         : editing ? `클릭해 선택 · ${GIZMO_MODES.find(item => item.id === gizmoMode)!.hint} · 오른쪽 버튼으로 끌어 둘러보기 · 휠로 확대 · 공간 그리기는 평면에서`
           : '클릭해 선택 · 오른쪽 버튼으로 끌어 둘러보기 · 휠로 확대 · 공간 더블클릭으로 상세 도면 열기';
 
-  return <div className="bmap-layout" onKeyDown={keyboard} tabIndex={-1}>
+  return <div className="bmap-layout" ref={rootRef} onKeyDown={keyboard} tabIndex={-1}>
     <aside className="bmap-tree" aria-label="도면 트리">
       <div className="bmap-section-heading"><strong>도면</strong>{snapshot.canManage && <button type="button" className="bmap-new-root" disabled={disabled} onClick={() => openCreate(null)}>＋ 새 도면</button>}</div>
       <nav aria-label="도면 목록">{treeRows.filter(({ map }) => !mapPath(maps, map.id).slice(0, -1).some(parent => collapsed.has(parent.id))).map(({ map, depth }) => <div key={map.id} className={`bmap-tree-item ${map.id === current?.id ? 'is-active' : ''}`} style={{ paddingLeft: 6 + depth * 13 }}>
@@ -929,7 +964,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             </div>}
             {editing && <><span className="bmap-divider" /><button type="button" title="되돌리기 (Ctrl+Z)" aria-label="되돌리기" disabled={!draft?.past.length || disabled || gestureActive} onClick={() => undo()}>↶</button><button type="button" title="다시 실행 (Ctrl+Shift+Z)" aria-label="다시 실행" disabled={!draft?.future.length || disabled || gestureActive} onClick={() => undo(true)}>↷</button></>}
           </div>
-          {mode === 'plan' ? <svg ref={svgRef} className={`bmap-canvas tool-${tool}`} style={{ '--bmap-label-scale': labelScale } as CSSProperties} viewBox={`${view.x} ${view.y} ${1000 / view.zoom} ${680 / view.zoom}`} aria-label={`${current.name} 도면`} tabIndex={0} onPointerDown={event => pointerDown(event)} onPointerMove={pointerMove} onPointerUp={event => pointerUp(event)} onPointerCancel={event => pointerUp(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) pointerUp(event, true); }} onClick={event => {
+          {mode === 'plan' ? <svg ref={svgRef} className={`bmap-canvas tool-${tool}${spacePan && !gestureActive && !marquee ? ' is-space-pan' : ''}${panning ? ' is-panning' : ''}`} style={{ '--bmap-label-scale': labelScale } as CSSProperties} viewBox={`${view.x} ${view.y} ${1000 / view.zoom} ${680 / view.zoom}`} aria-label={`${current.name} 도면`} tabIndex={0} onPointerDown={event => pointerDown(event)} onPointerMove={pointerMove} onPointerUp={event => pointerUp(event)} onPointerCancel={event => pointerUp(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) pointerUp(event, true); }} onClick={event => {
             const cycle = pendingCycle.current; pendingCycle.current = null;
             // A repeated click (the second click of a double-click, and every one after it) never steps through spaces, whatever the
             // double-click does: only a click that starts a new click sequence does. Through cameras and symbols it steps unless
