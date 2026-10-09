@@ -450,6 +450,13 @@ test('the pile on a space is every space that holds the point, the smallest firs
   // The chair and the cameras that stand on these points are no part of it, whatever the tolerance and the cover test.
   assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }, 1000, () => true), ['closet', 'room', 'floor', 'site']);
   assert.deepEqual(planPileAt(map, 'room', { x: 450, y: 300 }, 1000, () => true), ['room', 'floor', 'site']);
+  // The cover test is about cameras and symbols. No space passes the one the plan uses, and every space that holds the point still takes its turn.
+  assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }, undefined, onMainPlan({ x: 340, y: 240 })), ['closet', 'room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(map, 'closet', { x: 340, y: 240 }, undefined, () => false), ['closet', 'room', 'floor', 'site']);
+  // A locked space keeps its place, under the pressed one or pressed itself: it cannot be dragged, but a click still steps on from it.
+  const locked = freeze(mapOf(map.nodes.map(node => node.id === 'room' ? { ...node, locked: true } : node)));
+  assert.deepEqual(planPileAt(locked, 'closet', { x: 340, y: 240 }), ['closet', 'room', 'floor', 'site']);
+  assert.deepEqual(planPileAt(locked, 'room', { x: 450, y: 300 }), ['room', 'floor', 'site']);
 });
 
 test('a pressed space that does not hold the point is a pile of its own', () => {
