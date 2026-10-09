@@ -485,6 +485,10 @@ test('select replaces the selection with one node, also when that node is the pr
   assert.equal(viewOf(cleared).selectedIds, viewOf(fresh).selectedIds, 'every empty selection is the one shared list');
   // The same selection again is the same state.
   assert.equal(run(folded, selectOne('b')), folded); assert.equal(run(cleared, selectOne(null)), cleared); assert.equal(run(fresh, selectOne(null)), fresh);
+  // No early return on null either: a group whose single views were emptied (a pick-one of null) is still emptied.
+  const none = run(group, pickOne(null)), emptied = run(none, selectOne(null));
+  assert.equal(viewOf(none).selectedId, null); assert.deepEqual(viewOf(none).selectedIds, ['a', 'b']);
+  assert.deepEqual(viewOf(emptied).selectedIds, []); assert.equal(viewOf(emptied).selectedId, null);
 });
 
 test('select-many replaces the selection with the list, without duplicates and in picked order', () => {
@@ -507,6 +511,10 @@ test('select-many replaces the selection with the list, without duplicates and i
   // A pan and a zoom carry the very same list along, so a reader keyed on it does not recompute.
   const panned = run(state, { type: 'set-viewport', mapId: A, viewport: { x: 40, y: -10 } }, { type: 'set-viewport', mapId: A, viewport: { zoom: 2 } });
   assert.notEqual(viewOf(panned), viewOf(state)); assert.equal(viewOf(panned).selectedIds, list); assert.equal(viewOf(panned).selectedId, 'c');
+  // And a selection leaves the pan and the zoom of the plan view where they are.
+  const placed = run(createMapDocument(), { type: 'set-viewport', mapId: A, viewport: { x: 30, y: -20, zoom: 2 } });
+  assert.deepEqual(viewOf(run(placed, selectMany(['a', 'b']))), { x: 30, y: -20, zoom: 2, selectedId: 'b', selectedIds: ['a', 'b'] });
+  assert.deepEqual(viewOf(run(placed, selectOne('a'))), { x: 30, y: -20, zoom: 2, selectedId: 'a', selectedIds: ['a'] });
 });
 
 test('no action adds to or removes from the stored selection', () => {
@@ -546,6 +554,9 @@ test('pick-one moves the node of the single views and leaves the selection as it
   // A move of the plan view carries the picked node along with the list.
   const panned = run(picked, { type: 'set-viewport', mapId: A, viewport: { x: 40, zoom: 2 } });
   assert.equal(viewOf(panned).selectedId, 'x'); assert.equal(viewOf(panned).selectedIds, list);
+  // The pick itself leaves the pan and the zoom where they are.
+  const placed = run(createMapDocument(), { type: 'set-viewport', mapId: A, viewport: { x: 30, y: -20, zoom: 2 } });
+  assert.deepEqual(viewOf(run(placed, selectMany(['a', 'b']), pickOne('x'))), { x: 30, y: -20, zoom: 2, selectedId: 'x', selectedIds: ['a', 'b'] });
 });
 
 test('a selection action returns the node of the single views to the primary', () => {
@@ -640,6 +651,11 @@ test('a changed selection ends a field edit and the same selection keeps it', ()
     assert.equal(run(group, action).coalescing, null);
   const single = typing(run(opened(), selectOne('a')));
   assert.equal(run(single, selectOne('a')), single); assert.equal(run(single, selectMany(['a'])), single);
+  // The same list while the single views are off its primary is a change too: returning them ends the field edit.
+  const off = typing(run(opened(), selectMany(['a', 'b']), pickOne('x')));
+  assert.deepEqual(off.coalescing, { mapId: A, key });
+  const back = run(off, selectMany(['a', 'b']));
+  assert.equal(viewOf(back).selectedId, 'b'); assert.equal(back.coalescing, null);
 });
 
 test('a selection is no part of the edit: it leaves the drafts alone and no edit action touches it', () => {
