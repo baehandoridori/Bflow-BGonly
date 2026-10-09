@@ -8,7 +8,7 @@ import { build } from 'esbuild';
 import { Object3D, PerspectiveCamera, Raycaster, Texture, TextureLoader, Vector3 } from 'three';
 import type { BufferGeometry, Material, Mesh } from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
 import type { MapPickHit } from '../src/features/backgrounds/map3dScene.ts';
 import { MAP_GIZMO_COLORS, MAP_GIZMO_SHAPE, mapGizmoSize, MapNodeGizmo, mapGizmoSetup, previewMapFromRoot, rootWorldPose, styleMapGizmo } from '../src/features/backgrounds/BackgroundMapCameraGizmo.ts';
 import type { Map3DProps, Map3DViewState } from '../src/features/backgrounds/mapCanvas.ts';
@@ -496,6 +496,207 @@ test('cameras created on the same default spot can each be selected by clicking 
   assert.deepEqual(new Set(sideways().map(hit => hit.object.userData.nodeId)), new Set([a.id, b.id, glass.id]));
   assert.deepEqual([a.id, b.id].map(selected => resolveMapClick(seen, selected, sideways())), [b.id, a.id]);
   side.dispose();
+});
+
+test('the floors under a ray take turns as a click picks them: the nearest level first, and on one level the smaller space first', () => {
+  const small = space(1, { x: 400, y: 260, width: 160, height: 140 }), middle = space(2, { x: 300, y: 200, width: 400, height: 280 });
+  const big = space(3, { x: 100, y: 80, width: 800, height: 520 }), tiny = space(4, { x: 420, y: 280, width: 40, height: 40 });
+  const hit = (nodeId: string, pickPart: string, distance: number, nodeKind = 'space'): MapPickHit => ({ distance, object: { userData: { nodeId, nodeKind, pickPart } } });
+  const top = (hits: MapPickHit[], map: BackgroundMap) => pickMapFloor(hits, map)?.object.userData.nodeId;
+  // Three floors on one level: the smallest first, whatever the order of the hits and of the map.
+  const level = [hit(big.id, 'floor', 80), hit(small.id, 'floor', 80.00000002), hit(middle.id, 'floor', 80.00000001)];
+  for (const nodes of [[small, middle, big], [big, middle, small], [middle, big, small]]) for (const hits of [level, [...level].reverse(), [level[1], level[0], level[2]]]) {
+    const map = mapOf(nodes);
+    assert.deepEqual(mapFloorPile(hits, map), [small.id, middle.id, big.id]);
+    assert.equal(mapFloorPile(hits, map)[0], top(hits, map));
+  }
+  // Two spaces of one area: the later in the map is on top.
+  const twinA = space(7, { x: 0, y: 0, width: 100, height: 100 }), twinB = space(8, { x: 50, y: 50, width: 100, height: 100 });
+  const twins = [hit(twinA.id, 'floor', 80), hit(twinB.id, 'floor', 80.00000001)];
+  assert.deepEqual(mapFloorPile(twins, mapOf([twinA, twinB])), [twinB.id, twinA.id]);
+  assert.deepEqual(mapFloorPile(twins, mapOf([twinB, twinA])), [twinA.id, twinB.id]);
+  // Two levels: the nearer floor first, however large it is.
+  const all = mapOf([small, middle, big, tiny]);
+  for (const hits of [[hit(big.id, 'floor', 50), hit(small.id, 'floor', 80)], [hit(small.id, 'floor', 80), hit(big.id, 'floor', 50)]]) {
+    assert.deepEqual(mapFloorPile(hits, all), [big.id, small.id]);
+    assert.equal(top(hits, all), big.id);
+  }
+  assert.deepEqual(mapFloorPile([hit(small.id, 'floor', 50), hit(big.id, 'floor', 80)], all), [small.id, big.id]);
+  assert.deepEqual(mapFloorPile([hit(big.id, 'floor', 80), hit(small.id, 'floor', 81)], all), [big.id, small.id], 'a floor clearly behind is another level');
+  // Two floors on each of two levels: level by level, and within each as the plan stacks them.
+  const storeys = [hit(big.id, 'floor', 80), hit(middle.id, 'floor', 50.00000001), hit(tiny.id, 'floor', 80.00000001), hit(small.id, 'floor', 50)];
+  assert.deepEqual(mapFloorPile(storeys, all), [small.id, middle.id, tiny.id, big.id]);
+  assert.equal(mapFloorPile(storeys, all)[0], top(storeys, all));
+  // Only floors take part: no wall, no object or camera, and no hit without a distance.
+  assert.deepEqual(mapFloorPile([hit(small.id, 'wall', 5), hit(id(12), 'solid', 8, 'symbol'), hit(id(20), 'floor', 9, 'camera'), hit(middle.id, 'floor', Number.NaN), hit(big.id, 'floor', 80)], all), [big.id]);
+  assert.deepEqual(mapFloorPile([hit(small.id, 'wall', 5), hit(big.id, 'wall', 9)], all), []);
+  assert.deepEqual(mapFloorPile([], all), []);
+  // A floor that is no space of the map stays behind the ones that are, as in pickMapFloor.
+  const stray = [hit(id(99), 'floor', 80), hit(big.id, 'floor', 80.00000001)];
+  assert.deepEqual(mapFloorPile(stray, all), [big.id, id(99)]);
+  assert.equal(top(stray, all), big.id);
+  // The hits are left as they came.
+  const before = storeys.map(item => item.distance);
+  mapFloorPile(storeys, all);
+  assert.deepEqual(storeys.map(item => item.distance), before);
+});
+
+test('a selected space steps on to the floor under it only when the same spot is clicked again, and a repeated click leaves it selected', () => {
+  const aim = (viewer: PerspectiveCamera, x: number, y: number, z: number): [[number, number, number], [number, number, number]] => {
+    const origin = viewer.position, target = new Vector3(x, y, z).sub(origin);
+    return [[origin.x, origin.y, origin.z], [target.x, target.y, target.z]];
+  };
+  const floorIds = (hits: MapPickHit[]) => new Set(hits.filter(hit => hit.object.userData.pickPart === 'floor').map(hit => hit.object.userData.nodeId));
+  const partsOf = (hits: MapPickHit[], nodeId: string) => new Set(hits.filter(hit => hit.object.userData.nodeId === nodeId).map(hit => hit.object.userData.pickPart));
+  const outer = space(3, { x: 100, y: 80, width: 800, height: 520 }), inner = space(4, { x: 400, y: 260, width: 160, height: 140, shape: 'ellipse' });
+
+  // An oval room inside a larger one, seen from above. The order in the map changes nothing.
+  for (const nested of [mapOf([outer, inner]), mapOf([inner, outer])]) {
+    const scene = new Map3DScene();
+    scene.sync(nested, null);
+    const views = [cast(scene, [480, 900, 330], [0, -1, 0]), cast(scene, ...aim(viewerFor(topDownMapView(nested, 1.6), 1.6), 470, 0, 320)), cast(scene, ...aim(viewerFor(fitMapView(nested, 1.6), 1.6), 480, 0, 330))];
+    for (const onInner of views) {
+      assert.deepEqual(floorIds(onInner), new Set([outer.id, inner.id]));
+      assert.deepEqual(mapFloorPile(onInner, nested), [inner.id, outer.id]);
+      assert.equal(mapFloorPile(onInner, nested)[0], pickMapFloor(onInner, nested)?.object.userData.nodeId);
+      const click = (selectedId: string | null, again?: boolean, repeat?: boolean) => resolveMapClick(nested, selectedId, onInner, again, repeat);
+      // The same spot again: on to the floor under it, and from the bottom round to the top.
+      assert.equal(click(null, true), inner.id);
+      assert.equal(click(inner.id, true), outer.id);
+      assert.equal(click(outer.id, true), inner.id);
+      // A first click takes the room on top, whichever of the two is selected.
+      assert.equal(click(inner.id, false), inner.id);
+      assert.equal(click(outer.id, false), inner.id);
+      // Without `again` nothing has changed: a space never steps.
+      assert.equal(click(inner.id), inner.id);
+      assert.equal(click(outer.id), inner.id);
+      // A repeated click on the same spot neither steps on nor goes back to the room on top.
+      assert.equal(click(inner.id, true, true), inner.id, 'not on to the outer room');
+      assert.equal(click(outer.id, true, true), outer.id, 'not round to the inner room');
+      // A repeated click that is no second click on the spot is a first click.
+      assert.equal(click(outer.id, false, true), inner.id);
+      assert.equal(click(inner.id, false, true), inner.id);
+      assert.equal(click(null, false, true), inner.id);
+      assert.equal(click(null, true, true), inner.id);
+      // What the click is aimed at: the selected room when it steps on from it, else the room it picks.
+      const aimed = (selectedId: string | null, again?: boolean) => mapClickAim(nested, selectedId, onInner, again);
+      assert.equal(aimed(inner.id, true), inner.id, 'stepping on to the outer room');
+      assert.equal(aimed(outer.id, true), outer.id, 'stepping round to the inner room');
+      assert.equal(aimed(outer.id, false), inner.id, 'a first click on the inner room is aimed at it');
+      assert.equal(aimed(outer.id), inner.id);
+      assert.equal(aimed(inner.id, false), inner.id);
+      assert.equal(aimed(null, true), inner.id);
+      assert.equal(aimed(id(99), true), inner.id, 'a selection that is not on the map');
+    }
+    // Where only the outer room lies there is nothing to step on to.
+    const onOuter = cast(scene, [200, 900, 150], [0, -1, 0]);
+    assert.deepEqual(mapFloorPile(onOuter, nested), [outer.id]);
+    for (const again of [false, true]) {
+      assert.equal(resolveMapClick(nested, outer.id, onOuter, again), outer.id, `again ${again}`);
+      assert.equal(resolveMapClick(nested, inner.id, onOuter, again), outer.id, `again ${again}`);
+      assert.equal(mapClickAim(nested, outer.id, onOuter, again), outer.id, `again ${again}`);
+      assert.equal(mapClickAim(nested, inner.id, onOuter, again), outer.id, `again ${again}`);
+      assert.equal(resolveMapClick(nested, inner.id, cast(scene, [950, 900, 650], [0, -1, 0]), again), null, 'beside the map');
+      assert.equal(mapClickAim(nested, inner.id, cast(scene, [950, 900, 650], [0, -1, 0]), again), null, 'beside the map');
+    }
+    assert.equal(resolveMapClick(nested, outer.id, onOuter, true, true), outer.id);
+    // The selected room is hit on its wall only, in front of the outer floor: the click picks what it lands on.
+    const pastInner = cast(scene, [480, 300, 800], [0, -300, 230 - 800]);
+    assert.deepEqual(partsOf(pastInner, inner.id), new Set(['wall']));
+    assert.deepEqual(mapFloorPile(pastInner, nested), [outer.id]);
+    for (const again of [false, true]) {
+      assert.equal(resolveMapClick(nested, inner.id, pastInner, again), outer.id, `again ${again}`);
+      assert.equal(mapClickAim(nested, inner.id, pastInner, again), outer.id, `again ${again}`);
+    }
+
+    // A chair on both floors: it is picked, and a click on it never steps on to a room.
+    const chair = symbol(12, 'chair', { x: 450, y: 300 }), seated = mapOf([...nested.nodes, chair]);
+    scene.sync(seated, null);
+    const onChair = cast(scene, [480, 900, 330], [0, -1, 0]);
+    assert.deepEqual(mapFloorPile(onChair, seated), [inner.id, outer.id]);
+    for (const again of [false, true]) for (const selected of [inner.id, outer.id, null]) {
+      assert.equal(resolveMapClick(seated, selected, onChair, again), chair.id, `again ${again}`);
+      assert.equal(mapClickAim(seated, selected, onChair, again), chair.id, `again ${again}`);
+    }
+    // Beside the chair the rooms take turns as before.
+    const besideChair = cast(scene, [530, 900, 330], [0, -1, 0]);
+    assert.equal(resolveMapClick(seated, inner.id, besideChair, true), outer.id);
+    assert.equal(resolveMapClick(seated, chair.id, besideChair, true), inner.id, 'coming from the chair is a plain pick');
+
+    // A room in front of the two, crossed by the ray at wall height only: it is no part of the pile under the pointer.
+    const front = space(5, { x: 300, y: 640, width: 400, height: 100 }), street = mapOf([...nested.nodes, front]);
+    scene.sync(street, null);
+    const through = cast(scene, [480, 300, 1100], [0, -300, 330 - 1100]);
+    assert.deepEqual(partsOf(through, front.id), new Set(['wall']));
+    assert.deepEqual(mapFloorPile(through, street), [inner.id, outer.id]);
+    for (const again of [false, true]) {
+      assert.equal(resolveMapClick(street, front.id, through, again), inner.id, `again ${again}`);
+      assert.equal(mapClickAim(street, front.id, through, again), inner.id, `again ${again}`);
+    }
+    assert.equal(resolveMapClick(street, inner.id, through, true), outer.id, 'the two under the pointer still take turns');
+    scene.dispose();
+  }
+
+  // Three rooms inside one another: one step at a time, down and round.
+  const middle = space(5, { x: 300, y: 200, width: 400, height: 280 });
+  for (const three of [mapOf([inner, middle, outer]), mapOf([outer, inner, middle]), mapOf([middle, outer, inner])]) {
+    const scene = new Map3DScene();
+    scene.sync(three, null);
+    const hits = cast(scene, [480, 900, 330], [0, -1, 0]);
+    assert.deepEqual(mapFloorPile(hits, three), [inner.id, middle.id, outer.id]);
+    assert.deepEqual([inner.id, middle.id, outer.id].map(selected => resolveMapClick(three, selected, hits, true)), [middle.id, outer.id, inner.id]);
+    // The middle one selected: a first click takes the smallest, the same spot again the largest, and a repeated click leaves it.
+    assert.equal(resolveMapClick(three, middle.id, hits, false), inner.id);
+    assert.equal(resolveMapClick(three, middle.id, hits, true), outer.id);
+    assert.equal(resolveMapClick(three, middle.id, hits, true, true), middle.id, 'neither on to the largest nor back to the smallest');
+    assert.equal(resolveMapClick(three, middle.id, hits, false, true), inner.id);
+    assert.equal(mapClickAim(three, middle.id, hits, true), middle.id);
+    assert.equal(mapClickAim(three, middle.id, hits, false), inner.id);
+    // Beside the smallest room the other two take turns, and the smallest is no part of it.
+    const beside = cast(scene, [350, 900, 230], [0, -1, 0]);
+    assert.deepEqual(mapFloorPile(beside, three), [middle.id, outer.id]);
+    assert.deepEqual([middle.id, outer.id, inner.id].map(selected => resolveMapClick(three, selected, beside, true)), [outer.id, middle.id, middle.id]);
+    scene.dispose();
+  }
+
+  // A floor above another one: the nearer floor first, however large it is.
+  const loft = space(6, { x: 300, y: 200, width: 400, height: 280, elevation: 200 }), ground = space(7, { x: 400, y: 260, width: 160, height: 140 });
+  for (const levels of [mapOf([loft, ground]), mapOf([ground, loft])]) {
+    const tower = new Map3DScene();
+    tower.sync(levels, null);
+    const down = cast(tower, [480, 900, 330], [0, -1, 0]);
+    assert.deepEqual(mapFloorPile(down, levels), [loft.id, ground.id]);
+    assert.equal(pickMapFloor(down, levels)?.object.userData.nodeId, loft.id);
+    assert.equal(resolveMapClick(levels, null, down, true), loft.id);
+    assert.equal(resolveMapClick(levels, loft.id, down, true), ground.id);
+    assert.equal(resolveMapClick(levels, ground.id, down, true), loft.id);
+    assert.equal(resolveMapClick(levels, ground.id, down, false), loft.id);
+    assert.equal(resolveMapClick(levels, ground.id, down, true, true), ground.id);
+    tower.dispose();
+  }
+
+  // Three cameras on one spot over two rooms: they step on every click, whatever `again` and `repeat` say, and never down to a room.
+  let crowded = mapOf([outer, space(8, { x: 300, y: 200, width: 400, height: 300 })]);
+  const cameras: BackgroundCamera[] = [];
+  for (const index of [50, 51, 52]) {
+    const added = addMapCamera(crowded, id(index));
+    crowded = added.map; cameras.push(added.camera);
+  }
+  const pile = new Map3DScene();
+  pile.sync(crowded, null);
+  const onCameras = cast(pile, [495, 800, 340], [0, -1, 0]);
+  assert.deepEqual(mapFloorPile(onCameras, crowded), [id(8), outer.id]);
+  for (const again of [false, true]) for (const repeat of [false, true]) {
+    assert.equal(resolveMapClick(crowded, cameras[1].id, onCameras, again, repeat), cameras[2].id, `again ${again} repeat ${repeat}`);
+    assert.equal(resolveMapClick(crowded, cameras[2].id, onCameras, again, repeat), cameras[0].id, `again ${again} repeat ${repeat}`);
+  }
+  for (const again of [false, true]) {
+    assert.equal(mapClickAim(crowded, cameras[1].id, onCameras, again), cameras[1].id, `again ${again}`);
+    // A room selected under the cameras: the click picks a camera.
+    assert.ok(cameras.some(item => item.id === resolveMapClick(crowded, id(8), onCameras, again)), `again ${again}`);
+    assert.ok(cameras.some(item => item.id === mapClickAim(crowded, id(8), onCameras, again)), `again ${again}`);
+  }
+  pile.dispose();
 });
 
 test('syncing again reuses unchanged nodes and only moves the ones that moved', () => {

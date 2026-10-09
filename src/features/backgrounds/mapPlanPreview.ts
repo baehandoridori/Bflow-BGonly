@@ -151,8 +151,19 @@ export function planPileAt(map: BackgroundMap, hitId: string, point: BackgroundP
 /**
  * Selection after a click on `hitId`. When the current selection already sits in the same stack,
  * the click moves on to the next item, so cameras created on the same spot can each be picked.
+ * A clicked space is taken as it is, unless the same spot is clicked again (`again`, with the clicked `point`): then the
+ * click moves on to the space under the selected one, and a repeated click of its click sequence (`repeat`) leaves that one selected.
  */
-export function nextPlanSelection(map: BackgroundMap, hitId: string, selectedId: string | null, tolerance?: number, covers?: (node: BackgroundNode) => boolean): string {
+export function nextPlanSelection(map: BackgroundMap, hitId: string, selectedId: string | null, tolerance?: number, covers?: (node: BackgroundNode) => boolean, point?: BackgroundPoint, again = false, repeat = false): string {
+  if (map.nodes.find(node => node.id === hitId)?.type === 'space') {
+    // A space has a pile only on the same spot again: a first click takes the pressed one, which is on top there.
+    if (!point || !again) return hitId;
+    const pile = planPileAt(map, hitId, point, tolerance, covers);
+    if (selectedId === null || !pile.includes(selectedId)) return hitId;
+    // A repeated click neither steps on nor goes back to the top one.
+    if (repeat) return selectedId;
+    return pile[(pile.indexOf(selectedId) + 1) % pile.length];
+  }
   const stack = planStackUnder(map, hitId, tolerance, covers), at = selectedId === null ? -1 : stack.indexOf(selectedId);
   return at < 0 || stack.length < 2 ? hitId : stack[(at + 1) % stack.length];
 }
