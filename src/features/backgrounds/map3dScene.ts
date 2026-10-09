@@ -9,6 +9,7 @@ import type { Map3DViewState } from './mapCanvas.ts';
 import { MAP_PLAN_EXTENT, MAP_SPATIAL_DEFAULTS, cameraAspect, mapPlanBounds, nodeElevation, nodeVolumeHeight, nodeWorldPose, spaceOutline, verticalFov } from './mapSpatial.ts';
 import type { Vec3 } from './mapSpatial.ts';
 import { stackedMapNodeIds } from './mapGeometry.ts';
+import { spaceStackRanks } from './mapStack.ts';
 import { getSymbolPreset } from './symbolCatalog.ts';
 
 /**
@@ -591,14 +592,15 @@ function hitNode(hit: MapPickHit): { id: string; kind: NodeKind; part: unknown }
 }
 /**
  * The space floor a ray lands on: the nearest one. Floors on one level (a room drawn inside another)
- * are told apart as the plan stacks them: the space later in the map is on top.
+ * are told apart as the plan stacks them: the smaller space is on top.
  */
 export function pickMapFloor(hits: readonly MapPickHit[], map?: BackgroundMap): MapPickHit | null {
   let nearest: MapPickHit | null = null;
   const floors = hits.filter(hit => { const node = hitNode(hit); return node?.kind === 'space' && node.part === 'floor'; });
   for (const hit of floors) if (!nearest || hit.distance < nearest.distance) nearest = hit;
   if (!nearest || !map) return nearest;
-  const level = nearest.distance + 1e-6 * Math.max(1, nearest.distance), order = (hit: MapPickHit) => map.nodes.findIndex(node => node.id === hit.object.userData.nodeId);
+  const ranks = spaceStackRanks(map);
+  const level = nearest.distance + 1e-6 * Math.max(1, nearest.distance), order = (hit: MapPickHit) => ranks.get(String(hit.object.userData.nodeId)) ?? -1;
   let top = nearest, topOrder = order(nearest);
   for (const hit of floors) {
     const at = hit.distance <= level ? order(hit) : -1;

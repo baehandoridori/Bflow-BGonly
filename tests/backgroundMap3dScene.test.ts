@@ -337,10 +337,10 @@ test('the floor under the pointer decides the space: a room behind another one, 
   assert.equal(pickMapFloor(wallOnly, rooms), null);
   scene.dispose();
 
-  // A room drawn inside a larger one on the same level: the floors tie, and the later space is on top as on the plan.
+  // A room drawn inside a larger one on the same level: the floors tie, and the smaller space is on top, whatever the order in the map.
   const outer = space(3, { x: 100, y: 80, width: 800, height: 520 }), inner = space(4, { x: 400, y: 260, width: 160, height: 140, shape: 'ellipse' });
   for (const nested of [mapOf([outer, inner]), mapOf([inner, outer])]) {
-    const stacked = new Map3DScene(), top = nested.nodes[1], viewers = [viewerFor(fitMapView(nested, 1.6), 1.6), viewerFor(topDownMapView(nested, 1.6), 1.6)];
+    const stacked = new Map3DScene(), top = inner, viewers = [viewerFor(fitMapView(nested, 1.6), 1.6), viewerFor(topDownMapView(nested, 1.6), 1.6)];
     stacked.sync(nested, null);
     for (const viewer of viewers) for (let ix = 0; ix < 5; ix++) for (let iz = 0; iz < 5; iz++) {
       const hits = cast(stacked, ...aim(viewer, 450 + ix * 15, 0, 300 + iz * 15));
@@ -364,8 +364,12 @@ test('the floor under the pointer decides the space: a room behind another one, 
   // The rule itself.
   const hit = (nodeId: string, pickPart: string, distance: number): MapPickHit => ({ distance, object: { userData: { nodeId, nodeKind: 'space', pickPart } } });
   assert.equal(pickMapNode([hit(outer.id, 'wall', 5), hit(inner.id, 'floor', 80)]), inner.id, 'a floor beats a nearer wall');
-  assert.equal(pickMapNode([hit(outer.id, 'floor', 80), hit(inner.id, 'floor', 80.00000001)], mapOf([inner, outer])), outer.id);
+  assert.equal(pickMapNode([hit(outer.id, 'floor', 80), hit(inner.id, 'floor', 80.00000001)], mapOf([inner, outer])), inner.id);
   assert.equal(pickMapNode([hit(outer.id, 'floor', 80), hit(inner.id, 'floor', 80.00000001)], mapOf([outer, inner])), inner.id);
+  // Two spaces of one area: the later in the map is on top.
+  const twinA = space(7, { x: 0, y: 0, width: 100, height: 100 }), twinB = space(8, { x: 50, y: 50, width: 100, height: 100 });
+  assert.equal(pickMapNode([hit(twinA.id, 'floor', 80), hit(twinB.id, 'floor', 80.00000001)], mapOf([twinA, twinB])), twinB.id);
+  assert.equal(pickMapNode([hit(twinA.id, 'floor', 80), hit(twinB.id, 'floor', 80.00000001)], mapOf([twinB, twinA])), twinA.id);
   assert.equal(pickMapNode([hit(outer.id, 'floor', 80), hit(inner.id, 'floor', 81)], mapOf([outer, inner])), outer.id, 'a floor clearly behind does not take over');
   assert.equal(pickMapNode([hit(inner.id, 'floor', 80.00000001), hit(outer.id, 'floor', 80)]), outer.id, 'without a map the nearest floor wins');
 });
@@ -1613,7 +1617,7 @@ test('viewport: a click and a double click take the room whose floor is under th
   const classroom = space(1, { name: '교실', x: 100, y: 100, width: 400, height: 260, childMapId: id(901) });
   const corridor = space(2, { name: '복도', x: 100, y: 420, width: 300, height: 120, childMapId: id(902) });
   const nook = space(3, { name: '안쪽 방', x: 300, y: 150, width: 120, height: 100, childMapId: id(903) });
-  const editor = await mountViewport({ map: mapOf([classroom, corridor, nook]), canEdit: false });
+  const editor = await mountViewport({ map: mapOf([nook, classroom, corridor]), canEdit: false });
   for (const [x, z] of [[200, 330], [250, 280], [150, 240], [460, 340]]) {
     editor.click(editor.at(x, 0, z));
     assert.equal(editor.state.selectedId, classroom.id, `classroom floor ${x},${z}`);

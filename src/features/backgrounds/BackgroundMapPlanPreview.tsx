@@ -9,6 +9,7 @@ import {
   planSelectedNode, planSideView, planUnitsPerPixel, planViewBox, planVolumeReadout,
 } from './mapPlanPreview';
 import type { PlanCameraGlyph, PlanReadout, PlanSize } from './mapPlanPreview';
+import { stackedSpaces } from './mapStack';
 import './backgrounds-map-plan.css';
 
 /** `point` is where a click landed on the plan; a keyboard pick has none and takes exactly its node. */
@@ -185,7 +186,7 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanP
             <svg className="bmap-plan-svg" viewBox={`${fixed(viewBox.x)} ${fixed(viewBox.y)} ${fixed(viewBox.width)} ${fixed(viewBox.height)}`} role="group" aria-label={`${map.name} 평면 보기`} onClick={() => onSelect(null)}>
               <rect className="bmap-plan-extent" x="0" y="0" width={MAP_PLAN_EXTENT.width} height={MAP_PLAN_EXTENT.height} />
               {map.imageUrl && <image className="bmap-plan-underlay" href={map.imageUrl} x="0" y="0" width={MAP_PLAN_EXTENT.width} height={MAP_PLAN_EXTENT.height} preserveAspectRatio="xMidYMid meet" />}
-              {map.nodes.map(node => node.type === 'space' && <PlanShape key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
+              {stackedSpaces(map).map(node => <PlanShape key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
               {map.nodes.map(node => node.type === 'symbol' && <PlanShape key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
               {map.nodes.map(node => node.type === 'camera' && <PlanCamera key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
               {/* The selection is redrawn on top without moving the buttons, so keyboard order and focus stay put. */}
