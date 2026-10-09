@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { randomUUID,createHash } from 'node:crypto';
-import { BACKGROUND_SPATIAL_LIMITS } from '../src/features/backgrounds/domain.ts';
+import { BACKGROUND_CAMERA_COLORS, BACKGROUND_SPACE_SURFACES, BACKGROUND_SPATIAL_LIMITS, BACKGROUND_SYMBOL_KINDS } from '../src/features/backgrounds/domain.ts';
 import { mapSaveWasApplied } from '../src/features/backgrounds/mapWorkflow.ts';
 import { addMapCamera, applyNodeWorldPose } from '../src/features/backgrounds/mapGeometry.ts';
-import { cameraOrientation, nodeOrientation } from '../src/features/backgrounds/mapSpatial.ts';
+import { SYMBOL_VOLUME_HEIGHTS, cameraOrientation, nodeOrientation } from '../src/features/backgrounds/mapSpatial.ts';
 
 const migration=(name:string)=>readFileSync(new URL(`../DEVLOG/migrations/${name}`,import.meta.url),'utf8');
 // The 3D file replaces one function of the base file, so every run applies them in this order.
-const sql=migration('2026-09-21-background-library.sql'),sql3d=migration('2026-10-07-background-map-3d.sql');
+const sql=migration('2026-09-21-background-library.sql'),sql3d=migration('2026-10-07-background-map-3d.sql'),sqlElements=migration('2026-10-09-background-map-elements.sql');
 const runtime=process.env.BFLOW_PGLITE_MODULE;
 const id=()=>randomUUID();
 const place=(name='교실',parentId:string|null=null)=>({id:id(),revision:0,name,parentId,folderPath:''});
@@ -72,6 +72,67 @@ test('3D migration header tells the operator to apply it again after every run o
   // The base file is re-runnable and restores its own narrower validator; see the base-after-3D runtime test below.
   assert.match(sql3d,/^-- Re-run this file after every run of 2026-09-21-background-library\.sql/m);
   assert.ok(sql3d.indexOf('-- Re-run this file after every run')<sql3d.indexOf('BEGIN;'));
+});
+
+test('요소 파일은 검증 함수 하나만 바꿔 넣고, 기본값을 넣지 않고, 잠금을 다시 돈다',()=>{
+  const body=code(sqlElements);
+  assert.match(sqlElements,/^-- Prerequisites: 2026-09-21-background-library\.sql, then 2026-10-07-background-map-3d\.sql/m);
+  assert.match(body,/^BEGIN;\r?\nSET LOCAL lock_timeout = '5s';\r?\nSET LOCAL statement_timeout = '45s';/m);assert.match(body,/^COMMIT;\s*$/m);
+  assert.deepEqual(body.match(/CREATE OR REPLACE FUNCTION public\.\w+/g),['CREATE OR REPLACE FUNCTION public.background_library_validate_entity']);
+  // Refuses to run without the base file, and on the base validator: the applied chain stays base -> 3D -> this file.
+  assert.match(body,/to_regprocedure\('public\.background_library_validate_entity\(text,jsonb\)'\) IS NULL/);
+  assert.match(body,/position\('n-spatial' IN body\)=0/);assert.equal(body.match(/ERRCODE='55000'/g)?.length,2);
+  assert.match(body,/RETURNS VOID LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp/);
+  assert.doesNotMatch(body,/jsonb_set|jsonb_insert|jsonb_build_object|jsonb_strip_nulls|COALESCE|\|\||DEFAULT|\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE TABLE)\b/i);
+  assert.match(body,/REVOKE ALL PRIVILEGES ON FUNCTION %s FROM PUBLIC/);assert.match(body,/REVOKE ALL PRIVILEGES ON FUNCTION %s FROM %I/);
+  assert.match(body,/GRANT EXECUTE ON FUNCTION public\.background_library_read\(text\),public\.background_library_execute\(text,text,jsonb\) TO %I/);
+  assert.match(body,/^NOTIFY pgrst, 'reload schema';/m);
+});
+
+test('요소 파일은 3D 검증 함수의 모든 규칙을 글자 그대로 두고 정확히 셋을 더한다',()=>{
+  const base=entityValidator(sql3d),next=entityValidator(sqlElements);
+  const widened=base.map(line=>line
+    .replace("WHEN 'space' THEN ARRAY['elevation','volumeHeight']","WHEN 'space' THEN ARRAY['elevation','volumeHeight','surface']")
+    .replace("WHEN 'camera' THEN ARRAY['elevation','pitch','roll','aspect']","WHEN 'camera' THEN ARRAY['elevation','pitch','roll','aspect','color']")
+    .replace("'plant','custom')","'plant','custom','stairs')"));
+  assert.equal(widened.filter((line,index)=>line!==base[index]).length,3);
+  assert.deepEqual(next.filter(line=>widened.includes(line)),widened);
+  // The added lines are pinned whole: "passes when the key is absent" is the part a room without the key depends on.
+  const list = (names: readonly string[]) => names.map(name => `'${name}'`).join(',');
+  const added=next.filter(line=>!widened.includes(line));
+  assert.deepEqual(added,[
+    `    PERFORM public.background_library_require(NOT (n ? 'surface') OR n->>'surface' IN (${list(BACKGROUND_SPACE_SURFACES)}),'공간 종류가 올바르지 않습니다.');`,
+    `    PERFORM public.background_library_require(NOT (n ? 'color') OR n->>'color' IN (${list(BACKGROUND_CAMERA_COLORS)}),'카메라 색이 올바르지 않습니다.');`,
+  ]);
+  assert.equal(next.filter(line=>line.endsWith(`n->>'symbol' IN (${list(BACKGROUND_SYMBOL_KINDS)}),'사물 기호 또는 연결 공간이 올바르지 않습니다.');`)).length,1);
+  const after=(marker:string)=>{const at=next.findIndex(line=>line.includes(marker));assert.ok(at>=0,marker);return at+1;};
+  assert.equal(next.indexOf(added[0]),after("'공간의 바닥 높이 또는 입체 높이가 올바르지 않습니다.'"));
+  assert.equal(next.indexOf(added[1]),after("'카메라 높이, 위아래 각도, 기울기 또는 화면 비율이 올바르지 않습니다.'"));
+});
+
+test('SQL의 닫힌 목록은 앱이 검증에 쓰는 상수와 같다',()=>{
+  const body=code(sqlElements);
+  const names=(pattern:RegExp)=>{const found=[...body.matchAll(pattern)];assert.equal(found.length,1,String(pattern));return [...found[0][1].matchAll(/'([^']*)'/g)].map(match=>match[1]);};
+  assert.deepEqual(names(/n->>'symbol' IN \(([^)]*)\)/g),[...BACKGROUND_SYMBOL_KINDS]);
+  assert.deepEqual(names(/n->>'surface' IN \(([^)]*)\)/g),[...BACKGROUND_SPACE_SURFACES]);
+  const colors=names(/n->>'color' IN \(([^)]*)\)/g);
+  assert.deepEqual(colors,[...BACKGROUND_CAMERA_COLORS]);
+  for(const name of ['purple','amber'])assert.equal(colors.includes(name),false,name);
+  // Every kind of the type is in the list: the heights table is keyed by the type.
+  assert.deepEqual(Object.keys(SYMBOL_VOLUME_HEIGHTS).sort(),[...BACKGROUND_SYMBOL_KINDS].sort());
+});
+
+test('적용된 두 파일의 본문은 그대로다',()=>{
+  // Production holds these bodies (function md5 was compared there); only the comment lines above BEGIN; may change.
+  const applied:Record<string,string>={
+    '2026-09-21-background-library.sql':'9fae1b53f02379bf98af1a25f1cff04576d69d9fc59d7486da49b6cc6c4fd5eb',
+    '2026-10-07-background-map-3d.sql':'2e785dc4fe674136d620c0fd236b460572de7f782ca481bd8888e9ce15fc23b3',
+  };
+  for(const [name,expected] of Object.entries(applied)){
+    // A fresh checkout is CRLF: without the two guards the marker is missed and slice(0) hashes the header as well.
+    const text = migration(name).replace(/\r\n/g, '\n'); const at = text.indexOf('\nBEGIN;\n'); assert.ok(at >= 0); const hash = createHash('sha256').update(text.slice(at + 1)).digest('hex');
+    assert.equal(hash,expected,name);
+  }
 });
 
 test('background migration exposes only session RPCs and stores entities separately with durable tombstones',()=>{
