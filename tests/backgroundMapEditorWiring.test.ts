@@ -244,3 +244,26 @@ test('anchor 19: a press that starts a drag changes nothing laid out above the c
 test('anchor 20: the polygon tool stops at the number of points a space can store', () => {
   inOrder(handler.pointerDown(), 'setPolygon(previous => {', 'if (previous.length >= POLYGON_POINT_LIMIT) return previous;', 'const last = previous[previous.length - 1];');
 });
+
+// Numbered past 21-35, which the selection tools add in their last step: this one guards the lines none of those read.
+test('anchor 36: the image grid, the look-through, the picked point and the object list follow the selection as the editor reads it, never the raw viewport', () => {
+  // The image grid is scoped to the one node the single-node tools work on: with a group on the plan, the whole map.
+  assert.match(editor, /const settledSelected = settledCurrent\?\.nodes\.find\(node => node\.id === selected\?\.id\);/);
+  // Looking through a camera ends when the node the 3D view works on is another one: the comparison, and what the effect waits for.
+  assert.match(editor, /setLookThrough\(previous => previous && mode === '3d' && previous\.mapId === current\?\.id && previous\.id === singleId \? previous : null\);\s*\}, \[singleId, current\?\.id, mode\]\);/);
+  // The picked point belongs to that one node too.
+  assert.match(editor, /useEffect\(\(\) => setActiveVertex\(null\), \[selected\?\.id, current\?\.id, mode, canEdit\]\);/);
+  // The object list marks the whole group on the plan and, in 3D, only the node the 3D view marks.
+  inOrder(piece(editor, 'const listSelection = useMemo(', 'useEffect('), 'const group = mapSelection(settledCurrent, view.selectedIds);',
+    "if (mode === 'plan') return group;", 'const id = singleViewId(settledCurrent, group, view.selectedId);',
+    'return id === null ? mapSelection(undefined, group.ids) : { ids: [id], primaryId: id };',
+    '}, [settledCurrent, view.selectedIds, view.selectedId, mode]);');
+  assert.match(editor, /<ObjectList nodes=\{settledCurrent\?\.nodes \?\? current\.nodes\} selectedIds=\{listSelection\.ids\} primaryId=\{listSelection\.primaryId\} onSelect=\{selectNode\} \/>/);
+  // Every selected row is marked; the primary alone is the current one.
+  assert.match(piece(editor, 'const ObjectList = memo(function ObjectList(', 'export function BackgroundMapEditor('),
+    /className=\{selectedIds\.includes\(node\.id\) \? 'is-selected' : ''\} aria-current=\{node\.id === primaryId \? 'true' : undefined\}/);
+  // The `select` of the document is called from nowhere: in 3D it would fold the group that pickAction keeps.
+  const sources = readdirSync(directory).filter(name => /\.tsx?$/.test(name));
+  assert.ok(sources.includes('BackgroundMapEditor.tsx') && sources.includes('useBackgroundMapDocument.ts'), 'the sources were listed');
+  for (const name of sources) assert.doesNotMatch(read(name), /\bdoc\.select\(/, `${name} calls doc.select`);
+});
