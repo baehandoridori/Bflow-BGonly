@@ -144,23 +144,37 @@ test('SQL의 닫힌 목록은 앱이 검증에 쓰는 상수와 같다',()=>{
 
 test('세 파일의 머리말과 운영 문서가 사슬 전체를 말하고, 옛 두 파일 규칙이 남아 있지 않다',()=>{
   const elements='2026-10-09-background-map-elements.sql';
-  const header=(text:string)=>{const at=text.indexOf('BEGIN;');assert.ok(at>=0);return text.slice(0,at);};
+  // The header ends at the statement line, as for the body hash below: a comment that mentions BEGIN; does not end it.
+  const header=(text:string)=>{const at=text.search(/^BEGIN;\r?$/m);assert.ok(at>=0);return text.slice(0,at);};
   const doc=(name:string)=>readFileSync(new URL(`../${name}`,import.meta.url),'utf8').split(/\r?\n/);
   assert.match(header(sqlElements),/^-- Chain: base -> 3D -> this file\./m);
   assert.match(header(sqlElements),/^-- Re-run this file after every run of either of them/m);
   assert.ok(header(sql).includes(elements));assert.equal(header(sql).includes('run the 3D file again'),false);
+  // The base file undoes the most when run alone, so its header is held to what it must say, not only to what it must not.
+  assert.match(header(sql),/^-- after EVERY run of this file run both again, in that order/m);
   assert.match(header(sql3d),/^-- After this file, run 2026-10-09-background-map-elements\.sql again as well/m);
+  // Under a narrower validator, deleting the map that carries the newer shapes makes the 22023 go away and cannot be undone.
+  assert.match(header(sql),/Do not delete or\r?\n-- strip such a map to get past the error: apply the chain again\./);
+  assert.match(header(sql3d),/Do not get past the error that way \(a deleted map cannot be\r?\n-- brought back\): apply the chain again\./);
+  assert.match(header(sqlElements),/do not get round the error that way \(a deleted map cannot be brought back\), apply\r?\n-- the chain again\./);
   // "Re-run the 3D file after the base file" is a wrong instruction now: followed, it leaves the 3D validator in place.
+  // Per line, and these lines are whole paragraphs: a correct sentence that shares its line with 다시 실행 and one of
+  // the two phrases fails here as well. Reword that sentence; the check is the design's (4.4, D4).
   for(const name of ['CLAUDE.md','AGENTS.md']){
     const lines=doc(name);assert.ok(lines.length>1,name);
     assert.deepEqual(lines.filter(line=>line.includes('다시 실행')&&(line.includes('3D 파일도')||line.includes('이 SQL도'))),[],name);
   }
   // Pinned only where later rounds append: the notice on line 3 of both documents is rewritten when the screen opens to the team.
-  assert.ok(doc('AGENTS.md').some(line=>line.includes('background_library_validate_entity')&&line.includes(elements)&&line.includes('그 뒤의 파일을 모두 순서대로 다시 실행한다')));
+  const agents=doc('AGENTS.md');
+  assert.ok(agents.some(line=>['background_library_validate_entity',elements,'그 뒤의 파일을 모두 순서대로 다시 실행한다','그렇게 풀지 않는다','사슬을 다시 적용한다'].every(words=>line.includes(words))));
+  // A new install applies the whole chain, not the base file. The count word is left open for the round that adds a file.
+  assert.ok(agents.some(line=>line.includes('새 설치는 위의')&&line.includes('파일을 그 순서로 적용한다')));
   // The handoff keeps the two-file decision as history, so each line that states it is corrected on the same line.
   const handoff=doc('DEVLOG/background-3d-opus-handoff-2026-10-07.md');
   const rerun=handoff.filter(line=>line.includes('3D SQL도 다시 실행한다')),noted=handoff.filter(line=>line.includes('3D SQL 재실행'));
   assert.equal(rerun.length,1);assert.ok(rerun[0].includes(elements));
+  // The file name alone corrects nothing: the line that keeps the old sentence states the rule that replaced it.
+  assert.ok(rerun[0].includes('앞 파일을 다시 실행하면 그 뒤 파일을 모두 순서대로 다시 실행한다'));
   assert.ok(noted.length>=1);for(const line of noted)assert.ok(line.includes(elements),line);
 });
 
