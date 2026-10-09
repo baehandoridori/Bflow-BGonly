@@ -6,6 +6,7 @@ import { addMapCamera, applyNodeWorldPose, stackedMapNodeIds } from '../src/feat
 import { nodeLocalPoint, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpaceTo } from '../src/features/backgrounds/mapGeometry.ts';
 import { nodeNameAnchor, renameMapNode } from '../src/features/backgrounds/mapGeometry.ts';
 import { insertPolygonVertex, movePolygonVertex, polygonFromWorldPoints, rectToPolygon, removePolygonVertex } from '../src/features/backgrounds/mapGeometry.ts';
+import { lockMapNodes, moveMapNodes, removeMapNodes } from '../src/features/backgrounds/mapGeometry.ts';
 import { cameraOrientation, nodeOrientation, nodePlanOutline, nodeWorldPose } from '../src/features/backgrounds/mapSpatial.ts';
 import { validateBackgroundEntity } from '../src/features/backgrounds/domain.ts';
 
@@ -894,4 +895,120 @@ test('a rectangle becomes a four-point polygon with the very same outline', () =
   assert.deepEqual(rectToPolygon({ ...linked, points: [xy(0.2, 0.3)] })!.points, [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)]);
   // Only an unlocked rectangle is converted.
   for (const other of [{ ...linked, shape: 'ellipse' as const }, triangle, kite, { ...linked, locked: true }]) assert.equal(rectToPolygon(other), null, `${other.shape} ${other.locked}`);
+});
+
+// --- Several nodes at once ---------------------------------------------------------------------
+const groupRoom = (id: string, x: number, y: number, width: number, height: number, locked = false): BackgroundSpace =>
+  ({ ...plainRoom, id, x, y, width, height, locked });
+const groupSeat = (id: string, x: number, y: number, size: number, spaceId: string | null, locked = false): BackgroundSymbol =>
+  ({ ...symbol, id, symbol: 'chair', spaceId, x, y, width: size, height: size, rotation: 0, locked });
+const roomA = groupRoom('A', 100, 100, 144.65, 80), roomB = groupRoom('B', 300.4, 120.3, 60, 40), lockedRoom = groupRoom('LS', 600, 300, 100, 100, true);
+/** In room B: a chair and a camera it carries, and a locked chair it leaves behind. */
+const chairB = groupSeat('chairB', 310, 130, 20, 'B'), lockedB = groupSeat('lockedB', 330, 130, 20, 'B', true);
+const camB: BackgroundCamera = { ...memberCamera, id: 'camB', x: 320, y: 140, spaceId: 'B' };
+/** In no room, and an unlocked chair in the locked room. */
+const freeSeat = groupSeat('free', 400.5, 200.25, 30, null), memberOfLocked = groupSeat('mLS', 620, 320, 20, 'LS');
+const crowd: BackgroundMap = { ...map, nodes: [roomA, roomB, chairB, lockedB, freeSeat, camB, lockedRoom, memberOfLocked] };
+const nodeOf = (source: BackgroundMap, id: string) => source.nodes.find(node => node.id === id)!;
+const stands = (source: BackgroundMap, id: string, x: number, y: number) => {
+  const node = nodeOf(source, id);
+  tight(node.x, x, `${id} x`); tight(node.y, y, `${id} y`);
+  // Nothing but the position differs from the node as it was.
+  assert.deepEqual({ ...node, x: 0, y: 0 }, { ...nodeOf(crowd, id), x: 0, y: 0 }, id);
+};
+
+test('several nodes move in one step: locked ones stay, and a member is carried by its space once', () => {
+  const frozen = JSON.stringify(crowd), ids = ['B', 'chairB', 'free', 'LS', 'mLS', 'lockedB'], delta = { x: 10, y: -5 };
+  const moved = moveMapNodes(crowd, ids, delta);
+  stands(moved, 'B', 310.4, 115.3);
+  // Listed and carried by its room: it goes once, not twice.
+  stands(moved, 'chairB', 320, 125);
+  // Not listed, and carried all the same.
+  stands(moved, 'camB', 330, 135);
+  stands(moved, 'free', 410.5, 195.25);
+  // Its room is locked and stays, so this listed member moves on its own.
+  stands(moved, 'mLS', 630, 315);
+  for (const id of ['LS', 'lockedB', 'A']) assert.equal(nodeOf(moved, id), nodeOf(crowd, id), id);
+  assert.deepEqual(moved.nodes.map(node => node.id), crowd.nodes.map(node => node.id));
+  assert.deepEqual({ ...moved, nodes: [] }, { ...crowd, nodes: [] });
+  // The order of the list does not enter the result, and neither does an id that is listed twice.
+  assert.deepEqual(moveMapNodes(crowd, [...ids].reverse(), delta), moved);
+  assert.deepEqual(moveMapNodes(crowd, [...ids, ...ids], delta), moved);
+
+  // One id is the move of that node.
+  assert.deepEqual(moveMapNodes(crowd, ['B'], delta), moveMapNode(crowd, 'B', delta));
+  assert.deepEqual(moveMapNodes(crowd, ['free'], delta), moveMapNode(crowd, 'free', delta));
+  assert.deepEqual(moveMapNodes(crowd, ['chairB'], delta), moveMapNode(crowd, 'chairB', delta));
+  // Nothing that can move: the map itself.
+  assert.equal(moveMapNodes(crowd, ['LS', 'lockedB', 'missing'], delta), crowd);
+  assert.equal(moveMapNodes(crowd, [], delta), crowd);
+  assert.equal(JSON.stringify(crowd), frozen);
+});
+
+test('an anchored group move stores the very position given for the anchor, and the rest go by the delta', () => {
+  const frozen = JSON.stringify(crowd), ids = ['B', 'chairB', 'free', 'LS', 'mLS', 'lockedB'], delta = { x: 10, y: -5 };
+  const position = { x: 244.65, y: 113 };
+  const placed = moveMapNodes(crowd, ids, delta, { id: 'B', position });
+  assert.equal(nodeOf(placed, 'B').x, 244.65); assert.equal(nodeOf(placed, 'B').y, 113);
+  assert.deepEqual(nodeOf(placed, 'B'), { ...roomB, ...position });
+  // Its members go where the placed room takes them.
+  const carried = placeMapNode(crowd, 'B', position);
+  for (const id of ['chairB', 'camB']) assert.deepEqual(nodeOf(placed, id), nodeOf(carried, id), id);
+  stands(placed, 'chairB', 254.25, 122.7); stands(placed, 'camB', 264.25, 132.7);
+  // Everything else that moves goes by the delta.
+  stands(placed, 'free', 410.5, 195.25); stands(placed, 'mLS', 630, 315);
+  for (const id of ['LS', 'lockedB', 'A']) assert.equal(nodeOf(placed, id), nodeOf(crowd, id), id);
+
+  // A node that is no space is placed the same way.
+  const seated = moveMapNodes(crowd, ids, delta, { id: 'free', position: { x: 344.75, y: 119 } });
+  assert.deepEqual(nodeOf(seated, 'free'), { ...freeSeat, x: 344.75, y: 119 });
+  stands(seated, 'B', 310.4, 115.3); stands(seated, 'chairB', 320, 125);
+  // An anchor that does not move by itself changes nothing: a member its room carries, a locked node, one that is not listed.
+  for (const id of ['chairB', 'LS', 'lockedB', 'A', 'missing']) assert.deepEqual(moveMapNodes(crowd, ids, delta, { id, position }), moveMapNodes(crowd, ids, delta), id);
+  assert.equal(moveMapNodes(crowd, ['LS', 'lockedB'], delta, { id: 'LS', position }), crowd);
+  assert.equal(JSON.stringify(crowd), frozen);
+});
+
+test('several nodes are removed in one step: locked ones stay, and what a removed space leaves behind is detached', () => {
+  const frozen = JSON.stringify(crowd), left = ['A', 'chairB', 'lockedB', 'camB', 'LS', 'mLS'];
+  const removed = removeMapNodes(crowd, ['B', 'free']);
+  assert.deepEqual(removed.nodes.map(node => node.id), left);
+  for (const id of ['chairB', 'lockedB', 'camB']) assert.deepEqual(nodeOf(removed, id), { ...nodeOf(crowd, id), spaceId: null }, id);
+  // Its own room is still there.
+  assert.equal(nodeOf(removed, 'mLS'), memberOfLocked); assert.equal(nodeOf(removed, 'A'), roomA);
+  assert.deepEqual(removed, removeMapNode(removeMapNode(crowd, 'B'), 'free'));
+  assert.deepEqual(removeMapNodes(crowd, ['free', 'B']), removed);
+  // A room and one of its members together.
+  assert.deepEqual(removeMapNodes(crowd, ['B', 'chairB']), removeMapNode(removeMapNode(crowd, 'B'), 'chairB'));
+  // Unknown ids alone: the map itself.
+  assert.equal(removeMapNodes(crowd, ['missing', 'gone']), crowd); assert.equal(removeMapNodes(crowd, []), crowd);
+
+  // Locked nodes stay: of these four only the unlocked room and the free chair go.
+  const kept = removeMapNodes(crowd, ['B', 'lockedB', 'LS', 'free']);
+  assert.deepEqual(kept.nodes.map(node => node.id), left);
+  // The locked chair stays, but the room it was in is gone.
+  assert.deepEqual(nodeOf(kept, 'lockedB'), { ...lockedB, spaceId: null });
+  assert.equal(nodeOf(kept, 'LS'), lockedRoom); assert.equal(nodeOf(kept, 'mLS'), memberOfLocked);
+  assert.equal(removeMapNodes(crowd, ['LS', 'lockedB']), crowd);
+  assert.equal(JSON.stringify(crowd), frozen);
+});
+
+test('locking several nodes changes only those whose lock differs', () => {
+  const frozen = JSON.stringify(crowd), ids = ['B', 'lockedB', 'free', 'LS', 'missing'];
+  const locked = lockMapNodes(crowd, ids, true);
+  for (const id of ['B', 'lockedB', 'free', 'LS']) assert.equal(nodeOf(locked, id).locked, true, id);
+  // Position, size and membership are as they were.
+  for (const id of ['B', 'free']) assert.deepEqual(nodeOf(locked, id), { ...nodeOf(crowd, id), locked: true }, id);
+  // Already locked: the very objects. So is every node that is not listed, the members of a locked room too.
+  for (const id of ['lockedB', 'LS', 'A', 'chairB', 'camB', 'mLS']) assert.equal(nodeOf(locked, id), nodeOf(crowd, id), id);
+  assert.deepEqual(locked.nodes.map(node => node.id), crowd.nodes.map(node => node.id));
+  assert.deepEqual({ ...locked, nodes: [] }, { ...crowd, nodes: [] });
+
+  const freed = lockMapNodes(crowd, ids, false);
+  for (const id of ['lockedB', 'LS']) assert.deepEqual(nodeOf(freed, id), { ...nodeOf(crowd, id), locked: false }, id);
+  for (const id of ['B', 'free', 'A', 'chairB', 'camB', 'mLS']) assert.equal(nodeOf(freed, id), nodeOf(crowd, id), id);
+  // Nothing differs: the map itself.
+  assert.equal(lockMapNodes(crowd, ['lockedB', 'LS', 'missing'], true), crowd); assert.equal(lockMapNodes(crowd, ['A', 'B', 'free'], false), crowd);
+  assert.equal(lockMapNodes(crowd, [], true), crowd); assert.equal(lockMapNodes(locked, ids, true), locked);
+  assert.equal(JSON.stringify(crowd), frozen);
 });

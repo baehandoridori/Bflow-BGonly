@@ -1,11 +1,13 @@
 import type { BackgroundMap, BackgroundPoint, BackgroundSpace } from './types.ts';
-import { insertPolygonVertex, moveMapNode, movePolygonVertex, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpace, resizeSpaceTo, transformMapSpace } from './mapGeometry.ts';
+import { insertPolygonVertex, moveMapNode, moveMapNodes, movePolygonVertex, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpace, resizeSpaceTo, transformMapSpace } from './mapGeometry.ts';
 import { nodePlanOutline, normalizeDegrees } from './mapSpatial.ts';
 import { collectSnapCandidates, snapMove, snapPoint, snapResize, snapRotation, snapTravellingIds, withVertexNeighbours } from './mapSnap.ts';
 import type { SnapCandidates, SnapGuide } from './mapSnap.ts';
 
 export type PlanGesture =
   | { mode: 'move' | 'resize' | 'rotate'; nodeId: string }
+  /** Several selected nodes moved as one. `nodeId` is the pressed one. */
+  | { mode: 'move-group'; nodeId: string; ids: readonly string[] }
   | { mode: 'draw'; node: BackgroundSpace }
   /** A point of a polygon, or with `insert` the new point pulled out of the edge from `index` to the next point. */
   | { mode: 'vertex'; nodeId: string; index: number; insert: boolean };
@@ -32,6 +34,17 @@ function vertexHandle(gesture: Extract<PlanGesture, { mode: 'vertex' }>, initial
     : { space, base: point, beside: [outline[(index + count - 1) % count], next] };
 }
 
+/**
+ * The node a group move is measured from: the pressed one, or the moving space that carries it, since the stored
+ * position of a carried member cannot be set by itself. Pressed on a node that does not move, the first that does.
+ */
+function groupAnchorId(initial: BackgroundMap, moving: readonly string[], pressedId: string): string {
+  if (!moving.includes(pressedId)) return moving[0];
+  const pressed = initial.nodes.find(node => node.id === pressedId);
+  const carrier = pressed && pressed.type !== 'space' ? initial.nodes.find(node => node.type === 'space' && node.id === pressed.spaceId) : undefined;
+  return carrier && moving.includes(carrier.id) ? carrier.id : pressedId;
+}
+
 /** Snap targets of one gesture, from the map as it was at the press. */
 export function planGestureCandidates(gesture: PlanGesture, initial: BackgroundMap): SnapCandidates {
   // Drawing is not snapped, and a turn is caught by its stops alone: neither uses a line.
@@ -40,6 +53,11 @@ export function planGestureCandidates(gesture: PlanGesture, initial: BackgroundM
   // No edge or centre line of another node and no border of the plan, or it would catch on every chair in the room.
   if (gesture.mode === 'vertex') return withVertexNeighbours(
     { x: [], y: [], points: collectSnapCandidates(initial, new Set([gesture.nodeId])).points }, vertexHandle(gesture, initial)?.beside ?? []);
+  // Everything but what moves of the group and what travels with it. A locked node of the group stays, so it is a target.
+  if (gesture.mode === 'move-group') {
+    const moving = initial.nodes.filter(node => gesture.ids.includes(node.id) && !node.locked).map(node => node.id);
+    return collectSnapCandidates(initial, snapTravellingIds(initial, moving));
+  }
   // Everything but the node and what travels with it. What is near is told apart at each pointer position.
   return collectSnapCandidates(initial, snapTravellingIds(initial, [gesture.nodeId]));
 }
@@ -67,6 +85,16 @@ export function previewPlanGesture(gesture: PlanGesture, initial: BackgroundMap,
     const shaped = gesture.insert ? insertPolygonVertex(handle.space, gesture.index, target) : movePolygonVertex(handle.space, gesture.index, target);
     // Only the space is swapped: its members stay where they are, which the whole-space transform would not do.
     return shaped && { map: replaceMapNode(initial, shaped), guides: stuck ? stuck.guides : [] };
+  }
+  if (gesture.mode === 'move-group') {
+    // What moves of the group: on the map and not locked, in map order.
+    const moving = initial.nodes.filter(node => gesture.ids.includes(node.id) && !node.locked).map(node => node.id);
+    if (!moving.length) return { map: initial, guides: [] };
+    const anchorId = groupAnchorId(initial, moving, gesture.nodeId);
+    // One snap for the whole group: the rest go as far as the anchor did, so they stay as far apart as they were.
+    const stuck = snap && snapMove(initial, moving, anchorId, delta, snap.candidates, snap.tolerance, snap.reach);
+    return stuck ? { map: moveMapNodes(initial, moving, stuck.delta, { id: anchorId, position: stuck.position }), guides: stuck.guides }
+      : { map: moveMapNodes(initial, moving, delta), guides: [] };
   }
   const node = initial.nodes.find(item => item.id === gesture.nodeId);
   if (!node) return null;

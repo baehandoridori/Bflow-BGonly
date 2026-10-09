@@ -97,6 +97,25 @@ export function placeMapNode(map: BackgroundMap, id: string, position: Backgroun
 }
 
 /**
+ * Moves several nodes by one delta in one step. Locked nodes stay. A space carries its unlocked members as in
+ * moveMapNode, and a listed node that such a space carries is not moved a second time. With `anchor`, that node's
+ * stored x/y become exactly `anchor.position` instead. Returns `map` itself when nothing moves.
+ */
+export function moveMapNodes(map: BackgroundMap, ids: readonly string[], delta: BackgroundPoint,
+  anchor?: { id: string; position: BackgroundPoint }): BackgroundMap {
+  const moving = map.nodes.filter(node => ids.includes(node.id) && !node.locked);
+  if (!moving.length) return map;
+  const place = (node: BackgroundNode): BackgroundPoint => anchor?.id === node.id
+    ? { x: anchor.position.x, y: anchor.position.y } : { x: node.x + delta.x, y: node.y + delta.y };
+  const carrying = new Set<string>();
+  let next = map;
+  for (const node of moving) if (node.type === 'space') { next = transformMapSpace(next, { ...node, ...place(node) }); carrying.add(node.id); }
+  // What a moving space carries has gone with it, listed or not: only the rest is moved here.
+  const alone = new Set(moving.filter(node => node.type !== 'space' && !(node.spaceId !== null && carrying.has(node.spaceId))).map(node => node.id));
+  return alone.size ? { ...next, nodes: next.nodes.map(node => alone.has(node.id) ? { ...node, ...place(node) } : node) } : next;
+}
+
+/**
  * The map with the node renamed to the trimmed name. Blank or unchanged names, unknown and locked nodes return `map` itself.
  * Unchanged is judged between the trimmed names: a stored name can carry outer whitespace (the inspector keeps what was typed),
  * and a name box nothing was typed into hands that name back.
@@ -114,6 +133,23 @@ export function nodeNameAnchor(node: BackgroundNode): BackgroundPoint {
 
 export function removeMapNode(map: BackgroundMap, id: string): BackgroundMap {
   return { ...map, nodes: map.nodes.filter(node => node.id !== id).map(node => node.type !== 'space' && node.spaceId === id ? { ...node, spaceId: null } : node) };
+}
+
+/**
+ * Removes the listed nodes in one step. Locked nodes stay, as in moveMapNodes. Members of a removed space that stay
+ * are detached from it, as in removeMapNode. Returns `map` itself when nothing is removed.
+ */
+export function removeMapNodes(map: BackgroundMap, ids: readonly string[]): BackgroundMap {
+  const removed = new Set(map.nodes.filter(node => ids.includes(node.id) && !node.locked).map(node => node.id));
+  if (!removed.size) return map;
+  return { ...map, nodes: map.nodes.filter(node => !removed.has(node.id))
+    .map(node => node.type !== 'space' && node.spaceId !== null && removed.has(node.spaceId) ? { ...node, spaceId: null } : node) };
+}
+
+/** Sets the lock of every listed node that differs. Returns `map` itself when nothing changes. */
+export function lockMapNodes(map: BackgroundMap, ids: readonly string[], locked: boolean): BackgroundMap {
+  const differs = (node: BackgroundNode) => node.locked !== locked && ids.includes(node.id);
+  return map.nodes.some(differs) ? { ...map, nodes: map.nodes.map(node => differs(node) ? { ...node, locked } : node) } : map;
 }
 
 /** The area an outline encloses, whichever way round its points run. */

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planGestureCandidates, previewPlanGesture } from '../src/features/backgrounds/mapPlanGesture.ts';
 import type { PlanGesture, PlanGestureSnap } from '../src/features/backgrounds/mapPlanGesture.ts';
-import { moveMapNode, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpace, transformMapSpace } from '../src/features/backgrounds/mapGeometry.ts';
+import { moveMapNode, moveMapNodes, nodeResizeCorner, placeMapNode, replaceMapNode, resizeSpace, transformMapSpace } from '../src/features/backgrounds/mapGeometry.ts';
 import { collectSnapCandidates, snapTravellingIds } from '../src/features/backgrounds/mapSnap.ts';
 import { nodePlanOutline } from '../src/features/backgrounds/mapSpatial.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
@@ -650,4 +650,161 @@ test('a point collects the two points beside it and the corners of the other spa
   // Locked members stay behind in a move, but a point never sticks to them.
   const bolted = replaceMapNode(initial, { ...bench, locked: true });
   assert.deepEqual(planGestureCandidates(corner(1), bolted), planGestureCandidates(corner(1), initial));
+});
+
+// --- Several nodes moved as one ----------------------------------------------------------------
+/** A room whose right edge is the decimal 244.65, a smaller room to its right, and a crate beside that one which belongs to no room. */
+const blockA: BackgroundSpace = { ...room, id: 'A', name: '본관', x: 100, y: 100, width: 144.65, height: 80 };
+const blockB: BackgroundSpace = { ...room, id: 'B', name: '별관', x: 300.4, y: 120.3, width: 60, height: 40 };
+const crate: BackgroundSymbol = { ...chair, id: 'free', name: '상자', spaceId: null, x: 400.5, y: 126.25, width: 30, height: 30 };
+/** A chair in room B, which carries it. */
+const seatB: BackgroundSymbol = { ...chair, id: 'chairB', spaceId: 'B', x: 310, y: 130, width: 20, height: 20 };
+const court: BackgroundMap = { ...plan, nodes: [blockA, blockB, crate] }, seatedCourt: BackgroundMap = { ...plan, nodes: [blockA, blockB, crate, seatB] };
+const [BLOCK_A, BLOCK_B, CRATE, SEAT_B] = [0, 1, 2, 3];
+/** The room and the crate moved as one, unless other ids are given. */
+const group = (nodeId: string, ids: readonly string[] = ['B', 'free']): PlanGesture => ({ mode: 'move-group', nodeId, ids });
+/** Where the group is pressed, and where the pointer is after a travel from there. */
+const grip = { x: 320, y: 140 };
+const hauled = (travel: BackgroundPoint) => add(grip, travel);
+
+test('a free group move is the listed nodes moved together by as far as the pointer went', () => {
+  const point = hauled({ x: -52, y: -7.6 }), delta = between(grip, point);
+  // Whichever node was pressed, one of the group or not.
+  for (const nodeId of ['B', 'free', 'A', 'missing']) {
+    assert.deepEqual(previewPlanGesture(group(nodeId), court, grip, point, null), { map: moveMapNodes(court, ['B', 'free'], delta), guides: [] }, nodeId);
+  }
+  const moved = previewPlanGesture(group('B'), court, grip, point, null)!.map.nodes;
+  near(moved[BLOCK_B].x, 248.4, 'room x'); near(moved[BLOCK_B].y, 112.7, 'room y');
+  near(moved[CRATE].x, 348.5, 'crate x'); near(moved[CRATE].y, 118.65, 'crate y'); assert.equal(moved[BLOCK_A], blockA);
+
+  // A room and a chair it carries, both listed: the chair goes once, as in the move of the room alone.
+  const by = hauled({ x: 10, y: 5 });
+  for (const nodeId of ['B', 'chairB']) {
+    const preview = previewPlanGesture(group(nodeId, ['B', 'chairB']), seatedCourt, grip, by, null);
+    assert.deepEqual(preview, { map: moveMapNode(seatedCourt, 'B', between(grip, by)), guides: [] }, nodeId);
+    near(preview!.map.nodes[SEAT_B].x, 320, 'chair x'); near(preview!.map.nodes[SEAT_B].y, 135, 'chair y');
+  }
+});
+
+test('a snapped group move sticks by the box around the group, and the group keeps its own distances', () => {
+  const point = hauled({ x: -52, y: -7.6 });
+  assert.equal(blockA.x + blockA.width, 244.65);
+  // Pressed on the room. The left end of the box around both comes 3.75 from the right edge of A and takes its very
+  // value; the axis that stuck to nothing makes the stored value of the pressed node a whole number.
+  const byRoom = snapped(group('B'), court, grip, point);
+  assert.equal(byRoom.map.nodes[BLOCK_B].x, 244.65); assert.equal(byRoom.map.nodes[BLOCK_B].y, 113);
+  // The crate goes as far as the room went: it is not made a whole number of its own.
+  near(byRoom.map.nodes[CRATE].x, 344.75, 'crate x'); near(byRoom.map.nodes[CRATE].y, 118.95, 'crate y');
+  assert.deepEqual(byRoom.guides, [{ axis: 'x', at: 244.65, from: 100, to: 180 }]);
+  assert.equal(byRoom.map.nodes[BLOCK_A], blockA);
+  // Pressed on the crate, the same edge sticks and the whole number is that of the crate.
+  const byCrate = snapped(group('free'), court, grip, point);
+  near(byCrate.map.nodes[CRATE].x, 344.75, 'pressed crate x'); assert.equal(byCrate.map.nodes[CRATE].y, 119);
+  near(byCrate.map.nodes[BLOCK_B].x, 244.65, 'room x'); near(byCrate.map.nodes[BLOCK_B].y, 113.05, 'room y');
+  assert.deepEqual(byCrate.guides, [{ axis: 'x', at: 244.65, from: 100, to: 180 }]);
+  // Either way the two are as far apart as they were.
+  for (const { map } of [byRoom, byCrate]) {
+    near(map.nodes[CRATE].x - map.nodes[BLOCK_B].x, crate.x - blockB.x, 'gap x'); near(map.nodes[CRATE].y - map.nodes[BLOCK_B].y, crate.y - blockB.y, 'gap y');
+  }
+  // Nothing near: the stored position of the pressed node is made of whole numbers, and no guide shows.
+  const away = snapped(group('B'), court, grip, hauled({ x: 200.3, y: 300.3 }));
+  assert.equal(away.map.nodes[BLOCK_B].x, 501); assert.equal(away.map.nodes[BLOCK_B].y, 421); assert.deepEqual(away.guides, []);
+  near(away.map.nodes[CRATE].x, 601.1, 'far crate x'); near(away.map.nodes[CRATE].y, 426.95, 'far crate y');
+
+  // The snapped position of the pressed node is stored as it is. Reached by adding the travel, a drag from far away would miss the last digit.
+  const farRoom: BackgroundSpace = { ...blockB, x: 512.7, y: 420.3 }, farCrate: BackgroundSymbol = { ...crate, x: 612.8, y: 426.25 };
+  assert.notEqual(farRoom.x + (244.65 - farRoom.x), 244.65);
+  const far = snapped(group('B'), { ...court, nodes: [blockA, farRoom, farCrate] }, grip, hauled({ x: -264.3, y: -307.6 }));
+  assert.equal(far.map.nodes[BLOCK_B].x, 244.65); assert.equal(far.map.nodes[BLOCK_B].y, 113);
+  near(far.map.nodes[CRATE].x, 344.75, 'brought crate x'); near(far.map.nodes[CRATE].y, 118.95, 'brought crate y');
+  assert.deepEqual(far.guides, [{ axis: 'x', at: 244.65, from: 100, to: 180 }]);
+});
+
+test('a snapped group move is measured from the pressed node, or from the room that carries it', () => {
+  const point = hauled({ x: -52, y: -7.6 });
+  // Pressed on the chair, which its room carries: the stored position of the room is what sticks and what becomes a
+  // whole number. Measured from the chair, the whole number would be the y of the chair (122) and the room would stand on 112.3.
+  const preview = snapped(group('chairB', ['B', 'chairB']), seatedCourt, grip, point), moved = preview.map.nodes;
+  assert.equal(moved[BLOCK_B].x, 244.65); assert.equal(moved[BLOCK_B].y, 113);
+  near(moved[SEAT_B].x, 254.25, 'chair x'); near(moved[SEAT_B].y, 122.7, 'chair y');
+  assert.deepEqual(preview.guides, [{ axis: 'x', at: 244.65, from: 100, to: 180 }]);
+  assert.equal(moved[BLOCK_A], blockA); assert.equal(moved[CRATE], crate);
+  assert.deepEqual(preview, snapped(group('B', ['B', 'chairB']), seatedCourt, grip, point));
+  // Locked, the room stays and carries nothing: the chair is measured from itself, and sticks to the top of its own room.
+  const held = replaceMapNode(seatedCourt, { ...blockB, locked: true });
+  const alone = snapped(group('chairB', ['B', 'chairB']), held, grip, point);
+  assert.equal(alone.map.nodes[SEAT_B].x, 258); assert.equal(alone.map.nodes[SEAT_B].y, 120.3);
+  assert.deepEqual(alone.guides, [{ axis: 'y', at: 120.3, from: 258, to: 360.4 }]);
+  assert.equal(alone.map.nodes[BLOCK_B], held.nodes[BLOCK_B]);
+  assert.deepEqual(alone, snapped({ mode: 'move', nodeId: 'chairB' }, held, grip, point));
+  // A pressed node that does not move is no anchor: the first moving node in map order is, however the ids are listed.
+  for (const nodeId of ['A', 'missing']) {
+    assert.deepEqual(snapped(group(nodeId, ['free', 'B']), court, grip, point), snapped(group('B'), court, grip, point), nodeId);
+  }
+});
+
+test('a group move collects everything that is neither in the group nor travels with it', () => {
+  const candidates = planGestureCandidates(group('B'), court);
+  assert.deepEqual(candidates, collectSnapCandidates(court, new Set(['B', 'free'])));
+  // The border of the plan and room A: the room and the crate that move offer no line.
+  assert.deepEqual(candidates.x.map(line => line.at), [0, 1000, 100, 172.325, 244.65]);
+  assert.deepEqual(candidates.y.map(line => line.at), [0, 680, 100, 140, 180]);
+  assert.deepEqual(candidates.points, nodePlanOutline(blockA));
+  // Which node was pressed does not enter.
+  for (const nodeId of ['free', 'missing']) assert.deepEqual(planGestureCandidates(group(nodeId), court), candidates, nodeId);
+  // A chair the room carries travels along, listed or not.
+  for (const ids of [['B', 'free'], ['B', 'free', 'chairB']]) assert.deepEqual(planGestureCandidates(group('B', ids), seatedCourt), candidates, ids.join());
+
+  // Locked, a listed node stays where it is, and the rest of the group may stick to it.
+  const bolted = replaceMapNode(court, { ...crate, locked: true }), beside = planGestureCandidates(group('B'), bolted);
+  assert.deepEqual(beside, collectSnapCandidates(bolted, new Set(['B'])));
+  assert.deepEqual(beside.x.map(line => line.at), [0, 1000, 100, 172.325, 244.65, 400.5, 415.5, 430.5]);
+  // A locked room in the group carries nothing: the room and its chair are both targets of the crate.
+  const held = replaceMapNode(seatedCourt, { ...blockB, locked: true });
+  assert.deepEqual(planGestureCandidates(group('free'), held), collectSnapCandidates(held, new Set(['free'])));
+  assert.equal(planGestureCandidates(group('free'), held).x.length, 2 + 3 + 3 + 3);
+});
+
+test('a group move leaves its locked nodes where they are, and a group that cannot move is the map as it was', () => {
+  const point = hauled({ x: -52, y: -7.6 });
+  // The crate is locked: it stays the very object, and the room moves as it would alone.
+  const bolted = replaceMapNode(court, { ...crate, locked: true });
+  for (const nodeId of ['B', 'free']) {
+    const stuck = snapped(group(nodeId), bolted, grip, point);
+    assert.deepEqual(stuck, snapped({ mode: 'move', nodeId: 'B' }, bolted, grip, point), nodeId);
+    assert.equal(stuck.map.nodes[BLOCK_B].x, 244.65, nodeId); assert.equal(stuck.map.nodes[BLOCK_B].y, 113, nodeId);
+    assert.equal(stuck.map.nodes[CRATE], bolted.nodes[CRATE], nodeId);
+    const free = previewPlanGesture(group(nodeId), bolted, grip, point, null)!;
+    assert.deepEqual(free, { map: moveMapNode(bolted, 'B', between(grip, point)), guides: [] }, nodeId);
+    assert.equal(free.map.nodes[CRATE], bolted.nodes[CRATE], nodeId);
+  }
+  // Nothing in the group can move: locked nodes alone, ids that are not on the map, or none at all.
+  const fixed: BackgroundMap = { ...court, nodes: court.nodes.map(node => ({ ...node, locked: true })) };
+  const still: [BackgroundMap, string[]][] = [[fixed, ['B', 'free']], [court, ['missing']], [court, []]];
+  for (const [initial, ids] of still) for (const nodeId of ['B', 'missing']) {
+    const gesture = group(nodeId, ids), label = `${nodeId} of ${ids.join()}`;
+    for (const snap of [null, snapping(gesture, initial)]) {
+      const preview = previewPlanGesture(gesture, initial, grip, point, snap);
+      assert.ok(preview, label); assert.equal(preview.map, initial, label); assert.deepEqual(preview.guides, [], label);
+    }
+  }
+});
+
+test('a group preview depends on its arguments alone and leaves the map as it was', () => {
+  const frozen = JSON.stringify(seatedCourt), point = hauled({ x: -52, y: -7.6 }), elsewhere = { x: 14.2, y: 633.1 };
+  for (const gesture of [group('B'), group('free'), group('chairB', ['B', 'chairB']), group('B', ['chairB', 'free', 'B'])]) {
+    for (const snap of [null, snapping(gesture, seatedCourt)]) {
+      const label = `${JSON.stringify(gesture)} ${snap ? 'snapped' : 'free'}`, first = previewPlanGesture(gesture, seatedCourt, grip, point, snap);
+      assert.ok(first, label);
+      assert.deepEqual(previewPlanGesture(gesture, seatedCourt, grip, point, snap), first, label);
+      // Another position in between leaves no trace, in the result or in the targets.
+      previewPlanGesture(gesture, seatedCourt, grip, elsewhere, snap);
+      assert.deepEqual(previewPlanGesture(gesture, seatedCourt, grip, point, snap), first, label);
+      if (snap) assert.deepEqual(snap, snapping(gesture, seatedCourt), label);
+    }
+  }
+  assert.equal(JSON.stringify(seatedCourt), frozen);
+  // A pointer position that is no number cannot be snapped: the move is the free one, with no guide.
+  const gesture = group('B'), lost = { x: Number.NaN, y: 132.4 };
+  assert.deepEqual(previewPlanGesture(gesture, court, grip, lost, snapping(gesture, court)), previewPlanGesture(gesture, court, grip, lost, null));
 });
