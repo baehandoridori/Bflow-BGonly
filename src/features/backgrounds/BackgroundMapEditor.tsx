@@ -8,7 +8,8 @@ import { BackgroundMapPanels } from './BackgroundMapPanels';
 import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
 import { MapMarquee, MapNodeHandles, MapSnapGuides, MapVertexHandles } from './BackgroundMapPlanOverlays';
 import { BackgroundMapNameBox } from './BackgroundMapNameBox';
-import { addMapCamera, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removePolygonVertex, renameMapNode, replaceMapNode, transformMapSpace } from './mapGeometry';
+import { BackgroundMapSelectionSummary } from './BackgroundMapSelectionSummary';
+import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapSelection, mapViewport, pickAction, revealPlanPoint, singleViewId, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
@@ -216,7 +217,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [settingsForm, setSettingsForm] = useState<BackgroundMap | null>(null);
   const settingsRevision = useRef<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [confirmation, setConfirmation] = useState<'discard' | 'delete-map' | 'delete-node' | null>(null);
+  const [confirmation, setConfirmation] = useState<'discard' | 'delete-map' | 'delete-node' | 'delete-group' | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 680 });
@@ -396,6 +397,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   useEffect(() => setActiveVertex(null), [selected?.id, current?.id, mode, canEdit]);
   // A name box whose node can no longer be renamed is closed, and what was typed in it is dropped.
   useEffect(() => { if (renaming && !renamingNode) setRenaming(null); }, [renaming, renamingNode]);
+  /** Set by a group delete: once its confirmation is gone, the keyboard goes back to the canvas. */
+  const focusAfterConfirm = useRef(false);
+  useEffect(() => { if (!confirmation && focusAfterConfirm.current) { focusAfterConfirm.current = false; focusCanvas(); } }, [confirmation]);
 
   /** Cancels a gesture in progress and returns the drafts and maps without its preview. */
   function settle() {
@@ -532,6 +536,15 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       const source = settle().maps.find(map => map.id === current.id);
       if (source) updateMap(removeMapNode(source, selected.id));
       select(null); setConfirmation(null); return;
+    }
+    if (confirmation === 'delete-group' && canEdit) {
+      const source = settle().maps.find(map => map.id === current.id);
+      if (source) {
+        // The whole group in one update, so one undo brings it back. What was locked stays, and stays selected.
+        const next = removeMapNodes(source, selection.ids); updateMap(next);
+        doc.selectMany(current.id, selection.ids.filter(id => next.nodes.some(node => node.id === id)));
+      }
+      focusAfterConfirm.current = true; setConfirmation(null); return;
     }
     if (confirmation === 'discard') {
       doc.discard(current.id);
@@ -869,8 +882,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       return;
     }
     // Not on the repeats of a held key: the first one may have removed a picked point just now, and the rest
-    // would go on to ask about the whole node.
-    if (event.key === 'Delete' && !event.repeat && selected && canEdit && !selected.locked && !pointerRef.current && !doc.isGestureActive()) { event.preventDefault(); setConfirmation('delete-node'); }
+    // would go on to ask about the whole node. Several selected nodes are deleted together on the plan only.
+    if (event.key === 'Delete' && !event.repeat && canEdit && !pointerRef.current && !doc.isGestureActive()) {
+      if (selected && !selected.locked) { event.preventDefault(); setConfirmation('delete-node'); }
+      else if (mode === 'plan' && multiple && groupNodes.some(node => !node.locked)) { event.preventDefault(); setConfirmation('delete-group'); }
+    }
   }
 
   // Stable callbacks: the 3D viewport, the companion plan and the image grid must not re-subscribe on every preview.
@@ -905,6 +921,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const movedLink = linkTarget && current && linkTarget.parentId !== current.id;
   const draftChanged = mapDraftChanged(draft);
   const fieldLocked = !canEdit || !!selected?.locked;
+  /** Of the selected nodes, those a group delete leaves because they are locked, and those it removes. */
+  const groupLocked = groupNodes.filter(node => node.locked).length, groupFree = groupNodes.length - groupLocked;
   const spaceName = (id: string | null) => current?.nodes.find(node => node.type === 'space' && node.id === id)?.name ?? '공간 미지정';
   // In 3D the two tools keep their names in view: picking placements and looking around are separate operations.
   const toolItems: { id: Tool; label: string; title: string; icon: ReactNode; named?: boolean }[] = mode === 'plan'
@@ -1045,6 +1063,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
         <aside className="bmap-inspector" id="bmap-selection-properties" aria-label="선택 속성" hidden={!inspectorOpen}>
+          {/* 3D works on one node. The group picked on the plan is kept, and nothing here takes it apart. */}
+          {mode === '3d' && multiple && <p className="bmap-hint">{`평면에서 고른 ${selection.ids.length}개는 그대로 있어요. 3D에서는 하나씩만 다루고, 평면으로 돌아가면 ${selection.ids.length}개가 다시 선택돼 있어요.`}</p>}
           {selected ? <>
             <div className="bmap-section-heading"><span className="bmap-eyebrow">{selected.type === 'space' ? '선택한 공간' : selected.type === 'symbol' ? '선택한 기호' : '선택한 카메라'}</span><button type="button" className="bmap-icon-button" aria-label="선택 해제" onClick={() => select(null)}>×</button></div>
             {editing ? <Field label="이름"><input value={selected.name} disabled={fieldLocked} onChange={event => patchNode({ name: event.target.value }, 'name')} onBlur={doc.endCoalescing} /></Field> : <h3 className="bmap-selected-name">{selected.name}</h3>}
@@ -1103,7 +1123,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                 <button type="button" className="bmap-text-button bmap-danger" disabled={fieldLocked} onClick={() => { setError(''); setConfirmation('delete-node'); }}>이 배치 삭제</button>
               </details>
             </>}
-          </> : <>
+          </> : mode === 'plan' && multiple ? <BackgroundMapSelectionSummary nodes={groupNodes} canAct={canEdit} disabled={disabled} onClear={() => select(null)}
+            onLock={locked => {
+              // The button pressed disables itself with this click. The focus goes to the canvas, or the keys would reach nothing.
+              updateMap(lockMapNodes(current, selection.ids, locked)); focusCanvas();
+            }}
+            onDelete={() => { setError(''); setConfirmation('delete-group'); }} /> : <>
             <div className="bmap-section-heading"><strong>도면 구성</strong><span className="bmap-badge">{current.nodes.filter(node => node.type === 'space').length}개 공간</span></div>
             <p className="bmap-hint">공간을 선택하면 내부 도면을 만들거나 연결할 수 있습니다.</p>
             {snapshot.canManage && <button type="button" className="bg-button bmap-draw-action" disabled={disabled} title={mode === '3d' ? '공간은 평면에서 그려요. 평면으로 바꿔 드릴게요.' : undefined} onClick={() => { if (!editing) beginEditing(); if (mode !== 'plan') switchMode('plan'); setTool('rect'); }}>＋ 공간 그리기</button>}
@@ -1143,6 +1168,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       {error && <p className="bg-error" role="alert">{error}</p>}
       <div className="bmap-modal-actions"><button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); setConfirmation('delete-map'); }}>도면 삭제</button><button type="button" className="bg-button" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); }}>취소</button><button type="submit" className="bg-button bg-primary" disabled={disabled || !settingsForm.name.trim()}>{busy ? '저장 중…' : '설정 저장'}</button></div>
     </form></BackgroundModal>}
-    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? '도면 편집을 취소할까요?' : confirmation === 'delete-map' ? '도면을 삭제할까요?' : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? '이 도면에서 저장하지 않은 변경사항은 사라집니다.' : confirmation === 'delete-map' ? '도면 배치만 삭제합니다. 장소와 배경 원본은 유지됩니다. 하위 도면이나 연결이 남아 있으면 먼저 해제해 주세요.' : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '변경사항 버리기' : '삭제'}</button></div></BackgroundModal>}
+    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? '도면 편집을 취소할까요?' : confirmation === 'delete-map' ? '도면을 삭제할까요?' : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? '이 도면에서 저장하지 않은 변경사항은 사라집니다.' : confirmation === 'delete-map' ? '도면 배치만 삭제합니다. 장소와 배경 원본은 유지됩니다. 하위 도면이나 연결이 남아 있으면 먼저 해제해 주세요.' : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '변경사항 버리기' : '삭제'}</button></div></BackgroundModal>}
   </div>;
 }
