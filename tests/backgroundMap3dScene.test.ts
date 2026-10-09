@@ -276,7 +276,51 @@ test('a road is a floor without walls: its fill and its outline on the floor lev
   assert.deepEqual(rootOf(scene, odd).children.map(child => child.name), ['space-floor', 'space-outline', 'road-centre']);
   scene.sync(mapOf([asRoom(odd)]), null);
   assert.equal(rootOf(scene, odd).children.length, 0);
+
+  // The fill, the outline and the centre line of a road are its own geometries: drawn again, the old three are released.
+  const lockedBent = { ...bent, locked: true }, streets = mapOf([lane, lockedBent, round]);
+  const parts = ['space-floor', 'space-outline', 'road-centre'], released = new Map<object, number>();
+  const geometryOf = (node: BackgroundNode, name: string) => (named(rootOf(scene, node), name) as Mesh).geometry;
+  const watch = (items: Iterable<BufferGeometry | Material>) => {
+    for (const item of items) {
+      if (released.has(item)) continue;
+      released.set(item, 0);
+      item.addEventListener('dispose', () => { released.set(item, (released.get(item) ?? 0) + 1); });
+    }
+  };
+  scene.sync(streets, null);
+  const first = parts.map(name => geometryOf(lane, name));
+  watch(first);
+  scene.sync(streets, lane.id);
+  parts.forEach((name, index) => {
+    assert.equal(released.get(first[index]), 1, `${name} of a road that is drawn again was not released exactly once`);
+    assert.ok(geometryOf(lane, name) !== first[index], `${name} is built anew`);
+  });
+
+  // Every colour of a road comes from the palette: another theme repaints the fill, quiet or selected, the outline, plain
+  // or dashed, and the centre line. The outline of a selected road stays that of a selected room.
+  const grey = 0x5d6470, markGrey = 0x3a3f47;
+  scene.setPalette({ ...MAP3D_DARK_PALETTE, road: grey, roadMark: markGrey });
+  const fill = paintOf(scene, round, 'space-floor'), fillOn = paintOf(scene, lane, 'space-floor');
+  const plain = paintOf(scene, round, 'space-outline'), dashedGrey = paintOf(scene, lockedBent, 'space-outline');
+  assert.deepEqual([fill.color.getHex(), fill.opacity], [grey, 0.28], 'the fill of a road');
+  assert.deepEqual([fillOn.color.getHex(), fillOn.opacity], [grey, 0.44], 'the fill of a selected road');
+  assert.deepEqual([plain.color.getHex(), plain.opacity, !!plain.isLineDashedMaterial], [grey, 0.75, false], 'the outline of a road');
+  assert.deepEqual([dashedGrey.color.getHex(), dashedGrey.opacity, dashedGrey.isLineDashedMaterial, dashedGrey.dashSize, dashedGrey.gapSize], [grey, 0.75, true, 12, 7],
+    'the outline of a locked road');
+  assert.ok(dashesOf(scene, lockedBent, 'space-outline'), 'dashes need line distances');
+  for (const node of [lane, lockedBent]) assert.equal(paintOf(scene, node, 'road-centre').color.getHex(), markGrey, `${node.name}: centre line`);
+  assert.equal(paintOf(scene, lane, 'space-outline').color.getHex(), dark.accentSub, 'the outline of a selected road is not grey');
+
+  // Everything a road is drawn with is tracked, and released exactly once when the scene goes: resourceCount() alone
+  // would not see a geometry that was never tracked.
+  const { geometries, materials } = resources(scene), counted = scene.resourceCount();
+  for (const node of [lane, lockedBent]) for (const name of parts) assert.ok(geometries.has(geometryOf(node, name)), `${node.name}: ${name} is drawn`);
+  assert.ok(counted.geometries >= geometries.size && counted.materials >= materials.size, 'everything drawn is tracked');
+  watch([...geometries, ...materials]);
   scene.dispose();
+  for (const item of [...geometries, ...materials]) assert.equal(released.get(item), 1, `${(item as { type?: string }).type} was not released exactly once`);
+  for (const item of first) assert.equal(released.get(item), 1, 'released when the road was drawn again, and not once more');
   assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
 });
 
@@ -1111,6 +1155,11 @@ test('a road takes its floor level into the world bounds, and never the height t
   for (const [elevation, low, high] of [[200, 0, 200], [-40, -40, 0]] as const) {
     const { min, max } = mapWorldBounds(mapOf([{ ...lane, elevation }]));
     assert.deepEqual([min.y, max.y], [low, high], `a road at ${elevation}`);
+  }
+  // The stored height is not read at all: a road that stores one that is no number is in the bounds with its floor level.
+  for (const volumeHeight of [NaN, Infinity]) {
+    const { min, max } = mapWorldBounds(mapOf([{ ...lane, elevation: 200, volumeHeight }]));
+    assert.deepEqual([min.y, max.y], [0, 200], `a road at 200 that stores the height ${volumeHeight}`);
   }
 });
 
@@ -2785,7 +2834,6 @@ test('viewport: theme changes repaint, a lost context is reported once, and a fa
   themeValues = {}; root.setAttribute('data-color-mode', 'dark');
   for (const item of observers.mutation) item.callback([]);
   editor.frame();
-  assert.deepEqual(roadColours(), [MAP3D_DARK_PALETTE.road, MAP3D_DARK_PALETTE.roadMark]);
   assert.deepEqual(roadColours(), [0x9aa1ad, 0xe3e6ec], 'back on the dark palette');
   for (let times = 0; times < 2; times++) editor.canvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
   assert.equal(editor.count('unavailable'), 1);
