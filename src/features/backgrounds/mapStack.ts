@@ -30,7 +30,7 @@ export function spaceStackRanks(map: BackgroundMap): Map<string, number> {
   return new Map(stackedSpaces(map).map((space, rank) => [space.id, rank]));
 }
 
-/** The spaces that hold a plan point, the topmost (smallest) first. */
+/** The spaces that hold a plan point, the topmost first: the rooms from the smallest, then the roads from the smallest. */
 export function spacesAt(map: BackgroundMap, point: BackgroundPoint): BackgroundSpace[] {
   return stackedSpaces(map).filter(space => containsPoint(space, point)).reverse();
 }

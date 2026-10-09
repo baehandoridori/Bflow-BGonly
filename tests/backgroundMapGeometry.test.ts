@@ -1075,17 +1075,19 @@ test('a space becomes a road by one key, and a room again by losing it', () => {
   const lockedRoom: BackgroundSpace = { ...room, locked: true }, lockedRoad: BackgroundSpace = { ...road, locked: true };
   assert.equal(setSpaceSurface(lockedRoom, 'road'), lockedRoom); assert.equal(setSpaceSurface(lockedRoad, null), lockedRoad);
   assert.equal(Object.hasOwn(lockedRoom, 'surface'), false); assert.equal(lockedRoad.surface, 'road');
-  // Any shape, with its points.
+  // Any shape: a polygon with its points, and an ellipse, which has no centre line and is a road all the same.
   assert.deepEqual(setSpaceSurface(kite, 'road'), { ...kite, surface: 'road' });
+  assert.deepEqual(setSpaceSurface({ ...oddRoom, shape: 'ellipse' }, 'road'), { ...oddRoom, shape: 'ellipse', surface: 'road' });
   assert.equal(JSON.stringify(room), frozen); assert.equal(JSON.stringify(road), roadFrozen);
 });
 
 test('a 3D edit never writes a box height on a road', () => {
   const room: BackgroundSpace = { ...plainRoom, id: 'road', x: 100, y: 300, width: 400, height: 80 }, road: BackgroundSpace = { ...room, surface: 'road' };
   const pose = nodeWorldPose(road);
-  const scaled = (node: BackgroundSpace, scale: { x: number; y: number; z: number }) => {
-    const source: BackgroundMap = { ...map, nodes: [node] };
-    return { source, result: applyNodeWorldPose(source, node.id, { position: pose.position, quaternion: pose.quaternion, scale }) };
+  // The pose is the road's own unless `moved` gives another position or heading; `members` stand on the node.
+  const scaled = (node: BackgroundSpace, scale: { x: number; y: number; z: number }, moved: { position?: typeof pose.position; quaternion?: typeof pose.quaternion } = {}, members: BackgroundCamera[] = []) => {
+    const source: BackgroundMap = { ...map, nodes: [node, ...members] };
+    return { source, result: applyNodeWorldPose(source, node.id, { position: pose.position, quaternion: pose.quaternion, ...moved, scale }) };
   };
   // Pulled upwards alone: no change at all.
   const lifted = scaled(road, { x: 1, y: 3, z: 1 });
@@ -1101,6 +1103,15 @@ test('a 3D edit never writes a box height on a road', () => {
   // The same pull on a room writes its walls, as it always did.
   assert.deepEqual(scaled(room, { x: 1, y: 3, z: 1 }).result.nodes[0], { ...room, volumeHeight: 540 });
   assert.deepEqual(scaled({ ...room, volumeHeight: 240 }, { x: 1, y: 3, z: 1 }).result.nodes[0], { ...room, volumeHeight: 720 });
+  // The box height is all a road leaves out. Its floor height is written as a room's is: lifted, it takes what stands on it up by as much, and the pull upwards that came with the lift still writes no height.
+  const lens: BackgroundCamera = { ...memberCamera, id: 'lens', spaceId: road.id, x: 300, y: 340 };
+  const raised = scaled(road, { x: 1, y: 3, z: 1 }, { position: { ...pose.position, y: pose.position.y + 60 } }, [lens]).result;
+  assert.deepEqual(raised.nodes[0], { ...road, elevation: 60 });
+  assert.equal(Object.hasOwn(raised.nodes[0], 'volumeHeight'), false);
+  assert.deepEqual(raised.nodes[1], { ...lens, elevation: 180 });
+  // A turn, and a resize along the other plan side, are written as a room's are too.
+  assert.deepEqual(scaled(road, { x: 1, y: 3, z: 1 }, { quaternion: nodeWorldPose({ ...road, rotation: 90 }).quaternion }).result.nodes[0], { ...road, rotation: 90 });
+  assert.deepEqual(scaled(road, { x: 1, y: 3, z: 2 }).result.nodes[0], { ...road, y: road.y - road.height / 2, height: road.height * 2 });
 });
 
 test('a road is still a road after the edits that copy a space', () => {
