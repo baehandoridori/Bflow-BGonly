@@ -16,9 +16,12 @@ export function MapSnapGuides({ guides, scale }: { guides: readonly SnapGuide[];
   </g>;
 }
 
-/** The selection box while it is dragged, in plan coordinates. It draws what it is given. */
+/**
+ * The selection box while it is dragged, in plan coordinates. It draws what it is given. A path, not a `<rect>`: a
+ * rect with no width or no height is not drawn at all, and a box dragged along one line must still show its line.
+ */
 export function MapMarquee({ rect }: { rect: PlanRect }): JSX.Element {
-  return <rect className="bmap-marquee" x={rect.left} y={rect.top} width={rect.right - rect.left} height={rect.bottom - rect.top} pointerEvents="none" aria-hidden="true" />;
+  return <path className="bmap-marquee" d={`M ${rect.left} ${rect.top} H ${rect.right} V ${rect.bottom} H ${rect.left} Z`} pointerEvents="none" aria-hidden="true" />;
 }
 
 /** Rotate and resize handles of the selected node. Their sizes come from `planNodeHandles`, so they stay the same on screen at any zoom. */

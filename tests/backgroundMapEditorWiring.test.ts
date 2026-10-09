@@ -112,11 +112,17 @@ test('anchor 5: the step to the next pile item is taken by the click on the SVG,
   // The release selects twice, the node of the drag that ended and what the click picks: no step under any spelling.
   assert.equal(count(up, /\bselect\(/g), 2, 'the release selects nowhere else');
   assert.match(up, /select\(session\.node\.id, session\.mapId\)/);
-  assert.match(up, /select\(click\.id, session\.mapId\)/);
+  // The click of a press is done only by a release that neither moved nor was cancelled, and it sits right under that
+  // condition: after a pan, a box or the drag of a group it would put the pressed node (or nothing) over what the drag left.
+  assert.match(up, /if \(!cancel && !session\.moved\) \{\s*const click = session\.click;\s*if \(click\.kind === 'select'\) select\(click\.id, session\.mapId\);/);
   assert.doesNotMatch(up, /click\.ids\[/);
   assert.doesNotMatch(up, /indexOf\(click\.from/);
   // A group that was dragged stays the selection.
   assert.match(up, /if \(!session\.groupIds && session\.node\) select\(session\.node\.id, session\.mapId\);/);
+  // The press itself selects one thing only, what resolvePlanPress said to select at once: the node a drag is about to move.
+  const down = handler.pointerDown();
+  assert.match(down, /if \(plan\?\.selectAtPress !== undefined\) select\(plan\.selectAtPress\);/);
+  assert.equal(count(down, /\bselect\(/g), 1, 'the press selects nowhere else');
 });
 
 test('anchor 6: double-clicks are handled in one place, the SVG, and what one does is decided once, from the presses that pointerDown logged', () => {
@@ -124,8 +130,9 @@ test('anchor 6: double-clicks are handled in one place, the SVG, and what one do
   assert.equal(count(`${editor}${overlays}`, /onDoubleClick(?:Capture)?=/g), 1);
   assert.match(canvasTag(), /onDoubleClick=\{canvasDoubleClick\}/);
   // No double-click on a handle. What it does is asked in one place, and a space that is entered is picked on the way.
+  // Both are done to the node the answer names: the topmost node of the press may be another one.
   inOrder(handler.canvasDoubleClick(), 'if (!current || !last || last.handle || Date.now() - lastDrag.current <= 450) return;',
-    'doubleClickIntent(', "openSpace(intent.node.id, tool !== 'hand')", 'beginRename(');
+    'doubleClickIntent(', "openSpace(intent.node.id, tool !== 'hand')", 'else if (intent) beginRename(intent.node.id);');
   // What the log is read for: both presses on the same node. The node of the first press is asked first, then the topmost one.
   inOrder(handler.doubleClickIntent(), 'pressLog.current', 'first.hitId !== last.hitId', 'doubleClickNodeId(first.targetId, node.id, pile)',
     'for (const item of target === node ? [node] : [target, node])', 'planDoubleClickAction(item,');
@@ -278,4 +285,13 @@ test('anchor 36: the image grid, the look-through, the picked point and the obje
   const sources = readdirSync(directory).filter(name => /\.tsx?$/.test(name));
   assert.ok(sources.includes('BackgroundMapEditor.tsx') && sources.includes('useBackgroundMapDocument.ts'), 'the sources were listed');
   for (const name of sources) assert.doesNotMatch(read(name), /\bdoc\.select\(/, `${name} calls doc.select`);
+});
+
+// Numbered past 21-35 as well.
+test('anchor 37: the selection box is drawn as a path, so a box dragged along one line still shows', () => {
+  // An SVG <rect> with no width or no height is not drawn at all, its stroke included: a drag that is exactly horizontal
+  // or vertical would mark what it touches and show no box. A path is stroked along its length, whatever its area.
+  const box = piece(overlays, 'export function MapMarquee(', 'export function MapNodeHandles(');
+  assert.match(box, /<path className="bmap-marquee" d=\{`M \$\{rect\.left\} \$\{rect\.top\} H \$\{rect\.right\} V \$\{rect\.bottom\} H \$\{rect\.left\} Z`\} /);
+  assert.doesNotMatch(box, /<rect/);
 });
