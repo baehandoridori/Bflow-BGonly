@@ -9,6 +9,8 @@
 export interface CostumeWheelEvent {
   deltaX: number;
   deltaY: number;
+  /** 0 픽셀(보통) · 1 줄 · 2 화면. Windows 휠 설정이 '한 번에 한 화면씩'이면 2 로 온다. */
+  deltaMode?: number;
   shiftKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
@@ -34,8 +36,11 @@ export interface CostumeWheelResult {
 }
 
 export const COSTUME_WHEEL = {
-  /** 이만큼 모이면 한 장 넘긴다. 마우스 휠 한 칸(약 100)은 한 번에 넘고, 터치패드의 작은 값은 모인다. */
-  step: 40,
+  /**
+   * 이만큼 모이면 한 장 넘긴다. 마우스 휠 한 칸은 Windows 휠 설정의 줄 수 × 33.3 이라(기본 3줄 = 100)
+   * 가장 작은 설정(1줄 = 33.3)도 한 칸에 넘어가야 한다. 터치패드의 작은 값은 모인다.
+   */
+  step: 30,
   /** 한 장 넘긴 뒤 쉬는 시간. 관성으로 쏟아지는 휠이 여러 장을 건너뛰지 않게 한다. */
   cooldownMs: 120,
   /** 이보다 오래 쉬었다 굴리면 모아 둔 것을 버린다. */
@@ -52,8 +57,10 @@ export function costumeWheelStep(state: CostumeWheelState, event: CostumeWheelEv
   const claimed = event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && imagedCount > 1;
   if (!claimed) return { consume: false, dir: 0, state: state.carried === 0 ? state : { ...state, carried: 0 } };
 
-  // Shift 를 누르면 Chromium 은 세로 휠을 가로 값(deltaX)으로 바꿔 보낸다. 터치패드는 두 축이 함께 올 수 있어 큰 쪽을 읽는다.
-  const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+  // Shift 를 누른 세로 휠은 가로 값(deltaX)으로 들어오기도 하고, 터치패드는 두 축이 함께 올 수 있다 — 큰 쪽을 읽는다.
+  // 줄·화면 단위로 온 값은 한 칸이 1 이라, 픽셀로 온 한 칸과 같은 크기로 맞춘다.
+  const unit = event.deltaMode === 2 ? 100 : event.deltaMode === 1 ? 100 / 3 : 1;
+  const delta = (Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX) * unit;
   const stale = event.timeStamp - state.seenAt > COSTUME_WHEEL.idleMs;
   const turned = delta * state.carried < 0;
   const carried = (stale || turned ? 0 : state.carried) + delta;

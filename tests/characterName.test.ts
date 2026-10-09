@@ -120,4 +120,6 @@ test('피드백 55·57 배선 테스트 파일이 test:character 게이트에 �
   //   실행 자체가 안 돼 7개가 조용히 사라진 채 초록불이 된다 — 그래서 여기서 감시한다.
   const { scripts } = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
   assert.match(scripts['test:character'], /\.\/tests\/characterFeedback5\.test\.ts/);
+  // v1.132.1: "그냥 휠은 가로채지 않는다"를 지키는 판정 테스트도 같은 이유로 여기서 감시한다.
+  assert.match(scripts['test:character'], /\.\/tests\/characterCostumeWheel\.test\.ts/);
 });
