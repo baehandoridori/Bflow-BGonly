@@ -13,9 +13,12 @@ import type { BackgroundMap, BackgroundNode } from './types.ts';
  */
 export type MapGizmoSetup = { mode: Map3DGizmoMode; space: 'world' | 'local'; showX: boolean; showY: boolean; showZ: boolean };
 
-/** Handles a node offers in a mode, or null when the mode does not apply: a camera has no size. */
-export function mapGizmoSetup(type: BackgroundNode['type'], mode: Map3DGizmoMode): MapGizmoSetup | null {
-  if (mode === 'scale') return type === 'camera' ? null : { mode, space: 'local', showX: true, showY: true, showZ: true };
+/**
+ * Handles a node offers in a mode, or null when the mode does not apply: a camera has no size.
+ * `flat`: the node has no height to size (a road), so the size handles leave the vertical axis out.
+ */
+export function mapGizmoSetup(type: BackgroundNode['type'], mode: Map3DGizmoMode, flat = false): MapGizmoSetup | null {
+  if (mode === 'scale') return type === 'camera' ? null : { mode, space: 'local', showX: true, showY: !flat, showZ: true };
   // A space stays upright, so it only turns about the vertical axis.
   if (mode === 'rotate') return type === 'space' ? { mode, space: 'world', showX: false, showY: true, showZ: false } : { mode, space: 'local', showX: true, showY: true, showZ: true };
   return { mode, space: 'world', showX: true, showY: true, showZ: true };
@@ -31,7 +34,7 @@ export function previewMapFromRoot(initialMap: BackgroundMap, id: string, root: 
   return applyNodeWorldPose(initialMap, id, rootWorldPose(root));
 }
 
-export type MapGizmoTarget = { id: string; type: BackgroundNode['type']; root: Object3D };
+export type MapGizmoTarget = { id: string; type: BackgroundNode['type']; root: Object3D; flat?: boolean };
 export type MapGizmoHost = {
   /** The editor's current draft: it becomes the initial map of a drag that starts now. */
   currentMap(): BackgroundMap;
@@ -243,7 +246,7 @@ export class MapNodeGizmo {
 
   /** Show the gizmo on this node, or hide it. Returns false when the mode offers nothing for the node. */
   setTarget(target: MapGizmoTarget | null, mode: Map3DGizmoMode): boolean {
-    const setup = target ? mapGizmoSetup(target.type, mode) : null;
+    const setup = target ? mapGizmoSetup(target.type, mode, target.flat) : null;
     if (!target || !setup) { this.detach(); return false; }
     // A running drag keeps its handles; the owner cancels it first when the target must change.
     if (this.drag) return true;

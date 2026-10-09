@@ -9,7 +9,7 @@ import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim
 import type { Map3DPalette, MapPickHit } from './map3dScene';
 import { MapNodeGizmo, mapGizmoSetup } from './BackgroundMapCameraGizmo';
 import { stackedMapNodeIds } from './mapGeometry';
-import { MAP_SPATIAL_DEFAULTS, cameraAspect, nodeWorldPose, verticalFov } from './mapSpatial';
+import { MAP_SPATIAL_DEFAULTS, cameraAspect, isRoadSpace, nodeWorldPose, verticalFov } from './mapSpatial';
 import './backgrounds-map-3d.css';
 
 const UNAVAILABLE_AT_START = '이 PC에서는 3D 화면을 열 수 없어 평면 도면으로 보여 드립니다. 편집하던 내용은 그대로 있습니다.';
@@ -44,6 +44,8 @@ function readPalette(element: HTMLElement): Map3DPalette {
     light, background: hex('--color-bg-primary', base.background), card: hex('--color-bg-card', base.card), border: hex('--color-bg-border', base.border),
     accent: hex('--color-accent', base.accent), accentSub: hex('--color-accent-sub', base.accentSub),
     symbol: light ? 0x4f8f9a : base.symbol, camera: base.camera, cameraLens: base.cameraLens,
+    // The light values of the road are in the stylesheet alone.
+    road: hex('--bmap-road', base.road), roadMark: hex('--bmap-road-mark', base.roadMark),
     text: css('--color-text-primary', base.text), halo: css('--color-bg-primary', base.halo), font: style.fontFamily || base.font,
   };
 }
@@ -433,7 +435,8 @@ class Map3DViewport {
   private applyGizmo(): void {
     const props = this.props, id = props.selectedId;
     const node = id ? props.map.nodes.find(item => item.id === id) : undefined, root = id ? this.scene3d.root(id) : null;
-    this.gizmo.setTarget(node && root && this.gizmoAllowed(props, id) ? { id: node.id, type: node.type, root } : null, props.gizmoMode);
+    // A road has no height to size.
+    this.gizmo.setTarget(node && root && this.gizmoAllowed(props, id) ? { id: node.id, type: node.type, root, flat: node.type === 'space' && isRoadSpace(node) } : null, props.gizmoMode);
   }
   /** `select`: the left button belongs to picking and the gizmo. `look`: the left button turns the world. */
   private applyOrbit(): void {

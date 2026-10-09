@@ -6,7 +6,8 @@ import {
 import type { Material, Object3D } from 'three';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
 import type { Map3DViewState } from './mapCanvas.ts';
-import { MAP_PLAN_EXTENT, MAP_SPATIAL_DEFAULTS, cameraAspect, mapPlanBounds, nodeElevation, nodeVolumeHeight, nodeWorldPose, spaceOutline, verticalFov } from './mapSpatial.ts';
+import { MAP_PLAN_EXTENT, MAP_SPATIAL_DEFAULTS, cameraAspect, isRoadSpace, mapPlanBounds, nodeElevation, nodeVolumeHeight, nodeWorldPose, roadCentreLine, spaceOutline,
+  spaceWallHeight, verticalFov } from './mapSpatial.ts';
 import type { Vec3 } from './mapSpatial.ts';
 import { stackedMapNodeIds } from './mapGeometry.ts';
 import { spaceStackRanks } from './mapStack.ts';
@@ -21,12 +22,15 @@ export type Map3DPalette = {
   light: boolean;
   background: number; card: number; border: number;
   accent: number; accentSub: number; symbol: number; camera: number; cameraLens: number;
+  /** A road and the dashed line along its centre. */
+  road: number; roadMark: number;
   /** CSS colours and font of the name labels. */
   text: string; halo: string; font: string;
 };
 export const MAP3D_DARK_PALETTE: Map3DPalette = {
   light: false, background: 0x0f1117, card: 0x1a1d27, border: 0x2d3041, accent: 0x6c5ce7, accentSub: 0xa29bfe,
-  symbol: 0x89b8bf, camera: 0xe6b578, cameraLens: 0x372715, text: 'rgb(232, 232, 238)', halo: 'rgb(15, 17, 23)', font: 'sans-serif',
+  symbol: 0x89b8bf, camera: 0xe6b578, cameraLens: 0x372715, road: 0x9aa1ad, roadMark: 0xe3e6ec,
+  text: 'rgb(232, 232, 238)', halo: 'rgb(15, 17, 23)', font: 'sans-serif',
 };
 export function sameMap3DPalette(a: Map3DPalette, b: Map3DPalette): boolean {
   return (Object.keys(a) as (keyof Map3DPalette)[]).every(key => a[key] === b[key]);
@@ -45,6 +49,7 @@ export type Map3DResourceCount = { geometries: number; materials: number; textur
 type NodeKind = BackgroundNode['type'];
 type Disposable = { dispose(): void };
 type MaterialKey = 'floor' | 'floorLine' | 'spaceFloor' | 'spaceFloorOn' | 'spaceWall' | 'spaceWallOn' | 'spaceLine' | 'spaceLineOn' | 'spaceDash' | 'spaceDashOn'
+  | 'roadFloor' | 'roadFloorOn' | 'roadLine' | 'roadLineLocked' | 'roadCentre'
   | 'symbol' | 'symbolOn' | 'symbolLine' | 'symbolLineOn' | 'symbolArc' | 'symbolArcOn' | 'symbolDash' | 'symbolDashOn' | 'symbolFill' | 'symbolFillOn' | 'symbolBound'
   | 'camera' | 'cameraLens' | 'cameraLine' | 'cameraLineOn' | 'cameraFar' | 'cameraFarOn' | 'cameraRing' | 'proxy';
 type GeometryKey = 'box' | 'lens' | 'cameraProxy' | 'ring' | 'drop' | 'floor' | 'floorLine';
@@ -90,7 +95,7 @@ function shapeKey(node: BackgroundNode, selected: boolean): string {
   if (node.type === 'camera') return `camera|${flags}|${node.fov}|${cameraAspect(node)}`;
   if (node.type === 'symbol') return `symbol|${flags}|${getSymbolPreset(node.symbol).id}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${node.hinge}|${node.swing}`;
   const points = node.shape === 'polygon' ? node.points.map(point => `${point.x},${point.y}`).join(';') : '';
-  return `space|${flags}|${node.shape}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${points}`;
+  return `space|${flags}|${node.shape}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${points}|${isRoadSpace(node) ? 'road' : ''}`;
 }
 function labelSpec(node: BackgroundNode, selected: boolean): { text: string; sub: string; size: number } | null {
   const name = node.name.length > LABEL_LIMIT ? `${node.name.slice(0, LABEL_LIMIT - 1)}…` : node.name;
@@ -383,6 +388,11 @@ export class Map3DScene {
         case 'spaceLineOn': return line(palette.accentSub, 1);
         case 'spaceDash': return dash(palette.accentSub, 0.55, 12, 7);
         case 'spaceDashOn': return dash(palette.accentSub, 1, 12, 7);
+        case 'roadFloor': return flat(palette.road, 0.28);
+        case 'roadFloorOn': return flat(palette.road, 0.44);
+        case 'roadLine': return line(palette.road, 0.75);
+        case 'roadLineLocked': return dash(palette.road, 0.75, 12, 7);
+        case 'roadCentre': return dash(palette.roadMark, 0.9, 14, 10);
         case 'symbol': return new MeshLambertMaterial({ color: palette.symbol });
         case 'symbolOn': return new MeshLambertMaterial({ color: palette.accentSub });
         case 'symbolLine': return line(palette.symbol, 0.9);
@@ -441,15 +451,32 @@ export class Map3DScene {
     this.floor.add(fill, outline);
   }
 
-  /** Open-top box along the real outline: floor fill, translucent walls, outline at the bottom and the top. */
+  /** Open-top box along the real outline: floor fill, translucent walls, outline at the bottom and the top. A road is its floor alone. */
   private buildSpace(entry: Entry, node: BackgroundSpace, selected: boolean): void {
     const outline = spaceOutline(node, ELLIPSE_SEGMENTS).filter(point => finite(point.x, point.y)), count = outline.length;
-    const height = nodeVolumeHeight(node);
+    const road = isRoadSpace(node), height = spaceWallHeight(node); // 0 for a road
     entry.lift = (Number.isFinite(height) ? height : 0) + 4;
     if (count < 3 || !Number.isFinite(height)) return;
     const floor = new Mesh(entry.own.track(new ShapeGeometry(new Shape(outline.map(point => new Vector2(point.x, point.y)))).rotateX(Math.PI / 2)),
-      this.material(selected ? 'spaceFloorOn' : 'spaceFloor'));
-    floor.renderOrder = -1;
+      this.material(road ? (selected ? 'roadFloorOn' : 'roadFloor') : (selected ? 'spaceFloorOn' : 'spaceFloor')));
+    // Under the floors of the rooms, over the underlay: where a road and a room overlap the order never depends on the view.
+    floor.renderOrder = road ? -1.5 : -1;
+    if (road) {
+      // A wall-less floor: its outline on the floor, and the dashed centre line where the shape has one.
+      const edges = new LineSegments(entry.own.track(segments(outline.flatMap((a, index) => { const b = outline[(index + 1) % count]; return [a.x, 0, a.y, b.x, 0, b.y]; }))),
+        this.material(node.locked ? (selected ? 'spaceDashOn' : 'roadLineLocked') : (selected ? 'spaceLineOn' : 'roadLine')));
+      if (node.locked) edges.computeLineDistances();
+      floor.name = 'space-floor'; edges.name = 'space-outline';
+      tag(floor, node.id, 'space', 'floor'); entry.picks.push(floor);
+      entry.root.add(floor, edges);
+      const line = roadCentreLine(node);
+      if (line) {
+        const centre = new LineSegments(entry.own.track(segments(line.slice(1).flatMap((to, index) => [line[index].x, 0, line[index].y, to.x, 0, to.y]))), this.material('roadCentre'));
+        centre.computeLineDistances(); centre.name = 'road-centre';
+        entry.root.add(centre);
+      }
+      return;
+    }
     const wallPositions: number[] = [], linePositions: number[] = [];
     // An ellipse reads as a cylinder with four uprights; a rectangle or polygon gets one per corner.
     const stride = node.shape === 'ellipse' ? Math.max(1, Math.round(count / 4)) : Math.max(1, Math.ceil(count / 32));
@@ -697,7 +724,8 @@ export function mapWorldBounds(map: BackgroundMap): { min: Vec3; max: Vec3 } {
   const plan = mapPlanBounds(map);
   let low = 0, high = 0;
   for (const node of map.nodes) {
-    const base = nodeElevation(node), top = node.type === 'camera' ? base : base + nodeVolumeHeight(node);
+    // A road has no walls: only its floor level is in the box, whatever height is stored.
+    const base = nodeElevation(node), top = node.type === 'camera' ? base : base + (node.type === 'space' ? spaceWallHeight(node) : nodeVolumeHeight(node));
     if (!finite(base, top)) continue;
     low = Math.min(low, base, top); high = Math.max(high, base, top);
   }

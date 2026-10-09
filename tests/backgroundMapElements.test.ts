@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { getSymbolPreset, symbolCatalog } from '../src/features/backgrounds/symbolCatalog.ts';
 import { isRoadSpace, nodeVolumeHeight, roadCentreLine, roadCentrePlanLine, spaceWallHeight } from '../src/features/backgrounds/mapSpatial.ts';
 import { containsPoint } from '../src/features/backgrounds/mapGeometry.ts';
+import { MAP3D_DARK_PALETTE } from '../src/features/backgrounds/map3dScene.ts';
 import type { BackgroundPoint, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbolKind } from '../src/features/backgrounds/types.ts';
 
 test('the symbol list has stairs before the generic object, and a kind that is not listed reads as the generic object', () => {
@@ -142,4 +144,23 @@ test('the centre line in plan points is moved to the road and turned with it', (
   sameLine(roadCentrePlanLine(road(300, 100, { x: 100, y: 100, rotation: 90 })), [[250, 0], [250, 300]], 'a quarter turn');
   assert.equal(roadCentrePlanLine(space(300, 100, { x: 100, y: 100 })), null);
   assert.equal(roadCentrePlanLine(road(300, 100, { x: 100, y: 100, shape: 'ellipse' })), null);
+});
+
+/** A stylesheet of the map editor, line by line: a fresh checkout has CRLF line ends. */
+const sheet = (name: string): string[] => readFileSync(new URL(`../src/features/backgrounds/${name}`, import.meta.url), 'utf8').split(/\r?\n/);
+/** A colour as the stylesheets hold it: three numbers. */
+const triple = (hex: number): string => `${hex >> 16} ${(hex >> 8) & 255} ${hex & 255}`;
+
+test('the road colours are variables of the map editor: the dark values are those of the 3D palette, and the light ones are in the stylesheet alone', () => {
+  const lines = sheet('backgrounds-map.css');
+  // The declarations are looked up as text inside their rule: the camera colours join the same block.
+  const dark = lines.filter(line => line.startsWith('.bmap-layout {') && line.includes('--bmap-road'));
+  const light = lines.filter(line => line.startsWith('[data-color-mode="light"] .bmap-layout') && line.includes('--bmap-road'));
+  assert.equal(dark.length, 1, 'one rule sets the road colours on the editor');
+  assert.equal(light.length, 1, 'and one sets them for the light theme');
+  assert.ok(dark[0].includes('--bmap-road:154 161 173;') && dark[0].includes('--bmap-road-mark:227 230 236;'), dark[0]);
+  assert.ok(light[0].includes('--bmap-road:93 100 112;') && light[0].includes('--bmap-road-mark:58 63 71;'), light[0]);
+  // Where a variable is not set the 3D view paints with its dark palette: the two are one colour.
+  assert.deepEqual([MAP3D_DARK_PALETTE.road, MAP3D_DARK_PALETTE.roadMark], [0x9aa1ad, 0xe3e6ec]);
+  assert.ok(dark[0].includes(`--bmap-road:${triple(MAP3D_DARK_PALETTE.road)};`) && dark[0].includes(`--bmap-road-mark:${triple(MAP3D_DARK_PALETTE.roadMark)};`));
 });

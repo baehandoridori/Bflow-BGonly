@@ -1,4 +1,7 @@
 .bmap-layout { display:flex; min-height:500px; height:100%; overflow:hidden; border-top:1px solid rgb(var(--color-bg-border)); background:rgb(var(--color-bg-primary)); color:rgb(var(--color-text-primary)); }
+/* Colours of the map editor that are no theme colour: one camera (default = the amber it always was), and the road. */
+.bmap-layout { --bmap-road:154 161 173; --bmap-road-mark:227 230 236; }
+[data-color-mode="light"] .bmap-layout { --bmap-road:93 100 112; --bmap-road-mark:58 63 71; }
 .bmap-layout button,.bmap-layout input,.bmap-layout select { font:inherit; }
 .bmap-layout button { cursor:pointer; }
 .bmap-layout button:disabled { cursor:not-allowed; opacity:.42; }
