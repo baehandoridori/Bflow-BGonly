@@ -11,14 +11,14 @@ import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { addMapCamera, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removePolygonVertex, renameMapNode, replaceMapNode, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
-import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapViewport, revealPlanPoint, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
+import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapSelection, mapViewport, pickAction, revealPlanPoint, singleViewId, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
 import { MAP_EDIT_MARK, POLYGON_POINT_LIMIT, doubleClickNodeId, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
 import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
 import type { PlanGesture } from './mapPlanGesture';
 import { MAP_SNAP, sameSnapGuides } from './mapSnap';
 import type { SnapCandidates, SnapGuide } from './mapSnap';
 import { planNodeCovers, planStackUnder } from './mapPlanPreview';
-import type { MapUpdateOptions, MapViewport } from './mapDocument';
+import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
 import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode } from './mapCanvas';
 import { backgroundMapPath } from './domain';
@@ -148,13 +148,13 @@ class Map3DBoundary extends Component<{ onFail: (reason: string) => void; childr
 
 const kindLabel = (node: BackgroundNode) => node.type === 'camera' ? '카메라' : node.type === 'space' ? '공간' : getSymbolPreset(node.symbol).label;
 
-/** Every placement of the map, so items hidden under others (cameras on one spot) can each be picked. */
-const ObjectList = memo(function ObjectList({ nodes, selectedId, onSelect }: { nodes: BackgroundNode[]; selectedId: string | null; onSelect: (id: string) => void }) {
+/** Every placement of the map, so items hidden under others (cameras on one spot) can each be picked. Every selected row is marked; the primary alone is the current one. */
+const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, onSelect }: { nodes: BackgroundNode[]; selectedIds: readonly string[]; primaryId: string | null; onSelect: (id: string) => void }) {
   const ordered = [...nodes.filter(node => node.type === 'camera'), ...nodes.filter(node => node.type === 'symbol'), ...nodes.filter(node => node.type === 'space')];
   return <section className="bmap-objects" aria-label="오브젝트 목록">
     <div className="bmap-section-heading"><strong>오브젝트</strong><span className="bmap-badge">{ordered.length}개</span></div>
     {ordered.length ? <ul className="bmap-node-list">{ordered.map(node => <li key={node.id}>
-      <button type="button" className={node.id === selectedId ? 'is-selected' : ''} aria-current={node.id === selectedId ? 'true' : undefined} aria-label={`${node.name || '이름 없음'}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}`} onClick={() => onSelect(node.id)}>
+      <button type="button" className={selectedIds.includes(node.id) ? 'is-selected' : ''} aria-current={node.id === primaryId ? 'true' : undefined} aria-label={`${node.name || '이름 없음'}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}`} onClick={() => onSelect(node.id)}>
         <span className={`bmap-node-kind is-${node.type}`} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
         <span className="bmap-node-name">{node.name || '이름 없음'}</span>
         {node.locked && <span className="bmap-node-lock" aria-hidden="true">🔒</span>}
@@ -218,7 +218,15 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const current = maps.find(map => map.id === currentId) ?? maps[0];
   const draft = mapDraft(state, current?.id);
   const view = mapViewport(state, current?.id);
-  const selected = current?.nodes.find(node => node.id === view.selectedId);
+  // Keyed on the stored list, not on the viewport: a pan or a zoom keeps `selectedIds` and so keeps this value.
+  const selection = useMemo(() => mapSelection(current, view.selectedIds), [current, view.selectedIds]);
+  const multiple = selection.ids.length > 1;
+  /** The node the 3D view and its companion plan work on: the selection itself, or while several are selected the one picked there. */
+  const singleId = singleViewId(current, selection, view.selectedId);
+  /** The one node the single-node tools work on: none on the plan while several are selected. */
+  const selected = mode === 'plan' && multiple ? undefined : current?.nodes.find(node => node.id === singleId);
+  /** The selected nodes, in map order: what the summary counts and the group actions work on. */
+  const groupNodes = useMemo(() => current ? current.nodes.filter(node => selection.ids.includes(node.id)) : [], [current, selection]);
   const disabled = pending || busy;
   const editing = !!draft && snapshot.canManage;
   const canEdit = editing && !disabled;
@@ -241,7 +249,14 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   if (!gestureActive) settledMapsRef.current = maps;
   const settledMaps = settledMapsRef.current;
   const settledCurrent = current && (gestureStartMap(state, current.id) ?? current);
-  const settledSelected = settledCurrent?.nodes.find(node => node.id === view.selectedId);
+  const settledSelected = settledCurrent?.nodes.find(node => node.id === selected?.id);
+  // What the object list marks, read from the settled map and memoised, so a drag does not draw the list again.
+  const listSelection = useMemo((): MapSelection => {
+    const group = mapSelection(settledCurrent, view.selectedIds);
+    if (mode === 'plan') return group;
+    const id = singleViewId(settledCurrent, group, view.selectedId);                       // 3D: the one node the 3D view marks
+    return id === null ? mapSelection(undefined, group.ids) : { ids: [id], primaryId: id }; // none: the shared empty selection
+  }, [settledCurrent, view.selectedIds, view.selectedId, mode]);
 
   useEffect(() => {
     const svg = svgRef.current;
@@ -320,10 +335,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   }, []);
   // Looking through a camera ends when the selection, the map or the mode moves away from it.
   useEffect(() => {
-    setLookThrough(previous => previous && mode === '3d' && previous.mapId === current?.id && previous.id === view.selectedId ? previous : null);
-  }, [view.selectedId, current?.id, mode]);
+    setLookThrough(previous => previous && mode === '3d' && previous.mapId === current?.id && previous.id === singleId ? previous : null);
+  }, [singleId, current?.id, mode]);
   // A picked point belongs to one selection, on one map, while it can be edited.
-  useEffect(() => setActiveVertex(null), [view.selectedId, current?.id, mode, canEdit]);
+  useEffect(() => setActiveVertex(null), [selected?.id, current?.id, mode, canEdit]);
   // A name box whose node can no longer be renamed is closed, and what was typed in it is dropped.
   useEffect(() => { if (renaming && !renamingNode) setRenaming(null); }, [renaming, renamingNode]);
 
@@ -333,7 +348,13 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const settledDrafts = doc.getState().drafts;
     return { drafts: settledDrafts, maps: effectiveMaps(snapshot, settledDrafts) };
   }
-  function select(id: string | null, mapId = current?.id) { if (mapId) doc.select(mapId, id); }
+  /**
+   * Picks one node, or none. On the plan that is the selection. In 3D, while several are selected on this map, it is
+   * only the node the 3D view works on: the group picked on the plan is left as it is (pickAction).
+   */
+  function select(id: string | null, mapId = current?.id) {
+    if (mapId) doc.dispatch(pickAction(mapId, id, mode === '3d' && mapId === current?.id, selection));
+  }
   function updateView(changes: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>>, mapId = current?.id) { if (mapId) doc.setViewport(mapId, changes); }
   function focusCanvas() { (mode === 'plan' ? svgRef.current : stageRef.current)?.focus({ preventScroll: true }); }
   function navigate(id: string) { if (disabled) return; abortGesture(); setCurrentId(id); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); setConfirmation(null); }
@@ -894,14 +915,14 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               if (stage && !stage.contains(document.activeElement) && !(event.target as HTMLElement).closest(interactive)) stage.focus({ preventScroll: true });
             }}>
               <Map3DBoundary onFail={leave3D}><Suspense fallback={<div className="bmap-3d-loading" role="status">3D 화면을 준비하고 있어요…</div>}>
-                <Map3D map={current} selectedId={view.selectedId} canEdit={canEdit} onSelect={selectNode}
+                <Map3D map={current} selectedId={singleId} canEdit={canEdit} onSelect={selectNode}
                   onBeginGesture={beginCanvasGesture} onPreview={previewCanvasGesture} onFinishGesture={finishCanvasGesture} onCancelGesture={cancelCanvasGesture}
                   tool={tool === 'hand' ? 'look' : 'select'} gizmoMode={gizmoMode} placing={tool === 'symbol' && canEdit} onPlace={placeAt}
                   focusRequest={focusRequest} initialView={viewStates.current[current.id] ?? null} onViewChange={storeView}
                   lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} />
               </Suspense></Map3DBoundary>
             </div>
-            <BackgroundMapPlanPreview map={current} selectedId={view.selectedId} onSelect={selectNode} />
+            <BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} />
           </div>}
           {/* An HTML input beside the SVG, placed over its node. Keyed by the node, so each opening starts with that node's name. */}
           {renamingNode && <BackgroundMapNameBox key={renamingNode.id} svgRef={svgRef} anchor={nodeNameAnchor(renamingNode)}
@@ -981,7 +1002,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               {snapshot.canManage && <button type="button" className="bmap-text-button" disabled={disabled || !!polygon.length} onClick={() => openCreate(current.id)}>＋ 하위 도면 만들기</button>}
             </section>
           </>}
-          <ObjectList nodes={settledCurrent?.nodes ?? current.nodes} selectedId={view.selectedId} onSelect={selectNode} />
+          <ObjectList nodes={settledCurrent?.nodes ?? current.nodes} selectedIds={listSelection.ids} primaryId={listSelection.primaryId} onSelect={selectNode} />
         </aside>
       </BackgroundMapPanels>
     </main>}
