@@ -535,6 +535,8 @@ const CAMERA_TINTED = ['camera-body', 'camera-finder', 'camera-frustum', 'camera
 const cameraPaint = (scene: Map3DScene, node: BackgroundCamera, name: string): Paint => {
   const root = rootOf(scene, node), onFloor = name === 'camera-drop' || name === 'camera-ring';
   const holder = onFloor ? named(scene.scene, 'map-companions').children[named(scene.scene, 'map-nodes').children.indexOf(root)] : root;
+  // A camera's companions stand on the floor right under its lens: those of another camera would not.
+  assert.ok(holder && holder.position.x === root.position.x && holder.position.z === root.position.z, `${node.name}: ${name} is not read from its own companions`);
   return (named(holder, name) as Mesh).material as Paint;
 };
 
@@ -567,6 +569,7 @@ test('a camera is drawn in the colour it was given, with one set of materials pe
     assert.ok(paint(red, name) !== paint(plain, name), `${name}: a red camera and one without a colour do not share`);
   }
   same(paint(red, 'camera-lens'), paint(plain, 'camera-lens'), 'one lens material for every camera');
+  same(paint(red, 'camera-proxy'), paint(plain, 'camera-proxy'), 'one click proxy material for every camera');
   watch(resources(scene).materials);
 
   // Selected: the same colour, with the stronger lines and frame of any selected camera.

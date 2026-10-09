@@ -376,11 +376,11 @@ export class Map3DScene {
     const palette = this.palette;
     // A name the colour table does not know keeps the amber. The lens is never tinted.
     const cameraTint = (color ? cameraColorHex(color, palette.light) : null) ?? palette.camera;
-    const flat = (color: number, opacity: number) => new MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: DoubleSide });
+    const flat = (hex: number, opacity: number) => new MeshBasicMaterial({ color: hex, transparent: true, opacity, depthWrite: false, side: DoubleSide });
     const wall = (opacity: number) => new MeshLambertMaterial({ color: palette.accent, transparent: true, opacity, depthWrite: false, side: DoubleSide, forceSinglePass: true });
     // Lines are drawn with the see-through surfaces, after the floor, so a line lying on the floor is not dimmed by it.
-    const line = (color: number, opacity: number) => new LineBasicMaterial({ color, transparent: true, opacity });
-    const dash = (color: number, opacity: number, dashSize: number, gapSize: number) => new LineDashedMaterial({ color, transparent: true, opacity, dashSize, gapSize });
+    const line = (hex: number, opacity: number) => new LineBasicMaterial({ color: hex, transparent: true, opacity });
+    const dash = (hex: number, opacity: number, dashSize: number, gapSize: number) => new LineDashedMaterial({ color: hex, transparent: true, opacity, dashSize, gapSize });
     const make = (): Material => {
       switch (key) {
         case 'floor': return flat(palette.card, palette.light ? 0.9 : 0.72);
