@@ -110,6 +110,8 @@ test('a symbol is caught by its area', () => {
   assert.equal(touches(chair, 335, 335, 360, 360), true, 'over a corner');
   assert.equal(touches(chair, 341, 300, 360, 320), false);
   assert.equal(touches(chair, 340, 300, 360, 320), true, 'the closed box on its edge');
+  // The corner of this box is 7.2 from the centre of a 4 wide symbol and 4 clear of it.
+  assert.equal(touches(symbol('dot', 498, 338, 4, 4), 506, 336, 520, 344), false, 'no hit circle around a small symbol');
 });
 
 test('a turned symbol is caught by its turned box', () => {
@@ -129,6 +131,11 @@ test('a tilted symbol is caught by its own box, not by the outline it casts', ()
   assert.equal(touches(tilted, 310, 495, 330, 510), false, 'across the far edge of the cast outline');
   assert.equal(touches(tilted, 310, 310, 330, 330), true);
   assert.equal(touches(tilted, 335, 335, 360, 360), true, 'over a corner of its own box');
+  // Rolled, it casts its outline to the side instead.
+  const rolled = { ...chair, roll: 60, volumeHeight: 200 };
+  near(Math.min(...nodePlanOutline(rolled).map(point => point.x)), 136.8, 0.01, 'the outline of the rolled symbol reaches left to');
+  assert.equal(touches(rolled, 130, 310, 140, 330), false, 'across the far edge of the outline a rolled symbol casts');
+  assert.equal(touches(rolled, 310, 310, 330, 330), true);
 });
 
 test('a camera is caught by its body: the fan does not count', () => {
@@ -140,6 +147,11 @@ test('a camera is caught by its body: the fan does not count', () => {
   assert.equal(touches(cam, 490, 330, 510, 350), true, 'around the camera');
   assert.equal(touches(cam, 508, 348, 520, 360), true, '11.3 away on the diagonal');
   assert.equal(touches(cam, 509, 349, 520, 360), false, '12.7 away');
+  // The body reaches as far on the other sides: boxes that end to the left of the camera and above it.
+  assert.equal(touches(cam, 480, 330, 488, 350), true, 'exactly 12 to its left');
+  assert.equal(touches(cam, 480, 330, 487, 350), false, '13 to its left');
+  assert.equal(touches(cam, 490, 320, 510, 328), true, 'exactly 12 above it');
+  assert.equal(touches(cam, 490, 320, 510, 327), false, '13 above it');
 });
 
 test('a camera that looks straight up or down is caught by its ring', () => {
@@ -178,6 +190,8 @@ test('a box or a node with a value that is no finite number touches nothing', ()
     { ...cam, x: NaN }, { ...cam, y: -Infinity },
   ];
   broken.forEach((node, index) => assert.equal(planRectTouches(node, all), false, `${node.id} ${index}`));
+  // An ellipse of no width or height has no outline to touch: in its own frame the box has no finite corners.
+  for (const key of ['width', 'height'] as const) assert.equal(planRectTouches({ ...E, [key]: 0 }, all), false, `an ellipse of no ${key}`);
 });
 
 test('the nodes a box touches come in map order, locked ones too', () => {
