@@ -172,19 +172,46 @@ const rule = (name: string, opening: string): string => {
   return found[0];
 };
 
-test('the centre line of a road is a line in both stylesheets: never filled, and as thick on screen at any zoom', () => {
+/** The rules that paint the floor of a road, and the edge each of them draws: [stylesheet, selectors, edge]. */
+const ROAD_FLOOR_RULES: [string, string, string][] = [
+  ['backgrounds-map.css', '.bmap-space.is-road>rect,.bmap-space.is-road>ellipse,.bmap-space.is-road>polygon {', 'stroke:rgb(var(--bmap-road) /'],
+  ['backgrounds-map.css', '.bmap-space.is-road:hover>rect,.bmap-space.is-road:hover>ellipse,.bmap-space.is-road:hover>polygon {', 'stroke:rgb(var(--bmap-road))'],
+  // The selection colour of every space is set before the rules of a road and loses to them: a selected road has it from a rule of its own.
+  ['backgrounds-map.css', '.bmap-space.is-road.is-selected>rect,.bmap-space.is-road.is-selected>ellipse,.bmap-space.is-road.is-selected>polygon {', 'stroke:rgb(var(--color-accent-sub))'],
+  ['backgrounds-map-plan.css', '.bmap-plan-space.is-road>polygon {', 'stroke:rgb(var(--bmap-road) /'],
+  ['backgrounds-map-plan.css', '.bmap-plan-space.is-road:hover:not(:focus-visible)>polygon {', 'stroke:rgb(var(--bmap-road))'],
+];
+
+test('the floor of a road is the road colour on the plan and on the companion plan, in every state and whatever its shape', () => {
+  // The road colours can be set and never used: a road is then the purple of a room, and nothing else reads these rules.
+  for (const [name, selectors, edge] of ROAD_FLOOR_RULES) {
+    const line = rule(name, selectors);
+    assert.ok(line.includes('fill:rgb(var(--bmap-road) /'), line);
+    assert.ok(line.includes(edge), line);
+    // The width of a selected space and the dashes of a locked one come from the rules of every space, which are set earlier.
+    assert.ok(!line.includes('stroke-width') && !line.includes('stroke-dasharray'), line);
+  }
+});
+
+test('the centre line of a road is a dashed line in the mark colour of the road in both stylesheets: never filled, and as thick on screen at any zoom', () => {
   // A bent polyline is filled black by default: without the rule the inside of a bent road would be painted over.
   for (const [name, opening] of [['backgrounds-map.css', '.bmap-road-line {'], ['backgrounds-map-plan.css', '.bmap-plan-road-line {']]) {
     const line = rule(name, opening);
     assert.ok(line.includes('fill:none'), line);
     assert.ok(line.includes('vector-effect:non-scaling-stroke'), line);
+    // A polyline has no stroke unless a rule gives it one: without the colour there is no line to see.
+    assert.ok(line.includes('stroke:rgb(var(--bmap-road-mark) /'), line);
+    assert.ok(line.includes('stroke-dasharray:'), line);
   }
 });
 
-test('the outline behind the name of a road is as thick as the name is large, so the centre line never strikes it through', () => {
+test('the name of a road has an outline of the background colour behind its letters, as thick as the name is large, so the centre line never strikes it through', () => {
   // A fixed width is in map units: on a zoomed-out plan it thins away under a name that keeps its size on screen.
   const name = rule('backgrounds-map.css', '.bmap-space.is-road text {');
   assert.ok(name.includes('stroke-width:calc(4px * var(--bmap-label-scale,1))'), name);
+  // A width alone draws nothing: the outline has a colour, and it is painted before the letters or it would cover them.
+  assert.ok(name.includes('stroke:rgb(var(--color-bg-primary))'), name);
+  assert.ok(name.includes('paint-order:stroke'), name);
 });
 
 test('on the companion plan the colours of a road give way to the keyboard focus', () => {
