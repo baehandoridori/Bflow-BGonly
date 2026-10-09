@@ -144,6 +144,38 @@ test('잘 읽던 화면에 모르는 키가 든 응답이 오면 마지막으로
   unknown = true; assert.equal(await store.getState().refresh(), false);
   assert.equal(store.getState().updateRequired, true); assert.equal(warn.mock.callCount(), 2); assert.deepEqual(warn.mock.calls[1].arguments, UNKNOWN_KEY);
 });
+test('안내가 떠 있는 동안에는 자료가 실린 화면에서도 저장이 게이트웨이에 닿지 않고, 다른 까닭으로 실패한 읽기는 안내를 끄지 않는다', async t => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const store = createBackgroundStore(), good = library();
+  let change: Record<string, unknown> = {}, executes = 0;
+  await store.getState().initialize('admin', { read: async () => newer(good, 0, change), execute: async () => { executes++; return wire(good); } });
+  change = { future: 1 }; assert.equal(await store.getState().refresh(), false);
+  assert.equal(store.getState().updateRequired, true); assert.equal(store.getState().snapshot.canManage, true);
+  // The screen holds an admin's library, so only the notice stands between this save and the gateway (after an empty
+  // first read the save is refused before that, as not an admin's).
+  await assert.rejects(store.getState().execute(command()), /업데이트/);
+  assert.equal(executes, 0); assert.equal(store.getState().pending, false); assert.deepEqual(store.getState().snapshot, good);
+  // A read that fails for another reason (here a broken value) does not say the unknown key is gone.
+  change = { x: 'a' }; assert.equal(await store.getState().refresh(), false);
+  assert.equal(store.getState().updateRequired, true);
+  change = { future: 1 }; assert.equal(await store.getState().refresh(), false);
+  assert.equal(store.getState().updateRequired, true); assert.equal(store.getState().error, null); assert.equal(warn.mock.callCount(), 1);
+});
+test('낡은 조회가 모르는 키를 담고 늦게 도착해도 안내를 켜지 않는다 — 더 새 조회에 밀린 것도, 계정이 바뀐 뒤에 온 것도', async t => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const store = createBackgroundStore(), good = library(), passed = deferred<BackgroundSnapshot>(), slow = deferred<BackgroundSnapshot>();
+  let reads = 0;
+  await store.getState().initialize('alice', { read: async () => ++reads === 2 ? passed.promise : reads === 4 ? slow.promise : wire(good), execute: async () => wire(good) });
+  // Passed by a newer read of the same account, which was fine.
+  const older = store.getState().refresh(); assert.equal(await store.getState().refresh(), true);
+  passed.resolve(newer(good, 0, { future: 1 })); assert.equal(await older, false);
+  assert.equal(store.getState().updateRequired, false); assert.equal(warn.mock.callCount(), 0);
+  // Started for one account, landing after another has signed in and read for itself.
+  const late = store.getState().refresh();
+  await store.getState().initialize('bob', { read: async () => wire(good), execute: async () => wire(good) });
+  slow.resolve(newer(good, 0, { future: 1 })); assert.equal(await late, false);
+  assert.equal(store.getState().updateRequired, false); assert.equal(store.getState().actorId, 'bob'); assert.equal(warn.mock.callCount(), 0);
+});
 test('오류 문장이 떠 있던 화면에 모르는 키가 든 응답이 오면 문장을 지우고 안내만 남긴다', async t => {
   const warn = t.mock.method(console, 'warn', () => {});
   const store = createBackgroundStore(), good = library();
@@ -181,4 +213,34 @@ test('저장이 다른 까닭으로 거절돼도 복구 조회에 모르는 키�
   assert.equal(store.getState().updateRequired, true); assert.equal(store.getState().pending, false); assert.equal(store.getState().error, null);
   assert.deepEqual(store.getState().snapshot, good);
   assert.equal(warn.mock.callCount(), 1); assert.deepEqual(warn.mock.calls[0].arguments, UNKNOWN_KEY);
+});
+// The reply holds an unknown kind but the recovery read is clean (the kind was taken out in between): the two cases below.
+test('저장 응답에 모르는 종류가 있어도 복구 조회에서 도면 저장이 반영된 것을 확인하면 안내 없이 완료한다', async t => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const store = createBackgroundStore(), good = library();
+  let current = good;
+  await store.getState().initialize('admin', {
+    read: async () => wire(current),
+    execute: async ({command}) => { current = applyBackgroundCommand(current, command, {canManage:true}); return newer(current, 2, { symbol: 'elevator' }); },
+  });
+  // Whether the save went through is looked at before the notice.
+  await store.getState().execute({ type: 'save-maps', maps: [{ entity: { ...good.maps[0], name: '이름만 변경' }, expectedRevision: 1 }] });
+  assert.equal(store.getState().updateRequired, false); assert.equal(store.getState().pending, false); assert.equal(store.getState().error, null);
+  assert.deepEqual(store.getState().snapshot, current); assert.deepEqual(store.getState().snapshot.maps, [{ ...good.maps[0], name: '이름만 변경', revision: 2 }]);
+  assert.equal(warn.mock.callCount(), 0);
+});
+test('저장 응답에만 모르는 종류가 있으면 복구 조회로 읽은 자료를 화면에 두고 안내를 켠다', async t => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const store = createBackgroundStore(), good = library(), after = wire(good);
+  // What the recovery read finds is neither the library from before the save nor the one shown while saving.
+  after.maps[0].name = '동료 변경'; after.maps[0].revision = 2;
+  let reads = 0;
+  await store.getState().initialize('admin', {
+    read: async () => ++reads === 1 ? wire(good) : wire(after),
+    execute: async () => newer(good, 2, { symbol: 'elevator' }),
+  });
+  await assert.rejects(store.getState().execute(command()), (error: unknown) => error instanceof BackgroundUnsupportedError && error.detail === 'value "elevator"');
+  assert.equal(reads, 2); assert.equal(store.getState().updateRequired, true); assert.equal(store.getState().pending, false); assert.equal(store.getState().error, null);
+  assert.deepEqual(store.getState().snapshot, after); assert.notDeepEqual(after, good);
+  assert.equal(warn.mock.callCount(), 1); assert.deepEqual(warn.mock.calls[0].arguments, UNKNOWN_SYMBOL);
 });
