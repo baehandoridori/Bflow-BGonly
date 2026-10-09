@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { BackgroundCamera, BackgroundMap, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 import { canRedoMap, canUndoMap, createMapDocument, createMapDocumentStore, fieldEditStartMap, gestureStartMap, isMapGestureActive, mapDraft, mapDraftChanged, mapViewport,
-  reduceMapDocument, revealPlanPoint, zoomMapViewport, MAP_ZOOM_LIMITS, MAP_LABEL_SCALE_LIMITS, MAP_FIT_MARGIN, mapScreenScale, zoomMapViewportAt, wheelZoomFactor, fitMapViewport } from '../src/features/backgrounds/mapDocument.ts';
+  reduceMapDocument, revealPlanPoint, zoomMapViewport, MAP_ZOOM_LIMITS, MAP_LABEL_SCALE_LIMITS, MAP_FIT_MARGIN, mapScreenScale, zoomMapViewportAt, wheelZoomFactor, fitMapViewport,
+  mapSelection, singleViewId, pickAction } from '../src/features/backgrounds/mapDocument.ts';
 import type { MapDocumentAction, MapDocumentState } from '../src/features/backgrounds/mapDocument.ts';
+import { nextPlanSelection } from '../src/features/backgrounds/mapPlanPreview.ts';
 import { MAP_HISTORY_LIMIT } from '../src/features/backgrounds/mapEditSession.ts';
 import { effectiveMaps, saveMapChanges } from '../src/features/backgrounds/mapWorkflow.ts';
 import { emptyBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
@@ -253,9 +255,9 @@ test('only one gesture runs at a time and a preview for another map is ignored',
 test('selection and plan view are kept per map and survive preview, finish, cancel and undo', () => {
   const state = run(opened(), { type: 'select', mapId: A, id: camera.id }, { type: 'set-viewport', mapId: A, viewport: { x: 30, y: -20, zoom: 2 } },
     { type: 'select', mapId: B, id: 'space-in-b' });
-  assert.deepEqual(mapViewport(state, A), { x: 30, y: -20, zoom: 2, selectedId: camera.id });
-  assert.deepEqual(mapViewport(state, B), { x: 0, y: 0, zoom: 1, selectedId: 'space-in-b' });
-  assert.deepEqual(mapViewport(state, 'never-opened'), { x: 0, y: 0, zoom: 1, selectedId: null }); assert.deepEqual(mapViewport(state, null), mapViewport(state, undefined));
+  assert.deepEqual(mapViewport(state, A), { x: 30, y: -20, zoom: 2, selectedId: camera.id, selectedIds: [camera.id] });
+  assert.deepEqual(mapViewport(state, B), { x: 0, y: 0, zoom: 1, selectedId: 'space-in-b', selectedIds: ['space-in-b'] });
+  assert.deepEqual(mapViewport(state, 'never-opened'), { x: 0, y: 0, zoom: 1, selectedId: null, selectedIds: [] }); assert.deepEqual(mapViewport(state, null), mapViewport(state, undefined));
   const selection = (next: MapDocumentState) => [mapViewport(next, A).selectedId, mapViewport(next, B).selectedId];
   const dragging = run(state, { type: 'gesture-begin', mapId: A }, { type: 'gesture-preview', map: moved(valueOf(state), 640) });
   const finished = run(dragging, { type: 'gesture-finish' });
@@ -265,7 +267,7 @@ test('selection and plan view are kept per map and survive preview, finish, canc
   }
   // Viewers have no draft and still select and move the view; neither is an edit.
   const viewer = run(createMapDocument(), { type: 'select', mapId: A, id: camera.id }, { type: 'set-viewport', mapId: A, viewport: { zoom: 0.5 } });
-  assert.deepEqual(mapViewport(viewer, A), { x: 0, y: 0, zoom: 0.5, selectedId: camera.id }); assert.deepEqual(viewer.drafts, {});
+  assert.deepEqual(mapViewport(viewer, A), { x: 0, y: 0, zoom: 0.5, selectedId: camera.id, selectedIds: [camera.id] }); assert.deepEqual(viewer.drafts, {});
   assert.equal(run(viewer, { type: 'select', mapId: A, id: camera.id }), viewer);
   assert.equal(run(viewer, { type: 'set-viewport', mapId: A, viewport: { zoom: 0.5 } }), viewer);
   assert.equal(run(viewer, { type: 'set-viewport', mapId: A, viewport: { x: Number.NaN } }), viewer);
@@ -460,4 +462,239 @@ test('the store applies actions synchronously and notifies only on a change', ()
   unsubscribe();
   store.dispatch({ type: 'discard', mapId: A });
   assert.equal(notified, 3); assert.equal(mapDraft(store.getState(), A), undefined);
+});
+
+// Selection. The reducer knows nodes by id only; the functions that read a selection get the map.
+const mark = (id: string): BackgroundSymbol => ({ id, type: 'symbol', name: id, symbol: 'chair', spaceId: null, x: 0, y: 0, width: 60, height: 60, rotation: 0, locked: false, hinge: 'left', swing: 'inward' });
+const groupMap = mapOf(mark('a'), mark('b'), mark('c'), mark('x'));
+const viewOf = (state: MapDocumentState, id = A) => mapViewport(state, id);
+const selectOne = (id: string | null, mapId = A): MapDocumentAction => ({ type: 'select', mapId, id });
+const selectMany = (ids: readonly string[], mapId = A): MapDocumentAction => ({ type: 'select-many', mapId, ids });
+const pickOne = (id: string | null, mapId = A): MapDocumentAction => ({ type: 'pick-one', mapId, id });
+/** The selection as the editor reads it: the stored list against the draft as it is now. */
+const liveOf = (state: MapDocumentState) => mapSelection(valueOf(state), viewOf(state).selectedIds);
+
+test('select replaces the selection with one node, also when that node is the primary of a group', () => {
+  const fresh = createMapDocument(), group = run(fresh, selectMany(['a', 'b']));
+  assert.deepEqual(viewOf(group).selectedIds, ['a', 'b']); assert.equal(viewOf(group).selectedId, 'b');
+  // No early return on the id the single views already work on: the group folds to that one.
+  const folded = run(group, selectOne('b'));
+  assert.deepEqual(viewOf(folded).selectedIds, ['b']); assert.equal(viewOf(folded).selectedId, 'b');
+  const cleared = run(folded, selectOne(null));
+  assert.deepEqual(viewOf(cleared).selectedIds, []); assert.equal(viewOf(cleared).selectedId, null);
+  assert.equal(viewOf(cleared).selectedIds, viewOf(fresh).selectedIds, 'every empty selection is the one shared list');
+  // The same selection again is the same state.
+  assert.equal(run(folded, selectOne('b')), folded); assert.equal(run(cleared, selectOne(null)), cleared); assert.equal(run(fresh, selectOne(null)), fresh);
+});
+
+test('select-many replaces the selection with the list, without duplicates and in picked order', () => {
+  const other = run(createMapDocument(), selectOne('in-b', B), { type: 'set-viewport', mapId: B, viewport: { x: 5 } });
+  const state = run(other, selectMany(['a', 'b', 'a', 'c'])), list = viewOf(state).selectedIds;
+  assert.deepEqual(list, ['a', 'b', 'c']); assert.equal(viewOf(state).selectedId, 'c');
+  assert.equal(viewOf(state, B), viewOf(other, B), 'the view of another map is left alone');
+  // The same ids in the same order are the same selection.
+  assert.equal(run(state, selectMany(['a', 'b', 'c'])), state); assert.equal(run(state, selectMany(['a', 'b', 'c', 'a'])), state);
+  // Another order, a shorter list and a longer one are not.
+  const reordered = run(state, selectMany(['c', 'b', 'a']));
+  assert.deepEqual(viewOf(reordered).selectedIds, ['c', 'b', 'a']); assert.equal(viewOf(reordered).selectedId, 'a');
+  const shorter = run(state, selectMany(['a', 'b']));
+  assert.deepEqual(viewOf(shorter).selectedIds, ['a', 'b']); assert.equal(viewOf(shorter).selectedId, 'b');
+  assert.deepEqual(viewOf(run(shorter, selectMany(['a', 'b', 'c']))).selectedIds, ['a', 'b', 'c']);
+  const cleared = run(state, selectMany([]));
+  assert.deepEqual(viewOf(cleared).selectedIds, []); assert.equal(viewOf(cleared).selectedId, null);
+  assert.equal(viewOf(cleared).selectedIds, viewOf(createMapDocument()).selectedIds, 'the one shared empty list');
+  assert.equal(run(cleared, selectMany([])), cleared);
+  // A pan and a zoom carry the very same list along, so a reader keyed on it does not recompute.
+  const panned = run(state, { type: 'set-viewport', mapId: A, viewport: { x: 40, y: -10 } }, { type: 'set-viewport', mapId: A, viewport: { zoom: 2 } });
+  assert.notEqual(viewOf(panned), viewOf(state)); assert.equal(viewOf(panned).selectedIds, list); assert.equal(viewOf(panned).selectedId, 'c');
+});
+
+test('no action adds to or removes from the stored selection', () => {
+  const state = run(createMapDocument(), selectMany(['a', 'b']));
+  assert.equal(reduceMapDocument(state, { type: 'toggle-select', mapId: A, id: 'c' } as unknown as MapDocumentAction), state);
+  // The reducer reads no `add` flag: the list still replaces the selection.
+  const replaced = reduceMapDocument(state, { type: 'select-many', mapId: A, ids: ['c'], add: true } as unknown as MapDocumentAction);
+  assert.deepEqual(viewOf(replaced).selectedIds, ['c']); assert.equal(viewOf(replaced).selectedId, 'c');
+});
+
+test('after select and select-many the node of the single views is the last selected id', () => {
+  const steps = [selectOne('a'), selectMany(['a', 'b']), selectMany(['b', 'a', 'b', 'c']), selectOne('c'), selectMany([]), selectMany(['x']),
+    selectOne(null), selectMany(['c', 'a']), selectOne('a'), selectMany(['a', 'x', 'b'])];
+  assert.equal(steps.length, 10);
+  let state = createMapDocument();
+  for (const step of steps) {
+    const previous = state;
+    state = run(state, step);
+    const { selectedId, selectedIds } = viewOf(state);
+    assert.notEqual(state, previous); assert.equal(selectedId, selectedIds[selectedIds.length - 1] ?? null);
+  }
+  assert.deepEqual(viewOf(state).selectedIds, ['a', 'x', 'b']);
+});
+
+test('pick-one moves the node of the single views and leaves the selection as it is', () => {
+  const key = 'field';
+  const group = run(opened(), selectMany(['a', 'b']), selectOne('in-b', B), { type: 'update', map: moved(mapA, 1), coalesceKey: key });
+  const list = viewOf(group).selectedIds;
+  assert.deepEqual(group.coalescing, { mapId: A, key });
+  const picked = run(group, pickOne('x'));
+  assert.equal(viewOf(picked).selectedIds, list, 'the same array, not a copy'); assert.equal(viewOf(picked).selectedId, 'x');
+  assert.equal(picked.coalescing, null); assert.equal(picked.drafts, group.drafts); assert.equal(viewOf(picked, B), viewOf(group, B));
+  const none = run(picked, pickOne(null));
+  assert.equal(viewOf(none).selectedId, null); assert.equal(viewOf(none).selectedIds, list);
+  // The same node again is the same state.
+  assert.equal(run(picked, pickOne('x')), picked); assert.equal(run(none, pickOne(null)), none);
+  // A move of the plan view carries the picked node along with the list.
+  const panned = run(picked, { type: 'set-viewport', mapId: A, viewport: { x: 40, zoom: 2 } });
+  assert.equal(viewOf(panned).selectedId, 'x'); assert.equal(viewOf(panned).selectedIds, list);
+});
+
+test('a selection action returns the node of the single views to the primary', () => {
+  const group = run(createMapDocument(), selectMany(['a', 'b'])), list = viewOf(group).selectedIds;
+  const picked = run(group, pickOne('x'));
+  // The same list, but the single views were moved off its primary: this is not the same state.
+  const back = run(picked, selectMany(['a', 'b']));
+  assert.notEqual(back, picked); assert.equal(viewOf(back).selectedId, 'b'); assert.deepEqual(viewOf(back).selectedIds, ['a', 'b']);
+  assert.equal(viewOf(back).selectedIds, list, 'the list itself is kept');
+  assert.equal(run(back, selectMany(['a', 'b'])), back);
+  const one = run(picked, selectOne('a'));
+  assert.deepEqual(viewOf(one).selectedIds, ['a']); assert.equal(viewOf(one).selectedId, 'a');
+  // The same for one selected node and for none.
+  assert.equal(viewOf(run(createMapDocument(), selectOne('a'), pickOne('x'), selectOne('a'))).selectedId, 'a');
+  assert.equal(viewOf(run(createMapDocument(), pickOne('x'), selectOne(null))).selectedId, null);
+  assert.equal(viewOf(run(createMapDocument(), pickOne('x'), selectMany([]))).selectedId, null);
+});
+
+test('an id whose node is gone leaves the stored selection when the selection is next changed', () => {
+  const chair = mark('의자'), space: BackgroundSpace = { ...room(100, 100, 400, 260), id: 'S' };
+  const start = run(createMapDocument(), { type: 'begin-editing', map: mapOf(chair) });
+  const drawn = run(start, { type: 'update', map: { ...valueOf(start), nodes: [...valueOf(start).nodes, space] } }, selectOne('S'));
+  assert.deepEqual(liveOf(drawn).ids, ['S']);
+  const undone = run(drawn, { type: 'undo', mapId: A });
+  assert.deepEqual(viewOf(undone).selectedIds, ['S'], 'the stored list is raw'); assert.deepEqual(liveOf(undone).ids, []);
+  // A Shift+click builds the new list from the live selection, so the removed space does not ride along.
+  const added = run(undone, selectMany([...liveOf(undone).ids, chair.id]));
+  const redone = run(added, { type: 'redo', mapId: A });
+  assert.equal(valueOf(redone).nodes.length, 2); assert.deepEqual(liveOf(redone).ids, ['의자']);
+  // Left untouched, the selection comes back with the space.
+  assert.deepEqual(liveOf(run(undone, { type: 'redo', mapId: A })).ids, ['S']);
+});
+
+test('the node of the single views is the selection itself, or with several selected the one picked there', () => {
+  const single = mapSelection(groupMap, ['a']), group = mapSelection(groupMap, ['a', 'b']), none = mapSelection(groupMap, []);
+  // At most one selected: the selection, whatever was picked while there were more.
+  assert.equal(singleViewId(groupMap, single, 'a'), 'a'); assert.equal(singleViewId(groupMap, single, 'x'), 'a'); assert.equal(singleViewId(groupMap, single, null), 'a');
+  assert.equal(singleViewId(groupMap, mapSelection(groupMap, ['a', 'gone']), 'x'), 'a', 'a group that an undo left with one node');
+  for (const selectedId of [null, 'a', 'x', 'gone']) assert.equal(singleViewId(groupMap, none, selectedId), null);
+  // Several selected: the picked node, in the group or outside it, or none.
+  assert.equal(singleViewId(groupMap, group, 'b'), 'b'); assert.equal(singleViewId(groupMap, group, 'a'), 'a');
+  assert.equal(singleViewId(groupMap, group, 'x'), 'x'); assert.equal(singleViewId(groupMap, group, null), null);
+  // A picked node that is gone gives the primary again.
+  assert.equal(singleViewId(groupMap, group, 'gone'), 'b');
+  // Without a map nothing is selected.
+  for (const selectedId of [null, 'a', 'b']) assert.equal(singleViewId(undefined, mapSelection(undefined, ['a', 'b']), selectedId), null);
+});
+
+test('picking one node is a selection, and in a single view while several are selected only a pick-one', () => {
+  const group = mapSelection(groupMap, ['a', 'b']);
+  // One selected, none, or one left alive of a stored pair.
+  const atMostOne = [mapSelection(groupMap, ['a']), mapSelection(groupMap, []), mapSelection(groupMap, ['a', 'gone'])];
+  // The primary, another of the group, a node outside it and nothing: what is picked makes no difference.
+  for (const id of ['b', 'a', 'x', null]) {
+    assert.deepEqual(pickAction(A, id, true, group), { type: 'pick-one', mapId: A, id });
+    assert.deepEqual(pickAction(A, id, false, group), { type: 'select', mapId: A, id });
+    for (const selection of atMostOne) for (const singleView of [true, false]) assert.deepEqual(pickAction(A, id, singleView, selection), { type: 'select', mapId: A, id });
+  }
+});
+
+test('a pick in 3D never changes the group selected on the plan', () => {
+  /** The editor's `select` in 3D mode. */
+  const pick = (state: MapDocumentState, map: BackgroundMap, id: string | null) => run(state, pickAction(A, id, true, mapSelection(map, viewOf(state).selectedIds)));
+  const shown = (state: MapDocumentState, map: BackgroundMap) => singleViewId(map, mapSelection(map, viewOf(state).selectedIds), viewOf(state).selectedId);
+  let state = run(createMapDocument(), selectMany(['a', 'b', 'c']));
+  const list = viewOf(state).selectedIds;
+  assert.equal(shown(state, groupMap), 'c', 'the primary at first');
+  for (const id of ['x', null, 'a', 'c', 'x']) {
+    state = pick(state, groupMap, id);
+    assert.equal(viewOf(state).selectedIds, list); assert.equal(shown(state, groupMap), id);
+  }
+  // The companion plan reports the result of cycling a pile: here the next camera on the spot, outside the group.
+  const cameras = mapOf(mark('a'), ...['camA', 'camB', 'camC'].map(id => ({ ...camera, id })));
+  const piled = run(createMapDocument(), selectMany(['a', 'camB'])), pair = viewOf(piled).selectedIds;
+  assert.equal(shown(piled, cameras), 'camB');
+  const next = nextPlanSelection(cameras, 'camA', 'camB');
+  assert.equal(next, 'camC');
+  const cycled = pick(piled, cameras, next);
+  assert.equal(viewOf(cycled).selectedIds, pair); assert.equal(shown(cycled, cameras), 'camC');
+  // With one node selected the pick is the selection, as before.
+  const single = pick(run(createMapDocument(), selectOne('a')), groupMap, 'x');
+  assert.deepEqual(viewOf(single).selectedIds, ['x']); assert.equal(viewOf(single).selectedId, 'x');
+});
+
+test('a changed selection ends a field edit and the same selection keeps it', () => {
+  const key = 'field';
+  const typing = (state: MapDocumentState) => run(state, { type: 'update', map: moved(valueOf(state), 77), coalesceKey: key });
+  const group = typing(run(opened(), selectMany(['a', 'b'])));
+  assert.deepEqual(group.coalescing, { mapId: A, key });
+  for (const action of [selectMany(['a', 'b']), selectMany(['a', 'b', 'a']), pickOne('b')]) assert.equal(run(group, action), group);
+  for (const action of [selectMany(['a']), selectMany(['b', 'a']), selectMany([]), selectOne('b'), selectOne(null), pickOne('a'), pickOne(null), selectMany(['a'], B)])
+    assert.equal(run(group, action).coalescing, null);
+  const single = typing(run(opened(), selectOne('a')));
+  assert.equal(run(single, selectOne('a')), single); assert.equal(run(single, selectMany(['a'])), single);
+});
+
+test('a selection is no part of the edit: it leaves the drafts alone and no edit action touches it', () => {
+  const edited = run(opened(), { type: 'update', map: named(mapA, '편집') }), selected = run(edited, selectMany(['a', 'b']));
+  for (const state of [selected, run(selected, selectOne('a')), run(selected, selectOne(null)), run(selected, selectMany(['b'])), run(selected, pickOne('x'))]) assert.equal(state.drafts, edited.drafts);
+  const actions: MapDocumentAction[] = [{ type: 'update', map: named(mapA, '둘째') }, { type: 'gesture-begin', mapId: A }, { type: 'gesture-preview', map: moved(mapA, 900) }, { type: 'gesture-cancel' },
+    { type: 'gesture-begin', mapId: A }, { type: 'gesture-preview', map: moved(mapA, 640) }, { type: 'gesture-finish' }, { type: 'undo', mapId: A }, { type: 'redo', mapId: A },
+    { type: 'discard', mapId: A }, { type: 'drop-drafts', mapIds: [A, B] }, { type: 'begin-editing', map: mapA }, { type: 'enter-new-map', map: mapB }];
+  let next = selected;
+  for (const action of actions) {
+    const previous = next;
+    next = run(next, action);
+    assert.notEqual(next, previous, action.type); assert.equal(next.viewports, selected.viewports, action.type);
+  }
+  assert.deepEqual(viewOf(next).selectedIds, ['a', 'b']); assert.equal(viewOf(next).selectedId, 'b');
+});
+
+test('switching the display mode is still not an action while several are selected', () => {
+  const state = run(opened(), { type: 'update', map: named(mapA, '편집') }, selectMany(['a', 'b', 'c']), pickOne('x'));
+  let next = state;
+  for (let index = 0; index < 20; index++) next = reduceMapDocument(next, { type: 'set-mode', mode: index % 2 ? 'plan' : '3d' } as unknown as MapDocumentAction);
+  assert.equal(next, state);
+});
+
+test('the selection is read against the map: the ids of nodes that are gone are left out and nothing is written', () => {
+  const stored: readonly string[] = Object.freeze(['a', 'b', 'c']);
+  const without = (id: string) => mapOf(...groupMap.nodes.filter(node => node.id !== id));
+  const all = mapSelection(groupMap, stored);
+  assert.equal(all.ids, stored, 'all alive: the stored list itself'); assert.equal(all.primaryId, 'c');
+  // One node gone: only its id drops, and the primary is the last of the rest.
+  assert.deepEqual(mapSelection(without('a'), stored), { ids: ['b', 'c'], primaryId: 'c' });
+  assert.deepEqual(mapSelection(without('b'), stored), { ids: ['a', 'c'], primaryId: 'c' });
+  // The primary gone: the one picked before it takes its place.
+  assert.deepEqual(mapSelection(without('c'), stored), { ids: ['a', 'b'], primaryId: 'b' });
+  assert.deepEqual(mapSelection(mapOf(), stored), { ids: [], primaryId: null });
+  // No map, or nothing selected: one shared empty selection.
+  const empty = mapSelection(undefined, stored);
+  assert.deepEqual(empty, { ids: [], primaryId: null });
+  assert.equal(mapSelection(undefined, stored), empty); assert.equal(mapSelection(groupMap, []), empty); assert.equal(mapSelection(undefined, []), empty);
+  // A node that an undo removes and a redo brings back is selected again.
+  const start = run(createMapDocument(), { type: 'begin-editing', map: mapOf(mark('a')) });
+  const grown = run(start, { type: 'update', map: mapOf(mark('a'), mark('b')) }, selectMany(['a', 'b']));
+  const undone = run(grown, { type: 'undo', mapId: A }), redone = run(undone, { type: 'redo', mapId: A });
+  assert.deepEqual(liveOf(undone), { ids: ['a'], primaryId: 'a' });
+  assert.deepEqual(liveOf(redone), { ids: ['a', 'b'], primaryId: 'b' }); assert.equal(liveOf(redone).ids, viewOf(grown).selectedIds);
+});
+
+test('the store notifies once for a new selection and not for the same one', () => {
+  const store = createMapDocumentStore();
+  let notified = 0;
+  store.subscribe(() => { notified++; });
+  store.dispatch(selectMany(['a', 'b']));
+  assert.equal(notified, 1); assert.deepEqual(viewOf(store.getState()).selectedIds, ['a', 'b']);
+  store.dispatch(selectMany(['a', 'b'])); store.dispatch(selectMany(['a', 'b', 'a'])); store.dispatch(pickOne('b'));
+  assert.equal(notified, 1);
+  store.dispatch(pickOne('x'));
+  assert.equal(notified, 2); assert.deepEqual(viewOf(store.getState()).selectedIds, ['a', 'b']);
 });

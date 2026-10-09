@@ -26,6 +26,7 @@ export type BackgroundMapDocument = {
   finishGesture(): void;
   cancelGesture(): void;
   select(mapId: string, id: string | null): void;
+  selectMany(mapId: string, ids: readonly string[]): void;
   setViewport(mapId: string, viewport: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>>): void;
 };
 
@@ -54,6 +55,7 @@ export function useBackgroundMapDocument(): BackgroundMapDocument {
     finishGesture: () => store.dispatch({ type: 'gesture-finish' }),
     cancelGesture: () => store.dispatch({ type: 'gesture-cancel' }),
     select: (mapId: string, id: string | null) => store.dispatch({ type: 'select', mapId, id }),
+    selectMany: (mapId: string, ids: readonly string[]) => store.dispatch({ type: 'select-many', mapId, ids }),
     setViewport: (mapId: string, viewport: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>>) => store.dispatch({ type: 'set-viewport', mapId, viewport }),
   }), [store]);
   return useMemo(() => ({ state, ...actions }), [state, actions]);
