@@ -1,4 +1,4 @@
-import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbol } from './types.ts';
+import type { BackgroundCamera, BackgroundCameraColor, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbol } from './types.ts';
 import { MAP_SPATIAL_LIMITS, cameraAngles, cameraAnglesFromOrientation, cameraOrientation, createMapCamera, isRoadSpace, nextMapCameraName, nodeAngles, nodeAnglesFromOrientation,
   nodeElevation, nodeOrientation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees } from './mapSpatial.ts';
 import type { QuaternionValue, Vec3 } from './mapSpatial.ts';
@@ -247,6 +247,15 @@ export function setSpaceSurface(space: BackgroundSpace, surface: BackgroundSpace
   if (surface !== null) return { ...space, surface };
   const next = { ...space };
   delete next.surface;
+  return next;
+}
+
+/** A camera in a colour of the palette, or in the default again (`color` null). The key is removed for the default. The same object back when nothing changes or the camera is locked. */
+export function setCameraColor(camera: BackgroundCamera, color: BackgroundCameraColor | null): BackgroundCamera {
+  if (camera.locked || (camera.color ?? null) === color) return camera;
+  if (color !== null) return { ...camera, color };
+  const next = { ...camera };
+  delete next.color;
   return next;
 }
 

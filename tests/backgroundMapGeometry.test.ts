@@ -8,6 +8,7 @@ import { nodeNameAnchor, renameMapNode } from '../src/features/backgrounds/mapGe
 import { insertPolygonVertex, movePolygonVertex, polygonFromWorldPoints, rectToPolygon, removePolygonVertex } from '../src/features/backgrounds/mapGeometry.ts';
 import { lockMapNodes, moveMapNodes, removeMapNodes } from '../src/features/backgrounds/mapGeometry.ts';
 import { setSpaceSurface } from '../src/features/backgrounds/mapGeometry.ts';
+import { setCameraColor } from '../src/features/backgrounds/mapGeometry.ts';
 import { cameraOrientation, nodeOrientation, nodePlanOutline, nodeWorldPose } from '../src/features/backgrounds/mapSpatial.ts';
 import { validateBackgroundEntity } from '../src/features/backgrounds/domain.ts';
 
@@ -1134,4 +1135,31 @@ test('a road is still a road after the edits that copy a space', () => {
   assert.deepEqual(moved.nodes[0], { ...road, x: road.x + 40, y: road.y - 10 });
   near(moved.nodes[1].x, 340); near(moved.nodes[1].y, 140);
   assert.equal(JSON.stringify(road), frozen);
+});
+
+// --- Camera colour -----------------------------------------------------------------------------
+test('a camera takes a colour by one key, and the default again by losing it', () => {
+  const lens: BackgroundCamera = { ...memberCamera, id: 'lens', elevation: 260, pitch: -20, roll: 12, aspect: 2.35 };
+  const frozen = JSON.stringify(lens);
+  const red = setCameraColor(lens, 'red'), redFrozen = JSON.stringify(red);
+  assert.deepEqual(red, { ...lens, color: 'red' });
+  assert.notEqual(red, lens); assert.equal(Object.hasOwn(lens, 'color'), false);
+  // Another colour: the key changes and nothing else does.
+  const blue = setCameraColor(red, 'blue');
+  assert.deepEqual(blue, { ...lens, color: 'blue' });
+  assert.notEqual(blue, red); assert.equal(red.color, 'red');
+  // Back to the default the key is gone, not null.
+  const back = setCameraColor(blue, null);
+  assert.equal(Object.hasOwn(back, 'color'), false);
+  assert.deepEqual(back, lens);
+  assert.notEqual(back, blue); assert.equal(blue.color, 'blue');
+  // Nothing to change: the very object. A camera without a colour has no key at all, and null is still no change.
+  assert.equal(setCameraColor(lens, null), lens);
+  assert.equal(setCameraColor(red, 'red'), red);
+  // A locked camera stays as it is, either way.
+  const lockedLens: BackgroundCamera = { ...lens, locked: true }, lockedRed: BackgroundCamera = { ...red, locked: true };
+  assert.equal(setCameraColor(lockedLens, 'red'), lockedLens);
+  assert.equal(setCameraColor(lockedRed, 'blue'), lockedRed); assert.equal(setCameraColor(lockedRed, null), lockedRed);
+  assert.equal(Object.hasOwn(lockedLens, 'color'), false); assert.equal(lockedRed.color, 'red');
+  assert.equal(JSON.stringify(lens), frozen); assert.equal(JSON.stringify(red), redFrozen);
 });

@@ -5,7 +5,9 @@ import { getSymbolPreset, symbolCatalog } from '../src/features/backgrounds/symb
 import { isRoadSpace, nodeVolumeHeight, roadCentreLine, roadCentrePlanLine, spaceWallHeight } from '../src/features/backgrounds/mapSpatial.ts';
 import { containsPoint } from '../src/features/backgrounds/mapGeometry.ts';
 import { MAP3D_DARK_PALETTE } from '../src/features/backgrounds/map3dScene.ts';
-import type { BackgroundPoint, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbolKind } from '../src/features/backgrounds/types.ts';
+import { MAP_CAMERA_COLORS, cameraColorHex } from '../src/features/backgrounds/mapCameraColor.ts';
+import { BACKGROUND_CAMERA_COLORS } from '../src/features/backgrounds/domain.ts';
+import type { BackgroundCameraColor, BackgroundPoint, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbolKind } from '../src/features/backgrounds/types.ts';
 
 test('the symbol list has stairs before the generic object, and a kind that is not listed reads as the generic object', () => {
   // Removed presets stay the generic object: they never become whatever is listed next to it.
@@ -236,4 +238,36 @@ test('on the plan a selected road keeps the selection colour under the pointer',
   const hover = map.indexOf('.bmap-space.is-road:hover>rect'), selected = map.indexOf('.bmap-space.is-road.is-selected>rect');
   assert.ok(hover > -1 && selected > -1, 'a road has a hover rule and a selected rule of its own');
   assert.ok(hover < selected, 'the selected rule comes after the hover rule');
+});
+
+/** The camera palette of the design: [stored name, name on screen, value on the dark theme, value on the light theme]. */
+const CAMERA_PALETTE: [BackgroundCameraColor, string, number, number][] = [
+  ['red', '빨강', 0xf2726b, 0xc2362f],
+  ['lime', '연두', 0xb7d84b, 0x5f7f0f],
+  ['green', '초록', 0x5fcf8b, 0x1f8a4c],
+  ['teal', '청록', 0x45cfc4, 0x0b8a82],
+  ['blue', '파랑', 0x63a9f7, 0x1e6fd0],
+  ['pink', '분홍', 0xf58fb8, 0xc23f7c],
+];
+
+test('the camera palette is the six stored colour names in their order, each with a name of its own on screen', () => {
+  // The stored names are a closed list the server checks too: the palette has every one of them, in that order, and no other.
+  assert.deepEqual(MAP_CAMERA_COLORS.map(item => item.id), BACKGROUND_CAMERA_COLORS);
+  const labels = MAP_CAMERA_COLORS.map(item => item.label);
+  assert.equal(labels.length, 6);
+  assert.equal(new Set(labels).size, 6, 'no two colours share a name');
+  for (const label of labels) assert.ok(label.trim().length > 0, 'no colour is nameless');
+  // The amber is not a row: it is a camera without the key.
+  assert.deepEqual(MAP_CAMERA_COLORS, CAMERA_PALETTE.map(([id, label, dark, light]) => ({ id, label, dark, light })));
+});
+
+test('a camera colour has one value on the dark theme and another on the light one, and a name outside the palette has none', () => {
+  assert.equal(cameraColorHex('red', false), 0xf2726b); assert.equal(cameraColorHex('red', true), 0xc2362f);
+  for (const [id, , dark, light] of CAMERA_PALETTE) {
+    assert.equal(cameraColorHex(id, false), dark, `${id} on the dark theme`);
+    assert.equal(cameraColorHex(id, true), light, `${id} on the light theme`);
+  }
+  // Null, not a colour to fall back on: the caller keeps its default.
+  assert.equal(cameraColorHex('purple' as BackgroundCameraColor, false), null);
+  assert.equal(cameraColorHex('purple' as BackgroundCameraColor, true), null);
 });
