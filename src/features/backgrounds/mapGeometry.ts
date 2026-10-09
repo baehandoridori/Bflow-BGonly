@@ -1,5 +1,5 @@
-import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
-import { MAP_SPATIAL_LIMITS, cameraAngles, cameraAnglesFromOrientation, cameraOrientation, createMapCamera, nextMapCameraName, nodeAngles, nodeAnglesFromOrientation,
+import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbol } from './types.ts';
+import { MAP_SPATIAL_LIMITS, cameraAngles, cameraAnglesFromOrientation, cameraOrientation, createMapCamera, isRoadSpace, nextMapCameraName, nodeAngles, nodeAnglesFromOrientation,
   nodeElevation, nodeOrientation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees } from './mapSpatial.ts';
 import type { QuaternionValue, Vec3 } from './mapSpatial.ts';
 
@@ -241,6 +241,15 @@ export function rectToPolygon(space: BackgroundSpace): BackgroundSpace | null {
   return { ...space, shape: 'polygon', points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }] };
 }
 
+/** A space as a road, or as a room again (`surface` null). The key is written only for a road and removed for a room. The same object back when nothing changes or the space is locked. */
+export function setSpaceSurface(space: BackgroundSpace, surface: BackgroundSpaceSurface | null): BackgroundSpace {
+  if (space.locked || (space.surface ?? null) === surface) return space;
+  if (surface !== null) return { ...space, surface };
+  const next = { ...space };
+  delete next.surface;
+  return next;
+}
+
 export function containsPoint(space: BackgroundSpace, point: BackgroundPoint): boolean {
   const local = rotate({ x: point.x - space.x - space.width / 2, y: point.y - space.y - space.height / 2 }, -space.rotation);
   const x = local.x / space.width + 0.5, y = local.y / space.height + 0.5;
@@ -256,12 +265,14 @@ export function containsPoint(space: BackgroundSpace, point: BackgroundPoint): b
 
 /**
  * Add a camera at the fixed spawn point, whatever is clicked, selected or in view.
- * It joins a space only when exactly one space contains that point; overlaps stay unassigned.
+ * It joins a space only when exactly one room contains that point, or with no room there exactly one road; overlaps stay unassigned.
  */
 export function addMapCamera(map: BackgroundMap, id: string): { map: BackgroundMap; camera: BackgroundCamera } {
   const created = createMapCamera(id, nextMapCameraName(map.nodes));
-  const containing = map.nodes.filter(node => node.type === 'space' && containsPoint(node, created));
-  const camera: BackgroundCamera = containing.length === 1 ? { ...created, spaceId: containing[0].id } : created;
+  const containing = map.nodes.filter((node): node is BackgroundSpace => node.type === 'space' && containsPoint(node, created));
+  // A road lies under what stands on it: the rooms decide first, and a road is joined only where no room holds the point.
+  const rooms = containing.filter(space => !isRoadSpace(space)), candidates = rooms.length ? rooms : containing;
+  const camera: BackgroundCamera = candidates.length === 1 ? { ...created, spaceId: candidates[0].id } : created;
   return { map: { ...map, nodes: [...map.nodes, camera] }, camera };
 }
 
@@ -316,7 +327,8 @@ export function applyNodeWorldPose(initialMap: BackgroundMap, id: string, pose: 
   const width = settle(node.width * scale.x, node.width, MIN_PLAN_SIZE, PLAN_LIMIT), height = settle(node.height * scale.z, node.height, MIN_PLAN_SIZE, PLAN_LIMIT);
   const box = { x: settle(position.x - (width ?? node.width) / 2, node.x, -PLAN_LIMIT, PLAN_LIMIT), y: settle(position.z - (height ?? node.height) / 2, node.y, -PLAN_LIMIT, PLAN_LIMIT),
     width, height, rotation: settleTurn(read.rotation, current.rotation, normalizeDegrees), elevation,
-    volumeHeight: settle(volumeHeight * scale.y, volumeHeight, limits.volumeHeight.min, limits.volumeHeight.max) };
+    // A road has no walls: its box height is never written, and one stored while it was a room stays.
+    volumeHeight: node.type === 'space' && isRoadSpace(node) ? null : settle(volumeHeight * scale.y, volumeHeight, limits.volumeHeight.min, limits.volumeHeight.max) };
   if (node.type === 'space') {
     // Spaces stay upright: only the heading of the result is read, and members follow through the one shared carry.
     const changes = settled(box);

@@ -139,3 +139,67 @@ test('a turned room, an ellipse and a polygon hold the points containsPoint says
     assert.ok(inside > 0 && outside > 0, `${source.id}: ${inside} inside, ${outside} outside`);
   }
 });
+
+// --- Roads -------------------------------------------------------------------------------------
+/** Two roads through the building: the street across the site, the lane down it. By area alone both would lie above the floor. */
+const street = space('street', 0, 300, 1000, 80, { surface: 'road' }), lane = space('lane', 480, 0, 40, 680, { surface: 'road' });
+const town = () => mapOf([closet, street, room, site, lane, floor, chair, camera]);
+
+test('a road lies under every room whatever its size, and of two roads the larger lies below', () => {
+  const stacked = ['street', 'lane', 'site', 'floor', 'room', 'closet'];
+  assert.deepEqual(ids(stackedSpaces(town())), stacked);
+  for (const nodes of [[street, lane, site, floor, room, closet], [closet, room, floor, site, lane, street], [lane, closet, street, floor, site, room], [site, street, floor, lane, room, closet]])
+    assert.deepEqual(ids(stackedSpaces(mapOf(nodes))), stacked, ids(nodes).join(' '));
+  // A small road under a large room: by area it would be on top.
+  const patch = space('patch', 0, 0, 10, 10, { surface: 'road' });
+  assert.deepEqual(ids(stackedSpaces(mapOf([patch, site]))), ['patch', 'site']);
+  assert.deepEqual(ids(stackedSpaces(mapOf([site, patch]))), ['patch', 'site']);
+});
+
+test('the layer is asked before the area: a road and a room of one area, and two roads of one area', () => {
+  // Equal areas fall back on the order in the map only inside one layer.
+  const paved = space('paved', 0, 0, 100, 100, { surface: 'road' }), hut = space('hut', 50, 50, 100, 100);
+  assert.deepEqual(ids(stackedSpaces(mapOf([paved, hut]))), ['paved', 'hut']);
+  assert.deepEqual(ids(stackedSpaces(mapOf([hut, paved]))), ['paved', 'hut']);
+  const other = space('other', 50, 50, 100, 100, { surface: 'road' });
+  assert.deepEqual(ids(stackedSpaces(mapOf([paved, other]))), ['paved', 'other']);
+  assert.deepEqual(ids(stackedSpaces(mapOf([other, paved]))), ['other', 'paved']);
+});
+
+test('ranks count the roads first', () => {
+  const ranks = spaceStackRanks(town());
+  assert.deepEqual(['street', 'lane', 'site', 'floor', 'room', 'closet'].map(id => ranks.get(id)), [0, 1, 2, 3, 4, 5]);
+  assert.equal(ranks.size, 6);
+});
+
+test('at a plan point every room comes before the roads under it', () => {
+  const map = town();
+  assert.deepEqual(ids(spacesAt(map, { x: 490, y: 340 })), ['room', 'floor', 'site', 'lane', 'street']);
+  // Off the floor, on the site and the lane.
+  assert.deepEqual(ids(spacesAt(map, { x: 490, y: 20 })), ['site', 'lane']);
+  // Roads alone: the smaller on top, as with rooms.
+  assert.deepEqual(ids(spacesAt(mapOf([street, lane]), { x: 490, y: 340 })), ['lane', 'street']);
+  assert.deepEqual(ids(spacesAt(mapOf([lane, street]), { x: 490, y: 340 })), ['lane', 'street']);
+});
+
+test('a road whose area is no number lies at the bottom of the roads and never above a room', () => {
+  const broken = space('broken', 0, 0, NaN, 10, { surface: 'road' });
+  for (const nodes of [[closet, broken, street, site], [site, street, closet, broken], [street, broken, site, closet]])
+    assert.deepEqual(ids(stackedSpaces(mapOf(nodes))), ['broken', 'street', 'site', 'closet'], ids(nodes).join(' '));
+  // A room broken the same way is at the bottom of its own layer: under the rooms, above every road.
+  const shell = space('shell', 0, 0, NaN, 10);
+  for (const nodes of [[closet, shell, street, site], [street, site, closet, shell]])
+    assert.deepEqual(ids(stackedSpaces(mapOf(nodes))), ['street', 'shell', 'site', 'closet'], ids(nodes).join(' '));
+});
+
+test('stacking roads hands back the nodes it was given and leaves the map as it was', () => {
+  const map = town(), nodes = map.nodes, before = JSON.stringify(map);
+  const stacked = stackedSpaces(map);
+  [street, lane, site, floor, room, closet].forEach((source, index) => assert.equal(stacked[index], source, source.id));
+  spaceStackRanks(map);
+  const held = spacesAt(map, { x: 490, y: 340 });
+  assert.equal(held[0], room); assert.equal(held[3], lane); assert.equal(held[4], street);
+  assert.equal(map.nodes, nodes);
+  assert.deepEqual(ids(map.nodes), ['closet', 'street', 'room', 'site', 'lane', 'floor', 'chair', 'camera']);
+  assert.equal(JSON.stringify(map), before);
+});
