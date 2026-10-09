@@ -220,6 +220,8 @@ async function boot(){
     return db;
   } catch(error) {await db.close();throw error;}
 }
+/** The background_library_* functions a role may execute. The base-over-3D rerun test keeps its own copy of the query: that test is left as written. */
+const openTo=async(db:any,role:string):Promise<string[]>=>(await db.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'background_library_%' AND has_function_privilege($1::name,p.oid,'EXECUTE') ORDER BY 1",[role])).rows.map((row:any)=>row.proname);
 
 test('background RPC runtime validates sessions, permissions, CAS, idempotency and every entity reference',{skip:!runtime},async(t)=>{
   const db=await boot();
@@ -400,6 +402,14 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       assert.deepEqual(await read(),before);assert.deepEqual(await run(command,'admin',requestId),before);
     });
     let tall:any;
+    // One bad node, refused alone and in a batch; `before` is the caller's snapshot and is still what is read afterwards.
+    const refusing=(before:any)=>async(type:NodeType,extra:Record<string,unknown>,message:RegExp)=>{
+      const entity={...map(),nodes:[{...plain[type](),...extra}]},label=`${type} ${JSON.stringify(extra)}`;
+      await assert.rejects(save('map',entity),{code:'22023',message},label);
+      // Also inside a batch next to an otherwise valid edit: nothing of the batch may land.
+      await assert.rejects(run({type:'save-maps',maps:[{entity:{...tall,name:'반영되면 안 됨'},expectedRevision:tall.revision},{entity,expectedRevision:null}]}),{code:'22023',message},label);
+      assert.deepEqual(await read(),before,label);
+    };
     await t.test('vertical-axis fields roundtrip exactly, plain nodes gain nothing and plan-only saves keep every value',async()=>{
       const room={...space(classroom.id),elevation:-12.5,volumeHeight:260.75},find=(snapshot:any)=>snapshot.maps.find((item:any)=>item.id===m.id);
       const m=map(classroom.id);m.nodes=[room,
@@ -414,10 +424,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       const renamed=find(await save('map',{...saved,name:'이름만 바꾼 도면'},1));assert.deepEqual(renamed,{...m,name:'이름만 바꾼 도면',revision:2});
       const moved={...renamed,nodes:renamed.nodes.map((node:any)=>node.type==='camera'?{...node,x:node.x+25,y:node.y-10,angle:-45}:node)};
       await save('map',moved,2);tall=find(await read('member'));assert.deepEqual(tall,{...moved,revision:3});
-      for(const role of ['anon','authenticated']){
-        const open=(await db.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'background_library_%' AND has_function_privilege($1::name,p.oid,'EXECUTE') ORDER BY 1",[role])).rows;
-        assert.deepEqual(open.map((row:any)=>row.proname),['background_library_execute','background_library_read']);
-      }
+      for(const role of ['anon','authenticated'])assert.deepEqual(await openTo(db,role),['background_library_execute','background_library_read']);
       await assert.rejects(db.query("SELECT background_library_validate_entity('map','{}'::jsonb)"),{code:'42501'});
     });
     await t.test('a lost reply is recognised only while the stored map equals every submitted vertical-axis value',async()=>{
@@ -436,14 +443,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       assert.equal(mapSaveWasApplied(after,next),true);assert.equal(mapSaveWasApplied(after,command),false);
     });
     await t.test('invalid vertical-axis values and misplaced or unknown keys are rejected with 22023 and change nothing',async()=>{
-      const before=await read();
-      const refuse=async(type:NodeType,extra:Record<string,unknown>,message:RegExp)=>{
-        const entity={...map(),nodes:[{...plain[type](),...extra}]},label=`${type} ${JSON.stringify(extra)}`;
-        await assert.rejects(save('map',entity),{code:'22023',message},label);
-        // Also inside a batch next to an otherwise valid edit: nothing of the batch may land.
-        await assert.rejects(run({type:'save-maps',maps:[{entity:{...tall,name:'반영되면 안 됨'},expectedRevision:tall.revision},{entity,expectedRevision:null}]}),{code:'22023',message},label);
-        assert.deepEqual(await read(),before,label);
-      };
+      const before=await read(),refuse=refusing(before);
       // NaN and ±Infinity have no JSON form and reach SQL as an explicit null.
       for(const [type,key] of slots){const [min,max]=spatialRange[key];
         for(const value of [null,NaN,Infinity,-Infinity,String(min),'',true,false,[],{},min-0.001,max+0.001,min-1,max+1])await refuse(type,{[key]:value},/높이|각도|기울기|비율/);
@@ -501,14 +501,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       assert.deepEqual(find(await read('member')),renamed);
     });
     await t.test('모르는 값·잘못된 타입·잘못 붙은 키는 22023으로 거절되고 아무것도 바뀌지 않는다',async()=>{
-      const before=await read();
-      const refuse=async(type:NodeType,extra:Record<string,unknown>,message:RegExp)=>{
-        const entity={...map(),nodes:[{...plain[type](),...extra}]},label=`${type} ${JSON.stringify(extra)}`;
-        await assert.rejects(save('map',entity),{code:'22023',message},label);
-        // Also inside a batch next to an otherwise valid edit: nothing of the batch may land.
-        await assert.rejects(run({type:'save-maps',maps:[{entity:{...tall,name:'반영되면 안 됨'},expectedRevision:tall.revision},{entity,expectedRevision:null}]}),{code:'22023',message},label);
-        assert.deepEqual(await read(),before,label);
-      };
+      const refuse=refusing(await read());
       for(const value of ['river','room','Road','',null,true,1,[],{}])await refuse('space',{surface:value},/공간 종류/);
       for(const value of ['purple','amber','#ff0000','Red','',null,7,true,[],{}])await refuse('camera',{color:value},/카메라 색/);
       // Each key belongs to one node type; anywhere else it is an unknown key.
@@ -609,6 +602,9 @@ test('앞 파일을 다시 돌려도 잃는 것이 없고 사슬을 다시 적�
     const put=async(entity:any)=>{const value=find(await save('map',entity),entity);assert.deepEqual(value,{...entity,revision:1});return value;};
     // fresh carries what only the elements file accepts, tall what the 3D file added, flat neither.
     let fresh=await put({...map(),nodes:[{...symbol(),symbol:'stairs'},{...space(),surface:'road'},{...camera(),color:'pink'}]});
+    // The stair stays first: a validator stops at the first bad node, and the /사물 기호/ pins below read the stair's
+    // message from the 3D validator. With the road or the coloured camera first it answers with the key-list message.
+    assert.equal(fresh.nodes[0].symbol,'stairs');
     const tall=await put({...map(),nodes:[{...space(),elevation:5,volumeHeight:250},{...camera(),elevation:150,pitch:-90,roll:10,aspect:16/9},{...symbol(),elevation:12.5,volumeHeight:75,pitch:30,roll:-15}]});
     let flat=await put({...map(),nodes:[space(),camera(),symbol()]});
     await save('place',place());
@@ -646,12 +642,13 @@ test('앞 파일을 다시 돌려도 잃는 것이 없고 사슬을 다시 적�
     const renamed={...flat,name:'도면을 지운 뒤 평면',revision:flat.revision+1};await save('map',{...flat,name:renamed.name},flat.revision);
     const after=await read();
     assert.equal(find(after,fresh),undefined);assert.deepEqual(find(after,tall),tall);assert.deepEqual(find(after,flat),renamed);
+    // A grant that drifted in before the last run: every earlier file has locked the functions down and CREATE OR
+    // REPLACE keeps grants, so without a drift the closing check holds whether or not this file repeats the lockdown.
+    await db.exec('RESET ROLE');await db.exec('GRANT EXECUTE ON FUNCTION public.background_library_validate_entity(text,jsonb) TO PUBLIC,anon,authenticated');
+    for(const role of ['anon','authenticated'])assert.deepEqual(await openTo(db,role),['background_library_execute','background_library_read','background_library_validate_entity'],role);
     // With the chain whole again new shapes are accepted, and the deleted map stays deleted.
     await apply(sqlElements);await put({...map(),nodes:[{...symbol(),symbol:'stairs'}]});
     for(const expected of [null,fresh.revision,fresh.revision+1])await assert.rejects(save('map',fresh,expected),{code:'40001'});
-    for(const role of ['anon','authenticated']){
-      const open=(await db.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'background_library_%' AND has_function_privilege($1::name,p.oid,'EXECUTE') ORDER BY 1",[role])).rows;
-      assert.deepEqual(open.map((row:any)=>row.proname),['background_library_execute','background_library_read']);
-    }
+    for(const role of ['anon','authenticated'])assert.deepEqual(await openTo(db,role),['background_library_execute','background_library_read'],role);
   } finally {await db.close();}
 });
