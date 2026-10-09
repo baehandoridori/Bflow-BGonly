@@ -45,6 +45,11 @@ function inOrder(source: string, ...fragments: string[]): void {
 }
 const count = (source: string, pattern: RegExp) => (source.match(pattern) ?? []).length;
 /**
+ * A pick, under every spelling the editor has for one: `select`, `doc.selectMany`, the stable wrappers `selectNode` and
+ * `clearSelection`, and a dispatch. `setTool('select')` is none: the word is not followed by a parenthesis there.
+ */
+const anyPick = /\b(?:select\w*|clearSelection|dispatch)\(/;
+/**
  * One branch: from `opener`, which ends with the brace that opens it, through the brace that closes it. Braces are
  * counted as written: no branch read here has an unpaired one inside a string or a pattern.
  */
@@ -321,7 +326,7 @@ test('anchor 21: overlapping spaces are stacked in one place, mapStack.ts, and n
 test('anchor 22: switching between the plan and 3D, and going to another map, leave the selection alone', () => {
   // Several nodes picked on the plan are still picked on the way back: a line that folds them to one for 3D would lose them.
   for (const [name, body] of Object.entries({ switchMode: handler.switchMode(), leave3D: handler.leave3D(), navigate: handler.navigate() }))
-    assert.doesNotMatch(body, /\b(?:select|selectMany|dispatch)\(/, `${name} touches the selection`);
+    assert.doesNotMatch(body, anyPick, `${name} touches the selection`);
 });
 
 test('anchor 23: the 3D view and its companion plan are given one node, and a pick in 3D leaves the group picked on the plan alone', () => {
@@ -369,8 +374,12 @@ test('anchor 25: what a press of the select tool does is decided by resolvePlanP
   // What it said is carried out as it is: the node a drag takes, the nodes that travel along, what a release without movement does.
   assert.ok(down.includes('else if (plan) { mode = plan.drag; target = plan.nodeId === null ? undefined : live.nodes.find(item => item.id === plan.nodeId); }'));
   assert.ok(down.includes('groupIds: plan?.groupIds ?? null, click: plan?.click ?? NO_CLICK,'));
-  // A drag of several nodes is a gesture of its own, with all of them.
-  assert.ok(handler.planGestureOf().includes("{ mode: 'move-group', nodeId: node.id, ids: session.groupIds }"));
+  // The node that was pressed is handed over by each of the three kinds of node: without it every press is one on nothing.
+  assert.equal(count(editor, /onPointerDown=\{event => pointerDown\(event, node\)\}/g), 3, 'spaces, symbols and cameras');
+  // A drag of several nodes is a gesture of its own, with all of them. It is asked for a move, and before the line
+  // that takes any drag of a node for a drag of that one node: behind it the group would never be reached.
+  inOrder(handler.planGestureOf(), "if (mode === 'move' && node && session.groupIds) return { mode: 'move-group', nodeId: node.id, ids: session.groupIds };",
+    "if (node && mode !== 'pan' && mode !== 'marquee' && mode !== 'draw' && mode !== 'vertex') return { mode, nodeId: node.id };");
   // Shift+click puts a new list in place of the selection as it is read right now: the id of a node that is gone is not carried along.
   inOrder(block(handler.pointerUp(), "else if (click.kind === 'toggle') {"), 'const ids = liveSelection(session.mapId, liveMap).ids;',
     'doc.selectMany(session.mapId, ids.includes(click.id) ? ids.filter(id => id !== click.id) : [...ids, click.id]);');
@@ -383,12 +392,16 @@ test('anchor 25: what a press of the select tool does is decided by resolvePlanP
 test('anchor 26: the wheel button, the hand tool and a held Space move the view, before anything else a press could do', () => {
   const down = handler.pointerDown();
   assert.ok(down.includes("const panning = event.button === 1 || tool === 'hand' || spaceHeld.current;"));
+  // What they do: the view follows the pointer, and nothing else is asked of that move.
+  assert.ok(handler.pointerMove().includes("if (session.mode === 'pan') { if (first) setPanning(true); updateView({ x: session.view.x - delta.x, y: session.view.y - delta.y }, session.mapId); return; }"));
   // With Space held the polygon tool adds no point and the symbol tool places nothing.
   assert.match(down, /if \(!panning && canEdit && !handle && tool === 'polygon'\) \{\s*setPolygon\(previous => \{/);
   assert.match(down, /if \(!panning && canEdit && !handle && tool === 'symbol'\) \{ placeSymbol\(point, live\); return; \}/);
   assert.equal(count(down, /setPolygon\(/g), 1, 'points are added nowhere else');
   assert.equal(count(down, /placeSymbol\(/g), 1, 'a symbol is placed nowhere else');
-  // Nor does the select tool decide anything, so the selection stays.
+  // Nor does the select tool decide anything, so the selection stays. The same goes for a press of any of the four
+  // drawing tools while editing: left to the select tool, a click with one of them would pick, toggle or step.
+  assert.ok(down.includes("const drawing = canEdit && (tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || tool === 'symbol');"));
   assert.match(down, /const plan = panning \|\| drawing \|\| handle \? null : resolvePlanPress\(/);
   // A press with Space held is no half of a double-click, like a press the plan did not log (Shift). The wheel button
   // and the hand tool are logged as before: the hand tool enters a linked space on a double-click.
@@ -407,6 +420,8 @@ test('anchor 27: the selection box is no gesture of the document: it leaves no u
   assert.ok(editor.includes('const marqueeIds = useMemo(() => marquee && current ? planMarqueeIds(current, marquee) : null, [marquee, current]);'));
   assert.ok(editor.includes('const shownIds = useMemo(() => new Set(marqueeIds ?? selection.ids), [marqueeIds, selection]);'));
   assert.equal(count(editor, /shownIds\.has\(node\.id\)/g), 3, 'spaces, symbols and cameras');
+  // The box itself is drawn whenever there is one, over the snap guides and under the handles.
+  inOrder(editor, '<MapSnapGuides guides={guides} scale={screenScale} />', '{marquee && <MapMarquee rect={marquee} />}', '{selected && canEdit && !selected.locked && <MapNodeHandles ');
   // The release selects what the box touches, unless it was cancelled, and writes nothing to the map.
   const up = handler.pointerUp(), box = block(up, "if (session.mode === 'marquee') {");
   inOrder(box, 'setMarquee(null);', 'if (!cancel && session.moved && canEdit) {', 'doc.selectMany(session.mapId, planMarqueeIds(live, planRect(session.start, point)));');
@@ -423,6 +438,7 @@ test('anchor 28: Space held for panning is tracked wherever the focus is, and sw
   // The ref is what a press reads; the state only drives the cursor.
   inOrder(key, "if (event.code !== 'Space') return;", 'const hold = (held: boolean) => { if (spaceHeld.current !== held) { spaceHeld.current = held; setSpacePan(held); } };',
     "if (event.type === 'keyup') { hold(false); return; }",
+    'const root = rootRef.current, element = event.target instanceof Element ? event.target : null;',
     "if (mode !== 'plan' || !root || root.offsetParent === null || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;",
     'if (element?.closest(spaceEntry)) return;', 'hold(true);',
     'if (element === document.body || (element && root.contains(element) && !element.closest(`${interactive}, summary`))) event.preventDefault();');
@@ -430,6 +446,9 @@ test('anchor 28: Space held for panning is tracked wherever the focus is, and sw
   assert.doesNotMatch(key.slice(0, key.indexOf('hold(true);')), /root\.contains\(|document\.body/);
   assert.doesNotMatch(key, /closest\(textEntry\)/);
   assert.equal(count(key, /preventDefault\(/g), 1, 'swallowed on that one line only');
+  // That root is the editor itself. With the ref on nothing, or with another element read for it, the tracking line
+  // would turn every Space away (no root) or ask the wrong element whether the plan is on show.
+  assert.match(editor, /<div className="bmap-layout" ref=\{rootRef\} /);
   // Heard on the window, in the capture phase: the press moves the focus to the canvas, and the release must still be seen.
   const effect = piece(editor, 'const release = () => {', '}, [onSpaceKey]);');
   assert.match(effect, /^const release = \(\) => \{ if \(spaceHeld\.current\) \{ spaceHeld\.current = false; setSpacePan\(false\); \} \};/);
@@ -446,6 +465,10 @@ test('anchor 28: Space held for panning is tracked wherever the focus is, and sw
 test('anchor 29: several selected nodes are deleted and locked together, on the plan only, and the keyboard is back on the canvas afterwards', () => {
   // What the summary counts and the group actions work on: the selected nodes, in map order.
   assert.ok(editor.includes('const groupNodes = useMemo(() => current ? current.nodes.filter(node => selection.ids.includes(node.id)) : [], [current, selection]);'));
+  // The summary is given those nodes, offers the group actions only while editing, and its × empties the selection.
+  assert.ok(editor.includes('<BackgroundMapSelectionSummary nodes={groupNodes} canAct={canEdit} disabled={disabled} onClear={() => select(null)}'));
+  // Its delete button asks about the group: asked about one node, the dialog would confirm and delete nothing.
+  assert.ok(editor.includes("onDelete={() => { setError(''); setConfirmation('delete-group'); }} />"));
   // The whole group goes to removeMapNodes in one update, which leaves the locked ones. What stayed is still selected.
   const group = block(handler.confirmAction(), "if (confirmation === 'delete-group' && canEdit) {");
   inOrder(group, 'const next = removeMapNodes(source, selection.ids); updateMap(next);',
@@ -453,6 +476,8 @@ test('anchor 29: several selected nodes are deleted and locked together, on the 
   assert.equal(count(group, /updateMap\(/g), 1, 'one undo step');
   // The canvas takes the focus once the dialog is gone: while it is open nothing outside it can.
   assert.ok(editor.includes('useEffect(() => { if (!confirmation && focusAfterConfirm.current) { focusAfterConfirm.current = false; focusCanvas(); } }, [confirmation]);'));
+  // What both callers rely on: the canvas of the mode on show really takes the focus.
+  assert.ok(editor.includes("function focusCanvas() { (mode === 'plan' ? svgRef.current : stageRef.current)?.focus({ preventScroll: true }); }"));
   // A lock button disables itself with its own click, and the keys of a disabled button reach nothing.
   assert.match(editor, /onLock=\{locked => \{\s*updateMap\(lockMapNodes\(current, selection\.ids, locked\)\); focusCanvas\(\);\s*\}\}/);
   // Delete: the picked point, then the one node, then the group. In 3D only the one node.
@@ -464,7 +489,7 @@ test('anchor 30: Escape cancels a selection box like any drag, and never clears 
   const escape = block(handler.keyboard(), "if (event.key === 'Escape') {");
   // A box is no gesture of the document, so it is asked for by its own name. The tool is left as it is.
   inOrder(escape, "if (pointerRef.current?.mode === 'marquee' || doc.isGestureActive()) { abortGesture(); return; }", "setPolygon([]); setTool('select');");
-  assert.doesNotMatch(escape, /\b(?:select|selectMany)\(/);
+  assert.doesNotMatch(escape, anyPick, 'Escape touches the selection');
 });
 
 test('anchor 31: in 3D a click steps to the space underneath only on the same spot again, and never as the second click of a double click', () => {
@@ -487,6 +512,8 @@ test('anchor 31: in 3D a click steps to the space underneath only on the same sp
   // on the plan: the look tool picks nothing.
   assert.ok(viewport.onDoubleClick().includes('this.doubleClickNode('));
   assert.match(editor, /const openSpaceFrom3D = useEvent\(\(id: string\) => \{ if \(tool !== 'symbol'\) openSpace\(id, tool !== 'hand'\); \}\);/);
+  // And that is what the 3D view is given: handed openSpace itself, it would enter without picking, and with the symbol tool too.
+  assert.ok(editor.includes('onOpenSpace={openSpaceFrom3D}'));
   // A selection made some other way, and another map, end what was remembered.
   const update = viewport.update();
   assert.ok(update.includes('if (this.turn && props.selectedId !== this.turn.pickedId) this.turn = null;'));
@@ -529,6 +556,8 @@ test('anchor 34: on the companion plan a click steps to the space underneath onl
   const preview = read('BackgroundMapPlanPreview.tsx');
   // A click carries its point and its count. A keyboard pick carries neither.
   assert.ok(preview.includes('onActivate(node.id, true, clickPoint(event), event.detail >= 2)'));
+  // Told apart by the second argument: taken for a click, a keyboard pick would step through piles and write the spot memory.
+  assert.ok(preview.includes('event.preventDefault(); event.stopPropagation(); onActivate(node.id, false);'), 'a keyboard pick is no click');
   const activate = piece(preview, 'const activate = useCallback<Activate>(', '}, []);');
   // Only a click leaves a spot behind, and it is written before the selection is reported.
   inOrder(activate, 'const again = cycle && turn.current?.hitId === id && turn.current.pickedId === now.selectedId;',
