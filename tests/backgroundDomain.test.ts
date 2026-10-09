@@ -321,9 +321,11 @@ test('계단·도로·카메라 색은 단일 저장, 이름만 바꾼 저장, �
 });
 
 test('공간 종류와 카메라 색은 닫힌 목록의 값만 받고 목록 밖의 기호 종류도 거부한다',()=>{
-  for(const value of ['river','room','',null,undefined,true,1,[],{}])assert.throws(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
-  for(const value of ['purple','amber','#ff0000','',null,undefined,7,true,[],{}])assert.throws(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
-  assert.throws(()=>checkNodes([{...symbol(),symbol:'elevator'}]),/사물 기호/);
+  // The last two of each list: a listed name inside an array, or in another letter case, is not that name.
+  // The server compares the stored text as it is, so neither may pass here by being turned into a string or lower-cased.
+  for(const value of ['river','room','',null,undefined,true,1,[],{},['road'],'Road'])assert.throws(()=>checkNodes([{...planSpace(),surface:value}]),/공간 종류/,`surface=${inspect(value)}`);
+  for(const value of ['purple','amber','#ff0000','',null,undefined,7,true,[],{},['red'],'RED'])assert.throws(()=>checkNodes([{...planCamera(),color:value}]),/카메라 색/,`color=${inspect(value)}`);
+  for(const value of ['elevator',['stairs'],'Stairs'])assert.throws(()=>checkNodes([{...symbol(),symbol:value}]),/사물 기호/,`symbol=${inspect(value)}`);
   assert.doesNotThrow(()=>checkNodes([{...planSpace(),surface:'road'},...BACKGROUND_CAMERA_COLORS.map(color=>({...planCamera(),color})),{...symbol(),symbol:'stairs'}]));
 });
 
