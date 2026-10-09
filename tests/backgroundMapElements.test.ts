@@ -293,15 +293,17 @@ test('the stylesheet holds the camera palette as one set with the colour table: 
   assert.ok(lines.includes('.bmap-layout [data-camera-color] { --bmap-cam-mark:var(--color-bg-primary); }'), 'the mark of a coloured camera');
 });
 
-/** The rules that paint a camera on the plan and its direction handle, and what each must paint with: [selector, declarations]. */
+/** The rules that paint a camera on the plan and its direction handle, and what each must paint with: [selector, declarations].
+ *  A camera without a colour is painted by the same rules, so each see-through value is written out: it is the one the amber
+ *  had as two more digits (20, 65, 40 and 26 of ff), and with any other that camera is no longer what it was. */
 const CAMERA_PLAN_RULES: [string, string[]][] = [
   ['.bmap-camera circle {', ['fill:rgb(var(--bmap-cam))']],
-  ['.bmap-camera .bmap-camera-cone {', ['fill:rgb(var(--bmap-cam) /', 'stroke:rgb(var(--bmap-cam) /']],
+  ['.bmap-camera .bmap-camera-cone {', ['fill:rgb(var(--bmap-cam) / .1255)', 'stroke:rgb(var(--bmap-cam) / .3961)']],
   ['.bmap-camera line {', ['stroke:rgb(var(--bmap-cam))']],
   ['.bmap-camera .bmap-camera-arrow {', ['fill:rgb(var(--bmap-cam-mark))']],
-  ['.bmap-camera.is-selected .bmap-camera-cone {', ['fill:rgb(var(--bmap-cam) /', 'stroke:rgb(var(--bmap-cam))']],
-  ['.bmap-camera .bmap-camera-ring {', ['fill:rgb(var(--bmap-cam) /', 'stroke:rgb(var(--bmap-cam))']],
-  ['.bmap-camera.is-selected .bmap-camera-ring {', ['fill:rgb(var(--bmap-cam) /']],
+  ['.bmap-camera.is-selected .bmap-camera-cone {', ['fill:rgb(var(--bmap-cam) / .251)', 'stroke:rgb(var(--bmap-cam))']],
+  ['.bmap-camera .bmap-camera-ring {', ['fill:rgb(var(--bmap-cam) / .149)', 'stroke:rgb(var(--bmap-cam))']],
+  ['.bmap-camera.is-selected .bmap-camera-ring {', ['fill:rgb(var(--bmap-cam) / .251)']],
   ['.bmap-camera .bmap-camera-mark {', ['fill:rgb(var(--bmap-cam-mark))', 'stroke:rgb(var(--bmap-cam-mark))']],
   ['.bmap-handles .bmap-camera-direction {', ['stroke:rgb(var(--bmap-cam))']],
   ['.bmap-handles .bmap-camera-guide {', ['stroke:rgb(var(--bmap-cam))']],
@@ -328,7 +330,8 @@ test('on the companion plan a camera with a colour of its own sets the four came
   for (const name of ['--bmap-plan-cam:', '--bmap-plan-cam-line:', '--bmap-plan-cam-edge:', '--bmap-plan-cam-soft:']) assert.ok(line.includes(name), `${name} ${line}`);
   assert.ok(line.includes('var(--bmap-cam)'), line);
   // The light theme gives the line and the edge an amber of their own on the root: each of the four is set here, or that one stays amber.
-  for (const declaration of ['--bmap-plan-cam:rgb(var(--bmap-cam));', '--bmap-plan-cam-line:rgb(var(--bmap-cam));', '--bmap-plan-cam-edge:rgb(var(--color-bg-primary));', '--bmap-plan-cam-soft:rgb(var(--bmap-cam) /'])
+  // The soft one fills the fan and the hover of a camera: as see-through as the amber one of the root, or it would hide what is under it.
+  for (const declaration of ['--bmap-plan-cam:rgb(var(--bmap-cam));', '--bmap-plan-cam-line:rgb(var(--bmap-cam));', '--bmap-plan-cam-edge:rgb(var(--color-bg-primary));', '--bmap-plan-cam-soft:rgb(var(--bmap-cam) / .18);'])
     assert.ok(line.includes(declaration), `${declaration} ${line}`);
 });
 
@@ -350,6 +353,8 @@ test('a colour circle is painted with its own colour, marks the current colour w
   assert.ok(rule('backgrounds-map.css', '.bg-library .bmap-color-swatch {').includes('background:rgb(var(--bmap-cam))'));
   assert.ok(rule('backgrounds-map.css', '.bg-library button.bmap-color-swatch:hover:not(:disabled) {').includes('background:rgb(var(--bmap-cam))'));
   // Not by colour alone: the current colour has a ring, and 'back to the default colour' with nothing to reset is dimmed under the pointer too.
-  assert.ok(rule('backgrounds-map.css', '.bg-library .bmap-color-swatch[aria-pressed="true"] {').includes('box-shadow:'));
+  // The ring is a shadow in the text colour, outside the circle or inside it: a shadow of nothing marks no colour.
+  const pressed = rule('backgrounds-map.css', '.bg-library .bmap-color-swatch[aria-pressed="true"] {');
+  assert.match(pressed, /box-shadow:[^;]*rgb\(var\(--color-text-primary\)\)/, pressed);
   assert.ok(rule('backgrounds-map.css', '.bg-library .bmap-color-reset[aria-disabled="true"],.bg-library .bmap-color-reset[aria-disabled="true"]:hover {').includes('color:rgb(var(--color-text-secondary) /'));
 });
