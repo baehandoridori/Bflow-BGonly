@@ -1034,6 +1034,15 @@ test('a road loses a click to the rooms it shares ground with, on a floor or a w
   for (const again of [false, true]) for (const selected of [beside.id, street.id, null]) {
     assert.equal(resolveMapClick(besideRoad, selected, pastBeside, again), street.id, `beside the road, again ${again}`);
   }
+  // On the road or beside it is read from the outlines of the two, not from their boxes. A room turned 45°: its box
+  // before the turn is clear of the road, and one corner of the turned room reaches onto it. It stands on the road.
+  const turned = space(9, { x: 1010, y: 300, width: 200, height: 200, rotation: 45 });
+  row('a turned room with a corner on the road', mapOf([street, turned]), [hit(turned.id, 'wall', 40), hit(street.id, 'floor', 90)], turned.id, [turned.id, street.id]);
+  // An L-shaped room around the lower right corner of the road: its box covers that corner, and its outline keeps 20
+  // away from the road on both sides. It stands beside the road.
+  const bent = space(13, { x: 900, y: 580, width: 300, height: 300, shape: 'polygon',
+    points: [{ x: 0.4, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: 0, y: 0.4 }, { x: 0.4, y: 0.4 }] });
+  row('an L-shaped room around a corner of the road', mapOf([street, bent]), [hit(bent.id, 'wall', 40), hit(street.id, 'floor', 90)], street.id, [street.id]);
 
   // Two roads under the room: after the room the smaller one, then the larger, then the room again.
   const crossing = mapOf([street, alley, room]), pastCrossing = [hit(room.id, 'wall', 40), hit(street.id, 'floor', 90), hit(alley.id, 'floor', 90.00000001)];

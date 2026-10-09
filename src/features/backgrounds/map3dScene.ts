@@ -650,8 +650,9 @@ function roadsUnderRooms(hits: readonly MapPickHit[], map: BackgroundMap): Set<s
 /**
  * Node a ray selects. A camera or a solid part of an object comes first, the nearest one. The see-through box around
  * an object only counts when nothing solid is on the ray. Then the space whose floor is under the pointer, and a wall
- * only when no floor is: walls and boxes never swallow a click on what stands inside or behind them.
- * `map` settles floors on the same level.
+ * only when no floor is: walls and boxes never swallow a click on what stands inside or behind them. But the floor of
+ * a road under a room on the ray takes no part at all: it is set aside before anything else (below).
+ * `map` settles floors on the same level and tells which roads lie under a room: without it no road is set aside.
  */
 export function pickMapNode(hits: readonly MapPickHit[], map?: BackgroundMap): string | null {
   // A road lies under the rooms that stand on it: where the ray also meets such a room, on its floor or on a wall and
