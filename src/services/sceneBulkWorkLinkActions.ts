@@ -41,6 +41,14 @@ async function reloadLinks(sceneUuids: string[]): Promise<boolean> {
   return Promise.race([load, timeout]);
 }
 
+/**
+ * 쓰기가 모두 돌아온 뒤 그 씬들의 링크를 한 번 읽어 저장소를 서버와 맞춘다(5절).
+ * 기다리지 않고, 실패해도 조용하다 — 다음에 그 씬을 읽을 때 맞춰진다.
+ */
+function refreshLinks(sceneUuids: string[]): void {
+  void useSceneWorkLinkStore.getState().loadForSceneUuids(sceneUuids).catch(() => {});
+}
+
 export async function offerBulkWorkLink(input: {
   sceneUuid: string;
   department: SceneWorkLinkDepartment;
@@ -81,6 +89,8 @@ async function runBulkWorkLink(
   userId: string | null,
   savedToastId: string | number | undefined,
 ): Promise<void> {
+  // 한 칸 저장의 알림은 여기서 닫는다 — 아래 어느 길로 가든 결과 알림 한 장이 그 자리를 잇는다.
+  if (savedToastId !== undefined) toast.dismiss(savedToastId);
   const picked = new Set(selectedKeys);
   const uuids = offer.candidates
     .filter((item) => picked.has(item.key))
@@ -116,11 +126,60 @@ async function runBulkWorkLink(
       console.warn('[sceneBulkWorkLink] 연결 실패', plan.writes[index].sceneId, result.reason);
     }
   });
+  // 쓰기의 응답이 모두 돌아왔다 — 한 번 읽어 저장소에 남은 낙관적 행을 치우고 서버와 맞춘다.
+  refreshLinks(plan.writes.map((write) => write.sceneUuid));
   const message = bulkLinkResultText({ linked: done.map((write) => write.sceneId), failed, changed: plan.changed });
   if (done.length === 0) {
     if (failed.length > 0) toast.error(message);
     else toast(message);
     return;
   }
-  toast.success(message);
+  showUndoToast({
+    message,
+    durationMs: BULK_LINK_UNDO_MS,
+    onUndo: () => { void undoBulkWorkLink(offer, done, userId); },
+    onExpire: () => {},
+  });
+}
+
+async function undoBulkWorkLink(offer: BulkLinkOffer, writes: BulkLinkWrite[], userId: string | null): Promise<void> {
+  // 되돌리지 못한 것이 남으면 '되돌리기'를 다시 건다 — 바뀐 씬의 예전 경로는 이 writes에만 있다.
+  const offerAgain = (message: string, rest: BulkLinkWrite[]) => {
+    showUndoToast({
+      message,
+      durationMs: BULK_LINK_UNDO_MS,
+      onUndo: () => { void undoBulkWorkLink(offer, rest, userId); },
+      onExpire: () => {},
+    });
+  };
+  const fresh = await reloadLinks(writes.map((write) => write.sceneUuid));
+  if (!fresh) {
+    offerAgain(BULK_LINK_TEXT.undoRecheckFailed, writes);
+    return;
+  }
+  const store = useSceneWorkLinkStore.getState();
+  const plan = planBulkUndo(writes, offer.path, offer.department, store.linkMap, userId);
+  const settled = await Promise.allSettled(plan.steps.map((step) => (step.kind === 'delete'
+    ? store.deleteLink(step.sceneUuid, offer.department, 'primary_file')
+    : store.upsertLink({
+        sceneUuid: step.sceneUuid, department: offer.department, linkKind: 'primary_file', path: step.path, userId,
+      }))));
+  const undone: string[] = [];
+  const failed: BulkLinkWrite[] = [];
+  settled.forEach((result, index) => {
+    const step = plan.steps[index];
+    if (result.status === 'fulfilled') {
+      undone.push(step.sceneId);
+      return;
+    }
+    const before = step.kind === 'restore' ? step.path : null;
+    failed.push({ sceneUuid: step.sceneUuid, sceneId: step.sceneId, before });
+    // 예전 경로를 함께 남긴다 — '되돌리기'를 다시 누르지 못했을 때 찾아 쓸 수 있는 마지막 자리다.
+    console.warn('[sceneBulkWorkLink] 되돌리기 실패', step.sceneId, before, result.reason);
+  });
+  refreshLinks(plan.steps.map((step) => step.sceneUuid));
+  const message = bulkUndoResultText({ undone, failed: failed.map((write) => write.sceneId), kept: plan.kept });
+  if (failed.length > 0) offerAgain(message, failed);
+  else if (undone.length > 0) toast.success(message);
+  else toast(message);
 }
