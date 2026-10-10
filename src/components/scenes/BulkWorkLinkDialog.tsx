@@ -50,6 +50,9 @@ export function BulkWorkLinkDialogHost() {
   return <BulkWorkLinkWindow offer={offer} onClose={close} />;
 }
 
+/** 창이 뜬 뒤 이만큼은 바깥 누름으로 닫지 않는다 — 스스로 뜨는 창이라, 뜨는 순간 이미 누르고 있던 클릭이 제안을 닫아 버리지 않게. */
+const BACKDROP_GRACE_MS = 400;
+
 /** 뒤에 깔린 상세 창이 창 단위(window)로 듣는 단축키·붙여넣기에 닿지 않게 한다. */
 const stop = (event: React.SyntheticEvent) => { event.stopPropagation(); };
 
@@ -61,11 +64,13 @@ function BulkWorkLinkWindow({ offer, onClose }: { offer: BulkLinkOffer; onClose:
     () => new Set(offer.candidates.filter((row) => row.checked).map((row) => row.key)),
   );
   const previousRef = useRef<HTMLElement | null>(null);
+  const openedAtRef = useRef(0);
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog && !dialog.open) {
       previousRef.current = document.activeElement as HTMLElement | null;
       dialog.showModal();
+      openedAtRef.current = performance.now();
     }
     dialog?.querySelector<HTMLInputElement>('input[type="checkbox"]:not(:disabled)')?.focus();
     return () => {
@@ -140,7 +145,7 @@ function BulkWorkLinkWindow({ offer, onClose }: { offer: BulkLinkOffer; onClose:
       onCancel={(event) => { event.preventDefault(); onClose(null); }}
       onKeyDown={stop}
       onPaste={stop}
-      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(null); }}
+      onMouseDown={(event) => { if (event.target === event.currentTarget && performance.now() - openedAtRef.current > BACKDROP_GRACE_MS) onClose(null); }}
     >
       <div className="flex max-h-[min(640px,calc(100vh-48px))] flex-col">
         <header className="px-6 pt-5 pb-3">

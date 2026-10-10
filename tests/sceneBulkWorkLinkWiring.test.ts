@@ -351,7 +351,11 @@ test('앵커 8: 호스트는 본 창에 하나, 창은 스스로 닫히는 길�
   // 닫는 길은 모두 settle을 지난다: 버튼·Esc·바깥 누름은 close로 가고, 이미 떠 있을 때의 새 요청은 덮어쓰지 않고 null로 끝난다.
   has(dialog, 'const close = (keys: string[] | null) => { settle(keys); setOffer(null); };');
   has(dialog, 'onCancel={(event) => { event.preventDefault(); onClose(null); }}');
-  has(dialog, 'onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(null); }}');
+  // 최종 검토에서 더함: 이 창은 저장 뒤 0.몇 초에 스스로 뜬다 — 뜨는 순간 이미 누르고 있던 클릭이 뒤 배경에 떨어져 창을 닫으면 묻지도 못하고 제안이 사라진다. 뜬 뒤 0.4초 동안의 바깥 누름은 듣지 않는다.
+  has(dialog, 'const BACKDROP_GRACE_MS = 400;');
+  has(dialog, 'openedAtRef.current = performance.now();');
+  inOrder(dialog, ['dialog.showModal();', 'openedAtRef.current = performance.now();']);
+  has(dialog, 'onMouseDown={(event) => { if (event.target === event.currentTarget && performance.now() - openedAtRef.current > BACKDROP_GRACE_MS) onClose(null); }}');
   has(dialog, 'if (pending) { resolve(null); return; }');
 });
 
@@ -395,5 +399,11 @@ test('앵커 11: 새 창은 링크 행 신호에 자료를 다시 받지 않는�
 test('앵커 12: 저장이 도는 중에는 또 저장하지 않는다', () => {
   const panel = read(PANEL);
   const head = piece(panel, 'const savePath = async (nextPath: string) => {', 'setSaving(true);');
-  has(head, 'if (saving) return;');
+  // 최종 검토에서 고침: 렌더 때의 saving이 아니라 지금 값을 본다 — 선택창을 기다린 뒤의 저장은 예전 렌더의 saving을 쥐고 있어, 앞의 저장이 끝난 뒤 고른 파일을 조용히 버렸다.
+  has(head, 'if (savingRef.current) return;');
+  lacks(head, 'if (saving) return;');
+  // 켜는 자리는 빈 경로를 돌려보낸 뒤다 — 그 앞에서 켜면 빈 칸의 Enter 한 번에 그 줄이 다시는 저장하지 못한다.
+  inOrder(head, ['if (savingRef.current) return;', 'if (!scene?.id || !trimmed) return;', 'savingRef.current = true;', 'setSaving(true);']);
+  const tail = piece(piece(panel, 'const savePath = async (nextPath: string) => {', 'const handleChoose = async () => {'), '} finally {', 'setSaving(false);');
+  has(tail, 'savingRef.current = false;');
 });
