@@ -254,6 +254,7 @@ function WorkLinkRow({
   }, [menuOpen]);
 
   const savePath = async (nextPath: string) => {
+    if (saving) return;   // 저장이 도는 중에는 또 저장하지 않는다(붙여넣기 칸의 Enter는 버튼과 달리 막혀 있지 않다)
     const trimmed = nextPath.trim();
     if (!scene?.id || !trimmed) return;
     setSaving(true);

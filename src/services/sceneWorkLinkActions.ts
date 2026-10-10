@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { offerBulkWorkLink } from '@/services/sceneBulkWorkLinkActions';
 import { chooseWorkFile, chooseWorkFolder } from '@/services/sceneWorkLinkService';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import { getSceneWorkLinkSlots } from '@/utils/sceneWorkLinks';
@@ -60,7 +61,11 @@ export async function saveWorkLinkPathGuarded(opts: {
       path,
       userId: userId ?? null,
     });
-    toast.success(existingPath ? '작업 링크를 변경했습니다' : '작업 링크를 연결했습니다');
+    const savedToastId = toast.success(existingPath ? '작업 링크를 변경했습니다' : '작업 링크를 연결했습니다');
+    // 대표 파일이면 같은 파일을 쓸 다른 씬을 찾아 묻는다. 기다리지 않는다 — 이 저장의 결과는 여기서 끝났다.
+    if (linkKind === 'primary_file') {
+      void offerBulkWorkLink({ sceneUuid, department, path, userId: userId ?? null, savedToastId });
+    }
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
