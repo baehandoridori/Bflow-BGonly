@@ -345,6 +345,9 @@ test('앵커 8: 호스트는 본 창에 하나, 창은 스스로 닫히는 길�
   has(dialog, 'if (!dialogRef.current?.contains(pressed.target as Node | null)) pressed.stopPropagation();');
   has(dialog, "window.addEventListener('keydown', stopOutsideKeyAtWindow, true);");
   has(dialog, "return () => window.removeEventListener('keydown', stopOutsideKeyAtWindow, true);");
+  // 관문 C에서 더함: 체크를 푼 줄까지 넘기면 고르지 않은 씬(남이 맡은 씬도 든다)의 파일이 바뀐다 — 체크됐고 고를 수 있는 줄만 넘긴다.
+  has(dialog, "const picked = offer.candidates.filter((row) => checkedKeys.has(row.key) && (row.state === 'empty' || row.state === 'replace'));");
+  has(dialog, 'const submit = () => { if (count > 0) onClose(picked.map((row) => row.key)); };');
   // 닫는 길은 모두 settle을 지난다: 버튼·Esc·바깥 누름은 close로 가고, 이미 떠 있을 때의 새 요청은 덮어쓰지 않고 null로 끝난다.
   has(dialog, 'const close = (keys: string[] | null) => { settle(keys); setOffer(null); };');
   has(dialog, 'onCancel={(event) => { event.preventDefault(); onClose(null); }}');
