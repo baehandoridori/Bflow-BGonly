@@ -59,6 +59,14 @@ test('몰아서 온 예약은 마지막 예약에서 400ms 뒤에 한 번만 돈
   assert.equal(runs(), 1);
   advanceTo(1400);
   assert.equal(runs(), 2);
+
+  // 한참 쉰 뒤의 예약도 그 예약에서 400ms 뒤 — 2000ms 상한은 앞서 돈 때가 아니라 새 묶음의 첫 예약에서 센다.
+  advanceTo(5000);
+  debounce.schedule();
+  advanceTo(5399);
+  assert.equal(runs(), 2);
+  advanceTo(5400);
+  assert.equal(runs(), 3);
 });
 
 test('예약이 끊이지 않아도 첫 예약에서 2000ms 안에 한 번 돈다', () => {
@@ -97,4 +105,34 @@ test('cancel은 예약을 버리고 첫 예약 시각도 지운다', () => {
   assert.equal(runs(), 0);
   advanceTo(3400);
   assert.equal(runs(), 1);
+});
+
+test('시계를 넘기지 않으면 Date.now·setTimeout·clearTimeout으로 같은 규칙을 지킨다', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let runs = 0;
+  const debounce = createTrailingDebounce(() => { runs += 1; }, { waitMs: 400, maxWaitMs: 2000 });
+
+  // 0·100·200·300·400ms에 다섯 번 예약 → 마지막 예약에서 400ms 뒤(800ms)에 한 번만.
+  for (let i = 0; i < 5; i += 1) {
+    debounce.schedule();
+    t.mock.timers.tick(100);
+  }
+  t.mock.timers.tick(299); // 799ms
+  assert.equal(runs, 0);
+  t.mock.timers.tick(1); // 800ms
+  assert.equal(runs, 1);
+  t.mock.timers.tick(5000); // 5800ms
+  assert.equal(runs, 1);
+
+  // 5800ms부터 300ms마다 일곱 번 예약(마지막은 7600ms) → 첫 예약 + 2000(7800ms)에 한 번.
+  for (let i = 0; i < 7; i += 1) {
+    if (i > 0) t.mock.timers.tick(300);
+    debounce.schedule();
+  }
+  t.mock.timers.tick(199); // 7799ms
+  assert.equal(runs, 1);
+  t.mock.timers.tick(1); // 7800ms
+  assert.equal(runs, 2);
+  t.mock.timers.tick(5000);
+  assert.equal(runs, 2);
 });
