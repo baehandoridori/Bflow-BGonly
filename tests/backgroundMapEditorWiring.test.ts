@@ -663,3 +663,237 @@ test('anchor 39: on the companion plan a left press that never became a click th
   inOrder(preview, 'const forget = (event: PointerEvent) => {', "window.addEventListener('pointerdown', forget, true);",
     "return () => window.removeEventListener('pointerdown', forget, true);", 'const release = (event: PointerEvent) => {', 'const activate = useCallback<Activate>(');
 });
+
+// 40-49: the new map elements (stairs, roads, camera colours) and the update notice.
+test('anchor 40: the road tool is a drawing tool, and one drag with it draws a rectangle that carries the road key', () => {
+  assert.match(editor, /type Tool = (?:'[a-z]+' \| )*'road'(?: \| '[a-z]+')*;/);
+  // Counted with the drawing tools: going to 3D puts the select tool back, and a press with it is no press of the select tool.
+  assert.ok(editor.includes("const isDrawTool = (tool: Tool) => tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || tool === 'road';"));
+  // Offered with them: on the plan, while editing.
+  assert.match(editor, /\.\.\.\(editing \? \[[^\]]*\{ id: 'road' as const, label: '도로', title: '도로: 끌어서 곧은 길 그리기 · 꺾이는 길은 그린 뒤 다각형으로 바꿔 점을 다듬어요', icon: '═' \}\] : \[\]\)/);
+  // The drag of a rectangle, told to be a road.
+  assert.ok(handler.pointerDown().includes("if (canEdit && (tool === 'rect' || tool === 'ellipse' || tool === 'road')) { mode = 'draw'; target = newSpace(tool === 'road' ? 'rect' : tool, point, tool === 'road'); }"));
+  const make = piece(editor, 'function newSpace(', 'function finishPolygon(');
+  assert.ok(make.includes("name: road ? '새 도로' : '새 공간'"));
+  // The key is there for a road and absent for a room. Written as `undefined` it would stay in the node, and the save would be refused.
+  assert.ok(make.includes("...(road ? { surface: 'road' as const } : {})"));
+  assert.doesNotMatch(make, /\bsurface:\s*road\b/);
+});
+
+test('anchor 41: a road is drawn by the one pass that draws every space, its centre line under its name, on the plan and on the companion plan, and it is called a road wherever a space is named', () => {
+  // The plan. Rooms and roads come out of one pass over the stack: a pass of their own would draw the roads twice, or out of the stack.
+  assert.equal(count(editor, /\bstackedSpaces\(/g), 1, 'one pass over the stack');
+  assert.ok(editor.includes('stackedSpaces(current).map('));
+  assert.equal(count(editor, /\bbmap-space(?!-)/g), 1, 'one line draws a space');
+  assert.equal(count(editor, /shownIds\.has\(node\.id\)/g), 3, 'spaces, symbols and cameras');
+  const spaces = piece(editor, '{stackedSpaces(current).map(node => {', '{current.nodes.filter((node): node is BackgroundSymbol');
+  assert.ok(spaces.includes('road = isRoadSpace(node), centre = roadCentreLine(node);'));
+  assert.ok(spaces.includes("${road ? 'is-road ' : ''}"));
+  // A polyline, so the fill rule of a space (rect, ellipse, polygon) does not reach it. After the shape and before the
+  // name: the outline behind the letters of the name covers the line, never the other way round.
+  inOrder(spaces, '<rect width={node.width} height={node.height} rx={road ? 0 : 4} />', '{centre && <polyline className="bmap-road-line" fill="none" points={centre.map(', '<text');
+  assert.equal(count(editor, /bmap-road-line/g), 1, 'the centre line is drawn in that one place');
+  // That outline: without it the line strikes the name through, and with a fixed width it thins away on a zoomed-out plan.
+  const nameRule = read('backgrounds-map.css').split('\n').filter(line => line.startsWith('.bmap-space.is-road text {'));
+  assert.equal(nameRule.length, 1, 'the name of a road has one rule of its own');
+  assert.ok(nameRule[0].includes('paint-order:stroke'), nameRule[0]);
+  assert.match(nameRule[0], /stroke-width:[^;]*var\(--bmap-label-scale/);
+  // The companion plan. Nothing else tells it a road from a room: without these it draws a road as a room.
+  const preview = read('BackgroundMapPlanPreview.tsx'), shape = piece(preview, 'const PlanShape = memo(function PlanShape(', 'function VerticalMark(');
+  assert.ok(shape.includes("const road = node.type === 'space' && isRoadSpace(node), centre = node.type === 'space' ? roadCentrePlanLine(node) : null;"));
+  assert.ok(shape.includes("${road ? ' is-road' : ''}"));
+  inOrder(shape, '<polygon', '{centre && <polyline className="bmap-plan-road-line" fill="none" points={pointList(centre)} />}');
+  assert.ok(preview.includes("isRoadSpace(selected) ? '선택한 도로' : '선택한 공간'"));
+  // The words. The kind in the object list and in the name box, the heading of the inspector, the icon in the list.
+  assert.ok(piece(editor, 'const kindLabel = ', 'const ObjectList = memo(function ObjectList(').includes("node.type === 'space' ? (isRoadSpace(node) ? '도로' : '공간')"));
+  assert.ok(editor.includes("selected.type === 'space' ? (isRoadSpace(selected) ? '선택한 도로' : '선택한 공간')"));
+  assert.ok(piece(editor, 'const ObjectList = memo(function ObjectList(', 'export function BackgroundMapEditor(').includes("isRoadSpace(node) ? '═' : node.shape === 'ellipse'"));
+  // A road whose shape has no centre line says why, right where that line is computed: the line goes away with one more point.
+  assert.ok(editor.includes("const ROAD_HINT_ROUND = '둥근 도로에는 가운데 점선이 없어요.';"));
+  assert.match(editor, /const ROAD_HINT_NO_STRIP = '가운데 점선은 길 양쪽 옆줄의 점이 같은 수로 서로 마주 볼 때 보여요\.[^']*';/);
+  assert.ok(editor.includes(`{isRoadSpace(selected) && !roadCentreLine(selected) && <p className="bmap-hint">{selected.shape === 'ellipse' ? ROAD_HINT_ROUND : ROAD_HINT_NO_STRIP}</p>}`));
+  assert.ok(editor.includes("{isRoadSpace(selected) ? '꺾이는 길은 다각형으로 바꾼 뒤 점을 끌어 만들어요.' : '꼭짓점을 끌어 ㄱ자 같은 모양으로 고칠 수 있어요.'}"));
+  // A road under another space cannot be pressed there: the hint of every road ends with how to get hold of it.
+  assert.match(editor, /const ROAD_HINT = '[^']*다른 공간에 덮인 도로는 그 자리를 천천히 한 번 더 누르거나 오른쪽 목록에서 골라요\.';/);
+  assert.ok(editor.includes('<p className="bmap-hint">{isRoadSpace(selected) ? ROAD_HINT : '));
+});
+
+test('anchor 42: roads are a layer of their own under every room, asked before the areas are compared', () => {
+  const stacked = piece(read('mapStack.ts'), 'export function stackedSpaces(', 'export function spaceStackRanks(');
+  assert.ok(stacked.includes('layer: isRoadSpace(space) ? 0 : 1'));
+  // Asked after the area, only a road larger than every room would lie under them.
+  assert.ok(stacked.includes('entries.sort((a, b) => a.layer !== b.layer ? a.layer - b.layer : a.area === b.area ? a.index - b.index : b.area - a.area)'));
+  assert.equal(count(stacked, /\.sort\(/g), 1, 'sorted once');
+});
+
+test('anchor 43: the surface of a space and the colour of a camera are changed by two pure functions alone, and the default is the key taken away', () => {
+  // A road just drawn gets its key from newSpace (anchor 40). On a node that is there, each key has one writer.
+  const surface = piece(editor, 'function changeSpaceSurface(', 'function changeCameraColor('), colour = piece(editor, 'function changeCameraColor(', 'function duplicateSymbol(');
+  // The same node back means nothing changed: no update and no undo step.
+  inOrder(surface, 'const next = setSpaceSurface(selected, surface);', 'if (next !== selected) updateMap(replaceMapNode(current, next));');
+  inOrder(colour, 'const next = setCameraColor(selected, color);', 'if (next !== selected) updateMap(replaceMapNode(current, next));');
+  assert.equal(count(editor, /\bsetSpaceSurface\(/g), 1); assert.equal(count(editor, /\bsetCameraColor\(/g), 1);
+  assert.ok(editor.includes("onChange={event => changeSpaceSurface(event.target.value === 'road' ? 'road' : null)}"));
+  assert.ok(editor.includes('onChange={changeCameraColor}'));
+  // patchNode merges: it can write a key and never take one away. A key left as `undefined` or `null` is refused by the save.
+  assert.doesNotMatch(editor, /patchNode\(\{\s*(?:surface|color)\b/);
+  assert.doesNotMatch(editor, /\b(?:surface|color):\s*(?:undefined|null)\b/);
+  const geometry = read('mapGeometry.ts');
+  const setSurface = piece(geometry, 'export function setSpaceSurface(', 'export function setCameraColor('), setColour = piece(geometry, 'export function setCameraColor(', 'export function containsPoint(');
+  assert.ok(setSurface.includes('delete next.surface'));
+  assert.ok(setColour.includes('delete next.color'));
+  assert.doesNotMatch(`${setSurface}${setColour}`, /\b(?:surface|color):\s*(?:undefined|null)\b/);
+});
+
+test('anchor 44: a road has a floor level and no height: no field for it, nothing written to it from 3D, no handle that sizes it, and its floor is drawn under the floors of the rooms', () => {
+  assert.ok(editor.includes("const selectedRoad = selected?.type === 'space' && isRoadSpace(selected);"));
+  assert.ok(editor.includes('{!selectedRoad && <NumberField label="입체 높이" '));
+  assert.equal(count(editor, /label="입체 높이"/g), 1, 'the height field is drawn in that one branch');
+  // The box height of a gizmo result is never stored for a road: one stored while it was a room stays as it is.
+  assert.ok(piece(read('mapGeometry.ts'), 'export function applyNodeWorldPose(', 'export function stackedMapNodeIds(')
+    .includes("volumeHeight: node.type === 'space' && isRoadSpace(node) ? null : settle(volumeHeight * scale.y,"));
+  // The size handles leave the vertical axis out: the viewport says the node is flat, and the gizmo passes it on.
+  assert.ok(piece(view3d, 'private applyGizmo(', 'private applyOrbit(').includes("flat: node.type === 'space' && isRoadSpace(node)"));
+  assert.ok(piece(read('BackgroundMapCameraGizmo.ts'), 'setTarget(target: MapGizmoTarget | null, mode: Map3DGizmoMode): boolean {', 'detach(): void {')
+    .includes('const setup = target ? mapGizmoSetup(target.type, mode, target.flat) : null;'));
+  const scene = read('map3dScene.ts');
+  // Two see-through floors on one level, drawn in an order that depends on the view, would flicker where they overlap.
+  assert.ok(piece(scene, 'private buildSpace(', 'private buildSymbol(').includes('floor.renderOrder = road ? -1.5 : -1;'));
+  // The world box holds the floor of a road and no walls.
+  assert.ok(piece(scene, 'export function mapWorldBounds(', 'export function fitMapView(').includes("node.type === 'space' ? spaceWallHeight(node) : nodeVolumeHeight(node)"));
+});
+
+test('anchor 45: the colour of a camera is picked from six circles and a text button, and every view that draws the camera is told its colour', () => {
+  // The inspector: in the camera branch, while editing.
+  assert.equal(count(editor, /<BackgroundMapCameraColor\b/g), 1);
+  assert.ok(piece(editor, "{selected.type === 'camera' && (() => {", "{selected.type === 'symbol' && <section")
+    .includes('{editing && <BackgroundMapCameraColor color={selected.color} disabled={fieldLocked} onChange={changeCameraColor} />}'));
+  // A circle for each row of the colour table and no other: the amber is no colour to pick, it is a camera without the key.
+  const field = read('BackgroundMapCameraColor.tsx');
+  assert.equal(count(field, /className="bmap-color-swatch"/g), 1, 'one line draws the circles');
+  assert.match(field, /\{MAP_CAMERA_COLORS\.map\(item => <button [^<>]*className="bmap-color-swatch" data-camera-color=\{item\.id\} aria-pressed=\{color === item\.id\} /);
+  // The way back to the default is a text button, the last button of the row.
+  const reset = field.match(/<button (?:(?!<button )[\s\S])*>기본 색으로<\/button>/)?.[0] ?? '';
+  assert.ok(reset, 'the text button was found');
+  assert.doesNotMatch(reset, /bmap-color-swatch/);
+  assert.ok(reset.includes('onClick={() => { if (color !== undefined) onChange(null); }}'));
+  // With nothing to reset it is dimmed, not switched off: its own click would switch it off under the focus, and the
+  // keys of the editor would reach nothing. Only a locked camera or a running save switches it off.
+  assert.ok(reset.includes('aria-disabled={color === undefined}'));
+  assert.match(reset, /(?<!aria-)disabled=\{disabled\}/);
+  assert.equal(count(reset, /disabled=/g), 2, 'the dimmed state and the switch, each once');
+  // The plan: the camera and its direction handle. The object list: the icon of a camera.
+  assert.match(editor, /<g key=\{node\.id\} className=\{`bmap-camera [^`]*`\} data-camera-color=\{node\.color\} /);
+  assert.ok(editor.includes("<span className={`bmap-node-kind is-${node.type}`} data-camera-color={node.type === 'camera' ? node.color : undefined} "));
+  assert.equal(count(editor, /data-camera-color=/g), 2);
+  assert.ok(overlays.includes('<g className="bmap-handles" data-camera-color={node.color} '));
+  // The companion plan: the camera, its readout with the side view, and what is drawn for the selected camera outside its own button.
+  const preview = read('BackgroundMapPlanPreview.tsx');
+  assert.ok(preview.includes("<g className={`bmap-plan-node bmap-plan-camera${node.locked ? ' is-locked' : ''}`} data-camera-color={node.color} "));
+  assert.ok(preview.includes('<div className="bmap-plan-readout is-camera" data-camera-color={camera.color} '));
+  assert.ok(preview.includes("const selectedColor = selected?.type === 'camera' ? selected.color : undefined;"));
+  assert.ok(preview.includes('<g className="bmap-plan-selected bmap-plan-camera" data-camera-color={selectedColor} '));
+  assert.equal(count(preview, /<p className="bmap-plan-note" data-camera-color=\{selectedColor\}>/g), 2, 'the two notes of the selected camera');
+  assert.equal(count(preview, /data-camera-color=/g), 5);
+  // 3D: the colour is part of what a camera is built from, so a new colour builds it again.
+  const scene = read('map3dScene.ts');
+  assert.match(piece(scene, 'function shapeKey(', 'function labelSpec('), /if \(node\.type === 'camera'\) return `camera\|[^`]*\|\$\{node\.color \?\? ''\}`;/);
+  // Six materials take the colour. The lens stays dark, and the invisible click target is one material for every camera.
+  const build = piece(scene, 'private buildCamera(', 'function boxEdges(');
+  assert.ok(build.includes('const tint = node.color;'));
+  const calls = [...build.matchAll(/this\.material\(([^()]*)\)/g)].map(match => match[1]);
+  assert.equal(calls.length, count(build, /this\.material\(/g), 'every material of a camera was read');
+  assert.deepEqual(calls.filter(call => !call.endsWith(', tint')).sort(), ["'cameraLens'", "'proxy'"]);
+  assert.deepEqual(calls.filter(call => call.endsWith(', tint')).flatMap(call => call.match(/'\w+'/g) ?? []).sort(),
+    ["'camera'", "'cameraFar'", "'cameraFarOn'", "'cameraLine'", "'cameraLineOn'", "'cameraRing'"]);
+});
+
+test('anchor 46: stored data this version does not know is refused whole and turns the update notice on: nothing is drawn under it, nothing is saved, and the reason is logged once', () => {
+  const domain = read('domain.ts');
+  // An unknown key is refused, never dropped: a map read around it would be saved back without it.
+  assert.ok(piece(domain, 'function onlyKeys(', 'function commandSize(').includes("if (unknown.length) throw new BackgroundUnsupportedError('지원하지 않는 배경 속성이 포함되어 있습니다.',"));
+  // The operator, not the 'delete' of a request.
+  assert.doesNotMatch(domain, /\bdelete\b(?!')/);
+  const store = read('useBackgroundStore.ts');
+  const refresh = piece(store, 'refresh:async(', 'execute:async('), execute = piece(store, 'execute:async(', 'export const useBackgroundStore');
+  // A read that fails that way is no error on screen. The reason goes to the console as the notice turns on, and not
+  // again while it is on: the screen reads every 15 seconds and would repeat the line.
+  inOrder(refresh, 'error instanceof BackgroundUnsupportedError', "if (!get().updateRequired) console.warn('[background] update required:', error.message, error.detail);",
+    'set({ loading: false, updateRequired: true, error: null });');
+  // A save is turned away right after the login check, before anything is applied or sent.
+  inOrder(execute, "throw new Error('로그인이 필요합니다.');", "if (get().updateRequired) throw new Error('앱을 업데이트한 뒤 다시 저장해 주세요.');", 'applyBackgroundCommand(', 'active.execute(');
+  inOrder(execute, "if (!get().updateRequired) console.warn('[background] update required:', unsupported.message, unsupported.detail);",
+    'set({ snapshot: restored, pending: false, updateRequired: true, error: null });');
+  assert.equal(count(store, /console\.warn\('\[background\] update required:'/g), 2, 'the failed read and the failed save');
+  assert.equal(count(store, /if \(!get\(\)\.updateRequired\) console\.warn\(/g), 2, 'each only as the notice turns on');
+  assert.equal(count(store, /console\.warn\(/g), 2, 'nothing else is logged');
+  // The screen: the notice stands in place of the tabs, the error strip and every panel. With the editor still drawn
+  // under it the map could be seen and edited.
+  const view = read('BackgroundLibraryView.tsx'), [at] = positions(view, '{updateRequired ? (');
+  const head = view.slice(0, at), notice = piece(view.slice(at), '{updateRequired ? (', ') : ('), rest = piece(view.slice(at), ') : (', '</section>');
+  assert.ok(notice.includes('<h3>업데이트가 필요해요</h3>'));
+  assert.match(notice, /onClick=\{\(\) => void refresh\(\)\}>다시 확인<\/button>/);
+  for (const part of ['<nav className="bg-library-tabs"', 'className="bg-error bg-global-error"', '<div className="bg-library-body"', '<BackgroundMapEditor']) {
+    assert.ok(rest.includes(part), `drawn where there is no notice: ${part}`);
+    assert.ok(!head.includes(part) && !notice.includes(part), `drawn beside the notice: ${part}`);
+  }
+  // That other branch opens with the tabs and runs to the end of the screen: nothing follows it that is drawn either way.
+  assert.match(rest, /^\) : \(\s*<>\s*<nav className="bg-library-tabs"[\s\S]*<\/>\s*\)\}\s*$/);
+});
+
+test('anchor 47: the colour table and the spatial module stay pure: no three.js, no DOM', () => {
+  for (const name of ['mapCameraColor.ts', 'mapSpatial.ts']) {
+    const source = read(name);
+    assert.doesNotMatch(source, /from\s+['"]three/, `${name} imports three.js`);
+    assert.doesNotMatch(source, /\b(?:document|window)\.\w/, `${name} touches the DOM`);
+  }
+});
+
+test('anchor 48: a symbol kind that is not listed falls back to the generic object by its name, and the stairs have a drawing of their own', () => {
+  const catalog = read('symbolCatalog.ts');
+  // By name: by position, the next kind added at the end of the list would be what every removed kind turns into.
+  assert.ok(catalog.includes('?? symbolCatalog.find(item => item.id === "custom")!;'));
+  assert.doesNotMatch(catalog, /symbolCatalog\.length - 1/);
+  assert.doesNotMatch(catalog, /symbolCatalog\s*(?:\[|\.at\()/);
+  // The annotation keeps `id` a stored kind: without it the id of a preset is any string, and what is built from it no longer compiles.
+  assert.ok(catalog.includes('export const symbolCatalog: ReadonlyArray<{'));
+  // No test imports the drawing. Without this branch the stairs are an empty group: nothing on the plan, and an empty icon
+  // in the toolbar, the palette, the object list and the inspector.
+  const glyph = read('BackgroundSymbolGlyph.tsx'), stairs = piece(glyph, '{symbol === "stairs" && (', '{symbol === "custom" && (');
+  assert.ok(stairs.includes('d="M10 19.33H90M10 34.67H90M10 50H90M10 65.33H90M10 80.67H90"'), 'the five treads');
+  assert.ok(stairs.includes('d="M50 86V16M40 28L50 14L60 28"'), 'the arrow up the stairs');
+  // The lines of the stairs are in drawing units like those of every other symbol: they grow and shrink with the box.
+  assert.doesNotMatch(glyph, /<pattern/);
+  assert.doesNotMatch(glyph, /vectorEffect|vector-effect/);
+});
+
+test('anchor 49: in 3D a road gives way to a room that stands on it, and behind a wall of that room it is reached by pressing the same spot again', () => {
+  // Standing on it: the two share ground on the plan.
+  const stack = read('mapStack.ts');
+  assert.ok(stack.includes('const OVERLAP_SLACK = '));
+  const overlap = block(stack, 'export function spacesOverlap(a: BackgroundSpace, b: BackgroundSpace): boolean {');
+  assert.ok(overlap.includes('nodePlanOutline(a)') && overlap.includes('nodePlanOutline(b)'));
+  assert.ok(overlap.includes('OVERLAP_SLACK'));
+  // Cut where roadsUnderRooms stands, between pickMapFloor and pickMapNode: cut as anchor 21 cuts it, the floor rule would hold the road rule.
+  const scene = read('map3dScene.ts');
+  const floor = piece(scene, 'export function pickMapFloor(', 'function roadsUnderRooms('), under = piece(scene, 'function roadsUnderRooms(', 'export function pickMapNode(');
+  const pick = piece(scene, 'export function pickMapNode(', 'export function mapFloorPile('), floors = piece(scene, 'export function mapFloorPile(', 'export function mapSpacePile(');
+  const pile = piece(scene, 'export function mapSpacePile(', 'function mapClickStep('), step = piece(scene, 'function mapClickStep(', 'export function resolveMapClick(');
+  // Only a room that overlaps the road sets it aside: a building beside the road must not stand in the way of it.
+  assert.ok(under.includes('rooms.some(room => spacesOverlap(room, space))'));
+  // The first step of a pick, before anything is compared: the floor of such a road takes no part.
+  inOrder(pick, 'const under = map ? roadsUnderRooms(hits, map) : null;', 'hits.filter(hit => !under.has(String(hit.object.userData.nodeId)))', 'for (const hit of list) {', 'pickMapFloor(list, map)');
+  // Where a symbol is put down and the pile of floors know no roads: a road is a floor like any other there.
+  for (const [name, body] of Object.entries({ pickMapFloor: floor, mapFloorPile: floors }))
+    assert.doesNotMatch(body, /isRoadSpace|roadsUnderRooms|spacesOverlap/, `${name} has a rule for roads`);
+  // The pile a slow second click steps through: the floors, and in front of them the room that was picked on a wall.
+  // Only a space goes in front (a camera or an object on top is no part of it), and only where there is a floor to step on to.
+  inOrder(pile, 'const pile = mapFloorPile(hits, map), picked = pickMapNode(hits, map);', 'pile.length > 0', "node.type === 'space'", '[picked, ...pile]');
+  // Which space is a road, and which overlap, pickMapNode has settled already.
+  assert.doesNotMatch(pile, /isRoadSpace|spacesOverlap/);
+  // Both clicks read that pile: the click on the canvas, and the click on a handle of the selected space.
+  assert.ok(step.includes('pile = mapSpacePile(hits, map);'));
+  assert.doesNotMatch(step, /mapFloorPile\(/);
+  assert.ok(viewport.pick().includes('again ? mapSpacePile(hits, props.map) : []'));
+  assert.doesNotMatch(view3d, /mapFloorPile/);
+});
