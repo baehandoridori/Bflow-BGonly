@@ -40,6 +40,8 @@
 - 목표: 도면에 그릴 수 있는 것을 늘립니다. 계단 기호, 도로, 카메라 색이 생깁니다. 저장되는 내용이 늘어나는 묶음이라 서버 쪽 준비를 먼저 끝낸 뒤 앱을 내보내고, 새 기능을 쓰기 전에 한솔님이 쓰는 PC를 모두 업데이트합니다.
 - 운영 DB: Yes, one new file, third in the chain base -> 3D -> this: CREATE OR REPLACE background_library_validate_entity as a strict superset (symbol list + 'stairs', optional space.surface, optional camera.color). Apply to production before the app release. Header and test: re-run after every run of the base file.
 - 순서 근거: The three items that add to the closed map schema share ONE validator migration and one contract-test update instead of three. Shipped while the screen is still owner-only, so the effect 'the first new-shape row makes v1.130.0 fail to load the library' is confined to the owner's own PCs. This batch also adds the 'update needed' reader that the later team-wide release relies on. F3 uses the ordering helper from B2 and point editing from B1.
+- 문서: 설계 [`docs/superpowers/specs/2026-10-09-background-map-new-elements-design.md`](../specs/2026-10-09-background-map-new-elements-design.md) · 구현 계획 [`docs/superpowers/plans/2026-10-09-background-map-new-elements.md`](2026-10-09-background-map-new-elements.md)
+- 상태: 2026-10-10 구현 완료(v1.133.0) · 수동 검증·운영 DB 적용·배포 대기
 
 ### B4 팀 공개와 편집 권한
 
@@ -336,6 +338,6 @@ Resolved by opening the code (root C:/Bflow-BGonly/.claude/worktrees/background-
 |---|---|---|
 | ① 평면 편집 기본기 | `docs/superpowers/specs/2026-10-08-background-map-editing-basics-design.md` | 2026-10-08 구현·수동 검증 완료(v1.131.0), 배포는 PR 머지 뒤 |
 | ② 선택 도구 개편 | `docs/superpowers/specs/2026-10-09-background-map-selection-tools-design.md` | 2026-10-09 구현·수동 검증 완료(v1.132.0), 배포는 PR 머지 뒤 |
-| ③ 새 도면 요소 | - | 대기 |
+| ③ 새 도면 요소 | `docs/superpowers/specs/2026-10-09-background-map-new-elements-design.md` | 2026-10-10 구현 완료(v1.133.0) · 수동 검증·운영 DB 적용·배포 대기 |
 | ④ 팀 공개와 편집 권한 | - | 대기 (결정 필요) |
 | ⑤ 도면 주석 | - | 대기 (결정 필요) |

@@ -448,3 +448,77 @@ v1.130.0 시험 공개 뒤 한솔이 보낸 도면 피드백 2차의 첫 묶음�
 ### 16.4 뒤 차례가 정할 것
 
 - ⑤의 주석 핀이 상자에 잡히는지는 ⑤가 정한다. 이번 차례의 상자(`planRectTouches`·`planMarqueeIds`)·더미(`planPileAt`)·쌓임 순서(`mapStack.ts`) 코드는 공간·기호·카메라 세 종류만 읽고 주석 핀에 기대지 않는다.
+
+## 17. ③ 새 도면 요소 (v1.133.0)
+
+도면 피드백 2차의 셋째 묶음이다(라운드 계획 `docs/superpowers/plans/2026-10-08-background-map-feedback-round2.md`의 B3, 2026-10-09 설계 승인). 도면에 그릴 수 있는 것을 셋 늘렸다: 기호 '계단'(평면은 디딤판 줄무늬와 올라가는 방향 화살표, 3D는 층층이 오르는 단), '도로'(공간의 한 종류 — 회색 바닥과 가운데 점선, 3D는 벽 없는 납작한 바닥, 크기와 무관하게 늘 방 아래), 카메라 색(색 동그라미 여섯 개와 '기본 색으로'). **①·②와 달리 저장 모양이 늘었다**(기호 종류 `stairs`, 공간의 선택 키 `surface: 'road'`, 카메라의 선택 키 `color`). 그래서 서버 검증 함수를 넓히는 세 번째 migration 파일을 더했고, 앱이 모르는 종류가 저장돼 있으면 오류 대신 "업데이트가 필요해요" 안내를 띄우는 읽기 장치를 넣었다. 배경 메뉴는 계속 배한솔 계정에만 보인다. 브랜치는 `claude/bg-map-new-elements`이다(main v1.132.0, a0ca0542에서 갈라졌고, 그 뒤 main이 캐릭터 카드만 바꾼 v1.132.1, b3ca096e가 되어 그 위로 옮겼다). 2026-10-10에 구현을 마쳤고, 최종 수동 검증(설계 11절)·운영 DB 적용·배포는 그 뒤의 일이다.
+
+구현 도중 오케스트레이터가 앱 엔진(Electron 33)에서 관문 넷(A 업데이트 안내 · B 계단 · C 도로 · D 카메라 색)을 보았고 모두 통과했다. **설계 14.2의 대체안은 하나도 쓰지 않았다** — 앵커가 읽는 글자, CSS, 계단의 디딤판 그림, 3D 바닥의 그리는 순서(`renderOrder`), 점선 값이 모두 설계에 적힌 그대로다. 관문에서 알게 된 것은 둘이다. (R13) 이름 붙은 그리기 도구가 넷이 되어, 편집 중 평면의 도구줄이 창 폭 약 1231~1310px에서 새로 두 줄이 된다(예전에는 약 1230px 이하에서만 두 줄이었다). 도구줄이 도면 영역 밖으로 넘치지는 않으며 설계대로 받아들였다 — 거슬리면 14.2의 대체안(그리기 도구 넷의 이름을 한 단계 일찍 감춘다)이 있다. (C1) 색을 고르지 않은 카메라가 v1.132.0과 똑같이 보이는지는, v1.132.0을 다른 포트에 띄워 견주는 대신 같은 검사 창에서 카메라 색 작업이 들어가기 전과 뒤의 계산된 스타일과 화면 픽셀을 견줘 확인했다 — 모두 같았다.
+
+### 17.1 문서 위치
+
+- 설계(계약): `docs/superpowers/specs/2026-10-09-background-map-new-elements-design.md`. 거기 적힌 동작이 승인된 범위의 전부다. 하지 않는 것은 1.2절, 승인 문구가 한 가지로 정하지 않아 설계가 답을 정한 여섯 곳(I1~I6)과 다른 답이 왔을 때 고칠 곳은 1.1 끝의 표, 운영 적용 절차는 4.5, 배포 순서는 5.4, 앱 엔진에서 확인할 것과 그 대체안은 14.2, 한솔에게 알릴 것은 14.3에 있다.
+- 구현 계획: `docs/superpowers/plans/2026-10-09-background-map-new-elements.md`. Task 1~19가 설계 13절의 일곱 단계이며(1단계 = Task 1~4, 2 = 5~6, 3 = 7, 4 = 8~10, 5 = 11~14, 6 = 15~17, 7 = 18~19), 나눈 곳은 "순수 모듈 + 테스트" 커밋과 "배선" 커밋의 경계다.
+- 수동 검증(설계 11절)의 결과와 자동 검사 수치는 [누적 검증 기록](background-library-verification-2026-09-21.md)의 `## 2026-10-09 ③ 새 도면 요소 (v1.133.0)` 절에 적는다(검증한 날이 다르면 절 이름의 날짜가 그 날이다 — 관문은 2026-10-10에 보았다). 운영 DB 적용 결과도 그 절과 아래 17.3에 적는다. 그 절은 11절 전체를 확인한 뒤에 쓴다 — 절이 아직 없으면 수동 검증이 끝나지 않은 것이다.
+
+### 17.2 파일
+
+새 파일 4개: `DEVLOG/migrations/2026-10-09-background-map-elements.sql` / `src/features/backgrounds/`의 mapCameraColor.ts, BackgroundMapCameraColor.tsx / `tests/backgroundMapElements.test.ts`.
+
+바뀐 파일: types.ts, domain.ts, mapSpatial.ts, mapStack.ts, mapGeometry.ts, symbolCatalog.ts, BackgroundSymbolGlyph.tsx, mapPlanPreview.ts, BackgroundMapPlanPreview.tsx, BackgroundMapPlanOverlays.tsx, map3dScene.ts, BackgroundMap3D.tsx, BackgroundMapCameraGizmo.ts, BackgroundMapEditor.tsx, useBackgroundStore.ts, BackgroundLibraryView.tsx, backgrounds-map.css, backgrounds-map-plan.css / `DEVLOG/migrations/`의 적용된 두 파일(`2026-09-21-background-library.sql`, `2026-10-07-background-map-3d.sql` — **머리말 주석만**. `BEGIN;` 아래는 한 글자도 바꾸지 않았고 계약 테스트 D5가 그 해시를 고정한다) / tests의 backgroundDatabaseContract, backgroundDomain, backgroundStore, backgroundPreview, backgroundPersistence, backgroundSpatial, backgroundMapStack, backgroundMapGeometry, backgroundMapPlanSelect(더하기만), backgroundMapPlanPreview, backgroundMap3dScene, backgroundMapEditorWiring / package.json, package-lock.json, DEVLOG/update-notes.json, AGENTS.md, CLAUDE.md(맨 위 안내 줄의 다시 실행 문장만), ROADMAP.md, 이 문서(§13.3·§13.5의 두 줄과 이 절), 라운드 계획. `electron/**`(같은 `domain.ts`가 묶일 뿐이다), mapCanvas.ts, mapDocument.ts, useBackgroundMapDocument.ts, mapEditSession.ts, mapWorkflow.ts, mapPlanSelect.ts, mapPlanEdit.ts, mapPlanGesture.ts, mapSnap.ts, mapGallery.ts, previewGateway.ts, BackgroundMapNameBox.tsx, BackgroundMapSelectionSummary.tsx, BackgroundMapPanels.tsx, BackgroundMapGallery.tsx, BackgroundUI.tsx, backgrounds.css, backgrounds-map-3d.css, `src/mocks/devElectronAPI.ts`, `src/features/playground/featureFlag.ts`는 건드리지 않았다.
+
+| 파일 | 책임 |
+|---|---|
+| `DEVLOG/migrations/2026-10-09-background-map-elements.sql` | 검증 함수를 "3D 파일의 본문 + 다섯 줄"로 바꿔 넣는다(넓힌 세 줄, 더한 두 줄). 그 밖에는 가드와 잠금 블록뿐이다(설계 4절) |
+| mapCameraColor.ts | 카메라 색 표(이름·화면 이름·어두운/밝은 값)와 `cameraColorHex` (순수, three.js·DOM 없음) |
+| BackgroundMapCameraColor.tsx | 속성 칸의 색 동그라미 여섯 개와 '기본 색으로' 글자 버튼(받은 값만 그린다) |
+| types.ts | `BackgroundSymbolKind`에 `'stairs'`, `BackgroundSpaceSurface`, `BackgroundCameraColor`, 공간의 `surface?`, 카메라의 `color?` |
+| domain.ts | 닫힌 목록 상수 셋(`BACKGROUND_SYMBOL_KINDS`·`BACKGROUND_SPACE_SURFACES`·`BACKGROUND_CAMERA_COLORS`), 새 키와 값 검사, `BackgroundUnsupportedError`(`detail`)·`known`·`onlyKeys`의 오류 종류, 노드 종류 검사의 자리 |
+| mapSpatial.ts | `SYMBOL_VOLUME_HEIGHTS.stairs`, `isRoadSpace`, `spaceWallHeight`, `roadCentreLine`, `roadCentrePlanLine` |
+| mapStack.ts | `stackedSpaces`의 층(맨 앞 항), `spacesOverlap` |
+| mapGeometry.ts | `setSpaceSurface`, `setCameraColor`, `addMapCamera`의 도로 규칙, `applyNodeWorldPose`가 도로에 `volumeHeight`를 쓰지 않음 |
+| symbolCatalog.ts · BackgroundSymbolGlyph.tsx | 계단 항목과 이름으로 찾는 대체값 · 계단 그림 |
+| mapPlanPreview.ts · BackgroundMapPlanPreview.tsx | `planKindLabel`, 도로의 읽어 주는 값과 옆 그림 · 도로의 클래스·가운데 점선·접근성 이름, 카메라의 `data-camera-color` 다섯 곳 |
+| BackgroundMapPlanOverlays.tsx | 카메라 손잡이 `<g>`의 `data-camera-color` |
+| map3dScene.ts | 계단 가지, 도로 가지(재질 다섯·팔레트 둘·그리는 순서·범위·`shapeKey`), `roadsUnderRooms`와 `pickMapNode`의 맨 앞 걸음, `mapSpacePile`과 `mapClickStep`의 한 줄, 카메라 색 재질(`material`의 둘째 인자, `shapeKey`) |
+| BackgroundMap3D.tsx · BackgroundMapCameraGizmo.ts | `readPalette`의 `road`·`roadMark`, `applyGizmo`의 `flat`, 손잡이 위 클릭의 더미와 import · `mapGizmoSetup`의 셋째 인자, `MapGizmoTarget.flat`, `setTarget` |
+| BackgroundMapEditor.tsx | 도로 도구, 공간 그리기의 도로, '공간 종류'와 `changeSpaceSurface`, 도로의 높이 칸과 안내(`ROAD_HINT`), 색 동그라미와 `changeCameraColor`, `data-camera-color` 둘, `kindLabel`·머리 글자·목록 아이콘, 기호 목록 제목. 판정과 계산은 순수 모듈에 있고 편집기에는 배선만 늘었다 |
+| useBackgroundStore.ts · BackgroundLibraryView.tsx | 업데이트 안내(`updateRequired`, 저장 막기, 콘솔 기록 한 번, 안내 화면) |
+| backgrounds-map.css · backgrounds-map-plan.css | 변수 블록(`--bmap-cam`·`--bmap-cam-mark`·`--bmap-road`·`--bmap-road-mark`, 숫자 셋), 도로 규칙, 호박색 글자의 변수 치환, 색 동그라미, 보조 평면도의 색(설계 9.4) |
+| tests/backgroundDatabaseContract.test.ts | 정적 계약 D1~D5(요소 파일의 글자, 3D 본문과 다른 다섯 줄, 닫힌 목록과 상수의 일치, 사슬 문장, 적용된 두 파일 본문의 해시)와 PGlite 실행 P1~P4(새 모양의 저장·거절, 3D 파일 위에만 얹히는 순서, 앞 파일을 다시 돌렸을 때의 복구) |
+| tests/backgroundMapElements.test.ts | 기호 목록의 대체값, 도로의 판별·가운데 선, 색 표, 색 표·도로 색과 CSS의 일치, 새 CSS 규칙이 그 변수를 실제로 쓰는지(설계 10.4·10.6) |
+| tests/backgroundMapEditorWiring.test.ts | 소스 앵커 49개: ①·②의 39개(26·31은 이번에 고쳐 썼다)와 설계 10.9의 10개(40~49). 아래 17.4의 규칙 대부분을 글자로 고정한다 |
+
+모듈 의존(새로 생긴 줄만, 한 방향): `mapStack.ts` → `mapSpatial.ts`(`isRoadSpace`·`nodePlanOutline`), `mapGeometry.ts` → `mapSpatial.ts`(`isRoadSpace`), `mapPlanPreview.ts` → `mapSpatial.ts`(`isRoadSpace`), `mapCameraColor.ts` → `types.ts`(타입만), `map3dScene.ts` → `mapCameraColor.ts`·`mapStack.ts`(`spacesOverlap`)·`mapSpatial.ts`(`isRoadSpace`·`roadCentreLine`), `BackgroundMapCameraColor.tsx` → `mapCameraColor.ts`. `mapGeometry.ts`는 여전히 `mapStack.ts`를 import하지 않는다. `mapSpatial.ts`·`mapStack.ts`·`mapCameraColor.ts`·`domain.ts`는 three.js·DOM을 import하지 않고, 3D 파일(BackgroundMap3D.tsx, map3dScene.ts, BackgroundMapCameraGizmo.ts)은 `mapPlanSelect`·`mapPlanEdit`·`mapPlanGesture`·`mapSnap`을 여전히 import하지 않는다(앵커 10).
+
+처음 설계와 다르게 지은 곳은 하나이고, 설계도 같은 날 그렇게 고쳤다(지금의 설계와 코드는 같다):
+
+- 가운데 점선의 띠 규칙 (나)에서 안쪽 가로대의 각을 재는 기준은 앞뒤 가운데 점을 이은 줄이 아니라 **그 자리에서 만나는 두 구간의 이등분 방향**이다. 처음 기준은 긴 다리 쪽으로 기울어, 두 다리의 길이가 약 3.73배 넘게 다른 바른 ㄱ자 길이 점선을 잃었다(설계 7.4, `tests/backgroundMapElements.test.ts`).
+
+### 17.3 운영 DB
+
+- **사슬**: `2026-09-21-background-library.sql`(기본, 기록 이름 `background_library`, 20261008035103) → `2026-10-07-background-map-3d.sql`(3D, `background_map_3d`, 20261008035155) → `2026-10-09-background-map-elements.sql`(요소, 기록 이름 `background_map_elements`). 셋 다 같은 검증 함수(`public.background_library_validate_entity`)를 더 넓은 것으로 바꿔 넣으므로, 마지막에 돈 파일이 서버가 받는 모양을 정한다. 요소 파일은 그 함수 하나만 바꿔 넣고 표·행·다른 함수를 건드리지 않으며, 기본 파일이나 3D 파일이 먼저 적용되지 않은 DB에서는 55000으로 멈춘다.
+- **다시 실행 규칙**: 앞 파일을 다시 실행하면 그 뒤 파일을 모두 순서대로 다시 실행한다(기본 파일을 다시 돌렸으면 3D 파일 → 요소 파일, 3D 파일을 다시 돌렸으면 요소 파일). 요소 파일만 다시 돌리는 것은 아무 일도 없다(멱등). 앞 파일만 다시 돌리면 좁은 검증 함수가 돌아와, 저장된 도면에 뒤 파일의 값(세로 값, 계단·도로·카메라 색)이 하나라도 있는 동안 그 도면을 남겨 두는 쓰기가 모두 22023으로 막힌다(사실상 모든 편집이다. 읽기는 되고 잃는 것은 없다). 그런 도면이 아직 없을 때는 눈에 보이는 것이 없고 새 값을 실은 저장만 막혀서 조용히 지나가기 쉽다 — 검증 함수 본문의 md5로만 알아챈다(설계 4.5의 (2)). 같은 규칙이 세 SQL 파일의 머리말, `AGENTS.md`의 데이터 경계 항목, `CLAUDE.md`·`AGENTS.md`의 맨 위 안내 줄에 적혀 있고 계약 테스트 D4가 지킨다.
+- **적용하는 때와 방법**: PR 머지 뒤, 앱 빌드·배포 전에 오케스트레이터가 한다(설계 4.5와 5.4 — 적용 전 읽기 전용 확인, 적용, 적용 뒤 확인). 넣는 글자와 견주는 md5는 작업 폴더의 파일이 아니라 저장소의 blob에서 꺼낸다(새로 체크아웃한 작업 폴더의 SQL 파일은 CRLF다).
+- **적용 기록**: 아직 적용하지 않았다(2026-10-10 현재). 적용 뒤 오케스트레이터가 여기에 적는다 — 적용 버전 번호와 시각 / 검증 함수 본문 md5의 적용 전·후(적용 전이 LF 값이었는지 CRLF 값이었는지)와 나머지 함수 12개의 md5가 그대로인지 / `prosecdef`·`proconfig` / 권한(`anon`·`authenticated`가 실행할 수 있는 것이 `background_library_read`·`background_library_execute` 둘뿐인지, `PUBLIC`에 없는지, 두 표의 RLS·정책·직접 권한) / 점검 호출 결과(`background_library_validate()`, 검증 함수 직접 호출, 익명 역할의 거절) / 다시 실행했거나 되돌렸다면 그 사실과 시각 / 확인한 사람.
+
+### 17.4 뒤 차례가 지켜야 할 것
+
+- 저장 모양을 넓히는 법: 적용된 SQL 파일은 고치지 않고(머리말 주석만) 사슬 끝에 새 파일을 더한다. 운영 DB를 먼저 적용하고 앱을 배포한다 — 순서가 뒤집히면 새 모양이 든 저장을 서버가 22023으로 거절한다(자료는 잃지 않고 DB를 적용하면 풀린다). 서버는 검증만 하고 값을 채우거나 고쳐 쓰지 않는다. 닫힌 목록은 `domain.ts`의 상수 셋 한 곳이고 요소 파일의 IN 목록과 순서까지 같아야 한다(계약 테스트 D2·D3).
+- **넓히는 migration을 운영에 적용한 뒤 그 앱 버전의 배포가 끝날 때까지 운영에 새 모양을 저장하지 않는다 — 개발 빌드로도, 검증하면서도. 첫 저장은 배포된 버전에서, 그 화면을 여는 PC를 모두 올린 뒤에 한다. 그러지 않으면 그 모양을 모르는 PC가 모두 업데이트 안내를 띄우는데 올릴 버전이 없다(④ 뒤에는 팀 전체다).** 서버는 앱 버전을 모르므로 적용한 순간부터 새 모양을 받는다. 이번 차례에서는 설계 4.5의 9번(운영에서 실제 저장 호출을 하지 않는다)과 5.4의 6번이 이것을 지킨다.
+- 앞 파일만 다시 돌려 22023이 거듭 나올 때 도면을 지우거나 새 모양을 빼고 저장해 풀지 않는다(그 쓰기는 지나가고, 지운 도면은 되살릴 수 없다) — 사슬을 다시 적용한다. 좁은 검증 함수 아래에서도 지우기는 어떤 항목도 검증하지 않고 전체 재검사는 지워지지 않은 행만 보기 때문에, "깨진" 도면을 지우는 대응이 그대로 성공한다. 계약 테스트 P4의 ③이 이 동작을 고정한다(권하는 길이 아니라 그러면 안 되는 까닭이다).
+- **저장 모양은 새 선택 키 또는 닫힌 목록의 새 문자열로만 넓힌다. 기존 키의 숫자 범위·값 타입·개수 한계를 넓히면 이전 버전에는 업데이트 안내가 아니라 오류로 보인다.** 읽기 장치가 "더 새 자료"로 알아보는 것은 모르는 키와 닫힌 목록 밖의 문자열 둘뿐이다(설계 5.2).
+- 미리보기 저장소 키(`bflow-background-library-preview-v1`)는 그대로 두었다: v1.133.0의 미리보기가 새 모양을 저장한 주소에서 그보다 앞선 코드(v1.132.1 이하)를 미리보기로 띄우면 라이브러리 전체를 거절한다(§13.3 '프리뷰 저장소'의 3D 값과 같은 정책). 이전 코드와 견줄 일이 있으면 다른 포트를 쓴다.
+- 화면을 여는 버전은 업데이트 안내가 든 버전이어야 한다: ④가 배경 화면을 다른 계정에 여는 버전은 v1.133.0 이상이고, ④를 시작하기 전에 화면을 여는 대상 PC가 v1.133.0 이상인지 확인한다(설계 5.4의 7). 안내가 뜨면 탭과 본문이 내려가므로 그 순간 저장하지 않은 편집은 사라진다.
+- 닫힌 목록의 새 검사는 `known`: 닫힌 문자열 목록을 보는 검사를 더할 때는 `requireValue`가 아니라 `known`을 쓴다(목록 밖 문자열은 `BackgroundUnsupportedError`, 문자열이 아니면 지금처럼 `Error`). 모르는 키는 `onlyKeys`가 같은 종류로 던진다. 어느 쪽이든 통째로 거절하며 모르는 값을 지우고 읽지 않는다(통째 저장이 그것을 지운다). 무엇을 몰랐는지는 오류의 `detail`에 실려 안내가 켜질 때 콘솔에 한 번 남는다(문장과 화면에는 넣지 않는다). 요청의 `kind`·`type`은 그대로 `requireValue`다(저장된 자료가 아니라 이 앱이 만드는 요청이다).
+- 선택 키는 지워서 되돌린다: `surface`·`color`는 없으면 지금의 동작이고, 기본으로 되돌릴 때는 키를 지운다(`null`·`undefined`로 두지 않는다 — 응답 유실 복구가 보낸 도면과 저장된 도면을 그대로 견준다). 이미 있는 노드의 이 키를 바꾸는 곳은 `setSpaceSurface`·`setCameraColor` 둘뿐이고(새 도로의 `surface`만은 `newSpace`가 넣어 만든다) `patchNode`로 쓰지 않는다(합치기만 해서 지울 수 없다 — 앵커 43).
+- 도로는 `isRoadSpace`·`spaceWallHeight`·쌓임 순서의 층이다: 도로인지는 `isRoadSpace` 하나로 읽고, 벽이 없어 세로 크기는 `spaceWallHeight`(도로 0)로 읽으며(`nodeVolumeHeight`는 저장된 값이고 도로인 동안 쓰지 않는다), 쌓임 순서의 층(`mapStack.ts` 비교의 맨 앞 항 — 도로는 크기와 무관하게 모든 방 아래)으로 방과 갈린다. 쌓임 순서를 읽는 여섯 곳(평면 그리기, `planPileAt`, 보조 평면도, `pickMapFloor`, `mapFloorPile`, `placeSymbol`)의 읽는 줄은 고치지 않았다. 3D의 처음 누름은 `pickMapNode`의 맨 앞 걸음(`roadsUnderRooms`)이 맡는다: 같은 광선의 방과 `spacesOverlap`으로 겹친 도로만 진다 — 넓이를 나눠 가져야 겹친 것이고 변이나 모서리만 맞닿은 것은 아니다. 겹치지 않는 도로에는 v1.132.0의 규칙이 그대로 쓰인다(겹침 검사를 빼면 길가 건물이 길을 가로막는다). 다시 누름의 더미는 `mapSpacePile` 한 곳이고 클릭(`mapClickStep`)과 손잡이 위의 클릭(`BackgroundMap3D.tsx`의 `pick`)이 함께 쓴다 — 한쪽이라도 `mapFloorPile`을 직접 부르면 건물 밑의 도로에 닿지 못한다. `pickMapFloor`·`mapFloorPile`에는 도로 규칙을 넣지 않는다(기호를 놓는 자리, 바닥끼리의 순서). 큰 방 안에 통째로 든 도로는 몸통을 바로 누를 수 없다(천천히 다시 누르기·Shift+상자·목록과 손잡이 — 속성 칸의 `ROAD_HINT`가 그 길을 말한다): 쌓임 규칙의 결과이니 '고치지' 않는다. 새 카메라의 소속은 방이 먼저이고 방이 없을 때만 도로다.
+- 가운데 점선의 띠 규칙 넷: 가운데 점선은 `roadCentreLine` 한 곳이 정하고 평면·보조 평면도·3D가 함께 읽는다. 사각형은 긴 쪽을 따라 끝에서 끝까지 그린다. 다각형은 두 옆줄의 점을 하나씩 짝지은 띠가 (가) 칸마다 볼록하고 (나) 안쪽 가로대가 그 자리의 길 방향(만나는 두 구간의 이등분 방향)과 60° 이상이고 (다) 선이 가장 긴 가로대보다 짧지 않고 (라) 선이 다각형 안에 있을 때만 그린다(설계 7.4). 타원과 점이 홀수 개인 다각형에는 없다. 점의 수가 짝수인 것만으로 그리지 않는다(한쪽 옆줄에만 점이 많으면 선이 가장자리로 빠진다). 점선이 없는 도로에는 속성 칸이 까닭을 말한다. 평면에서 도로의 이름에는 글자 테두리가 있고 그 굵기는 글자처럼 `--bmap-label-scale`을 곱한다(고정값이면 축소한 도면에서 테두리가 사라져 점선이 이름을 긋는다).
+- 색은 이름(칸의 이름)으로, 동그라미는 여섯: 카메라 색은 이름으로 저장하고 값은 화면이 정한다 — 3D는 `mapCameraColor.ts`, DOM은 `backgrounds-map.css`의 `--bmap-cam`(숫자 셋)이며 두 벌은 테스트가 견준다. 저장되는 이름 여섯(`red`·`lime`·`green`·`teal`·`blue`·`pink`)은 칸의 이름이라, 칸의 색과 화면 이름은 migration 없이 고칠 수 있고 운영 DB의 여섯 이름은 다시 건드리지 않는다. 호박색은 저장하지 않는다(키가 없는 것이 호박색이고, 색이 없는 카메라의 모습은 v1.132.0과 같다). 속성 칸의 동그라미는 승인된 수인 여섯 개이고, 호박색으로 돌아가는 길은 동그라미가 아닌 '기본 색으로' 글자 버튼이다.
+- 1.1의 I1~I6에 다른 답이 왔을 때 고칠 곳: 설계 1.1 끝의 표에 줄마다 적혀 있고, 여섯 다 운영 DB를 다시 건드리지 않고 고칠 수 있다 — I1 '기본 색으로' 버튼만 뺀다 / I2 `roadCentreLine`의 다각형 가지를 `null`로 / I3 `addMapCamera`의 도로 가지를 뺀다 / I4 `roadsUnderRooms`의 겹침 검사, 또는 `pickMapNode`의 그 걸음과 `mapSpacePile` / I5 쌓임의 층을 다시 정한다(`stackedSpaces`와 설계 7.6·7.7·10.3의 표) / I6 운영 DB 적용 전이면 이름까지(상수·요소 파일·CSS·색 표), 적용 뒤면 값과 화면 이름만. I6의 여섯 색 화면은 2026-10-10에 한솔에게 보였고, 답은 운영 DB를 적용하기 전에 오케스트레이터가 적는다.
+
+### 17.5 뒤 차례가 정할 것
+
+- ④의 migration 파일은 사슬의 넷째로 붙는다(기본 → 3D → 요소 → ④). ④는 `background_library_snapshot`·`background_library_execute`를 다시 만드는 파일이라 검증 함수의 사슬과는 독립이지만, 적용하고 다시 돌리는 순서는 하나로 적는다. ④가 자기 머리말과 앞의 세 파일의 머리말에 한 줄씩 더한다(앞의 파일은 머리말 주석만 고친다).
+- **④가 `CLAUDE.md` :3·`AGENTS.md` :3의 시험 공개 안내 줄을 다시 쓸 때 사슬 문장을 옮겨 적는다.** 계약 테스트 D4는 그 두 줄의 글자를 고정하지 않는다(옛 두 파일 규칙의 문장이 남아 있지 않다는 것만 본다). 긍정 문구는 `AGENTS.md`의 데이터 경계 항목과 세 SQL 파일의 머리말에서 본다 — ④가 그 항목이나 머리말의 문장을 고치면 같은 변경에서 D4를 맞춘다(`npm run build`가 `test:background`를 돌리므로 어긋나면 배포 빌드가 멈춘다).
+- ⑤의 주석 핀이 도로·계단과 어떻게 놓이는지(쌓임·누름·상자)는 ⑤가 정한다. 주석은 별도 표라 이번 저장 계약과는 무관하다.
