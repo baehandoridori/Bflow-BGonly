@@ -294,7 +294,7 @@ R = C:/Bflow-BGonly/.claude/worktrees/background-library-2d-3d-editor-a0ed8c. TO
 | 묶음 | 설계 문서 | 상태 |
 |---|---|---|
 | 가. 캐릭터 카드 휠 (G7) | 이 문서 2절, 아래 7.1 | 2026-10-10 구현·검증 완료 (v1.132.1) · 실제 마우스의 Shift+휠은 배포 뒤 확인 |
-| 나. 같은 레이아웃 씬 한꺼번에 연결 (G8) | docs/superpowers/specs/2026-10-10-scene-bulk-work-link-design.md, 아래 7.2 | 2026-10-11 구현·수동 검증 완료 (v1.134.0) · 배포 대기 |
+| 나. 같은 레이아웃 씬 한꺼번에 연결 (G8) | docs/superpowers/specs/2026-10-10-scene-bulk-work-link-design.md, 아래 7.2 | 2026-10-11 구현·수동 검증 완료 · **v1.134.0 배포 완료(2026-10-11 03:07 KST, PR #320 → main c2f370ba)** · 팀 PC 실기 확인 대기 |
 | 다. 편집 상태와 저장 지키기 (G2) | - | 대기 |
 | 라. 끌어다 놓아 이미지 추가 (G1) | - | 대기 (결정 필요) |
 | 마. 3D 조작 다듬기 (G3·G4·G5·G6) | - | 대기 (결정 필요) |
