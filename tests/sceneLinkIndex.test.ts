@@ -1,6 +1,7 @@
 // tests/sceneLinkIndex.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { buildPrimaryFileBasenameIndex, resolveScenesForBasenames } from '../electron/presence/sceneLinkIndex.ts';
 import type { SupabaseSceneWorkLink } from '../electron/supabase.ts';
 
@@ -38,4 +39,12 @@ test('콜리전: 동명 파일 다른 폴더 → 전 sceneUuid + collision 보�
   const r = resolveScenesForBasenames(idx, ['b030.moho']);
   assert.deepEqual(r.sceneUuids.sort(), ['s1', 's2']);
   assert.deepEqual(r.collisions, ['b030.moho']);
+});
+// 이 확인을 test:scene-links의 파일 안에 두면 그 스크립트가 빌드에서 빠질 때 감시도 함께 사라진다 — 그래서 test:presence의 이 파일이 지킨다.
+test('씬 작업 링크 테스트가 빌드에 들어 있다', () => {
+  const { scripts } = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+  assert.match(scripts['test:scene-links'], /\.\/tests\/sceneWorkLinks\.test\.ts/);
+  assert.match(scripts['test:scene-links'], /\.\/tests\/sceneWorkLinkCardBadges\.test\.ts/);
+  assert.match(scripts.build, /npm run test:scene-links &&/);
+  assert.match(scripts['build:vite'], /npm run test:scene-links &&/);
 });
