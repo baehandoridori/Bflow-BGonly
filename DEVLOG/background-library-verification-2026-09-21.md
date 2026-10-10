@@ -349,4 +349,10 @@ PGlite는 기존 로컬 설치를 `BFLOW_PGLITE_MODULE`로 지정했으며 앱 �
 
 ### 운영 DB 적용
 
-(PR 머지 뒤, 앱 빌드·배포 전에 적용하고 여기에 적는다: 적용 버전 번호와 시각, 함수 본문 md5 전·후, 권한, 점검 호출 결과.)
+2026-10-10 18:05 KST, PR #318 머지(30179373) 뒤·앱 빌드 전에 적용했다. 적용 버전 번호 `20261010090509`(`background_map_elements`).
+
+- 적용 전(읽기만): 적용 기록에 `background_library`·`background_map_3d`만 있음 / 검증 함수 본문 md5 `956240d88619d7b370d9116acb2a0213`(3D 파일의 LF 값, `has_cr` 거짓), SECURITY INVOKER, `search_path=public, pg_temp` / 함수 13개 / `anon`·`authenticated`의 실행 권한은 `execute`·`read` 둘씩 / 도면 2행, 새 모양이 든 노드 0 / `background_library_validate()` 통과 / 두 표 RLS 켜짐·정책 0·직접 권한 없음. 일곱 항목 모두 기대값.
+- 넣은 글자: 머지 커밋의 blob에서 꺼낸 요소 파일 전체(14,943바이트, LF, CR 0개).
+- 적용 뒤: 검증 함수 본문 md5 `3e7d8ebada46b93c9022b40f356457e8` = blob에서 계산한 값(9,609자) / 나머지 함수 12개 md5 그대로 / 권한·표의 잠금·저장된 자료 그대로(`PUBLIC` 실행 권한 0줄) / `background_library_validate()` 통과 / 도로·`teal` 카메라·계단이 든 도면의 점검 호출 통과, `river`·`purple`·`elevator`로 바꾼 셋은 각각 22023 / 익명 역할의 읽기·검증 함수·표 직접 조회는 모두 42501. 다시 실행하거나 되돌린 일 없음.
+- 운영에서 저장(쓰기) 호출은 하지 않았다. 첫 저장은 배포된 앱에서 한솔 계정으로 확인한다.
+- 적용 뒤 요소 파일의 본문을 계약 테스트 D5에 더했다(최종 검토의 지적). 닫힌 목록을 넓힐 때는 새 migration 파일을 더한다.

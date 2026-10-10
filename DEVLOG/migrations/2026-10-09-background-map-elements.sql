@@ -2,6 +2,7 @@
 -- Prerequisites: 2026-09-21-background-library.sql, then 2026-10-07-background-map-3d.sql. Apply this file
 -- after both, and before the app version that writes these shapes (v1.133.0): app first means every save
 -- that carries one of them fails with 22023.
+-- Applied to production on 2026-10-10 as 20261010090509 (background_map_elements), after the 3D file (20261008035155).
 -- Chain: base -> 3D -> this file. All three replace public.background_library_validate_entity, each with a
 -- wider one, so the file that ran last decides what the server accepts.
 -- Re-run this file after every run of either of them, not only after the first one. The base file puts back

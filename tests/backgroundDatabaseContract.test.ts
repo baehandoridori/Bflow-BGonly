@@ -178,11 +178,14 @@ test('세 파일의 머리말과 운영 문서가 사슬 전체를 말하고, �
   assert.ok(noted.length>=1);for(const line of noted)assert.ok(line.includes(elements),line);
 });
 
-test('적용된 두 파일의 본문은 그대로다',()=>{
+test('적용된 세 파일의 본문은 그대로다',()=>{
   // Production holds these bodies (function md5 was compared there); only the comment lines above BEGIN; may change.
   const applied:Record<string,string>={
     '2026-09-21-background-library.sql':'9fae1b53f02379bf98af1a25f1cff04576d69d9fc59d7486da49b6cc6c4fd5eb',
     '2026-10-07-background-map-3d.sql':'2e785dc4fe674136d620c0fd236b460572de7f782ca481bd8888e9ce15fc23b3',
+    // Applied on 2026-10-10 (20261010090509). From then on its lists are frozen as well: a new symbol kind, surface or camera
+    // colour goes into a NEW migration file, and the list checks above (the added lines, the IN lists) move to that file.
+    '2026-10-09-background-map-elements.sql':'64f1c1aaec5d979694522b1840ffc2041132e55c91922b2ce201b04d15eabe54',
   };
   for(const [name,expected] of Object.entries(applied)){
     // A fresh checkout is CRLF: without the two guards the marker is missed and slice(0) hashes the header as well.
