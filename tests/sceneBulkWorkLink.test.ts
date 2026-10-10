@@ -8,7 +8,7 @@ import {
   findSceneLocation,
   sameWorkPath,
 } from '../src/utils/sceneBulkWorkLink.ts';
-import type { BulkLinkDefaults, BulkLinkScope } from '../src/utils/sceneBulkWorkLink.ts';
+import type { BulkLinkDefaults, BulkLinkOffer, BulkLinkScope } from '../src/utils/sceneBulkWorkLink.ts';
 import { getWorkLinkSlotKey } from '../src/utils/sceneWorkLinks.ts';
 import type { Episode, Part, Scene, SceneWorkLink, SceneWorkLinkDepartment } from '../src/types/index.ts';
 
@@ -84,6 +84,9 @@ const LINKS = new Map([
 
 const D: BulkLinkDefaults = { checkNamedReplace: true, offerLayoutOnly: true, checkLayoutOnly: false };
 
+// 제안의 줄: [씬 번호, 묶음, 상태, 처음 체크]. 제안이 없으면(null) undefined라 어느 목록과도 같지 않다.
+const rows = (offer: BulkLinkOffer | null) => offer?.candidates.map((item) => [item.sceneId, item.group, item.state, item.checked]);
+
 test('findSceneLocation: uuid로 씬의 파트와 화를 찾는다', () => {
   const location = findSceneLocation(episodes, 'act-3');
   assert.equal(location?.part.sheetName, 'EP05_A_ACT');
@@ -104,6 +107,13 @@ test('effectiveLayout: 자기 레이아웃, 비었으면 짝 파트의 같은 �
   assert.equal(effectiveLayout(sceneOf(bgC, 'c003'), bgC, actC), '12');
 });
 
+// 보탬 자료(설계 11.2의 목록 밖): 4.9의 `if (!key) return '';`. 11.2의 씬에는 모두 번호가 있어 이 줄을 지운 구현을 가르지 못한다 — 막 더한 씬은 번호가 ''로 저장될 수 있다.
+test('effectiveLayout: 씬 번호가 빈 씬은 짝 파트의 번호가 빈 씬을 짝으로 삼지 않는다', () => {
+  const blankBg = { partId: 'Y', department: 'bg', sheetName: 'EP07_Y_BG', scenes: [scene('y-1', 1, '')] } as Part;
+  const blankAct = { partId: 'Y', department: 'acting', sheetName: 'EP07_Y_ACT', scenes: [scene('ya-1', 1, '', '12')] } as Part;
+  assert.equal(effectiveLayout(blankBg.scenes[0], blankBg, blankAct), '');
+});
+
 test('findBulkLinkScope: 배경 씬에서 — 그 파트의 이름 묶음·레이아웃 묶음·없는 씬', () => {
   const scope = scopeOf('bg-1', 'bg', FILE);
   assert.deepEqual(sceneIds(scope.named), ['a003', 'a005', 'A007']);
@@ -119,6 +129,8 @@ test('findBulkLinkScope: 액팅 씬에서 — 액팅 파트 것만, 없는 씬�
   assert.deepEqual(sceneIds(scope.named), ['A003', 'A005', 'A007']);
   assert.deepEqual(sceneIds(scope.layout), ['A002']);
   assert.deepEqual(scope.notFound, ['A011']);
+  // 보탬(11.2의 목록 밖): layoutValue는 유효 레이아웃이다(4.1) — A001은 자기 것이 비었고 배경 짝 a001의 12다.
+  assert.equal(scope.layoutValue, '12');
 });
 
 test('findBulkLinkScope: 부서가 어긋나면 null', () => {
@@ -157,6 +169,8 @@ test('findBulkLinkScope: 이름 묶음은 번호 순이고, 연결한 씬과 번
   const scope = scopeOf('c-1', 'bg', 'G:\\x\\c 001,003,005.moho');
   assert.deepEqual(sceneIds(scope.named), ['c003', 'c005']);
   assert.deepEqual(scope.layout, []);
+  // 보탬(11.2의 목록 밖): 순수 모듈이다(4절 머리말) — 넘겨받은 씬 배열(저장소의 자료)의 순서는 그대로다. 번호 순은 사본을 정렬한 것이다.
+  assert.deepEqual(sceneIds(bgC.scenes), ['c005', 'c001', 'C001', 'c003']);
 });
 
 test('findBulkLinkScope: 접미가 붙은 씬은 접미까지 맞아야 한다', () => {
@@ -236,6 +250,20 @@ test('findBulkLinkScope: 이름 묶음 — 번호가 같은 씬이 둘이면(e00
   assert.deepEqual(scope.notFound, []);
 });
 
+// 보탬 자료(설계 11.2의 목록 밖): 4.4 "다듬은 글자의 완전 일치다('12'와 '012'는 다르다)". 11.2에는 수로는 같고 글자만 다른 레이아웃이 없어, 수로 견주거나 대소문자를 접는 구현을 가르지 못한다.
+test('findBulkLinkScope: 레이아웃 묶음 — 글자 그대로 같아야 한다(12와 012, 12a와 12A는 다르다)', () => {
+  const partZ = { partId: 'Z', department: 'bg', sheetName: 'EP07_Z_BG', scenes: [
+    scene('z-1', 1, 'z001', '12'), scene('z-2', 2, 'z002', '012'), scene('z-3', 3, 'z003', '12'),
+    scene('z-4', 4, 'z004', '12a'), scene('z-5', 5, 'z005', '12A'),
+  ] };
+  const episodesZ = [{ episodeNumber: 7, title: 'EP.07', parts: [partZ] }] as Episode[];
+  const scope = findBulkLinkScope(episodesZ, 'z-1', 'bg', 'G:\\x\\main.psd');
+  assert.ok(scope);
+  assert.deepEqual(scope.named, []);
+  assert.deepEqual(sceneIds(scope.layout), ['z003']);
+  assert.equal(findBulkLinkScope(episodesZ, 'z-4', 'bg', 'G:\\x\\main.psd'), null);
+});
+
 test('필터와 무관: 화면 상태를 받는 인자가 없다(기본값이 있는 defaults는 세지 않는다)', () => {
   assert.equal(findBulkLinkScope.length, 4);
   assert.equal(buildBulkLinkOffer.length, 4);
@@ -252,6 +280,10 @@ test('buildBulkLinkOffer: 후보마다 상태와 처음 체크 — 이름 묶음
     ['a009', 'layout', 'empty', false, 'bg-9'],
     ['a010', 'layout', 'unavailable', false, 'no:8:a010'],
   ]);
+  // 보탬(11.2의 표 밖): 4.1의 나머지 필드 — uuid 없는 줄의 sceneUuid는 null이고(''가 아니다), path와 department는 넘긴 그대로다.
+  assert.deepEqual(offer.candidates.map((item) => item.sceneUuid), ['bg-3', 'bg-5', 'bg-7', 'bg-2', 'bg-9', null]);
+  assert.equal(offer.path, FILE);
+  assert.equal(offer.department, 'bg');
   assert.equal(offer.fileName, 'a 001,003,005,007,011.moho');
   assert.equal(offer.layout, '12');
   assert.equal(offer.linkedSceneId, 'a001');
@@ -286,6 +318,45 @@ test('buildBulkLinkOffer: 할 일이 없으면 null — 모두 이미 이 파일
   assert.equal(buildBulkLinkOffer(scopeD, pathD, 'bg', new Map()), null);
 });
 
+// 보탬 자료(설계 11.2의 목록 밖): 4.6 "후보 가운데 empty나 replace가 하나라도 있을 때만". 11.2의 제안에는 늘 empty와 replace가 함께 있고 처음부터 체크된 이름 묶음의 줄도 있어, 둘 중 한쪽만 보거나·체크된 줄만 보거나·이름 묶음만 보는 구현을 가르지 못한다.
+test('buildBulkLinkOffer: 창이 뜨는 조건 — empty나 replace가 하나라도 있으면 뜬다(체크된 줄이 없어도, 레이아웃 묶음뿐이어도)', () => {
+  const pathB = 'G:\\x\\b 001,003.moho';
+  // 빈 칸 하나뿐.
+  assert.deepEqual(rows(buildBulkLinkOffer(scopeOf('bgb-1', 'bg', pathB), pathB, 'bg', new Map())), [['b003', 'named', 'empty', true]]);
+  // 다른 파일을 든 칸 하나뿐 — 그 줄을 풀어 둔 채 여는 설정(checkNamedReplace: false)에서도 창은 뜬다.
+  const replaceOnly = new Map([link('bgb-3', 'bg', 'G:\\old\\b003.moho')]);
+  assert.deepEqual(rows(buildBulkLinkOffer(scopeOf('bgb-1', 'bg', pathB), pathB, 'bg', replaceOnly)), [['b003', 'named', 'replace', true]]);
+  assert.deepEqual(
+    rows(buildBulkLinkOffer(scopeOf('bgb-1', 'bg', pathB), pathB, 'bg', replaceOnly, { ...D, checkNamedReplace: false })),
+    [['b003', 'named', 'replace', false]],
+  );
+  // 레이아웃 묶음뿐이고 처음부터 체크된 줄이 하나도 없다(P3: 올리되 체크하지 않는다).
+  const pathA2 = 'G:\\x\\a002.moho';
+  assert.deepEqual(rows(buildBulkLinkOffer(scopeOf('bg-2', 'bg', pathA2), pathA2, 'bg', new Map())), [
+    ['a001', 'layout', 'empty', false],
+    ['a003', 'layout', 'empty', false],
+    ['a009', 'layout', 'empty', false],
+    ['a010', 'layout', 'unavailable', false],
+  ]);
+});
+
+// 보탬 자료(설계 11.2의 목록 밖): 4.5의 표 "unavailable — 처음 체크: 아니오"와 4.1의 `sceneUuid: string | null`. 11.2에서 창이 뜨는 제안의 uuid 없는 씬은 레이아웃 묶음의 a010뿐이라, 이름 묶음의 uuid 없는 줄을 체크해 두는 구현을 가르지 못한다.
+test('buildBulkLinkOffer: 이름 묶음의 uuid 없는 씬 — 체크하지 않고, 열쇠는 no:…, sceneUuid는 null', () => {
+  const partD = { partId: 'D', department: 'bg', sheetName: 'EP05_D_BG', scenes: [
+    scene('d-1', 1, 'd001'), { ...scene('', 2, 'd003'), id: undefined }, scene('d-5', 3, 'd005'),
+  ] };
+  const episodesD = [{ episodeNumber: 5, title: 'EP.05', parts: [partD] }] as Episode[];
+  const pathD = 'G:\\x\\d 001,003,005.moho';
+  const scopeD = findBulkLinkScope(episodesD, 'd-1', 'bg', pathD);
+  assert.ok(scopeD);
+  const offer = buildBulkLinkOffer(scopeD, pathD, 'bg', new Map());
+  assert.ok(offer);
+  assert.deepEqual(offer.candidates.map((item) => [item.sceneId, item.group, item.state, item.checked, item.key, item.sceneUuid]), [
+    ['d003', 'named', 'unavailable', false, 'no:2:d003', null],
+    ['d005', 'named', 'empty', true, 'd-5', 'd-5'],
+  ]);
+});
+
 test('buildBulkLinkOffer: 액팅에서 연결하면 액팅 칸만 읽는다', () => {
   // 같은 uuid에 배경 링크가 따로 있어도 보지 않는다.
   const links = new Map([link('act-3', 'bg', 'G:\\bg\\other.psd'), link('act-5', 'acting', 'G:\\old\\A005.moho')]);
@@ -295,6 +366,8 @@ test('buildBulkLinkOffer: 액팅에서 연결하면 액팅 칸만 읽는다', ()
     offer.candidates.map((item) => `${item.sceneId} ${item.state}`),
     ['A003 empty', 'A005 replace', 'A007 empty', 'A002 empty'],
   );
+  // 보탬(11.2의 목록 밖): 제안의 department는 넘긴 부서다(4.1).
+  assert.equal(offer.department, 'acting');
 });
 
 test('상수 고정: BULK_LINK_DEFAULTS', () => {
