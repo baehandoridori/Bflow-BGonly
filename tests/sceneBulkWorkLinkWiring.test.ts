@@ -340,6 +340,11 @@ test('앵커 8: 호스트는 본 창에 하나, 창은 스스로 닫히는 길�
   has(dialog, 'const stopPasteAtWindow = (pasted: ClipboardEvent) => { pasted.stopPropagation(); };');
   // 그 리스너는 창이 닫힐 때 뗀다 — 남으면 창이 한 번 뜬 뒤 본 창의 붙여넣기가 모두 멈춘다.
   has(dialog, "return () => window.removeEventListener('paste', stopPasteAtWindow, true);");
+  // 설계 6.3(수동 검증에서 더함): Tab이 마지막 버튼을 지나면 포커스가 한 번 창 밖(body)에 놓인다. 그때의 키는 onKeyDown에 닿지 않는다 — 창 단위 캡처에서, 창 밖에서 온 키만 멈춘다.
+  has(dialog, 'const stopOutsideKeyAtWindow = (pressed: KeyboardEvent) => {');
+  has(dialog, 'if (!dialogRef.current?.contains(pressed.target as Node | null)) pressed.stopPropagation();');
+  has(dialog, "window.addEventListener('keydown', stopOutsideKeyAtWindow, true);");
+  has(dialog, "return () => window.removeEventListener('keydown', stopOutsideKeyAtWindow, true);");
   // 닫는 길은 모두 settle을 지난다: 버튼·Esc·바깥 누름은 close로 가고, 이미 떠 있을 때의 새 요청은 덮어쓰지 않고 null로 끝난다.
   has(dialog, 'const close = (keys: string[] | null) => { settle(keys); setOffer(null); };');
   has(dialog, 'onCancel={(event) => { event.preventDefault(); onClose(null); }}');

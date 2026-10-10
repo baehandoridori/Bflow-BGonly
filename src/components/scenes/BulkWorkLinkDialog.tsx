@@ -78,6 +78,14 @@ function BulkWorkLinkWindow({ offer, onClose }: { offer: BulkLinkOffer; onClose:
     window.addEventListener('paste', stopPasteAtWindow, true);
     return () => window.removeEventListener('paste', stopPasteAtWindow, true);
   }, []);
+  useEffect(() => {
+    // Tab이 마지막 버튼을 지나면 포커스가 한 번 창 밖(body)에 놓인다. 그때의 키는 창의 onKeyDown을 지나지 않으므로, 뒤의 상세 창에 닿기 전에 여기서 멈춘다.
+    const stopOutsideKeyAtWindow = (pressed: KeyboardEvent) => {
+      if (!dialogRef.current?.contains(pressed.target as Node | null)) pressed.stopPropagation();
+    };
+    window.addEventListener('keydown', stopOutsideKeyAtWindow, true);
+    return () => window.removeEventListener('keydown', stopOutsideKeyAtWindow, true);
+  }, []);
   const toggle = (key: string) => setCheckedKeys((current) => {
     const next = new Set(current);
     if (!next.delete(key)) next.add(key);
