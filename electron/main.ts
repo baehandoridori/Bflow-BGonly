@@ -1474,6 +1474,7 @@ import { mapCalendarNotificationRow } from '../src/shared/calendarNotifications'
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
 import { sceneWorkFileEntries } from './presence/sceneLinkIndex';
+import { createTrailingDebounce } from './presence/trailingDebounce';
 import type { EditingPresenceHandle } from './presence/editingPresenceService';
 import type { PresenceSnapshotBundle, EditingPresencePayload } from './presence/types';
 
@@ -3372,14 +3373,7 @@ function startSupabaseRealtime() {
     onCalendarNotificationInsert: (payload) => broadcastSupabaseCalendarNotification(payload),
     onSceneWorkLinkChange: (payload) => {
       broadcastSupabaseEvent('scene_work_links', payload);
-      // 프레즌스 basename→씬 매칭에 쓰는 캐시를 최신화(전체 재로드) 후 재평가.
-      // 이미 Moho 파일이 열린 상태에서 primary_file 링크가 추가/이름변경/삭제되면
-      // 창 집합(basename)은 그대로라 poller가 onChange를 안 띄운다 → reset()으로 dedup을
-      // 비우고 즉시 재폴링해, 신선한 캐시로 인덱스를 재구성하고 새 sceneUuids를 재track한다.
-      // (신선한 캐시를 쓰도록 refresh 완료 후 reset — 그 전 reset은 stale 캐시로 재평가됨)
-      void refreshSceneWorkLinkCache().then(() => {
-        try { editingPresence?.reset(); } catch { /* ignore */ }
-      });
+      sceneWorkLinkRefresh.schedule();
     },
     onPresenceSync: (state) => receivePresence(
       state as Record<string, EditingPresencePayload[]>,
@@ -3490,6 +3484,21 @@ async function refreshSceneWorkLinkCache(): Promise<void> {
   }
 }
 
+// 링크 행이 한꺼번에 여러 개 바뀌어도(한꺼번에 연결·되돌리기) 표 다시 읽기와 감지기 초기화는 한 번만 한다.
+// 행마다 하면 PC마다 N번 표를 읽고 PowerShell을 N개 띄운다.
+// 프레즌스 basename→씬 매칭에 쓰는 캐시를 최신화(전체 재로드) 후 재평가.
+// 이미 Moho 파일이 열린 상태에서 primary_file 링크가 추가/이름변경/삭제되면
+// 창 집합(basename)은 그대로라 poller가 onChange를 안 띄운다 → reset()으로 dedup을
+// 비우고 즉시 재폴링해, 신선한 캐시로 인덱스를 재구성하고 새 sceneUuids를 재track한다.
+// (신선한 캐시를 쓰도록 refresh 완료 후 reset — 그 전 reset은 stale 캐시로 재평가됨)
+const SCENE_WORK_LINK_REFRESH_WAIT_MS = 400;
+const SCENE_WORK_LINK_REFRESH_MAX_WAIT_MS = 2000;
+const sceneWorkLinkRefresh = createTrailingDebounce(() => {
+  void refreshSceneWorkLinkCache().then(() => {
+    try { editingPresence?.reset(); } catch { /* ignore */ }
+  });
+}, { waitMs: SCENE_WORK_LINK_REFRESH_WAIT_MS, maxWaitMs: SCENE_WORK_LINK_REFRESH_MAX_WAIT_MS });
+
 // 복장 작업 파일 경로 캐시 — 프레즌스 basename→복장 매칭용 (피드백 54).
 let costumeFileCache: Array<{ id: string; path: string | null }> = [];
 
@@ -3546,6 +3555,7 @@ async function startEditingPresence(): Promise<void> {
 
 // 프레즌스 서비스 중단(앱 종료 시).
 function stopEditingPresenceService(): void {
+  sceneWorkLinkRefresh.cancel();
   try { editingPresence?.stop(); } catch { /* ignore */ }
   editingPresence = null;
 }

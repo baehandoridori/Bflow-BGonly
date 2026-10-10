@@ -180,6 +180,8 @@ function WorkLinkRow({
   const [pasteOpen, setPasteOpen] = useState(false);
   const [draftPath, setDraftPath] = useState('');
   const [saving, setSaving] = useState(false);
+  // 저장이 도는 중인가 — 지금 값. 선택창을 기다린 뒤 부르는 savePath는 예전 렌더의 saving을 쥐고 있어 그것으로는 가릴 수 없다.
+  const savingRef = useRef(false);
   const [opening, setOpening] = useState(false);
   const [exists, setExists] = useState<boolean | null>(null);
 
@@ -254,8 +256,10 @@ function WorkLinkRow({
   }, [menuOpen]);
 
   const savePath = async (nextPath: string) => {
+    if (savingRef.current) return;   // 저장이 도는 중에는 또 저장하지 않는다(붙여넣기 칸의 Enter는 버튼과 달리 막혀 있지 않다)
     const trimmed = nextPath.trim();
     if (!scene?.id || !trimmed) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       // 공용 가드 경유 — 지금 빈 슬롯으로 보일 때('연결')만 로딩 레이스 대비 재확인.
@@ -274,6 +278,7 @@ function WorkLinkRow({
         setMenuOpen(false);
       }
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
