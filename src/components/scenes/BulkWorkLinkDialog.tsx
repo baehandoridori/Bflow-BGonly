@@ -60,12 +60,23 @@ function BulkWorkLinkWindow({ offer, onClose }: { offer: BulkLinkOffer; onClose:
   const [checkedKeys, setCheckedKeys] = useState<ReadonlySet<string>>(
     () => new Set(offer.candidates.filter((row) => row.checked).map((row) => row.key)),
   );
+  const previousRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
-    if (dialog && !dialog.open) dialog.showModal();
+    if (dialog && !dialog.open) {
+      previousRef.current = document.activeElement as HTMLElement | null;
+      dialog.showModal();
+    }
     dialog?.querySelector<HTMLInputElement>('input[type="checkbox"]:not(:disabled)')?.focus();
-    return () => { if (previous?.isConnected) previous.focus(); };
+    return () => {
+      const previous = previousRef.current;
+      if (previous?.isConnected) previous.focus();
+    };
+  }, []);
+  useEffect(() => {
+    const stopPasteAtWindow = (pasted: ClipboardEvent) => { pasted.stopPropagation(); };
+    window.addEventListener('paste', stopPasteAtWindow, true);
+    return () => window.removeEventListener('paste', stopPasteAtWindow, true);
   }, []);
   const toggle = (key: string) => setCheckedKeys((current) => {
     const next = new Set(current);
