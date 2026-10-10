@@ -512,6 +512,22 @@ test('planBulkLink: 후보의 순서대로 쓰고(고른 순서가 아니다), �
   assert.deepEqual(gone, { writes: [WRITE_A005, WRITE_A002], same: [], changed: ['a003'] });
 });
 
+// 보탬 자료(설계 11.2의 목록 밖): 4.7의 표가 줄마다 견주는 방식 — 이 파일인가는 `sameWorkPath(지금, offer.path)`로, 창을 열 때 본 경로와는 글자 그대로(`(지금 ?? '') !== (currentPath ?? '')`), 씬 번호도 글자 그대로(`sceneId`). 11.2에서 이 파일이 된 칸은 FILE의 글자 그대로이고, 달라진 칸은 전혀 다른 파일이며, 번호가 바뀐 씬은 숫자가 달라, 셋 가운데 어느 하나를 반대 방식으로 견주는 구현을 가르지 못한다.
+test('planBulkLink: 견주는 방식 — 이 파일인가는 빗금과 대소문자를 맞춰서, 창을 열 때 본 경로와 씬 번호는 글자 그대로', () => {
+  const offer = firstOffer();
+  const scope = firstScope();
+  // 그 사이 bg-3이 빗금과 대소문자만 다르게 적힌 이 파일이 됐다 — 이미 이 파일이다(알리지 않고 건너뛴다).
+  const respelled = planBulkLink(offer, PICKED, new Map([...LINKS, link('bg-3', 'bg', 'g:/show/ep5/A 001,003,005,007,011.MOHO')]), scope);
+  assert.deepEqual(respelled, { writes: [WRITE_A005, WRITE_A002], same: ['a003'], changed: [] });
+  // bg-5의 경로가 빗금과 대소문자만 달라졌다 — 창을 열 때 본 글자가 아니므로 쓰지 않는다.
+  const recased = planBulkLink(offer, PICKED, new Map([...LINKS, link('bg-5', 'bg', 'g:/old/A005.MOHO')]), scope);
+  assert.deepEqual(recased, { writes: [WRITE_A003, WRITE_A002], same: [], changed: ['a005'] });
+  // bg-3의 씬 번호가 대소문자만 바뀌었다(a003 → A003) — 이름 묶음에는 그대로 있지만 번호 글자가 다르다.
+  const upper = rescoped((part) => { sceneByUuid(part, 'bg-3').sceneId = 'A003'; });
+  assert.deepEqual(upper?.named.map((item) => `${item.id} ${item.sceneId}`), ['bg-3 A003', 'bg-5 a005', 'bg-7 A007']);
+  assert.deepEqual(planBulkLink(offer, PICKED, LINKS, upper), { writes: [WRITE_A005, WRITE_A002], same: [], changed: ['a003'] });
+});
+
 test('액팅에서 연결하면 액팅 칸만 읽고 쓴다: 실행 계획과 되돌리기 계획', () => {
   // 같은 uuid에 배경 링크가 따로 있어도 보지 않는다.
   const links = new Map([link('act-3', 'bg', 'G:\\bg\\other.psd'), link('act-5', 'acting', 'G:\\old\\A005.moho')]);
@@ -560,6 +576,8 @@ test('planBulkUndo: 경로는 같은데 마지막으로 고친 사람이 다르�
     ],
     kept: ['a002'],
   });
+  // 보탬(11.2의 목록 밖): 로그인한 사람이 없어도 다른 사람이 고친 칸은 내 것이 아니다(4.7: `(link.updatedBy ?? null) === (userId ?? null)`) — 위 자료는 고친 사람도 모두 null이라, userId가 null이면 고친 사람을 보지 않는 구현을 가르지 못한다.
+  assert.deepEqual(planBulkUndo([WRITE_A003], FILE, 'bg', new Map([link('bg-3', 'bg', FILE, 'someone')]), null), { steps: [], kept: ['a003'] });
 });
 
 // 보탬 자료(설계 11.2의 목록 밖): 4.7 "그 칸의 경로가 sameWorkPath(지금, path)". 11.2의 되돌리기 자료에서 아직 이 파일인 칸은 경로의 글자까지 같아, 글자 그대로 견주는 구현을 가르지 못한다.
@@ -640,6 +658,8 @@ test('문구: 없는 씬 줄, 연결한 씬이 바뀌었을 때, 다시 읽지 �
 test('문구: 버튼의 글자, 씬 번호 줄임, 파일이 바뀌는 씬의 수', () => {
   assert.equal(bulkLinkConfirmLabel(3), '선택한 3개에 연결');
   assert.equal(bulkLinkConfirmLabel(0), '연결할 씬을 골라 주세요');
+  // 보탬(11.2의 목록 밖): 하나만 골라도 버튼은 연결을 말한다(6.2: '연결할 씬을 골라 주세요'는 고른 것이 없을 때뿐이다) — 3과 0만으로는 경계가 하나 어긋난 구현을 가르지 못한다.
+  assert.equal(bulkLinkConfirmLabel(1), '선택한 1개에 연결');
   assert.equal(sceneIdList(['a003', 'a005', 'a007', 'a009']), 'a003, a005, a007 외 1개');
   assert.equal(bulkLinkReplaceNote(3), '이 중 3개는 지금 연결된 파일이 바뀌어요');
   assert.equal(bulkLinkReplaceNote(1), '이 중 1개는 지금 연결된 파일이 바뀌어요');
@@ -672,4 +692,16 @@ test('문구: 되돌리기의 결과 — 있는 조각만 잇는다', () => {
     '씬 1개를 되돌렸어요 · 1개는 되돌리지 못했어요(a005) · 1개는 그 뒤에 바뀌어서 그대로 뒀어요(a007)',
   );
   assert.equal(bulkUndoResultText({ undone: [], failed: [], kept: [] }), '되돌릴 것이 없어요');
+});
+
+// 보탬 자료(설계 11.2의 목록 밖): 7.3·7.4의 조각은 씬 번호를 모두 `sceneIdList`로 줄여 적는다(4.9). 11.2에서 번호가 셋을 넘는 목록은 연결의 '연결하지 못했어요' 조각뿐이라, 나머지 세 조각(연결의 '그 사이 바뀌어서', 되돌리기의 '되돌리지 못했어요'·'그 뒤에 바뀌어서')이 번호를 끝까지 늘어놓는 구현을 가르지 못한다.
+test('문구: 결과의 씬 번호 줄임 — 어느 조각이든 셋까지만 적는다', () => {
+  assert.equal(
+    bulkLinkResultText({ linked: [], failed: [], changed: ['a003', 'a005', 'a007', 'a009'] }),
+    '4개는 그 사이 바뀌어서 그대로 뒀어요(a003, a005, a007 외 1개)',
+  );
+  assert.equal(
+    bulkUndoResultText({ undone: [], failed: ['a003', 'a005', 'a007', 'a009'], kept: ['a002', 'a004', 'a006', 'a008'] }),
+    '4개는 되돌리지 못했어요(a003, a005, a007 외 1개) · 4개는 그 뒤에 바뀌어서 그대로 뒀어요(a002, a004, a006 외 1개)',
+  );
 });
