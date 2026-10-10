@@ -168,3 +168,49 @@ export function sceneRefKey(sceneId: string | null | undefined, family: string):
 export function refKey(ref: { number: number; suffix: string }): string {
   return `${ref.number}${ref.suffix}`;
 }
+
+/** 씬 번호처럼 쓴 숫자인가 — 자릿수가 minSceneDigits 이상이거나, 연결한 씬 번호의 자릿수와 같다. */
+function sceneLikeWidth(width: number, sceneId: string, rules: SceneNameRules): boolean {
+  return width >= rules.minSceneDigits || width === (/\d+/.exec(sceneId)?.[0].length ?? 0);
+}
+
+export function sceneListForScene(
+  path: string,
+  scene: { sceneId: string; partId: string },
+  rules: SceneNameRules = SCENE_NAME_RULES,
+): SceneNameList | null {
+  const family = sceneFamily(scene.sceneId, scene.partId);
+  if (family === null) return null;
+  const self = sceneRefKey(scene.sceneId, family);
+  if (self === null) return null;
+  const lists = readSceneNameLists(path, rules);
+  const inFamily = (list: SceneNameList) => list.prefix === family || list.prefix === family.slice(0, 1);
+  // 맞는 목록이 여럿이면: 번호가 둘 이상인 것 먼저, 그래도 여럿이면 왼쪽 것.
+  const pick = (pool: SceneNameList[]) => pool.find((list) => list.refs.length > 1) ?? pool[0] ?? null;
+  const fits = lists.filter((list) => {
+    const hasSelf = list.refs.some((ref) => refKey(ref) === self);
+    if (list.prefix === '') return hasSelf && sceneLikeWidth(list.width, scene.sceneId, rules);
+    if (!inFamily(list)) return false;
+    // P4(끈 것이 정해진 값): 번호가 둘 이상이면 자기 번호가 없어도 맞는다. 번호가 하나뿐인 목록은 늘 자기 번호여야 한다(시안: 씬 하나뿐인 이름은 묻지 않는다).
+    return hasSelf || (!rules.requireOwnNumber && list.refs.length > 1);
+  });
+  const lettered = fits.filter((list) => list.prefix !== '');
+  if (lettered.length > 0) return pick(lettered);
+  // 글자가 붙은 씬 목록이 이름에 따로 있으면(이 가족의 것이거나 번호가 둘 이상) 글자 없는 조각을 이 씬의 목록으로 읽지 않는다.
+  const hasLetteredSceneList = lists.some((list) => (
+    list.prefix !== '' && sceneLikeWidth(list.width, scene.sceneId, rules) && (inFamily(list) || list.refs.length > 1)
+  ));
+  if (hasLetteredSceneList) return null;
+  return pick(fits);
+}
+
+export function namesOtherScenes(
+  path: string,
+  scene: { sceneId: string; partId: string },
+  rules: SceneNameRules = SCENE_NAME_RULES,
+): boolean {
+  if (sceneListForScene(path, scene, rules)) return false;
+  return readSceneNameLists(path, rules).some((list) => (
+    list.prefix !== '' && list.refs.length > 1 && sceneLikeWidth(list.width, scene.sceneId, rules)
+  ));
+}

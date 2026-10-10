@@ -2,14 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SCENE_NAME_RULES,
+  namesOtherScenes,
   readSceneNameLists,
   refKey,
   sceneFamily,
+  sceneListForScene,
   sceneRefKey,
   splitSceneId,
   workFileName,
 } from '../src/utils/sceneFileNameList.ts';
-import type { SceneNameList } from '../src/utils/sceneFileNameList.ts';
+import type { SceneNameList, SceneNameRules } from '../src/utils/sceneFileNameList.ts';
 
 // #85의 두 열: 'a: 1 2* … 49* 50'(50개, 양 끝만 직접 적힌 번호).
 const RANGE_50 = 'a: 1 ' + Array.from({ length: 48 }, (_, i) => (i + 2) + '*').join(' ') + ' 50';
@@ -189,13 +191,63 @@ const P1_OFF: Record<number, [string, string]> = {
   139: ['a: 1 10', 'a: 1 10'],
 };
 
+// 설계 15.1 "P4를 켜면" 표의 여덟 줄: 이 씬의 목록이 null이 된다(글자가 맞고 번호가 둘 이상인데 자기 번호가 없는 목록).
+const P4_ON = [59, 60, 61, 62, 109, 123, 126, 128];
+
+// 설계 3.7의 "다른 씬들의 목록인가" 표 스무 줄: [경로, sceneId, partId, 결과].
+type OtherRow = [string, string, string, boolean];
+
+const OTHERS: OtherRow[] = [
+  ['b 001,003.moho', 'a001', 'A', true],
+  ['a 001,003.moho', 'a005', 'A', false],
+  ['a001~005.moho', 'a007', 'A', false],
+  ['a001,003.moho', 'v2a001', 'A', true],
+  ['take 001,002.moho', 'a001', 'A', true],
+  ['a 001,003.moho', 'a001', 'A', false],
+  ['a001,003 b002,004.moho', 'a001', 'A', false],
+  ['b030.moho', 'a001', 'A', false],
+  ['a012.moho', 'a005', 'A', false],
+  ['main_v01_02.psd', 'a001', 'A', false],
+  ['001,003.moho', 'a005', 'A', false],
+  ['[드라마 퀄리티] 한솔 SWver12.moho', 'a012', 'A', false],
+  ['main.psd', 'a014', 'A', false],
+  ['005_006 a 005,007.moho', 'a006', 'A', false],
+  ['a001,003-005,007.moho', 'a005', 'A', false],
+  ['b001,003-005,007.moho', 'a005', 'A', true],
+  ['A_BG_001,003.moho', 'a001', 'A', true],
+  ['sc 001,003.moho', 'a001', 'A', true],
+  ['b001-003,005.moho', 'a003', 'A', false],
+  ['a001-005.moho', 'a005', 'A', false],
+];
+
 const row = (number: number): Row => ROWS[number - 1];
 
 const show = (list: SceneNameList): string => (
   (list.prefix || '∅') + ': ' + list.refs.map((ref) => refKey(ref) + (ref.ranged ? '*' : '')).join(' ')
 );
 const showAll = (lists: SceneNameList[]): string => (lists.length > 0 ? lists.map(show).join(' ; ') : '(없음)');
+const showOne = (list: SceneNameList | null): string => (list ? show(list) : 'null');
 const directNumbers = (list: SceneNameList): number[] => list.refs.filter((ref) => !ref.ranged).map((ref) => ref.number);
+
+// 그 줄의 씬 번호에서 글자와 숫자 자릿수를 따 만든 씬 서른 개(a001 → a001~a030, a1 → a1~a30, 001 → 001~030. 접미는 뗀다).
+const thirtyScenes = (sceneId: string): string[] => {
+  const match = /^([a-z]*)(\d+)/i.exec(sceneId);
+  assert.ok(match, sceneId);
+  return Array.from({ length: 30 }, (_, i) => match[1] + String(i + 1).padStart(match[2].length, '0'));
+};
+
+// 서른 씬에서 돌려 나온 번호 둘 이상의 결과를 '글자: 열쇠들'(범위 표시 없이)로 모은다.
+const listsAcrossScenes = (path: string, sceneId: string, partId: string, rules?: SceneNameRules): string[] => {
+  const found = new Set<string>();
+  for (const id of thirtyScenes(sceneId)) {
+    const list = sceneListForScene(path, { sceneId: id, partId }, rules);
+    if (list && list.refs.length > 1) found.add((list.prefix || '∅') + ': ' + list.refs.map((ref) => refKey(ref)).join(' '));
+  }
+  return [...found].sort();
+};
+
+// 빈 경로(#40)와 씬 번호를 가를 수 없는 줄(#74·#75)은 서른 씬을 만들 수 없다.
+const SAME_LIST_SKIP = [40, 74, 75];
 
 test('자료: 144줄이고 번호가 1부터 144까지 차례다', () => {
   assert.equal(ROWS.length, 144);
@@ -257,6 +309,121 @@ test('readSceneNameLists: 3.3의 규칙 다섯 — 틈은 하나, 중복은 번�
   assert.equal(read('a001,003~a005.moho'), 'a: 1 3 4* 5');
   // 항목의 글자: 첫 글자만이 아니라 글자 전체가 머리와 같아야 한다.
   assert.equal(read('a001,ac003.moho'), 'a: 1 ; ac: 3');
+});
+
+test('sceneListForScene: 설계 3.7의 144줄 — 이 씬의 목록', () => {
+  for (const [number, path, sceneId, partId, , own] of ROWS) {
+    assert.equal(showOne(sceneListForScene(path, { sceneId, partId })), own, `#${number}`);
+  }
+});
+
+test('sceneListForScene: #85 — 50개이고 양 끝만 직접 적힌 번호다', () => {
+  const [, path, sceneId, partId] = row(85);
+  const list = sceneListForScene(path, { sceneId, partId });
+  assert.ok(list, '#85');
+  assert.equal(list.refs.length, 50);
+  assert.deepEqual(directNumbers(list), [1, 50]);
+});
+
+test('sceneListForScene: P1을 끄면(tildeRange: false) 15.1의 열아홉 줄만 달라진다', () => {
+  const rules = { ...SCENE_NAME_RULES, tildeRange: false };
+  for (const [number, path, sceneId, partId, , own] of ROWS) {
+    assert.equal(showOne(sceneListForScene(path, { sceneId, partId }, rules)), P1_OFF[number]?.[1] ?? own, `#${number}`);
+  }
+});
+
+test('sceneListForScene: P4를 켜면(requireOwnNumber: true) 15.1의 여덟 줄만 null이 된다', () => {
+  assert.equal(P4_ON.length, 8);
+  // 끈 값(정해진 값)에서 그 여덟 줄이 읽히는 목록 — 15.1의 표 아래 줄.
+  assert.deepEqual(
+    P4_ON.map((number) => row(number)[5]),
+    ['a: 1A 3', 'a: 1 3', 'a: 1 3', 'a: 1 3 5 7', 'a: 8 9', 'a: 1 2* 3', 'a: 5 7', 'a: 1 3'],
+  );
+  const rules = { ...SCENE_NAME_RULES, requireOwnNumber: true };
+  for (const [number, path, sceneId, partId, , own] of ROWS) {
+    assert.equal(
+      showOne(sceneListForScene(path, { sceneId, partId }, rules)),
+      P4_ON.includes(number) ? 'null' : own,
+      `#${number}`,
+    );
+  }
+});
+
+test('sceneListForScene: 번호가 하나뿐인 이름과 글자 없는 목록은 정해진 값에서도 자기 번호가 있어야 한다', () => {
+  assert.equal(sceneListForScene('a012.moho', { sceneId: 'a005', partId: 'A' }), null);
+  assert.equal(sceneListForScene('b030-피드백.moho', { sceneId: 'b031', partId: 'B' }), null);
+  assert.equal(sceneListForScene('ep2-b030-retake.moho', { sceneId: 'b012', partId: 'B' }), null);
+  assert.equal(sceneListForScene('001,003,005.moho', { sceneId: 'a007', partId: 'A' }), null);
+});
+
+test('sceneListForScene: 넘긴 손잡이를 듣는다 — minSceneDigits, maxRangeCount, maxDigits', () => {
+  const own = (number: number, rules: SceneNameRules): SceneNameList | null => {
+    const [, path, sceneId, partId] = row(number);
+    return sceneListForScene(path, { sceneId, partId }, rules);
+  };
+  assert.equal(showOne(own(94, { ...SCENE_NAME_RULES, minSceneDigits: 2 })), '∅: 10 12', '#94');
+  const ranged = own(86, { ...SCENE_NAME_RULES, maxRangeCount: 60 });
+  assert.ok(ranged, '#86');
+  assert.equal(ranged.refs.length, 60, '#86');
+  assert.deepEqual(directNumbers(ranged), [1, 60], '#86');
+  assert.equal(showOne(own(50, { ...SCENE_NAME_RULES, maxDigits: 5 })), 'a: 1 3', '#50');
+});
+
+test('sceneListForScene: 같은 파일은 어느 씬에서 연결해도 같은 목록이다 — 정해진 값에서는 예외가 없다', () => {
+  for (const [number, path, sceneId, partId] of ROWS) {
+    if (SAME_LIST_SKIP.includes(number)) continue;
+    const found = listsAcrossScenes(path, sceneId, partId);
+    assert.ok(found.length <= 1, `#${number}: ${found.join(' / ')}`);
+  }
+  const [, path, sceneId, partId] = row(132);
+  assert.deepEqual(listsAcrossScenes(path, sceneId, partId), ['a: 1 3'], '#132');
+});
+
+test('sceneListForScene: P4를 켜면 같은 가족의 목록을 둘 적은 #132의 이름에서만 둘로 갈린다', () => {
+  const rules = { ...SCENE_NAME_RULES, requireOwnNumber: true };
+  for (const [number, path, sceneId, partId] of ROWS) {
+    if (SAME_LIST_SKIP.includes(number) || number === 132) continue;
+    const found = listsAcrossScenes(path, sceneId, partId, rules);
+    assert.ok(found.length <= 1, `#${number}: ${found.join(' / ')}`);
+  }
+  const [, path, sceneId, partId] = row(132);
+  assert.deepEqual(listsAcrossScenes(path, sceneId, partId, rules), ['a: 1 3', 'a: 1 5'], '#132');
+});
+
+// 보탬 자료(설계 3.7의 표 밖): 3.4가 글로 정한 규칙 셋을 그럴듯한 틀린 구현과 가른다. ROWS에는 넣지 않는다 — ROWS의 출처는 3.7의 표뿐이다.
+test('sceneListForScene: 3.4의 규칙 셋 — 관문은 가족 전체이거나 첫 글자 하나, 글자 없는 맞는 목록도 번호가 여럿인 것 먼저·왼쪽 것, 번호가 하나뿐인 목록끼리도 왼쪽 것', () => {
+  const own = (name: string, sceneId: string): string => showOne(sceneListForScene(name, { sceneId, partId: 'A' }));
+  // 관문(3.4의 4): 글자가 가족과 같거나 가족의 첫 글자다. 가족의 앞부분('abc'의 'ab')은 지나지 못한다.
+  assert.equal(own('a 001,003.moho', 'abc001'), 'a: 1 3');
+  assert.equal(own('ab 001,003.moho', 'abc001'), 'null');
+  // 글자 없는 맞는 목록(3.4의 5-3): 번호가 둘 이상인 것 먼저, 그래도 여럿이면 왼쪽 것.
+  assert.equal(own('002 수정 002,005.moho', 'a002'), '∅: 2 5');
+  assert.equal(own('001,003 수정 001,005.moho', 'a001'), '∅: 1 3');
+  // 번호가 하나뿐인 맞는 목록끼리(3.4의 5-1): 왼쪽 것.
+  assert.equal(own('a001 ac001.moho', 'ac001'), 'a: 1');
+});
+
+test('자료: "다른 씬들의 목록인가" 표는 스무 줄이고 참이 여섯이다', () => {
+  assert.equal(OTHERS.length, 20);
+  assert.equal(OTHERS.filter(([, , , expected]) => expected).length, 6);
+});
+
+test('namesOtherScenes: 설계 3.7의 "다른 씬들의 목록인가" 표 스무 줄', () => {
+  for (const [path, sceneId, partId, expected] of OTHERS) {
+    assert.equal(namesOtherScenes(path, { sceneId, partId }), expected, `'${path}' (${sceneId} / ${partId})`);
+  }
+});
+
+test('namesOtherScenes: 넘긴 손잡이를 듣는다 — requireOwnNumber, tildeRange', () => {
+  const ownNumber = { ...SCENE_NAME_RULES, requireOwnNumber: true };
+  assert.equal(namesOtherScenes('a 001,003.moho', { sceneId: 'a005', partId: 'A' }, ownNumber), true);
+  assert.equal(namesOtherScenes('a001~005.moho', { sceneId: 'a007', partId: 'A' }, ownNumber), true);
+  assert.equal(namesOtherScenes('005_006 a 005,007.moho', { sceneId: 'a006', partId: 'A' }, ownNumber), true);
+  assert.equal(namesOtherScenes('a001,003-005,007.moho', { sceneId: 'a005', partId: 'A' }, ownNumber), true);
+  assert.equal(namesOtherScenes('b 001,003.moho', { sceneId: 'a001', partId: 'A' }, ownNumber), true);
+  assert.equal(namesOtherScenes('b001,003-005,007.moho', { sceneId: 'a005', partId: 'A' }, ownNumber), true);
+  const noTilde = { ...SCENE_NAME_RULES, tildeRange: false };
+  assert.equal(namesOtherScenes('a001~005.moho', { sceneId: 'a007', partId: 'A' }, noTilde), false);
 });
 
 test('workFileName: 경로의 마지막 조각, 폴더 경로와 빈 경로는 빈 글자', () => {
