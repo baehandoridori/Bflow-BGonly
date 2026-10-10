@@ -32,7 +32,7 @@ export function MapNodeHandles({ node, scale, vertexHandles, onHandleDown }: {
   const handles = planNodeHandles(node, scale, vertexHandles);
   if (node.type === 'camera') {
     // The handle stays on the stored direction, also when the camera looks straight up or down.
-    return <g className="bmap-handles" transform={`translate(${node.x} ${node.y}) rotate(${node.angle})`}>
+    return <g className="bmap-handles" data-camera-color={node.color} transform={`translate(${node.x} ${node.y}) rotate(${node.angle})`}>
       {handles.kind === 'camera' && <>
         {handles.guide && <line className="bmap-camera-guide" x1={handles.guide.from} y1="0" x2={handles.guide.to} y2="0" />}
         <circle className="bmap-camera-direction" cx={handles.distance} cy="0" r={handles.radius} onPointerDown={event => onHandleDown(event, 'rotate')} />

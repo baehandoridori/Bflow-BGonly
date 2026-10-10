@@ -8,7 +8,7 @@ import { build } from 'esbuild';
 import { Object3D, PerspectiveCamera, Raycaster, Texture, TextureLoader, Vector2, Vector3 } from 'three';
 import type { BufferGeometry, Material, Mesh } from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
 import type { MapPickHit } from '../src/features/backgrounds/map3dScene.ts';
 import { MAP_GIZMO_COLORS, MAP_GIZMO_SHAPE, mapGizmoSize, MapNodeGizmo, mapGizmoSetup, previewMapFromRoot, rootWorldPose, styleMapGizmo } from '../src/features/backgrounds/BackgroundMapCameraGizmo.ts';
 import type { Map3DProps, Map3DViewState } from '../src/features/backgrounds/mapCanvas.ts';
@@ -17,8 +17,8 @@ import { beginMapGesture, finishMapGesture, previewMapGesture } from '../src/fea
 import type { MapGesture } from '../src/features/backgrounds/mapEditSession.ts';
 import { addMapCamera } from '../src/features/backgrounds/mapGeometry.ts';
 import { planCameraGlyph, planCameraReadout, planReadoutText } from '../src/features/backgrounds/mapPlanPreview.ts';
-import { DEFAULT_MAP_CAMERA_POSE, SYMBOL_VOLUME_HEIGHTS, cameraOrientation, cameraPitchLabel, nodePlanOutline, nodeWorldPose, verticalFov } from '../src/features/backgrounds/mapSpatial.ts';
-import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
+import { DEFAULT_MAP_CAMERA_POSE, SYMBOL_VOLUME_HEIGHTS, cameraOrientation, cameraPitchLabel, nodePlanOutline, nodeWorldPose, roadCentrePlanLine, verticalFov } from '../src/features/backgrounds/mapSpatial.ts';
+import type { BackgroundCamera, BackgroundCameraColor, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
 const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
 const near = (actual: number, expected: number, label = '', tolerance = 1e-6) =>
@@ -46,6 +46,9 @@ const symbol = (index: number, kind: BackgroundSymbol['symbol'], changes: Partia
 const camera = (index: number, changes: Partial<BackgroundCamera> = {}): BackgroundCamera => ({
   id: id(index), type: 'camera', name: `카메라 ${index}`, spaceId: null, x: 250, y: 180, angle: 0, fov: 60, viewIds: [], locked: false, ...changes,
 });
+const road = (index: number, changes: Partial<BackgroundSpace> = {}): BackgroundSpace => space(index, { surface: 'road', ...changes });
+/** The same space as a room: the key is gone, not empty. */
+const asRoom = (source: BackgroundSpace): BackgroundSpace => { const room = { ...source }; delete room.surface; return room; };
 const mapOf = (nodes: BackgroundNode[]): BackgroundMap => ({ id: id(900), revision: 3, name: '교실', parentId: null, placeId: null, imageUrl: '', nodes });
 
 const tiltedRect = space(1, { x: 100, y: 80, width: 300, height: 200, rotation: 30, elevation: 15, volumeHeight: 140 });
@@ -161,6 +164,198 @@ test('a selected space is stronger and a locked one is dashed', () => {
   scene.dispose();
 });
 
+type Paint = Material & { color: { getHex(): number }; isLineDashedMaterial?: boolean; dashSize?: number; gapSize?: number };
+const paintOf = (scene: Map3DScene, node: BackgroundNode, name: string) => (named(rootOf(scene, node), name) as Mesh).material as Paint;
+const dashesOf = (scene: Map3DScene, node: BackgroundNode, name: string) => (named(rootOf(scene, node), name) as Mesh).geometry.getAttribute('lineDistance');
+
+test('a road is a floor without walls: its fill and its outline on the floor level, and a dashed centre line where the shape has one', () => {
+  const scene = new Map3DScene();
+  const lane = road(1, { x: 0, y: 300, width: 1000, height: 80, elevation: 30, volumeHeight: 500 });
+  const bent = road(2, { x: 100, y: 20, width: 200, height: 200, rotation: 25, shape: 'polygon',
+    points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0.6, y: 1 }, { x: 0.6, y: 0.4 }, { x: 0, y: 0.4 }] });
+  const round = road(3, { x: 600, y: 420, width: 240, height: 160, shape: 'ellipse', elevation: -12 });
+  const room = space(4, { x: 700, y: 40, width: 200, height: 150 });
+  scene.sync(mapOf([lane, bent, round, room]), null);
+  // Vertices of the centre line: two for every part of it.
+  for (const [node, marks] of [[lane, 2], [bent, 4], [round, 0]] as const) {
+    const root = rootOf(scene, node), base = node.elevation ?? 0, outline = nodePlanOutline(node), line = roadCentrePlanLine(node);
+    assert.deepEqual(root.children.map(child => child.name), marks ? ['space-floor', 'space-outline', 'road-centre'] : ['space-floor', 'space-outline'], `${node.name}: no walls`);
+    assert.ok(!root.getObjectByName('space-walls'), `${node.name} has no walls`);
+    // Everything lies on the floor level, whatever height is stored.
+    for (const part of root.children) for (const point of worldPoints(part)) near(point.y, base, `${node.name} ${part.name}`, 1e-3);
+    for (const point of worldPoints(named(root, 'space-floor'))) {
+      assert.ok(outline.some(corner => Math.hypot(corner.x - point.x, corner.y - point.z) < 1e-3), `${node.name}: floor vertex off the outline`);
+    }
+    // The outline runs once round the real shape.
+    const edges = worldPoints(named(root, 'space-outline'));
+    assert.equal(edges.length, outline.length * 2, `${node.name}: outline`);
+    outline.forEach((corner, index) => {
+      const next = outline[(index + 1) % outline.length];
+      nearVec(edges[index * 2], { x: corner.x, y: base, z: corner.y }, `${node.name} side ${index} from`, 1e-3);
+      nearVec(edges[index * 2 + 1], { x: next.x, y: base, z: next.y }, `${node.name} side ${index} to`, 1e-3);
+    });
+    assert.equal(line ? (line.length - 1) * 2 : 0, marks, `${node.name}: parts of the centre line`);
+    if (!line) continue;
+    const centre = worldPoints(named(root, 'road-centre'));
+    assert.equal(centre.length, marks, `${node.name}: centre line`);
+    line.slice(1).forEach((to, index) => {
+      nearVec(centre[index * 2], { x: line[index].x, y: base, z: line[index].y }, `${node.name} centre part ${index} from`, 1e-3);
+      nearVec(centre[index * 2 + 1], { x: to.x, y: base, z: to.y }, `${node.name} centre part ${index} to`, 1e-3);
+    });
+    assert.ok(dashesOf(scene, node, 'road-centre'), 'dashes need line distances');
+  }
+  nearVec(worldPoints(named(rootOf(scene, lane), 'road-centre'))[0], { x: 0, y: 30, z: 340 }, 'the long way of the lane, from');
+  nearVec(worldPoints(named(rootOf(scene, lane), 'road-centre'))[1], { x: 1000, y: 30, z: 340 }, 'the long way of the lane, to');
+  // Drawn before the floors of the rooms: where the two overlap the order does not depend on the view.
+  for (const node of [lane, bent, round]) assert.equal(named(rootOf(scene, node), 'space-floor').renderOrder, -1.5, node.name);
+  assert.equal(named(rootOf(scene, room), 'space-floor').renderOrder, -1);
+  named(rootOf(scene, room), 'space-walls');
+  assert.ok(!rootOf(scene, room).getObjectByName('road-centre'), 'a room has no centre line');
+  // A click lands on the floor of a road and on nothing else of it.
+  const targets = scene.pickTargets();
+  for (const node of [lane, bent, round]) {
+    assert.deepEqual(targets.filter(object => object.userData.nodeId === node.id).map(object => [object.name, object.userData.nodeKind, object.userData.pickPart]),
+      [['space-floor', 'space', 'floor']], node.name);
+  }
+  assert.deepEqual(targets.filter(object => object.userData.nodeId === room.id).map(object => object.userData.pickPart), ['floor', 'wall']);
+
+  // Grey, see-through and without depth, and one set of materials for every road.
+  const dark = MAP3D_DARK_PALETTE, quietFloor = paintOf(scene, lane, 'space-floor'), quietLine = paintOf(scene, lane, 'space-outline'), mark = paintOf(scene, lane, 'road-centre');
+  assert.deepEqual([quietFloor.color.getHex(), quietFloor.opacity, quietFloor.transparent, quietFloor.depthWrite], [dark.road, 0.28, true, false]);
+  assert.deepEqual([quietLine.color.getHex(), quietLine.opacity, !!quietLine.isLineDashedMaterial], [dark.road, 0.75, false]);
+  assert.deepEqual([mark.color.getHex(), mark.opacity, mark.isLineDashedMaterial, mark.dashSize, mark.gapSize], [dark.roadMark, 0.9, true, 14, 10]);
+  for (const node of [bent, round]) {
+    same(paintOf(scene, node, 'space-floor'), quietFloor, `${node.name}: floor material`);
+    same(paintOf(scene, node, 'space-outline'), quietLine, `${node.name}: outline material`);
+  }
+  same(paintOf(scene, bent, 'road-centre'), mark, 'centre line material');
+  assert.ok(paintOf(scene, room, 'space-floor') !== quietFloor && paintOf(scene, room, 'space-outline') !== quietLine, 'a room is not painted as a road');
+
+  // Selected: a stronger fill, and the outline of a selected room.
+  const map = mapOf([lane, bent, round, room]);
+  scene.sync(map, room.id);
+  const roomLineOn = paintOf(scene, room, 'space-outline');
+  scene.sync(map, lane.id);
+  const litFloor = paintOf(scene, lane, 'space-floor');
+  assert.deepEqual([litFloor.color.getHex(), litFloor.opacity, litFloor.transparent, litFloor.depthWrite], [dark.road, 0.44, true, false]);
+  same(paintOf(scene, lane, 'space-outline'), roomLineOn, 'a selected road is outlined like a selected room');
+  same(paintOf(scene, lane, 'road-centre'), mark, 'the centre line is the same, selected or not');
+  assert.ok(!rootOf(scene, lane).getObjectByName('space-walls'), 'selected, still no walls');
+  assert.equal(named(rootOf(scene, lane), 'space-floor').renderOrder, -1.5);
+  same(paintOf(scene, bent, 'space-floor'), quietFloor, 'the other roads stay quiet');
+
+  // Locked: dashes in the grey of the road, and those of a selected locked room once selected.
+  const lockedLane = { ...lane, locked: true }, lockedRoom = { ...room, locked: true }, lockedMap = mapOf([lockedLane, bent, round, lockedRoom]);
+  scene.sync(lockedMap, null);
+  const dashed = paintOf(scene, lockedLane, 'space-outline');
+  assert.deepEqual([dashed.color.getHex(), dashed.opacity, dashed.isLineDashedMaterial, dashed.dashSize, dashed.gapSize], [dark.road, 0.75, true, 12, 7]);
+  assert.ok(dashesOf(scene, lockedLane, 'space-outline'), 'dashes need line distances');
+  same(paintOf(scene, lockedLane, 'space-floor'), quietFloor, 'a lock changes the outline only');
+  scene.sync(lockedMap, lockedRoom.id);
+  const roomDashOn = paintOf(scene, lockedRoom, 'space-outline');
+  scene.sync(lockedMap, lockedLane.id);
+  same(paintOf(scene, lockedLane, 'space-outline'), roomDashOn, 'a selected locked road is outlined like a selected locked room');
+  assert.ok(dashesOf(scene, lockedLane, 'space-outline'), 'dashes need line distances');
+
+  // A room turned into a road loses its walls inside the same root, and gets them back at the height that stayed stored.
+  const plot = space(5, { x: 300, y: 500, width: 200, height: 100, volumeHeight: 240 }), paved: BackgroundSpace = { ...plot, surface: 'road' };
+  scene.sync(mapOf([plot]), null);
+  const root = rootOf(scene, plot);
+  near(Math.max(...worldPoints(named(root, 'space-walls')).map(point => point.y)), 240, 'the walls of the room');
+  scene.sync(mapOf([paved]), null);
+  same(rootOf(scene, paved), root, 'the road keeps the root of the room');
+  assert.deepEqual(root.children.map(child => child.name), ['space-floor', 'space-outline', 'road-centre']);
+  scene.sync(mapOf([asRoom(paved)]), null);
+  same(rootOf(scene, plot), root, 'and the room keeps the root of the road');
+  assert.deepEqual(root.children.map(child => child.name), ['space-floor', 'space-walls', 'space-outline']);
+  near(Math.max(...worldPoints(named(root, 'space-walls')).map(point => point.y)), 240, 'the walls stand again');
+
+  // The stored height of a road is not read at all: one that is no number draws the road all the same, and no room.
+  const odd = road(6, { volumeHeight: NaN });
+  scene.sync(mapOf([odd]), null);
+  assert.deepEqual(rootOf(scene, odd).children.map(child => child.name), ['space-floor', 'space-outline', 'road-centre']);
+  scene.sync(mapOf([asRoom(odd)]), null);
+  assert.equal(rootOf(scene, odd).children.length, 0);
+
+  // The fill, the outline and the centre line of a road are its own geometries: drawn again, the old three are released.
+  const lockedBent = { ...bent, locked: true }, streets = mapOf([lane, lockedBent, round]);
+  const parts = ['space-floor', 'space-outline', 'road-centre'], released = new Map<object, number>();
+  const geometryOf = (node: BackgroundNode, name: string) => (named(rootOf(scene, node), name) as Mesh).geometry;
+  const watch = (items: Iterable<BufferGeometry | Material>) => {
+    for (const item of items) {
+      if (released.has(item)) continue;
+      released.set(item, 0);
+      item.addEventListener('dispose', () => { released.set(item, (released.get(item) ?? 0) + 1); });
+    }
+  };
+  scene.sync(streets, null);
+  const first = parts.map(name => geometryOf(lane, name));
+  watch(first);
+  scene.sync(streets, lane.id);
+  parts.forEach((name, index) => {
+    assert.equal(released.get(first[index]), 1, `${name} of a road that is drawn again was not released exactly once`);
+    assert.ok(geometryOf(lane, name) !== first[index], `${name} is built anew`);
+  });
+
+  // Every colour of a road comes from the palette: another theme repaints the fill, quiet or selected, the outline, plain
+  // or dashed, and the centre line. The outline of a selected road stays that of a selected room.
+  const grey = 0x5d6470, markGrey = 0x3a3f47;
+  scene.setPalette({ ...MAP3D_DARK_PALETTE, road: grey, roadMark: markGrey });
+  const fill = paintOf(scene, round, 'space-floor'), fillOn = paintOf(scene, lane, 'space-floor');
+  const plain = paintOf(scene, round, 'space-outline'), dashedGrey = paintOf(scene, lockedBent, 'space-outline');
+  assert.deepEqual([fill.color.getHex(), fill.opacity], [grey, 0.28], 'the fill of a road');
+  assert.deepEqual([fillOn.color.getHex(), fillOn.opacity], [grey, 0.44], 'the fill of a selected road');
+  assert.deepEqual([plain.color.getHex(), plain.opacity, !!plain.isLineDashedMaterial], [grey, 0.75, false], 'the outline of a road');
+  assert.deepEqual([dashedGrey.color.getHex(), dashedGrey.opacity, dashedGrey.isLineDashedMaterial, dashedGrey.dashSize, dashedGrey.gapSize], [grey, 0.75, true, 12, 7],
+    'the outline of a locked road');
+  assert.ok(dashesOf(scene, lockedBent, 'space-outline'), 'dashes need line distances');
+  for (const node of [lane, lockedBent]) assert.equal(paintOf(scene, node, 'road-centre').color.getHex(), markGrey, `${node.name}: centre line`);
+  assert.equal(paintOf(scene, lane, 'space-outline').color.getHex(), dark.accentSub, 'the outline of a selected road is not grey');
+
+  // Everything a road is drawn with is tracked, and released exactly once when the scene goes: resourceCount() alone
+  // would not see a geometry that was never tracked.
+  const { geometries, materials } = resources(scene), counted = scene.resourceCount();
+  for (const node of [lane, lockedBent]) for (const name of parts) assert.ok(geometries.has(geometryOf(node, name)), `${node.name}: ${name} is drawn`);
+  assert.ok(counted.geometries >= geometries.size && counted.materials >= materials.size, 'everything drawn is tracked');
+  watch([...geometries, ...materials]);
+  scene.dispose();
+  for (const item of [...geometries, ...materials]) assert.equal(released.get(item), 1, `${(item as { type?: string }).type} was not released exactly once`);
+  for (const item of first) assert.equal(released.get(item), 1, 'released when the road was drawn again, and not once more');
+  assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
+});
+
+test('the name of a road floats just above its floor, and that of a room above its walls', () => {
+  // Labels are drawn on a 2D canvas: a stand-in that measures and draws nothing is enough to place them.
+  const scope = globalThis as unknown as { document?: unknown }, had = 'document' in scope, before = scope.document;
+  const context = { font: '', measureText: (text: string) => ({ width: text.length * 7 }), scale() {}, strokeText() {}, fillText() {} };
+  scope.document = { createElement: () => ({ width: 0, height: 0, getContext: () => context }) };
+  try {
+    const scene = new Map3DScene();
+    const lane = road(1, { name: '큰길', x: 0, y: 300, width: 1000, height: 80, elevation: 30, volumeHeight: 500 });
+    const room = space(2, { name: '교실', x: 600, y: 40, width: 200, height: 150, elevation: 30, volumeHeight: 240 });
+    const map = mapOf([lane, room]);
+    // Companions are listed in the order of the nodes; the label is the sprite among them.
+    const labelHeight = (index: number) => {
+      const label = named(scene.scene, 'map-companions').children[index].children.find(child => (child as { isSprite?: boolean }).isSprite);
+      assert.ok(label, `node ${index} has a label`);
+      scene.scene.updateMatrixWorld(true);
+      return label.getWorldPosition(new Vector3()).y;
+    };
+    scene.sync(map, null);
+    near(labelHeight(0), 34, 'the road: 4 above its floor, whatever height is stored');
+    near(labelHeight(1), 274, 'the room: 4 above its walls');
+    scene.sync(map, lane.id);
+    near(labelHeight(0), 34, 'selected');
+    // As a room again its name is back above the walls that stayed stored.
+    scene.sync(mapOf([asRoom(lane), room]), null);
+    near(labelHeight(0), 534, 'the road as a room');
+    scene.dispose();
+    assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
+  } finally {
+    if (had) scope.document = before; else delete scope.document;
+  }
+});
+
 test('membership never nests objects: members stay in absolute map coordinates', () => {
   const scene = new Map3DScene();
   scene.sync(everything, null);
@@ -181,17 +376,27 @@ test('symbols are simple solids sized by width, volume height and plan depth', (
   const scene = new Map3DScene();
   const parts: Record<string, string[]> = {
     door: ['door-leaf', 'door-sill', 'door-swing'], chair: ['chair-seat', 'chair-back', 'chair-leg'], table: ['table-top', 'table-leg'],
-    bed: ['bed-mattress', 'bed-headboard', 'bed-pillow'], custom: ['object-fill', 'object-outline'],
+    bed: ['bed-mattress', 'bed-headboard', 'bed-pillow'], stairs: ['stairs-step'], custom: ['object-fill', 'object-outline'],
   };
-  for (const kind of ['door', 'chair', 'table', 'bed', 'custom', 'desk', 'sofa', 'cabinet', 'plant'] as const) {
+  // 'plant' stays last: the line after the loop looks at whatever kind was synced last.
+  for (const kind of ['door', 'chair', 'table', 'bed', 'stairs', 'custom', 'desk', 'sofa', 'cabinet', 'plant'] as const) {
     const node = symbol(30, kind, { width: 120, height: 90 });
     scene.sync(mapOf([node]), null);
     const root = rootOf(scene, node), body = named(root, 'symbol-body');
     assert.deepEqual(body.scale.toArray(), [120, SYMBOL_VOLUME_HEIGHTS[kind], 90], `${kind} body size`);
     for (const name of parts[kind] ?? parts.custom) named(root, name);
+    if (kind !== 'stairs') assert.ok(!root.getObjectByName('stairs-step'), kind);
     assert.equal(named(root, 'symbol-proxy').userData.nodeId, node.id);
   }
   assert.ok(!rootOf(scene, symbol(30, 'plant')).getObjectByName('table-top'), 'a removed kind renders as the generic object');
+  // The loop re-syncs one node, and the four removed kinds share the shape key of 'custom', so it never rebuilds their meshes: each is also built from nothing.
+  for (const [index, kind] of (['desk', 'sofa', 'cabinet', 'plant'] as const).entries()) {
+    const fresh = symbol(34 + index, kind);
+    scene.sync(mapOf([fresh]), null);
+    const root = rootOf(scene, fresh);
+    for (const name of parts.custom) named(root, name);
+    assert.ok(!root.getObjectByName('stairs-step'), `${kind} built from nothing is the generic object, not stairs`);
+  }
   // Stored volume height wins over the kind default; the pillow end of a bed is the plan top (-Z).
   const bed = symbol(31, 'bed', { x: 0, y: 0, width: 130, height: 210, volumeHeight: 50 });
   scene.sync(mapOf([bed]), null);
@@ -216,6 +421,65 @@ test('symbols are simple solids sized by width, volume height and plan depth', (
   scene.sync(mapOf([chair]), chair.id);
   named(rootOf(scene, chair), 'selection-outline');
   scene.dispose();
+});
+
+test('stairs are solid steps from the floor that climb to the plan top, as many as the volume height asks for', () => {
+  const scene = new Map3DScene();
+  const stairs = symbol(40, 'stairs', { x: 100, y: 100, width: 120, height: 240 }), chair = symbol(41, 'chair', { x: 600, y: 400 });
+  // Lowest step first.
+  const stepsOf = (node: BackgroundSymbol) => named(rootOf(scene, node), 'symbol-body').children.filter(child => child.name === 'stairs-step')
+    .sort((a, b) => a.scale.y - b.scale.y);
+  const at = (step: Object3D) => step.getWorldPosition(new Vector3());
+  scene.sync(mapOf([stairs, chair]), null);
+  // The default height (180) is one step for every 18: ten steps, each a full-width slab standing on the floor.
+  const steps = stepsOf(stairs);
+  assert.equal(steps.length, 10);
+  assert.deepEqual(named(rootOf(scene, stairs), 'symbol-body').scale.toArray(), [120, 180, 240]);
+  steps.forEach((step, index) => {
+    near(step.scale.y, (index + 1) / 10, `step ${index} height`);
+    near(step.scale.x, 1, `step ${index} width`); near(step.scale.z, 1 / 10, `step ${index} depth`);
+    nearVec(at(step), { x: 160, y: 0, z: 328 - 24 * index }, `step ${index}`);
+  });
+  assert.ok(at(steps[9]).z < at(steps[0]).z, 'the flight climbs towards the plan top (-Z), where the plan arrow points');
+  // Turned a quarter, the climb turns with it: the plan top is now the plan right.
+  const turned = { ...stairs, rotation: 90 };
+  scene.sync(mapOf([turned, chair]), null);
+  nearVec(at(stepsOf(turned)[0]), { x: 52, y: 0, z: 220 }, 'turned lowest step');
+  nearVec(at(stepsOf(turned)[9]), { x: 268, y: 0, z: 220 }, 'turned highest step');
+  // The height sets the count: rounded, never fewer than three and never more than sixteen.
+  for (const [volumeHeight, count] of [[20, 3], [54, 3], [60, 3], [63, 4], [288, 16], [1000, 16]] as const) {
+    const node = { ...stairs, volumeHeight };
+    scene.sync(mapOf([node, chair]), null);
+    const flight = stepsOf(node);
+    assert.equal(flight.length, count, `${volumeHeight} high`);
+    assert.deepEqual(named(rootOf(scene, node), 'symbol-body').scale.toArray(), [120, volumeHeight, 240]);
+    flight.forEach((step, index) => near(step.scale.y, (index + 1) / count, `${volumeHeight} high, step ${index}`));
+  }
+  // Nothing new to release: every step is the shared unit box in the shared symbol material.
+  scene.sync(mapOf([stairs, chair]), null);
+  const seat = named(rootOf(scene, chair), 'chair-seat') as Mesh, proxy = named(rootOf(scene, stairs), 'symbol-proxy'), targets = scene.pickTargets();
+  for (const step of stepsOf(stairs) as Mesh[]) {
+    same(step.geometry, seat.geometry, 'a step is the shared box');
+    same(step.material, seat.material, 'a step is drawn like every other solid');
+    assert.ok(targets.includes(step), 'a step can be clicked');
+    assert.deepEqual([step.userData.nodeId, step.userData.pickPart], [stairs.id, 'solid']);
+  }
+  // The box around the flight is clickable too, and at full height: only a door shrinks it to the floor.
+  assert.ok(targets.includes(proxy));
+  assert.deepEqual([proxy.userData.nodeId, proxy.userData.pickPart, proxy.scale.y], [stairs.id, 'box', 1]);
+  assert.equal(targets.filter(object => object.userData.nodeId === stairs.id).length, 11);
+  assert.ok(!rootOf(scene, stairs).getObjectByName('selection-outline'), 'no outline before selection');
+  scene.sync(mapOf([stairs, chair]), stairs.id);
+  named(rootOf(scene, stairs), 'selection-outline');
+  // Selected, the flight is still ten solid steps: in the selected colour (`seat` holds the unselected one) and every one of them clickable.
+  const lit = stepsOf(stairs) as Mesh[], litTargets = scene.pickTargets();
+  assert.equal(lit.length, 10);
+  for (const step of lit) {
+    assert.ok(step.material !== seat.material, 'a selected flight is drawn in the selected colour');
+    assert.ok(step.userData.pickPart === 'solid' && litTargets.includes(step), 'and its steps stay clickable');
+  }
+  scene.dispose();
+  assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
 });
 
 test('placed cameras show sight, frame shape, and a drop line to the floor', () => {
@@ -263,6 +527,98 @@ test('a camera looking straight up or down keeps a finite orientation', () => {
     assert.equal(pickMapNode(cast(scene, [node.x, (node.elevation ?? 120) + 4, 900], [0, 0, -1])), node.id);
   }
   scene.dispose();
+});
+
+/** What a camera is painted with, except its lens: the body and the finder, the lines of sight and to the floor, the frame, the ring on the floor. */
+const CAMERA_TINTED = ['camera-body', 'camera-finder', 'camera-frustum', 'camera-frame', 'camera-drop', 'camera-ring'];
+/** The paint of a part of a camera. The drop line and the ring stand on the floor with its companions, which are listed like the roots. */
+const cameraPaint = (scene: Map3DScene, node: BackgroundCamera, name: string): Paint => {
+  const root = rootOf(scene, node), onFloor = name === 'camera-drop' || name === 'camera-ring';
+  const holder = onFloor ? named(scene.scene, 'map-companions').children[named(scene.scene, 'map-nodes').children.indexOf(root)] : root;
+  // A camera's companions stand on the floor right under its lens: those of another camera would not.
+  assert.ok(holder && holder.position.x === root.position.x && holder.position.z === root.position.z, `${node.name}: ${name} is not read from its own companions`);
+  return (named(holder, name) as Mesh).material as Paint;
+};
+
+test('a camera is drawn in the colour it was given, with one set of materials per colour on either theme, and its lens stays dark', () => {
+  const dark = MAP3D_DARK_PALETTE, scene = new Map3DScene(dark);
+  const plain = camera(30, { x: 150, y: 200 }), red = camera(31, { x: 350, y: 200, color: 'red' }), twin = camera(32, { x: 550, y: 200, color: 'red' });
+  const odd = camera(33, { x: 750, y: 200, color: 'purple' as BackgroundCameraColor });
+  const map = mapOf([plain, red, twin, odd]);
+  const paint = (node: BackgroundCamera, name: string) => cameraPaint(scene, node, name);
+  const colours = (node: BackgroundCamera) => CAMERA_TINTED.map(name => paint(node, name).color.getHex());
+  const all = (value: number) => CAMERA_TINTED.map(() => value);
+  const strength = (node: BackgroundCamera) => ['camera-frustum', 'camera-drop', 'camera-frame'].map(name => paint(node, name).opacity);
+  const released = new Map<object, number>();
+  const watch = (items: Iterable<Material>) => {
+    for (const item of items) {
+      if (released.has(item)) continue;
+      released.set(item, 0);
+      item.addEventListener('dispose', () => { released.set(item, (released.get(item) ?? 0) + 1); });
+    }
+  };
+
+  scene.sync(map, null);
+  assert.deepEqual(colours(red), all(0xf2726b), 'a red camera on the dark theme');
+  assert.deepEqual(colours(plain), all(dark.camera), 'a camera without a colour keeps the amber');
+  assert.deepEqual(colours(odd), all(dark.camera), 'a name the colour table does not know keeps the amber');
+  for (const node of [plain, red, twin, odd]) assert.equal(paint(node, 'camera-lens').color.getHex(), dark.cameraLens, `${node.name}: lens`);
+  // One set per colour: cameras of one colour share it, and it is not the set of the cameras without a colour.
+  for (const name of CAMERA_TINTED) {
+    same(paint(twin, name), paint(red, name), `${name}: two red cameras share one material`);
+    assert.ok(paint(red, name) !== paint(plain, name), `${name}: a red camera and one without a colour do not share`);
+  }
+  same(paint(red, 'camera-lens'), paint(plain, 'camera-lens'), 'one lens material for every camera');
+  same(paint(red, 'camera-proxy'), paint(plain, 'camera-proxy'), 'one click proxy material for every camera');
+  watch(resources(scene).materials);
+
+  // Selected: the same colour, with the stronger lines and frame of any selected camera.
+  assert.deepEqual(strength(red), [0.6, 0.6, 0.1], 'quiet');
+  scene.sync(map, red.id);
+  assert.deepEqual(colours(red), all(0xf2726b), 'a selected red camera is still red');
+  assert.deepEqual(strength(red), [1, 1, 0.24], 'selected');
+  assert.deepEqual([colours(twin), strength(twin)], [all(0xf2726b), [0.6, 0.6, 0.1]], 'the other red camera stays quiet');
+  const redOn = paint(red, 'camera-frustum');
+  watch(resources(scene).materials);
+  scene.sync(map, plain.id);
+  assert.deepEqual([colours(plain), strength(plain)], [all(dark.camera), [1, 1, 0.24]], 'a selected camera without a colour');
+  assert.equal(paint(plain, 'camera-lens').color.getHex(), dark.cameraLens);
+  watch(resources(scene).materials);
+  scene.sync(map, null);
+
+  // Another colour is another look: the camera is built again inside the same root, and its neighbours are not.
+  const root = rootOf(scene, red), parts = [...root.children], neighbour = [...rootOf(scene, twin).children];
+  const blue: BackgroundCamera = { ...red, color: 'blue' };
+  scene.sync(mapOf([plain, blue, twin, odd]), null);
+  same(rootOf(scene, blue), root, 'a recoloured camera keeps its root');
+  assert.ok(!sameList(root.children, parts), 'a recoloured camera is built again');
+  assert.ok(sameList(rootOf(scene, twin).children, neighbour), 'its neighbour is not');
+  assert.deepEqual(colours(blue), all(0x63a9f7), 'blue on the dark theme');
+  assert.deepEqual(colours(twin), all(0xf2726b), 'the other camera stays red');
+  const blueBody = paint(blue, 'camera-body');
+  watch(resources(scene).materials);
+  // Back to the default (the key is gone): the materials of the cameras without a colour.
+  const cleared: BackgroundCamera = { ...blue };
+  delete cleared.color;
+  scene.sync(mapOf([plain, cleared, twin, odd]), null);
+  for (const name of CAMERA_TINTED) same(paint(cleared, name), paint(plain, name), `${name}: back to the default`);
+  assert.ok([...released.values()].every(count => count === 0), 'a colour that was used once stays until the theme changes');
+
+  // The other theme: every material of the old one is released, drawn at that moment or not, and each colour has its value for that theme.
+  const light = { ...MAP3D_DARK_PALETTE, light: true };
+  scene.setPalette(light);
+  assert.ok([...released.values()].every(count => count === 1), 'every material of the old theme is released exactly once');
+  assert.deepEqual([released.get(redOn), released.get(blueBody)], [1, 1], 'also the ones no camera is drawn with at that moment');
+  assert.deepEqual(colours(twin), all(0xc2362f), 'a red camera on the light theme');
+  assert.deepEqual(colours(plain), all(light.camera), 'a camera without a colour is painted from the palette, as before');
+  assert.deepEqual(colours(odd), all(light.camera), 'and so is an unknown name');
+  assert.equal(paint(twin, 'camera-lens').color.getHex(), light.cameraLens, 'lens on the light theme');
+  assert.equal(scene.resourceCount().materials, resources(scene).materials.size, 'nothing of the old theme is kept');
+  watch(resources(scene).materials);
+
+  scene.dispose();
+  assert.ok([...released.values()].every(count => count === 1), 'the materials of both themes are released exactly once');
+  assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
 });
 
 test('picking prefers cameras and symbols; walls never swallow a click', () => {
@@ -709,6 +1065,212 @@ test('a selected space steps on to the floor under it only when the same spot is
   pile.dispose();
 });
 
+// A wide road with a house standing on it: seen from the front, the ray through the walls of the house lands on the road behind it.
+const wideRoad = road(1, { name: '도로', x: 0, y: 0, width: 1000, height: 680 }), houseOnRoad = space(2, { name: '건물', x: 300, y: 200, width: 200, height: 150 });
+const roadUnderHouse = mapOf([wideRoad, houseOnRoad]);
+// A street with five houses on each side, drawn up to its edges: they touch it and share no ground with it.
+const sideStreet = road(10, { name: '길', x: 0, y: 300, width: 1000, height: 80 });
+const nearHouses = [0, 1, 2, 3, 4].map(index => space(11 + index, { name: `눈 쪽 건물 ${index + 1}`, x: 25 + 200 * index, y: 380, width: 150, height: 150 }));
+const farHouses = [0, 1, 2, 3, 4].map(index => space(21 + index, { name: `먼 쪽 건물 ${index + 1}`, x: 25 + 200 * index, y: 150, width: 150, height: 150 }));
+const streetOf = (lane: BackgroundSpace, front: BackgroundSpace[]) => mapOf([lane, ...front, ...farHouses]);
+
+test('a road loses a click to the rooms it shares ground with, on a floor or a wall and at any height, and to no other room', () => {
+  const hit = (nodeId: string, pickPart: string | undefined, distance: number, nodeKind = 'space'): MapPickHit => ({ distance, object: { userData: { nodeId, nodeKind, pickPart } } });
+  const street = wideRoad, room = houseOnRoad;
+  const hall = space(3, { x: 100, y: 100, width: 700, height: 500 }), second = space(4, { x: 600, y: 400, width: 100, height: 100 });
+  // Along the lower edge of the road: the two touch and share no ground.
+  const beside = space(5, { x: 0, y: 680, width: 300, height: 100 });
+  // Two more roads: one runs under the room, the other far from it.
+  const alley = road(6, { x: 480, y: 0, width: 40, height: 680 }), farAlley = road(7, { x: 900, y: 0, width: 40, height: 680 });
+  const chair = symbol(12, 'chair', { x: 380, y: 100 }), lens = camera(20, { x: 400, y: 120 });
+  const floorOf = (hits: MapPickHit[], map: BackgroundMap) => pickMapFloor(hits, map)?.object.userData.nodeId;
+  // What the ray picks and the pile it leaves for the same spot clicked again, whatever order the hits arrive in.
+  const row = (label: string, map: BackgroundMap, hits: MapPickHit[], picked: string | null, pile: string[]) => {
+    for (const list of [hits, [...hits].reverse()]) {
+      assert.equal(pickMapNode(list, map), picked, `${label}: picked`);
+      assert.deepEqual(mapSpacePile(list, map), pile, `${label}: pile`);
+    }
+  };
+
+  // The floors of a room and of the road under it on one level: the room, as the plan stacks them, whatever the order in
+  // the map and however small the road.
+  const patch = road(8, { x: 350, y: 250, width: 20, height: 20 });
+  for (const lane of [street, patch]) for (const map of [mapOf([lane, room]), mapOf([room, lane])]) {
+    const level = [hit(lane.id, 'floor', 80), hit(room.id, 'floor', 80.00000001)];
+    row(`floors on one level, ${lane.name}`, map, level, room.id, [room.id, lane.id]);
+    assert.equal(floorOf(level, map), room.id);
+    assert.deepEqual(mapFloorPile(level, map), [room.id, lane.id]);
+  }
+
+  // A wall of the room, and behind it the floor of the road the room stands on: the room. The same spot again goes down to the road.
+  const onRoad = roadUnderHouse, pastWall = [hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)];
+  row('a wall of the room on the road', onRoad, pastWall, room.id, [room.id, street.id]);
+  assert.equal(pickMapNode(pastWall), street.id, 'without a map a floor beats a wall, as before');
+  // The floors under the pointer are left as they were: the road alone.
+  assert.deepEqual(mapFloorPile(pastWall, onRoad), [street.id]);
+  assert.equal(floorOf(pastWall, onRoad), street.id);
+  assert.equal(resolveMapClick(onRoad, room.id, pastWall, true), street.id, 'on to the road');
+  assert.equal(resolveMapClick(onRoad, street.id, pastWall, true), room.id, 'and round to the room');
+  for (const selected of [room.id, street.id, null]) {
+    assert.equal(resolveMapClick(onRoad, selected, pastWall, false), room.id, 'a first click takes the room');
+    assert.equal(resolveMapClick(onRoad, selected, pastWall, false, true), room.id, 'a repeated click that is no second click on the spot is a first click');
+  }
+  for (const selected of [room.id, street.id]) assert.equal(resolveMapClick(onRoad, selected, pastWall, true, true), selected, 'a repeated click on the same spot steps nowhere');
+  assert.equal(mapClickAim(onRoad, room.id, pastWall, true), room.id, 'stepping on to the road');
+  assert.equal(mapClickAim(onRoad, street.id, pastWall, true), street.id, 'stepping round to the room');
+  assert.equal(mapClickAim(onRoad, street.id, pastWall, false), room.id);
+
+  // A wall of a room that stands beside the road: the floor behind the wall, as with any other floor.
+  const besideRoad = mapOf([street, beside]), pastBeside = [hit(beside.id, 'wall', 40), hit(street.id, 'floor', 90)];
+  row('a wall of the room beside the road', besideRoad, pastBeside, street.id, [street.id]);
+  for (const again of [false, true]) for (const selected of [beside.id, street.id, null]) {
+    assert.equal(resolveMapClick(besideRoad, selected, pastBeside, again), street.id, `beside the road, again ${again}`);
+  }
+  // On the road or beside it is read from the outlines of the two, not from their boxes. A room turned 45°: its box
+  // before the turn is clear of the road, and one corner of the turned room reaches onto it. It stands on the road.
+  const turned = space(9, { x: 1010, y: 300, width: 200, height: 200, rotation: 45 });
+  row('a turned room with a corner on the road', mapOf([street, turned]), [hit(turned.id, 'wall', 40), hit(street.id, 'floor', 90)], turned.id, [turned.id, street.id]);
+  // An L-shaped room around the lower right corner of the road: its box covers that corner, and its outline keeps 20
+  // away from the road on both sides. It stands beside the road.
+  const bent = space(13, { x: 900, y: 580, width: 300, height: 300, shape: 'polygon',
+    points: [{ x: 0.4, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: 0, y: 0.4 }, { x: 0.4, y: 0.4 }] });
+  row('an L-shaped room around a corner of the road', mapOf([street, bent]), [hit(bent.id, 'wall', 40), hit(street.id, 'floor', 90)], street.id, [street.id]);
+
+  // Two roads under the room: after the room the smaller one, then the larger, then the room again.
+  const crossing = mapOf([street, alley, room]), pastCrossing = [hit(room.id, 'wall', 40), hit(street.id, 'floor', 90), hit(alley.id, 'floor', 90.00000001)];
+  row('two roads under the room', crossing, pastCrossing, room.id, [room.id, alley.id, street.id]);
+  assert.deepEqual([room.id, alley.id, street.id].map(selected => resolveMapClick(crossing, selected, pastCrossing, true)), [alley.id, street.id, room.id]);
+  // A road under the room and one beside it: only the first is set aside, and the floor of the other beats the wall.
+  const apart = mapOf([street, farAlley, room]), pastApart = [hit(room.id, 'wall', 40), hit(street.id, 'floor', 90), hit(farAlley.id, 'floor', 90.00000001)];
+  row('a road under the room and one beside it', apart, pastApart, farAlley.id, [farAlley.id, street.id]);
+  assert.deepEqual(mapFloorPile(pastApart, apart), [farAlley.id, street.id]);
+
+  // A road raised over the room it shares ground with: its floor is nearer, and the room is picked all the same.
+  const raised: BackgroundSpace = { ...street, elevation: 200 };
+  const flyover = mapOf([raised, room]), underFlyover = [hit(raised.id, 'floor', 50), hit(room.id, 'floor', 90)];
+  row('a raised road over the room', flyover, underFlyover, room.id, [raised.id, room.id]);
+  assert.deepEqual(mapFloorPile(underFlyover, flyover), [raised.id, room.id]);
+  assert.equal(floorOf(underFlyover, flyover), raised.id, 'the floor under the pointer is still the nearer one');
+  assert.equal(resolveMapClick(flyover, room.id, underFlyover, true), raised.id);
+  assert.equal(resolveMapClick(flyover, raised.id, underFlyover, true), room.id);
+  for (const selected of [room.id, raised.id]) assert.equal(resolveMapClick(flyover, selected, underFlyover, false), room.id);
+  // The same on a wall of that room, with none of its floor on the ray: the raised road is the nearest space there, and
+  // it is set aside all the same.
+  const besideWall = [hit(raised.id, 'floor', 50), hit(room.id, 'wall', 70)];
+  row('a raised road in front of a wall of the room', flyover, besideWall, room.id, [room.id, raised.id]);
+  assert.deepEqual([room.id, raised.id].map(selected => resolveMapClick(flyover, selected, besideWall, true)), [raised.id, room.id]);
+  // Raised over a room it only touches: the nearer floor, as before.
+  const overNeighbour = mapOf([raised, beside]), underNeighbour = [hit(raised.id, 'floor', 50), hit(beside.id, 'floor', 90)];
+  row('a raised road beside the room', overNeighbour, underNeighbour, raised.id, [raised.id, beside.id]);
+
+  // Roads alone are floors like any other: the nearest, and on one level the smaller. A room of the map that the ray
+  // does not meet takes nothing away from them.
+  row('one road', crossing, [hit(street.id, 'floor', 80)], street.id, [street.id]);
+  row('two roads', crossing, [hit(street.id, 'floor', 80), hit(alley.id, 'floor', 80.00000001)], alley.id, [alley.id, street.id]);
+
+  // Rooms among themselves are as before: the floor of the larger room behind the wall is picked, and the room hit on a
+  // wall only is no part of the pile.
+  const inHall = mapOf([street, hall, room]), pastInHall = [hit(room.id, 'wall', 40), hit(hall.id, 'floor', 90.00000001), hit(street.id, 'floor', 90)];
+  row('a wall, the floor of a larger room and the road', inHall, pastInHall, hall.id, [hall.id, street.id]);
+  assert.equal(resolveMapClick(inHall, room.id, pastInHall, true), hall.id, 'picked, not stepped on to');
+  assert.equal(resolveMapClick(inHall, hall.id, pastInHall, true), street.id);
+  // Two walls and the road under both rooms: the room of the nearest wall.
+  const twoOnRoad = mapOf([street, second, room]);
+  row('two walls of rooms on the road', twoOnRoad, [hit(second.id, 'wall', 30), hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)], second.id, [second.id, street.id]);
+  // Only the room behind stands on the road: the road is set aside for it, and of the walls that are left the nearest one picks.
+  const mixed = mapOf([street, beside, room]);
+  row('a wall beside the road in front of a wall on it', mixed, [hit(beside.id, 'wall', 30), hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)], beside.id, [beside.id, street.id]);
+  // Walls only: the room, and no pile.
+  row('walls only', onRoad, [hit(room.id, 'wall', 40), hit(room.id, 'wall', 60)], room.id, []);
+
+  // A camera or an object on top is picked, and it is no part of a pile of spaces. Nor is the room behind it.
+  const furnished = mapOf([street, room, chair, lens]);
+  row('an object over the road', furnished, [hit(chair.id, 'box', 30, 'symbol'), hit(street.id, 'floor', 90)], chair.id, [street.id]);
+  row('a camera over the road', furnished, [hit(lens.id, undefined, 30, 'camera'), hit(street.id, 'floor', 90)], lens.id, [street.id]);
+  row('an object in front of the wall', furnished, [hit(chair.id, 'box', 30, 'symbol'), hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)], chair.id, [street.id]);
+  row('a camera in front of the wall', furnished, [hit(lens.id, undefined, 30, 'camera'), hit(room.id, 'wall', 40), hit(street.id, 'floor', 90)], lens.id, [street.id]);
+
+  // Without a road nothing has changed.
+  const rooms = mapOf([hall, room]), pastRoom = [hit(room.id, 'wall', 40), hit(hall.id, 'floor', 90)];
+  row('no road', rooms, pastRoom, hall.id, [hall.id]);
+  assert.equal(resolveMapClick(rooms, room.id, pastRoom, true), hall.id);
+  for (const map of [onRoad, crossing, furnished, rooms, mapOf([])]) row('no hits', map, [], null, []);
+});
+
+test('seen in 3D: the walls of a house on a road pick the house, and a street is picked through the walls of the houses along it', () => {
+  const aim = (viewer: PerspectiveCamera, x: number, y: number, z: number): [[number, number, number], [number, number, number]] => {
+    const origin = viewer.position, target = new Vector3(x, y, z).sub(origin);
+    return [[origin.x, origin.y, origin.z], [target.x, target.y, target.z]];
+  };
+  const idsOf = (hits: MapPickHit[]) => new Set(hits.map(hit => hit.object.userData.nodeId));
+  const partsOf = (hits: MapPickHit[], nodeId: string) => new Set(hits.filter(hit => hit.object.userData.nodeId === nodeId).map(hit => hit.object.userData.pickPart));
+
+  // Through the walls of the house onto the road behind it, at (400, 180).
+  const street = wideRoad, house = houseOnRoad, scene = new Map3DScene();
+  const behindHouse: [[number, number, number], [number, number, number]] = [[400, 300, 800], [0, -300, 180 - 800]];
+  scene.sync(roadUnderHouse, null);
+  const through = cast(scene, ...behindHouse);
+  assert.deepEqual([partsOf(through, house.id), partsOf(through, street.id)], [new Set(['wall']), new Set(['floor'])]);
+  assert.equal(pickMapNode(through, roadUnderHouse), house.id);
+  assert.deepEqual(mapSpacePile(through, roadUnderHouse), [house.id, street.id]);
+  // The same ground as a room: rooms among themselves are as before, the floor behind the wall is picked.
+  const yard = asRoom(street), inYard = mapOf([yard, house]);
+  scene.sync(inYard, null);
+  const onYard = cast(scene, ...behindHouse);
+  assert.deepEqual([partsOf(onYard, house.id), partsOf(onYard, yard.id)], [new Set(['wall']), new Set(['floor'])]);
+  assert.equal(pickMapNode(onYard, inYard), yard.id);
+  assert.deepEqual(mapSpacePile(onYard, inYard), [yard.id]);
+  scene.dispose();
+
+  // Points all over the street, 56 along it by 7 across.
+  const samples = Array.from({ length: 392 }, (_, index): [number, number] => [9 + 17.85 * (index % 56), 306 + 11.3 * Math.floor(index / 56)]);
+  const lane = sideStreet.id, third = nearHouses[2].id;
+
+  // The houses touch the street: it is picked at once, also where it is seen behind their walls.
+  const touching = streetOf(sideStreet, nearHouses), town = new Map3DScene();
+  town.sync(touching, null);
+  const fitted = viewerFor(fitMapView(touching, 1.6), 1.6);
+  const middle = cast(town, ...aim(fitted, 500, 0, 340));
+  assert.deepEqual(idsOf(middle), new Set([third, lane]));
+  assert.deepEqual([partsOf(middle, third), partsOf(middle, lane)], [new Set(['wall']), new Set(['floor'])]);
+  assert.equal(pickMapNode(middle, touching), lane);
+  assert.deepEqual(mapSpacePile(middle, touching), [lane]);
+  for (const selected of [null, third, lane]) assert.equal(resolveMapClick(touching, selected, middle, true), lane);
+  let behindWalls = 0;
+  for (const [x, z] of samples) {
+    const hits = cast(town, ...aim(fitted, x, 0, z));
+    assert.equal(pickMapNode(hits, touching), lane, `the street at ${x},${z}`);
+    assert.deepEqual(mapSpacePile(hits, touching), [lane], `the pile at ${x},${z}`);
+    if (hits.some(hit => hit.object.userData.pickPart === 'wall' && nearHouses.some(item => item.id === hit.object.userData.nodeId))) behindWalls++;
+  }
+  assert.ok(behindWalls > samples.length / 2, `more than half of those points lie behind a wall of a house: ${behindWalls}`);
+  const above = viewerFor(topDownMapView(touching, 1.6), 1.6);
+  for (const [x, z] of samples) assert.equal(pickMapNode(cast(town, ...aim(above, x, 0, z)), touching), lane, `from above, the street at ${x},${z}`);
+  town.dispose();
+
+  // The near houses moved 1 onto the street: they share ground with it, and their walls pick them. The same spot again reaches the street.
+  const pushed = nearHouses.map(item => ({ ...item, y: 379 })), overlapping = streetOf(sideStreet, pushed), crowded = new Map3DScene();
+  crowded.sync(overlapping, null);
+  const viewer = viewerFor(fitMapView(overlapping, 1.6), 1.6);
+  let onStreet = 0, onHouse = 0;
+  for (const [x, z] of samples) {
+    const hits = cast(crowded, ...aim(viewer, x, 0, z)), picked = pickMapNode(hits, overlapping);
+    if (picked === lane) { onStreet++; continue; }
+    onHouse++;
+    assert.ok(pushed.some(item => item.id === picked), `the street or a near house at ${x},${z}`);
+    assert.deepEqual(partsOf(hits, String(picked)), new Set(['wall']), `the house at ${x},${z} is hit on its walls only`);
+    assert.deepEqual(mapFloorPile(hits, overlapping), [lane], `the floors at ${x},${z}`);
+    assert.deepEqual(mapSpacePile(hits, overlapping), [picked, lane], `the pile at ${x},${z}`);
+    assert.equal(resolveMapClick(overlapping, picked, hits, true), lane, `on to the street at ${x},${z}`);
+    assert.equal(resolveMapClick(overlapping, lane, hits, true), picked, `round to the house at ${x},${z}`);
+  }
+  assert.ok(onStreet > 0 && onHouse > onStreet, `both are picked somewhere, a house more often: ${onStreet} / ${onHouse}`);
+  const onMiddle = cast(crowded, ...aim(viewer, 500, 0, 340));
+  assert.equal(pickMapNode(onMiddle, overlapping), third);
+  assert.deepEqual([null, third, lane].map(selected => resolveMapClick(overlapping, selected, onMiddle, true)), [third, lane, third]);
+  crowded.dispose();
+});
+
 test('syncing again reuses unchanged nodes and only moves the ones that moved', () => {
   const scene = new Map3DScene();
   scene.sync(everything, null);
@@ -829,9 +1391,15 @@ test('the floor is the base extent without a dot grid, and a palette change keep
 test('dispose releases every geometry and material', () => {
   const scene = new Map3DScene();
   scene.sync(everything, tiltedTable.id);
-  scene.sync({ ...everything, nodes: [...everything.nodes, camera(60, { x: 800, y: 500, locked: true })] }, polygon.id);
+  // Two cameras with a colour of their own: the materials of a colour are tracked and released with the rest.
+  const redLens = camera(61, { x: 700, y: 500, color: 'red' }), tealLens = camera(62, { x: 760, y: 560, color: 'teal' });
+  scene.sync({ ...everything, nodes: [...everything.nodes, camera(60, { x: 800, y: 500, locked: true }), redLens, tealLens] }, polygon.id);
   const { geometries, materials } = resources(scene), counted = scene.resourceCount();
   assert.ok(geometries.size > 10 && materials.size > 5);
+  for (const [node, value] of [[redLens, 0xf2726b], [tealLens, 0x45cfc4]] as const) for (const name of CAMERA_TINTED) {
+    assert.equal(cameraPaint(scene, node, name).color.getHex(), value, `${node.name}: ${name}`);
+    assert.ok(materials.has(cameraPaint(scene, node, name)), `${node.name}: ${name} is among the materials that are watched`);
+  }
   assert.ok(counted.geometries >= geometries.size && counted.materials >= materials.size, 'everything drawn is tracked');
   const released = new Map<object, number>();
   for (const item of [...geometries, ...materials]) item.addEventListener('dispose', () => { released.set(item, (released.get(item) ?? 0) + 1); });
@@ -883,6 +1451,22 @@ test('fit and top-down views hold the whole map, and top-down is turned like the
   nearVec({ x: empty.target[0], y: empty.target[1], z: empty.target[2] }, { x: 500, y: 0, z: 340 }, 'empty map target');
 });
 
+test('a road takes its floor level into the world bounds, and never the height that is stored with it', () => {
+  const lane = road(1, { volumeHeight: 500 });
+  assert.equal(mapWorldBounds(mapOf([lane])).max.y, 0);
+  assert.equal(mapWorldBounds(mapOf([asRoom(lane)])).max.y, 500, 'as a room its walls are in the bounds');
+  // The floor level is in the bounds like that of any other node: a raised or sunken road is not left out.
+  for (const [elevation, low, high] of [[200, 0, 200], [-40, -40, 0]] as const) {
+    const { min, max } = mapWorldBounds(mapOf([{ ...lane, elevation }]));
+    assert.deepEqual([min.y, max.y], [low, high], `a road at ${elevation}`);
+  }
+  // The stored height is not read at all: a road that stores one that is no number is in the bounds with its floor level.
+  for (const volumeHeight of [NaN, Infinity]) {
+    const { min, max } = mapWorldBounds(mapOf([{ ...lane, elevation: 200, volumeHeight }]));
+    assert.deepEqual([min.y, max.y], [0, 200], `a road at 200 that stores the height ${volumeHeight}`);
+  }
+});
+
 test('each kind gets the handles that make sense for it', () => {
   for (const type of ['space', 'symbol', 'camera'] as const) {
     assert.deepEqual(mapGizmoSetup(type, 'translate'), { mode: 'translate', space: 'world', showX: true, showY: true, showZ: true });
@@ -893,6 +1477,19 @@ test('each kind gets the handles that make sense for it', () => {
   assert.deepEqual(mapGizmoSetup('space', 'scale'), { mode: 'scale', space: 'local', showX: true, showY: true, showZ: true });
   assert.deepEqual(mapGizmoSetup('symbol', 'scale'), { mode: 'scale', space: 'local', showX: true, showY: true, showZ: true });
   assert.equal(mapGizmoSetup('camera', 'scale'), null, 'a camera has no size');
+});
+
+test('a flat node has no height handle in size mode, and the handles of any other node in the other modes', () => {
+  assert.deepEqual(mapGizmoSetup('space', 'scale', true), { mode: 'scale', space: 'local', showX: true, showY: false, showZ: true });
+  assert.deepEqual(mapGizmoSetup('symbol', 'scale', true), { mode: 'scale', space: 'local', showX: true, showY: false, showZ: true });
+  assert.equal(mapGizmoSetup('camera', 'scale', true), null, 'a camera has no size, flat or not');
+  for (const type of ['space', 'symbol', 'camera'] as const) for (const mode of ['translate', 'rotate'] as const) {
+    assert.deepEqual(mapGizmoSetup(type, mode, true), mapGizmoSetup(type, mode), `${type} ${mode}`);
+  }
+  // Not flat is what no third argument is.
+  for (const type of ['space', 'symbol', 'camera'] as const) for (const mode of ['translate', 'rotate', 'scale'] as const) {
+    assert.deepEqual(mapGizmoSetup(type, mode, false), mapGizmoSetup(type, mode), `${type} ${mode}`);
+  }
 });
 
 test('a root transform converts back into node fields with minimal writes', () => {
@@ -1163,6 +1760,33 @@ test('the gizmo is offered per kind and mode, and hides for a camera in size mod
   gizmo.setTarget(null, 'rotate');
   assert.deepEqual(harness.calls.slice(-2), ['release', 'cancel']);
   assert.ok(!harness.calls.includes('finish'));
+  gizmo.dispose();
+  harness.scene.dispose();
+});
+
+test('a flat target reaches the handles: no height handle in size mode, and the same target without the flag has it again', () => {
+  const lane = road(1), map = mapOf([lane]), harness = gizmoHarness(map, lane.id, 'scale'), { gizmo } = harness;
+  const controls = gizmo.controls as unknown as { object?: Object3D; showX: boolean; showY: boolean; showZ: boolean; mode: string; space: string };
+  const target = { id: lane.id, type: 'space' as const, root: rootOf(harness.scene, lane) };
+  const shown = () => [controls.showX, controls.showY, controls.showZ], setup = () => [controls.mode, controls.space, ...shown()];
+  assert.equal(gizmo.setTarget({ ...target, flat: true }, 'scale'), true);
+  assert.deepEqual(shown(), [true, false, true]);
+  same(controls.object, target.root, 'attached to the road');
+  assert.equal(gizmo.setTarget(target, 'scale'), true);
+  assert.deepEqual(shown(), [true, true, true]);
+  assert.equal(gizmo.setTarget({ ...target, flat: false }, 'scale'), true);
+  assert.deepEqual(shown(), [true, true, true]);
+  // Moving and turning do not read the flag.
+  for (const mode of ['translate', 'rotate'] as const) {
+    gizmo.setTarget(target, mode);
+    const plain = setup();
+    gizmo.setTarget({ ...target, flat: true }, mode);
+    assert.deepEqual(setup(), plain, mode);
+  }
+  assert.deepEqual(setup(), ['rotate', 'world', false, true, false]);
+  // Back in size mode the flag counts again: nothing is kept from the mode before.
+  gizmo.setTarget({ ...target, flat: true }, 'scale');
+  assert.deepEqual(setup(), ['scale', 'local', true, false, true]);
   gizmo.dispose();
   harness.scene.dispose();
 });
@@ -1791,6 +2415,48 @@ test('viewport: the gizmo is offered only for an unlocked selection while editin
   editor.viewport.dispose();
 });
 
+test('viewport: the size handles of a road leave out the height, and it is there again once the road is a room', async () => {
+  const lane = road(30, { x: 0, y: 420, width: 1000, height: 120 }), house = space(31, { x: 600, y: 100, width: 200, height: 150 });
+  const map = mapOf([lane, house]);
+  const editor = await mountViewport({ map });
+  const transform = editor.dev().transform;
+  const setup = () => [transform.mode, transform.showX, transform.showY, transform.showZ];
+  editor.render({ selectedId: lane.id, gizmoMode: 'scale' });
+  same(transform.object, editor.root(lane.id), 'the road has a size gizmo');
+  assert.deepEqual(setup(), ['scale', true, false, true]);
+  // Nothing is grabbed where the upright handle would stand.
+  editor.frame();
+  const upright = editor.handle(lane.id, 'Y'), along = editor.handle(lane.id, 'X');
+  editor.move(upright);
+  assert.equal(transform.axis, null, 'no height handle under the pointer');
+  editor.move(along);
+  assert.equal(transform.axis, 'X', 'the plan handles are there');
+  // Moving and turning are those of a room.
+  editor.render({ gizmoMode: 'translate' });
+  assert.deepEqual(setup(), ['translate', true, true, true]);
+  editor.render({ gizmoMode: 'rotate' });
+  assert.deepEqual(setup(), ['rotate', false, true, false]);
+  editor.render({ gizmoMode: 'scale' });
+  assert.deepEqual(setup(), ['scale', true, false, true]);
+  // The same node without the key is a room: the height handle is back, on the same root.
+  editor.render({ map: mapOf([asRoom(lane), house]) });
+  same(transform.object, editor.root(lane.id), 'still attached');
+  assert.deepEqual(setup(), ['scale', true, true, true]);
+  editor.frame();
+  editor.move(upright);
+  assert.equal(transform.axis, 'Y', 'the height handle of a room');
+  editor.render({ map });
+  assert.deepEqual(setup(), ['scale', true, false, true]);
+  editor.render({ selectedId: house.id });
+  same(transform.object, editor.root(house.id), 'the room has a size gizmo');
+  assert.deepEqual(setup(), ['scale', true, true, true]);
+  editor.viewport.dispose();
+  // A room has its height handle from the start.
+  const other = await mountViewport({ map, selectedId: house.id, gizmoMode: 'scale' });
+  assert.deepEqual([other.dev().transform.mode, other.dev().transform.showX, other.dev().transform.showY, other.dev().transform.showZ], ['scale', true, true, true]);
+  other.viewport.dispose();
+});
+
 test('viewport: placing reports the floor point instead of selecting', async () => {
   const editor = await mountViewport({ placing: true, selectedId: viewLens.id });
   editor.click(editor.at(250, 0, 180));
@@ -2088,6 +2754,87 @@ test('viewport: a press on the handles of the selected room steps on only from t
   nested.fire('dblclick', onArrow);
   assert.deepEqual([selects(nested), opened(nested), nested.undo.length], [[], [middle.id], 0]);
   nested.viewport.dispose();
+});
+
+test('viewport: the walls of a house on a road pick the house, and the same spot clicked again slowly goes down to the road', async () => {
+  const street = wideRoad.id, house = houseOnRoad.id, linked = mapOf([{ ...wideRoad, childMapId: id(901) }, houseOnRoad]);
+  // On the road behind the house, seen through its walls.
+  const behindHouse = (editor: MountedViewport): ScreenPoint => {
+    const at = editor.at(400, 0, 180);
+    assert.deepEqual([partsUnder(editor, at, house), partsUnder(editor, at, street)], [new Set(['wall']), new Set(['floor'])]);
+    return at;
+  };
+  const slow = await mountViewport({ map: roadUnderHouse, canEdit: false });
+  for (const expected of [house, street, house]) { clickNth(slow, behindHouse(slow)); assert.equal(slow.state.selectedId, expected); }
+  slow.viewport.dispose();
+  // A double click there is about the house, also when the road under it has a detail map: the quick second click steps nowhere.
+  for (const map of [roadUnderHouse, linked]) {
+    const quick = await mountViewport({ map, canEdit: false });
+    const at = behindHouse(quick);
+    clickNth(quick, at, 1); clickNth(quick, at, 2);
+    quick.fire('dblclick', at);
+    assert.deepEqual([selects(quick), opened(quick)], [[house, house], [house]]);
+    quick.viewport.dispose();
+  }
+  // Stepped down to the linked road first: the double click is aimed at the road and enters it.
+  const stepped = await mountViewport({ map: linked, canEdit: false });
+  const spot = behindHouse(stepped);
+  clickNth(stepped, spot); clickNth(stepped, spot);
+  assert.deepEqual(selects(stepped), [house, street]);
+  clickNth(stepped, spot, 1); clickNth(stepped, spot, 2);
+  stepped.fire('dblclick', spot);
+  assert.deepEqual(opened(stepped), [street]);
+  stepped.viewport.dispose();
+  // The road picked in the object list: a first click on the spot takes the house.
+  const listed = await mountViewport({ map: roadUnderHouse, canEdit: false, selectedId: street });
+  clickNth(listed, behindHouse(listed));
+  assert.deepEqual(selects(listed), [house]);
+  // Where no part of the house is under the pointer the road is picked at once.
+  listed.viewport.topDown(); listed.frame();
+  const clear = listed.at(400, 0, 120);
+  assert.deepEqual([partsUnder(listed, clear, house), partsUnder(listed, clear, street)], [new Set(), new Set(['floor'])]);
+  clickNth(listed, clear);
+  assert.deepEqual(selects(listed), [house, street]);
+  listed.viewport.dispose();
+});
+
+test('viewport: a street along the houses is picked through their walls at once, and a double click there enters it', async () => {
+  const lane = sideStreet.id, third = nearHouses[2].id;
+  const editor = await mountViewport({ map: streetOf({ ...sideStreet, childMapId: id(901) }, nearHouses), canEdit: false });
+  const at = editor.at(500, 0, 340);
+  assert.deepEqual([partsUnder(editor, at, third), partsUnder(editor, at, lane)], [new Set(['wall']), new Set(['floor'])]);
+  for (let times = 0; times < 3; times++) clickNth(editor, at);
+  assert.deepEqual(selects(editor), [lane, lane, lane], 'nothing to step on to');
+  clickNth(editor, at, 1); clickNth(editor, at, 2);
+  editor.fire('dblclick', at);
+  assert.deepEqual(opened(editor), [lane]);
+  editor.viewport.dispose();
+});
+
+test('viewport: a press on a handle of a house on a road goes down to the road, from the same spot again only', async () => {
+  const street = wideRoad.id, house = houseOnRoad.id;
+  // The upright arrow of the move gizmo of the house, in the fitted view every viewport here opens with. A handle that
+  // was not reached by clicking the spot picks nothing.
+  const fresh = await mountViewport({ map: roadUnderHouse, selectedId: house });
+  fresh.frame();
+  const arrow = fresh.handle(house, 'Y', 0.3);
+  // Behind the arrow the ray crosses a wall of the house and lands on the road.
+  assert.deepEqual([partsUnder(fresh, arrow, house), partsUnder(fresh, arrow, street)], [new Set(['wall']), new Set(['floor'])]);
+  fresh.move(arrow);
+  assert.equal(fresh.dev().transform.axis, 'Y');
+  clickNth(fresh, arrow);
+  assert.deepEqual(selects(fresh), []);
+  fresh.viewport.dispose();
+  // Clicking that spot picks the house and puts the arrow under the pointer: the same spot again steps on to the road.
+  const editor = await mountViewport({ map: roadUnderHouse });
+  clickNth(editor, arrow);
+  assert.deepEqual(selects(editor), [house]);
+  editor.frame(); editor.move(arrow);
+  assert.equal(editor.dev().transform.axis, 'Y', 'the arrow is under the pointer');
+  clickNth(editor, arrow);
+  assert.deepEqual(selects(editor), [house, street]);
+  assert.deepEqual([editor.count('preview'), editor.undo.length, editor.count('cancel')], [0, 0, 0], 'stepping edits nothing');
+  editor.viewport.dispose();
 });
 
 test('viewport: the memory of the clicked spot ends with a selection made elsewhere, a press that picks nothing and a press outside the canvas', async () => {
@@ -2454,16 +3201,25 @@ test('viewport: saved view, map change with the same renderer, hidden tab, resiz
 });
 
 test('viewport: theme changes repaint, a lost context is reported once, and a failed start leaves nothing behind', async () => {
-  const editor = await mountViewport();
+  const lane = road(30, { x: 0, y: 500, width: 1000, height: 80 });
+  const editor = await mountViewport({ map: mapOf([...viewMap.nodes, lane]) });
   const { renderer } = editor, before = renderer.renders, root = (globalThis as Any).document.documentElement;
-  themeValues = { '--color-bg-primary': '250 250 252', '--color-accent': '90 70 200' };
+  // The fill of the road and its centre line.
+  const roadColours = () => ['space-floor', 'road-centre'].map(name => editor.root(lane.id).getObjectByName(name).material.color.getHex());
+  assert.deepEqual(roadColours(), [0x9aa1ad, 0xe3e6ec], 'no variable is set: the dark palette');
+  themeValues = { '--color-bg-primary': '250 250 252', '--color-accent': '90 70 200', '--bmap-road': '93 100 112', '--bmap-road-mark': '58 63 71' };
   root.setAttribute('data-color-mode', 'light');
   for (const item of observers.mutation) item.callback([]);
   editor.frame();
   assert.deepEqual([renderer.renders, renderer.clearColor], [before + 1, 0xfafafc]);
+  // The colours of a road are read from the theme: its light values are in the stylesheet and nowhere else.
+  assert.deepEqual(roadColours(), [0x5d6470, 0x3a3f47]);
   for (const item of observers.mutation) item.callback([]);
   assert.equal(frames.size, 0, 'an unchanged palette asks for nothing');
   themeValues = {}; root.setAttribute('data-color-mode', 'dark');
+  for (const item of observers.mutation) item.callback([]);
+  editor.frame();
+  assert.deepEqual(roadColours(), [0x9aa1ad, 0xe3e6ec], 'back on the dark palette');
   for (let times = 0; times < 2; times++) editor.canvas().dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
   assert.equal(editor.count('unavailable'), 1);
   assert.match(String(editor.log.find(entry => entry[0] === 'unavailable')?.[1]), /평면 도면/);

@@ -7,6 +7,8 @@ import { nodeLocalPoint, nodeResizeCorner, placeMapNode, replaceMapNode, resizeS
 import { nodeNameAnchor, renameMapNode } from '../src/features/backgrounds/mapGeometry.ts';
 import { insertPolygonVertex, movePolygonVertex, polygonFromWorldPoints, rectToPolygon, removePolygonVertex } from '../src/features/backgrounds/mapGeometry.ts';
 import { lockMapNodes, moveMapNodes, removeMapNodes } from '../src/features/backgrounds/mapGeometry.ts';
+import { setSpaceSurface } from '../src/features/backgrounds/mapGeometry.ts';
+import { setCameraColor } from '../src/features/backgrounds/mapGeometry.ts';
 import { cameraOrientation, nodeOrientation, nodePlanOutline, nodeWorldPose } from '../src/features/backgrounds/mapSpatial.ts';
 import { validateBackgroundEntity } from '../src/features/backgrounds/domain.ts';
 
@@ -1029,4 +1031,135 @@ test('locking several nodes changes only those whose lock differs', () => {
   assert.equal(lockMapNodes(crowd, ['lockedB', 'LS', 'missing'], true), crowd); assert.equal(lockMapNodes(crowd, ['A', 'B', 'free'], false), crowd);
   assert.equal(lockMapNodes(crowd, [], true), crowd); assert.equal(lockMapNodes(locked, ids, true), locked);
   assert.equal(JSON.stringify(crowd), frozen);
+});
+
+// --- Roads -------------------------------------------------------------------------------------
+/** Both hold the point every new camera starts at, (500, 340). */
+const street: BackgroundSpace = { ...plainRoom, id: 'street', x: 0, y: 300, width: 1000, height: 80, surface: 'road' };
+const lane: BackgroundSpace = { ...plainRoom, id: 'lane', x: 480, y: 0, width: 40, height: 680, surface: 'road' };
+
+test('a new camera joins the one room at the fixed point whatever roads lie under it, and a road only where no room holds the point', () => {
+  const room: BackgroundSpace = { ...plainRoom, id: 'room', x: 400, y: 300, width: 200, height: 100 };
+  const far: BackgroundSpace = { ...plainRoom, id: 'far', x: 0, y: 0, width: 100, height: 100 };
+  const hall: BackgroundSpace = { ...room, id: 'hall', x: 450, y: 320, shape: 'ellipse' };
+  const joins = (...nodes: BackgroundSpace[]) => addMapCamera({ ...map, nodes }, 'c').camera.spaceId;
+  assert.equal(joins(street), 'street');
+  assert.equal(joins(street, room), 'room'); assert.equal(joins(room, street), 'room');
+  assert.equal(joins(street, lane, room), 'room');
+  // Two rooms leave it unassigned as before: the road under them does not take it instead.
+  assert.equal(joins(street, room, hall), null);
+  // So do two roads with no room on them.
+  assert.equal(joins(street, lane), null);
+  // A room that does not hold the point decides nothing.
+  assert.equal(joins(far, street), 'street');
+  // The map gets the camera at its end and keeps the nodes it had.
+  const source: BackgroundMap = { ...map, nodes: [street, room] }, joined = addMapCamera(source, 'c');
+  assert.deepEqual(joined.map.nodes, [street, room, joined.camera]);
+  assert.equal(joined.map.nodes[0], street); assert.equal(joined.map.nodes[1], room); assert.equal(source.nodes.length, 2);
+});
+
+test('a space becomes a road by one key, and a room again by losing it', () => {
+  const room: BackgroundSpace = { ...oddRoom, name: '큰길', placeId: 'place', childMapId: 'child', elevation: 40, volumeHeight: 250 };
+  const frozen = JSON.stringify(room);
+  const road = setSpaceSurface(room, 'road'), roadFrozen = JSON.stringify(road);
+  assert.deepEqual(road, { ...room, surface: 'road' });
+  assert.notEqual(road, room); assert.equal(Object.hasOwn(room, 'surface'), false);
+  // Back to a room the key is gone, not null, and the wall height it had is still there.
+  const back = setSpaceSurface(road, null);
+  assert.equal(Object.hasOwn(back, 'surface'), false);
+  assert.deepEqual(back, room); assert.equal(back.volumeHeight, 250);
+  assert.notEqual(back, road); assert.equal(road.surface, 'road');
+  // Nothing to change: the very object. A room has no key at all, and null is still no change.
+  assert.equal(setSpaceSurface(room, null), room);
+  assert.equal(setSpaceSurface(road, 'road'), road);
+  // A locked space stays what it is, either way.
+  const lockedRoom: BackgroundSpace = { ...room, locked: true }, lockedRoad: BackgroundSpace = { ...road, locked: true };
+  assert.equal(setSpaceSurface(lockedRoom, 'road'), lockedRoom); assert.equal(setSpaceSurface(lockedRoad, null), lockedRoad);
+  assert.equal(Object.hasOwn(lockedRoom, 'surface'), false); assert.equal(lockedRoad.surface, 'road');
+  // Any shape: a polygon with its points, and an ellipse, which has no centre line and is a road all the same.
+  assert.deepEqual(setSpaceSurface(kite, 'road'), { ...kite, surface: 'road' });
+  assert.deepEqual(setSpaceSurface({ ...oddRoom, shape: 'ellipse' }, 'road'), { ...oddRoom, shape: 'ellipse', surface: 'road' });
+  assert.equal(JSON.stringify(room), frozen); assert.equal(JSON.stringify(road), roadFrozen);
+});
+
+test('a 3D edit never writes a box height on a road', () => {
+  const room: BackgroundSpace = { ...plainRoom, id: 'road', x: 100, y: 300, width: 400, height: 80 }, road: BackgroundSpace = { ...room, surface: 'road' };
+  const pose = nodeWorldPose(road);
+  // The pose is the road's own unless `moved` gives another position or heading; `members` stand on the node.
+  const scaled = (node: BackgroundSpace, scale: { x: number; y: number; z: number }, moved: { position?: typeof pose.position; quaternion?: typeof pose.quaternion } = {}, members: BackgroundCamera[] = []) => {
+    const source: BackgroundMap = { ...map, nodes: [node, ...members] };
+    return { source, result: applyNodeWorldPose(source, node.id, { position: pose.position, quaternion: pose.quaternion, ...moved, scale }) };
+  };
+  // Pulled upwards alone: no change at all.
+  const lifted = scaled(road, { x: 1, y: 3, z: 1 });
+  assert.equal(lifted.result, lifted.source);
+  // Wider and upwards: the root is the centre of the base, so x and width change together. No height appears beside them.
+  const wider = scaled(road, { x: 2, y: 3, z: 1 }).result.nodes[0];
+  assert.deepEqual(wider, { ...road, x: road.x - road.width / 2, width: road.width * 2 });
+  assert.equal(Object.hasOwn(wider, 'volumeHeight'), false);
+  // A height stored while it was a room is neither rewritten nor removed.
+  const tall: BackgroundSpace = { ...road, volumeHeight: 240 }, kept = scaled(tall, { x: 1, y: 3, z: 1 });
+  assert.equal(kept.result, kept.source); assert.equal((kept.result.nodes[0] as BackgroundSpace).volumeHeight, 240);
+  assert.deepEqual(scaled(tall, { x: 2, y: 3, z: 1 }).result.nodes[0], { ...tall, x: tall.x - tall.width / 2, width: tall.width * 2 });
+  // The same pull on a room writes its walls, as it always did.
+  assert.deepEqual(scaled(room, { x: 1, y: 3, z: 1 }).result.nodes[0], { ...room, volumeHeight: 540 });
+  assert.deepEqual(scaled({ ...room, volumeHeight: 240 }, { x: 1, y: 3, z: 1 }).result.nodes[0], { ...room, volumeHeight: 720 });
+  // The box height is all a road leaves out. Its floor height is written as a room's is: lifted, it takes what stands on it up by as much, and the pull upwards that came with the lift still writes no height.
+  const lens: BackgroundCamera = { ...memberCamera, id: 'lens', spaceId: road.id, x: 300, y: 340 };
+  const raised = scaled(road, { x: 1, y: 3, z: 1 }, { position: { ...pose.position, y: pose.position.y + 60 } }, [lens]).result;
+  assert.deepEqual(raised.nodes[0], { ...road, elevation: 60 });
+  assert.equal(Object.hasOwn(raised.nodes[0], 'volumeHeight'), false);
+  assert.deepEqual(raised.nodes[1], { ...lens, elevation: 180 });
+  // A turn, and a resize along the other plan side, are written as a room's are too.
+  assert.deepEqual(scaled(road, { x: 1, y: 3, z: 1 }, { quaternion: nodeWorldPose({ ...road, rotation: 90 }).quaternion }).result.nodes[0], { ...road, rotation: 90 });
+  assert.deepEqual(scaled(road, { x: 1, y: 3, z: 2 }).result.nodes[0], { ...road, y: road.y - road.height / 2, height: road.height * 2 });
+});
+
+test('a road is still a road after the edits that copy a space', () => {
+  const road: BackgroundSpace = { ...oddRoom, id: 'road', surface: 'road' }, frozen = JSON.stringify(road);
+  // Made a polygon, and rebuilt from plan points.
+  const polygon = rectToPolygon(road);
+  assert.deepEqual(polygon, { ...road, shape: 'polygon', points: [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)] });
+  const outline = nodePlanOutline(polygon!);
+  const rebuilt = polygonFromWorldPoints(polygon!, outline.map((point, index) => index === 2 ? xy(point.x + 30, point.y + 20) : point));
+  assert.ok(rebuilt); assert.equal(rebuilt.surface, 'road'); assert.equal(rebuilt.points.length, 4);
+  assert.equal(movePolygonVertex(polygon!, 2, xy(outline[2].x + 30, outline[2].y + 20))!.surface, 'road');
+  // Moved, turned and resized as a whole, with what belongs to it.
+  const lens: BackgroundCamera = { ...memberCamera, id: 'lens', spaceId: road.id, x: 300, y: 150 };
+  const source: BackgroundMap = { ...map, nodes: [road, lens] };
+  const next: BackgroundSpace = { ...road, x: road.x + 40, y: road.y - 10, width: 200, rotation: 90 };
+  const carried = transformMapSpace(source, next);
+  assert.equal(carried.nodes[0], next); assert.equal((carried.nodes[0] as BackgroundSpace).surface, 'road');
+  assert.notEqual(carried.nodes[1].x, lens.x);
+  const moved = moveMapNode(source, road.id, { x: 40, y: -10 });
+  assert.deepEqual(moved.nodes[0], { ...road, x: road.x + 40, y: road.y - 10 });
+  near(moved.nodes[1].x, 340); near(moved.nodes[1].y, 140);
+  assert.equal(JSON.stringify(road), frozen);
+});
+
+// --- Camera colour -----------------------------------------------------------------------------
+test('a camera takes a colour by one key, and the default again by losing it', () => {
+  const lens: BackgroundCamera = { ...memberCamera, id: 'lens', elevation: 260, pitch: -20, roll: 12, aspect: 2.35 };
+  const frozen = JSON.stringify(lens);
+  const red = setCameraColor(lens, 'red'), redFrozen = JSON.stringify(red);
+  assert.deepEqual(red, { ...lens, color: 'red' });
+  assert.notEqual(red, lens); assert.equal(Object.hasOwn(lens, 'color'), false);
+  // Another colour: the key changes and nothing else does.
+  const blue = setCameraColor(red, 'blue');
+  assert.deepEqual(blue, { ...lens, color: 'blue' });
+  assert.notEqual(blue, red); assert.equal(red.color, 'red');
+  // Back to the default the key is gone, not null.
+  const back = setCameraColor(blue, null);
+  assert.equal(Object.hasOwn(back, 'color'), false);
+  assert.deepEqual(back, lens);
+  assert.notEqual(back, blue); assert.equal(blue.color, 'blue');
+  // Nothing to change: the very object. A camera without a colour has no key at all, and null is still no change.
+  assert.equal(setCameraColor(lens, null), lens);
+  assert.equal(setCameraColor(red, 'red'), red);
+  // A locked camera stays as it is, either way.
+  const lockedLens: BackgroundCamera = { ...lens, locked: true }, lockedRed: BackgroundCamera = { ...red, locked: true };
+  assert.equal(setCameraColor(lockedLens, 'red'), lockedLens);
+  assert.equal(setCameraColor(lockedRed, 'blue'), lockedRed); assert.equal(setCameraColor(lockedRed, null), lockedRed);
+  assert.equal(Object.hasOwn(lockedLens, 'color'), false); assert.equal(lockedRed.color, 'red');
+  assert.equal(JSON.stringify(lens), frozen); assert.equal(JSON.stringify(red), redFrozen);
 });

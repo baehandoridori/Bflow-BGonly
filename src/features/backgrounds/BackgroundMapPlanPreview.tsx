@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import type { MapPlanPreviewProps } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types';
-import { MAP_PLAN_EXTENT, cameraAngles, cameraPitchLabel } from './mapSpatial';
+import { MAP_PLAN_EXTENT, cameraAngles, cameraPitchLabel, isRoadSpace, roadCentrePlanLine } from './mapSpatial';
 import {
   PLAN_FALLBACK_SIZE, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_VIEW,
   nextPlanSelection, planCameraGlyph, planCameraReadout, planNodeCovers, planNodeLabel, planNodeSummary, planOutlinePoints, planReadoutText,
@@ -43,9 +43,12 @@ function nodeButton(node: BackgroundNode, selected: boolean, onActivate: Activat
 const PlanShape = memo(function PlanShape({ node, scale, selected, onActivate }: NodeProps<BackgroundSpace | BackgroundSymbol>) {
   const points = planOutlinePoints(node);
   if (!points) return null;
-  return <g className={`bmap-plan-node bmap-plan-${node.type}${node.locked ? ' is-locked' : ''}`} {...nodeButton(node, selected, onActivate)}>
+  const road = node.type === 'space' && isRoadSpace(node), centre = node.type === 'space' ? roadCentrePlanLine(node) : null;
+  return <g className={`bmap-plan-node bmap-plan-${node.type}${road ? ' is-road' : ''}${node.locked ? ' is-locked' : ''}`} {...nodeButton(node, selected, onActivate)}>
     <title>{planNodeLabel(node)}</title>
     <polygon points={points} />
+    {/* The attribute keeps a bent line unfilled even where the style rule is missing. */}
+    {centre && <polyline className="bmap-plan-road-line" fill="none" points={pointList(centre)} />}
     {/* Small objects keep a target that can be hit on a small plan. */}
     {node.type === 'symbol' && <circle className="bmap-plan-hit" cx={fixed(node.x + node.width / 2)} cy={fixed(node.y + node.height / 2)} r={fixed(PLAN_MARK.dot * 1.6 * scale)} />}
   </g>;
@@ -81,7 +84,7 @@ function CameraMark({ glyph, scale, emphasis = false }: { glyph: PlanCameraGlyph
 const PlanCamera = memo(function PlanCamera({ node, scale, selected, onActivate }: NodeProps<BackgroundCamera>) {
   const glyph = planCameraGlyph(node, scale);
   if (!glyph) return null;
-  return <g className={`bmap-plan-node bmap-plan-camera${node.locked ? ' is-locked' : ''}`} {...nodeButton(node, selected, onActivate)}>
+  return <g className={`bmap-plan-node bmap-plan-camera${node.locked ? ' is-locked' : ''}`} data-camera-color={node.color} {...nodeButton(node, selected, onActivate)}>
     <title>{planNodeLabel(node)}</title>
     <circle className="bmap-plan-hit" cx={fixed(glyph.position.x)} cy={fixed(glyph.position.y)} r={fixed(PLAN_MARK.hit * scale)} />
     <CameraMark glyph={glyph} scale={scale} />
@@ -111,7 +114,7 @@ function ReadoutText({ readout, pitch }: { readout: PlanReadout; pitch?: number 
 function CameraReadout({ map, camera }: { map: BackgroundMap; camera: BackgroundCamera }) {
   const readout = planCameraReadout(camera), side = planSideView(map, camera), box = PLAN_SIDE_VIEW;
   const [, pitchText, heightText] = readout.items.map(planReadoutText);
-  return <div className="bmap-plan-readout is-camera" role="group" aria-label="선택한 카메라">
+  return <div className="bmap-plan-readout is-camera" data-camera-color={camera.color} role="group" aria-label="선택한 카메라">
     <ReadoutText readout={readout} pitch={readout.vertical ? (readout.vertical === 'up' ? 90 : -90) : cameraAngles(camera).pitch} />
     <figure className="bmap-plan-side">
       <svg viewBox={`0 0 ${box.width} ${box.height}`} role="img" aria-label={`옆에서 본 방향: ${pitchText}, ${heightText}`}>
@@ -200,6 +203,8 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanP
   }, []);
 
   const selectedGlyph = viewBox && selected?.type === 'camera' ? planCameraGlyph(selected, scale) : null;
+  // The marks drawn for the selected camera outside its own button follow its colour too.
+  const selectedColor = selected?.type === 'camera' ? selected.color : undefined;
   const selectedOutline = viewBox && selected && selected.type !== 'camera' ? planOutlinePoints(selected) : null;
   const readout = selected && selected.type !== 'camera' ? planVolumeReadout(selected) : null;
 
@@ -222,13 +227,13 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanP
               {map.nodes.map(node => node.type === 'camera' && <PlanCamera key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
               {/* The selection is redrawn on top without moving the buttons, so keyboard order and focus stay put. */}
               {selectedOutline && <g className="bmap-plan-selected" aria-hidden="true"><polygon className="bmap-plan-halo" points={selectedOutline} /><polygon className="bmap-plan-outline" points={selectedOutline} /></g>}
-              {selectedGlyph && <g className="bmap-plan-selected bmap-plan-camera" aria-hidden="true"><CameraMark glyph={selectedGlyph} scale={scale} emphasis /></g>}
+              {selectedGlyph && <g className="bmap-plan-selected bmap-plan-camera" data-camera-color={selectedColor} aria-hidden="true"><CameraMark glyph={selectedGlyph} scale={scale} emphasis /></g>}
             </svg>
-            {selectedGlyph?.vertical && <p className="bmap-plan-note"><VerticalIcon vertical={selectedGlyph.vertical} />{cameraPitchLabel(selectedGlyph.vertical === 'up' ? 90 : -90)} · 점선: 기울일 때 방향</p>}
-            {selectedGlyph?.fan && <p className="bmap-plan-note"><svg className="bmap-plan-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path className="bmap-plan-fan" d="M 2 8 L 13 3 A 12 12 0 0 1 13 13 Z" /></svg>부채꼴: 방향 참고</p>}
+            {selectedGlyph?.vertical && <p className="bmap-plan-note" data-camera-color={selectedColor}><VerticalIcon vertical={selectedGlyph.vertical} />{cameraPitchLabel(selectedGlyph.vertical === 'up' ? 90 : -90)} · 점선: 기울일 때 방향</p>}
+            {selectedGlyph?.fan && <p className="bmap-plan-note" data-camera-color={selectedColor}><svg className="bmap-plan-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path className="bmap-plan-fan" d="M 2 8 L 13 3 A 12 12 0 0 1 13 13 Z" /></svg>부채꼴: 방향 참고</p>}
           </div>
           {selected?.type === 'camera' ? <CameraReadout map={map} camera={selected} />
-            : readout ? <div className="bmap-plan-readout is-volume" role="group" aria-label={selected?.type === 'space' ? '선택한 공간' : '선택한 기호'}><ReadoutText readout={readout} /></div>
+            : readout ? <div className="bmap-plan-readout is-volume" role="group" aria-label={selected?.type === 'space' ? (isRoadSpace(selected) ? '선택한 도로' : '선택한 공간') : '선택한 기호'}><ReadoutText readout={readout} /></div>
               : <div className="bmap-plan-readout is-empty"><p className="bmap-plan-hint">{PLAN_PREVIEW_HINT}</p></div>}
         </>}
       </div>

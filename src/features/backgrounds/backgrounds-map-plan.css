@@ -24,12 +24,15 @@
 .bmap-plan-node { cursor:pointer; outline:none; }
 .bmap-plan-space>polygon { fill:rgb(var(--color-accent) / .1); stroke:rgb(var(--color-accent-sub) / .6); stroke-width:1.25; stroke-linejoin:round; }
 .bmap-plan-space:hover>polygon { fill:rgb(var(--color-accent) / .2); stroke:rgb(var(--color-accent-sub)); }
+.bmap-plan-space.is-road>polygon { fill:rgb(var(--bmap-road) / .24); stroke:rgb(var(--bmap-road) / .7); }
+.bmap-plan-space.is-road:hover:not(:focus-visible)>polygon { fill:rgb(var(--bmap-road) / .34); stroke:rgb(var(--bmap-road)); }
+.bmap-plan-road-line { fill:none; stroke:rgb(var(--bmap-road-mark) / .8); stroke-width:1; stroke-dasharray:4 3; vector-effect:non-scaling-stroke; pointer-events:none; }
 .bmap-plan-symbol>polygon { fill:rgb(var(--color-text-secondary) / .16); stroke:rgb(var(--color-text-secondary)); stroke-width:1; stroke-linejoin:round; }
 .bmap-plan-symbol:hover>polygon { fill:rgb(var(--color-accent) / .22); stroke:rgb(var(--color-accent-sub)); }
 .bmap-plan-node.is-locked>polygon { stroke-dasharray:5 3; }
 .bmap-plan-hit { fill:transparent; stroke:transparent; stroke-width:2; pointer-events:all; }
 .bmap-plan-camera:hover>.bmap-plan-hit { fill:var(--bmap-plan-cam-soft); }
-/* Keyboard focus is drawn on the shape itself, apart from the selection colours. */
+/* Keyboard focus is drawn on the shape itself, apart from the selection colours. The colours of a road are set above this rule and its hover leaves a focused road out: either would otherwise win over the focus colour. */
 .bmap-plan-node:focus-visible>polygon { stroke:rgb(var(--color-text-primary)); stroke-width:2.5; stroke-dasharray:none; }
 .bmap-plan-node:focus-visible>.bmap-plan-hit { stroke:rgb(var(--color-text-primary)); }
 .bmap-plan-dot { fill:var(--bmap-plan-cam); stroke:var(--bmap-plan-cam-edge); stroke-width:1.5; }
@@ -101,3 +104,5 @@
 @media (prefers-reduced-motion: reduce) {
   .bmap-plan-toggle>svg { transition:none; }
 }
+/* A camera with a colour of its own: the four camera variables of this plan follow it, on both themes. */
+.bmap-plan-preview [data-camera-color] { --bmap-plan-cam:rgb(var(--bmap-cam)); --bmap-plan-cam-line:rgb(var(--bmap-cam)); --bmap-plan-cam-edge:rgb(var(--color-bg-primary)); --bmap-plan-cam-soft:rgb(var(--bmap-cam) / .18); }

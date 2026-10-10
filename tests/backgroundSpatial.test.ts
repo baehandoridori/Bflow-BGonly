@@ -70,6 +70,7 @@ test('constants are the agreed defaults and share the domain limits object', () 
   assert.deepEqual(MAP_SPATIAL_DEFAULTS, { spaceElevation: 0, spaceVolumeHeight: 180, symbolElevation: 0, cameraElevation: 120, pitch: 0, roll: 0, aspect: 16 / 9 });
   assert.deepEqual(DEFAULT_MAP_CAMERA_POSE, { x: 500, y: 340, elevation: 120, angle: 0, pitch: 0, roll: 0, fov: 60, aspect: 16 / 9 });
   assert.deepEqual([SYMBOL_VOLUME_HEIGHTS.door, SYMBOL_VOLUME_HEIGHTS.chair, SYMBOL_VOLUME_HEIGHTS.table, SYMBOL_VOLUME_HEIGHTS.bed, SYMBOL_VOLUME_HEIGHTS.custom], [160, 70, 60, 45, 80]);
+  assert.equal(SYMBOL_VOLUME_HEIGHTS.stairs, 180);
 });
 
 test('four plan directions map to the world without a mirror flip', () => {
@@ -310,7 +311,7 @@ test('nodes saved before the 3D editor read as defaults without gaining keys', (
   assert.deepEqual(space, legacySpace); assert.deepEqual(camera, legacyCamera); assert.deepEqual(symbol, legacySymbol);
   for (const node of [space, camera, symbol]) for (const key of ['elevation', 'volumeHeight', 'pitch', 'roll', 'aspect']) assert.equal(key in node, false);
 
-  const heights: Array<[BackgroundSymbol['symbol'], number]> = [['door', 160], ['chair', 70], ['table', 60], ['bed', 45], ['custom', 80], ['desk', 80], ['sofa', 80], ['cabinet', 80], ['plant', 80]];
+  const heights: Array<[BackgroundSymbol['symbol'], number]> = [['door', 160], ['chair', 70], ['table', 60], ['bed', 45], ['custom', 80], ['desk', 80], ['sofa', 80], ['cabinet', 80], ['plant', 80], ['stairs', 180]];
   for (const [kind, height] of heights) assert.equal(nodeVolumeHeight({ ...legacySymbol, symbol: kind }), height, kind);
   assert.equal(nodeVolumeHeight({ ...legacySymbol, symbol: 'piano' as BackgroundSymbol['symbol'] }), 80);
   assert.equal(nodeVolumeHeight({ ...legacySymbol, symbol: 'toString' as BackgroundSymbol['symbol'] }), 80);

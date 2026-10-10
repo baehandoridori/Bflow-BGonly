@@ -4,12 +4,14 @@ import {
   SRGBColorSpace, Scene, Shape, ShapeGeometry, SphereGeometry, Sprite, SpriteMaterial, TextureLoader, Vector2,
 } from 'three';
 import type { Material, Object3D } from 'three';
-import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
+import type { BackgroundCamera, BackgroundCameraColor, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
 import type { Map3DViewState } from './mapCanvas.ts';
-import { MAP_PLAN_EXTENT, MAP_SPATIAL_DEFAULTS, cameraAspect, mapPlanBounds, nodeElevation, nodeVolumeHeight, nodeWorldPose, spaceOutline, verticalFov } from './mapSpatial.ts';
+import { cameraColorHex } from './mapCameraColor.ts';
+import { MAP_PLAN_EXTENT, MAP_SPATIAL_DEFAULTS, cameraAspect, isRoadSpace, mapPlanBounds, nodeElevation, nodeVolumeHeight, nodeWorldPose, roadCentreLine, spaceOutline,
+  spaceWallHeight, verticalFov } from './mapSpatial.ts';
 import type { Vec3 } from './mapSpatial.ts';
 import { stackedMapNodeIds } from './mapGeometry.ts';
-import { spaceStackRanks } from './mapStack.ts';
+import { spaceStackRanks, spacesOverlap } from './mapStack.ts';
 import { getSymbolPreset } from './symbolCatalog.ts';
 
 /**
@@ -21,12 +23,15 @@ export type Map3DPalette = {
   light: boolean;
   background: number; card: number; border: number;
   accent: number; accentSub: number; symbol: number; camera: number; cameraLens: number;
+  /** A road and the dashed line along its centre. */
+  road: number; roadMark: number;
   /** CSS colours and font of the name labels. */
   text: string; halo: string; font: string;
 };
 export const MAP3D_DARK_PALETTE: Map3DPalette = {
   light: false, background: 0x0f1117, card: 0x1a1d27, border: 0x2d3041, accent: 0x6c5ce7, accentSub: 0xa29bfe,
-  symbol: 0x89b8bf, camera: 0xe6b578, cameraLens: 0x372715, text: 'rgb(232, 232, 238)', halo: 'rgb(15, 17, 23)', font: 'sans-serif',
+  symbol: 0x89b8bf, camera: 0xe6b578, cameraLens: 0x372715, road: 0x9aa1ad, roadMark: 0xe3e6ec,
+  text: 'rgb(232, 232, 238)', halo: 'rgb(15, 17, 23)', font: 'sans-serif',
 };
 export function sameMap3DPalette(a: Map3DPalette, b: Map3DPalette): boolean {
   return (Object.keys(a) as (keyof Map3DPalette)[]).every(key => a[key] === b[key]);
@@ -45,6 +50,7 @@ export type Map3DResourceCount = { geometries: number; materials: number; textur
 type NodeKind = BackgroundNode['type'];
 type Disposable = { dispose(): void };
 type MaterialKey = 'floor' | 'floorLine' | 'spaceFloor' | 'spaceFloorOn' | 'spaceWall' | 'spaceWallOn' | 'spaceLine' | 'spaceLineOn' | 'spaceDash' | 'spaceDashOn'
+  | 'roadFloor' | 'roadFloorOn' | 'roadLine' | 'roadLineLocked' | 'roadCentre'
   | 'symbol' | 'symbolOn' | 'symbolLine' | 'symbolLineOn' | 'symbolArc' | 'symbolArcOn' | 'symbolDash' | 'symbolDashOn' | 'symbolFill' | 'symbolFillOn' | 'symbolBound'
   | 'camera' | 'cameraLens' | 'cameraLine' | 'cameraLineOn' | 'cameraFar' | 'cameraFarOn' | 'cameraRing' | 'proxy';
 type GeometryKey = 'box' | 'lens' | 'cameraProxy' | 'ring' | 'drop' | 'floor' | 'floorLine';
@@ -87,10 +93,10 @@ function tag(object: Object3D, id: string, kind: NodeKind, part?: PickPart): voi
 /** Everything that changes a node's meshes. Position, level and turn are applied to the root instead. */
 function shapeKey(node: BackgroundNode, selected: boolean): string {
   const flags = `${selected ? 1 : 0}${node.locked ? 1 : 0}`;
-  if (node.type === 'camera') return `camera|${flags}|${node.fov}|${cameraAspect(node)}`;
+  if (node.type === 'camera') return `camera|${flags}|${node.fov}|${cameraAspect(node)}|${node.color ?? ''}`;
   if (node.type === 'symbol') return `symbol|${flags}|${getSymbolPreset(node.symbol).id}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${node.hinge}|${node.swing}`;
   const points = node.shape === 'polygon' ? node.points.map(point => `${point.x},${point.y}`).join(';') : '';
-  return `space|${flags}|${node.shape}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${points}`;
+  return `space|${flags}|${node.shape}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${points}|${isRoadSpace(node) ? 'road' : ''}`;
 }
 function labelSpec(node: BackgroundNode, selected: boolean): { text: string; sub: string; size: number } | null {
   const name = node.name.length > LABEL_LIMIT ? `${node.name.slice(0, LABEL_LIMIT - 1)}…` : node.name;
@@ -139,7 +145,8 @@ export class Map3DScene {
   private readonly floor = new Group();
   private readonly lights: Disposable[] = [];
   private readonly shared = new ResourceBag();
-  private readonly materials = new Map<MaterialKey, Material>();
+  /** By material name, or by `name|colour` for the materials of a camera with a colour of its own. */
+  private readonly materials = new Map<string, Material>();
   private readonly geometries = new Map<GeometryKey, BufferGeometry>();
   private readonly entries = new Map<string, Entry>();
   private readonly onInvalidate: () => void;
@@ -362,15 +369,18 @@ export class Map3DScene {
     this.underlay = null;
   }
 
-  private material(key: MaterialKey): Material {
-    const cached = this.materials.get(key);
+  /** `color`: the colour of the camera that is drawn. Each colour gets its own set of the six camera materials, made when first asked for. */
+  private material(key: MaterialKey, color?: BackgroundCameraColor): Material {
+    const slot = color ? `${key}|${color}` : key, cached = this.materials.get(slot);
     if (cached) return cached;
     const palette = this.palette;
-    const flat = (color: number, opacity: number) => new MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: DoubleSide });
+    // A name the colour table does not know keeps the amber. The lens is never tinted.
+    const cameraTint = (color ? cameraColorHex(color, palette.light) : null) ?? palette.camera;
+    const flat = (hex: number, opacity: number) => new MeshBasicMaterial({ color: hex, transparent: true, opacity, depthWrite: false, side: DoubleSide });
     const wall = (opacity: number) => new MeshLambertMaterial({ color: palette.accent, transparent: true, opacity, depthWrite: false, side: DoubleSide, forceSinglePass: true });
     // Lines are drawn with the see-through surfaces, after the floor, so a line lying on the floor is not dimmed by it.
-    const line = (color: number, opacity: number) => new LineBasicMaterial({ color, transparent: true, opacity });
-    const dash = (color: number, opacity: number, dashSize: number, gapSize: number) => new LineDashedMaterial({ color, transparent: true, opacity, dashSize, gapSize });
+    const line = (hex: number, opacity: number) => new LineBasicMaterial({ color: hex, transparent: true, opacity });
+    const dash = (hex: number, opacity: number, dashSize: number, gapSize: number) => new LineDashedMaterial({ color: hex, transparent: true, opacity, dashSize, gapSize });
     const make = (): Material => {
       switch (key) {
         case 'floor': return flat(palette.card, palette.light ? 0.9 : 0.72);
@@ -383,6 +393,11 @@ export class Map3DScene {
         case 'spaceLineOn': return line(palette.accentSub, 1);
         case 'spaceDash': return dash(palette.accentSub, 0.55, 12, 7);
         case 'spaceDashOn': return dash(palette.accentSub, 1, 12, 7);
+        case 'roadFloor': return flat(palette.road, 0.28);
+        case 'roadFloorOn': return flat(palette.road, 0.44);
+        case 'roadLine': return line(palette.road, 0.75);
+        case 'roadLineLocked': return dash(palette.road, 0.75, 12, 7);
+        case 'roadCentre': return dash(palette.roadMark, 0.9, 14, 10);
         case 'symbol': return new MeshLambertMaterial({ color: palette.symbol });
         case 'symbolOn': return new MeshLambertMaterial({ color: palette.accentSub });
         case 'symbolLine': return line(palette.symbol, 0.9);
@@ -394,18 +409,18 @@ export class Map3DScene {
         case 'symbolFill': return flat(palette.symbol, 0.08);
         case 'symbolFillOn': return flat(palette.accentSub, 0.16);
         case 'symbolBound': return dash(palette.accentSub, 0.85, 5, 4);
-        case 'camera': return new MeshLambertMaterial({ color: palette.camera });
+        case 'camera': return new MeshLambertMaterial({ color: cameraTint });
         case 'cameraLens': return new MeshLambertMaterial({ color: palette.cameraLens });
-        case 'cameraLine': return line(palette.camera, 0.6);
-        case 'cameraLineOn': return line(palette.camera, 1);
-        case 'cameraFar': return flat(palette.camera, 0.1);
-        case 'cameraFarOn': return flat(palette.camera, 0.24);
-        case 'cameraRing': return flat(palette.camera, 0.8);
+        case 'cameraLine': return line(cameraTint, 0.6);
+        case 'cameraLineOn': return line(cameraTint, 1);
+        case 'cameraFar': return flat(cameraTint, 0.1);
+        case 'cameraFarOn': return flat(cameraTint, 0.24);
+        case 'cameraRing': return flat(cameraTint, 0.8);
         case 'proxy': return new MeshBasicMaterial({ visible: false, side: DoubleSide });
       }
     };
     const made = this.shared.track(make());
-    this.materials.set(key, made);
+    this.materials.set(slot, made);
     return made;
   }
   private geometry(key: GeometryKey): BufferGeometry {
@@ -441,15 +456,32 @@ export class Map3DScene {
     this.floor.add(fill, outline);
   }
 
-  /** Open-top box along the real outline: floor fill, translucent walls, outline at the bottom and the top. */
+  /** Open-top box along the real outline: floor fill, translucent walls, outline at the bottom and the top. A road is its floor alone. */
   private buildSpace(entry: Entry, node: BackgroundSpace, selected: boolean): void {
     const outline = spaceOutline(node, ELLIPSE_SEGMENTS).filter(point => finite(point.x, point.y)), count = outline.length;
-    const height = nodeVolumeHeight(node);
+    const road = isRoadSpace(node), height = spaceWallHeight(node); // 0 for a road
     entry.lift = (Number.isFinite(height) ? height : 0) + 4;
     if (count < 3 || !Number.isFinite(height)) return;
     const floor = new Mesh(entry.own.track(new ShapeGeometry(new Shape(outline.map(point => new Vector2(point.x, point.y)))).rotateX(Math.PI / 2)),
-      this.material(selected ? 'spaceFloorOn' : 'spaceFloor'));
-    floor.renderOrder = -1;
+      this.material(road ? (selected ? 'roadFloorOn' : 'roadFloor') : (selected ? 'spaceFloorOn' : 'spaceFloor')));
+    // Under the floors of the rooms, over the underlay: where a road and a room overlap the order never depends on the view.
+    floor.renderOrder = road ? -1.5 : -1;
+    if (road) {
+      // A wall-less floor: its outline on the floor, and the dashed centre line where the shape has one.
+      const edges = new LineSegments(entry.own.track(segments(outline.flatMap((a, index) => { const b = outline[(index + 1) % count]; return [a.x, 0, a.y, b.x, 0, b.y]; }))),
+        this.material(node.locked ? (selected ? 'spaceDashOn' : 'roadLineLocked') : (selected ? 'spaceLineOn' : 'roadLine')));
+      if (node.locked) edges.computeLineDistances();
+      floor.name = 'space-floor'; edges.name = 'space-outline';
+      tag(floor, node.id, 'space', 'floor'); entry.picks.push(floor);
+      entry.root.add(floor, edges);
+      const line = roadCentreLine(node);
+      if (line) {
+        const centre = new LineSegments(entry.own.track(segments(line.slice(1).flatMap((to, index) => [line[index].x, 0, line[index].y, to.x, 0, to.y]))), this.material('roadCentre'));
+        centre.computeLineDistances(); centre.name = 'road-centre';
+        entry.root.add(centre);
+      }
+      return;
+    }
     const wallPositions: number[] = [], linePositions: number[] = [];
     // An ellipse reads as a cylinder with four uprights; a rectangle or polygon gets one per corner.
     const stride = node.shape === 'ellipse' ? Math.max(1, Math.round(count / 4)) : Math.max(1, Math.ceil(count / 32));
@@ -513,6 +545,10 @@ export class Map3DScene {
       part('bed-headboard', -0.41, 0.41, 0, 1, -0.45, -0.37);
       part('bed-pillow', -0.32, -0.05, 0.62, 0.76, -0.31, -0.16);
       part('bed-pillow', 0.05, 0.32, 0.62, 0.76, -0.31, -0.16);
+    } else if (kind === 'stairs') {
+      // Solid steps from the floor up, the lowest at the plan bottom (+Z) and the highest at the plan top (-Z), where the plan arrow points.
+      const steps = Math.min(16, Math.max(3, Math.round(tall / 18)));
+      for (let index = 0; index < steps; index++) part('stairs-step', -0.5, 0.5, 0, (index + 1) / steps, 0.5 - (index + 1) / steps, 0.5 - index / steps);
     } else {
       // Generic object: a dashed outline box. Its lines are built at real size so the dashes stay even.
       part('object-fill', -0.5, 0.5, 0, 1, -0.5, 0.5, this.material(selected ? 'symbolFillOn' : 'symbolFill'));
@@ -538,9 +574,10 @@ export class Map3DScene {
     entry.root.add(body);
   }
 
-  /** Amber body looking down local -Z, with sight line, frustum outline, and a drop line to the floor. */
+  /** Body in the camera's colour (amber without one) looking down local -Z, with sight line, frustum outline, and a drop line to the floor. */
   private buildCamera(entry: Entry, node: BackgroundCamera, selected: boolean): void {
-    const box = this.geometry('box'), solid = this.material('camera'), lineMaterial = this.material(selected ? 'cameraLineOn' : 'cameraLine');
+    const tint = node.color;
+    const box = this.geometry('box'), solid = this.material('camera', tint), lineMaterial = this.material(selected ? 'cameraLineOn' : 'cameraLine', tint);
     const body = new Mesh(box, solid), finder = new Mesh(box, solid), lens = new Mesh(this.geometry('lens'), this.material('cameraLens'));
     body.scale.set(16, 12, 20); body.position.set(0, -6, 18);
     finder.scale.set(5, 4, 9); finder.position.set(0, 6, 15);
@@ -559,13 +596,13 @@ export class Map3DScene {
     lines.push(-halfWidth * 0.3, halfHeight, -reach, 0, halfHeight * 1.35, -reach, 0, halfHeight * 1.35, -reach, halfWidth * 0.3, halfHeight, -reach);
     const frustum = new LineSegments(entry.own.track(segments(lines)), lineMaterial);
     const far = new Mesh(entry.own.track(segments([-halfWidth, halfHeight, -reach, halfWidth, halfHeight, -reach, halfWidth, -halfHeight, -reach,
-      -halfWidth, halfHeight, -reach, halfWidth, -halfHeight, -reach, -halfWidth, -halfHeight, -reach])), this.material(selected ? 'cameraFarOn' : 'cameraFar'));
+      -halfWidth, halfHeight, -reach, halfWidth, -halfHeight, -reach, -halfWidth, -halfHeight, -reach])), this.material(selected ? 'cameraFarOn' : 'cameraFar', tint));
     const proxy = new Mesh(this.geometry('cameraProxy'), this.material('proxy'));
     body.name = 'camera-body'; finder.name = 'camera-finder'; lens.name = 'camera-lens'; frustum.name = 'camera-frustum'; far.name = 'camera-frame'; proxy.name = 'camera-proxy';
     tag(proxy, node.id, 'camera');
     entry.picks.push(proxy);
     entry.root.add(body, finder, lens, frustum, far, proxy);
-    const drop = new LineSegments(this.geometry('drop'), lineMaterial), ring = new Mesh(this.geometry('ring'), this.material('cameraRing'));
+    const drop = new LineSegments(this.geometry('drop'), lineMaterial), ring = new Mesh(this.geometry('ring'), this.material('cameraRing', tint));
     ring.position.y = 0.3;
     drop.name = 'camera-drop'; ring.name = 'camera-ring';
     entry.parts.add(drop, ring);
@@ -608,24 +645,37 @@ export function pickMapFloor(hits: readonly MapPickHit[], map?: BackgroundMap): 
   }
   return top;
 }
+/** The roads on a ray that lie under a room on the same ray: the two share ground on the plan (spacesOverlap). */
+function roadsUnderRooms(hits: readonly MapPickHit[], map: BackgroundMap): Set<string> {
+  const onRay = new Set<string>();
+  for (const hit of hits) { const node = hitNode(hit); if (node?.kind === 'space') onRay.add(node.id); }
+  const spaces = map.nodes.filter((node): node is BackgroundSpace => node.type === 'space' && onRay.has(node.id));
+  const rooms = spaces.filter(space => !isRoadSpace(space));
+  return new Set(spaces.filter(space => isRoadSpace(space) && rooms.some(room => spacesOverlap(room, space))).map(space => space.id));
+}
 /**
  * Node a ray selects. A camera or a solid part of an object comes first, the nearest one. The see-through box around
  * an object only counts when nothing solid is on the ray. Then the space whose floor is under the pointer, and a wall
- * only when no floor is: walls and boxes never swallow a click on what stands inside or behind them.
- * `map` settles floors on the same level.
+ * only when no floor is: walls and boxes never swallow a click on what stands inside or behind them. But the floor of
+ * a road under a room on the ray takes no part at all: it is set aside before anything else (below).
+ * `map` settles floors on the same level and tells which roads lie under a room: without it no road is set aside.
  */
 export function pickMapNode(hits: readonly MapPickHit[], map?: BackgroundMap): string | null {
+  // A road lies under the rooms that stand on it: where the ray also meets such a room, on its floor or on a wall and
+  // at any height, the floor of that road takes no part in the click. Beside a room a road is a floor like any other.
+  const under = map ? roadsUnderRooms(hits, map) : null;
+  const list = under?.size ? hits.filter(hit => !under.has(String(hit.object.userData.nodeId))) : hits;
   type Near = { id: string; distance: number } | null;
   let solid: Near = null, box: Near = null, surface: Near = null;
   const nearer = (pick: Near, id: string, distance: number): Near => !pick || distance < pick.distance ? { id, distance } : pick;
-  for (const hit of hits) {
+  for (const hit of list) {
     const node = hitNode(hit);
     if (!node) continue;
     if (node.kind === 'space') surface = nearer(surface, node.id, hit.distance);
     else if (node.kind === 'symbol' && node.part === 'box') box = nearer(box, node.id, hit.distance);
     else solid = nearer(solid, node.id, hit.distance);
   }
-  const floor = solid || box ? null : pickMapFloor(hits, map);
+  const floor = solid || box ? null : pickMapFloor(list, map);
   return solid?.id ?? box?.id ?? (floor ? String(floor.object.userData.nodeId) : surface?.id ?? null);
 }
 /** The spaces whose floor a ray lands on, in the order a click picks them: the nearest level first, and floors on one level as the plan stacks them, the smaller first. */
@@ -643,6 +693,18 @@ export function mapFloorPile(hits: readonly MapPickHit[], map: BackgroundMap): s
     }
   }
   return pile;
+}
+/**
+ * The spaces a slow second click on one spot takes turns through: the floors under the pointer as mapFloorPile lists
+ * them, and in front of them the room that the click picks on a wall when every floor behind that wall is a road
+ * under a room on the ray. Without it such a road could not be reached there: the room takes every click.
+ */
+export function mapSpacePile(hits: readonly MapPickHit[], map: BackgroundMap): string[] {
+  const pile = mapFloorPile(hits, map), picked = pickMapNode(hits, map);
+  // A picked space that is no floor under the pointer was hit on a wall, and then every floor there is a road set
+  // aside by pickMapNode: any other floor would have been picked instead. A camera or an object on top is no part of
+  // a pile of spaces.
+  return picked !== null && pile.length > 0 && !pile.includes(picked) && map.nodes.some(node => node.id === picked && node.type === 'space') ? [picked, ...pile] : pile;
 }
 /**
  * One click, as resolveMapClick and mapClickAim both read it: what the ray picks, what the click leaves selected, and
@@ -663,13 +725,13 @@ function mapClickStep(map: BackgroundMap, selectedId: string | null, hits: reado
   if (map.nodes.some(node => node.id === selectedId && node.type === 'space')) {
     // A space has a pile only on the same spot again: a first click there takes what is on top.
     if (!again) return plain;
-    pile = mapFloorPile(hits, map);
-    // A repeated click neither steps on nor goes back to the top one. It keeps the selected space only while its floor
-    // and the floor the click picks are both in the pile: with a camera or an object on top, or with the selected space
+    pile = mapSpacePile(hits, map);
+    // A repeated click neither steps on nor goes back to the top one. It keeps the selected space only while it and
+    // what the click picks are both in the pile: with a camera or an object on top, or with the selected space
     // hit on a wall only, it is a plain pick (nextPlanSelection reads the pile first in the same way).
     if (repeat) return pile.includes(selectedId) && pile.includes(picked) ? { picked, next: selectedId, stepped: false } : plain;
   } else pile = stackedMapNodeIds(map, selectedId).filter(id => under.has(id));
-  // A space hit on a wall only is no part of the floors under the pointer.
+  // A space hit on a wall only is no part of the pile, but for the room picked on a wall in front of the roads under it (mapSpacePile).
   if (pile.length < 2 || !pile.includes(selectedId) || !pile.includes(picked)) return plain;
   return { picked, next: pile[(pile.indexOf(selectedId) + 1) % pile.length], stepped: true };
 }
@@ -693,7 +755,8 @@ export function mapWorldBounds(map: BackgroundMap): { min: Vec3; max: Vec3 } {
   const plan = mapPlanBounds(map);
   let low = 0, high = 0;
   for (const node of map.nodes) {
-    const base = nodeElevation(node), top = node.type === 'camera' ? base : base + nodeVolumeHeight(node);
+    // A road has no walls: only its floor level is in the box, whatever height is stored.
+    const base = nodeElevation(node), top = node.type === 'camera' ? base : base + (node.type === 'space' ? spaceWallHeight(node) : nodeVolumeHeight(node));
     if (!finite(base, top)) continue;
     low = Math.min(low, base, top); high = Math.max(high, base, top);
   }

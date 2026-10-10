@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import { randomUUID } from 'node:crypto';
 import { createBackgroundPreviewGateway } from '../src/features/backgrounds/previewGateway.ts';
+import { BackgroundUnsupportedError } from '../src/features/backgrounds/domain.ts';
 import type { BackgroundRequest, BackgroundMap, BackgroundNode } from '../src/features/backgrounds/types.ts';
 const request=():BackgroundRequest=>({requestId:randomUUID(),command:{type:'save',kind:'place',entity:{id:randomUUID(),revision:0,name:'학교',parentId:null,folderPath:''},expectedRevision:null}});
 function environment(){const values=new Map<string,string>();let tail=Promise.resolve();return {storage:{getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);}},locks:{request<T>(_key:string,fn:()=>Promise<T>):Promise<T>{const p=tail.then(fn);tail=p.then(()=>{},()=>{});return p;}},seed:false};}
@@ -56,6 +57,25 @@ test('preview 저장은 높이·기울기·화면 비율을 그대로 보존하�
   assert.equal(renamed.maps[0].revision,2);assert.deepEqual(renamed.maps[0].nodes,nodes);
   assert.deepEqual(await createBackgroundPreviewGateway(actor,options).read(),renamed);
 });
+test('preview 저장은 계단·도로·카메라 색을 그대로 보존하고 다시 열어도 그대로 읽는다',async()=>{
+  const options=environment(),actor={id:randomUUID(),canManage:true},g=createBackgroundPreviewGateway(actor,options);
+  const room:BackgroundNode={id:randomUUID(),type:'space',name:'교실',placeId:null,childMapId:null,x:100,y:110,width:470,height:300,rotation:0,shape:'rect',points:[],locked:false};
+  const nodes:BackgroundNode[]=[room,
+    {id:randomUUID(),type:'space',name:'큰길',placeId:null,childMapId:null,x:0,y:450,width:1000,height:80,rotation:0,shape:'rect',points:[],locked:false,surface:'road'},
+    {id:randomUUID(),type:'space',name:'꺾인 길',placeId:null,childMapId:null,x:600,y:0,width:80,height:450,rotation:0,shape:'polygon',points:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],locked:false,surface:'road'},
+    ...(['red','lime','green','teal','blue','pink'] as const).map((color,index):BackgroundNode=>({id:randomUUID(),type:'camera',name:`${color} 카메라`,spaceId:room.id,x:150+index*60,y:300,angle:0,fov:60,viewIds:[],locked:false,color})),
+    {id:randomUUID(),type:'symbol',name:'계단',symbol:'stairs',spaceId:room.id,x:200,y:150,width:120,height:200,rotation:0,locked:false,hinge:'left',swing:'inward'},
+    {id:randomUUID(),type:'camera',name:'기본 카메라',spaceId:null,x:10,y:20,angle:0,fov:60,viewIds:[],locked:false}];
+  const map={...blankMap('새 요소 도면'),nodes};
+  const save:BackgroundRequest={requestId:randomUUID(),command:{type:'save-maps',maps:[{entity:map,expectedRevision:null}]}};
+  const saved=await g.execute(save);assert.deepEqual(saved.maps,[{...map,revision:1}]);
+  const reopened=createBackgroundPreviewGateway(actor,options);assert.deepEqual(await reopened.read(),saved);
+  // The room and the plain camera gain neither key.
+  for(const index of [0,nodes.length-1])for(const key of ['surface','color'])assert.equal(Object.hasOwn(saved.maps[0].nodes[index],key),false,`${index}.${key}`);
+  const renamed=await reopened.execute({requestId:randomUUID(),command:{type:'save',kind:'map',entity:{...saved.maps[0],name:'이름만 변경'},expectedRevision:1}});
+  assert.equal(renamed.maps[0].revision,2);assert.deepEqual(renamed.maps[0].nodes,nodes);
+  assert.deepEqual(await createBackgroundPreviewGateway(actor,options).read(),renamed);
+});
 test('preview는 잘못된 높이 값을 저장하지 않고 높이 값이 없는 이전 저장분은 그대로 읽고 다시 저장한다',async()=>{
   const options=environment(),actor={id:randomUUID(),canManage:true};
   // A store written before the vertical-axis fields existed.
@@ -70,4 +90,15 @@ test('preview는 잘못된 높이 값을 저장하지 않고 높이 값이 없�
   assert.deepEqual(renamed.maps,[{...old,name:'이름만 변경',revision:4}]);
   const raised=await g.execute({requestId:randomUUID(),command:{type:'save',kind:'map',entity:{...renamed.maps[0],nodes:old.nodes.map(node=>node.id===camera.id?{...node,elevation:180,pitch:-30}:node)},expectedRevision:4}});
   assert.deepEqual(raised.maps[0].nodes[1],{...camera,elevation:180,pitch:-30});assert.deepEqual(raised.maps[0].nodes[0],old.nodes[0]);
+});
+test('preview는 저장소에 든 모르는 종류를 모르는 것으로, 깨진 값을 그냥 오류로 거절하고 저장소는 그대로 둔다',async()=>{
+  const actor={id:randomUUID(),canManage:true},key='bflow-background-library-preview-v1';
+  // A store another build on the same origin wrote: one map holding one node.
+  const stored=(node:Record<string,unknown>)=>{const options=environment();options.storage.setItem(key,JSON.stringify({snapshot:{places:[],maps:[{...blankMap('다른 버전의 도면'),revision:1,nodes:[node]}],views:[],groups:[],usages:[],canManage:true},receipts:{},retired:[]}));return options;};
+  const lift={id:randomUUID(),type:'symbol',name:'승강기',symbol:'elevator',spaceId:null,x:200,y:150,width:120,height:200,rotation:0,locked:false,hinge:'left',swing:'inward'};
+  const newer=stored(lift),written=newer.storage.getItem(key);
+  await assert.rejects(createBackgroundPreviewGateway(actor,newer).read(),BackgroundUnsupportedError);
+  await assert.rejects(createBackgroundPreviewGateway(actor,newer).read(),/사물 기호/);
+  assert.equal(newer.storage.getItem(key),written);
+  await assert.rejects(createBackgroundPreviewGateway(actor,stored({...lift,symbol:'stairs',x:'a'})).read(),(error:unknown)=>error instanceof Error&&!(error instanceof BackgroundUnsupportedError)&&/가로 좌표/.test(error.message));
 });

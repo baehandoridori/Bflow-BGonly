@@ -1,11 +1,29 @@
-import type { BackgroundActor, BackgroundCommand, BackgroundEntities, BackgroundGroup, BackgroundKind, BackgroundRequest, BackgroundSnapshot, BackgroundUsage, BackgroundVariant, BackgroundView } from './types.ts';
+import type { BackgroundActor, BackgroundCameraColor, BackgroundCommand, BackgroundEntities, BackgroundGroup, BackgroundKind, BackgroundRequest, BackgroundSnapshot, BackgroundSpaceSurface, BackgroundSymbolKind, BackgroundUsage, BackgroundVariant, BackgroundView } from './types.ts';
 
 export const backgroundCollections = { place:'places', map:'maps', view:'views', group:'groups', usage:'usages' } as const;
 /** Vertical-axis bounds of map nodes. Single source for mapSpatial; mirrored by the 3D migration SQL. */
 export const BACKGROUND_SPATIAL_LIMITS = { elevation:{min:-100000,max:100000}, volumeHeight:{min:1,max:100000}, pitch:{min:-90,max:90}, roll:{min:-180,max:180}, aspect:{min:0.1,max:10} } as const;
+/** Closed lists of the stored map shape. Mirrored by DEVLOG/migrations/2026-10-09-background-map-elements.sql. */
+export const BACKGROUND_SYMBOL_KINDS: readonly BackgroundSymbolKind[] = ['door', 'desk', 'chair', 'table', 'sofa', 'bed', 'cabinet', 'plant', 'custom', 'stairs'];
+export const BACKGROUND_SPACE_SURFACES: readonly BackgroundSpaceSurface[] = ['road'];
+export const BACKGROUND_CAMERA_COLORS: readonly BackgroundCameraColor[] = ['red', 'lime', 'green', 'teal', 'blue', 'pink'];
 const kinds = Object.keys(backgroundCollections) as BackgroundKind[];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function requireValue(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
+/**
+ * Thrown where stored data holds a key, or a value of a closed list, that this version does not know: most likely
+ * written by a newer app. It is still an Error with the same message: nothing is accepted that was refused before.
+ */
+export class BackgroundUnsupportedError extends Error {
+  /** What was not known (the keys, or the value). For the console only: no part of the message and never shown to the user. */
+  readonly detail: string;
+  constructor(message: string, detail: string) { super(message); this.name = 'BackgroundUnsupportedError'; this.detail = detail; }
+}
+/** A value of a closed list. A string outside the list is unknown (BackgroundUnsupportedError); anything else is invalid. */
+function known(value: unknown, allowed: readonly string[], message: string): void {
+  if (typeof value === 'string' && allowed.includes(value)) return;
+  throw typeof value === 'string' ? new BackgroundUnsupportedError(message, `value ${JSON.stringify(value.slice(0, 80))}`) : new Error(message);
+}
 function object(value: unknown): asserts value is Record<string, unknown> { requireValue(value && typeof value === 'object' && !Array.isArray(value), '올바른 배경 데이터가 필요합니다.'); }
 function text(value: unknown, max: number, label: string, required = false): asserts value is string { requireValue(typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0), `${label} 형식 또는 길이를 확인해 주세요.`); }
 function id(value: unknown, nullable = false): void { requireValue(nullable && value === null || typeof value === 'string' && uuid.test(value), '배경 식별자가 올바르지 않습니다.'); }
@@ -15,7 +33,10 @@ function number(value: unknown, min: number, max: number, label: string): void {
 // Optional vertical-axis value. Omission keeps the default derived when reading; a present key must be a real number.
 function spatial(node: Record<string, unknown>, key: keyof typeof BACKGROUND_SPATIAL_LIMITS, label: string): void { if(key in node)number(node[key],BACKGROUND_SPATIAL_LIMITS[key].min,BACKGROUND_SPATIAL_LIMITS[key].max,label); }
 function image(value: unknown): void { text(value,2_000_000,'이미지 주소'); requireValue(value === '' || /^https:\/\/[^\s]+$/i.test(value) || /^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(value),'이미지는 HTTPS 주소 또는 PNG/JPEG/WebP 파일이어야 합니다.'); }
-function onlyKeys(value: Record<string, unknown>, allowed: string[]): void { requireValue(Object.keys(value).every(key=>allowed.includes(key)),'지원하지 않는 배경 속성이 포함되어 있습니다.'); }
+function onlyKeys(value: Record<string, unknown>, allowed: string[]): void {
+  const unknown = Object.keys(value).filter(key => !allowed.includes(key));
+  if (unknown.length) throw new BackgroundUnsupportedError('지원하지 않는 배경 속성이 포함되어 있습니다.', `keys ${unknown.slice(0, 8).map(key => JSON.stringify(key.slice(0, 80))).join(', ')}`);
+}
 function commandSize(value: Record<string,unknown>): void {
   // PostgreSQL jsonb::text separates keys/items with spaces; count those without copying large images.
   const serialized=JSON.stringify(value);let quoted=false,escaped=false,spaces=0;
@@ -34,33 +55,35 @@ export function validateBackgroundEntity(kind: BackgroundKind, value: unknown): 
     onlyKeys(value,[...shared,'name','parentId','placeId','imageUrl','nodes']);id(value.parentId,true);id(value.placeId,true);image(value.imageUrl);array(value.nodes,1000);
     const nodeIds=new Set<string>();
     for(const n of value.nodes) {
-      object(n);id(n.id);requireValue(!nodeIds.has(n.id as string),'도면 오브젝트 식별자가 중복되었습니다.');nodeIds.add(n.id as string);text(n.name,160,'오브젝트 이름',true);
+      object(n);known(n.type,['space','camera','symbol'],'지원하지 않는 도면 오브젝트입니다.');id(n.id);requireValue(!nodeIds.has(n.id as string),'도면 오브젝트 식별자가 중복되었습니다.');nodeIds.add(n.id as string);text(n.name,160,'오브젝트 이름',true);
       number(n.x,-100000,100000,'가로 좌표');number(n.y,-100000,100000,'세로 좌표');requireValue(typeof n.locked==='boolean','잠금 상태를 확인해 주세요.');
       const base=['id','type','name','x','y','locked'];
       if(n.type==='space') {
-        onlyKeys(n,[...base,'placeId','childMapId','width','height','rotation','shape','points','elevation','volumeHeight']);id(n.placeId,true);id(n.childMapId,true);
+        onlyKeys(n,[...base,'placeId','childMapId','width','height','rotation','shape','points','elevation','volumeHeight','surface']);id(n.placeId,true);id(n.childMapId,true);
         number(n.width,10,100000,'공간 가로 길이');number(n.height,10,100000,'공간 세로 길이');number(n.rotation,-360,360,'회전');
         spatial(n,'elevation','바닥 높이');spatial(n,'volumeHeight','입체 높이');
-        requireValue(['rect','ellipse','polygon'].includes(n.shape as string),'공간 모양이 올바르지 않습니다.');array(n.points,200);
+        if('surface' in n)known(n.surface,BACKGROUND_SPACE_SURFACES,'공간 종류가 올바르지 않습니다.');
+        known(n.shape,['rect','ellipse','polygon'],'공간 모양이 올바르지 않습니다.');array(n.points,200);
         if(n.shape==='polygon') requireValue(n.points.length>=3,'다각형에는 꼭짓점이 3개 이상 필요합니다.');
         for(const p of n.points){object(p);onlyKeys(p,['x','y']);number(p.x,0,1,'꼭짓점 좌표');number(p.y,0,1,'꼭짓점 좌표');}
       } else if(n.type==='camera') {
-        onlyKeys(n,[...base,'spaceId','angle','fov','viewIds','elevation','pitch','roll','aspect']);id(n.spaceId,true);number(n.angle,-360,360,'카메라 방향');number(n.fov,1,179,'카메라 시야');ids(n.viewIds);
+        onlyKeys(n,[...base,'spaceId','angle','fov','viewIds','elevation','pitch','roll','aspect','color']);id(n.spaceId,true);number(n.angle,-360,360,'카메라 방향');number(n.fov,1,179,'카메라 시야');ids(n.viewIds);
         spatial(n,'elevation','카메라 높이');spatial(n,'pitch','위아래 각도');spatial(n,'roll','기울기');spatial(n,'aspect','화면 비율');
+        if('color' in n)known(n.color,BACKGROUND_CAMERA_COLORS,'카메라 색이 올바르지 않습니다.');
       } else {
-        requireValue(n.type==='symbol','지원하지 않는 도면 오브젝트입니다.');onlyKeys(n,[...base,'symbol','spaceId','width','height','rotation','hinge','swing','elevation','volumeHeight','pitch','roll']);id(n.spaceId,true);
-        requireValue(['door','desk','chair','table','sofa','bed','cabinet','plant','custom'].includes(n.symbol as string),'사물 기호가 올바르지 않습니다.');
+        onlyKeys(n,[...base,'symbol','spaceId','width','height','rotation','hinge','swing','elevation','volumeHeight','pitch','roll']);id(n.spaceId,true);
+        known(n.symbol,BACKGROUND_SYMBOL_KINDS,'사물 기호가 올바르지 않습니다.');
         number(n.width,10,100000,'기호 가로 길이');number(n.height,10,100000,'기호 세로 길이');number(n.rotation,-360,360,'회전');
-        requireValue(['left','right'].includes(n.hinge as string),'문의 경첩 방향이 올바르지 않습니다.');requireValue(['inward','outward'].includes(n.swing as string),'문 열림 방향이 올바르지 않습니다.');
+        known(n.hinge,['left','right'],'문의 경첩 방향이 올바르지 않습니다.');known(n.swing,['inward','outward'],'문 열림 방향이 올바르지 않습니다.');
         spatial(n,'elevation','바닥 높이');spatial(n,'volumeHeight','입체 높이');spatial(n,'pitch','위아래 각도');spatial(n,'roll','기울기');
       }
     }
   } else if(kind==='view') {
     onlyKeys(value,[...shared,'name','placeId','cameraPlaceId','visiblePlaceIds','relatedPlaceIds','shot','tags','memo','variants']);id(value.placeId);id(value.cameraPlaceId,true);ids(value.visiblePlaceIds);ids(value.relatedPlaceIds);
-    requireValue(['wide','medium','closeup','detail'].includes(value.shot as string),'구도 분류를 확인해 주세요.');array(value.tags,100);value.tags.forEach(t=>text(t,80,'태그',true));text(value.memo,10000,'메모');array(value.variants,100);requireValue(value.variants.length>0,'이미지 변형을 하나 이상 등록해 주세요.');
+    known(value.shot,['wide','medium','closeup','detail'],'구도 분류를 확인해 주세요.');array(value.tags,100);value.tags.forEach(t=>text(t,80,'태그',true));text(value.memo,10000,'메모');array(value.variants,100);requireValue(value.variants.length>0,'이미지 변형을 하나 이상 등록해 주세요.');
     const variantIds=new Set();
     for(const v of value.variants) {
-      object(v);onlyKeys(v,['id','name','time','revisions','activeRevisionId','workFilePath']);id(v.id);requireValue(!variantIds.has(v.id),'변형 식별자가 중복되었습니다.');variantIds.add(v.id);text(v.name,160,'변형 이름',true);requireValue(['day','night','other'].includes(v.time as string),'시간대 분류를 확인해 주세요.');id(v.activeRevisionId);array(v.revisions,100);requireValue(v.revisions.length>0,'수정본이 하나 이상 필요합니다.');
+      object(v);onlyKeys(v,['id','name','time','revisions','activeRevisionId','workFilePath']);id(v.id);requireValue(!variantIds.has(v.id),'변형 식별자가 중복되었습니다.');variantIds.add(v.id);text(v.name,160,'변형 이름',true);known(v.time,['day','night','other'],'시간대 분류를 확인해 주세요.');id(v.activeRevisionId);array(v.revisions,100);requireValue(v.revisions.length>0,'수정본이 하나 이상 필요합니다.');
       if('workFilePath' in v)text(v.workFilePath,4096,'작업파일 경로');
       const revisionIds=new Set();
       for(const r of v.revisions){object(r);onlyKeys(r,['id','imageUrl','filePath','createdAt','sourceImagePath']);id(r.id);requireValue(!revisionIds.has(r.id),'수정본 식별자가 중복되었습니다.');revisionIds.add(r.id);image(r.imageUrl);text(r.filePath,4096,'원본 파일 경로');if('sourceImagePath' in r)text(r.sourceImagePath,4096,'이미지파일 경로');text(r.createdAt,64,'등록 시간',true);requireValue(Number.isFinite(Date.parse(r.createdAt)),'등록 시간이 올바르지 않습니다.');}

@@ -5,11 +5,11 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Map3DProps, Map3DViewState } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView } from './map3dScene';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView } from './map3dScene';
 import type { Map3DPalette, MapPickHit } from './map3dScene';
 import { MapNodeGizmo, mapGizmoSetup } from './BackgroundMapCameraGizmo';
 import { stackedMapNodeIds } from './mapGeometry';
-import { MAP_SPATIAL_DEFAULTS, cameraAspect, nodeWorldPose, verticalFov } from './mapSpatial';
+import { MAP_SPATIAL_DEFAULTS, cameraAspect, isRoadSpace, nodeWorldPose, verticalFov } from './mapSpatial';
 import './backgrounds-map-3d.css';
 
 const UNAVAILABLE_AT_START = '이 PC에서는 3D 화면을 열 수 없어 평면 도면으로 보여 드립니다. 편집하던 내용은 그대로 있습니다.';
@@ -44,6 +44,8 @@ function readPalette(element: HTMLElement): Map3DPalette {
     light, background: hex('--color-bg-primary', base.background), card: hex('--color-bg-card', base.card), border: hex('--color-bg-border', base.border),
     accent: hex('--color-accent', base.accent), accentSub: hex('--color-accent-sub', base.accentSub),
     symbol: light ? 0x4f8f9a : base.symbol, camera: base.camera, cameraLens: base.cameraLens,
+    // The light values of the road are in the stylesheet alone.
+    road: hex('--bmap-road', base.road), roadMark: hex('--bmap-road-mark', base.roadMark),
     text: css('--color-text-primary', base.text), halo: css('--color-bg-primary', base.halo), font: style.fontFamily || base.font,
   };
 }
@@ -433,7 +435,8 @@ class Map3DViewport {
   private applyGizmo(): void {
     const props = this.props, id = props.selectedId;
     const node = id ? props.map.nodes.find(item => item.id === id) : undefined, root = id ? this.scene3d.root(id) : null;
-    this.gizmo.setTarget(node && root && this.gizmoAllowed(props, id) ? { id: node.id, type: node.type, root } : null, props.gizmoMode);
+    // A road has no height to size.
+    this.gizmo.setTarget(node && root && this.gizmoAllowed(props, id) ? { id: node.id, type: node.type, root, flat: node.type === 'space' && isRoadSpace(node) } : null, props.gizmoMode);
   }
   /** `select`: the left button belongs to picking and the gizmo. `look`: the left button turns the world. */
   private applyOrbit(): void {
@@ -559,7 +562,7 @@ class Map3DViewport {
     if (onHandle) {
       // Never a fresh pick from a handle: only the next of the pile the selected item is in.
       const selected = props.map.nodes.find(node => node.id === selectedId);
-      const pile = !selected ? [] : selected.type !== 'space' ? stackedMapNodeIds(props.map, selected.id) : again ? mapFloorPile(hits, props.map) : [];
+      const pile = !selected ? [] : selected.type !== 'space' ? stackedMapNodeIds(props.map, selected.id) : again ? mapSpacePile(hits, props.map) : [];
       if (!selected || next === null || next === selected.id || !pile.includes(selected.id) || !pile.includes(next)) return;
     }
     this.turn = top === null ? null : { hitId: top, pickedId: next };     // before onSelect: the props that come back must find it

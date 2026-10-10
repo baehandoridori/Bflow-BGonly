@@ -2,9 +2,12 @@
 -- Prerequisites: public.users, public.episodes, public.app_session_user_id(text).
 -- Apply separately from the application release. This file never seeds production demo data.
 -- Applied to production on 2026-10-08 as 20261008035103 (background_library).
--- Follow-up: 2026-10-07-background-map-3d.sql widens background_library_validate_entity for the
--- vertical-axis map fields. This file restores the narrower validator, so after EVERY run of this
--- file run the 3D file again; until then saves that touch a map carrying those fields are rejected.
+-- Follow-up chain: 2026-10-07-background-map-3d.sql (vertical-axis map fields), then
+-- 2026-10-09-background-map-elements.sql (stairs symbol, road spaces, camera colours). Each replaces
+-- background_library_validate_entity with a wider one. This file restores the narrowest validator, so
+-- after EVERY run of this file run both again, in that order; until then every write that leaves a map
+-- with one of their fields stored is rejected with 22023 (in practice every edit). Do not delete or
+-- strip such a map to get past the error: apply the chain again.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '45s';

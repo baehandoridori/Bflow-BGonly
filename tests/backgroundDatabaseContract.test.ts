@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { randomUUID,createHash } from 'node:crypto';
-import { BACKGROUND_SPATIAL_LIMITS } from '../src/features/backgrounds/domain.ts';
+import { BACKGROUND_CAMERA_COLORS, BACKGROUND_SPACE_SURFACES, BACKGROUND_SPATIAL_LIMITS, BACKGROUND_SYMBOL_KINDS } from '../src/features/backgrounds/domain.ts';
 import { mapSaveWasApplied } from '../src/features/backgrounds/mapWorkflow.ts';
 import { addMapCamera, applyNodeWorldPose } from '../src/features/backgrounds/mapGeometry.ts';
-import { cameraOrientation, nodeOrientation } from '../src/features/backgrounds/mapSpatial.ts';
+import { SYMBOL_VOLUME_HEIGHTS, cameraOrientation, nodeOrientation } from '../src/features/backgrounds/mapSpatial.ts';
 
 const migration=(name:string)=>readFileSync(new URL(`../DEVLOG/migrations/${name}`,import.meta.url),'utf8');
-// The 3D file replaces one function of the base file, so every run applies them in this order.
-const sql=migration('2026-09-21-background-library.sql'),sql3d=migration('2026-10-07-background-map-3d.sql');
+// The 3D file replaces one function of the base file and the elements file replaces it again, so every run applies them in this order.
+const sql=migration('2026-09-21-background-library.sql'),sql3d=migration('2026-10-07-background-map-3d.sql'),sqlElements=migration('2026-10-09-background-map-elements.sql');
 const runtime=process.env.BFLOW_PGLITE_MODULE;
 const id=()=>randomUUID();
 const place=(name='교실',parentId:string|null=null)=>({id:id(),revision:0,name,parentId,folderPath:''});
@@ -74,6 +74,123 @@ test('3D migration header tells the operator to apply it again after every run o
   assert.ok(sql3d.indexOf('-- Re-run this file after every run')<sql3d.indexOf('BEGIN;'));
 });
 
+test('요소 파일은 검증 함수 하나만 바꿔 넣고, 기본값을 넣지 않고, 잠금을 다시 돈다',()=>{
+  const body=code(sqlElements);
+  assert.match(sqlElements,/^-- Prerequisites: 2026-09-21-background-library\.sql, then 2026-10-07-background-map-3d\.sql/m);
+  assert.match(body,/^BEGIN;\r?\nSET LOCAL lock_timeout = '5s';\r?\nSET LOCAL statement_timeout = '45s';/m);assert.match(body,/^COMMIT;\s*$/m);
+  assert.deepEqual(body.match(/CREATE OR REPLACE FUNCTION public\.\w+/g),['CREATE OR REPLACE FUNCTION public.background_library_validate_entity']);
+  // Refuses to run without the base file, and on the base validator: the applied chain stays base -> 3D -> this file.
+  assert.match(body,/to_regprocedure\('public\.background_library_validate_entity\(text,jsonb\)'\) IS NULL/);
+  assert.match(body,/position\('n-spatial' IN body\)=0/);assert.equal(body.match(/ERRCODE='55000'/g)?.length,2);
+  // The strings above being present does not mean the second guard can fire: without the prosrc read, with the
+  // raise in a dead branch, or placed below the function it never does. So what runs before the function is pinned whole.
+  const lines=sqlElements.split(/\r?\n/),begin=lines.indexOf('BEGIN;'),create=lines.indexOf('CREATE OR REPLACE FUNCTION public.background_library_validate_entity(kind TEXT, v JSONB)');
+  assert.ok(begin>=0&&create>begin);
+  assert.deepEqual(lines.slice(begin,create),[
+    'BEGIN;',"SET LOCAL lock_timeout = '5s';","SET LOCAL statement_timeout = '45s';",'',
+    'DO $$ DECLARE body TEXT; BEGIN',
+    " IF to_regprocedure('public.background_library_validate_entity(text,jsonb)') IS NULL THEN",
+    "  RAISE EXCEPTION '2026-09-21-background-library.sql 을 먼저 적용해야 합니다.' USING ERRCODE='55000';",
+    ' END IF;',
+    " SELECT p.prosrc INTO body FROM pg_proc p WHERE p.oid='public.background_library_validate_entity(text,jsonb)'::regprocedure;",
+    " IF position('n-spatial' IN body)=0 THEN",
+    "  RAISE EXCEPTION '2026-10-07-background-map-3d.sql 을 먼저 적용해야 합니다.' USING ERRCODE='55000';",
+    ' END IF;',
+    'END $$;','',
+  ]);
+  assert.match(body,/RETURNS VOID LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp/);
+  assert.doesNotMatch(body,/jsonb_set|jsonb_insert|jsonb_build_object|jsonb_strip_nulls|COALESCE|\|\||DEFAULT|\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE TABLE)\b/i);
+  assert.match(body,/REVOKE ALL PRIVILEGES ON FUNCTION %s FROM PUBLIC/);assert.match(body,/REVOKE ALL PRIVILEGES ON FUNCTION %s FROM %I/);
+  assert.match(body,/GRANT EXECUTE ON FUNCTION public\.background_library_read\(text\),public\.background_library_execute\(text,text,jsonb\) TO %I/);
+  assert.match(body,/^NOTIFY pgrst, 'reload schema';/m);
+  // From the end of the function on, the file is the 3D file's, character for character: the three format strings
+  // above also match a lockdown with a narrower revoke loop or with one more grant after it.
+  const closing=(text:string)=>{const start=text.indexOf('CREATE OR REPLACE FUNCTION public.background_library_validate_entity('),end=text.indexOf('END $$;',start);assert.ok(start>=0&&end>start);return text.slice(end).split(/\r?\n/);};
+  assert.deepEqual(closing(sqlElements),closing(sql3d));
+});
+
+test('요소 파일은 3D 검증 함수의 모든 규칙을 글자 그대로 두고 정확히 셋을 더한다',()=>{
+  const base=entityValidator(sql3d),next=entityValidator(sqlElements);
+  const widened=base.map(line=>line
+    .replace("WHEN 'space' THEN ARRAY['elevation','volumeHeight']","WHEN 'space' THEN ARRAY['elevation','volumeHeight','surface']")
+    .replace("WHEN 'camera' THEN ARRAY['elevation','pitch','roll','aspect']","WHEN 'camera' THEN ARRAY['elevation','pitch','roll','aspect','color']")
+    .replace("'plant','custom')","'plant','custom','stairs')"));
+  assert.equal(widened.filter((line,index)=>line!==base[index]).length,3);
+  assert.deepEqual(next.filter(line=>widened.includes(line)),widened);
+  // The added lines are pinned whole: "passes when the key is absent" is the part a room without the key depends on.
+  const list = (names: readonly string[]) => names.map(name => `'${name}'`).join(',');
+  const added=next.filter(line=>!widened.includes(line));
+  assert.deepEqual(added,[
+    `    PERFORM public.background_library_require(NOT (n ? 'surface') OR n->>'surface' IN (${list(BACKGROUND_SPACE_SURFACES)}),'공간 종류가 올바르지 않습니다.');`,
+    `    PERFORM public.background_library_require(NOT (n ? 'color') OR n->>'color' IN (${list(BACKGROUND_CAMERA_COLORS)}),'카메라 색이 올바르지 않습니다.');`,
+  ]);
+  assert.equal(next.filter(line=>line.endsWith(`n->>'symbol' IN (${list(BACKGROUND_SYMBOL_KINDS)}),'사물 기호 또는 연결 공간이 올바르지 않습니다.');`)).length,1);
+  const after=(marker:string)=>{const at=next.findIndex(line=>line.includes(marker));assert.ok(at>=0,marker);return at+1;};
+  assert.equal(next.indexOf(added[0]),after("'공간의 바닥 높이 또는 입체 높이가 올바르지 않습니다.'"));
+  assert.equal(next.indexOf(added[1]),after("'카메라 높이, 위아래 각도, 기울기 또는 화면 비율이 올바르지 않습니다.'"));
+});
+
+test('SQL의 닫힌 목록은 앱이 검증에 쓰는 상수와 같다',()=>{
+  const body=code(sqlElements);
+  const names=(pattern:RegExp)=>{const found=[...body.matchAll(pattern)];assert.equal(found.length,1,String(pattern));return [...found[0][1].matchAll(/'([^']*)'/g)].map(match=>match[1]);};
+  assert.deepEqual(names(/n->>'symbol' IN \(([^)]*)\)/g),[...BACKGROUND_SYMBOL_KINDS]);
+  assert.deepEqual(names(/n->>'surface' IN \(([^)]*)\)/g),[...BACKGROUND_SPACE_SURFACES]);
+  const colors=names(/n->>'color' IN \(([^)]*)\)/g);
+  assert.deepEqual(colors,[...BACKGROUND_CAMERA_COLORS]);
+  for(const name of ['purple','amber'])assert.equal(colors.includes(name),false,name);
+  // Every kind of the type is in the list: the heights table is keyed by the type.
+  assert.deepEqual(Object.keys(SYMBOL_VOLUME_HEIGHTS).sort(),[...BACKGROUND_SYMBOL_KINDS].sort());
+});
+
+test('세 파일의 머리말과 운영 문서가 사슬 전체를 말하고, 옛 두 파일 규칙이 남아 있지 않다',()=>{
+  const elements='2026-10-09-background-map-elements.sql';
+  // The header ends at the statement line, as for the body hash below: a comment that mentions BEGIN; does not end it.
+  const header=(text:string)=>{const at=text.search(/^BEGIN;\r?$/m);assert.ok(at>=0);return text.slice(0,at);};
+  const doc=(name:string)=>readFileSync(new URL(`../${name}`,import.meta.url),'utf8').split(/\r?\n/);
+  assert.match(header(sqlElements),/^-- Chain: base -> 3D -> this file\./m);
+  assert.match(header(sqlElements),/^-- Re-run this file after every run of either of them/m);
+  assert.ok(header(sql).includes(elements));assert.equal(header(sql).includes('run the 3D file again'),false);
+  // The base file undoes the most when run alone, so its header is held to what it must say, not only to what it must not.
+  assert.match(header(sql),/^-- after EVERY run of this file run both again, in that order/m);
+  assert.match(header(sql3d),/^-- After this file, run 2026-10-09-background-map-elements\.sql again as well/m);
+  // Under a narrower validator, deleting the map that carries the newer shapes makes the 22023 go away and cannot be undone.
+  assert.match(header(sql),/Do not delete or\r?\n-- strip such a map to get past the error: apply the chain again\./);
+  assert.match(header(sql3d),/Do not get past the error that way \(a deleted map cannot be\r?\n-- brought back\): apply the chain again\./);
+  assert.match(header(sqlElements),/do not get round the error that way \(a deleted map cannot be brought back\), apply\r?\n-- the chain again\./);
+  // "Re-run the 3D file after the base file" is a wrong instruction now: followed, it leaves the 3D validator in place.
+  // Per line, and these lines are whole paragraphs: a correct sentence that shares its line with 다시 실행 and one of
+  // the two phrases fails here as well. Reword that sentence; the check is the design's (4.4, D4).
+  for(const name of ['CLAUDE.md','AGENTS.md']){
+    const lines=doc(name);assert.ok(lines.length>1,name);
+    assert.deepEqual(lines.filter(line=>line.includes('다시 실행')&&(line.includes('3D 파일도')||line.includes('이 SQL도'))),[],name);
+  }
+  // Pinned only where later rounds append: the notice on line 3 of both documents is rewritten when the screen opens to the team.
+  const agents=doc('AGENTS.md');
+  assert.ok(agents.some(line=>['background_library_validate_entity',elements,'그 뒤의 파일을 모두 순서대로 다시 실행한다','그렇게 풀지 않는다','사슬을 다시 적용한다'].every(words=>line.includes(words))));
+  // A new install applies the whole chain, not the base file. The count word is left open for the round that adds a file.
+  assert.ok(agents.some(line=>line.includes('새 설치는 위의')&&line.includes('파일을 그 순서로 적용한다')));
+  // The handoff keeps the two-file decision as history, so each line that states it is corrected on the same line.
+  const handoff=doc('DEVLOG/background-3d-opus-handoff-2026-10-07.md');
+  const rerun=handoff.filter(line=>line.includes('3D SQL도 다시 실행한다')),noted=handoff.filter(line=>line.includes('3D SQL 재실행'));
+  assert.equal(rerun.length,1);assert.ok(rerun[0].includes(elements));
+  // The file name alone corrects nothing: the line that keeps the old sentence states the rule that replaced it.
+  assert.ok(rerun[0].includes('앞 파일을 다시 실행하면 그 뒤 파일을 모두 순서대로 다시 실행한다'));
+  assert.ok(noted.length>=1);for(const line of noted)assert.ok(line.includes(elements),line);
+});
+
+test('적용된 두 파일의 본문은 그대로다',()=>{
+  // Production holds these bodies (function md5 was compared there); only the comment lines above BEGIN; may change.
+  const applied:Record<string,string>={
+    '2026-09-21-background-library.sql':'9fae1b53f02379bf98af1a25f1cff04576d69d9fc59d7486da49b6cc6c4fd5eb',
+    '2026-10-07-background-map-3d.sql':'2e785dc4fe674136d620c0fd236b460572de7f782ca481bd8888e9ce15fc23b3',
+  };
+  for(const [name,expected] of Object.entries(applied)){
+    // A fresh checkout is CRLF: without the two guards the marker is missed and slice(0) hashes the header as well.
+    const text = migration(name).replace(/\r\n/g, '\n'); const at = text.indexOf('\nBEGIN;\n'); assert.ok(at >= 0); const hash = createHash('sha256').update(text.slice(at + 1)).digest('hex');
+    assert.equal(hash,expected,name);
+  }
+});
+
 test('background migration exposes only session RPCs and stores entities separately with durable tombstones',()=>{
   assert.match(sql,/background_library_entities/);assert.match(sql,/PRIMARY KEY \(kind,id\)/);assert.match(sql,/deleted_at TIMESTAMPTZ/);
   assert.match(sql,/ENABLE ROW LEVEL SECURITY/g);assert.match(sql,/app_session_user_id\(p_session_token\)/);assert.match(sql,/FROM PUBLIC/);
@@ -103,11 +220,13 @@ async function boot(){
     return db;
   } catch(error) {await db.close();throw error;}
 }
+/** The background_library_* functions a role may execute. The base-over-3D rerun test keeps its own copy of the query: that test is left as written. */
+const openTo=async(db:any,role:string):Promise<string[]>=>(await db.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'background_library_%' AND has_function_privilege($1::name,p.oid,'EXECUTE') ORDER BY 1",[role])).rows.map((row:any)=>row.proname);
 
 test('background RPC runtime validates sessions, permissions, CAS, idempotency and every entity reference',{skip:!runtime},async(t)=>{
   const db=await boot();
   try {
-    await db.exec(sql);await db.exec(sql);await db.exec(sql3d);await db.exec(sql3d);await db.exec('SET ROLE anon');
+    await db.exec(sql);await db.exec(sql);await db.exec(sql3d);await db.exec(sql3d);await db.exec(sqlElements);await db.exec(sqlElements);await db.exec('SET ROLE anon');
     const read=async(who:'admin'|'member'='admin')=>(await db.query('SELECT background_library_read($1) AS value',[tokens[who]])).rows[0].value;
     const run=async(command:any,who:'admin'|'member'='admin',requestId=id())=>(await db.query('SELECT background_library_execute($1,$2,$3) AS value',[tokens[who],requestId,command])).rows[0].value;
     const save=(kind:string,entity:any,expectedRevision:number|null=null,who:'admin'|'member'='admin')=>run({type:'save',kind,entity,expectedRevision},who);
@@ -172,7 +291,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
     });
     await t.test('mixed maps persist doors and furniture, keep canonical permissions and reject invalid symbol writes atomically',async()=>{
       const room=space(classroom.id),m=map(classroom.id),door=symbol(room.id);
-      m.nodes=[room,{...camera(room.id),viewIds:[asset.id]},...['door','desk','chair','table','sofa','bed','cabinet','plant','custom'].map(kind=>({...door,id:id(),symbol:kind}))];
+      m.nodes=[room,{...camera(room.id),viewIds:[asset.id]},...BACKGROUND_SYMBOL_KINDS.map(kind=>({...door,id:id(),symbol:kind}))];
       const before=await read();await assert.rejects(save('map',m,null,'member'),{code:'42501'});assert.deepEqual(await read(),before);
       await save('map',m);assert.deepEqual((await read('member')).maps.find((item:any)=>item.id===m.id).nodes,m.nodes);
       const edited={...m,nodes:m.nodes.map(node=>node.type==='symbol'?{...node,hinge:'right',swing:'outward'}:node)};
@@ -283,6 +402,14 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       assert.deepEqual(await read(),before);assert.deepEqual(await run(command,'admin',requestId),before);
     });
     let tall:any;
+    // One bad node, refused alone and in a batch; `before` is the caller's snapshot and is still what is read afterwards.
+    const refusing=(before:any)=>async(type:NodeType,extra:Record<string,unknown>,message:RegExp)=>{
+      const entity={...map(),nodes:[{...plain[type](),...extra}]},label=`${type} ${JSON.stringify(extra)}`;
+      await assert.rejects(save('map',entity),{code:'22023',message},label);
+      // Also inside a batch next to an otherwise valid edit: nothing of the batch may land.
+      await assert.rejects(run({type:'save-maps',maps:[{entity:{...tall,name:'반영되면 안 됨'},expectedRevision:tall.revision},{entity,expectedRevision:null}]}),{code:'22023',message},label);
+      assert.deepEqual(await read(),before,label);
+    };
     await t.test('vertical-axis fields roundtrip exactly, plain nodes gain nothing and plan-only saves keep every value',async()=>{
       const room={...space(classroom.id),elevation:-12.5,volumeHeight:260.75},find=(snapshot:any)=>snapshot.maps.find((item:any)=>item.id===m.id);
       const m=map(classroom.id);m.nodes=[room,
@@ -297,10 +424,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       const renamed=find(await save('map',{...saved,name:'이름만 바꾼 도면'},1));assert.deepEqual(renamed,{...m,name:'이름만 바꾼 도면',revision:2});
       const moved={...renamed,nodes:renamed.nodes.map((node:any)=>node.type==='camera'?{...node,x:node.x+25,y:node.y-10,angle:-45}:node)};
       await save('map',moved,2);tall=find(await read('member'));assert.deepEqual(tall,{...moved,revision:3});
-      for(const role of ['anon','authenticated']){
-        const open=(await db.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'background_library_%' AND has_function_privilege($1::name,p.oid,'EXECUTE') ORDER BY 1",[role])).rows;
-        assert.deepEqual(open.map((row:any)=>row.proname),['background_library_execute','background_library_read']);
-      }
+      for(const role of ['anon','authenticated'])assert.deepEqual(await openTo(db,role),['background_library_execute','background_library_read']);
       await assert.rejects(db.query("SELECT background_library_validate_entity('map','{}'::jsonb)"),{code:'42501'});
     });
     await t.test('a lost reply is recognised only while the stored map equals every submitted vertical-axis value',async()=>{
@@ -319,14 +443,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       assert.equal(mapSaveWasApplied(after,next),true);assert.equal(mapSaveWasApplied(after,command),false);
     });
     await t.test('invalid vertical-axis values and misplaced or unknown keys are rejected with 22023 and change nothing',async()=>{
-      const before=await read();
-      const refuse=async(type:NodeType,extra:Record<string,unknown>,message:RegExp)=>{
-        const entity={...map(),nodes:[{...plain[type](),...extra}]},label=`${type} ${JSON.stringify(extra)}`;
-        await assert.rejects(save('map',entity),{code:'22023',message},label);
-        // Also inside a batch next to an otherwise valid edit: nothing of the batch may land.
-        await assert.rejects(run({type:'save-maps',maps:[{entity:{...tall,name:'반영되면 안 됨'},expectedRevision:tall.revision},{entity,expectedRevision:null}]}),{code:'22023',message},label);
-        assert.deepEqual(await read(),before,label);
-      };
+      const before=await read(),refuse=refusing(before);
       // NaN and ±Infinity have no JSON form and reach SQL as an explicit null.
       for(const [type,key] of slots){const [min,max]=spatialRange[key];
         for(const value of [null,NaN,Infinity,-Infinity,String(min),'',true,false,[],{},min-0.001,max+0.001,min-1,max+1])await refuse(type,{[key]:value},/높이|각도|기울기|비율/);
@@ -362,6 +479,35 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       }
       assert.deepEqual(current.nodes.slice(0,3).map((node:any)=>[Math.abs(node.x)<=100000,Math.abs(node.y)<=100000]),Array.from({length:3},()=>[true,true]));
       assert.equal(current.nodes[1].pitch,-90);assert.equal(current.revision,1+edits.length);
+    });
+    await t.test('계단·도로·카메라 색은 보낸 그대로 저장되고 없던 노드에는 아무것도 생기지 않는다',async()=>{
+      const m=map(classroom.id),find=(snapshot:any)=>snapshot.maps.find((item:any)=>item.id===m.id);
+      m.nodes=[{...symbol(),symbol:'stairs'},{...space(),surface:'road'},
+        {...space(),shape:'polygon',points:[{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}],surface:'road',elevation:30},
+        ...BACKGROUND_CAMERA_COLORS.map(color=>({...camera(),color})),{...camera(),elevation:150,pitch:-20,color:'teal'},
+        space(),camera(),symbol()];
+      // Lost-reply recovery takes the batch command, so the first save is sent as one.
+      const command:any={type:'save-maps',maps:[{entity:m,expectedRevision:null}]},stored=await run(command);
+      assert.deepEqual(find(stored),{...m,revision:1});
+      // Keys that were never set stay unset: the server writes no surface or colour into plain nodes.
+      for(const node of find(stored).nodes.slice(-3))for(const key of ['surface','color'])assert.equal(Object.hasOwn(node,key),false,`${node.type}.${key}`);
+      assert.equal(mapSaveWasApplied(stored,command),true);
+      // Another colour, or a road sent as a room, is a different save.
+      for(const [index,node] of m.nodes.entries()){
+        if('color' in node){const other=structuredClone(command);other.maps[0].entity.nodes[index].color=BACKGROUND_CAMERA_COLORS.find(color=>color!==node.color);assert.equal(mapSaveWasApplied(stored,other),false,`color ${index}`);}
+        if('surface' in node){const other=structuredClone(command);delete other.maps[0].entity.nodes[index].surface;assert.equal(mapSaveWasApplied(stored,other),false,`surface ${index}`);}
+      }
+      const renamed=find(await save('map',{...find(stored),name:'이름만 바꾼 도면'},1));assert.deepEqual(renamed,{...m,name:'이름만 바꾼 도면',revision:2});
+      assert.deepEqual(find(await read('member')),renamed);
+    });
+    await t.test('모르는 값·잘못된 타입·잘못 붙은 키는 22023으로 거절되고 아무것도 바뀌지 않는다',async()=>{
+      const refuse=refusing(await read());
+      for(const value of ['river','room','Road','',null,true,1,[],{}])await refuse('space',{surface:value},/공간 종류/);
+      for(const value of ['purple','amber','#ff0000','Red','',null,7,true,[],{}])await refuse('camera',{color:value},/카메라 색/);
+      // Each key belongs to one node type; anywhere else it is an unknown key.
+      for(const type of ['camera','symbol'] as const)await refuse(type,{surface:'road'},/도면 배치 항목/);
+      for(const type of ['space','symbol'] as const)await refuse(type,{color:'red'},/도면 배치 항목/);
+      await refuse('symbol',{symbol:'elevator'},/사물 기호/);
     });
     await t.test('role changes apply immediately and realtime never broadcasts entity content',async()=>{
       await db.exec('RESET ROLE');await db.exec("UPDATE users SET role='user' WHERE id='admin'");await db.exec('SET ROLE anon');
@@ -416,5 +562,93 @@ test('re-running the base migration over stored 3D maps loses nothing and is rep
       const open=(await db.query("SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname LIKE 'background_library_%' AND has_function_privilege($1::name,p.oid,'EXECUTE') ORDER BY 1",[role])).rows;
       assert.deepEqual(open.map((row:any)=>row.proname),['background_library_execute','background_library_read']);
     }
+  } finally {await db.close();}
+});
+
+test('3D 파일까지만으로는 새 모양이 거절되므로 요소 파일은 그 위에만 얹는다',{skip:!runtime},async()=>{
+  const db=await boot();
+  try {
+    // On an empty database the file stops at its first check and leaves nothing behind.
+    await assert.rejects(db.exec(sqlElements),{code:'55000',message:/background-library/});await db.exec('ROLLBACK');
+    assert.equal((await db.query("SELECT count(*)::int AS total FROM pg_proc WHERE proname LIKE 'background_library_%'")).rows[0].total,0);
+    // On the base validator it stops at the second one and the validator stays the base one.
+    await db.exec(sql);await assert.rejects(db.exec(sqlElements),{code:'55000',message:/3d/});await db.exec('ROLLBACK');
+    assert.equal((await db.query("SELECT p.prosrc FROM pg_proc p WHERE p.oid='public.background_library_validate_entity(text,jsonb)'::regprocedure")).rows[0].prosrc.includes('n-spatial'),false);
+    await db.exec(sql3d);await db.exec('SET ROLE anon');
+    const store=async(entity:any)=>(await db.query('SELECT background_library_execute($1,$2,$3) AS value',[tokens.admin,id(),{type:'save',kind:'map',entity,expectedRevision:null}])).rows[0].value.maps.find((item:any)=>item.id===entity.id);
+    const plan={...map(),nodes:[space(),camera(),symbol()]};
+    const tall={...map(),nodes:[{...space(),elevation:5,volumeHeight:250},{...camera(),elevation:150,pitch:-20,roll:10,aspect:16/9},{...symbol(),elevation:12.5,volumeHeight:75,pitch:30,roll:-15}]};
+    assert.deepEqual(await store(plan),{...plan,revision:1});assert.deepEqual(await store(tall),{...tall,revision:1});
+    // The 3D validator knows neither: the kind fails its closed list, the two keys fail the key list of their node.
+    const shapes:[string,()=>any,RegExp][]=[['stairs',()=>({...symbol(),symbol:'stairs'}),/사물 기호/],['surface',()=>({...space(),surface:'road'}),/도면 배치 항목/],['color',()=>({...camera(),color:'red'}),/도면 배치 항목/]];
+    for(const [label,node,message] of shapes)await assert.rejects(store({...map(),nodes:[node()]}),{code:'22023',message},label);
+    await db.exec('RESET ROLE');await db.exec(sqlElements);await db.exec('SET ROLE anon');
+    for(const [label,node] of shapes){const entity={...map(),nodes:[node()]};assert.deepEqual(await store(entity),{...entity,revision:1},label);}
+    // Rows written before the elements file was applied read back untouched afterwards.
+    const maps=(await db.query('SELECT background_library_read($1) AS value',[tokens.admin])).rows[0].value.maps;
+    for(const entity of [plan,tall])assert.deepEqual(maps.find((item:any)=>item.id===entity.id),{...entity,revision:1});
+  } finally {await db.close();}
+});
+
+test('앞 파일을 다시 돌려도 잃는 것이 없고 사슬을 다시 적용하면 고쳐진다',{skip:!runtime},async()=>{
+  const db=await boot();
+  try {
+    await db.exec(sql);await db.exec(sql3d);await db.exec(sqlElements);await db.exec('SET ROLE anon');
+    const read=async()=>(await db.query('SELECT background_library_read($1) AS value',[tokens.admin])).rows[0].value;
+    const run=async(command:any)=>(await db.query('SELECT background_library_execute($1,$2,$3) AS value',[tokens.admin,id(),command])).rows[0].value;
+    const save=(kind:string,entity:any,expectedRevision:number|null=null)=>run({type:'save',kind,entity,expectedRevision});
+    const apply=async(text:string)=>{await db.exec('RESET ROLE');await db.exec(text);await db.exec('SET ROLE anon');};
+    const find=(snapshot:any,entity:any)=>snapshot.maps.find((item:any)=>item.id===entity.id);
+    const put=async(entity:any)=>{const value=find(await save('map',entity),entity);assert.deepEqual(value,{...entity,revision:1});return value;};
+    // fresh carries what only the elements file accepts, tall what the 3D file added, flat neither.
+    let fresh=await put({...map(),nodes:[{...symbol(),symbol:'stairs'},{...space(),surface:'road'},{...camera(),color:'pink'}]});
+    // The stair stays first: a validator stops at the first bad node, and the /사물 기호/ pins below read the stair's
+    // message from the 3D validator. With the road or the coloured camera first it answers with the key-list message.
+    assert.equal(fresh.nodes[0].symbol,'stairs');
+    const tall=await put({...map(),nodes:[{...space(),elevation:5,volumeHeight:250},{...camera(),elevation:150,pitch:-90,roll:10,aspect:16/9},{...symbol(),elevation:12.5,volumeHeight:75,pitch:30,roll:-15}]});
+    let flat=await put({...map(),nodes:[space(),camera(),symbol()]});
+    await save('place',place());
+    // Four ordinary writes. Only the last one carries a new shape itself.
+    const writes=(label:string)=>[()=>save('place',place(`${label} 장소`)),()=>save('map',{...map(),name:`${label} 도면`}),
+      ()=>save('map',{...flat,name:`${label} 평면`},flat.revision),()=>save('map',{...fresh,name:`${label} 새 모양`},fresh.revision)];
+    const blocked=async(label:string,message:RegExp)=>{
+      const before=await read();
+      for(const write of writes(label))await assert.rejects(write(),{code:'22023',message},label);
+      assert.deepEqual(await read(),before,label);
+    };
+    const works=async(label:string)=>{
+      const before=await read();for(const write of writes(label))await write();
+      const after=await read();assert.equal(after.places.length,before.places.length+1,label);assert.equal(after.maps.length,before.maps.length+1,label);
+      flat={...flat,name:`${label} 평면`,revision:flat.revision+1};fresh={...fresh,name:`${label} 새 모양`,revision:fresh.revision+1};
+      // Renamed and nothing else: every node is still what was sent.
+      for(const entity of [fresh,tall,flat])assert.deepEqual(find(after,entity),entity,label);
+    };
+    let kept=await read();
+    // 1. The 3D file alone puts back the validator without the three additions. Each write re-checks every stored map,
+    // so the stored stair blocks the writes that carry none of them as well. Reading works and nothing is lost.
+    await apply(sql3d);assert.deepEqual(await read(),kept);await blocked('3D 파일만 다시',/사물 기호/);
+    await apply(sqlElements);assert.deepEqual(await read(),kept);await works('요소 파일 다시');
+    // 2. The base file alone puts back the plan-only validator, and the elements file refuses to run on it.
+    kept=await read();await apply(sql);assert.deepEqual(await read(),kept);await blocked('기본 파일만 다시',/도면 배치 항목|사물 기호/);
+    await db.exec('RESET ROLE');await assert.rejects(db.exec(sqlElements),{code:'55000',message:/3d/});await db.exec('ROLLBACK');await db.exec('SET ROLE anon');
+    // The 3D file is only half of the repair: the stair is still stored.
+    await apply(sql3d);await blocked('기본 파일 뒤 3D 파일까지',/사물 기호/);
+    await apply(sqlElements);assert.deepEqual(await read(),kept);await works('사슬을 끝까지 다시');
+    // 3. Not a way out, but the reason a 22023 is never answered by deleting the map: under the narrower validator the
+    // delete passes, every other write passes once the map is gone, and no command brings it back.
+    await apply(sql3d);await blocked('다시 3D 파일만',/사물 기호/);
+    await run({type:'delete',kind:'map',id:fresh.id,expectedRevision:fresh.revision});
+    await save('place',place('도면을 지운 뒤 장소'));
+    const renamed={...flat,name:'도면을 지운 뒤 평면',revision:flat.revision+1};await save('map',{...flat,name:renamed.name},flat.revision);
+    const after=await read();
+    assert.equal(find(after,fresh),undefined);assert.deepEqual(find(after,tall),tall);assert.deepEqual(find(after,flat),renamed);
+    // A grant that drifted in before the last run: every earlier file has locked the functions down and CREATE OR
+    // REPLACE keeps grants, so without a drift the closing check holds whether or not this file repeats the lockdown.
+    await db.exec('RESET ROLE');await db.exec('GRANT EXECUTE ON FUNCTION public.background_library_validate_entity(text,jsonb) TO PUBLIC,anon,authenticated');
+    for(const role of ['anon','authenticated'])assert.deepEqual(await openTo(db,role),['background_library_execute','background_library_read','background_library_validate_entity'],role);
+    // With the chain whole again new shapes are accepted, and the deleted map stays deleted.
+    await apply(sqlElements);await put({...map(),nodes:[{...symbol(),symbol:'stairs'}]});
+    for(const expected of [null,fresh.revision,fresh.revision+1])await assert.rejects(save('map',fresh,expected),{code:'40001'});
+    for(const role of ['anon','authenticated'])assert.deepEqual(await openTo(db,role),['background_library_execute','background_library_read'],role);
   } finally {await db.close();}
 });

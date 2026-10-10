@@ -1,5 +1,5 @@
 import { stackedMapNodeIds } from './mapGeometry.ts';
-import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraPitchLabel, mapPlanBounds, nodeElevation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees, projectCameraToPlan } from './mapSpatial.ts';
+import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraPitchLabel, isRoadSpace, mapPlanBounds, nodeElevation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees, projectCameraToPlan } from './mapSpatial.ts';
 import type { CameraPlanProjection } from './mapSpatial.ts';
 import { spacesAt } from './mapStack.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
@@ -178,9 +178,13 @@ export function planDegrees(value: number): string {
 export function planNodeName(node: BackgroundNode): string {
   return node.name.trim() || '이름 없음';
 }
+/** What a node is called on the companion plan: a road is a space with a name of its own. */
+export function planKindLabel(node: BackgroundNode): string {
+  return node.type === 'space' && isRoadSpace(node) ? '도로' : PLAN_KIND_LABELS[node.type];
+}
 /** Accessible name of a node on the plan: its name and what it is. */
 export function planNodeLabel(node: BackgroundNode): string {
-  return `${planNodeName(node)}, ${PLAN_KIND_LABELS[node.type]}`;
+  return `${planNodeName(node)}, ${planKindLabel(node)}`;
 }
 
 export type PlanReadoutItem = { key: 'direction' | 'pitch' | 'elevation' | 'fov' | 'floor' | 'volume'; label: string; value: string };
@@ -191,7 +195,7 @@ export function planReadoutText(item: PlanReadoutItem): string {
 /** Name, horizontal direction, up/down view, lens height and field of view of a camera. Roll is not part of it. */
 export function planCameraReadout(camera: BackgroundCamera): PlanReadout {
   const projection = projectCameraToPlan(camera);
-  return { name: planNodeName(camera), kind: PLAN_KIND_LABELS.camera, vertical: projection.vertical, items: [
+  return { name: planNodeName(camera), kind: planKindLabel(camera), vertical: projection.vertical, items: [
     { key: 'direction', label: '방향', value: planDegrees(cameraAngles(camera).angle) },
     { key: 'pitch', label: '', value: cameraPitchLabel(projection.pitch) },
     { key: 'elevation', label: '높이', value: planNumber(projection.elevation) },
@@ -200,10 +204,10 @@ export function planCameraReadout(camera: BackgroundCamera): PlanReadout {
 }
 /** Floor level and vertical size of a space or symbol. The plan depth (`height`) is never shown as a height. */
 export function planVolumeReadout(node: BackgroundSpace | BackgroundSymbol): PlanReadout {
-  return { name: planNodeName(node), kind: PLAN_KIND_LABELS[node.type], vertical: null, items: [
-    { key: 'floor', label: '바닥 높이', value: planNumber(nodeElevation(node)) },
-    { key: 'volume', label: '입체 높이', value: planNumber(nodeVolumeHeight(node)) },
-  ] };
+  const items: PlanReadoutItem[] = [{ key: 'floor', label: '바닥 높이', value: planNumber(nodeElevation(node)) }];
+  // A road has no walls: the height it may still store is not read out.
+  if (!(node.type === 'space' && isRoadSpace(node))) items.push({ key: 'volume', label: '입체 높이', value: planNumber(nodeVolumeHeight(node)) });
+  return { name: planNodeName(node), kind: planKindLabel(node), vertical: null, items };
 }
 export function planNodeReadout(node: BackgroundNode): PlanReadout {
   return node.type === 'camera' ? planCameraReadout(node) : planVolumeReadout(node);
@@ -227,7 +231,7 @@ export type PlanSideView = {
   /** Arrow at the pitch angle: straight up or down when vertical. */
   tip: BackgroundPoint;
   head: BackgroundPoint[];
-  /** Floor and top of the camera's own space, when it has one. */
+  /** Floor and top of the camera's own space, when it has one that is no road. */
   room: { top: number; bottom: number } | null;
 };
 /** Side elevation of one camera: how high it is and how far up or down it looks. */
@@ -237,12 +241,15 @@ export function planSideView(map: BackgroundMap, camera: BackgroundCamera): Plan
   let low = Math.min(0, elevation), high = Math.max(0, elevation), spaces = 0, own: { floor: number; top: number } | null = null;
   for (const node of map.nodes) {
     if (node.type !== 'space') continue;
-    const floor = nodeElevation(node), top = floor + nodeVolumeHeight(node);
+    // A road has no walls: its floor level alone is part of the range, and it is neither a yardstick nor a room.
+    const road = isRoadSpace(node), floor = nodeElevation(node), top = road ? floor : floor + nodeVolumeHeight(node);
     if (!Number.isFinite(floor) || !Number.isFinite(top)) continue;
-    low = Math.min(low, floor, top); high = Math.max(high, floor, top); spaces++;
+    low = Math.min(low, floor, top); high = Math.max(high, floor, top);
+    if (road) continue;
+    spaces++;
     if (node.id === camera.spaceId) own = { floor, top };
   }
-  // Without any space the default room height is the yardstick, so the camera still moves as it is lifted.
+  // Without any room the default room height is the yardstick, so the camera still moves as it is lifted.
   if (!spaces) high = Math.max(high, MAP_SPATIAL_DEFAULTS.spaceVolumeHeight);
   const span = Math.max(high - low, 1), y = (level: number) => box.bottom - (level - low) / span * (box.bottom - box.top);
   const lens = { x: box.cameraX, y: y(elevation) };

@@ -1,4 +1,20 @@
 .bmap-layout { display:flex; min-height:500px; height:100%; overflow:hidden; border-top:1px solid rgb(var(--color-bg-border)); background:rgb(var(--color-bg-primary)); color:rgb(var(--color-text-primary)); }
+/* Colours of the map editor that are no theme colour: one camera (default = the amber it always was), and the road. */
+.bmap-layout { --bmap-cam:230 181 120; --bmap-cam-mark:55 39 21; --bmap-road:154 161 173; --bmap-road-mark:227 230 236; }
+[data-color-mode="light"] .bmap-layout { --bmap-road:93 100 112; --bmap-road-mark:58 63 71; }
+.bmap-layout [data-camera-color] { --bmap-cam-mark:var(--color-bg-primary); }
+.bmap-layout [data-camera-color="red"] { --bmap-cam:242 114 107; }
+.bmap-layout [data-camera-color="lime"] { --bmap-cam:183 216 75; }
+.bmap-layout [data-camera-color="green"] { --bmap-cam:95 207 139; }
+.bmap-layout [data-camera-color="teal"] { --bmap-cam:69 207 196; }
+.bmap-layout [data-camera-color="blue"] { --bmap-cam:99 169 247; }
+.bmap-layout [data-camera-color="pink"] { --bmap-cam:245 143 184; }
+[data-color-mode="light"] .bmap-layout [data-camera-color="red"] { --bmap-cam:194 54 47; }
+[data-color-mode="light"] .bmap-layout [data-camera-color="lime"] { --bmap-cam:95 127 15; }
+[data-color-mode="light"] .bmap-layout [data-camera-color="green"] { --bmap-cam:31 138 76; }
+[data-color-mode="light"] .bmap-layout [data-camera-color="teal"] { --bmap-cam:11 138 130; }
+[data-color-mode="light"] .bmap-layout [data-camera-color="blue"] { --bmap-cam:30 111 208; }
+[data-color-mode="light"] .bmap-layout [data-camera-color="pink"] { --bmap-cam:194 63 124; }
 .bmap-layout button,.bmap-layout input,.bmap-layout select { font:inherit; }
 .bmap-layout button { cursor:pointer; }
 .bmap-layout button:disabled { cursor:not-allowed; opacity:.42; }
@@ -43,31 +59,38 @@
 .bmap-divider { width:1px; background:rgb(var(--color-bg-border)); margin:3px; }
 .bmap-canvas { width:100%; height:0; flex:1; min-height:0; touch-action:none; user-select:none; }
 .bmap-canvas.tool-hand { cursor:grab; }
-.bmap-canvas.tool-rect,.bmap-canvas.tool-ellipse,.bmap-canvas.tool-polygon { cursor:crosshair; }
+.bmap-canvas.tool-rect,.bmap-canvas.tool-ellipse,.bmap-canvas.tool-polygon,.bmap-canvas.tool-road { cursor:crosshair; }
 .bmap-space { cursor:pointer; }
 .bmap-space>rect,.bmap-space>ellipse,.bmap-space>polygon { fill:rgb(var(--color-accent) / .10); stroke:rgb(var(--color-accent-sub) / .52); stroke-width:1.5; vector-effect:non-scaling-stroke; }
 .bmap-space:hover>rect,.bmap-space:hover>ellipse,.bmap-space:hover>polygon { fill:rgb(var(--color-accent) / .18); stroke:rgb(var(--color-accent-sub)); }
 .bmap-space.is-selected>rect,.bmap-space.is-selected>ellipse,.bmap-space.is-selected>polygon { fill:rgb(var(--color-accent) / .21); stroke:rgb(var(--color-accent-sub)); stroke-width:2.5; }
 .bmap-space.is-locked>rect,.bmap-space.is-locked>ellipse,.bmap-space.is-locked>polygon { stroke-dasharray:6 3; }
+/* A road: a grey floor. No width and no dashes here: the selected width and the dashes of a locked space come from the rules above. */
+.bmap-space.is-road>rect,.bmap-space.is-road>ellipse,.bmap-space.is-road>polygon { fill:rgb(var(--bmap-road) / .22); stroke:rgb(var(--bmap-road) / .6); }
+.bmap-space.is-road:hover>rect,.bmap-space.is-road:hover>ellipse,.bmap-space.is-road:hover>polygon { fill:rgb(var(--bmap-road) / .3); stroke:rgb(var(--bmap-road)); }
+.bmap-space.is-road.is-selected>rect,.bmap-space.is-road.is-selected>ellipse,.bmap-space.is-road.is-selected>polygon { fill:rgb(var(--bmap-road) / .34); stroke:rgb(var(--color-accent-sub)); }
+.bmap-road-line { fill:none; stroke:rgb(var(--bmap-road-mark) / .85); stroke-width:1.5; stroke-dasharray:9 7; vector-effect:non-scaling-stroke; pointer-events:none; }
 .bmap-space text { font-size:calc(15px * var(--bmap-label-scale,1)); fill:rgb(var(--color-text-primary)); font-weight:550; }
 .bmap-space text.bmap-space-detail { font-size:calc(10px * var(--bmap-label-scale,1)); fill:rgb(var(--color-text-secondary)); font-weight:400; transform:translateY(calc(15px * (var(--bmap-label-scale,1) - 1))); }
+/* The name of a road sits on its centre line. The outline behind the letters is scaled like the letters, so it hides the line at any zoom. */
+.bmap-space.is-road text { paint-order:stroke; stroke:rgb(var(--color-bg-primary)); stroke-width:calc(4px * var(--bmap-label-scale,1)); stroke-linejoin:round; }
 .bmap-handles circle,.bmap-handles rect { fill:rgb(var(--color-bg-card)); stroke:rgb(var(--color-accent-sub)); stroke-width:2; vector-effect:non-scaling-stroke; }
 .bmap-handles line { stroke:rgb(var(--color-accent-sub)); stroke-width:1; vector-effect:non-scaling-stroke; }
 .bmap-resize-handle { cursor:nwse-resize; }
 .bmap-rotate-handle { cursor:crosshair; }
 .bmap-camera { cursor:pointer; }
-.bmap-camera circle { fill:#e6b578; stroke:rgb(var(--color-bg-primary)); stroke-width:2; }
-.bmap-camera .bmap-camera-cone { fill:#e6b57820; stroke:#e6b57865; stroke-width:1; vector-effect:non-scaling-stroke; }
-.bmap-camera line { stroke:#e6b578; stroke-width:1.5; vector-effect:non-scaling-stroke; }
-.bmap-camera .bmap-camera-arrow { fill:#372715; pointer-events:none; }
-.bmap-camera.is-selected .bmap-camera-cone { fill:#e6b57840; stroke:#e6b578; stroke-width:2; }
+.bmap-camera circle { fill:rgb(var(--bmap-cam)); stroke:rgb(var(--color-bg-primary)); stroke-width:2; }
+.bmap-camera .bmap-camera-cone { fill:rgb(var(--bmap-cam) / .1255); stroke:rgb(var(--bmap-cam) / .3961); stroke-width:1; vector-effect:non-scaling-stroke; }
+.bmap-camera line { stroke:rgb(var(--bmap-cam)); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+.bmap-camera .bmap-camera-arrow { fill:rgb(var(--bmap-cam-mark)); pointer-events:none; }
+.bmap-camera.is-selected .bmap-camera-cone { fill:rgb(var(--bmap-cam) / .251); stroke:rgb(var(--bmap-cam)); stroke-width:2; }
 /* Straight up or down has no horizontal direction: a ring with a dot (up) or a cross (down) replaces the fan. */
-.bmap-camera .bmap-camera-ring { fill:#e6b57826; stroke:#e6b578; stroke-width:1.5; vector-effect:non-scaling-stroke; }
-.bmap-camera.is-selected .bmap-camera-ring { fill:#e6b57840; stroke-width:2.5; }
-.bmap-camera .bmap-camera-mark { fill:#372715; stroke:#372715; stroke-width:2.4; stroke-linecap:round; pointer-events:none; }
+.bmap-camera .bmap-camera-ring { fill:rgb(var(--bmap-cam) / .149); stroke:rgb(var(--bmap-cam)); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+.bmap-camera.is-selected .bmap-camera-ring { fill:rgb(var(--bmap-cam) / .251); stroke-width:2.5; }
+.bmap-camera .bmap-camera-mark { fill:rgb(var(--bmap-cam-mark)); stroke:rgb(var(--bmap-cam-mark)); stroke-width:2.4; stroke-linecap:round; pointer-events:none; }
 .bmap-camera circle.bmap-camera-mark { stroke:none; }
-.bmap-handles .bmap-camera-direction { stroke:#e6b578; cursor:crosshair; }
-.bmap-handles .bmap-camera-guide { stroke:#e6b578; stroke-dasharray:4 4; }
+.bmap-handles .bmap-camera-direction { stroke:rgb(var(--bmap-cam)); cursor:crosshair; }
+.bmap-handles .bmap-camera-guide { stroke:rgb(var(--bmap-cam)); stroke-dasharray:4 4; }
 .bmap-camera text { font-size:calc(12px * var(--bmap-label-scale,1)); fill:rgb(var(--color-text-primary)); paint-order:stroke; stroke:rgb(var(--color-bg-primary)); stroke-width:4; stroke-linejoin:round; transform:translateY(calc(10px * (var(--bmap-label-scale,1) - 1))); }
 .bmap-polygon-preview polyline { fill:rgb(var(--color-accent) / .08); stroke:rgb(var(--color-accent-sub)); stroke-width:1.5; stroke-dasharray:5 4; vector-effect:non-scaling-stroke; }
 .bmap-polygon-preview circle { fill:rgb(var(--color-accent-sub)); }
@@ -130,6 +153,7 @@
 .bmap-node-kind.is-symbol { color:#89b8bf; }
 [data-color-mode="light"] .bmap-node-kind.is-camera { color:#a8701f; }
 [data-color-mode="light"] .bmap-node-kind.is-symbol { color:#3f7f89; }
+.bmap-node-kind.is-camera[data-camera-color] { color:rgb(var(--bmap-cam)); }
 .bmap-node-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .bmap-node-lock { flex-shrink:0; font-size:10px; }
 .bmap-node-type { flex-shrink:0; font-size:10px; opacity:.75; }
@@ -317,6 +341,18 @@
   .bmap-3d-split:not(:has(>.bmap-plan-preview.is-collapsed)) { grid-template-columns:minmax(0,1fr) clamp(220px,30%,320px); grid-template-rows:minmax(0,1fr); }
   .bmap-3d-split>.bmap-plan-preview:not(.is-collapsed) { border-top:0; border-left:1px solid rgb(var(--color-bg-border)); }
 }
+.bmap-color-field { margin:12px 0 8px; }
+/* 12px between the circles and 8px above and below: room for a focus ring 7px out next to a pressed ring 4px out. */
+.bmap-color-swatches { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:8px; }
+.bg-library .bmap-color-swatch { width:22px; height:22px; min-height:22px; padding:0; border-radius:50%; border:1px solid rgb(var(--color-bg-border)); background:rgb(var(--bmap-cam)); }
+/* The shared hover of the library would repaint it with the accent tint. */
+.bg-library button.bmap-color-swatch:hover:not(:disabled) { background:rgb(var(--bmap-cam)); border-color:rgb(var(--color-text-primary)); }
+.bg-library .bmap-color-swatch[aria-pressed="true"] { box-shadow:0 0 0 2px rgb(var(--color-bg-card)), 0 0 0 4px rgb(var(--color-text-primary)); }
+/* The shared focus ring sits 2 to 4px out, exactly on the ring of the pressed colour: outside it, both are seen. */
+.bg-library .bmap-color-swatch:focus-visible { outline-offset:5px; }
+/* 'Back to the default colour' with nothing to reset: dimmed, and the hover of a text button does not light it. */
+.bg-library .bmap-color-reset { margin-left:4px; }
+.bg-library .bmap-color-reset[aria-disabled="true"],.bg-library .bmap-color-reset[aria-disabled="true"]:hover { color:rgb(var(--color-text-secondary) / .45); background:transparent; cursor:default; }
 .bmap-camera-properties { margin:12px 0 4px; }
 .bmap-camera-properties .bmap-hint strong { color:rgb(var(--color-text-primary)); font-weight:600; }
 .bmap-pitch-presets { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-bottom:8px; }

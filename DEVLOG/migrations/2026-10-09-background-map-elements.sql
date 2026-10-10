@@ -1,36 +1,40 @@
--- Background library maps: optional vertical-axis fields for the shared plan/3D map editor.
--- Prerequisite: 2026-09-21-background-library.sql. Apply this file right after it, in the same rollout.
--- Both files are applied together: the base file alone rejects every map that carries one of the
--- fields below. Applied to production on 2026-10-08 as 20261008035155 (background_map_3d), right
--- after the base file (20261008035103, background_library).
--- Re-run this file after every run of 2026-09-21-background-library.sql, not only after the first one.
--- The base file is re-runnable and puts back its own validator, which does not know the fields below.
--- Stored maps stay readable and nothing is lost, but each write re-checks every stored map, so one map
--- with a vertical field makes every background write fail with 22023 until this file is applied again.
--- After this file, run 2026-10-09-background-map-elements.sql again as well: it replaces the same
--- function with a wider one (symbol 'stairs', space.surface, camera.color), and this file puts back
--- the validator without them. Run alone after that file, this one rejects with 22023 every write that
--- leaves a map with a stair, a road or a camera colour stored (in practice every edit).
--- "Every write" above and here means every write that leaves such a map stored: deleting the map, or
--- saving it without those nodes, passes. Do not get past the error that way (a deleted map cannot be
--- brought back): apply the chain again.
+-- Background library maps: stairs symbol, road spaces and camera colours.
+-- Prerequisites: 2026-09-21-background-library.sql, then 2026-10-07-background-map-3d.sql. Apply this file
+-- after both, and before the app version that writes these shapes (v1.133.0): app first means every save
+-- that carries one of them fails with 22023.
+-- Chain: base -> 3D -> this file. All three replace public.background_library_validate_entity, each with a
+-- wider one, so the file that ran last decides what the server accepts.
+-- Re-run this file after every run of either of them, not only after the first one. The base file puts back
+-- the plan-only validator and the 3D file the validator without the additions below. Stored maps stay
+-- readable and nothing is lost, but each write re-checks every map that is still stored, so one stored
+-- stair, road or camera colour makes every write that leaves that map stored fail with 22023 (in practice
+-- every edit) until this file is applied again. A write that deletes that map, or saves it without those
+-- nodes, would pass: do not get round the error that way (a deleted map cannot be brought back), apply
+-- the chain again. While no such map is stored yet, only saves that carry one of these shapes fail.
+-- After a run of the base file, run the 3D file first: this file refuses to run on the base validator.
 --
--- Replaces public.background_library_validate_entity and nothing else. The body is the base body with
--- the map node branches widened; tests/backgroundDatabaseContract.test.ts fails if the two drift apart.
---   space : elevation [-100000,100000], volumeHeight [1,100000]
---   camera: elevation [-100000,100000], pitch [-90,90], roll [-180,180], aspect [0.1,10]
---   symbol: elevation [-100000,100000], volumeHeight [1,100000], pitch [-90,90], roll [-180,180]
--- The ranges mirror BACKGROUND_SPATIAL_LIMITS in src/features/backgrounds/domain.ts.
--- Every field is optional. A map saved without them stays valid and is stored without them: the server
+-- Replaces public.background_library_validate_entity and nothing else. The body is the 3D body with three
+-- additions; tests/backgroundDatabaseContract.test.ts fails if they drift apart.
+--   symbol: kind 'stairs' joins the closed list
+--   space : optional surface, one of ('road'); omitted = a room
+--   camera: optional color, one of ('red','lime','green','teal','blue','pink'); omitted = the amber it was
+-- `spatial` now also lists these two optional keys; the name is kept so every other line stays the 3D line.
+-- The lists mirror BACKGROUND_SYMBOL_KINDS, BACKGROUND_SPACE_SURFACES and BACKGROUND_CAMERA_COLORS in
+-- src/features/backgrounds/domain.ts.
+-- Both keys are optional. A map saved without them stays valid and is stored without them: the server
 -- validates and never fills in or rewrites a value, because lost-reply recovery compares the complete
--- submitted map with the stored one. width/height remain the plan size of a space or symbol.
+-- submitted map with the stored one. No stored row is touched by this file.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '45s';
 
-DO $$ BEGIN
+DO $$ DECLARE body TEXT; BEGIN
  IF to_regprocedure('public.background_library_validate_entity(text,jsonb)') IS NULL THEN
   RAISE EXCEPTION '2026-09-21-background-library.sql 을 먼저 적용해야 합니다.' USING ERRCODE='55000';
+ END IF;
+ SELECT p.prosrc INTO body FROM pg_proc p WHERE p.oid='public.background_library_validate_entity(text,jsonb)'::regprocedure;
+ IF position('n-spatial' IN body)=0 THEN
+  RAISE EXCEPTION '2026-10-07-background-map-3d.sql 을 먼저 적용해야 합니다.' USING ERRCODE='55000';
  END IF;
 END $$;
 
@@ -60,8 +64,8 @@ BEGIN
     WHEN 'camera' THEN ARRAY['id','type','name','spaceId','x','y','angle','fov','viewIds','locked']
     WHEN 'symbol' THEN ARRAY['id','type','name','symbol','spaceId','x','y','width','height','rotation','locked','hinge','swing'] END;
    spatial:=CASE n->>'type'
-    WHEN 'space' THEN ARRAY['elevation','volumeHeight']
-    WHEN 'camera' THEN ARRAY['elevation','pitch','roll','aspect']
+    WHEN 'space' THEN ARRAY['elevation','volumeHeight','surface']
+    WHEN 'camera' THEN ARRAY['elevation','pitch','roll','aspect','color']
     WHEN 'symbol' THEN ARRAY['elevation','volumeHeight','pitch','roll'] END;
    PERFORM public.background_library_require(keys IS NOT NULL AND public.background_library_object(n-spatial,keys) AND public.background_library_uuid(n->'id') AND public.background_library_text(n->'name',1,160),'도면 배치 항목이 올바르지 않습니다.');
    PERFORM public.background_library_require(public.background_library_number(n->'x',-100000,100000) AND public.background_library_number(n->'y',-100000,100000) AND jsonb_typeof(n->'locked')='boolean','도면 위치 또는 잠금 값이 올바르지 않습니다.');
@@ -69,6 +73,7 @@ BEGIN
     PERFORM public.background_library_require(public.background_library_uuid(n->'placeId',true) AND public.background_library_uuid(n->'childMapId',true),'공간의 장소 또는 상세 도면이 올바르지 않습니다.');
     PERFORM public.background_library_require(public.background_library_number(n->'width',10,100000) AND public.background_library_number(n->'height',10,100000) AND public.background_library_number(n->'rotation',-360,360),'공간 크기 또는 회전이 올바르지 않습니다.');
     PERFORM public.background_library_require((NOT (n ? 'elevation') OR public.background_library_number(n->'elevation',-100000,100000)) AND (NOT (n ? 'volumeHeight') OR public.background_library_number(n->'volumeHeight',1,100000)),'공간의 바닥 높이 또는 입체 높이가 올바르지 않습니다.');
+    PERFORM public.background_library_require(NOT (n ? 'surface') OR n->>'surface' IN ('road'),'공간 종류가 올바르지 않습니다.');
     PERFORM public.background_library_require(n->>'shape' IN ('rect','ellipse','polygon') AND public.background_library_array(n->'points',CASE WHEN n->>'shape'='polygon' THEN 3 ELSE 0 END,200),'공간 모양이 올바르지 않습니다.');
     FOR point IN SELECT * FROM jsonb_array_elements(n->'points') LOOP
      PERFORM public.background_library_require(public.background_library_object(point,ARRAY['x','y']) AND public.background_library_number(point->'x',0,1) AND public.background_library_number(point->'y',0,1),'다각형 좌표가 올바르지 않습니다.');
@@ -76,8 +81,9 @@ BEGIN
    ELSIF n->>'type'='camera' THEN
     PERFORM public.background_library_require(public.background_library_uuid(n->'spaceId',true) AND public.background_library_number(n->'angle',-360,360) AND public.background_library_number(n->'fov',1,179) AND public.background_library_ids(n->'viewIds'),'카메라 정보가 올바르지 않습니다.');
     PERFORM public.background_library_require((NOT (n ? 'elevation') OR public.background_library_number(n->'elevation',-100000,100000)) AND (NOT (n ? 'pitch') OR public.background_library_number(n->'pitch',-90,90)) AND (NOT (n ? 'roll') OR public.background_library_number(n->'roll',-180,180)) AND (NOT (n ? 'aspect') OR public.background_library_number(n->'aspect',0.1,10)),'카메라 높이, 위아래 각도, 기울기 또는 화면 비율이 올바르지 않습니다.');
+    PERFORM public.background_library_require(NOT (n ? 'color') OR n->>'color' IN ('red','lime','green','teal','blue','pink'),'카메라 색이 올바르지 않습니다.');
    ELSE
-    PERFORM public.background_library_require(public.background_library_uuid(n->'spaceId',true) AND n->>'symbol' IN ('door','desk','chair','table','sofa','bed','cabinet','plant','custom'),'사물 기호 또는 연결 공간이 올바르지 않습니다.');
+    PERFORM public.background_library_require(public.background_library_uuid(n->'spaceId',true) AND n->>'symbol' IN ('door','desk','chair','table','sofa','bed','cabinet','plant','custom','stairs'),'사물 기호 또는 연결 공간이 올바르지 않습니다.');
     PERFORM public.background_library_require(public.background_library_number(n->'width',10,100000) AND public.background_library_number(n->'height',10,100000) AND public.background_library_number(n->'rotation',-360,360),'기호 크기 또는 회전이 올바르지 않습니다.');
     PERFORM public.background_library_require(n->>'hinge' IN ('left','right') AND n->>'swing' IN ('inward','outward'),'문 경첩 또는 열림 방향이 올바르지 않습니다.');
     PERFORM public.background_library_require((NOT (n ? 'elevation') OR public.background_library_number(n->'elevation',-100000,100000)) AND (NOT (n ? 'volumeHeight') OR public.background_library_number(n->'volumeHeight',1,100000)) AND (NOT (n ? 'pitch') OR public.background_library_number(n->'pitch',-90,90)) AND (NOT (n ? 'roll') OR public.background_library_number(n->'roll',-180,180)),'사물의 바닥 높이, 입체 높이, 위아래 각도 또는 기울기가 올바르지 않습니다.');

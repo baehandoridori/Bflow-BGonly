@@ -18,6 +18,8 @@ export interface BackgroundSpace extends BackgroundPoint {
   elevation?: number;
   /** Vertical extent of the box. */
   volumeHeight?: number;
+  /** What the space is besides a room. Omitted = a room: written only for a road, and removed (never null) when it is a room again. */
+  surface?: BackgroundSpaceSurface;
 }
 export interface BackgroundCamera extends BackgroundPoint {
   id: string; type: 'camera'; name: string; spaceId: string | null;
@@ -30,9 +32,13 @@ export interface BackgroundCamera extends BackgroundPoint {
   roll?: number;
   /** Frame width / height. `fov` is the horizontal field of view. */
   aspect?: number;
+  /** Name of a colour of the camera palette. Omitted = the default amber: written only when one is picked, and removed (never null) for the default. */
+  color?: BackgroundCameraColor;
 }
 /** desk/sofa/cabinet/plant are retained for saved-map compatibility and render as custom. */
-export type BackgroundSymbolKind = 'door' | 'desk' | 'chair' | 'table' | 'sofa' | 'bed' | 'cabinet' | 'plant' | 'custom';
+export type BackgroundSymbolKind = 'door' | 'desk' | 'chair' | 'table' | 'sofa' | 'bed' | 'cabinet' | 'plant' | 'custom' | 'stairs';
+export type BackgroundSpaceSurface = 'road';
+export type BackgroundCameraColor = 'red' | 'lime' | 'green' | 'teal' | 'blue' | 'pink';
 export interface BackgroundSymbol extends BackgroundPoint {
   id: string; type: 'symbol'; name: string; symbol: BackgroundSymbolKind; spaceId: string | null;
   width: number; height: number; rotation: number; locked: boolean;

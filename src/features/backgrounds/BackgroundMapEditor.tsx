@@ -1,7 +1,7 @@
 import { Component, Fragment, Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { Move3d, Orbit, Rotate3d, Scale3d } from 'lucide-react';
-import type { BackgroundCamera, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSnapshot, BackgroundSpace, BackgroundSymbol, BackgroundSymbolKind } from './types';
+import type { BackgroundCamera, BackgroundCameraColor, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSnapshot, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbol, BackgroundSymbolKind } from './types';
 import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './BackgroundUI';
 import { BackgroundMapGallery } from './BackgroundMapGallery';
 import { BackgroundMapPanels } from './BackgroundMapPanels';
@@ -9,9 +9,10 @@ import { BackgroundMapPlanPreview } from './BackgroundMapPlanPreview';
 import { MapMarquee, MapNodeHandles, MapSnapGuides, MapVertexHandles } from './BackgroundMapPlanOverlays';
 import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { BackgroundMapSelectionSummary } from './BackgroundMapSelectionSummary';
-import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, transformMapSpace } from './mapGeometry';
+import { BackgroundMapCameraColor } from './BackgroundMapCameraColor';
+import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
-import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan } from './mapSpatial';
+import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapSelection, mapViewport, pickAction, revealPlanPoint, singleViewId, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
 import { MAP_EDIT_MARK, POLYGON_POINT_LIMIT, doubleClickNodeId, planDoubleClickAction, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
 import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
@@ -32,7 +33,7 @@ import './backgrounds-map.css';
 
 type Props = { snapshot: BackgroundSnapshot; pending: boolean; execute: (command: BackgroundCommand) => Promise<void>; onOpenView: (id: string, variantId?: string) => void; onOpenCatalog: () => void };
 /** `hand` pans the plan and orbits the 3D world. The drawing tools exist on the plan only. */
-type Tool = 'select' | 'hand' | 'rect' | 'ellipse' | 'polygon' | 'symbol';
+type Tool = 'select' | 'hand' | 'rect' | 'ellipse' | 'polygon' | 'road' | 'symbol';
 type CreateForm = { id: string; name: string; parentId: string | null; spaceId: string | null; placeId: string | null };
 /** The handle of the selected node a press landed on. The object is a point handle of a polygon: that point, or with `insert` the + of the edge that starts at it. */
 type PlanHandle = 'resize' | 'rotate' | { index: number; insert: boolean };
@@ -76,7 +77,7 @@ const message = (error: unknown) => error instanceof Error ? error.message : '�
 const normalizeAngle = (value: number) => ((value % 360) + 360) % 360;
 const uuid = () => crypto.randomUUID();
 const round = (value: number) => Math.round(value * 100) / 100;
-const isDrawTool = (tool: Tool) => tool === 'rect' || tool === 'ellipse' || tool === 'polygon';
+const isDrawTool = (tool: Tool) => tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || tool === 'road';
 /** Where a key is text. The selectors below are built on it, so a new kind of text field reaches both. */
 const textFields = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 const interactive = `${textFields}, button`;
@@ -87,6 +88,10 @@ const tickInputs = 'input:is([type="checkbox"], [type="radio"])';
 /** Where Space is text (it types, or opens the list of a select) or belongs to an open dialog: `textEntry` without the inputs Space only ticks. */
 const spaceEntry = `:is(${textEntry}):not(${tickInputs})`;
 const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔어요. 편집 내용은 그대로예요.';
+// The last sentence is how to get hold of a road that another space covers: it cannot be pressed there directly.
+const ROAD_HINT = '도로는 벽 없는 바닥이에요. 다른 공간과 겹치면 늘 아래에 깔려요. 다른 공간에 덮인 도로는 그 자리를 천천히 한 번 더 누르거나 오른쪽 목록에서 골라요.';
+const ROAD_HINT_ROUND = '둥근 도로에는 가운데 점선이 없어요.';
+const ROAD_HINT_NO_STRIP = '가운데 점선은 길 양쪽 옆줄의 점이 같은 수로 서로 마주 볼 때 보여요. 한쪽에 점을 더했으면 맞은편에도 하나 더해 주세요. 광장처럼 길 모양이 아닌 곳에는 그리지 않아요.';
 const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string }[] = [
   { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기' },
   { id: 'rotate', label: '회전', Icon: Rotate3d, hint: '고리를 끌어 돌리기' },
@@ -159,7 +164,7 @@ class Map3DBoundary extends Component<{ onFail: (reason: string) => void; childr
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-const kindLabel = (node: BackgroundNode) => node.type === 'camera' ? '카메라' : node.type === 'space' ? '공간' : getSymbolPreset(node.symbol).label;
+const kindLabel = (node: BackgroundNode) => node.type === 'camera' ? '카메라' : node.type === 'space' ? (isRoadSpace(node) ? '도로' : '공간') : getSymbolPreset(node.symbol).label;
 
 /** Every placement of the map, so items hidden under others (cameras on one spot) can each be picked. Every selected row is marked; the primary alone is the current one. */
 const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, onSelect }: { nodes: BackgroundNode[]; selectedIds: readonly string[]; primaryId: string | null; onSelect: (id: string) => void }) {
@@ -168,7 +173,7 @@ const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, onS
     <div className="bmap-section-heading"><strong>오브젝트</strong><span className="bmap-badge">{ordered.length}개</span></div>
     {ordered.length ? <ul className="bmap-node-list">{ordered.map(node => <li key={node.id}>
       <button type="button" className={selectedIds.includes(node.id) ? 'is-selected' : ''} aria-current={node.id === primaryId ? 'true' : undefined} aria-label={`${node.name || '이름 없음'}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}`} onClick={() => onSelect(node.id)}>
-        <span className={`bmap-node-kind is-${node.type}`} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
+        <span className={`bmap-node-kind is-${node.type}`} data-camera-color={node.type === 'camera' ? node.color : undefined} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : isRoadSpace(node) ? '═' : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
         <span className="bmap-node-name">{node.name || '이름 없음'}</span>
         {node.locked && <span className="bmap-node-lock" aria-hidden="true">🔒</span>}
         <span className="bmap-node-type" aria-hidden="true">{kindLabel(node)}</span>
@@ -480,6 +485,16 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (!current || !selected || !canEdit) return;
     updateMap(moveMapNode(current, selected.id, delta), { coalesceKey: `${selected.id}:${field}` });
   }
+  function changeSpaceSurface(surface: BackgroundSpaceSurface | null) {
+    if (!current || selected?.type !== 'space' || !canEdit) return;
+    const next = setSpaceSurface(selected, surface);
+    if (next !== selected) updateMap(replaceMapNode(current, next));     // one update, one undo step; the members stay where they are
+  }
+  function changeCameraColor(color: BackgroundCameraColor | null) {
+    if (!current || selected?.type !== 'camera' || !canEdit) return;
+    const next = setCameraColor(selected, color);
+    if (next !== selected) updateMap(replaceMapNode(current, next));     // one update per pick, one undo step
+  }
   function duplicateSymbol() {
     if (!current || selected?.type !== 'symbol' || !canEdit || pointerRef.current || doc.isGestureActive()) return;
     const copy: BackgroundSymbol = { ...selected, symbol: getSymbolPreset(selected.symbol).id, id: uuid(), x: selected.x + 24, y: selected.y + 24, locked: false };
@@ -612,8 +627,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       setSettingsForm(previous => previous?.id === id ? { ...previous, imageUrl } : previous);
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   }
-  function newSpace(shape: BackgroundSpace['shape'], origin: BackgroundPoint): BackgroundSpace {
-    return { id: uuid(), type: 'space', name: '새 공간', placeId: null, childMapId: null, x: origin.x, y: origin.y, width: 10, height: 10, rotation: 0, shape, points: [], locked: false };
+  function newSpace(shape: BackgroundSpace['shape'], origin: BackgroundPoint, road = false): BackgroundSpace {
+    return { id: uuid(), type: 'space', name: road ? '새 도로' : '새 공간', placeId: null, childMapId: null, x: origin.x, y: origin.y, width: 10, height: 10, rotation: 0, shape, points: [], locked: false,
+      ...(road ? { surface: 'road' as const } : {}) };
   }
   function finishPolygon() {
     if (!current || !canEdit || doc.isGestureActive()) return;
@@ -689,7 +705,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const hit = node && (live.nodes.find(item => item.id === node.id) ?? node);
     // The wheel button, the hand tool and a held Space only move the view, whatever was pressed.
     const panning = event.button === 1 || tool === 'hand' || spaceHeld.current;
-    const drawing = canEdit && (tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || tool === 'symbol');
+    const drawing = canEdit && (isDrawTool(tool) || tool === 'symbol');
     const held = liveSelection(current.id, live);                                       // the selection at this very moment
     // The same spot again: the select tool pressed this same topmost node last, and the one node that press left selected
     // is still the selection. Every press the canvas takes ends that memory; a select-tool press that picks or moves the node it
@@ -718,7 +734,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (!panning && canEdit && !handle && tool === 'symbol') { placeSymbol(point, live); return; }
     let mode: PointerSession['mode'] = 'pan', target = hit;
     if (!panning) {
-      if (canEdit && (tool === 'rect' || tool === 'ellipse')) { mode = 'draw'; target = newSpace(tool, point); }
+      if (canEdit && (tool === 'rect' || tool === 'ellipse' || tool === 'road')) { mode = 'draw'; target = newSpace(tool === 'road' ? 'rect' : tool, point, tool === 'road'); }
       else if (plan) { mode = plan.drag; target = plan.nodeId === null ? undefined : live.nodes.find(item => item.id === plan.nodeId); }
       else if (handle && canEdit && target && !target.locked) mode = typeof handle === 'object' ? 'vertex' : handle;
     }
@@ -924,6 +940,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const movedLink = linkTarget && current && linkTarget.parentId !== current.id;
   const draftChanged = mapDraftChanged(draft);
   const fieldLocked = !canEdit || !!selected?.locked;
+  /** The node in hand is a road: it has a floor height and no walls. */
+  const selectedRoad = selected?.type === 'space' && isRoadSpace(selected);
   /** Of the selected nodes, those a group delete leaves because they are locked, and those it removes. */
   const groupLocked = groupNodes.filter(node => node.locked).length, groupFree = groupNodes.length - groupLocked;
   const spaceName = (id: string | null) => current?.nodes.find(node => node.type === 'space' && node.id === id)?.name ?? '공간 미지정';
@@ -931,7 +949,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const toolItems: { id: Tool; label: string; title: string; icon: ReactNode; named?: boolean }[] = mode === 'plan'
     ? [{ id: 'select', label: '선택', title: editing ? '선택: 눌러 고르고 끌어 옮기기 · 빈 곳을 끌어 여러 개 고르기' : '선택: 눌러 고르기 · 끌면 화면이 움직여요', icon: '↖' },
       { id: 'hand', label: '화면 이동', title: '화면 이동: 끌어서 화면만 옮기기 · 스페이스를 누른 채 끌거나 휠 버튼으로 끌어도 돼요', icon: '✥' },
-      ...(editing ? [{ id: 'rect' as const, label: '사각형', title: '사각형', icon: '▭' }, { id: 'ellipse' as const, label: '타원', title: '타원', icon: '◯' }, { id: 'polygon' as const, label: '다각형', title: '다각형', icon: '⬡' }] : [])]
+      ...(editing ? [{ id: 'rect' as const, label: '사각형', title: '사각형', icon: '▭' }, { id: 'ellipse' as const, label: '타원', title: '타원', icon: '◯' }, { id: 'polygon' as const, label: '다각형', title: '다각형', icon: '⬡' }, { id: 'road' as const, label: '도로', title: '도로: 끌어서 곧은 길 그리기 · 꺾이는 길은 그린 뒤 다각형으로 바꿔 점을 다듬어요', icon: '═' }] : [])]
     : [{ id: 'select', label: '선택', title: editing ? '선택: 클릭해 고르고 손잡이로 옮기기' : '선택: 클릭해 고르기', icon: '↖', named: true },
       { id: 'hand', label: '둘러보기', title: '둘러보기: 끌어서 돌려 보기만 하고 배치는 그대로 둬요', icon: <Orbit size={17} strokeWidth={1.8} aria-hidden="true" />, named: true }];
   const footerHint = tool === 'symbol' ? `${getSymbolPreset(symbolKind).label} 놓을 ${mode === 'plan' ? '곳' : '바닥'}을 클릭 · Esc 취소`
@@ -976,9 +994,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             </div></>}
             {editing && <><span className="bmap-divider" /><button type="button" className="bmap-toolbar-named bmap-toolbar-camera" title="정해진 기본 위치에 새 카메라를 만들어요" aria-label="카메라 추가" disabled={!canEdit} onClick={addCamera}><span aria-hidden="true">◉</span><span>카메라 추가</span></button></>}
             {editing && <div className="bmap-symbol-picker">
-              <button type="button" className={tool === 'symbol' || symbolPaletteOpen ? 'is-active' : ''} title="문과 사물 기호" aria-label="기호" aria-expanded={symbolPaletteOpen} aria-controls="bmap-symbol-palette" disabled={disabled} onClick={() => setSymbolPaletteOpen(value => !value)}><SymbolIcon symbol={symbolKind} size={20} /><span>기호</span><small>⌄</small></button>
+              <button type="button" className={tool === 'symbol' || symbolPaletteOpen ? 'is-active' : ''} title="문·계단·사물 기호" aria-label="기호" aria-expanded={symbolPaletteOpen} aria-controls="bmap-symbol-palette" disabled={disabled} onClick={() => setSymbolPaletteOpen(value => !value)}><SymbolIcon symbol={symbolKind} size={20} /><span>기호</span><small>⌄</small></button>
               {symbolPaletteOpen && <div className="bmap-symbol-palette" id="bmap-symbol-palette" role="group" aria-label="배치할 기호">
-                <div className="bmap-palette-heading">문과 사물</div>
+                <div className="bmap-palette-heading">문·계단·사물</div>
                 <div className="bmap-symbol-options">{symbolCatalog.map(item => <button key={item.id} type="button" aria-label={`${item.label} 배치`} disabled={!canEdit} onClick={() => { setSymbolKind(item.id); setTool('symbol'); setPolygon([]); setSymbolPaletteOpen(false); focusCanvas(); }}><SymbolIcon symbol={item.id} size={28} /><span>{item.label}</span></button>)}</div>
                 <p>{mode === 'plan' ? '기호를 고른 뒤 도면을 클릭하세요.' : '기호를 고른 뒤 놓을 바닥을 클릭하세요.'}</p>
               </div>}
@@ -998,9 +1016,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
           }} onDoubleClick={canvasDoubleClick}>
             {current.imageUrl && <image href={current.imageUrl} x="0" y="0" width="1000" height="680" preserveAspectRatio="xMidYMid meet" opacity="0.65" pointerEvents="none" />}
             {stackedSpaces(current).map(node => {
-              const isSelected = shownIds.has(node.id);
-              return <g key={node.id} className={`bmap-space ${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
-                {node.shape === 'ellipse' ? <ellipse cx={node.width / 2} cy={node.height / 2} rx={node.width / 2} ry={node.height / 2} /> : node.shape === 'polygon' ? <polygon points={node.points.map(point => `${point.x * node.width},${point.y * node.height}`).join(' ')} /> : <rect width={node.width} height={node.height} rx="4" />}
+              const isSelected = shownIds.has(node.id), road = isRoadSpace(node), centre = roadCentreLine(node);
+              return <g key={node.id} className={`bmap-space ${road ? 'is-road ' : ''}${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${road ? ', 도로' : ''}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
+                {node.shape === 'ellipse' ? <ellipse cx={node.width / 2} cy={node.height / 2} rx={node.width / 2} ry={node.height / 2} /> : node.shape === 'polygon' ? <polygon points={node.points.map(point => `${point.x * node.width},${point.y * node.height}`).join(' ')} /> : <rect width={node.width} height={node.height} rx={road ? 0 : 4} />}
+                {/* The centre line is in the frame of the outline, centred on the box. The attribute keeps a bent line unfilled even where the style rule is missing. */}
+                {centre && <polyline className="bmap-road-line" fill="none" points={centre.map(point => `${point.x + node.width / 2},${point.y + node.height / 2}`).join(' ')} />}
                 <text x={node.width / 2} y={node.height / 2} textAnchor="middle" dominantBaseline="central" pointerEvents="none">{node.locked ? '🔒 ' : ''}{node.name}</text>
                 {node.childMapId && <text className="bmap-space-detail" x={node.width / 2} y={node.height / 2 + 21} textAnchor="middle" pointerEvents="none">상세 도면 ↗</text>}
               </g>;
@@ -1024,7 +1044,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               const plan = projectCameraToPlan(node), reach = Math.hypot(plan.direction.x, plan.direction.y);
               const half = node.fov / 2 * Math.PI / 180, radius = 80 * reach;
               const tilt = Math.abs(plan.pitch) >= 0.5 ? cameraPitchLabel(plan.pitch) : '';
-              return <g key={node.id} className={`bmap-camera ${shownIds.has(node.id) ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
+              return <g key={node.id} className={`bmap-camera ${shownIds.has(node.id) ? 'is-selected' : ''} ${plan.vertical ? 'is-vertical' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} data-camera-color={node.color} transform={`translate(${node.x} ${node.y})`} role="button" aria-label={`${node.name}, 카메라${tilt ? `, ${tilt}` : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.stopPropagation(); select(node.id); } }}>
                 {plan.vertical ? <>
                   <circle className="bmap-camera-ring" r="17" /><circle r="11" />
                   {plan.vertical === 'up' ? <circle className="bmap-camera-mark" r="3.5" /> : <path className="bmap-camera-mark" d="M -4.5 -4.5 L 4.5 4.5 M 4.5 -4.5 L -4.5 4.5" />}
@@ -1069,7 +1089,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
           {/* 3D works on one node. The group picked on the plan is kept, and nothing here takes it apart. */}
           {mode === '3d' && multiple && <p className="bmap-hint">{`평면에서 고른 ${selection.ids.length}개는 그대로 있어요. 3D에서는 하나씩만 다루고, 평면으로 돌아가면 ${selection.ids.length}개가 다시 선택돼 있어요.`}</p>}
           {selected ? <>
-            <div className="bmap-section-heading"><span className="bmap-eyebrow">{selected.type === 'space' ? '선택한 공간' : selected.type === 'symbol' ? '선택한 기호' : '선택한 카메라'}</span><button type="button" className="bmap-icon-button" aria-label="선택 해제" onClick={() => select(null)}>×</button></div>
+            <div className="bmap-section-heading"><span className="bmap-eyebrow">{selected.type === 'space' ? (isRoadSpace(selected) ? '선택한 도로' : '선택한 공간') : selected.type === 'symbol' ? '선택한 기호' : '선택한 카메라'}</span><button type="button" className="bmap-icon-button" aria-label="선택 해제" onClick={() => select(null)}>×</button></div>
             {editing ? <Field label="이름"><input value={selected.name} disabled={fieldLocked} onChange={event => patchNode({ name: event.target.value }, 'name')} onBlur={doc.endCoalescing} /></Field> : <h3 className="bmap-selected-name">{selected.name}</h3>}
             {selected.type === 'space' && <section className="bmap-connection" aria-label="공간의 상세 도면">
               <span className="bmap-eyebrow">이 공간 안으로</span>
@@ -1084,12 +1104,20 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               {/* The button goes away with its own click. The focus goes to the canvas, or the keys (undo is the only way back) would reach nothing. */}
               {selected.shape === 'rect' && <><button type="button" className="bmap-text-button" disabled={fieldLocked || gestureActive}
                 onClick={() => { const shaped = rectToPolygon(selected); if (shaped) { updateMap(replaceMapNode(current, shaped)); focusCanvas(); } }}>다각형으로 바꾸기</button>
-                <p className="bmap-hint">꼭짓점을 끌어 ㄱ자 같은 모양으로 고칠 수 있어요.</p></>}
+                <p className="bmap-hint">{isRoadSpace(selected) ? '꺾이는 길은 다각형으로 바꾼 뒤 점을 끌어 만들어요.' : '꼭짓점을 끌어 ㄱ자 같은 모양으로 고칠 수 있어요.'}</p></>}
               {selected.shape === 'polygon' && <p className="bmap-hint">점을 끌어 모양을 고쳐요. 변 가운데의 +를 끌면 점이 생기고, 점을 고른 뒤 Delete를 누르면 지워져요.</p>}
             </div>}
+            {editing && selected.type === 'space' && <>
+              <Field label="공간 종류"><select value={isRoadSpace(selected) ? 'road' : 'room'} disabled={fieldLocked || gestureActive}
+                onChange={event => changeSpaceSurface(event.target.value === 'road' ? 'road' : null)}><option value="room">방</option><option value="road">도로</option></select></Field>
+              <p className="bmap-hint">{isRoadSpace(selected) ? ROAD_HINT : '도로로 바꾸면 벽 없는 회색 바닥이 되고, 다른 공간 아래에 깔려요.'}</p>
+              {/* The centre line is the look of a road: where the shape has none, say why, or it reads as a bug. */}
+              {isRoadSpace(selected) && !roadCentreLine(selected) && <p className="bmap-hint">{selected.shape === 'ellipse' ? ROAD_HINT_ROUND : ROAD_HINT_NO_STRIP}</p>}
+            </>}
             {selected.type === 'camera' && (() => {
               const angles = cameraAngles(selected), aspect = cameraAspect(selected), preset = ASPECT_PRESETS.find(item => Math.abs(item.value - aspect) < 0.005);
               return <>
+                {editing && <BackgroundMapCameraColor color={selected.color} disabled={fieldLocked} onChange={changeCameraColor} />}
                 {editing ? <section className="bmap-camera-properties" key={`camera-${selected.id}`} aria-label="카메라 설정">
                   <div className="bmap-field-pair"><NumberField label="카메라 높이" value={nodeElevation(selected)} min={MAP_SPATIAL_LIMITS.elevation.min} max={MAP_SPATIAL_LIMITS.elevation.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} /><NumberField label="방향 (°)" value={selected.angle} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={angleValue => patchNode({ angle: normalizeAngle(angleValue) }, 'angle')} /></div>
                   <div className="bmap-field-pair"><NumberField label="위아래 각도 (°)" value={angles.pitch} min={MAP_SPATIAL_LIMITS.pitch.min} max={MAP_SPATIAL_LIMITS.pitch.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="기울기 (°)" value={angles.roll} min={MAP_SPATIAL_LIMITS.roll.min} max={MAP_SPATIAL_LIMITS.roll.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>
@@ -1114,10 +1142,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             </section>}
             {editing && <>
               {selected.type === 'space' ? <details className="bmap-disclosure" key={`place-${selected.id}`}><summary>배경 장소 연결<span>{snapshot.places.find(place => place.id === selected.placeId)?.name ?? '선택 안 함'}</span></summary><Field label="배경 장소"><select value={selected.placeId ?? ''} disabled={fieldLocked} onChange={event => patchNode({ placeId: event.target.value || null })}><option value="">나중에 연결</option>{snapshot.places.map(place => <option key={place.id} value={place.id}>{place.name}</option>)}</select></Field><p className="bmap-hint">장소를 연결하면 해당 배경 이미지들을 여기서 볼 수 있습니다.</p></details> : selected.type === 'camera' ? <details className="bmap-disclosure" key={`views-${selected.id}`}><summary>시점 연결<span>{selected.viewIds.length}개</span></summary><Field label="카메라가 있는 공간"><select value={selected.spaceId ?? ''} disabled={fieldLocked} onChange={event => patchNode({ spaceId: event.target.value || null })}><option value="">공간 밖 / 미지정</option>{current.nodes.filter(node => node.type === 'space').map(node => <option key={node.id} value={node.id}>{node.name}</option>)}</select></Field><fieldset className="bmap-view-select" disabled={fieldLocked}><legend>연결할 배경 시점</legend>{snapshot.views.map(item => <label key={item.id} className="bmap-check"><input type="checkbox" checked={selected.viewIds.includes(item.id)} onChange={event => patchNode({ viewIds: event.target.checked ? [...selected.viewIds, item.id] : selected.viewIds.filter(id => id !== item.id) })} />{item.name}</label>)}{!snapshot.views.length && <p className="bmap-hint">배경 목록에서 시점을 먼저 등록해 주세요.</p>}</fieldset></details> : null}
-              {selected.type !== 'camera' && <details className="bmap-disclosure" open key={`vertical-${selected.id}`}><summary>{selected.type === 'space' ? '높이' : '높이·기울기'}<span>입체 {Math.round(nodeVolumeHeight(selected))}</span></summary>
-                <div className="bmap-field-pair"><NumberField label="바닥 높이" value={nodeElevation(selected)} min={MAP_SPATIAL_LIMITS.elevation.min} max={MAP_SPATIAL_LIMITS.elevation.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} /><NumberField label="입체 높이" value={nodeVolumeHeight(selected)} min={MAP_SPATIAL_LIMITS.volumeHeight.min} max={MAP_SPATIAL_LIMITS.volumeHeight.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={volumeHeight => patchNode({ volumeHeight }, 'volumeHeight')} /></div>
+              {selected.type !== 'camera' && <details className="bmap-disclosure" open key={`vertical-${selected.id}`}><summary>{selected.type === 'space' ? '높이' : '높이·기울기'}<span>{selectedRoad ? `바닥 ${Math.round(nodeElevation(selected))}` : `입체 ${Math.round(nodeVolumeHeight(selected))}`}</span></summary>
+                <div className="bmap-field-pair"><NumberField label="바닥 높이" value={nodeElevation(selected)} min={MAP_SPATIAL_LIMITS.elevation.min} max={MAP_SPATIAL_LIMITS.elevation.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} />{!selectedRoad && <NumberField label="입체 높이" value={nodeVolumeHeight(selected)} min={MAP_SPATIAL_LIMITS.volumeHeight.min} max={MAP_SPATIAL_LIMITS.volumeHeight.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={volumeHeight => patchNode({ volumeHeight }, 'volumeHeight')} />}</div>
                 {selected.type === 'symbol' && <div className="bmap-field-pair"><NumberField label="앞뒤 기울기 (°)" value={nodeAngles(selected).pitch} min={MAP_SPATIAL_LIMITS.pitch.min} max={MAP_SPATIAL_LIMITS.pitch.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="좌우 기울기 (°)" value={nodeAngles(selected).roll} min={MAP_SPATIAL_LIMITS.roll.min} max={MAP_SPATIAL_LIMITS.roll.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>}
-                <p className="bmap-hint">{selected.type === 'space' ? '바닥 높이를 바꾸면 이 공간에 속한 카메라와 사물도 같은 만큼 함께 오르내려요. 입체 높이는 3D에서 보이는 벽 높이예요.' : '입체 높이는 3D에서 보이는 사물의 키예요. 기울여도 가로·세로 길이는 그대로예요.'}</p>
+                <p className="bmap-hint">{selectedRoad ? '바닥 높이를 바꾸면 이 도로에 속한 카메라와 사물도 같은 만큼 함께 오르내려요. 도로에는 벽이 없어서 입체 높이가 없어요.' : selected.type === 'space' ? '바닥 높이를 바꾸면 이 공간에 속한 카메라와 사물도 같은 만큼 함께 오르내려요. 입체 높이는 3D에서 보이는 벽 높이예요.' : '입체 높이는 3D에서 보이는 사물의 키예요. 기울여도 가로·세로 길이는 그대로예요.'}</p>
               </details>}
               <details className="bmap-disclosure" key={`geometry-${selected.id}`}><summary>위치·크기·잠금</summary>
                 <label className="bmap-check"><input type="checkbox" checked={selected.locked} disabled={!canEdit} onChange={event => patchNode({ locked: event.target.checked })} />위치와 속성 잠금</label>

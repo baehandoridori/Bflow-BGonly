@@ -29,6 +29,7 @@ export const MAP_SPATIAL_DEFAULTS = { spaceElevation: 0, spaceVolumeHeight: 180,
 /** Legacy kinds render as the generic object, so they share its height. */
 export const SYMBOL_VOLUME_HEIGHTS: Readonly<Record<BackgroundSymbolKind, number>> = {
   door: 160, chair: 70, table: 60, bed: 45, custom: 80, desk: 80, sofa: 80, cabinet: 80, plant: 80,
+  stairs: 180, // A flight climbs one storey: the default room height.
 };
 /** Every new camera starts here, whatever is clicked, selected or visible. */
 export const DEFAULT_MAP_CAMERA_POSE = { x: 500, y: 340, elevation: 120, angle: 0, pitch: 0, roll: 0, fov: 60, aspect: 16 / 9 } as const;
@@ -63,6 +64,10 @@ export function nodeVolumeHeight(node: BackgroundSpace | BackgroundSymbol): numb
   if (node.type === 'space') return MAP_SPATIAL_DEFAULTS.spaceVolumeHeight;
   return Object.prototype.hasOwnProperty.call(SYMBOL_VOLUME_HEIGHTS, node.symbol) ? SYMBOL_VOLUME_HEIGHTS[node.symbol] : SYMBOL_VOLUME_HEIGHTS.custom;
 }
+/** Whether a space is a road: a wall-less floor that lies under every other space. */
+export function isRoadSpace(space: BackgroundSpace): boolean { return space.surface === 'road'; }
+/** Height of the walls a space is drawn with and takes up in the world: none for a road. `nodeVolumeHeight` stays what is stored. */
+export function spaceWallHeight(space: BackgroundSpace): number { return isRoadSpace(space) ? 0 : nodeVolumeHeight(space); }
 export function cameraAngles(camera: BackgroundCamera): CameraAngles {
   return { angle: camera.angle, pitch: camera.pitch ?? MAP_SPATIAL_DEFAULTS.pitch, roll: camera.roll ?? MAP_SPATIAL_DEFAULTS.roll };
 }
@@ -210,6 +215,81 @@ export function spaceOutline(space: BackgroundSpace, ellipseSegments = 48): Back
   }
   if (space.shape === 'polygon' && space.points.length >= 3) return space.points.map(point => ({ x: (point.x - 0.5) * space.width, y: (point.y - 0.5) * space.height }));
   return [{ x: -halfWidth, y: -halfHeight }, { x: halfWidth, y: -halfHeight }, { x: halfWidth, y: halfHeight }, { x: -halfWidth, y: halfHeight }];
+}
+
+/** Even-odd test in the frame of an outline: the polygon branch of containsPoint (mapGeometry.ts), which is not imported here. */
+function outlineHolds(outline: readonly BackgroundPoint[], point: BackgroundPoint): boolean {
+  let inside = false;
+  for (let index = 0, previous = outline.length - 1; index < outline.length; previous = index++) {
+    const a = outline[index], b = outline[previous];
+    if ((a.y > point.y) !== (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+/**
+ * Centre line of a strip: an outline whose two sides have as many points and face each other. From `start` the points
+ * are paired off from one end of the road, a(i) going along one side and b(i) coming back along the other. A rung
+ * joins a pair and the line runs through the middles of the rungs. Null when this pairing is not a strip.
+ */
+function stripCentreLine(outline: readonly BackgroundPoint[], start: number): BackgroundPoint[] | null {
+  const count = outline.length, half = count / 2;
+  const a = (i: number) => outline[(start + i) % count], b = (i: number) => outline[(start - 1 - i + 2 * count) % count];
+  const turn = (p: BackgroundPoint, q: BackgroundPoint, r: BackgroundPoint) => (q.x - p.x) * (r.y - q.y) - (q.y - p.y) * (r.x - q.x);
+  const distance = (p: BackgroundPoint, q: BackgroundPoint) => Math.hypot(q.x - p.x, q.y - p.y);
+  // Every cell between two rungs is convex: the pairing neither crosses itself nor folds over.
+  for (let i = 0; i < half - 1; i++) {
+    const cell = [a(i), a(i + 1), b(i + 1), b(i)], turns = cell.map((corner, at) => turn(corner, cell[(at + 1) % 4], cell[(at + 2) % 4]));
+    if (!turns.every(value => value > 0) && !turns.every(value => value < 0)) return null;
+  }
+  const line = Array.from({ length: half }, (_, i) => ({ x: (a(i).x + b(i).x) / 2, y: (a(i).y + b(i).y) / 2 }));
+  // An inner rung crosses the road: 60 degrees or more from the way the line passes it. The two ends may be cut at a slant.
+  // That way is the bisector of the two parts of the line that meet at the rung, each taken at length one: the rung of a
+  // mitred corner is square to it however long the legs are. (The chord from the middle before to the middle after leans
+  // toward the longer leg, and a square corner would fail once one leg is some 3.7 times the other.) No part is without
+  // length here, as its cell would not be convex; one would leave NaN and fail the check all the same.
+  for (let i = 1; i < half - 1; i++) {
+    const rung = { x: b(i).x - a(i).x, y: b(i).y - a(i).y }, before = distance(line[i - 1], line[i]), after = distance(line[i], line[i + 1]);
+    const along = { x: (line[i].x - line[i - 1].x) / before + (line[i + 1].x - line[i].x) / after, y: (line[i].y - line[i - 1].y) / before + (line[i + 1].y - line[i].y) / after };
+    const across = Math.hypot(rung.x, rung.y), run = Math.hypot(along.x, along.y);
+    if (!(across > 0 && run > 0 && Math.abs(rung.x * along.x + rung.y * along.y) <= 0.5 * across * run)) return null;
+  }
+  // The line is no shorter than the longest rung: the pairing runs along the road, not across it.
+  let length = 0, widest = 0;
+  for (let i = 0; i < half; i++) widest = Math.max(widest, distance(a(i), b(i)));
+  for (let i = 0; i < half - 1; i++) length += distance(line[i], line[i + 1]);
+  if (!(length > 0 && length >= widest)) return null;
+  // The line stays inside the road.
+  for (let i = 0; i < half - 1; i++) if (!outlineHolds(outline, { x: (line[i].x + line[i + 1].x) / 2, y: (line[i].y + line[i + 1].y) / 2 })) return null;
+  return line;
+}
+/**
+ * Centre line of a road in the frame of spaceOutline (centred on the box centre, not rotated), or null when the space
+ * is no road or its shape has none.
+ */
+export function roadCentreLine(space: BackgroundSpace): BackgroundPoint[] | null {
+  const { width, height } = space;
+  if (!isRoadSpace(space) || !(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) return null;
+  if (space.shape === 'ellipse') return null;
+  // A rectangle, and a polygon drawn as its box: the long way, end to end. A square has the line along its width.
+  if (space.shape !== 'polygon' || space.points.length < 3) return width >= height ? [{ x: -width / 2, y: 0 }, { x: width / 2, y: 0 }] : [{ x: 0, y: -height / 2 }, { x: 0, y: height / 2 }];
+  const outline = spaceOutline(space);
+  if (outline.length % 2) return null;
+  // The smallest start that pairs the points into a strip.
+  for (let start = 0; start < outline.length / 2; start++) {
+    const line = stripCentreLine(outline, start);
+    if (line) return line;
+  }
+  return null;
+}
+/** The same line as absolute plan points (turned with the space). */
+export function roadCentrePlanLine(space: BackgroundSpace): BackgroundPoint[] | null {
+  const line = roadCentreLine(space);
+  if (!line) return null;
+  const centre = { x: space.x + space.width / 2, y: space.y + space.height / 2 };
+  return line.map(point => {
+    const turned = rotatePlan(point, space.rotation);
+    return { x: centre.x + turned.x, y: centre.y + turned.y };
+  });
 }
 
 export function nodeWorldPose(node: BackgroundNode): NodeWorldPose {
