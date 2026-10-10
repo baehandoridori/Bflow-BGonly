@@ -648,6 +648,9 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       // 알림은 App 창에서만 표시한다. popup까지 fanout되지만 현황 데이터 재조회 대상은 아니다.
       if (table === 'calendar_notifications') return;
 
+      // 작업 링크는 새 창 어디에도 보이지 않는다(연결도 표시도 본 창). 행마다 자료를 통째로 다시 받지 않는다.
+      if (table === 'scene_work_links') return;
+
       if (table === 'users') {
         void reconcilePopupUserDirectory()
           .then((result) => { if (result !== 'deleted') reloadData(); })
