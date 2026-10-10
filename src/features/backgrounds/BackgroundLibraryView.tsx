@@ -56,6 +56,10 @@ export default function BackgroundLibraryView() {
       void useBackgroundStore.getState().initialize(null);
     };
   }, [user?.id]);
+  // The notice replaces the body without closing what was open in it. A dialog left open would come back by itself with the body.
+  useEffect(() => {
+    if (updateRequired) setMapAsset(null);
+  }, [updateRequired]);
   useEffect(() => {
     if (!user) return;
     const refresh = () => {

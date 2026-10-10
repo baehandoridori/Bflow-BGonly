@@ -851,6 +851,10 @@ test('anchor 46: stored data this version does not know is refused whole and tur
   }
   // That other branch opens with the tabs and runs to the end of the screen: nothing follows it that is drawn either way.
   assert.match(rest, /^\) : \(\s*<>\s*<nav className="bg-library-tabs"[\s\S]*<\/>\s*\)\}\s*$/);
+  // The asset dialog is drawn in that branch but opened by state of this screen, which stays mounted: the state is
+  // cleared as the notice turns on, or the dialog would open again by itself when a later read brings the body back.
+  assert.match(head, /useEffect\(\(\) => \{\s*if \(updateRequired\) setMapAsset\(null\);\s*\}, \[updateRequired\]\);/);
+  assert.ok(rest.includes('{mapAssetView && <AssetDialog ') && !head.includes('<AssetDialog '), 'the dialog is drawn in the branch the notice replaces');
 });
 
 test('anchor 47: the colour table and the spatial module stay pure: no three.js, no DOM', () => {
