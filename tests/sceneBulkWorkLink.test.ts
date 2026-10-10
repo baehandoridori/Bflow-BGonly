@@ -2,13 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BULK_LINK_DEFAULTS,
+  BULK_LINK_TEXT,
   buildBulkLinkOffer,
+  bulkLinkConfirmLabel,
+  bulkLinkLayoutHeading,
+  bulkLinkLead,
+  bulkLinkNotFoundText,
+  bulkLinkRecheckFailedText,
+  bulkLinkReplaceNote,
+  bulkLinkResultText,
+  bulkLinkRowParts,
+  bulkLinkSourceChangedText,
+  bulkUndoResultText,
   effectiveLayout,
   findBulkLinkScope,
   findSceneLocation,
+  planBulkLink,
+  planBulkUndo,
   sameWorkPath,
+  sceneIdList,
 } from '../src/utils/sceneBulkWorkLink.ts';
-import type { BulkLinkDefaults, BulkLinkOffer, BulkLinkScope } from '../src/utils/sceneBulkWorkLink.ts';
+import type { BulkLinkDefaults, BulkLinkOffer, BulkLinkPlan, BulkLinkScope, BulkLinkWrite } from '../src/utils/sceneBulkWorkLink.ts';
 import { getWorkLinkSlotKey } from '../src/utils/sceneWorkLinks.ts';
 import type { Episode, Part, Scene, SceneWorkLink, SceneWorkLinkDepartment } from '../src/types/index.ts';
 
@@ -379,4 +393,283 @@ test('sameWorkPath: 다듬고 빗금과 대소문자를 맞춘 값이 비지 않
   assert.equal(sameWorkPath('', ''), false);
   assert.equal(sameWorkPath(null, 'x'), false);
   assert.equal(sameWorkPath(undefined, undefined), false);
+});
+
+// 실행 계획의 자료: 위 buildBulkLinkOffer 테스트의 제안과, 그 제안을 만든 첫 호출의 결과(씬 자료가 그대로일 때의 scope).
+const firstScope = (): BulkLinkScope => scopeOf('bg-1', 'bg', FILE);
+const firstOffer = (): BulkLinkOffer => {
+  const offer = buildBulkLinkOffer(firstScope(), FILE, 'bg', LINKS);
+  assert.ok(offer);
+  return offer;
+};
+
+// 고른 것. bg-7은 상태가 same이라 고를 수 없는 줄이다 — 들어 있어도 무시한다.
+const PICKED = ['bg-3', 'bg-5', 'bg-2', 'bg-7'];
+const WRITE_A003: BulkLinkWrite = { sceneUuid: 'bg-3', sceneId: 'a003', before: null };
+const WRITE_A005: BulkLinkWrite = { sceneUuid: 'bg-5', sceneId: 'a005', before: 'G:\\old\\a005.moho' };
+const WRITE_A002: BulkLinkWrite = { sceneUuid: 'bg-2', sceneId: 'a002', before: 'G:\\old\\layout12.moho' };
+
+const sceneByUuid = (part: Part, uuid: string): Scene => {
+  const found = part.scenes.find((item) => item.id === uuid);
+  assert.ok(found, uuid);
+  return found;
+};
+
+// 그 사이 바뀐 씬 자료로 다시 찾은 묶음: 자료를 새로 만들어 배경 파트 A의 씬 하나만 고친 뒤 findBulkLinkScope를 다시 부른다.
+const rescoped = (change: (part: Part) => void): BulkLinkScope | null => {
+  const fresh = makeEpisodes();
+  change(fresh[0].parts[0]);
+  return findBulkLinkScope(fresh, 'bg-1', 'bg', FILE);
+};
+
+test('planBulkLink: 누르는 순간의 링크로 다시 본다 — 그대로면 쓰고, 이미 이 파일이면 same, 그 사이 달라졌으면 changed', () => {
+  const offer = firstOffer();
+  const scope = firstScope();
+  // 링크가 창을 열 때와 같다.
+  const unchanged = planBulkLink(offer, PICKED, LINKS, scope);
+  assert.deepEqual(unchanged, { writes: [WRITE_A003, WRITE_A005, WRITE_A002], same: [], changed: [] });
+  // 그 사이 bg-3에 다른 사람이 파일을 걸었다.
+  const taken = planBulkLink(offer, PICKED, new Map([...LINKS, link('bg-3', 'bg', 'G:\\someone\\else.moho')]), scope);
+  assert.deepEqual(taken.changed, ['a003']);
+  assert.deepEqual(taken.writes, [WRITE_A005, WRITE_A002]);
+  assert.deepEqual(taken.same, []);
+  // 그 사이 bg-3이 이 파일이 됐다.
+  const already = planBulkLink(offer, PICKED, new Map([...LINKS, link('bg-3', 'bg', FILE)]), scope);
+  assert.deepEqual(already.same, ['a003']);
+  assert.deepEqual(already.writes, [WRITE_A005, WRITE_A002]);
+  assert.deepEqual(already.changed, []);
+  // 고르지 않은 줄(bg-9)과 uuid 없는 줄(no:8:a010)은 어디에도 없다.
+  for (const plan of [unchanged, taken, already]) {
+    const touched = [...plan.writes.map((write) => write.sceneId), ...plan.same, ...plan.changed];
+    assert.equal(touched.includes('a009'), false);
+    assert.equal(touched.includes('a010'), false);
+  }
+});
+
+test('planBulkLink: 그 사이 씬 자료가 바뀌었으면 — 더는 그 묶음의 그 씬이 아닌 줄은 쓰지 않는다', () => {
+  const offer = firstOffer();
+  // 링크는 창을 열 때 그대로다. 넷째 인자(scope)만 바뀐 자료로 다시 찾은 것이다.
+  const planWith = (scope: BulkLinkScope | null): BulkLinkPlan => planBulkLink(offer, PICKED, LINKS, scope);
+
+  // bg-3의 씬 번호가 a013이 됐다(이름 묶음에서 빠진다).
+  const renumbered = rescoped((part) => { sceneByUuid(part, 'bg-3').sceneId = 'a013'; });
+  assert.deepEqual(planWith(renumbered), { writes: [WRITE_A005, WRITE_A002], same: [], changed: ['a003'] });
+
+  // bg-5의 씬 번호가 a011이 됐다 — 011도 파일 이름에 있어 uuid는 이름 묶음에 그대로 있지만 번호 글자가 다르다.
+  const renumberedInList = rescoped((part) => { sceneByUuid(part, 'bg-5').sceneId = 'a011'; });
+  assert.deepEqual(renumberedInList?.named.map((item) => item.id), ['bg-3', 'bg-7', 'bg-5']);
+  assert.deepEqual(planWith(renumberedInList), { writes: [WRITE_A003, WRITE_A002], same: [], changed: ['a005'] });
+
+  // bg-2의 레이아웃이 99가 됐다(레이아웃 묶음에서 빠진다).
+  const otherLayout = rescoped((part) => { sceneByUuid(part, 'bg-2').layoutId = '99'; });
+  assert.deepEqual(planWith(otherLayout), { writes: [WRITE_A003, WRITE_A005], same: [], changed: ['a002'] });
+
+  // 연결한 씬 bg-1의 번호가 A003이 됐다 — bg-3은 이제 자기와 같은 번호라 이름 묶음에서 빠지고 레이아웃 묶음으로 옮겨 간다(묶음이 달라졌다).
+  const movedGroup = rescoped((part) => { sceneByUuid(part, 'bg-1').sceneId = 'A003'; });
+  assert.deepEqual(movedGroup?.layout.map((item) => item.id), ['bg-2', 'bg-3', 'bg-9', undefined]);
+  assert.deepEqual(planWith(movedGroup), { writes: [WRITE_A005, WRITE_A002], same: [], changed: ['a003'] });
+
+  // bg-3이 지워지고 그 번호 a003으로 다른 씬(uuid bg-3x)이 생겼다 — 번호 글자는 같지만 uuid가 다르다.
+  const replaced = rescoped((part) => {
+    part.scenes = part.scenes.filter((item) => item.id !== 'bg-3');
+    part.scenes.push(scene('bg-3x', 9, 'a003'));
+  });
+  assert.deepEqual(replaced?.named.map((item) => `${item.id} ${item.sceneId}`), ['bg-3x a003', 'bg-5 a005', 'bg-7 A007']);
+  assert.deepEqual(planWith(replaced), { writes: [WRITE_A005, WRITE_A002], same: [], changed: ['a003'] });
+
+  // 연결한 씬 bg-1의 번호가 파일 이름에 없는 a021이 됐다 — 묶음은 그대로다(P4: 글자가 맞고 번호가 둘 이상인 목록은 자기 번호가 없어도 읽는다).
+  const selfNotListed = rescoped((part) => { sceneByUuid(part, 'bg-1').sceneId = 'a021'; });
+  assert.deepEqual(planWith(selfNotListed), { writes: [WRITE_A003, WRITE_A005, WRITE_A002], same: [], changed: [] });
+
+  // 연결한 씬 bg-1의 번호가 b021이 됐다 — 글자가 달라져 파일 이름이 다른 씬들의 목록이 됐고, 다시 찾은 묶음이 null이다.
+  const otherFamily = rescoped((part) => { sceneByUuid(part, 'bg-1').sceneId = 'b021'; });
+  assert.equal(otherFamily, null);
+  assert.deepEqual(planWith(otherFamily), { writes: [], same: [], changed: ['a003', 'a005', 'a002'] });
+});
+
+test('planBulkLink: scope는 기본값이 없는 인자다 — 빼먹고 부를 수 없다', () => {
+  assert.equal(planBulkLink.length, 4);
+});
+
+// 보탬 자료(설계 11.2의 목록 밖): 4.7의 표 "창을 열 때 본 경로(currentPath)와 다르다 → changed". 11.2에서 그 사이 달라진 칸은 비어 있던 줄(a003)뿐이라, 비어 있던 줄에 파일이 생긴 것만 보는 구현을 가르지 못한다.
+test('planBulkLink: 다른 파일이 걸려 있던 줄도 창을 열 때 본 경로와 달라졌으면 쓰지 않는다 — 또 다른 파일이 됐든, 비었든', () => {
+  const offer = firstOffer();
+  const scope = firstScope();
+  const another = planBulkLink(offer, PICKED, new Map([...LINKS, link('bg-5', 'bg', 'G:\\newer\\a005.moho')]), scope);
+  assert.deepEqual(another, { writes: [WRITE_A003, WRITE_A002], same: [], changed: ['a005'] });
+  const cleared = planBulkLink(offer, PICKED, new Map([...LINKS].filter(([, item]) => item.sceneUuid !== 'bg-5')), scope);
+  assert.deepEqual(cleared, { writes: [WRITE_A003, WRITE_A002], same: [], changed: ['a005'] });
+});
+
+// 보탬 자료(설계 11.2의 목록 밖): 4.7 "고른 후보마다, 후보의 순서대로 위에서부터". 11.2의 고른 것은 후보와 같은 순서이고, 묶음에서 빠진 줄이 그 사이 이 파일이 된 경우가 없어, 고른 순서를 따르거나 표의 둘째 줄(same)을 먼저 보는 구현을 가르지 못한다.
+test('planBulkLink: 후보의 순서대로 쓰고(고른 순서가 아니다), 더는 그 묶음이 아닌 줄은 그 사이 이 파일이 됐어도 changed다', () => {
+  const offer = firstOffer();
+  // uuid 없는 줄의 열쇠가 고른 것에 들어 있어도 어디에도 없다.
+  const reordered = planBulkLink(offer, ['no:8:a010', 'bg-2', 'bg-5', 'bg-3'], LINKS, firstScope());
+  assert.deepEqual(reordered, { writes: [WRITE_A003, WRITE_A005, WRITE_A002], same: [], changed: [] });
+  const renumbered = rescoped((part) => { sceneByUuid(part, 'bg-3').sceneId = 'a013'; });
+  const gone = planBulkLink(offer, PICKED, new Map([...LINKS, link('bg-3', 'bg', FILE)]), renumbered);
+  assert.deepEqual(gone, { writes: [WRITE_A005, WRITE_A002], same: [], changed: ['a003'] });
+});
+
+test('액팅에서 연결하면 액팅 칸만 읽고 쓴다: 실행 계획과 되돌리기 계획', () => {
+  // 같은 uuid에 배경 링크가 따로 있어도 보지 않는다.
+  const links = new Map([link('act-3', 'bg', 'G:\\bg\\other.psd'), link('act-5', 'acting', 'G:\\old\\A005.moho')]);
+  const scope = scopeOf('act-1', 'acting', FILE);
+  const offer = buildBulkLinkOffer(scope, FILE, 'acting', links);
+  assert.ok(offer);
+  assert.deepEqual(planBulkLink(offer, ['act-3', 'act-5'], links, scope).writes, [
+    { sceneUuid: 'act-3', sceneId: 'A003', before: null },
+    { sceneUuid: 'act-5', sceneId: 'A005', before: 'G:\\old\\A005.moho' },
+  ]);
+  const after = new Map([link('act-3', 'acting', FILE), link('act-3', 'bg', 'G:\\bg\\other.psd')]);
+  assert.deepEqual(planBulkUndo([{ sceneUuid: 'act-3', sceneId: 'A003', before: null }], FILE, 'acting', after, 'me'), {
+    steps: [{ kind: 'delete', sceneUuid: 'act-3', sceneId: 'A003' }],
+    kept: [],
+  });
+});
+
+test('planBulkUndo: 아직 이 동작이 쓴 칸만 되돌린다 — 비어 있던 씬은 다시 비우고, 바뀐 씬은 예전 파일로', () => {
+  const writes = [WRITE_A003, WRITE_A005, WRITE_A002];
+  // 링크의 고친 사람은 모두 'me'. bg-5는 그 뒤 다른 파일이 됐다.
+  const links = new Map([link('bg-3', 'bg', FILE), link('bg-5', 'bg', 'G:\\other\\changed.moho'), link('bg-2', 'bg', FILE)]);
+  assert.deepEqual(planBulkUndo(writes, FILE, 'bg', links, 'me'), {
+    steps: [
+      { kind: 'delete', sceneUuid: 'bg-3', sceneId: 'a003' },
+      { kind: 'restore', sceneUuid: 'bg-2', sceneId: 'a002', path: 'G:\\old\\layout12.moho' },
+    ],
+    kept: ['a005'],
+  });
+  // 칸이 비어 있는 경우(그 뒤 풀렸다)도 손대지 않는다.
+  assert.deepEqual(planBulkUndo(writes, FILE, 'bg', new Map(), 'me'), { steps: [], kept: ['a003', 'a005', 'a002'] });
+});
+
+test('planBulkUndo: 경로는 같은데 마지막으로 고친 사람이 다르면 손대지 않는다', () => {
+  const writes = [WRITE_A003, WRITE_A005, WRITE_A002];
+  const links = new Map([link('bg-3', 'bg', FILE, 'someone'), link('bg-5', 'bg', FILE, 'me'), link('bg-2', 'bg', FILE, null)]);
+  assert.deepEqual(planBulkUndo(writes, FILE, 'bg', links, 'me'), {
+    steps: [{ kind: 'restore', sceneUuid: 'bg-5', sceneId: 'a005', path: 'G:\\old\\a005.moho' }],
+    kept: ['a003', 'a002'],
+  });
+  // 로그인한 사람이 없을 때(userId가 null)는 고친 사람이 null인 칸이 내 것이다. bg-2는 링크가 없다.
+  const anonymous = new Map([link('bg-3', 'bg', FILE, null), link('bg-5', 'bg', FILE, null)]);
+  assert.deepEqual(planBulkUndo(writes, FILE, 'bg', anonymous, null), {
+    steps: [
+      { kind: 'delete', sceneUuid: 'bg-3', sceneId: 'a003' },
+      { kind: 'restore', sceneUuid: 'bg-5', sceneId: 'a005', path: 'G:\\old\\a005.moho' },
+    ],
+    kept: ['a002'],
+  });
+});
+
+// 보탬 자료(설계 11.2의 목록 밖): 4.7 "그 칸의 경로가 sameWorkPath(지금, path)". 11.2의 되돌리기 자료에서 아직 이 파일인 칸은 경로의 글자까지 같아, 글자 그대로 견주는 구현을 가르지 못한다.
+test('planBulkUndo: 빗금과 대소문자만 다른 경로는 아직 이 파일이다', () => {
+  const links = new Map([link('bg-3', 'bg', 'g:/show/ep5/A 001,003,005,007,011.MOHO')]);
+  assert.deepEqual(planBulkUndo([WRITE_A003], FILE, 'bg', links, 'me'), {
+    steps: [{ kind: 'delete', sceneUuid: 'bg-3', sceneId: 'a003' }],
+    kept: [],
+  });
+});
+
+test('문구: BULK_LINK_TEXT의 열 값', () => {
+  assert.deepEqual(BULK_LINK_TEXT, {
+    title: '이 파일을 다른 씬에도 연결할까요?',
+    named: '파일 이름에 적힌 씬',
+    only: '이 씬만',
+    pick: '연결할 씬을 골라 주세요',
+    empty: '비어 있음',
+    same: '이미 이 파일',
+    unavailable: '아직 저장 중인 씬이라 연결할 수 없어요',
+    replaceMark: '→ 이 파일로 바뀜',
+    replaceMarkOff: '체크하면 이 파일로 바뀜',
+    undoRecheckFailed: '연결 상태를 확인하지 못해서 아직 되돌리지 않았어요',
+  });
+});
+
+test('문구: 안내 한 줄과 레이아웃 묶음의 머리글', () => {
+  assert.equal(
+    bulkLinkLead({ linkedSceneId: 'a001', department: 'bg' }),
+    '방금 a001의 배경 대표 파일로 연결했어요. 아래에서 고른 씬에도 배경 대표 파일로 연결해요.',
+  );
+  assert.equal(
+    bulkLinkLead({ linkedSceneId: 'a001', department: 'acting' }),
+    '방금 a001의 액팅 대표 파일로 연결했어요. 아래에서 고른 씬에도 액팅 대표 파일로 연결해요.',
+  );
+  assert.equal(bulkLinkLayoutHeading('12'), '같은 레이아웃(#12)인 씬');
+});
+
+test('문구: 줄의 글자 조각 — replace 줄의 표시는 체크를 따르고, 경로 줄은 이름과 다를 때만', () => {
+  assert.deepEqual(
+    bulkLinkRowParts({ state: 'replace', currentPath: 'G:\\old\\a005.moho' }, true),
+    { text: '지금: a005.moho', mark: '→ 이 파일로 바뀜', path: 'G:\\old\\a005.moho' },
+  );
+  // 체크가 풀려 있으면 mark만 다르다.
+  assert.deepEqual(
+    bulkLinkRowParts({ state: 'replace', currentPath: 'G:\\old\\a005.moho' }, false),
+    { text: '지금: a005.moho', mark: '체크하면 이 파일로 바뀜', path: 'G:\\old\\a005.moho' },
+  );
+  // 경로가 이름뿐이면 경로 줄이 없다.
+  assert.equal(bulkLinkRowParts({ state: 'replace', currentPath: 'a005.moho' }, true).path, null);
+  // 폴더로 끝나는 경로면 이름 자리에 경로 전체가 온다.
+  const folder = bulkLinkRowParts({ state: 'replace', currentPath: 'G:\\old\\folder\\' }, true);
+  assert.equal(folder.text, '지금: G:\\old\\folder\\');
+  assert.equal(folder.path, null);
+  // 나머지 셋은 둘째 인자가 true든 false든 같다.
+  for (const checked of [true, false]) {
+    assert.deepEqual(bulkLinkRowParts({ state: 'empty', currentPath: null }, checked), { text: '비어 있음', mark: null, path: null });
+    assert.deepEqual(
+      bulkLinkRowParts({ state: 'same', currentPath: 'G:\\show\\EP5\\a 001,003,005,007,011.moho' }, checked),
+      { text: '이미 이 파일', mark: null, path: null },
+    );
+    assert.deepEqual(
+      bulkLinkRowParts({ state: 'unavailable', currentPath: null }, checked),
+      { text: '아직 저장 중인 씬이라 연결할 수 없어요', mark: null, path: null },
+    );
+  }
+});
+
+test('문구: 없는 씬 줄, 연결한 씬이 바뀌었을 때, 다시 읽지 못했을 때', () => {
+  assert.equal(bulkLinkNotFoundText(['a011', 'a013']), '파일 이름에는 있지만 이 파트에 없는 씬: a011, a013');
+  assert.equal(bulkLinkSourceChangedText('a001'), '그 사이 a001의 파일이 바뀌어서 다른 씬에는 연결하지 않았어요');
+  assert.equal(
+    bulkLinkRecheckFailedText('a001'),
+    '연결 상태를 확인하지 못해서 다른 씬에는 연결하지 않았어요. a001의 상세 창에서 대표 파일의 연필(수정) 버튼으로 같은 파일을 다시 저장하면 다시 물어봐요',
+  );
+});
+
+test('문구: 버튼의 글자, 씬 번호 줄임, 파일이 바뀌는 씬의 수', () => {
+  assert.equal(bulkLinkConfirmLabel(3), '선택한 3개에 연결');
+  assert.equal(bulkLinkConfirmLabel(0), '연결할 씬을 골라 주세요');
+  assert.equal(sceneIdList(['a003', 'a005', 'a007', 'a009']), 'a003, a005, a007 외 1개');
+  assert.equal(bulkLinkReplaceNote(3), '이 중 3개는 지금 연결된 파일이 바뀌어요');
+  assert.equal(bulkLinkReplaceNote(1), '이 중 1개는 지금 연결된 파일이 바뀌어요');
+  assert.equal(bulkLinkReplaceNote(0), '');
+});
+
+// 보탬 자료(설계 11.2의 목록 밖): 7.3 "셋까지는 a003, a005, a007, 넘으면 … 외 1개". 11.2에는 꼭 셋인 목록이 없어 경계가 하나 어긋난 구현('외 0개')을 가르지 못하고, 둘째 인자 max를 넘긴 예도 없다.
+test('문구: sceneIdList — 셋까지는 모두 적고, max를 넘기면 그 수까지만 적는다', () => {
+  assert.equal(sceneIdList(['a003', 'a005', 'a007']), 'a003, a005, a007');
+  assert.equal(sceneIdList(['a003', 'a005', 'a007'], 2), 'a003, a005 외 1개');
+});
+
+test('문구: 한꺼번에 연결의 결과 — 있는 조각만 잇는다', () => {
+  assert.equal(bulkLinkResultText({ linked: ['a003', 'a005', 'a007'], failed: [], changed: [] }), '씬 3개에 연결했어요');
+  assert.equal(
+    bulkLinkResultText({ linked: ['a003'], failed: ['a005', 'a007'], changed: ['a009'] }),
+    '씬 1개에 연결했어요 · 2개는 연결하지 못했어요(a005, a007) · 1개는 그 사이 바뀌어서 그대로 뒀어요(a009)',
+  );
+  assert.equal(
+    bulkLinkResultText({ linked: [], failed: ['a003', 'a005', 'a007', 'a009'], changed: [] }),
+    '4개는 연결하지 못했어요(a003, a005, a007 외 1개)',
+  );
+  assert.equal(bulkLinkResultText({ linked: [], failed: [], changed: [] }), '이미 모두 이 파일에 연결돼 있어요');
+});
+
+test('문구: 되돌리기의 결과 — 있는 조각만 잇는다', () => {
+  assert.equal(bulkUndoResultText({ undone: ['a003', 'a005'], failed: [], kept: [] }), '씬 2개를 되돌렸어요');
+  assert.equal(
+    bulkUndoResultText({ undone: ['a003'], failed: ['a005'], kept: ['a007'] }),
+    '씬 1개를 되돌렸어요 · 1개는 되돌리지 못했어요(a005) · 1개는 그 뒤에 바뀌어서 그대로 뒀어요(a007)',
+  );
+  assert.equal(bulkUndoResultText({ undone: [], failed: [], kept: [] }), '되돌릴 것이 없어요');
 });
