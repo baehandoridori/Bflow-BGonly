@@ -674,6 +674,10 @@ test('anchor 40: the road tool is a drawing tool, and one drag with it draws a r
   // The drag of a rectangle, told to be a road.
   assert.ok(handler.pointerDown().includes("if (canEdit && (tool === 'rect' || tool === 'ellipse' || tool === 'road')) { mode = 'draw'; target = newSpace(tool === 'road' ? 'rect' : tool, point, tool === 'road'); }"));
   const make = piece(editor, 'function newSpace(', 'function finishPolygon(');
+  // A room unless told otherwise, and only that drag tells it: the polygon tool still draws a room.
+  assert.ok(make.startsWith("function newSpace(shape: BackgroundSpace['shape'], origin: BackgroundPoint, road = false): BackgroundSpace {"));
+  assert.equal(count(editor, /\bnewSpace\(/g), 3, 'the definition, the drag and the finished polygon');
+  assert.ok(editor.includes("newSpace('polygon', geometry)"));
   assert.ok(make.includes("name: road ? '새 도로' : '새 공간'"));
   // The key is there for a road and absent for a room. Written as `undefined` it would stay in the node, and the save would be refused.
   assert.ok(make.includes("...(road ? { surface: 'road' as const } : {})"));
@@ -686,12 +690,16 @@ test('anchor 41: a road is drawn by the one pass that draws every space, its cen
   assert.ok(editor.includes('stackedSpaces(current).map('));
   assert.equal(count(editor, /\bbmap-space(?!-)/g), 1, 'one line draws a space');
   assert.equal(count(editor, /shownIds\.has\(node\.id\)/g), 3, 'spaces, symbols and cameras');
+  // No other pass over the nodes asks which of them are roads.
+  assert.equal(count(editor, /isRoadSpace\(node\)/g), 3, 'the kind label, the list icon and the one pass');
   const spaces = piece(editor, '{stackedSpaces(current).map(node => {', '{current.nodes.filter((node): node is BackgroundSymbol');
   assert.ok(spaces.includes('road = isRoadSpace(node), centre = roadCentreLine(node);'));
   assert.ok(spaces.includes("${road ? 'is-road ' : ''}"));
   // A polyline, so the fill rule of a space (rect, ellipse, polygon) does not reach it. After the shape and before the
-  // name: the outline behind the letters of the name covers the line, never the other way round.
-  inOrder(spaces, '<rect width={node.width} height={node.height} rx={road ? 0 : 4} />', '{centre && <polyline className="bmap-road-line" fill="none" points={centre.map(', '<text');
+  // name: the outline behind the letters of the name covers the line, never the other way round. Its points are
+  // centred on the box, and this line alone moves them into the frame of the <g>, whose origin is a corner of the box.
+  inOrder(spaces, '<rect width={node.width} height={node.height} rx={road ? 0 : 4} />',
+    '{centre && <polyline className="bmap-road-line" fill="none" points={centre.map(point => `${point.x + node.width / 2},${point.y + node.height / 2}`).join(\' \')} />}', '<text');
   assert.equal(count(editor, /bmap-road-line/g), 1, 'the centre line is drawn in that one place');
   // That outline: without it the line strikes the name through, and with a fixed width it thins away on a zoomed-out plan.
   const nameRule = read('backgrounds-map.css').split('\n').filter(line => line.startsWith('.bmap-space.is-road text {'));
@@ -770,8 +778,12 @@ test('anchor 45: the colour of a camera is picked from six circles and a text bu
     .includes('{editing && <BackgroundMapCameraColor color={selected.color} disabled={fieldLocked} onChange={changeCameraColor} />}'));
   // A circle for each row of the colour table and no other: the amber is no colour to pick, it is a camera without the key.
   const field = read('BackgroundMapCameraColor.tsx');
-  assert.equal(count(field, /className="bmap-color-swatch"/g), 1, 'one line draws the circles');
-  assert.match(field, /\{MAP_CAMERA_COLORS\.map\(item => <button [^<>]*className="bmap-color-swatch" data-camera-color=\{item\.id\} aria-pressed=\{color === item\.id\} /);
+  // Counted by the class token and by the buttons: a seventh circle is one with a second class beside it, and under a class of its own.
+  assert.equal(count(field, /\bbmap-color-swatch(?![\w-])/g), 1, 'one line draws the circles');
+  assert.equal(count(field, /<button\b/g), 2, 'the circles of the table and the text button');
+  // The whole circle, as no test draws this component: switched off with the field, and a press asks for its own
+  // colour whatever the colour was. It never takes the colour away: a second press on the same circle changes nothing.
+  assert.match(field, /\{MAP_CAMERA_COLORS\.map\(item => <button [^<>]*className="bmap-color-swatch" data-camera-color=\{item\.id\} aria-pressed=\{color === item\.id\} aria-label=\{item\.label\} title=\{item\.label\} disabled=\{disabled\} onClick=\{\(\) => onChange\(item\.id\)\} \/>\)\}/);
   // The way back to the default is a text button, the last button of the row.
   const reset = field.match(/<button (?:(?!<button )[\s\S])*>기본 색으로<\/button>/)?.[0] ?? '';
   assert.ok(reset, 'the text button was found');
