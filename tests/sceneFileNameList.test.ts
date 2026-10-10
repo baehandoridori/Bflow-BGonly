@@ -243,6 +243,22 @@ test('readSceneNameLists: width는 맨 앞 숫자의 자릿수다', () => {
   assert.equal(readSceneNameLists('a0001~0003.moho')[0].width, 4);
 });
 
+// 보탬 자료(설계 3.7의 표 밖): 3.3이 글로 정한 규칙 다섯을 그럴듯한 틀린 구현과 가른다. ROWS에는 넣지 않는다 — ROWS의 출처는 3.7의 표뿐이다.
+test('readSceneNameLists: 3.3의 규칙 다섯 — 틈은 하나, 중복은 번호와 접미 둘 다, 괄호는 구분자가 아니다, 범위와 항목의 글자는 머리의 글자와 같다', () => {
+  const read = (name: string): string => showAll(readSceneNameLists(name));
+  // 틈: 빈칸·밑줄·하이픈이 하나일 때만 그 글자가 번호의 글자다.
+  assert.equal(read('a__001,003.moho'), '∅: 1 3');
+  assert.equal(read('a - 001,003.moho'), '∅: 1 3');
+  // 중복: 번호와 접미가 모두 같아야 같은 항목이다.
+  assert.equal(read('a001,001A,003.moho'), 'a: 1 1A 3');
+  // 구분자가 아닌 것: 괄호(3.5의 예).
+  assert.equal(read('a001,003 (005,007 제외).moho'), 'a: 1 3 ; ∅: 5 7');
+  // 범위: 오른쪽의 글자는 바로 앞 번호의 글자가 아니라 머리의 글자와 견준다.
+  assert.equal(read('a001,003~a005.moho'), 'a: 1 3 4* 5');
+  // 항목의 글자: 첫 글자만이 아니라 글자 전체가 머리와 같아야 한다.
+  assert.equal(read('a001,ac003.moho'), 'a: 1 ; ac: 3');
+});
+
 test('workFileName: 경로의 마지막 조각, 폴더 경로와 빈 경로는 빈 글자', () => {
   assert.equal(workFileName('G:\\show\\EP2\\B030.moho'), 'B030.moho');
   assert.equal(workFileName('G:/a/b/c.psd'), 'c.psd');
@@ -275,6 +291,9 @@ test('sceneFamily: 씬 번호 자신의 글자, 없으면 파트의 첫 글자',
   assert.equal(sceneFamily('001', ' A '), 'a');
   assert.equal(sceneFamily('001', ''), '');
   assert.equal(sceneFamily('v2a001', 'A'), null);
+  // 보탬 자료(설계 11.1의 일곱 밖): 파트 글자는 첫 글자 하나만 쓰고, 파트가 없으면(null) 빈 글자다(3.4의 2).
+  assert.equal(sceneFamily('001', 'AB'), 'a');
+  assert.equal(sceneFamily('001', null), '');
 });
 
 test('sceneRefKey: 설계 3.4 끝의 표 — 씬 번호 열하나 × 가족 넷', () => {
