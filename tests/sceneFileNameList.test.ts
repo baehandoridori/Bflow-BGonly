@@ -362,6 +362,8 @@ test('sceneListForScene: 넘긴 손잡이를 듣는다 — minSceneDigits, maxRa
     return sceneListForScene(path, { sceneId, partId }, rules);
   };
   assert.equal(showOne(own(94, { ...SCENE_NAME_RULES, minSceneDigits: 2 })), '∅: 10 12', '#94');
+  // 보탬 자료(설계 11.1의 값 밖): 글자 붙은 씬 목록이 따로 있는지(3.4의 5-2)를 볼 때도 넘긴 minSceneDigits를 듣는다 — 두 자리 'e: 5'가 씬 목록이 되어 글자 없는 조각을 읽지 않는다(정해진 값에서는 '∅: 1 3').
+  assert.equal(showOne(own(131, { ...SCENE_NAME_RULES, minSceneDigits: 2 })), 'null', '#131');
   const ranged = own(86, { ...SCENE_NAME_RULES, maxRangeCount: 60 });
   assert.ok(ranged, '#86');
   assert.equal(ranged.refs.length, 60, '#86');
@@ -390,8 +392,8 @@ test('sceneListForScene: P4를 켜면 같은 가족의 목록을 둘 적은 #132
   assert.deepEqual(listsAcrossScenes(path, sceneId, partId, rules), ['a: 1 3', 'a: 1 5'], '#132');
 });
 
-// 보탬 자료(설계 3.7의 표 밖): 3.4가 글로 정한 규칙 셋을 그럴듯한 틀린 구현과 가른다. ROWS에는 넣지 않는다 — ROWS의 출처는 3.7의 표뿐이다.
-test('sceneListForScene: 3.4의 규칙 셋 — 관문은 가족 전체이거나 첫 글자 하나, 글자 없는 맞는 목록도 번호가 여럿인 것 먼저·왼쪽 것, 번호가 하나뿐인 목록끼리도 왼쪽 것', () => {
+// 보탬 자료(설계 3.7의 표 밖): 3.4가 글로 정한 규칙 넷을 그럴듯한 틀린 구현과 가른다. ROWS에는 넣지 않는다 — ROWS의 출처는 3.7의 표뿐이다.
+test('sceneListForScene: 3.4의 규칙 넷 — 관문은 가족 전체이거나 첫 글자 하나, 글자 없는 맞는 목록도 번호가 여럿인 것 먼저·왼쪽 것, 번호가 하나뿐인 목록끼리도 왼쪽 것, 번호가 여럿인 목록끼리는 번호가 더 많은 것이 아니라 왼쪽 것', () => {
   const own = (name: string, sceneId: string): string => showOne(sceneListForScene(name, { sceneId, partId: 'A' }));
   // 관문(3.4의 4): 글자가 가족과 같거나 가족의 첫 글자다. 가족의 앞부분('abc'의 'ab')은 지나지 못한다.
   assert.equal(own('a 001,003.moho', 'abc001'), 'a: 1 3');
@@ -401,6 +403,8 @@ test('sceneListForScene: 3.4의 규칙 셋 — 관문은 가족 전체이거나 
   assert.equal(own('001,003 수정 001,005.moho', 'a001'), '∅: 1 3');
   // 번호가 하나뿐인 맞는 목록끼리(3.4의 5-1): 왼쪽 것.
   assert.equal(own('a001 ac001.moho', 'ac001'), 'a: 1');
+  // 번호가 둘 이상인 맞는 목록끼리(3.4의 5-1): 번호가 더 많은 것이 아니라 왼쪽 것. #132의 두 목록은 길이가 같아 이 둘을 가르지 못한다.
+  assert.equal(own('a001,003 수정 a001,005,007.moho', 'a001'), 'a: 1 3');
 });
 
 test('자료: "다른 씬들의 목록인가" 표는 스무 줄이고 참이 여섯이다', () => {
@@ -414,7 +418,7 @@ test('namesOtherScenes: 설계 3.7의 "다른 씬들의 목록인가" 표 스무
   }
 });
 
-test('namesOtherScenes: 넘긴 손잡이를 듣는다 — requireOwnNumber, tildeRange', () => {
+test('namesOtherScenes: 넘긴 손잡이를 듣는다 — requireOwnNumber, tildeRange, minSceneDigits', () => {
   const ownNumber = { ...SCENE_NAME_RULES, requireOwnNumber: true };
   assert.equal(namesOtherScenes('a 001,003.moho', { sceneId: 'a005', partId: 'A' }, ownNumber), true);
   assert.equal(namesOtherScenes('a001~005.moho', { sceneId: 'a007', partId: 'A' }, ownNumber), true);
@@ -424,6 +428,9 @@ test('namesOtherScenes: 넘긴 손잡이를 듣는다 — requireOwnNumber, tild
   assert.equal(namesOtherScenes('b001,003-005,007.moho', { sceneId: 'a005', partId: 'A' }, ownNumber), true);
   const noTilde = { ...SCENE_NAME_RULES, tildeRange: false };
   assert.equal(namesOtherScenes('a001~005.moho', { sceneId: 'a007', partId: 'A' }, noTilde), false);
+  // 보탬 자료(설계 11.1의 값 밖): 씬 번호처럼 쓴 숫자인지 볼 때도 넘긴 minSceneDigits를 듣는다 — 정해진 값에서는 거짓이다(3.7의 표: 두 자리).
+  const twoDigits = { ...SCENE_NAME_RULES, minSceneDigits: 2 };
+  assert.equal(namesOtherScenes('main_v01_02.psd', { sceneId: 'a001', partId: 'A' }, twoDigits), true);
 });
 
 test('workFileName: 경로의 마지막 조각, 폴더 경로와 빈 경로는 빈 글자', () => {
