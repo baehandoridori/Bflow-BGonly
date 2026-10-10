@@ -45,6 +45,7 @@ test('씬 작업 링크 테스트가 빌드에 들어 있다', () => {
   const { scripts } = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
   assert.match(scripts['test:scene-links'], /\.\/tests\/sceneWorkLinks\.test\.ts/);
   assert.match(scripts['test:scene-links'], /\.\/tests\/sceneWorkLinkCardBadges\.test\.ts/);
+  assert.match(scripts['test:scene-links'], /\.\/tests\/sceneFileNameList\.test\.ts/);
   assert.match(scripts.build, /npm run test:scene-links &&/);
   assert.match(scripts['build:vite'], /npm run test:scene-links &&/);
 });
