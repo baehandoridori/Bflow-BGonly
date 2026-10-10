@@ -71,6 +71,12 @@ test('앵커 2: 대표 파일일 때만, 기다리지 않고 부른다', () => {
   has(save, "if (linkKind === 'primary_file') {");
   has(save, 'void offerBulkWorkLink(');
   lacks(actions, 'await offerBulkWorkLink(');
+  // 설계 표에 없는 보탬: 제안은 그 조건의 가지 안에 있다(가지를 비우고 제안을 그 뒤에 두면 폴더 연결에도 묻는데, 표의 두 조각은 그대로 있다).
+  assert.equal(
+    squash(piece(save, "if (linkKind === 'primary_file') {", 'return true;')),
+    "if(linkKind==='primary_file'){voidofferBulkWorkLink({sceneUuid,department,path,userId:userId??null,savedToastId});}returntrue;",
+    '대표 파일일 때의 가지에는 제안 한 줄뿐이고, 가지가 닫히면 바로 return true; 이다',
+  );
 });
 
 test('앵커 3: 한꺼번에 연결과 되돌리기는 제안을 다시 부르지 않고 저장소 액션을 직접 부른다', () => {
@@ -136,7 +142,8 @@ test('앵커 5: 읽고 나서 매긴다 — 제안은 던지지 않고, 이미 �
   // catch는 경고 한 줄로 끝나고 그 뒤는 함수의 끝이다 — 다시 던지지 않는다.
   const caught = piece(body, '} catch (err) {');
   lacks(caught, 'throw');
-  assert.match(squash(caught), /^\}catch\(err\)\{console\.warn\(.*\);\}\}$/, 'catch는 경고 한 줄뿐이고 그 뒤에 다른 문장이 없다');
+  // 경고의 괄호 안에는 세미콜론이 없다 — [^;]*라서 경고 뒤에 문장이 하나라도 더 오면 맞지 않는다(throw 없이 거부를 돌려주는 것도 던지는 제안이다).
+  assert.match(squash(caught), /^\}catch\(err\)\{console\.warn\([^;]*\);\}\}$/, 'catch는 경고 한 줄뿐이고 그 뒤에 다른 문장이 없다');
 
   const modal = piece(service, OTHER_MODAL, RELOAD);
   has(modal, '[role="dialog"][aria-modal="true"]');
@@ -144,6 +151,24 @@ test('앵커 5: 읽고 나서 매긴다 — 제안은 던지지 않고, 이미 �
 
   // 설계 표에 없는 보탬: 상태를 매기는 데 쓰는 링크 지도도 읽은 뒤에 꺼낸다(읽기 전에 꺼내 두면 낡은 지도로 매긴다).
   inOrder(tried, ['loadForSceneUuids(uuids)', 'const linkMap = useSceneWorkLinkStore.getState().linkMap;', 'buildBulkLinkOffer(']);
+  // 시작 시각은 읽기 앞에서 재고, 읽기는 기다리고, 읽은 뒤의 두 검사는 돌아간다(시각을 읽기 뒤에 재면 3초 검사가 걸리지 않고, 읽기를 기다리지 않으면 읽기 전의 지도로 매긴다).
+  inOrder(tried, [
+    'const startedAt = Date.now();',
+    'if (uuids.length > 0) await useSceneWorkLinkStore.getState().loadForSceneUuids(uuids);',
+    'if (run !== offerRun || BulkWorkLinkDialog.isOpen()) return;',
+    'if (Date.now() - startedAt > BULK_LINK_OFFER_MAX_WAIT_MS) return;',
+  ]);
+  has(service, 'export const BULK_LINK_OFFER_MAX_WAIT_MS = 3000;');
+  // 가장 나중 저장의 제안만 남는다 — 차례 번호는 올려서 받는다.
+  has(tried, 'const run = ++offerRun;');
+  // 연결한 씬의 대표 파일 칸이 방금 저장한 경로일 때만 묻는다.
+  has(tried, 'const own = getSceneWorkLinkSlots(linkMap, input.sceneUuid, input.department).primaryFile?.path;');
+  has(tried, 'if (!sameWorkPath(own, input.path)) return;');
+  // 고른 것이 없으면 끝나고, 있으면 고른 줄·저장한 사람·한 칸 알림을 그대로 넘겨 끝까지 기다린다(기다리지 않으면 실행의 거부가 catch를 벗어난다).
+  has(tried, 'if (!selected || selected.length === 0) return;');
+  has(tried, 'await runBulkWorkLink(offer, selected, input.userId, input.savedToastId);');
+  // 다른 창이 '있을 때' 물러난다.
+  has(modal, "return document.querySelector('[role=\"dialog\"][aria-modal=\"true\"], dialog[open]') !== null;");
 });
 
 test('앵커 6: 누르는 순간 다시 읽고, 읽지 못했으면 쓰지 않는다 — 되돌리기도 같고, 못 되돌린 것은 다시 건다', () => {
@@ -241,6 +266,33 @@ test('앵커 6: 누르는 순간 다시 읽고, 읽지 못했으면 쓰지 않�
     'if(!sameWorkPath(own,offer.path)){toast(bulkLinkSourceChangedText(offer.linkedSceneId));return;}',
     '한꺼번에 연결: 연결한 씬의 칸이 달라졌으면 알리고 끝낸다',
   );
+  // 값도 글자로 고정한다: '되돌리기'는 10초이고, 누르는 순간의 다시 읽기는 1.5초까지만 기다린다.
+  has(service, 'export const BULK_LINK_UNDO_MS = 10_000;');
+  has(service, 'export const BULK_LINK_RECHECK_MAX_WAIT_MS = 1500;');
+  has(reload, 'setTimeout(() => resolve(false), BULK_LINK_RECHECK_MAX_WAIT_MS)');
+  has(reload, 'return Promise.race([load, timeout]);');
+  // 누르는 순간에는 고른 씬들을 다시 읽는다 — 이 목록이 비면 연결한 씬만 읽고, 고른 씬은 낡은 지도로 계획한다.
+  assert.equal(
+    squash(piece(run, 'const picked = new Set(selectedKeys);', '.filter((id): id is string => Boolean(id));')),
+    'constpicked=newSet(selectedKeys);constuuids=offer.candidates.filter((item)=>picked.has(item.key)).map((item)=>item.sceneUuid).filter((id):idisstring=>Boolean(id));',
+    '한꺼번에 연결: 다시 읽는 씬은 고른 줄의 씬이다',
+  );
+  // 견주는 칸은 연결한 씬의 대표 파일 칸이다.
+  has(run, 'const own = getSceneWorkLinkSlots(store.linkMap, offer.linkedSceneUuid, offer.department).primaryFile?.path;');
+  // 결과 글자는 성공한 것(done)·실패한 것·그 사이 바뀐 것을 그대로 센다. 하나도 못 했으면 '되돌리기' 없이 알리고 끝낸다.
+  has(run, 'const message = bulkLinkResultText({ linked: done.map((write) => write.sceneId), failed, changed: plan.changed });');
+  assert.equal(
+    squash(piece(run, 'if (done.length === 0) {', 'return;')),
+    'if(done.length===0){if(failed.length>0)toast.error(message);elsetoast(message);return;',
+    '한꺼번에 연결: 하나도 못 했으면 알리고 끝낸다',
+  );
+  // 되돌리기의 결과 글자와 끝의 세 갈래: 못 되돌린 것이 있으면 다시 걸고, 되돌린 것이 있으면 성공 알림, 둘 다 없으면 보통 알림.
+  has(undo, 'const message = bulkUndoResultText({ undone, failed: failed.map((write) => write.sceneId), kept: plan.kept });');
+  assert.equal(
+    squash(piece(undo, 'if (failed.length > 0) offerAgain(message, failed);', 'else toast(message);')),
+    'if(failed.length>0)offerAgain(message,failed);elseif(undone.length>0)toast.success(message);elsetoast(message);',
+    '되돌리기의 끝 세 갈래',
+  );
 });
 
 test('앵커 7: 순수 모듈은 확장자를 붙인 상대 import만 쓰고 화면에 기대지 않는다', () => {
@@ -286,6 +338,13 @@ test('앵커 8: 호스트는 본 창에 하나, 창은 스스로 닫히는 길�
   // 설계 표에 없는 보탬: 체크 칸·버튼에 포커스가 있을 때의 붙여넣기는 body로 와서 onPaste에 닿지 않는다 — 창 단위 캡처에서 멈춘다.
   has(dialog, "window.addEventListener('paste', stopPasteAtWindow, true);");
   has(dialog, 'const stopPasteAtWindow = (pasted: ClipboardEvent) => { pasted.stopPropagation(); };');
+  // 그 리스너는 창이 닫힐 때 뗀다 — 남으면 창이 한 번 뜬 뒤 본 창의 붙여넣기가 모두 멈춘다.
+  has(dialog, "return () => window.removeEventListener('paste', stopPasteAtWindow, true);");
+  // 닫는 길은 모두 settle을 지난다: 버튼·Esc·바깥 누름은 close로 가고, 이미 떠 있을 때의 새 요청은 덮어쓰지 않고 null로 끝난다.
+  has(dialog, 'const close = (keys: string[] | null) => { settle(keys); setOffer(null); };');
+  has(dialog, 'onCancel={(event) => { event.preventDefault(); onClose(null); }}');
+  has(dialog, 'onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(null); }}');
+  has(dialog, 'if (pending) { resolve(null); return; }');
 });
 
 test('앵커 9: main은 링크 행 신호를 모아서 한 번 — 렌더러로 가는 신호는 행마다 바로', () => {
@@ -302,6 +361,9 @@ test('앵커 9: main은 링크 행 신호를 모아서 한 번 — 렌더러로 
   inOrder(callback, ['refreshSceneWorkLinkCache().then(', 'editingPresence?.reset()']);
   const stop = piece(main, 'function stopEditingPresenceService(): void {', 'function broadcastSupabaseEvent(');
   has(stop, 'sceneWorkLinkRefresh.cancel();');
+  // 설계 표에 없는 보탬: 모으는 시간도 글자로 고정한다 — 0.4초 쉬면 돌고, 이어지는 변화에서는 2초에 한 번은 돈다.
+  has(main, 'const SCENE_WORK_LINK_REFRESH_WAIT_MS = 400;');
+  has(main, 'const SCENE_WORK_LINK_REFRESH_MAX_WAIT_MS = 2000;');
 });
 
 // 이 확인을 test:presence의 파일 안에 두면 그 스크립트가 빌드에서 빠질 때 감시도 함께 사라진다 — 그래서 test:scene-links의 이 파일이 지킨다.
