@@ -920,6 +920,11 @@ test('anchor 50: a save never ends edit mode: every saved map that was being edi
   // The one function every save of maps goes through. The drafts are put back from the command, in one dispatch.
   const persist = handler.persistMaps(), waited = 'await execute(command);';
   inOrder(persist, waited, 'doc.rebaseDrafts(savedMaps(command));');
+  // Only a save that went through puts them back. With a `try` of its own here, a save that failed would leave a draft
+  // with nothing unsaved on a revision the library does not have: the edits would read as saved, and the next save be refused.
+  assert.doesNotMatch(persist, /\b(?:try|catch|finally)\b/);
+  // And no draft is ended here, under any spelling: the drafts that were put back stay.
+  assert.doesNotMatch(persist, /doc\.(?:discard|dispatch)\(/);
   // After the wait this handler holds the render that started the save: a draft opened from its map would be on the
   // revision before that save, and the next save would be refused. Nothing after the wait reads that render or opens a draft.
   const after = persist.slice(positions(persist, waited)[0] + waited.length);
@@ -929,7 +934,10 @@ test('anchor 50: a save never ends edit mode: every saved map that was being edi
   assert.equal(count(editor, /await persistMaps\(/g), 4, 'the map, a new map, a link, the settings');
   const binding = read('useBackgroundMapDocument.ts');
   assert.doesNotMatch(binding, /dropDrafts/);
-  assert.ok(binding.includes("type: 'rebase-drafts'"));
+  // The calls of the editor reach the reducer through these two lines, and each sends its own action. Swapped, a save would
+  // leave its draft on the revision before it, and the library would put fresh drafts over the ones that have unsaved edits.
+  assert.ok(binding.includes("rebaseDrafts: (maps: readonly BackgroundMap[]) => store.dispatch({ type: 'rebase-drafts', maps }),"));
+  assert.ok(binding.includes("followSaved: (maps: readonly BackgroundMap[]) => store.dispatch({ type: 'follow-saved', maps }),"));
   // Only a map that has a draft gets one: a save by someone who was not editing turns no edit mode on. That draft has nothing unsaved.
   const reducer = read('mapDocument.ts'), rebase = piece(reducer, 'function rebaseDrafts(', 'function dropDrafts(');
   assert.ok(rebase.includes('!!draft &&'));
@@ -951,6 +959,15 @@ test('anchor 51: the map is saved only when something is unsaved and never twice
     "if (polygon.length) { setError('그리는 중인 다각형을 완성하거나 취소한 뒤 저장해 주세요.'); setRefused(count => count + 1); return; }",
     'if (!mapDraftChanged(mapDraft(doc.getState(), current.id))) return;', 'if (!current.name.trim()) {', 'const settled = settle()',
     'saving.current = true; setBusy(true);', 'finally { saving.current = false; setBusy(false); }');
+  // The save itself. The message of the save before is cleared. What goes out is the map and the drafts `settle()` gave,
+  // not those of the render, which do not know the field that was just left. And the command is built inside `try`:
+  // built after the ref is set but outside it, a command that cannot be built would leave the ref and `busy` set for good.
+  inOrder(save, "saving.current = true; setBusy(true); setError('');", 'try {', 'await persistMaps(saveMapChanges(snapshot, settled.drafts, [captured]));',
+    '} catch (cause) { setError(message(cause)); setRefused(count => count + 1); } finally { saving.current = false; setBusy(false); }');
+  // The ref is set in that one place only: a second one before the checks that return early would leave it set after one refused save.
+  assert.equal(count(save, /saving\.current = true/g), 1);
+  // The save ends no draft and opens none, whether it went through or failed: a failed save keeps the unsaved edits.
+  assert.doesNotMatch(save, /doc\.(?:discard|dispatch|beginEditing|enterNewMap)\(/);
   // The value of the render does not know the field that leaving it has just committed.
   assert.doesNotMatch(save, /\bdraftChanged\b/);
   // A save ends in a message instead of a save in three places: the polygon, the empty name, a failure.
