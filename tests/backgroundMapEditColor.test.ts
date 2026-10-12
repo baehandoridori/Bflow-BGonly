@@ -293,6 +293,44 @@ test('C-8: the table of candidates: none near red, none greyish, each readable, 
   near(gaps.reduce((sum, gap) => sum + gap, 0), 360, 1e-9, 'the three gaps together');
 });
 
+/** The stylesheet of the map editor, line by line and as written (a rule is one line, comments stay): a fresh checkout has CRLF line ends. */
+const sheet = (): string[] => readFileSync(new URL('backgrounds-map.css', directory), 'utf8').split(/\r?\n/);
+/** The one base rule that starts with this, at the very start of its line: an override of it inside a media block is indented. */
+function baseRule(lines: string[], opening: string): string {
+  const found = lines.filter(line => line.startsWith(opening));
+  assert.equal(found.length, 1, `one rule starts with "${opening}"`);
+  return found[0];
+}
+
+test('C-9: the stylesheet starts from the default theme: its one line of defaults holds what the function gives for that theme', () => {
+  const defaults = baseRule(sheet(), '.bmap-layout { --bmap-edit:');
+  assert.equal(defaults, '.bmap-layout { --bmap-edit:245 178 64; --bmap-edit-ink:28 22 8; --bmap-edit-h:40px; }');
+  // What is painted before the script has run, and what the script then writes under the default theme, are one colour.
+  const colors = mapEditColors('108 92 231', '162 155 254', '15 17 23');
+  assert.equal(/--bmap-edit:([^;]*);/.exec(defaults)?.[1], colors.strip);
+  assert.equal(/--bmap-edit-ink:([^;]*);/.exec(defaults)?.[1], colors.ink);
+});
+
+test('C-10: the band, the frame and the dot are painted with the two variables: no rule of theirs holds a colour of its own', () => {
+  const lines = sheet();
+  const strip = baseRule(lines, '.bmap-edit-strip {'), frame = baseRule(lines, '.bmap-main.is-editing .bmap-canvas-wrap::after {');
+  const dot = baseRule(lines, '.bmap-draft-dot {'), pill = baseRule(lines, '.bmap-edit-strip[data-phase="changed"] .bmap-edit-state>span {');
+  assert.ok(strip.includes('background:rgb(var(--bmap-edit))') && strip.includes('color:rgb(var(--bmap-edit-ink))'), strip);
+  assert.ok(frame.includes('border:2px solid rgb(var(--bmap-edit))'), frame);
+  assert.ok(dot.includes('color:rgb(var(--bmap-edit))'), dot);
+  assert.ok(pill.includes('background:rgb(var(--bmap-edit-ink))') && pill.includes('color:rgb(var(--bmap-edit))'), pill);
+  // Every rule of theirs, read without its indent: the overrides inside the media blocks are rules of theirs too. The
+  // line that sets the variables starts with `.bmap-layout` and is not one of them.
+  const own = lines.filter(line => ['.bmap-edit', '.bg-library .bmap-edit', '.bmap-main.is-editing', '.bmap-draft-dot'].some(start => line.trimStart().startsWith(start)));
+  // Asked first: over no lines the loop below would pass. The four rules above are among them, and so are indented ones.
+  assert.ok(own.length >= 20, `${own.length} rules of the band, the frame and the dot`);
+  for (const rule of [strip, frame, dot, pill]) assert.ok(own.includes(rule), rule);
+  assert.ok(own.some(line => line !== line.trimStart()), 'no indented rule was read');
+  // A hex colour; `rgb(` of anything but the two variables (`rgb(28 22 8)` would be right in one tone of the six); a colour
+  // by its name (not found by a word edge: these lines hold `white-space`); `hsl(`.
+  for (const line of own) for (const colour of [/#[0-9a-fA-F]{3,8}\b/, /rgb\((?!var\(--bmap-edit)/, /(?<![\w-])(?:white|black)(?![\w-])/, /hsla?\(/]) assert.doesNotMatch(line, colour);
+});
+
 test('C-11: the colour module and the status module stay pure: no import in the first, no three.js and no DOM in either', () => {
   // Read as written, comments and all.
   const colorSource = readFileSync(new URL('mapEditColor.ts', directory), 'utf8');

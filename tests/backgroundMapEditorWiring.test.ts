@@ -112,6 +112,27 @@ const viewport = {
   onDoubleClick: () => piece(view3d, 'private readonly onDoubleClick =', 'private readonly onContextMenu ='),
   onMouseDown: () => piece(view3d, 'private readonly onMouseDown =', 'private readonly onDragKey ='),
 };
+/** The edit band, read when an anchor asks for it: without the file that anchor fails, not every anchor of this file. */
+const editStrip = () => read('BackgroundMapEditStrip.tsx');
+/** The stylesheet of the editor, line by line and as written: a rule is one line there, and the comments stay. */
+const sheetLines = () => readFileSync(new URL('backgrounds-map.css', directory), 'utf8').replace(/\r\n/g, '\n').split('\n');
+/** The number of the one line that starts with this, at the very start of the line. */
+function lineOf(lines: string[], opening: string): number {
+  const found = lines.flatMap((line, index) => line.startsWith(opening) ? [index] : []);
+  assert.equal(found.length, 1, `one line starts with "${opening}"`);
+  return found[0];
+}
+/** What a rule declares, each `property:value` as it is written. */
+const declarations = (rule: string) => rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}')).split(';').map(part => part.trim()).filter(Boolean);
+/** A base rule: the one line that starts with this selector and its brace. An override inside a media block is indented, and is not it. */
+const baseRule = (lines: string[], opening: string) => declarations(lines[lineOf(lines, opening)]);
+/** A media block written over several lines: its lines without their indent, from the line that opens it to the brace that closes it. */
+function mediaBlock(lines: string[], opening: string): string[] {
+  const start = lineOf(lines, opening), end = lines.indexOf('}', start);
+  assert.equal(lines[start], opening);
+  assert.ok(end > start, `block not closed: ${opening}`);
+  return lines.slice(start + 1, end).map(line => line.trim());
+}
 
 test('anchor 1: the wheel is a native, non-passive listener on the plan SVG, attached again for each map and mode', () => {
   // The registration and the dependency list are one effect: no other effect starts between them.
@@ -976,6 +997,97 @@ test('anchor 51: the map is saved only when something is unsaved and never twice
   // Each brings that message into view: it sits above the band and may be scrolled away. `nearest` moves nothing when it is in view.
   assert.ok(editor.includes("useEffect(() => { if (refused) errorRef.current?.scrollIntoView({ block: 'nearest' }); }, [refused]);"));
   assert.ok(editor.includes('<div className="bg-error" role="alert" ref={errorRef}>'));
+  // The button of the band. It is on with something to save and nothing running: asked of `disabled` alone it would look on
+  // over a map with nothing unsaved (a press would still save nothing, so only the look is wrong and no other check sees it).
+  // Its tooltip is the one place that says why the dimmed button does nothing.
+  const strip = editStrip();
+  for (const part of ['const idle = !status.canSave || disabled;', 'aria-disabled={idle}', 'onClick={() => { if (!idle) onSave(); }}',
+    "title={status.canSave ? '도면 저장 (Ctrl+S)' : status.phase === 'saving' ? undefined : '저장할 변경이 없어요'}"]) assert.ok(strip.includes(part), `not found: ${part}`);
+  // Dimmed, never switched off: switched off it would leave the Tab order, and its tooltip would not be reached.
+  assert.doesNotMatch(piece(strip, 'className="bmap-edit-save"', '</button>'), /(?<!aria-)\bdisabled\b/);
+});
+
+test('anchor 54: the band is one element for the plan and for 3D, stuck over the map at a height that never depends on what it says', () => {
+  // The markup the stylesheet hangs on. The filled box and the tick are drawn by `data-phase` and by the `<span>` round the
+  // words: without either the three states differ in their words alone, and every rule below would still be found.
+  const strip = editStrip();
+  assert.ok(strip.includes('<section className="bmap-edit-strip" data-phase={status.phase}'));
+  assert.ok(strip.includes('<p className="bmap-edit-state"><strong>{MAP_EDIT_LABEL}</strong><span>{status.detail}</span></p>'));
+  for (const name of ['bmap-edit-key', 'bmap-edit-actions', 'bmap-edit-end', 'bmap-edit-save']) assert.equal(count(strip, new RegExp(`className="${name}"`, 'g')), 1, name);
+  // The stylesheet. A base rule is found at the very start of its line, a line of a media block without its indent: the
+  // narrow layout overrides three of these rules under the same selectors, and the frame has a second rule for its motion.
+  const lines = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const part of parts) assert.ok(rule.includes(part), `not declared: ${part} (${rule.join('; ')})`); };
+  // Stuck to the top of the tab, and over the canvas: that comes later in the page and stacks by itself, so without the
+  // z-index the stuck band would be under the map. Its height is the variable, whatever is inside.
+  has(baseRule(lines, '.bmap-edit-strip {'), 'position:sticky', 'top:0', 'z-index:5', 'flex:0 0 var(--bmap-edit-h)', 'height:var(--bmap-edit-h)');
+  // One line of words that gives way to the buttons and ends in an ellipsis: all four are needed for the ellipsis to be
+  // drawn. The least height is that of the filled box: without it the row of buttons of the two-line layout moves at the first edit.
+  has(baseRule(lines, '.bmap-edit-state {'), 'white-space:nowrap', 'min-width:0', 'min-height:23px');
+  has(baseRule(lines, '.bmap-edit-state>span {'), 'text-overflow:ellipsis', 'overflow:hidden');
+  // Nothing between the band and the tab scrolls: `hidden` makes a box a scroll container, and the band would stick to
+  // that box, which never scrolls. `clip` cuts at the same edge and is none.
+  const first = lines.find(line => line.startsWith('.bmap-layout {'));
+  assert.ok(first, 'the first rule of the editor');
+  for (const rule of [declarations(first), baseRule(lines, '.bmap-main {')]) { has(rule, 'overflow:clip'); assert.ok(!rule.includes('overflow:hidden')); }
+  // The frame is laid over the canvas area: a real border would make the map smaller as edit mode starts.
+  has(baseRule(lines, '.bmap-main.is-editing .bmap-canvas-wrap::after {'), 'content:""', 'inset:0', 'position:absolute', 'pointer-events:none');
+  assert.ok(!lines[lineOf(lines, '.bmap-canvas-wrap {')].includes('border'));
+  // The height of the band is taken from the image list, in a wide window only: outside that block these three would
+  // outweigh the heights of the narrow layout.
+  const wide = mediaBlock(lines, '@media(min-width:901px) {');
+  for (const line of ['.bmap-layout:has(.bmap-main.is-editing) { min-height:calc(500px + var(--bmap-edit-h)); }',
+    '.bmap-layout:has(.bmap-main.is-editing):has(.bmap-canvas-wrap.is-3d) { min-height:calc(760px + var(--bmap-edit-h)); }',
+    '.bmap-main.is-editing .bmap-panels:not(.is-sized)>.bmap-gallery { flex-basis:calc(clamp(248px,33dvh,370px) - var(--bmap-edit-h)); }']) assert.ok(wide.includes(line), `not in the wide block: ${line}`);
+  // The order, by line number. The narrow layout overrides these four under selectors of the same weight, so the later
+  // line wins: with the base rules after that block the band would be 40px high around two lines of content.
+  const narrowAt = lineOf(lines, '@media(max-width:900px) {'), bandAt = lineOf(lines, '.bmap-edit-strip {');
+  for (const opening of ['.bmap-layout { --bmap-edit:', '.bmap-edit-strip {', '.bmap-edit-state {', '.bmap-edit-key {']) assert.ok(lineOf(lines, opening) < narrowAt, `after the narrow layout: ${opening}`);
+  // The narrow layout: 72px, the words on a line of their own, the shortcut and the buttons on the second, to the right.
+  const narrow = mediaBlock(lines, '@media(max-width:900px) {');
+  assert.ok(narrow.includes('.bmap-layout { height:auto; min-height:0; --bmap-edit-h:72px; }'));
+  for (const opening of ['.bmap-edit-strip { flex-wrap:wrap', '.bmap-edit-state { flex:1 0 100%', '.bmap-edit-key { margin-left:auto']) assert.equal(narrow.filter(line => line.startsWith(opening)).length, 1, opening);
+  // The shortcut is not hidden there: with nothing to save the tooltip of the button does not name it either.
+  assert.ok(!lines.some(line => line.includes('.bmap-edit-key { display:none')));
+  // Where the header has a narrower side margin the band starts on the same line as the title: after the base rule, which it overrides.
+  const marginAt = lineOf(lines, '@media(max-width:1100px) { .bmap-edit-strip {');
+  assert.equal(lines[marginAt], '@media(max-width:1100px) { .bmap-edit-strip { padding-left:14px; } }');
+  assert.ok(bandAt < marginAt && marginAt < narrowAt);
+  // The states are told apart by shape: unsaved edits stand in a filled box, a save that just went through has a tick.
+  const pill = baseRule(lines, '.bmap-edit-strip[data-phase="changed"] .bmap-edit-state>span {');
+  has(pill, 'background:rgb(var(--bmap-edit-ink))');
+  assert.ok(pill.some(part => part.startsWith('border-radius:')));
+  has(baseRule(lines, '.bmap-edit-strip[data-phase="saved"] .bmap-edit-state>span::before {'), 'content:"✓"');
+  // The save button keeps one width and one weight whatever it says and whether it is on or dimmed: nothing beside it moves.
+  const save = baseRule(lines, '.bg-library .bmap-edit-strip .bmap-edit-save {');
+  has(save, 'font-weight:600', 'transition:none');
+  assert.ok(save.some(part => part.startsWith('min-width:')));
+  // Dimmed it is an empty box. The line is counted: asked only for what it must not hold, a deleted line would pass.
+  const dimmedAt = lineOf(lines, '.bg-library .bmap-edit-strip .bmap-edit-save[aria-disabled="true"],');
+  has(declarations(lines[dimmedAt]), 'background:transparent', 'cursor:default');
+  assert.ok(!lines[dimmedAt].includes('font-weight'));
+  // What the keyboard brings into view stops below the stuck band. Not the canvas (no `[tabindex]`): it takes the focus on
+  // a press, and must not scroll then. And not the two buttons of the band: with the margin a focus on them would scroll the tab.
+  assert.ok(lines.includes('.bmap-main.is-editing :is(button,input,select,summary) { scroll-margin-top:var(--bmap-edit-h); }'));
+  assert.ok(lines.includes('.bmap-main.is-editing .bmap-edit-strip button { scroll-margin-top:0; }'));
+});
+
+test('anchor 55: the colours of the band come from the two accents of the theme and the page as they are on screen', () => {
+  const hook = read('useMapEditColors.ts');
+  // Read from what is painted: the computed style of <html>, whether a theme was applied or the values of the stylesheet
+  // stand. The whole call: three values, in the order the function takes them. And the whole call of the observer: it is
+  // <html> that changes with the theme and the colour mode, not the editor.
+  for (const part of ['getComputedStyle(document.documentElement)',
+    "mapEditColors(theme.getPropertyValue('--color-accent'), theme.getPropertyValue('--color-accent-sub'), theme.getPropertyValue('--color-bg-primary'))",
+    "root.style.setProperty('--bmap-edit', colors.strip)", "root.style.setProperty('--bmap-edit-ink', colors.ink)",
+    "observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-color-mode', 'class', 'style'] })",
+    'observer.disconnect()']) assert.ok(hook.includes(part), `not found: ${part}`);
+  // Written on the editor's own element: written on <html> it would wake what observes <html>, this hook and the 3D view.
+  assert.ok(!hook.includes('document.documentElement.style.setProperty'));
+  // The tone follows the page that is painted, not the mode attribute: a theme picked by hand may not agree with it.
+  assert.ok(!hook.includes('getAttribute'));
+  // Once at the start: the observer hears only what changes after it. Without that call every theme but the default one
+  // would keep the amber of the stylesheet until the colour mode is switched.
+  inOrder(hook, 'apply();', 'new MutationObserver(apply)');
 });
 
 test('anchor 56: only a draft with nothing unsaved follows the library, never during a save or under an open dialog, and a map that went away is left as on a move to another map', () => {
