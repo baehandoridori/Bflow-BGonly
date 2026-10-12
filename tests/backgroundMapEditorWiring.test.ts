@@ -1023,9 +1023,11 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
     'leaveEditing(); focusCanvas();');
   // A draft with every edit undone has nothing to lose: the redo history is not asked.
   assert.doesNotMatch(end, /future/);
-  // What ending is: the draft of the map on show goes, and with it the points that were being drawn and the word that
-  // the map was just saved.
-  for (const part of ['doc.discard(current.id);', 'setPolygon([])', 'setSavedNotice(null)']) assert.ok(leave.includes(part), `not found: ${part}`);
+  // What ending is: the draft of the map on show goes, and with it the points that were being drawn, the tool in hand,
+  // the editor's message and the word that the map was just saved. The tool is no detail: the bar of the polygon tool
+  // (다각형 완성 · 취소) is drawn for the tool alone, in edit mode or not, and left in hand it would stay over a map that
+  // is no longer edited.
+  for (const part of ['doc.discard(current.id);', 'setPolygon([])', "setTool('select')", "setError('')", 'setSavedNotice(null)']) assert.ok(leave.includes(part), `not found: ${part}`);
   // The answer of the dialog ends it the same way. Its button is gone with the band, so the keyboard is handed to the
   // canvas once the dialog has closed.
   inOrder(block(handler.confirmAction(), "if (confirmation === 'discard') {"), 'leaveEditing();', 'focusAfterConfirm.current = true; setConfirmation(null); return;');
@@ -1033,6 +1035,9 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // a second way out would ask twice, or not at all.
   assert.equal(count(editor, /setConfirmation\('discard'\)/g), 1);
   assert.equal(count(editor, /\bleaveEditing\b/g), 3);
+  // Nor does the row of buttons in the header end it, under any name or by any call: 취소 left the header for the band.
+  // One left behind that drops the draft by itself would not ask, and neither count above would see it.
+  assert.doesNotMatch(piece(editor, '<div className="bmap-actions">', '</header>'), /discard|leaveEditing|endEditing/);
   // The band's 편집 끝내기 is that handler. Wired to `leaveEditing` it would drop unsaved edits without a question, and
   // everything above would still be found. Both buttons are off while a save or another action of the editor runs.
   const strip = handler.strip();
@@ -1043,6 +1048,12 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   for (const part of ["confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?')",
     "confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.')",
     "confirmation === 'discard' ? '버리고 끝내기' : '삭제'"]) assert.ok(editor.includes(part), `not found: ${part}`);
+  // Going back loses nothing. The dialog's 돌아가기 and its own close do one thing, they close it: nothing in the dialog
+  // touches the points that were being drawn or the tool in hand, so the polygon can be gone on with.
+  const dialog = piece(editor, '{confirmation && current && <BackgroundModal ', '</BackgroundModal>}');
+  for (const part of ["onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}",
+    "onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button>"]) assert.ok(dialog.includes(part), `not found: ${part}`);
+  assert.doesNotMatch(dialog, /setPolygon\(|setTool\(/);
   // The words of the button this one replaced (취소) are gone, with or without quotes round them.
   for (const old of ['도면 편집을 취소할까요?', '저장하지 않은 변경사항', '변경사항 버리기']) assert.ok(!editor.includes(old), `still there: ${old}`);
 });
