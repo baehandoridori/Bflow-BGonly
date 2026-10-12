@@ -1097,6 +1097,14 @@ test('anchor 53: Ctrl+S is heard on the window, passes its guards, commits the f
   // by the cleanup the effect returns, with the same flag: without it the listener would outlive the editor.
   const effect = piece(editor, "window.addEventListener('keydown', onSaveKey, true);", '}, [onSaveKey]);');
   assert.ok(effect.includes("return () => window.removeEventListener('keydown', onSaveKey, true);"));
+  // And the effect holds these four lines alone, as the handler holds its own. A return in front of the first would leave the
+  // key deaf everywhere: the editor is mounted while viewing and the handler is stable, so the effect never runs a second
+  // time. A second listener for the release, the shape of the Space effect above, would save on the press and again on the release.
+  const all = editor.split('\n').map(line => line.trim()).filter(Boolean), at = all.indexOf("window.addEventListener('keydown', onSaveKey, true);");
+  assert.deepEqual(all.slice(at - 1, at + 3),
+    ['useEffect(() => {', "window.addEventListener('keydown', onSaveKey, true);", "return () => window.removeEventListener('keydown', onSaveKey, true);", '}, [onSaveKey]);']);
+  // The handler is named where it is made and in those lines, and nowhere else: no second effect, no handler of an element.
+  assert.equal(count(editor, /\bonSaveKey\b/g), 4, 'made, added, removed, and what the effect depends on');
   // 도면 저장 and Ctrl+S are one function, and it holds these three lines alone. Nothing while a save runs, and nothing
   // during a drag: the save would cancel it. Then the focus goes to the canvas, before the save: leaving a field commits
   // what was being typed in it (a syllable still being composed too), and the save reads the draft after that.
@@ -1106,8 +1114,13 @@ test('anchor 53: Ctrl+S is heard on the window, passes its guards, commits the f
   // The band's button is that function, and the map is saved from nowhere else: a second way would skip the focus.
   assert.ok(handler.strip().includes('onSave={requestSave}'));
   assert.equal(count(editor, /\bsaveMap\(/g), 2, 'the function itself and requestSave');
+  // Nor is that function reached from a third place. It asks of no open dialog itself: the key handler does that before it.
+  assert.equal(count(editor, /\brequestSave\b/g), 3, 'the function, the key handler, the band');
   // The rule lives in one place: keyboard() has no S of its own.
   assert.doesNotMatch(handler.keyboard(), /'KeyS'|=== 's'/);
+  // Under any spelling of the key: keyboard() also hears the keys pressed inside the editor's own dialogs (its guards for
+  // them say so), and a save from there would save the draft under the open settings dialog.
+  assert.doesNotMatch(handler.keyboard(), /requestSave|saveMap/);
 });
 
 test('anchor 54: the band is one element for the plan and for 3D, stuck over the map at a height that never depends on what it says', () => {
