@@ -1248,16 +1248,20 @@ test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the wo
   assert.ok(row.includes('>도면 설정</button><button type="button" className="bg-button bmap-edit-start"'));
   assert.ok(piece(row, '{snapshot.canManage && <>', '</>}').includes(start));
   // Hidden, it still takes its room. `display:none` would give the room away, as the branch would: the line as written,
-  // and no other line that takes the button out of the layout.
+  // and it is the one line of the sheet that names the class. A second rule could take the button out of the row under
+  // another spelling (`display: none`, `position:absolute`, on `:disabled`), or show it again while the map is edited.
   const lines = sheetLines();
   assert.equal(lines[lineOf(lines, '.bmap-edit-start[aria-hidden="true"]')], '.bmap-edit-start[aria-hidden="true"] { visibility:hidden; }');
-  assert.ok(!lines.some(line => line.includes('.bmap-edit-start') && line.includes('display:none')));
+  assert.equal(lines.filter(line => line.includes('bmap-edit-start')).length, 1, 'one line of the sheet names the class of 편집 시작');
   // The names of the buttons that are gone are said nowhere: 공간 편집 on a button or in a hint, and the 취소 of the header
   // (the bar of the polygon tool has a 취소 of its own, further down).
   for (const source of [editor, gallery]) for (const old of ['공간 편집에서', '도면 편집에서', '>공간 편집<']) assert.ok(!source.includes(old), `still there: ${old}`);
   assert.ok(!row.includes('>취소</button>'));
   // The name of a button is said only to those who have it on screen. The image list is read while editing as well, right
-  // under the band, where the button is hidden: its two hints speak of editing the map and name no button.
+  // under the band, where the button is hidden: its two hints speak of editing the map and name no button. The whole
+  // choice, like the hint of the editor below: each hint to its last mark, the one about a view under a picked camera
+  // and the other under anything else, and before both the branch of a read-only account, which is not told to edit.
+  assert.ok(gallery.includes("!snapshot.canManage ? '관리자가 도면이나 공간에 연결한 배경이 여기에 표시됩니다.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'"));
   assert.equal(count(gallery, /도면을 편집하면서/g), 2);
   assert.ok(!gallery.includes('편집 시작'));
   // The hint of an empty map, the whole line. It names the button in the branch of those who are not editing, and there
@@ -1274,4 +1278,9 @@ test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the wo
   // 연결 해제 is drawn only while there is a link, so the save its own click starts takes the button away, and editing goes
   // on. The focus is sent to the canvas before that save: left on a button that is gone, Delete, Ctrl+Z and F2 are not heard.
   assert.ok(button('연결 해제').includes('onClick={() => { focusCanvas(); void linkMap(null, selected.id); }}'));
+  // Both clicks send the focus to the canvas of the mode on show, and neither canvas is a control: the SVG of the plan and
+  // the stage of the 3D view take it only by their `tabIndex`. Without it `focus()` does nothing there, and the keyboard
+  // stays on the hidden 편집 시작, or on a 연결 해제 that is gone.
+  assert.ok(canvasTag().includes(' tabIndex={0} '));
+  assert.ok(editor.includes('<div className="bmap-3d-main" ref={stageRef} tabIndex={-1} '));
 });
