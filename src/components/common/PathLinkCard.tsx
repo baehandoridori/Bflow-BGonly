@@ -29,7 +29,7 @@ export interface PathLinkCardProps {
 }
 
 const TEXT_BUTTON =
-  'inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md border border-bg-border px-2.5 text-xs text-text-secondary transition-colors hover:border-text-secondary/50 hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/45 disabled:opacity-45';
+  'inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md border border-text-secondary/30 px-2.5 text-xs text-text-primary transition-colors hover:border-text-secondary/60 hover:bg-text-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/45 disabled:opacity-45';
 const ICON_BUTTON =
   'inline-flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md text-text-secondary transition-colors focus:outline-none focus-visible:ring-2 disabled:opacity-45';
 
