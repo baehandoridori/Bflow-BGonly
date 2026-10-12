@@ -72,7 +72,9 @@ const handler = {
   navigate: () => piece(editor, 'function navigate(', 'function switchMode('),
   switchMode: () => piece(editor, 'function switchMode(', 'const leave3D = useEvent('),
   leave3D: () => piece(editor, 'const leave3D = useEvent(', 'function expandPath('),
+  persistMaps: () => piece(editor, 'async function persistMaps(', 'function enterNewMap('),
   placeSymbol: () => piece(editor, 'function placeSymbol(', 'function beginEditing('),
+  saveMap: () => piece(editor, 'async function saveMap(', 'async function confirmAction('),
   confirmAction: () => piece(editor, 'async function confirmAction(', 'async function createMap('),
   abortGesture: () => piece(editor, 'const abortGesture = useEvent(', 'useLayoutEffect(() => { abortGesture(); }'),
   commitName: () => piece(editor, 'const commitName = useEvent(', 'const cancelName = useEvent('),
@@ -912,4 +914,48 @@ test('anchor 49: in 3D a road gives way to a room that stands on it, and behind 
   assert.doesNotMatch(step, /mapFloorPile\(/);
   assert.ok(viewport.pick().includes('again ? mapSpacePile(hits, props.map) : []'));
   assert.doesNotMatch(view3d, /mapFloorPile/);
+});
+
+test('anchor 50: a save never ends edit mode: every saved map that was being edited goes on from what the command saved', () => {
+  // The one function every save of maps goes through. The drafts are put back from the command, in one dispatch.
+  const persist = handler.persistMaps(), waited = 'await execute(command);';
+  inOrder(persist, waited, 'doc.rebaseDrafts(savedMaps(command));');
+  // After the wait this handler holds the render that started the save: a draft opened from its map would be on the
+  // revision before that save, and the next save would be refused. Nothing after the wait reads that render or opens a draft.
+  const after = persist.slice(positions(persist, waited)[0] + waited.length);
+  for (const stale of [/\bsnapshot\b/, /\bcurrent\b/, /\bdraft\b/, /doc\.beginEditing/, /doc\.enterNewMap/]) assert.doesNotMatch(after, stale);
+  // No save drops a draft any more, and the four saves all go through that function.
+  assert.doesNotMatch(editor, /dropDrafts/);
+  assert.equal(count(editor, /await persistMaps\(/g), 4, 'the map, a new map, a link, the settings');
+  const binding = read('useBackgroundMapDocument.ts');
+  assert.doesNotMatch(binding, /dropDrafts/);
+  assert.ok(binding.includes("type: 'rebase-drafts'"));
+  // Only a map that has a draft gets one: a save by someone who was not editing turns no edit mode on. That draft has nothing unsaved.
+  const reducer = read('mapDocument.ts'), rebase = piece(reducer, 'function rebaseDrafts(', 'function dropDrafts(');
+  assert.ok(rebase.includes('!!draft &&'));
+  assert.ok(rebase.includes('freshDraft(map)'));
+  assert.ok(piece(reducer, 'function freshDraft(', 'function openDraft(').includes('past: [], future: [], dropped: 0'));
+  // Its revision is the one the store and the server give a saved map.
+  assert.ok(piece(read('mapWorkflow.ts'), 'export function savedMaps(', 'export function effectiveMaps(').includes('revision: (expectedRevision ?? 0) + 1'));
+  // Editing goes on with the tool that is in hand.
+  assert.doesNotMatch(handler.saveMap(), /setTool\(/);
+});
+
+test('anchor 51: the map is saved only when something is unsaved and never twice at once, and a save that ends in a message brings the message into view', () => {
+  const save = handler.saveMap();
+  // The checks, in this order. The polygon that is being drawn is asked before the unsaved edits: its points are no part
+  // of the draft, and asked after them, Ctrl+S on a map with nothing else unsaved would end without a word. The unsaved
+  // edits are read from the store, where the field that was just left is committed already. The ref is set after the
+  // checks that return early (set before them, one refused save would leave it set for good) and cleared in `finally`.
+  inOrder(save, 'if (!current || !draft || !canEdit || saving.current) return;',
+    "if (polygon.length) { setError('그리는 중인 다각형을 완성하거나 취소한 뒤 저장해 주세요.'); setRefused(count => count + 1); return; }",
+    'if (!mapDraftChanged(mapDraft(doc.getState(), current.id))) return;', 'if (!current.name.trim()) {', 'const settled = settle()',
+    'saving.current = true; setBusy(true);', 'finally { saving.current = false; setBusy(false); }');
+  // The value of the render does not know the field that leaving it has just committed.
+  assert.doesNotMatch(save, /\bdraftChanged\b/);
+  // A save ends in a message instead of a save in three places: the polygon, the empty name, a failure.
+  assert.equal(count(save, /setRefused\(count => count \+ 1\)/g), 3);
+  // Each brings that message into view: it sits above the band and may be scrolled away. `nearest` moves nothing when it is in view.
+  assert.ok(editor.includes("useEffect(() => { if (refused) errorRef.current?.scrollIntoView({ block: 'nearest' }); }, [refused]);"));
+  assert.ok(editor.includes('<div className="bg-error" role="alert" ref={errorRef}>'));
 });

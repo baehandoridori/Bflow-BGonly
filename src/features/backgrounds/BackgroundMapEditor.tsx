@@ -26,7 +26,7 @@ import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument'
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
 import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode } from './mapCanvas';
 import { backgroundMapPath } from './domain';
-import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, type MapSaveCommand } from './mapWorkflow';
+import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
@@ -216,7 +216,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const renamingRef = useRef<NameEdit | null>(null);       // handlers read this, so a late blur after a close is a no-op
   function setRenaming(next: NameEdit | null) { renamingRef.current = next; setRenamingState(next); }
   const [error, setError] = useState('');
+  /** Counts the saves of the map that ended in a message instead of a save. Each one brings that message into view. */
+  const [refused, setRefused] = useState(0);
+  const errorRef = useRef<HTMLDivElement>(null);            // the editor's own error block, above the band
   const [busy, setBusy] = useState(false);
+  const saving = useRef(false);                             // a save of the map is running. A ref: a second Ctrl+S can come before `busy` is drawn
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
   const [linkForm, setLinkForm] = useState<{ spaceId: string; mapId: string; search: string } | null>(null);
   const [settingsForm, setSettingsForm] = useState<BackgroundMap | null>(null);
@@ -324,6 +328,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     return () => svg.removeEventListener('wheel', onWheel);
   }, [onWheel, current?.id, mode]);
   useEffect(() => { if (!snapshot.canManage) { setTool('select'); setPolygon([]); setSymbolPaletteOpen(false); } }, [snapshot.canManage]);
+  useEffect(() => { if (refused) errorRef.current?.scrollIntoView({ block: 'nearest' }); }, [refused]);
 
   /** Ends the pressed pointer and cancels the gesture in progress. Nothing of it reaches the history. */
   const abortGesture = useEvent(() => {
@@ -459,7 +464,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   }
   async function persistMaps(command: MapSaveCommand) {
     await execute(command);
-    doc.dropDrafts(command.maps.map(item => item.entity.id));
+    // Saving never ends edit mode: every saved map that was being edited goes on from what was saved. Built from the command.
+    // After the wait this handler still holds the snapshot of the render that started the save, with the revision before it.
+    doc.rebaseDrafts(savedMaps(command));
   }
   function enterNewMap(map: BackgroundMap) {
     doc.enterNewMap(map);
@@ -534,16 +541,20 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     setPolygon([]); setActiveVertex(null);        // after the step the index may name another point
   }
   async function saveMap() {
-    if (!current || !draft || !canEdit) return;
-    if (!current.name.trim()) { setError('도면 이름을 입력해 주세요.'); return; }
-    if (polygon.length) { setError('그리는 중인 다각형을 완성하거나 취소한 뒤 저장해 주세요.'); return; }
+    if (!current || !draft || !canEdit || saving.current) return;
+    // Not saved: the reason is shown, and brought into view. It sits above the band and may be scrolled away, while the band and Ctrl+S are always at hand.
+    // The points of a polygon that is being drawn are no part of the draft. Asked first: after the check below, Ctrl+S on a map with nothing else unsaved would end without a word.
+    if (polygon.length) { setError('그리는 중인 다각형을 완성하거나 취소한 뒤 저장해 주세요.'); setRefused(count => count + 1); return; }
+    // Nothing unsaved: no write. A save of an untouched map would still raise its revision and signal every open screen.
+    // Read from the store: the field that was being typed in has just been committed by leaving it.
+    if (!mapDraftChanged(mapDraft(doc.getState(), current.id))) return;
+    if (!current.name.trim()) { setError('도면 이름을 입력해 주세요.'); setRefused(count => count + 1); return; }
     const settled = settle(), captured = settled.maps.find(map => map.id === current.id);
     if (!captured) return;
-    setBusy(true); setError('');
+    saving.current = true; setBusy(true); setError('');
     try {
       await persistMaps(saveMapChanges(snapshot, settled.drafts, [captured]));
-      setTool('select');
-    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+    } catch (cause) { setError(message(cause)); setRefused(count => count + 1); } finally { saving.current = false; setBusy(false); }
   }
   async function confirmAction() {
     if (!current || disabled) return;
@@ -978,7 +989,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2>{editing && <span className="bmap-badge">{draftChanged ? '저장 전 변경사항' : '편집 중'}</span>}</div></div>
         <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button>{editing ? <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={() => { setError(''); setConfirmation('discard'); }}>취소</button><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => void saveMap()}>{busy ? '저장 중…' : '도면 저장'}</button></> : <button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => { beginEditing(); setInspectorOpen(true); }}>공간 편집</button>}</>}</div>
       </header>
-      {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert">{error}</div>}
+      {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
