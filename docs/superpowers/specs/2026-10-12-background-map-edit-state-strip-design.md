@@ -611,6 +611,9 @@ function endEditing() {
   if (mapDraftChanged(mapDraft(doc.getState(), current.id)) || polygon.length) { setError(''); setConfirmation('discard'); return; }
   // The button goes away with this click. The focus goes to the canvas, or the keys would reach nothing.
   leaveEditing(); focusCanvas();
+  // The band goes with it, and what is below moves up by its height: the second click of a double-click would land on
+  // whatever slides under the pointer (the canvas in a narrow window, where it drops the selection or enters a space).
+  swallowSecondClick();
 }
 ```
 
@@ -628,6 +631,7 @@ function endEditing() {
 - **창이 답하는 도면은 창을 연 도면이다.** `leaveEditing`은 답하는 렌더의 `current.id`를 버린다. 창이 열려 있는 동안 그 도면은 바뀌지 않는다: 초안이 그 도면을 화면에 붙들고 있고, 그 초안을 치울 수 있는 따라가기는 창이 열려 있는 동안 돌지 않는다(4.4). 그 가드가 없으면, 다각형 점만 있는 채 뜬 창 밑에서 그 도면이 다른 곳에서 지워졌을 때 '버리고 끝내기'가 목록의 첫 도면의 초안을 버린다.
 - 검사는 저장소에서 지금 읽는다. 버튼을 누르는 것 자체가 치던 칸을 떠나게 하므로(blur가 클릭보다 먼저다) 그 값은 이미 초안에 들어 있다.
 - **확인 창에서 누른 Esc는 창만 닫는다(게이트 B에서 고친 것).** 창은 포털로 그려지지만 그 안의 키는 React 트리를 따라 편집기의 `keyboard()`까지 올라온다. v1.134.0까지는 그 Esc가 `keyboard()`의 Escape 가지를 그대로 지나 찍던 점과 손에 든 도구를 지웠다 — '돌아가기' 버튼은 점을 남기는데 Esc는 지웠다(I9가 지키려는 바로 그 점이다). Escape 가지의 둘째 줄이 `if ((event.target as HTMLElement).closest('dialog')) return;`이다(앵커 52). 설정·연결·만들기 창에서 누른 Esc도 같은 줄에서 멈춘다.
+- **묻지 않고 끝난 직후의 둘째 클릭은 삼킨다(게이트 B에서 더한 것).** 띠가 사라지면 그 아래가 띠의 높이만큼(40px, 좁은 창은 72px) 올라온다. '편집 끝내기'를 더블클릭하면 둘째 클릭이 그 자리로 올라온 것에 닿는다 — 넓은 창에서는 속성 칸의 빈 곳이지만, 900px 이하의 두 줄 배치에서는 도면이다(게이트 B에서 본 것: 고른 것이 풀렸다. 그 자리에 연결된 공간이 있으면 그 도면으로 들어간다). I11이 '편집 시작'에서 막은 일의 짝이다. `swallowSecondClick()`이 더블클릭 한 번의 길이(`SECOND_CLICK_MS` = 500ms) 동안 창 단위 캡처에서 누름 여섯 가지(`pointerdown`·`mousedown`·`pointerup`·`mouseup`·`click`·`dblclick`)를 멈추고 스스로 떼어 낸다. 키보드는 막지 않는다. 확인 창을 거쳐 끝나는 길에는 없다(그때 띠는 창의 버튼을 누를 때 사라진다).
 - **편집을 끝내면 기호 팔레트도 닫힌다(게이트 B에서 고친 것).** `leaveEditing`이 `setSymbolPaletteOpen(false)`를 부른다. 묻지 않고 끝나는 길이 생기면서, 팔레트를 연 채 '편집 끝내기' → '편집 시작' 두 번의 클릭으로 팔레트가 시키지 않았는데 열려 있었다.
 - **그리다 만 다각형이 있으면 묻는다(I9).** 찍던 점(`polygon` — 초안의 일부가 아니라 화면 상태다)은 편집이 끝나면 사라지는 작업이다. 지금의 '취소'는 늘 묻고 '돌아가기'는 점을 그대로 둔다(확인 창은 `polygon`을 건드리지 않는다) — 그 보호를 그대로 둔다. `polygon`은 클릭으로만 바뀌는 React 상태라 이 클릭의 렌더가 쥔 값이 지금 값이다. 초안이 깨끗한 채 점만 있을 때의 창은 그 경우의 제목과 문장을 쓴다(5.2).
 - **모두 되돌린 초안은 "잃을 것이 없다"에 든다(I10).** `mapDraftChanged`는 '다시 실행' 기록(`future`)을 보지 않는다(3.2). 열 번 고치고 열 번 되돌린 뒤 '편집 끝내기'를 누르면 묻지 않고 끝나고, 그 열 번은 다시 실행할 수 없게 된다. 저장과 따라가기도 그 기록을 비운다(4.1, 4.4) — 같은 규칙이다.

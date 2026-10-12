@@ -1025,6 +1025,20 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
     'leaveEditing(); focusCanvas();');
   // A draft with every edit undone has nothing to lose: the redo history is not asked.
   assert.doesNotMatch(end, /future/);
+  // Ended without a question, the band is gone with the click that ended it and everything below has moved up by its
+  // height: the second click of a double-click would land on whatever slid under the pointer (the canvas in a narrow
+  // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
+  // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
+  inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 2);
+  assert.deepEqual(piece(editor, 'function swallowSecondClick() {', 'function navigate(').split('\n').map(line => line.trim()).filter(Boolean), [
+    'function swallowSecondClick() {',
+    'const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };',
+    'for (const type of pressEvents) window.addEventListener(type, stop, true);',
+    'window.setTimeout(() => { for (const type of pressEvents) window.removeEventListener(type, stop, true); }, SECOND_CLICK_MS);',
+    '}']);
+  assert.ok(editor.includes('const SECOND_CLICK_MS = 500;'));
+  assert.ok(editor.includes("const pressEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick'];"));
   // What ending is: the draft of the map on show goes, and with it the points that were being drawn, the tool in hand,
   // the editor's message and the word that the map was just saved. The tool is no detail: the bar of the polygon tool
   // (다각형 완성 · 취소) is drawn for the tool alone, in edit mode or not, and left in hand it would stay over a map that

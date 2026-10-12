@@ -105,6 +105,9 @@ const ASPECT_PRESETS = [{ label: '16:9', value: 16 / 9 }, { label: '4:3', value:
 const PITCH_PRESETS = [{ label: '수평', pitch: 0 }, { label: '수직 위', pitch: 90 }, { label: '수직 아래', pitch: -90 }];
 /** Saved bounds of plan positions and sizes. */
 const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
+/** The longest a double-click takes (the system's default interval). */
+const SECOND_CLICK_MS = 500;
+const pressEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick'];
 /**
  * The plan gesture a pressed pointer performs. Only the sessions that edit the map have one (`pan` and `marquee`
  * never ask): any other names no node, so nothing is previewed for it. The editing modes are told apart by
@@ -479,6 +482,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function liveSelection(mapId: string, map: BackgroundMap): MapSelection { return mapSelection(map, mapViewport(doc.getState(), mapId).selectedIds); }
   function updateView(changes: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>>, mapId = current?.id) { if (mapId) doc.setViewport(mapId, changes); }
   function focusCanvas() { (mode === 'plan' ? svgRef.current : stageRef.current)?.focus({ preventScroll: true }); }
+  /** For the length of a double-click no press reaches the page: what was pressed has gone, and something else lies under the pointer. */
+  function swallowSecondClick() {
+    const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };
+    for (const type of pressEvents) window.addEventListener(type, stop, true);
+    window.setTimeout(() => { for (const type of pressEvents) window.removeEventListener(type, stop, true); }, SECOND_CLICK_MS);
+  }
   function navigate(id: string) { if (disabled) return; abortGesture(); setCurrentId(id); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); setConfirmation(null); }
   function switchMode(next: MapDisplayMode) {
     if (next === mode) return;
@@ -603,6 +612,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (mapDraftChanged(mapDraft(doc.getState(), current.id)) || polygon.length) { setError(''); setConfirmation('discard'); return; }
     // The button goes away with this click. The focus goes to the canvas, or the keys would reach nothing.
     leaveEditing(); focusCanvas();
+    // The band goes with it, and what is below moves up by its height: the second click of a double-click would land on
+    // whatever slides under the pointer (the canvas in a narrow window, where it drops the selection or enters a space).
+    swallowSecondClick();
   }
   function undo(redo = false) {
     if (!current || !canEdit || pointerRef.current || doc.isGestureActive()) return;
