@@ -134,7 +134,8 @@ test('올리기: 원본 형식이 화면용과 달라도 원본 형식 그대로
 });
 
 test('올리기: 원본이 없거나 받을 수 없는 값이면 화면용만', async () => {
-  for (const value of [undefined, null, '', 'data:image/svg+xml;base64,AAAA', 'not-a-data-url']) {
+  // 마지막 값은 base64 로 읽으면 내용이 비는 경우 — 빈 원본이 올라가면 복사가 화면용으로 넘어가지 못하고 실패한다.
+  for (const value of [undefined, null, '', 'data:image/svg+xml;base64,AAAA', 'not-a-data-url', 'data:image/png;base64,!!!!']) {
     const { store, uploads } = fakeStore();
     const result = await uploadCharacterImageFiles(store, { ...target, display: displayPng, originalDataUrl: value });
     assert.equal(result.originalSaved, false);
@@ -204,6 +205,8 @@ test('배선: 캐릭터 그림 복사는 원본을 먼저 — 없으면 화면�
   assert.match(imageActions, /export async function fetchImageBlob\(url: string\): Promise<Blob>/);
   assert.match(imageActions, /export async function writeImageBlobToClipboard\(blob: Blob\): Promise<\{ width: number; height: number \}>/);
   assert.match(imageActions, /await writeImageBlobToClipboard\(await fetchImageBlob\(url\)\);/);
+  // 쓴 그림의 실제 크기를 돌려준다 — 줄어든 그림인지 가리는 데 쓴다.
+  assert.match(imageActions, /return \{ width: canvas\.width, height: canvas\.height \};/);
 });
 
 test('배선: 그림을 지우면 원본도 같이 지운다 — 낱장·복장·캐릭터 삭제 모두', () => {
