@@ -224,6 +224,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const errorRef = useRef<HTMLDivElement>(null);            // the editor's own error block, above the band
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);                             // a save of the map is running. A ref: a second Ctrl+S can come before `busy` is drawn
+  /** The map whose save just went through, while the band still says so. */
+  const [savedNotice, setSavedNotice] = useState<{ mapId: string } | null>(null);
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
   const [linkForm, setLinkForm] = useState<{ spaceId: string; mapId: string; search: string } | null>(null);
   const [settingsForm, setSettingsForm] = useState<BackgroundMap | null>(null);
@@ -554,6 +556,22 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     doc.beginEditing(current);
     setTool('select'); setError('');
   }
+  /** Edit mode ends for the map on show: its draft goes, and what was not saved goes with it. */
+  function leaveEditing() {
+    if (!current) return;
+    doc.discard(current.id);
+    setPolygon([]); setTool('select'); setError(''); setSavedNotice(null);
+  }
+  /** 편집 끝내기. With nothing to lose edit mode ends at once; otherwise the question comes first. */
+  function endEditing() {
+    if (!current || !editing || disabled) return;
+    abortGesture();
+    // Asked when something would be lost: unsaved edits (read from the store: the press on the button has just committed
+    // the field that was being typed in), or the points of a polygon that is being drawn.
+    if (mapDraftChanged(mapDraft(doc.getState(), current.id)) || polygon.length) { setError(''); setConfirmation('discard'); return; }
+    // The button goes away with this click. The focus goes to the canvas, or the keys would reach nothing.
+    leaveEditing(); focusCanvas();
+  }
   function undo(redo = false) {
     if (!current || !canEdit || pointerRef.current || doc.isGestureActive()) return;
     if (redo) doc.redo(current.id); else doc.undo(current.id);
@@ -592,8 +610,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       focusAfterConfirm.current = true; setConfirmation(null); return;
     }
     if (confirmation === 'discard') {
-      doc.discard(current.id);
-      setPolygon([]); setTool('select'); setConfirmation(null); setError(''); return;
+      leaveEditing();
+      focusAfterConfirm.current = true; setConfirmation(null); return;
     }
     if (confirmation === 'delete-map' && snapshot.canManage) {
       if (draft?.baseRevision === null) {
@@ -1010,7 +1028,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       </header>
       {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
-      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, false)} disabled={disabled} onEnd={() => { setError(''); setConfirmation('discard'); }} onSave={() => void saveMap()} />}
+      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, false)} disabled={disabled} onEnd={endEditing} onSave={() => void saveMap()} />}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
           <div className="bmap-toolbar" role="toolbar" aria-label="도면 도구">
@@ -1230,6 +1248,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       {error && <p className="bg-error" role="alert">{error}</p>}
       <div className="bmap-modal-actions"><button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); setConfirmation('delete-map'); }}>도면 삭제</button><button type="button" className="bg-button" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); }}>취소</button><button type="submit" className="bg-button bg-primary" disabled={disabled || !settingsForm.name.trim()}>{busy ? '저장 중…' : '설정 저장'}</button></div>
     </form></BackgroundModal>}
-    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? '도면 편집을 취소할까요?' : confirmation === 'delete-map' ? '도면을 삭제할까요?' : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? '이 도면에서 저장하지 않은 변경사항은 사라집니다.' : confirmation === 'delete-map' ? '도면 배치만 삭제합니다. 장소와 배경 원본은 유지됩니다. 하위 도면이나 연결이 남아 있으면 먼저 해제해 주세요.' : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '변경사항 버리기' : '삭제'}</button></div></BackgroundModal>}
+    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?') : confirmation === 'delete-map' ? '도면을 삭제할까요?' : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.') : confirmation === 'delete-map' ? '도면 배치만 삭제합니다. 장소와 배경 원본은 유지됩니다. 하위 도면이나 연결이 남아 있으면 먼저 해제해 주세요.' : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}
   </div>;
 }

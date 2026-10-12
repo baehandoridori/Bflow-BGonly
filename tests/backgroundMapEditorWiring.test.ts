@@ -74,6 +74,8 @@ const handler = {
   leave3D: () => piece(editor, 'const leave3D = useEvent(', 'function expandPath('),
   persistMaps: () => piece(editor, 'async function persistMaps(', 'function enterNewMap('),
   placeSymbol: () => piece(editor, 'function placeSymbol(', 'function beginEditing('),
+  leaveEditing: () => piece(editor, 'function leaveEditing(', 'function endEditing('),
+  endEditing: () => piece(editor, 'function endEditing(', 'function undo('),
   saveMap: () => piece(editor, 'async function saveMap(', 'async function confirmAction('),
   confirmAction: () => piece(editor, 'async function confirmAction(', 'async function createMap('),
   followSaved: () => piece(editor, 'const followSaved = useEvent(() => {', 'const abortGesture = useEvent('),
@@ -87,6 +89,8 @@ const handler = {
   openSpace: () => piece(editor, 'function openSpace(', 'function beginRename('),
   fitView: () => piece(editor, 'function fitView(', 'function keyboard('),
   keyboard: () => piece(editor, 'function keyboard(', 'const selectNode = useEvent('),
+  /** No handler: the one tag with which the editor draws the edit band, up to the `/>` that closes it. */
+  strip: () => piece(editor, '<BackgroundMapEditStrip ', '/>'),
 };
 /** The opening tag of the plan SVG, through the end of its last attribute. */
 function canvasTag(): string {
@@ -1005,6 +1009,42 @@ test('anchor 51: the map is saved only when something is unsaved and never twice
     "title={status.canSave ? '도면 저장 (Ctrl+S)' : status.phase === 'saving' ? undefined : '저장할 변경이 없어요'}"]) assert.ok(strip.includes(part), `not found: ${part}`);
   // Dimmed, never switched off: switched off it would leave the Tab order, and its tooltip would not be reached.
   assert.doesNotMatch(piece(strip, 'className="bmap-edit-save"', '</button>'), /(?<!aria-)\bdisabled\b/);
+});
+
+test('anchor 52: edit mode ends without a question only when nothing would be lost', () => {
+  const leave = handler.leaveEditing(), end = handler.endEditing();
+  // 편집 끝내기, in this order. Nothing while a save runs, and a drag in progress is cancelled first. Then the question,
+  // only when something would be lost: unsaved edits, read from the store (the press on the button has just committed the
+  // field that was being typed in, which the value of the render does not know), or the points of a polygon that is being
+  // drawn, which are no part of the draft. With neither, edit mode ends at once and the keyboard goes to the canvas: the
+  // button that was pressed is gone.
+  inOrder(end, 'if (!current || !editing || disabled) return;', 'abortGesture();',
+    "if (mapDraftChanged(mapDraft(doc.getState(), current.id)) || polygon.length) { setError(''); setConfirmation('discard'); return; }",
+    'leaveEditing(); focusCanvas();');
+  // A draft with every edit undone has nothing to lose: the redo history is not asked.
+  assert.doesNotMatch(end, /future/);
+  // What ending is: the draft of the map on show goes, and with it the points that were being drawn and the word that
+  // the map was just saved.
+  for (const part of ['doc.discard(current.id);', 'setPolygon([])', 'setSavedNotice(null)']) assert.ok(leave.includes(part), `not found: ${part}`);
+  // The answer of the dialog ends it the same way. Its button is gone with the band, so the keyboard is handed to the
+  // canvas once the dialog has closed.
+  inOrder(block(handler.confirmAction(), "if (confirmation === 'discard') {"), 'leaveEditing();', 'focusAfterConfirm.current = true; setConfirmation(null); return;');
+  // The question is asked from one place, and edit mode is ended from those two alone (the third is the function itself):
+  // a second way out would ask twice, or not at all.
+  assert.equal(count(editor, /setConfirmation\('discard'\)/g), 1);
+  assert.equal(count(editor, /\bleaveEditing\b/g), 3);
+  // The band's 편집 끝내기 is that handler. Wired to `leaveEditing` it would drop unsaved edits without a question, and
+  // everything above would still be found. Both buttons are off while a save or another action of the editor runs.
+  const strip = handler.strip();
+  for (const part of ['onEnd={endEditing}', 'disabled={disabled}']) assert.ok(strip.includes(part), `not found: ${part}`);
+  assert.ok(editStrip().includes('<button type="button" className="bmap-edit-end" disabled={disabled} onClick={onEnd}>편집 끝내기</button>'));
+  // The dialog. Its title and its text part on the same value: with only a polygon being drawn nothing is unsaved (the
+  // band says so, and those points cannot be saved), so the question does not speak of saving. One button fits both.
+  for (const part of ["confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?')",
+    "confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.')",
+    "confirmation === 'discard' ? '버리고 끝내기' : '삭제'"]) assert.ok(editor.includes(part), `not found: ${part}`);
+  // The words of the button this one replaced (취소) are gone, with or without quotes round them.
+  for (const old of ['도면 편집을 취소할까요?', '저장하지 않은 변경사항', '변경사항 버리기']) assert.ok(!editor.includes(old), `still there: ${old}`);
 });
 
 test('anchor 54: the band is one element for the plan and for 3D, stuck over the map at a height that never depends on what it says', () => {
