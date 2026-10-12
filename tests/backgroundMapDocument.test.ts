@@ -781,6 +781,12 @@ test('rebase-drafts puts a fresh draft under each listed map that has one, and o
   const both = run(opened(), selectMany(['a', 'b']), { type: 'set-viewport', mapId: A, viewport: { x: 30, zoom: 2 } });
   const one = run(both, { type: 'rebase-drafts', maps: [saved] });
   assert.deepEqual(valueOf(one), saved); assert.equal(mapDraft(one, B), mapDraft(both, B)); assert.equal(one.viewports, both.viewports);
+  // One save can carry several maps (a link saves the parent and the child): every listed draft is replaced, each by its own map.
+  const savedB: BackgroundMap = { ...mapB, revision: 8, name: '복도 저장됨' };
+  const pair = run(opened(), { type: 'update', map: named(mapA, '고침') }, { type: 'update', map: named(mapB, '복도 고침') }, { type: 'rebase-drafts', maps: [saved, savedB] });
+  assert.deepEqual(valueOf(pair), saved); assert.deepEqual(valueOf(pair, B), savedB);
+  assert.equal(mapDraft(pair, A)!.baseRevision, 4); assert.equal(mapDraft(pair, B)!.baseRevision, 8);
+  assert.equal(mapDraftChanged(mapDraft(pair, A)), false); assert.equal(mapDraftChanged(mapDraft(pair, B)), false);
   // Nothing to do is the same state: an empty list, and a list of maps without a draft.
   assert.equal(run(both, { type: 'rebase-drafts', maps: [] }), both);
   assert.equal(run(editing, { type: 'rebase-drafts', maps: [mapB] }), editing);
@@ -811,12 +817,20 @@ test('follow-saved moves a draft with nothing unsaved to a newer revision of its
   const followed = follow(clean, newer, mapB), draft = mapDraft(followed, A)!;
   assert.deepEqual(draft.value, newer); assert.notEqual(draft.value, newer); assert.equal(draft.baseRevision, 4); assert.equal(mapDraftChanged(draft), false);
   assert.equal(mapDraft(followed, B), mapDraft(clean, B)); assert.equal(followed.viewports, clean.viewports);
+  // Two drafts at once, each to the revision its own map is on now, however many saves it missed.
+  const jumped = follow(clean, { ...mapA, revision: 9 }, { ...mapB, revision: 12 });
+  assert.equal(mapDraft(jumped, A)!.baseRevision, 9); assert.equal(mapDraft(jumped, B)!.baseRevision, 12);
   // The echo of its own save (the same revision) and an older reading change nothing.
   assert.equal(follow(clean, mapA, mapB), clean);
   assert.equal(follow(clean, { ...mapA, revision: 2, name: '옛 값' }, mapB), clean);
   // Unsaved edits are never replaced.
   const changed = run(clean, { type: 'update', map: named(mapA, '고침') });
   assert.equal(follow(changed, newer, mapB), changed);
+  // Nor is an unsaved edit that only the count still knows: one more edit than the history holds, then undo to its end.
+  const worn = undoTimes(editTimes(clean, MAP_HISTORY_LIMIT + 1), MAP_HISTORY_LIMIT), wornDraft = mapDraft(worn, A)!;
+  assert.equal(wornDraft.past.length, 0); assert.equal(wornDraft.dropped, 1); assert.equal(wornDraft.value.name, '1');
+  assert.equal(mapDraftChanged(wornDraft), true); assert.equal(mapDraftSteps(wornDraft), 1);
+  assert.equal(follow(worn, newer, mapB), worn);
   // Every edit undone: nothing is unsaved, so it follows. The redo steps are whole values of the old map and go.
   const undone = run(changed, { type: 'undo', mapId: A });
   assert.equal(mapDraft(undone, A)!.future.length, 1);
@@ -825,6 +839,15 @@ test('follow-saved moves a draft with nothing unsaved to a newer revision of its
   // Not in the middle of a drag.
   const dragging = run(clean, { type: 'gesture-begin', mapId: A }, { type: 'gesture-preview', map: moved(valueOf(clean), 640) });
   assert.equal(follow(dragging, newer, mapB), dragging);
+  // A field edit or a drag on another map, which is in the list like every map of the library, goes on while this draft follows.
+  const key = 'field', typingB = run(clean, { type: 'update', map: named(mapB, '복도 수정'), coalesceKey: key });
+  const whileTyping = follow(typingB, newer, mapB);
+  assert.equal(mapDraft(whileTyping, A)!.baseRevision, 4); assert.equal(mapDraft(whileTyping, B), mapDraft(typingB, B));
+  assert.equal(whileTyping.coalescing, typingB.coalescing); assert.deepEqual(whileTyping.coalescing, { mapId: B, key });
+  const draggingB = run(clean, { type: 'gesture-begin', mapId: B }, { type: 'gesture-preview', map: named(mapB, '끄는 중') });
+  const whileDragging = follow(draggingB, newer, mapB);
+  assert.equal(mapDraft(whileDragging, A)!.baseRevision, 4); assert.equal(mapDraft(whileDragging, B), mapDraft(draggingB, B));
+  assert.equal(whileDragging.gesture, draggingB.gesture); assert.equal(whileDragging.gesture?.mapId, B);
   // A map that was never saved has no revision to move on from.
   const local = neverSaved(clean);
   assert.equal(follow(local, newer, mapB), local);
@@ -842,12 +865,21 @@ test('follow-saved drops a draft with nothing unsaved whose map the library no l
   // Unsaved edits stay, and the map with them.
   const changed = run(clean, { type: 'update', map: named(mapA, '고침') });
   assert.equal(follow(changed, mapB), changed);
+  // So does an unsaved edit that only the count still knows: one more edit than the history holds, then undo to its end.
+  const worn = undoTimes(editTimes(clean, MAP_HISTORY_LIMIT + 1), MAP_HISTORY_LIMIT), wornDraft = mapDraft(worn, A)!;
+  assert.equal(wornDraft.past.length, 0); assert.equal(wornDraft.dropped, 1); assert.equal(mapDraftChanged(wornDraft), true);
+  assert.equal(follow(worn, mapB), worn);
   // Every edit undone: nothing unsaved is left in it, so it goes.
   const undone = run(changed, { type: 'undo', mapId: A });
   assert.equal(mapDraft(undone, A)!.future.length, 1); assert.equal(mapDraft(follow(undone, mapB), A), undefined);
   // Not in the middle of a drag: the draft and the gesture go on.
   const dragging = run(clean, { type: 'gesture-begin', mapId: A }, { type: 'gesture-preview', map: moved(valueOf(clean), 640) });
   assert.equal(follow(dragging, mapB), dragging);
+  // A drag on another map does not hold the draft that goes, and goes on itself.
+  const draggingB = run(clean, { type: 'gesture-begin', mapId: B }, { type: 'gesture-preview', map: named(mapB, '끄는 중') });
+  const goneWhileDragging = follow(draggingB, mapB);
+  assert.equal(mapDraft(goneWhileDragging, A), undefined); assert.equal(mapDraft(goneWhileDragging, B), mapDraft(draggingB, B));
+  assert.equal(goneWhileDragging.gesture, draggingB.gesture); assert.equal(goneWhileDragging.gesture?.mapId, B);
   // A map that was never saved counts as changed.
   const local = neverSaved(clean);
   assert.equal(follow(local, mapB), local);
