@@ -251,6 +251,10 @@ test('C-6: values that cannot be read: which of the three it is decides what the
   assert.deepEqual(colorTriple('108/92/231'), [108, 92, 231]);
   assert.deepEqual(colorTriple('  108 92 231 \n'), [108, 92, 231]);
   assert.equal(colorTriple(''), null);
+  // A fourth part, as in a colour written with its opacity, is left out: the first three are the colour.
+  assert.deepEqual(colorTriple('108 92 231 / 0.5'), [108, 92, 231]);
+  // A channel below 0 is no colour, as one above 255 is none.
+  assert.equal(colorTriple('-5 0 0'), null);
 });
 
 test('C-7: of the two tones the one that stands out from the page: bright on a dark page, deep on a light one, and no mode is asked', () => {
@@ -260,6 +264,11 @@ test('C-7: of the two tones the one that stands out from the page: bright on a d
     const [accent, accentSub] = themes[tone.id];
     assert.deepEqual(mapEditColors(accent, accentSub, '15 17 23'), tone.bright, `${tone.id} on the dark page`);
     assert.deepEqual(mapEditColors(accent, accentSub, '239 243 250'), tone.deep, `${tone.id} on the light page`);
+    // In between it is the two contrasts that are compared, not the page that is called dark or light: on a grey page
+    // each candidate turns where its own two tones stand out as much, purple (past grey 130) before the other two (past 135).
+    assert.deepEqual(mapEditColors(accent, accentSub, '130 130 130'), tone.bright, `${tone.id} on grey 130`);
+    assert.deepEqual(mapEditColors(accent, accentSub, '133 133 133'), tone.id === 'purple' ? tone.deep : tone.bright, `${tone.id} on grey 133`);
+    assert.deepEqual(mapEditColors(accent, accentSub, '136 136 136'), tone.deep, `${tone.id} on grey 136`);
   }
   // The page is all it is told: there is no argument for a colour mode.
   assert.equal(mapEditColors.length, 3);
@@ -290,6 +299,8 @@ test('C-11: the colour module and the status module stay pure: no import in the 
   assert.ok(colorSource.includes('export function mapEditColors('));
   // An import statement at the start of a line, not the word: the comment at the head says "no imports".
   assert.doesNotMatch(colorSource, /^import\b/m);
+  // Nor a module brought in without such a line: a re-export, an import inside a function, an import after an indent.
+  assert.doesNotMatch(colorSource, /\bfrom\s*['"]|\bimport\s*[('"]/);
   for (const word of ['document', 'window', 'getComputedStyle']) assert.equal(colorSource.includes(word), false, `mapEditColor.ts names ${word}`);
   const statusSource = readFileSync(new URL('mapEditStatus.ts', directory), 'utf8');
   assert.ok(statusSource.includes('export function mapEditStatus('));
