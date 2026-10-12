@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { connectMap, createMapAndConnect, mapCanNest, mapSaveWasApplied, moveMapChanges, saveMapChanges } from '../src/features/backgrounds/mapWorkflow.ts';
+import { connectMap, createMapAndConnect, mapCanNest, mapSaveWasApplied, moveMapChanges, saveMapChanges, savedMaps } from '../src/features/backgrounds/mapWorkflow.ts';
 import { applyBackgroundCommand, emptyBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 
@@ -117,4 +117,31 @@ test('도면 연결과 초안 저장은 공간·카메라·사물의 높이 값�
   const after = applyBackgroundCommand(snapshot, saved, { canManage: true });
   assert.equal(mapSaveWasApplied(after, saved), true);
   assert.equal(mapSaveWasApplied(after, saveMapChanges(snapshot, {}, [parent])), false);
+});
+
+test('savedMaps: 저장이 끝난 도면은 명령의 값에 그 저장이 준 버전을 얹은 것이다', () => {
+  // The revision comes from the save, not from the value that was sent: the second map still carries an older one.
+  const school = { ...map('학교'), nodes: [space(), camera(), prop()] }, hall = { ...map('복도', school.id), revision: 3 }, created = { ...map('자료실', school.id), revision: 0 };
+  const command = { type: 'save-maps' as const, maps: [{ entity: school, expectedRevision: 1 }, { entity: hall, expectedRevision: 7 }, { entity: created, expectedRevision: null }] };
+  const saved = savedMaps(command);
+  assert.deepEqual(saved.map(item => item.revision), [2, 8, 1]);
+  // Everything else is what was sent.
+  assert.deepEqual(saved, [{ ...school, revision: 2 }, { ...hall, revision: 8 }, { ...created, revision: 1 }]);
+});
+
+test('savedMaps의 버전 셈은 저장 계약과 복구 판정의 셈과 같다', () => {
+  const parent = { ...map('학교'), revision: 4 }, entrance = space();
+  parent.nodes = [entrance, camera()];
+  const snapshot = { ...emptyBackgroundSnapshot(true), maps: [parent] };
+  const drafts = { [parent.id]: { value: { ...parent, name: '학교 수정 중' }, baseRevision: 4 } };
+  const edited = saveMapChanges(snapshot, drafts, [drafts[parent.id].value]);
+  assert.deepEqual(edited.maps.map(item => item.expectedRevision), [4]);
+  const child = { ...map('자료실', parent.id), revision: 0 };
+  const created = createMapAndConnect(snapshot, drafts, child, entrance.id);
+  assert.deepEqual(created.maps.map(item => [item.entity.id, item.expectedRevision]), [[child.id, null], [parent.id, 4]]);
+  for (const command of [edited, created]) {
+    const stored = applyBackgroundCommand(snapshot, command, { canManage: true });
+    assert.deepEqual(savedMaps(command), command.maps.map(item => stored.maps.find(saved => saved.id === item.entity.id)));
+    assert.equal(mapSaveWasApplied(stored, command), true);
+  }
 });
