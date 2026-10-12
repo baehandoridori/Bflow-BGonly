@@ -225,6 +225,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clipboardReadImage: () =>
     ipcRenderer.invoke('clipboard:read-image') as Promise<string | null>,
   clipboardReadImageFile: () => ipcRenderer.invoke('clipboard:read-image-file'),
+  clipboardWriteImage: (png: Uint8Array) =>
+    ipcRenderer.invoke('clipboard:write-image', png) as Promise<boolean>,
 
   // ─── Supabase ──────────────────────────────────
   supabaseTestConnection: () =>
@@ -936,8 +938,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     characterId: string,
     updates: { memo?: string | null; costumeIds?: string[] },
   ) => ipcRenderer.invoke('supabase:update-episode-character-map', episodeNumber, characterId, updates),
-  storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) =>
-    ipcRenderer.invoke('storage:upload-character-image', characterId, costumeId, base64Data),
+  storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string, originalDataUrl?: string | null) =>
+    ipcRenderer.invoke('storage:upload-character-image', characterId, costumeId, base64Data, originalDataUrl),
   // ─── 복장 다중 이미지 ───
   supabaseLoadCostumeImages: () => ipcRenderer.invoke('supabase:load-costume-images'),
   supabaseAddCostumeImage: (input: {

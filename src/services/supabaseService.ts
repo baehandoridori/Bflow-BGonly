@@ -1164,12 +1164,14 @@ export async function updateEpisodeCharacterMapping(
   await window.electronAPI.supabaseUpdateEpisodeCharacterMap(episodeNumber, characterId, updates);
 }
 
+/** originalDataUrl: 줄이기 전 파일 그대로 — 함께 보관해 두면 '이미지 복사'가 원래 크기로 나간다(없으면 화면용만). */
 export async function uploadCharacterImage(
   characterId: string,
   costumeId: string,
   base64Data: string,
-): Promise<{ ok: boolean; url?: string; error?: string }> {
-  return window.electronAPI.storageUploadCharacterImage(characterId, costumeId, base64Data);
+  originalDataUrl?: string | null,
+): Promise<{ ok: boolean; url?: string; error?: string; originalSaved?: boolean }> {
+  return window.electronAPI.storageUploadCharacterImage(characterId, costumeId, base64Data, originalDataUrl);
 }
 
 /**

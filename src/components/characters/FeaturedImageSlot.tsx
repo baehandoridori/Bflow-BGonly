@@ -21,7 +21,8 @@ import type {
 import { COSTUME_IMAGE_ROLES } from '@/types';
 import { uploadCharacterImage } from '@/services/supabaseService';
 import { deleteImage } from '@/services/storageService';
-import { measureImageSize, resizeBlob } from '@/utils/imageUtils';
+import { measureImageSize, readFileAsDataUrl, resizeBlob } from '@/utils/imageUtils';
+import { CHARACTER_DISPLAY_MAX_PX, canKeepCharacterOriginal } from '@/shared/characterImageOriginal';
 import { autoHeightFromNatural } from '@/utils/characterHeightGuides';
 import { dataUrlToFile } from '@/utils/dataUrlToFile';
 import { cn } from '@/utils/cn';
@@ -396,8 +397,11 @@ export function FeaturedImageSlot({
       //   측정 실패(null)해도 업로드는 계속한다.
       const naturalSize = await measureImageSize(file);
       const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
-      const base64 = await resizeBlob(file, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
-      const res = await uploadCharacterImage(character.id, targetCostume.id, base64);
+      const base64 = await resizeBlob(file, CHARACTER_DISPLAY_MAX_PX, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
+      // 줄이기 전 파일 그대로를 함께 올린다 — '이미지 복사'는 이 원본을 쓴다(줄인 그림을 복사하면 Moho 에 작게 붙는다).
+      //   원본은 덤이다 — 읽지 못해도 그림 올리기는 계속한다.
+      const originalDataUrl = canKeepCharacterOriginal(file) ? await readFileAsDataUrl(file).catch(() => null) : null;
+      const res = await uploadCharacterImage(character.id, targetCostume.id, base64, originalDataUrl);
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
       // 대표 이미지 자동 지정·featured_* 동기화는 store(addCostumeImage)+DB 트리거가 담당 —
       //   앱이 featured 를 직접 쓰지 않으므로 예전 이미지 파일을 지우지 않는다(P1 해소).
@@ -408,6 +412,10 @@ export function FeaturedImageSlot({
         return;
       }
       setSelectedImageId(created.id);
+      // 줄어든 그림만 남았으면 알린다 — 원래 작은 그림은 화면용이 곧 원래 크기라 알릴 것이 없다.
+      if (!res.originalSaved && naturalSize && Math.max(naturalSize.width, naturalSize.height) > CHARACTER_DISPLAY_MAX_PX) {
+        toast.warning('원래 크기 그대로는 보관하지 못했어요. 이 그림을 복사하면 줄어든 크기로 들어가요.', { duration: 8000 });
+      }
       // 피드백 33(a): 기준 키 자동 설정 — 아직 값이 없을 때만(이미 입력된 값은 덮지 않음), 원본 세로 px 로.
       //   최신값을 store 에서 재조회 — 업로드 대기 중 다른 사용자가 값을 넣었을 수 있다(stale-closure 방지).
       if (naturalSize) {
