@@ -997,6 +997,11 @@ test('anchor 56: only a draft with nothing unsaved follows the library, never du
   // Each is a line of its own: nothing stands in front of one (a condition before the call, say).
   const lines = follow.split('\n').map(line => line.trim());
   for (const step of steps) assert.ok(lines.includes(step), `not a line of its own: ${step}`);
+  // And the handler holds nothing else: its first line, the five statements, the brace that closes it. A return put in front
+  // of the guard (`if (!editing) return;`, say) would keep the drafts that are not on show from following: the parent that a
+  // link or a new map left behind would stay in the tree after its map was deleted elsewhere, as a map that can never be saved.
+  const opener = 'const followSaved = useEvent(() => {';
+  assert.deepEqual(block(editor, opener).split('\n').map(line => line.trim()).filter(Boolean), [opener, ...steps.slice(0, 5), '}']);
   // The library is followed from that one place: a second call would not ask the guard.
   assert.equal(count(editor, /doc\.followSaved\(/g), 1);
   // The reducer. A draft follows only with nothing unsaved in it, not while it is dragged, and only on to a later revision:
