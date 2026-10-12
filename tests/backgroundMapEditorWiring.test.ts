@@ -76,6 +76,7 @@ const handler = {
   placeSymbol: () => piece(editor, 'function placeSymbol(', 'function beginEditing('),
   saveMap: () => piece(editor, 'async function saveMap(', 'async function confirmAction('),
   confirmAction: () => piece(editor, 'async function confirmAction(', 'async function createMap('),
+  followSaved: () => piece(editor, 'const followSaved = useEvent(() => {', 'const abortGesture = useEvent('),
   abortGesture: () => piece(editor, 'const abortGesture = useEvent(', 'useLayoutEffect(() => { abortGesture(); }'),
   commitName: () => piece(editor, 'const commitName = useEvent(', 'const cancelName = useEvent('),
   pointerDown: () => piece(editor, 'function pointerDown(', 'function pointerMove('),
@@ -975,4 +976,35 @@ test('anchor 51: the map is saved only when something is unsaved and never twice
   // Each brings that message into view: it sits above the band and may be scrolled away. `nearest` moves nothing when it is in view.
   assert.ok(editor.includes("useEffect(() => { if (refused) errorRef.current?.scrollIntoView({ block: 'nearest' }); }, [refused]);"));
   assert.ok(editor.includes('<div className="bg-error" role="alert" ref={errorRef}>'));
+});
+
+test('anchor 56: only a draft with nothing unsaved follows the library, never during a save or under an open dialog, and a map that went away is left as on a move to another map', () => {
+  // The guard comes first. While a save runs the store shows maps that are not confirmed (a draft that followed would keep
+  // the values of a save that failed, and a map that is only being deleted would read as gone). A dialog of the editor asks
+  // about the map on show: with that map gone under it, a second press on its delete would go to the first map of the list.
+  // Then the draft of the map on show is read before and after. Replaced, the picked point goes: it is a number, and may
+  // now name another point. Gone, what `navigate` clears is cleared, and only then: on a mere newer revision the points
+  // that are being drawn and the tool stay. The four dialogs are dependencies, so what was skipped is done as one closes.
+  const follow = handler.followSaved(), steps = [
+    'if (disabled || doc.isGestureActive() || confirmation || createForm || linkForm || settingsForm) return;',
+    'const before = mapDraft(doc.getState(), current?.id);',
+    'doc.followSaved(snapshot.maps);',
+    'if (mapDraft(doc.getState(), current?.id) !== before) setActiveVertex(null);',
+    "if (before && !mapDraft(doc.getState(), current?.id)) { setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); }",
+    'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);',
+  ];
+  inOrder(follow, ...steps);
+  // Each is a line of its own: nothing stands in front of one (a condition before the call, say).
+  const lines = follow.split('\n').map(line => line.trim());
+  for (const step of steps) assert.ok(lines.includes(step), `not a line of its own: ${step}`);
+  // The library is followed from that one place: a second call would not ask the guard.
+  assert.equal(count(editor, /doc\.followSaved\(/g), 1);
+  // The reducer. A draft follows only with nothing unsaved in it, not while it is dragged, and only on to a later revision:
+  // with `>=` the echo of one's own save would empty the redo history. The draft of a map the library no longer has goes
+  // under the same conditions: one with unsaved edits stays, and so does one that is being dragged.
+  const branch = block(read('mapDocument.ts'), "case 'follow-saved': {");
+  for (const rule of ['!mapDraftChanged(draft)', 'state.gesture?.mapId !== map.id', 'map.revision > (draft.baseRevision ?? Infinity)',
+    '!known.has(id) && !mapDraftChanged(followed.drafts[id]) && followed.gesture?.mapId !== id']) assert.ok(branch.includes(rule), `not found: ${rule}`);
+  // Not through dropDrafts: that ends the field edit that is being typed, which may be on another map.
+  assert.doesNotMatch(branch, /dropDrafts\(/);
 });

@@ -328,6 +328,21 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     return () => svg.removeEventListener('wheel', onWheel);
   }, [onWheel, current?.id, mode]);
   useEffect(() => { if (!snapshot.canManage) { setTool('select'); setPolygon([]); setSymbolPaletteOpen(false); } }, [snapshot.canManage]);
+  // Saving no longer ends edit mode, so a draft can stay open for hours. One with nothing unsaved in it follows the library
+  // when its map is saved elsewhere, and goes when its map is deleted there.
+  const followSaved = useEvent(() => {
+    // Never while a save runs: the store then shows maps that are not confirmed yet. Never during a drag. And never under an
+    // open dialog of the editor: it asks about the map on show, and that must still be the same map when it is answered.
+    if (disabled || doc.isGestureActive() || confirmation || createForm || linkForm || settingsForm) return;
+    const before = mapDraft(doc.getState(), current?.id);
+    doc.followSaved(snapshot.maps);
+    // The map on show was replaced under the picked point: its index may now name another point (as after an undo).
+    if (mapDraft(doc.getState(), current?.id) !== before) setActiveVertex(null);
+    // The map on show went with its draft: the screen moves on to another map without `navigate`, so what `navigate` clears is cleared here.
+    if (before && !mapDraft(doc.getState(), current?.id)) { setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); }
+  });
+  // The four dialogs are in the list so that this runs again as one of them closes.
+  useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);
   useEffect(() => { if (refused) errorRef.current?.scrollIntoView({ block: 'nearest' }); }, [refused]);
 
   /** Ends the pressed pointer and cancels the gesture in progress. Nothing of it reaches the history. */
