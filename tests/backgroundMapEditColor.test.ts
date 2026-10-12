@@ -329,6 +329,20 @@ test('C-10: the band, the frame and the dot are painted with the two variables: 
   // A hex colour; `rgb(` of anything but the two variables (`rgb(28 22 8)` would be right in one tone of the six); a colour
   // by its name (not found by a word edge: these lines hold `white-space`); `hsl(`.
   for (const line of own) for (const colour of [/#[0-9a-fA-F]{3,8}\b/, /rgb\((?!var\(--bmap-edit)/, /(?<![\w-])(?:white|black)(?![\w-])/, /hsla?\(/]) assert.doesNotMatch(line, colour);
+  // That list cannot name every spelling of a colour: `rgba(` (after `rgb` the pattern wants the bracket), a colour by
+  // any name but two, `oklch(`. So each declaration that can paint is read the other way round as well: with the two
+  // variables taken out, whole or thinned, its value holds nothing but widths, the words of a line or of a shadow, and
+  // the words for no colour of its own.
+  const variable = /rgb\(var\(--bmap-edit(?:-ink)?\)(?: \/ [\d.]+)?\)/g, plain = /^(?:transparent|currentColor|inherit|none|solid|inset|-?\d*\.?\d+(?:px|%)?)$/;
+  let painting = 0;
+  for (const line of own) for (const declaration of line.slice(line.indexOf('{') + 1, line.lastIndexOf('}')).split(';')) {
+    const colon = declaration.indexOf(':'), property = declaration.slice(0, colon).trim(), value = declaration.slice(colon + 1).trim();
+    if (!/color|background|border|outline|shadow|fill|stroke|filter/.test(property)) continue;
+    painting++;
+    for (const word of value.replace(variable, ' ').split(/\s+/).filter(Boolean)) assert.match(word, plain, `${property}:${value} in ${line.trim()}`);
+  }
+  // Asked last: over no declarations the loop above would pass.
+  assert.ok(painting >= 20, `${painting} declarations that can paint`);
 });
 
 test('C-11: the colour module and the status module stay pure: no import in the first, no three.js and no DOM in either', () => {

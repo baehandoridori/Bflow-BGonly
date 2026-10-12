@@ -1061,26 +1061,57 @@ test('anchor 54: the band is one element for the plan and for 3D, stuck over the
   const save = baseRule(lines, '.bg-library .bmap-edit-strip .bmap-edit-save {');
   has(save, 'font-weight:600', 'transition:none');
   assert.ok(save.some(part => part.startsWith('min-width:')));
+  // What the two buttons are painted with, so that their words can be read on a band of any colour. A button of the band:
+  // words in the colour of the band's words, on nothing. The save button the other way round: a box in the colour of the
+  // words, with words in the colour of the band.
+  has(baseRule(lines, '.bg-library .bmap-edit-strip button {'), 'color:rgb(var(--bmap-edit-ink))', 'background:transparent');
+  has(save, 'background:rgb(var(--bmap-edit-ink))', 'color:rgb(var(--bmap-edit))');
+  // Under the pointer it stays that box, by a rule of its own: the hover rule of the band's buttons outweighs the save
+  // rule, and would lay its faint wash under words in the colour of the band.
+  has(baseRule(lines, '.bg-library .bmap-edit-strip .bmap-edit-save:hover:not(:disabled) {'), 'background:rgb(var(--bmap-edit-ink) / .86)');
+  // The focus ring is in the colour of the words too: the accent ring of the editor may not show on the band.
+  has(baseRule(lines, '.bg-library .bmap-edit-strip button:focus-visible {'), 'outline:2px solid rgb(var(--bmap-edit-ink))');
   // Dimmed it is an empty box. The line is counted: asked only for what it must not hold, a deleted line would pass.
-  const dimmedAt = lineOf(lines, '.bg-library .bmap-edit-strip .bmap-edit-save[aria-disabled="true"],');
-  has(declarations(lines[dimmedAt]), 'background:transparent', 'cursor:default');
+  const dimmedAt = lineOf(lines, '.bg-library .bmap-edit-strip .bmap-edit-save[aria-disabled="true"],'), dimmed = declarations(lines[dimmedAt]);
+  has(dimmed, 'background:transparent', 'cursor:default');
   assert.ok(!lines[dimmedAt].includes('font-weight'));
+  // Its words are in the colour of the other words, thinned: left to the save rule they would be in the colour of the
+  // band, on the band. How thin is not pinned: that is tuned by eye, in the app.
+  assert.ok(dimmed.some(part => /^color:rgb\(var\(--bmap-edit-ink\) \/ \.\d+\)$/.test(part)), `the dimmed words have no colour of their own (${dimmed.join('; ')})`);
   // What the keyboard brings into view stops below the stuck band. Not the canvas (no `[tabindex]`): it takes the focus on
   // a press, and must not scroll then. And not the two buttons of the band: with the margin a focus on them would scroll the tab.
   assert.ok(lines.includes('.bmap-main.is-editing :is(button,input,select,summary) { scroll-margin-top:var(--bmap-edit-h); }'));
   assert.ok(lines.includes('.bmap-main.is-editing .bmap-edit-strip button { scroll-margin-top:0; }'));
+  // The motion rules of the app, on every line that styles the band or the editor while editing. The band follows the
+  // scroll, so no backdrop-filter: what is behind it would be blurred again at each step. Nothing repeats. No transition
+  // of its own: its box has its height at once and its words change without one (`transition:none` on the save button
+  // takes one away). And what moves as edit mode starts is declared inside the block for those who want motion, nowhere
+  // else: outside it the band would slide in under "reduce motion" and at the app's own "minimal" as well.
+  const band = lines.flatMap((line, at) => !line.trimStart().startsWith('/*') && /\.bmap-edit|\.bmap-main\.is-editing/.test(line) ? [at] : []);
+  assert.ok(band.length >= 20 && band.includes(bandAt), `${band.length} lines of the band`);
+  const calmAt = lines.indexOf('@media (prefers-reduced-motion: no-preference) {'), calmEnd = lines.indexOf('}', calmAt);
+  for (const at of band) {
+    assert.doesNotMatch(lines[at], /backdrop-filter|infinite|transition(?!:none;)/);
+    if (lines[at].includes('animation')) assert.ok(calmAt > -1 && calmAt < at && at < calmEnd, `moves whatever the motion setting: ${lines[at]}`);
+  }
 });
 
 test('anchor 55: the colours of the band come from the two accents of the theme and the page as they are on screen', () => {
   const hook = read('useMapEditColors.ts');
   // Read from what is painted: the computed style of <html>, whether a theme was applied or the values of the stylesheet
   // stand. The whole call: three values, in the order the function takes them. And the whole call of the observer: it is
-  // <html> that changes with the theme and the colour mode, not the editor.
+  // <html> that changes with the theme and the colour mode, not the editor. The observer is let go by the cleanup the
+  // effect returns, the whole line: called in the body of the effect it would stop listening as soon as it began, and
+  // the band would keep its colour when the colour mode is switched.
   for (const part of ['getComputedStyle(document.documentElement)',
     "mapEditColors(theme.getPropertyValue('--color-accent'), theme.getPropertyValue('--color-accent-sub'), theme.getPropertyValue('--color-bg-primary'))",
     "root.style.setProperty('--bmap-edit', colors.strip)", "root.style.setProperty('--bmap-edit-ink', colors.ink)",
     "observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-color-mode', 'class', 'style'] })",
-    'observer.disconnect()']) assert.ok(hook.includes(part), `not found: ${part}`);
+    'return () => observer.disconnect();']) assert.ok(hook.includes(part), `not found: ${part}`);
+  // Written before the first paint: in a `useEffect` the editor would be painted once in the amber of the stylesheet, in
+  // every theme but the default one, each time it mounts.
+  assert.ok(hook.includes('useLayoutEffect(() => {'));
+  assert.doesNotMatch(hook, /\buseEffect\b/);
   // Written on the editor's own element: written on <html> it would wake what observes <html>, this hook and the 3D view.
   assert.ok(!hook.includes('document.documentElement.style.setProperty'));
   // The tone follows the page that is painted, not the mode attribute: a theme picked by hand may not agree with it.
