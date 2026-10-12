@@ -111,6 +111,9 @@ test('피드백 31(b): 공지 이미지 Ctrl+V — 공지 전용 업로드 + 미
   // 취소 시 전부(단, 전송 중이면 웹훅이 참조할 선택 이미지 보존 — 코덱스 3차 P2), 전송 시 쓴 이미지만 남기고 정리.
   assert.match(modal, /cleanupPastedUploads\(sending \? selectedUrlSet : new Set\(\)\)/);
   assert.match(modal, /cleanupPastedUploads\(selectedUrlSet\)/);
+  // 전송을 시도한 그림은 실패로 보여도 지우지 않는다 — 응답만 끊기고 슬랙에는 나갔을 수 있고, 서버는 이 그림을 지켜 주지 못한다(v1.134.3).
+  assert.match(modal, /setSending\(true\);\s+for \(const url of selectedUrlSet\) attemptedUrlsRef\.current\.add\(url\);\s+try \{\s+await sendRiggingAnnounce\(/);
+  assert.match(modal, /if \(keepUrls\.has\(img\.url\) \|\| attemptedUrlsRef\.current\.has\(img\.url\)\) continue;/);
   // 피드백 50: 다중 선택 상태 + 상한 가드.
   assert.match(modal, /const \[selectedImageIds, setSelectedImageIds\]/);
   assert.match(modal, /MAX_ANNOUNCE_IMAGES = 5/);

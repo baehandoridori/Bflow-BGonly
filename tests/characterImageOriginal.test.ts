@@ -310,6 +310,8 @@ test('배선: 클립보드에 쓰는 일은 main 이 한다 — 그림을 받는
 });
 
 test('배선: 그림을 지우면 원본도 같이 지운다 — 낱장·복장·캐릭터 삭제 모두', () => {
-  assert.match(storage, /\.remove\(withCharacterOriginalPaths\(\[path\]\)\)/);
-  assert.match(mainSupabase, /await supabase\.storage\.from\('scene-images'\)\.remove\(withCharacterOriginalPaths\(paths\)\)/);
+  // 지우는 길은 하나(removeStoragePaths)이고 그 길이 원본 경로를 끼워 넣는다 — 동작은 storageRemove.test.ts.
+  assert.match(readFileSync('electron/storageRemove.ts', 'utf8'), /await remove\(withCharacterOriginalPaths\(wanted\.slice\(at, at \+ STORAGE_REMOVE_CHUNK\)\)\)/);
+  assert.match(storage, /await removeStoragePaths\(removeFromBucket, paths, tag\);/);
+  assert.match(mainSupabase, /await storageDeleteImages\(urls, '\[character-board\]'\);/);
 });

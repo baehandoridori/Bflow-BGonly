@@ -5,8 +5,7 @@ import {
   broadcastCommentAdded, broadcastCalendarChanged, broadcastCommentReactionChanged,
   broadcastCommentReactionNotification, broadcastCommentReactionNotificationRemoved, broadcastActivityRemoved,
 } from './broadcast';
-import { deleteImage as storageDeleteImage } from './storage';
-import { withCharacterOriginalPaths } from '../src/shared/characterImageOriginal';
+import { deleteImages as storageDeleteImages } from './storage';
 import { createRetryManager } from './retry-utils';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds, type CharacterCommentSummaries } from '../src/shared/characterCommentSummary';
 import {
@@ -673,7 +672,7 @@ export async function addScenes(
   broadcastDataChange('scenes', 'INSERT');
 }
 
-/** 씬 삭제 (UUID로 삭제) — DB row 삭제 전에 Storage 이미지 먼저 정리해 고아 파일 방지 */
+/** 씬 삭제 (UUID로 삭제) — DB row 를 지운 뒤 Storage 이미지를 정리해 고아 파일 방지 */
 export async function deleteScene(sceneUuid: string): Promise<void> {
   // 1) Storage 이미지 URL 조회 (DB 삭제 전에)
   const { data: scene } = await supabase
@@ -682,20 +681,13 @@ export async function deleteScene(sceneUuid: string): Promise<void> {
     .eq('id', sceneUuid)
     .maybeSingle();
 
-  // 2) Storage 삭제 (실패해도 DB 삭제는 계속 — 부분 고아 < 완전 고아)
-  if (scene?.storyboard_url) {
-    await storageDeleteImage(scene.storyboard_url).catch((err) =>
-      console.warn('[Storage] storyboard 삭제 실패:', err));
-  }
-  if (scene?.guide_url) {
-    await storageDeleteImage(scene.guide_url).catch((err) =>
-      console.warn('[Storage] guide 삭제 실패:', err));
-  }
-
-  // 3) DB row 삭제 (comments 등은 FK CASCADE 로 자동 정리)
+  // 2) DB row 삭제 (comments 등은 FK CASCADE 로 자동 정리) — 실패하면 그림은 건드리지 않는다
   const { error } = await supabase.from('scenes').delete().eq('id', sceneUuid);
   throwIfError(error);
   broadcastDataChange('scenes', 'DELETE');
+
+  // 3) Storage 삭제 — 서버는 아직 쓰이는 그림의 삭제를 거절하므로 row 를 지운 뒤에 한다 (실패해도 씬 삭제는 이미 성공)
+  await storageDeleteImages([scene?.storyboard_url, scene?.guide_url]);
 }
 
 /** 씬 체크박스 토글 */
@@ -1200,9 +1192,7 @@ export async function bulkDeleteScenes(
     const urls = urlsByUuid.get(r.sceneUuid);
     if (urls) urlsToDelete.push(...urls);
   }
-  if (urlsToDelete.length > 0) {
-    await Promise.allSettled(urlsToDelete.map((u) => storageDeleteImage(u)));
-  }
+  await storageDeleteImages(urlsToDelete);
 
   return results;
 }
@@ -1894,27 +1884,8 @@ export async function deleteComment(commentId: string): Promise<void> {
   const { error } = await supabase.from('comments').delete().eq('id', commentId);
   throwIfError(error);
 
-  // 3) storage 객체 정리 (fire-and-forget — 실패해도 row 삭제 자체는 이미 성공)
-  const STORAGE_BUCKET = 'scene-images';
-  const paths = images
-    .filter((u): u is string => typeof u === 'string')
-    .map((url) => {
-      const m = url.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/);
-      return m ? m[1] : null;
-    })
-    .filter((p): p is string => !!p);
-  if (paths.length > 0) {
-    // Codex P2 11차(2026-04-30): supabase.storage.remove() 는 API 실패 시 throw 대신 { data, error } 를 반환.
-    // try/catch 만으로는 잡지 못하므로 error 객체를 명시적으로 확인.
-    try {
-      const { error: storageErr } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
-      if (storageErr) {
-        console.warn('[deleteComment] storage 이미지 정리 실패 (orphan 가능):', storageErr);
-      }
-    } catch (err) {
-      console.warn('[deleteComment] storage 이미지 정리 예외:', err);
-    }
-  }
+  // 3) storage 객체 정리 (실패해도 row 삭제 자체는 이미 성공 — 지우지 못한 파일은 기록으로 남는다)
+  await storageDeleteImages(images, '[deleteComment]');
 
   // v1.29.0: 이모지 반응·반응 알림·반응 활동 로그 cleanup (best-effort 순차 — 단일 트랜잭션 미지원).
   //   실패 한 단계가 다음을 막지 않음. orphan 데이터는 추후 cleanup job 으로 처리.
@@ -2198,7 +2169,7 @@ export async function getPrivateEventOwner(id: string): Promise<string | null> {
 // COMP_REVISIONS
 // ═══════════════════════════════════════════════
 
-/** 리비전 삭제 — 권한 검증(요청자 본인 또는 admin) 후 Storage 이미지 정리 + DB row 삭제.
+/** 리비전 삭제 — 권한 검증(요청자 본인 또는 admin) 후 DB row 삭제 + Storage 이미지 정리.
  *  Codex 리뷰 #5 P2: UI 의 canDelete 체크만으로는 다른 renderer 호출이 bypass 가능 →
  *  main 프로세스에서 반드시 권한 검증 수행. */
 export async function deleteRevision(id: string, requesterUserId: string): Promise<void> {
@@ -2225,17 +2196,13 @@ export async function deleteRevision(id: string, requesterUserId: string): Promi
     throw new Error('리비전 삭제 권한이 없습니다. (요청자 본인 또는 관리자만)');
   }
 
-  // 2) Storage 이미지 삭제 (실패해도 DB 삭제 계속)
-  const imageUrl = (rev as { image_url?: string }).image_url;
-  if (imageUrl) {
-    await storageDeleteImage(imageUrl).catch((err) =>
-      console.warn('[Storage] revision 이미지 삭제 실패:', err));
-  }
-
-  // 3) DB row 삭제
+  // 2) DB row 삭제 — 실패하면 그림은 건드리지 않는다
   const { error } = await supabase.from('comp_revisions').delete().eq('id', id);
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'DELETE');
+
+  // 3) Storage 이미지 삭제 — 서버는 아직 쓰이는 그림의 삭제를 거절하므로 row 를 지운 뒤에 한다 (실패해도 삭제는 이미 성공)
+  await storageDeleteImages([(rev as { image_url?: string }).image_url]);
 }
 
 /** ID 단건 조회: 서버 오류와 실제 삭제(null)를 구분한다. */
@@ -4642,18 +4609,12 @@ export async function updateEpisodeReelPath(
   broadcastDataChange('episodes', 'UPDATE');
 }
 
-/** public URL 들에서 scene-images 스토리지 경로를 뽑아 일괄 삭제. legacy/비-Supabase URL 은 무시. 실패해도 삭제 흐름은 진행. */
+/** public URL 들의 scene-images 스토리지 파일을 일괄 삭제(캐릭터 그림은 원본 .orig 도). legacy/비-Supabase URL 은 무시. 실패해도 삭제 흐름은 진행. */
 async function removeCharacterStorageByUrl(urls: (string | null | undefined)[]): Promise<void> {
-  const paths = urls
-    .map((u) => (typeof u === 'string' ? u.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/)?.[1] : undefined))
-    .filter((p): p is string => !!p);
-  if (paths.length === 0) return;
-  // 캐릭터 그림은 함께 보관한 원본(.orig)도 같이 지운다.
-  const { error } = await supabase.storage.from('scene-images').remove(withCharacterOriginalPaths(paths));
-  if (error) console.warn('[character-board] 스토리지 자산 정리 실패(무시하고 진행):', error.message);
+  await storageDeleteImages(urls, '[character-board]');
 }
 
-/** 캐릭터 삭제. 복장/매핑/댓글/복장이미지는 FK cascade 로 자동 삭제 — cascade 전에 스토리지 자산을 먼저 정리한다. */
+/** 캐릭터 삭제. 복장/매핑/댓글/복장이미지는 FK cascade 로 자동 삭제 — 스토리지 자산의 주소를 cascade 전에 모아 두고 삭제 뒤에 정리한다. */
 export async function deleteCharacter(id: string): Promise<void> {
   // 복장 대표 이미지 + 복장 다중 이미지 + 캐릭터 댓글 첨부 이미지를 cascade 전에 수집해 삭제(고아 파일 방지).
   const [{ data: costumeRows }, { data: commentRows }] = await Promise.all([
@@ -4763,7 +4724,7 @@ export async function updateCharacterCostume(
   return data as CharacterCostumeRow;
 }
 
-/** 복장 삭제. 삭제 전 대표 이미지 + 복장 다중 이미지 스토리지 객체를 정리해 고아 파일을 방지한다. */
+/** 복장 삭제. 대표 이미지 + 복장 다중 이미지의 주소를 삭제 전에 모아 두고, 삭제 뒤 스토리지 객체를 정리해 고아 파일을 방지한다. */
 export async function deleteCharacterCostume(id: string): Promise<void> {
   const [{ data: row }, { data: imageRows }] = await Promise.all([
     supabase.from('character_costumes').select('featured_image_url').eq('id', id).maybeSingle(),
