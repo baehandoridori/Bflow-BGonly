@@ -49,4 +49,10 @@ test('the wording: the label, how long the notice stays, and a clean band that n
   const clean = mapEditStatus(draftAfter(0), false, false), unsaved = mapEditStatus(draftAfter(1), false, false);
   assert.equal(clean.phase, 'clean'); assert.equal(clean.detail.startsWith('저장 안 한'), false);
   assert.equal(unsaved.phase, 'changed'); assert.equal(unsaved.detail.startsWith('저장 안 한'), true);
+  // The number has no ceiling: sixty edits read as sixty, past the fifty that undo keeps.
+  const sixty = mapEditStatus(draftAfter(60), false, false);
+  assert.deepEqual([sixty.steps, sixty.detail], [60, '저장 안 한 변경 60개']);
+  // The never-saved sentence hangs on the draft having no saved revision, not on a count of zero. Made by hand, as in row 7.
+  const neverSavedEdited = mapEditStatus({ ...draftAfter(2), baseRevision: null }, false, false);
+  assert.deepEqual([neverSavedEdited.steps, neverSavedEdited.detail], [2, '아직 저장한 적 없는 도면이에요']);
 });

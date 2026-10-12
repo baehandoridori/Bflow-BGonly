@@ -120,13 +120,17 @@ test('도면 연결과 초안 저장은 공간·카메라·사물의 높이 값�
 });
 
 test('savedMaps: 저장이 끝난 도면은 명령의 값에 그 저장이 준 버전을 얹은 것이다', () => {
-  // The revision comes from the save, not from the value that was sent: the second map still carries an older one.
-  const school = { ...map('학교'), nodes: [space(), camera(), prop()] }, hall = { ...map('복도', school.id), revision: 3 }, created = { ...map('자료실', school.id), revision: 0 };
+  // The revision comes from the save, not from the value that was sent: the second map still carries an older one,
+  // and the new map a number of its own, which a first save does not count from.
+  const school = { ...map('학교'), nodes: [space(), camera(), prop()] }, hall = { ...map('복도', school.id), revision: 3 }, created = { ...map('자료실', school.id), revision: 5 };
   const command = { type: 'save-maps' as const, maps: [{ entity: school, expectedRevision: 1 }, { entity: hall, expectedRevision: 7 }, { entity: created, expectedRevision: null }] };
+  const sent = structuredClone(command);
   const saved = savedMaps(command);
   assert.deepEqual(saved.map(item => item.revision), [2, 8, 1]);
   // Everything else is what was sent.
   assert.deepEqual(saved, [{ ...school, revision: 2 }, { ...hall, revision: 8 }, { ...created, revision: 1 }]);
+  // The command is read, never written: its maps are a draft's value or the library's own objects.
+  assert.deepEqual(command, sent);
 });
 
 test('savedMaps의 버전 셈은 저장 계약과 복구 판정의 셈과 같다', () => {
