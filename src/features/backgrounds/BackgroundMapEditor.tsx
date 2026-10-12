@@ -10,6 +10,7 @@ import { MapMarquee, MapNodeHandles, MapSnapGuides, MapVertexHandles } from './B
 import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { BackgroundMapSelectionSummary } from './BackgroundMapSelectionSummary';
 import { BackgroundMapCameraColor } from './BackgroundMapCameraColor';
+import { BackgroundMapEditStrip } from './BackgroundMapEditStrip';
 import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
@@ -24,6 +25,8 @@ import { planMarkCovers, planMarqueeIds, planRect, resolvePlanPress, sameSpotAga
 import type { PlanPressClick, PlanRect, PlanSpot } from './mapPlanSelect';
 import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
+import { mapEditStatus } from './mapEditStatus';
+import { useMapEditColors } from './useMapEditColors';
 import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode } from './mapCanvas';
 import { backgroundMapPath } from './domain';
 import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
@@ -245,6 +248,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const spaceHeld = useRef(false);
   const [spacePan, setSpacePan] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);                 // the root of the editor, `.bmap-layout`
+  useMapEditColors(rootRef);
   /** Orbit pose of the 3D viewport per map. UI state only: never history, never a render. */
   const viewStates = useRef<Record<string, Map3DViewState>>({});
   const focusNonce = useRef(0);
@@ -995,17 +999,18 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <div className="bmap-section-heading"><strong>도면</strong>{snapshot.canManage && <button type="button" className="bmap-new-root" disabled={disabled} onClick={() => openCreate(null)}>＋ 새 도면</button>}</div>
       <nav aria-label="도면 목록">{treeRows.filter(({ map }) => !mapPath(maps, map.id).slice(0, -1).some(parent => collapsed.has(parent.id))).map(({ map, depth }) => <div key={map.id} className={`bmap-tree-item ${map.id === current?.id ? 'is-active' : ''}`} style={{ paddingLeft: 6 + depth * 13 }}>
         {maps.some(child => child.parentId === map.id) ? <button type="button" className="bmap-tree-toggle" aria-label={`${map.name} ${collapsed.has(map.id) ? '펼치기' : '접기'}`} aria-expanded={!collapsed.has(map.id)} onClick={() => setCollapsed(previous => { const next = new Set(previous); if (next.has(map.id)) next.delete(map.id); else next.add(map.id); return next; })}>{collapsed.has(map.id) ? '›' : '⌄'}</button> : <span className="bmap-tree-spacer" />}
-        <button type="button" className="bmap-tree-row" onClick={() => navigate(map.id)} aria-current={map.id === current?.id ? 'page' : undefined}><span>{map.name}</span>{mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 전 변경사항">●</span>}</button>
+        <button type="button" className="bmap-tree-row" onClick={() => navigate(map.id)} aria-current={map.id === current?.id ? 'page' : undefined}><span>{map.name}</span>{mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 안 한 변경이 있어요">●</span>}</button>
       </div>)}</nav>
       {!maps.length && <p className="bmap-hint">등록된 도면이 없습니다.</p>}
       <div className="bmap-tree-footer">공간을 선택해 내부 도면을 만들고 이어가세요.</div>
     </aside>
-    {!current ? <div className="bmap-main"><EmptyState title="첫 도면을 만들어 보세요" description={snapshot.canManage ? '이름을 정하고 공간을 그리면 시작할 수 있습니다.' : '관리자가 도면을 등록하면 이곳에서 탐색할 수 있습니다.'}>{snapshot.canManage && <button type="button" className="bg-button bg-primary" onClick={() => openCreate(null)}>도면 만들기</button>}</EmptyState></div> : <main className="bmap-main">
-      <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2>{editing && <span className="bmap-badge">{draftChanged ? '저장 전 변경사항' : '편집 중'}</span>}</div></div>
-        <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button>{editing ? <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={() => { setError(''); setConfirmation('discard'); }}>취소</button><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => void saveMap()}>{busy ? '저장 중…' : '도면 저장'}</button></> : <button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => { beginEditing(); setInspectorOpen(true); }}>공간 편집</button>}</>}</div>
+    {!current ? <div className="bmap-main"><EmptyState title="첫 도면을 만들어 보세요" description={snapshot.canManage ? '이름을 정하고 공간을 그리면 시작할 수 있습니다.' : '관리자가 도면을 등록하면 이곳에서 탐색할 수 있습니다.'}>{snapshot.canManage && <button type="button" className="bg-button bg-primary" onClick={() => openCreate(null)}>도면 만들기</button>}</EmptyState></div> : <main className={`bmap-main${editing ? ' is-editing' : ''}`}>
+      <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2></div></div>
+        <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button>{!editing && <button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => { beginEditing(); setInspectorOpen(true); }}>공간 편집</button>}</>}</div>
       </header>
       {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
+      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, false)} disabled={disabled} onEnd={() => { setError(''); setConfirmation('discard'); }} onSave={() => void saveMap()} />}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
           <div className="bmap-toolbar" role="toolbar" aria-label="도면 도구">

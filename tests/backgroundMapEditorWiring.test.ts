@@ -1008,6 +1008,14 @@ test('anchor 51: the map is saved only when something is unsaved and never twice
 });
 
 test('anchor 54: the band is one element for the plan and for 3D, stuck over the map at a height that never depends on what it says', () => {
+  // The editor draws the band once, in `.bmap-main` and in front of the panels: the plan and 3D part inside the canvas
+  // area, so both have the same element in the same place. It hangs on `editing`, not on `canEdit`: that one is off
+  // while a save runs, and the band would go and come back with every save, the map moving under the pointer.
+  assert.equal(count(editor, /<BackgroundMapEditStrip/g), 1);
+  for (const later of ['<BackgroundMapPanels gallery={gallery}>', "{mode === 'plan' ? <svg ref={svgRef}"]) inOrder(editor, '{editing && draft && <BackgroundMapEditStrip ', later);
+  // The class the frame, the height taken from the image list and the scroll margin hang on. The whole line: it is the
+  // editor of a map, not the `<div className="bmap-main">` that stands there while no map exists.
+  assert.ok(editor.includes("<main className={`bmap-main${editing ? ' is-editing' : ''}`}>"));
   // The markup the stylesheet hangs on. The filled box and the tick are drawn by `data-phase` and by the `<span>` round the
   // words: without either the three states differ in their words alone, and every rule below would still be found.
   const strip = editStrip();
@@ -1119,6 +1127,8 @@ test('anchor 55: the colours of the band come from the two accents of the theme 
   // Once at the start: the observer hears only what changes after it. Without that call every theme but the default one
   // would keep the amber of the stylesheet until the colour mode is switched.
   inOrder(hook, 'apply();', 'new MutationObserver(apply)');
+  // The editor calls it once, with its own root: the band, the frame and the dot of the tree are all inside that element.
+  assert.equal(count(editor, /useMapEditColors\(rootRef\);/g), 1);
 });
 
 test('anchor 56: only a draft with nothing unsaved follows the library, never during a save or under an open dialog, and a map that went away is left as on a move to another map', () => {
