@@ -592,7 +592,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function leaveEditing() {
     if (!current) return;
     doc.discard(current.id);
-    setPolygon([]); setTool('select'); setError(''); setSavedNotice(null);
+    setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setError(''); setSavedNotice(null);
   }
   /** 편집 끝내기. With nothing to lose edit mode ends at once; otherwise the question comes first. */
   function endEditing() {
@@ -956,6 +956,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function keyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
       if (event.nativeEvent === handledEscape.current) return;
+      // Pressed inside an open dialog it closes that dialog and nothing more. The key comes up here through the portal,
+      // and the points being drawn and the tool in hand are what the question of 편집 끝내기 is asked about.
+      if ((event.target as HTMLElement).closest('dialog')) return;
       // A drag in progress, a marquee included, is cancelled first; the tool is left as it is.
       if (pointerRef.current?.mode === 'marquee' || doc.isGestureActive()) { abortGesture(); return; }
       setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setActiveVertex(null);

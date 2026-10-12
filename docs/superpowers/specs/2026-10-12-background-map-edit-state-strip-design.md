@@ -600,7 +600,7 @@ useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestu
 function leaveEditing() {
   if (!current) return;
   doc.discard(current.id);
-  setPolygon([]); setTool('select'); setError(''); setSavedNotice(null);
+  setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setError(''); setSavedNotice(null);
 }
 /** 편집 끝내기. With nothing to lose edit mode ends at once; otherwise the question comes first. */
 function endEditing() {
@@ -627,6 +627,8 @@ function endEditing() {
 - **저장 안 한 변경이 있으면** 버리기 확인 창이 뜬다. '돌아가기'를 누르면 `BackgroundModal`이 포커스를 '편집 끝내기' 버튼으로 돌려준다(버튼이 아직 있다. 그 `focus()`에는 `preventScroll`이 없지만 — BackgroundUI.tsx:33 — 띠의 두 버튼에는 `scroll-margin-top`을 주지 않으므로 띠가 붙어 있어도 화면이 움직이지 않는다, 6.4). '버리고 끝내기'를 누르면 버튼이 사라지므로 `focusAfterConfirm`(:406-407의 기존 장치)으로 창이 닫힌 뒤 캔버스에 포커스를 준다.
 - **창이 답하는 도면은 창을 연 도면이다.** `leaveEditing`은 답하는 렌더의 `current.id`를 버린다. 창이 열려 있는 동안 그 도면은 바뀌지 않는다: 초안이 그 도면을 화면에 붙들고 있고, 그 초안을 치울 수 있는 따라가기는 창이 열려 있는 동안 돌지 않는다(4.4). 그 가드가 없으면, 다각형 점만 있는 채 뜬 창 밑에서 그 도면이 다른 곳에서 지워졌을 때 '버리고 끝내기'가 목록의 첫 도면의 초안을 버린다.
 - 검사는 저장소에서 지금 읽는다. 버튼을 누르는 것 자체가 치던 칸을 떠나게 하므로(blur가 클릭보다 먼저다) 그 값은 이미 초안에 들어 있다.
+- **확인 창에서 누른 Esc는 창만 닫는다(게이트 B에서 고친 것).** 창은 포털로 그려지지만 그 안의 키는 React 트리를 따라 편집기의 `keyboard()`까지 올라온다. v1.134.0까지는 그 Esc가 `keyboard()`의 Escape 가지를 그대로 지나 찍던 점과 손에 든 도구를 지웠다 — '돌아가기' 버튼은 점을 남기는데 Esc는 지웠다(I9가 지키려는 바로 그 점이다). Escape 가지의 둘째 줄이 `if ((event.target as HTMLElement).closest('dialog')) return;`이다(앵커 52). 설정·연결·만들기 창에서 누른 Esc도 같은 줄에서 멈춘다.
+- **편집을 끝내면 기호 팔레트도 닫힌다(게이트 B에서 고친 것).** `leaveEditing`이 `setSymbolPaletteOpen(false)`를 부른다. 묻지 않고 끝나는 길이 생기면서, 팔레트를 연 채 '편집 끝내기' → '편집 시작' 두 번의 클릭으로 팔레트가 시키지 않았는데 열려 있었다.
 - **그리다 만 다각형이 있으면 묻는다(I9).** 찍던 점(`polygon` — 초안의 일부가 아니라 화면 상태다)은 편집이 끝나면 사라지는 작업이다. 지금의 '취소'는 늘 묻고 '돌아가기'는 점을 그대로 둔다(확인 창은 `polygon`을 건드리지 않는다) — 그 보호를 그대로 둔다. `polygon`은 클릭으로만 바뀌는 React 상태라 이 클릭의 렌더가 쥔 값이 지금 값이다. 초안이 깨끗한 채 점만 있을 때의 창은 그 경우의 제목과 문장을 쓴다(5.2).
 - **모두 되돌린 초안은 "잃을 것이 없다"에 든다(I10).** `mapDraftChanged`는 '다시 실행' 기록(`future`)을 보지 않는다(3.2). 열 번 고치고 열 번 되돌린 뒤 '편집 끝내기'를 누르면 묻지 않고 끝나고, 그 열 번은 다시 실행할 수 없게 된다. 저장과 따라가기도 그 기록을 비운다(4.1, 4.4) — 같은 규칙이다.
 - 저장이 도는 동안에는 버튼이 꺼져 있다(`disabled`).

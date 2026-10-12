@@ -1028,8 +1028,8 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // What ending is: the draft of the map on show goes, and with it the points that were being drawn, the tool in hand,
   // the editor's message and the word that the map was just saved. The tool is no detail: the bar of the polygon tool
   // (다각형 완성 · 취소) is drawn for the tool alone, in edit mode or not, and left in hand it would stay over a map that
-  // is no longer edited.
-  for (const part of ['doc.discard(current.id);', 'setPolygon([])', "setTool('select')", "setError('')", 'setSavedNotice(null)']) assert.ok(leave.includes(part), `not found: ${part}`);
+  // is no longer edited. Nor is the palette of symbols: left open it would be drawn open, unasked, at the next 편집 시작.
+  for (const part of ['doc.discard(current.id);', 'setPolygon([])', "setTool('select')", 'setSymbolPaletteOpen(false)', "setError('')", 'setSavedNotice(null)']) assert.ok(leave.includes(part), `not found: ${part}`);
   // The answer of the dialog ends it the same way. Its button is gone with the band, so the keyboard is handed to the
   // canvas once the dialog has closed.
   inOrder(block(handler.confirmAction(), "if (confirmation === 'discard') {"), 'leaveEditing();', 'focusAfterConfirm.current = true; setConfirmation(null); return;');
@@ -1056,6 +1056,12 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   for (const part of ["onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}",
     "onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button>"]) assert.ok(dialog.includes(part), `not found: ${part}`);
   assert.doesNotMatch(dialog, /setPolygon\(|setTool\(/);
+  // Esc in the dialog is 돌아가기 too. The key comes up to the editor's own handler through the portal, and its Escape
+  // branch drops the points being drawn and the tool in hand: it leaves before that line when the key was pressed inside
+  // a dialog, and before the line that cancels a drag (no drag is in progress under an open dialog).
+  const escape = block(handler.keyboard(), "if (event.key === 'Escape') {");
+  inOrder(escape, 'if (event.nativeEvent === handledEscape.current) return;', "if ((event.target as HTMLElement).closest('dialog')) return;",
+    "if (pointerRef.current?.mode === 'marquee' || doc.isGestureActive()) { abortGesture(); return; }", 'setPolygon([]);');
   // The words of the button this one replaced (취소) are gone, with or without quotes round them.
   for (const old of ['도면 편집을 취소할까요?', '저장하지 않은 변경사항', '변경사항 버리기']) assert.ok(!editor.includes(old), `still there: ${old}`);
 });
