@@ -90,6 +90,7 @@ const textEntry = `${textFields}, dialog`;
 const tickInputs = 'input:is([type="checkbox"], [type="radio"])';
 /** Where Space is text (it types, or opens the list of a select) or belongs to an open dialog: `textEntry` without the inputs Space only ticks. */
 const spaceEntry = `:is(${textEntry}):not(${tickInputs})`;
+const openDialogs = 'dialog[open], [aria-modal="true"]';
 const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔어요. 편집 내용은 그대로예요.';
 // The last sentence is how to get hold of a road that another space covers: it cannot be pressed there directly.
 const ROAD_HINT = '도로는 벽 없는 바닥이에요. 다른 공간과 겹치면 늘 아래에 깔려요. 다른 공간에 덮인 도로는 그 자리를 천천히 한 번 더 누르거나 오른쪽 목록에서 골라요.';
@@ -412,6 +413,29 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     window.addEventListener('keydown', onSpaceKey, true); window.addEventListener('keyup', onSpaceKey, true); window.addEventListener('blur', release);
     return () => { window.removeEventListener('keydown', onSpaceKey, true); window.removeEventListener('keyup', onSpaceKey, true); window.removeEventListener('blur', release); };
   }, [onSpaceKey]);
+  /** Ctrl+S saves the map being edited. Heard on the window, like Space above: right after a button was pressed the focus is on nothing at all, and a field keeps its keys from the editor's own handler. */
+  const onSaveKey = useEvent((event: KeyboardEvent) => {
+    if (event.code !== 'KeyS' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+    const root = rootRef.current, element = event.target instanceof Element ? event.target : null;
+    // The key is the editor's only while it is on show and editing. While viewing, for a read-only account and in another tab of the library it is left alone.
+    if (!root || root.offsetParent === null || !editing) return;
+    // An open dialog keeps the key. Asked from the state and from the document, never from the target: once Tab has run past the last button of a modal, the focus (and so the target) is the body.
+    if (createForm || linkForm || settingsForm || confirmation || document.querySelector(openDialogs)) return;
+    // The key is the editor's while the focus is in the library, or on nothing at all. Elsewhere it belongs to what has the focus:
+    // a window of the app that is neither a dialog element nor marked modal (changing the password, managing users), a button of the app's own frame.
+    if (element && element !== document.body && !element.closest('.bg-library')) return;
+    // Text typed outside the editor is not the editor's.
+    if (element?.closest(textFields) && !root.contains(element)) return;
+    event.preventDefault(); event.stopPropagation();
+    // Taken, and nothing done: the repeats of a held key. A syllable still being composed is no reason to stop: the
+    // focus leaves the field in requestSave, which ends the composition and commits it, as a press on 도면 저장 does.
+    if (event.repeat) return;
+    requestSave();
+  });
+  useEffect(() => {
+    window.addEventListener('keydown', onSaveKey, true);
+    return () => window.removeEventListener('keydown', onSaveKey, true);
+  }, [onSaveKey]);
   // A press the canvas did not take can never be the first half of a double-click on a node.
   useEffect(() => {
     const forget = (event: PointerEvent) => {
@@ -592,6 +616,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     try {
       await persistMaps(saveMapChanges(snapshot, settled.drafts, [captured]));
     } catch (cause) { setError(message(cause)); setRefused(count => count + 1); } finally { saving.current = false; setBusy(false); }
+  }
+  /** 도면 저장 and Ctrl+S. The focus goes to the canvas first: leaving a field commits what was being typed in it, and afterwards the editor's keys work without a detour. */
+  function requestSave() {
+    if (!current || !canEdit || saving.current || pointerRef.current || doc.isGestureActive()) return;
+    focusCanvas();
+    void saveMap();
   }
   async function confirmAction() {
     if (!current || disabled) return;
@@ -1028,7 +1058,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       </header>
       {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
-      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, false)} disabled={disabled} onEnd={endEditing} onSave={() => void saveMap()} />}
+      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, false)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
           <div className="bmap-toolbar" role="toolbar" aria-label="도면 도구">

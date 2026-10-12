@@ -68,6 +68,7 @@ function block(source: string, opener: string): string {
 const handler = {
   planGestureOf: () => piece(editor, 'function planGestureOf(', 'function mapPath('),
   onSpaceKey: () => piece(editor, 'const onSpaceKey = useEvent(', 'useEffect('),
+  onSaveKey: () => piece(editor, 'const onSaveKey = useEvent(', 'useEffect('),
   select: () => piece(editor, 'function select(', 'function updateView('),
   navigate: () => piece(editor, 'function navigate(', 'function switchMode('),
   switchMode: () => piece(editor, 'function switchMode(', 'const leave3D = useEvent('),
@@ -76,7 +77,8 @@ const handler = {
   placeSymbol: () => piece(editor, 'function placeSymbol(', 'function beginEditing('),
   leaveEditing: () => piece(editor, 'function leaveEditing(', 'function endEditing('),
   endEditing: () => piece(editor, 'function endEditing(', 'function undo('),
-  saveMap: () => piece(editor, 'async function saveMap(', 'async function confirmAction('),
+  saveMap: () => piece(editor, 'async function saveMap(', 'function requestSave('),
+  requestSave: () => piece(editor, 'function requestSave(', 'async function confirmAction('),
   confirmAction: () => piece(editor, 'async function confirmAction(', 'async function createMap('),
   followSaved: () => piece(editor, 'const followSaved = useEvent(() => {', 'const abortGesture = useEvent('),
   abortGesture: () => piece(editor, 'const abortGesture = useEvent(', 'useLayoutEffect(() => { abortGesture(); }'),
@@ -1056,6 +1058,56 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   assert.doesNotMatch(dialog, /setPolygon\(|setTool\(/);
   // The words of the button this one replaced (취소) are gone, with or without quotes round them.
   for (const old of ['도면 편집을 취소할까요?', '저장하지 않은 변경사항', '변경사항 버리기']) assert.ok(!editor.includes(old), `still there: ${old}`);
+});
+
+test('anchor 53: Ctrl+S is heard on the window, passes its guards, commits the field being typed in and saves', () => {
+  // The guards, in this order. The key, by its place on the keyboard (the Korean input state does not matter), with Ctrl
+  // and without Alt or Shift. The editor on show and editing: while viewing, for a read-only account and in another tab
+  // of the library the key is not even swallowed. No open dialog, asked of the state and of the document, never of the
+  // target: once Tab has run past the last button of a modal the target is the body. The focus in the library or on
+  // nothing at all (the body, right after a button went away): elsewhere the key belongs to what has the focus, a window
+  // of the app that is neither a dialog element nor marked modal, say. No text field outside the editor. Only then is the
+  // key taken, and taken before its repeats are dropped: a held key saves once and is swallowed all the while.
+  const key = handler.onSaveKey(), steps = [
+    "if (event.code !== 'KeyS' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;",
+    'if (!root || root.offsetParent === null || !editing) return;',
+    'if (createForm || linkForm || settingsForm || confirmation || document.querySelector(openDialogs)) return;',
+    "if (element && element !== document.body && !element.closest('.bg-library')) return;",
+    'if (element?.closest(textFields) && !root.contains(element)) return;',
+    'event.preventDefault(); event.stopPropagation();',
+    'if (event.repeat) return;',
+    'requestSave();',
+  ];
+  inOrder(key, ...steps);
+  // Each is a line of its own: nothing stands in front of one, and none is the tail of another condition.
+  const lines = key.split('\n').map(line => line.trim());
+  for (const step of steps) assert.ok(lines.includes(step), `not a line of its own: ${step}`);
+  // And the handler holds nothing else: its first line, the guards, the line that reads the root and the target, the brace
+  // that closes it. One more return (for a focused button, for 3D, for a composition) would make the key deaf there.
+  const opener = 'const onSaveKey = useEvent((event: KeyboardEvent) => {';
+  assert.deepEqual(block(editor, opener).split('\n').map(line => line.trim()).filter(Boolean),
+    [opener, steps[0], 'const root = rootRef.current, element = event.target instanceof Element ? event.target : null;', ...steps.slice(1), '}']);
+  // No dialog is asked of the target. And a composition is no dead end: a Korean name typed and saved at once is saved,
+  // by the focus leaving the field in requestSave. Swallowed and dropped, that Ctrl+S would die without a word.
+  assert.doesNotMatch(key, /closest\('dialog'\)|closest\(textEntry\)|isComposing|229/);
+  // What the document is asked: a native dialog that is open, and a window that is none but is marked modal.
+  assert.ok(editor.includes('const openDialogs = \'dialog[open], [aria-modal="true"]\';'));
+  // Heard on the window, in the capture phase: the editor's own handler is never reached from the body and is deaf behind a
+  // focused field or button, and a shortcut of the app bound to the same keys listens on the window as it bubbles. Let go
+  // by the cleanup the effect returns, with the same flag: without it the listener would outlive the editor.
+  const effect = piece(editor, "window.addEventListener('keydown', onSaveKey, true);", '}, [onSaveKey]);');
+  assert.ok(effect.includes("return () => window.removeEventListener('keydown', onSaveKey, true);"));
+  // 도면 저장 and Ctrl+S are one function, and it holds these three lines alone. Nothing while a save runs, and nothing
+  // during a drag: the save would cancel it. Then the focus goes to the canvas, before the save: leaving a field commits
+  // what was being typed in it (a syllable still being composed too), and the save reads the draft after that.
+  const request = handler.requestSave(), asked = ['if (!current || !canEdit || saving.current || pointerRef.current || doc.isGestureActive()) return;', 'focusCanvas();', 'void saveMap();'];
+  inOrder(request, ...asked);
+  assert.deepEqual(block(editor, 'function requestSave() {').split('\n').map(line => line.trim()).filter(Boolean), ['function requestSave() {', ...asked, '}']);
+  // The band's button is that function, and the map is saved from nowhere else: a second way would skip the focus.
+  assert.ok(handler.strip().includes('onSave={requestSave}'));
+  assert.equal(count(editor, /\bsaveMap\(/g), 2, 'the function itself and requestSave');
+  // The rule lives in one place: keyboard() has no S of its own.
+  assert.doesNotMatch(handler.keyboard(), /'KeyS'|=== 's'/);
 });
 
 test('anchor 54: the band is one element for the plan and for 3D, stuck over the map at a height that never depends on what it says', () => {
