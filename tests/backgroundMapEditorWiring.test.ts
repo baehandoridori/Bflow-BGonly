@@ -1012,7 +1012,16 @@ test('anchor 54: the band is one element for the plan and for 3D, stuck over the
   // area, so both have the same element in the same place. It hangs on `editing`, not on `canEdit`: that one is off
   // while a save runs, and the band would go and come back with every save, the map moving under the pointer.
   assert.equal(count(editor, /<BackgroundMapEditStrip/g), 1);
-  for (const later of ['<BackgroundMapPanels gallery={gallery}>', "{mode === 'plan' ? <svg ref={svgRef}"]) inOrder(editor, '{editing && draft && <BackgroundMapEditStrip ', later);
+  // Its place among the children of `.bmap-main`, a column whose first child is the header: after the header, the
+  // editor's message and the notice, in front of the panels and so of the plan. Anywhere before the end of the header it
+  // is above the title, or no child of `.bmap-main` at all: beside the tree it would be a column of the editor's row, not
+  // a band over the map. In front of the message it would cover it: a refused save brings its message to the top of the
+  // tab, which is where the band is stuck.
+  inOrder(editor, '</header>', '<div className="bg-error" role="alert" ref={errorRef}>', '{notice && <div className="bmap-notice" role="status">',
+    '{editing && draft && <BackgroundMapEditStrip ', '<BackgroundMapPanels gallery={gallery}>', "{mode === 'plan' ? <svg ref={svgRef}");
+  // The row of buttons in the header saves nothing, under any name: 도면 저장 went to the band. A second one left here
+  // would be lit with nothing to save, and no check of the band's own button would see it.
+  assert.doesNotMatch(piece(editor, '<div className="bmap-actions">', '</header>'), /[Ss]ave|저장/);
   // The class the frame, the height taken from the image list and the scroll margin hang on. The whole line: it is the
   // editor of a map, not the `<div className="bmap-main">` that stands there while no map exists.
   assert.ok(editor.includes("<main className={`bmap-main${editing ? ' is-editing' : ''}`}>"));
