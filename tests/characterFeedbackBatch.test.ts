@@ -75,7 +75,7 @@ test('B8→피드백 53: 카드 좌/우 버튼으로 복장 전환 + 전환 복�
 test('B9: 열기 버튼 hover 시 전체 경로', () => {
   // 작업 경로 칸은 씬 상세와 함께 쓰는 공용 카드(PathLinkCard)다 (v1.134.2).
   assert.match(costumeDetail, /<PathLinkCard\s+kind="folder"/);
-  assert.match(pathLinkCard, /onClick=\{onOpen\}\s+disabled=\{opening\}\s+title=\{path \?\? undefined\}/);
+  assert.match(pathLinkCard, /onClick=\{onOpen\}\s+disabled=\{opening\}\s+aria-label=\{`\$\{label\} 열기`\}\s+title=\{path \?\? undefined\}/);
   // 이름 텍스트 title 은 경로가 아니라 이름 풀버전(F26) — '열기' 버튼과 위치 줄이 경로를 담당.
   assert.match(pathLinkCard, /title=\{name\}>\{name\}/);
 });

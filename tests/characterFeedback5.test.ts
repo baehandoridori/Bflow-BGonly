@@ -107,7 +107,7 @@ test('피드백 57-2·57-3: 경로 칸 — 해제 버튼 + 상태별 버튼 이�
   // 기존 앵커 보존: 만들기 버튼 설명, 열기 버튼 title=경로.
   assert.match(costumeDetail, /createTitle="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"/);
   assert.match(pathLinkCard, /onClick=\{onCreate\} disabled=\{busy\} title=\{createTitle\}/);
-  assert.match(pathLinkCard, /onClick=\{onOpen\}\s+disabled=\{opening\}\s+title=\{path \?\? undefined\}/);
+  assert.match(pathLinkCard, /onClick=\{onOpen\}\s+disabled=\{opening\}\s+aria-label=\{`\$\{label\} 열기`\}\s+title=\{path \?\? undefined\}/);
   // CostumeDetail props → 두 행에 배선. 행을 넘겨 교차 배선되면(폴더 지우기가 파일 연결을 지움) 실패해야 한다.
   assert.match(costumeDetail, /onClearFolder: \(\) => void;/);
   assert.match(costumeDetail, /onClearFile: \(\) => void;/);

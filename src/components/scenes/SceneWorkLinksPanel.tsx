@@ -370,7 +370,7 @@ function WorkLinkRow({
             <button
               type="button"
               onClick={() => setPasteOpen(false)}
-              className="h-8 rounded-md px-2 text-[11px] text-text-secondary transition-colors hover:bg-white/8 hover:text-text-primary"
+              className="h-8 rounded-md px-2 text-[11px] text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary"
             >
               취소
             </button>
@@ -387,7 +387,7 @@ function WorkLinkRow({
           <button
             type="button"
             onClick={handleChoose}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11.5px] text-text-primary transition-colors hover:bg-white/8"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11.5px] text-text-primary transition-colors hover:bg-white/10"
           >
             <MousePointerClick size={13} aria-hidden />
             선택창으로 고르기
@@ -395,7 +395,7 @@ function WorkLinkRow({
           <button
             type="button"
             onClick={handlePaste}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11.5px] text-text-primary transition-colors hover:bg-white/8"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11.5px] text-text-primary transition-colors hover:bg-white/10"
           >
             <Clipboard size={13} aria-hidden />
             경로 붙여넣기

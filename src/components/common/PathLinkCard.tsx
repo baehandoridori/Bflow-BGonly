@@ -70,9 +70,10 @@ export function PathLinkCard({
       {linked ? (
         <>
           <div className="flex items-start gap-2.5">
+            {/* 테두리는 아이콘 색의 25% — currentColor 에는 Tailwind 투명도 클래스가 만들어지지 않아 직접 섞는다. */}
             <span
-              className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-current/25 text-accent"
-              style={tone ? { color: tone } : undefined}
+              className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-accent"
+              style={{ ...(tone ? { color: tone } : null), borderColor: 'color-mix(in oklab, currentColor 25%, transparent)' }}
             >
               <Icon size={15} aria-hidden />
             </span>
@@ -94,6 +95,7 @@ export function PathLinkCard({
               type="button"
               onClick={onOpen}
               disabled={opening}
+              aria-label={`${label} 열기`}
               title={path ?? undefined}
               className="inline-flex h-[30px] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md bg-accent/15 text-xs font-medium text-text-primary transition-colors hover:bg-accent/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/45 disabled:opacity-45"
             >
@@ -118,7 +120,7 @@ export function PathLinkCard({
                 disabled={busy}
                 aria-label={`${label} 연결 해제`}
                 title="연결 해제 — 실제 폴더·파일은 그대로예요"
-                className={cn(ICON_BUTTON, 'hover:bg-red-500/12 hover:text-red-300 focus-visible:ring-red-400/45')}
+                className={cn(ICON_BUTTON, 'hover:bg-red-500/10 hover:text-red-400 focus-visible:ring-red-400/45')}
               >
                 <Unlink size={13} aria-hidden />
               </button>

@@ -58,11 +58,31 @@ test('버튼 무게: 열기는 남는 폭을 다 쓰는 글자 버튼, 수정·�
   assert.match(card, /className=\{cn\(ICON_BUTTON, 'border border-bg-border [^']*'\)\}\s+>\s+\{busy \? [^\n]+<Pencil /);
   // 해제 — 테두리 없이 가장 조용하게, 올리면 빨강.
   const unlinkClass = /className=\{cn\(ICON_BUTTON, '([^']*)'\)\}\s+>\s+<Unlink /.exec(card)?.[1] ?? '';
-  assert.match(unlinkClass, /hover:text-red-300/);
+  assert.match(unlinkClass, /hover:bg-red-500\/10 hover:text-red-400/);
   assert.doesNotMatch(unlinkClass, /\bborder\b/);
-  // 아이콘뿐인 버튼은 이름을 따로 갖는다(읽어 주는 이름 + 올리면 뜨는 설명).
+  // 아이콘뿐인 버튼은 이름을 따로 갖는다(읽어 주는 이름 + 올리면 뜨는 설명). 열기도 어느 칸의 열기인지 읽어 준다.
+  assert.match(card, /aria-label=\{`\$\{label\} 열기`\}/);
   assert.match(card, /aria-label=\{`\$\{label\} 수정`\}/);
   assert.match(card, /aria-label=\{`\$\{label\} 연결 해제`\}\s+title="연결 해제 — 실제 폴더·파일은 그대로예요"/);
+});
+
+test('잠금: 도는 중에는 수정·해제·연결·만들기를 못 누르고, 연결할 수 없는 칸은 수정도 잠근다', () => {
+  assert.match(card, /onClick=\{onEdit\}\s+disabled=\{busy \|\| !!lockedReason\}/);
+  assert.match(card, /onClick=\{onUnlink\}\s+disabled=\{busy\}/);
+  assert.match(card, /onClick=\{onCreate\} disabled=\{busy\}/);
+  const empty = card.slice(card.indexOf(') : ('));
+  assert.match(empty, /ref=\{editButtonRef\}\s+type="button"\s+onClick=\{onEdit\}\s+disabled=\{busy\}/);
+});
+
+test('스타일: 실제로 만들어지지 않는 색 클래스를 쓰지 않는다', () => {
+  // 이 프로젝트의 Tailwind 는 currentColor 에 투명도를 붙이지 못하고(border-current/25), 투명도는 5 단위 눈금만 만든다(/12, /8 은 없다).
+  // 쓰여 있어도 조용히 빠져서 테두리가 기본 색(거의 흰색)으로 나오거나 올림 표시가 사라진다 — 리뷰에서 묶음 CSS 로 확인.
+  assert.doesNotMatch(card, /-current\/\d/);
+  assert.match(card, /borderColor: 'color-mix\(in oklab, currentColor 25%, transparent\)'/);
+  for (const [name, source] of [['PathLinkCard', card], ['SceneWorkLinksPanel', scenePanel]] as const) {
+    const odd = source.match(/[a-z-]+\/(?!\d*[05]\b)\d+(?=[\s"'`])/g) ?? [];
+    assert.deepEqual(odd, [], `${name}: 눈금에 없는 투명도 — ${odd.join(', ')}`);
+  }
 });
 
 test('정보: 이름 줄과 위치 줄을 나눠 보이고, 위치 줄은 전체 경로를 설명으로 갖는다', () => {
@@ -85,6 +105,9 @@ test('배선: 두 화면이 같은 카드를 쓴다 — 예전 제각각의 버�
   assert.match(scenePanel, /onEdit=\{\(\) => setMenuOpen\(\(value\) => !value\)\}\s+editButtonRef=\{menuTriggerRef\}\s+busy=\{saving\}/);
   assert.match(scenePanel, /lockedReason=\{canEdit \? undefined : '씬 데이터 없음'\}\s+onUnlink=\{handleUnlink\}/);
   assert.match(scenePanel, /<\/PathLinkCard>\s+\{menuOpen && menuPos && createPortal\(/);
+  assert.match(scenePanel, /onOpen=\{handleOpen\}\s+opening=\{opening\}/);
+  // 경고 표시와 붙여넣기 칸은 카드 안(버튼 줄 아래)에 둔다.
+  assert.match(scenePanel, /onUnlink=\{handleUnlink\}\s+>\s+\{warningKeys\.length > 0 && \((?:(?!<\/PathLinkCard>)[\s\S])*\{pasteOpen && \((?:(?!<\/PathLinkCard>)[\s\S])*<\/PathLinkCard>/);
   for (const gone of ['<ExternalLink ', '<Pencil ', '<Unlink ', "'링크 해제'", 'title="수정"']) {
     assert.equal(scenePanel.includes(gone), false, `씬 상세에 예전 버튼 흔적: ${gone}`);
   }
@@ -93,8 +116,9 @@ test('배선: 두 화면이 같은 카드를 쓴다 — 예전 제각각의 버�
   assert.match(costumeDetail, /<PathLinkCard\s+kind="file"\s+label="작업 파일"\s+path=\{costume\.workFilePath\}/);
   assert.match(costumeDetail, /onEdit=\{onPickFolder\}\s+onUnlink=\{onClearFolder\}\s+onCreate=\{onCreateFolder\}/);
   assert.match(costumeDetail, /onEdit=\{onPickFile\}\s+onUnlink=\{onClearFile\}/);
-  for (const gone of ['PathActionRow', '경로 수정', '경로 지정', '지우기\n']) {
-    assert.equal(costumeDetail.includes(gone), false, `캐릭터 현황판에 예전 버튼 흔적: ${gone.trim()}`);
+  // (줄바꿈을 끼워 찾지 않는다 — 작업 트리가 CRLF 라 '\n' 을 붙이면 영영 맞지 않는 죽은 가드가 된다.)
+  for (const gone of ['PathActionRow', '경로 수정', '경로 지정', '지우기']) {
+    assert.equal(costumeDetail.includes(gone), false, `캐릭터 현황판에 예전 버튼 흔적: ${gone}`);
   }
   // 확인 창도 같은 말을 쓴다.
   assert.match(scenePanel, /confirmLabel: '연결 해제'/);
