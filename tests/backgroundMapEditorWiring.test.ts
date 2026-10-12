@@ -1292,6 +1292,43 @@ test('anchor 56: only a draft with nothing unsaved follows the library, never du
   assert.doesNotMatch(branch, /dropDrafts\(/);
 });
 
+test('anchor 57: a save is told inside the band, for a moment', () => {
+  // The word is turned on in one place, the function every save of maps goes through. The map on show is taken before the
+  // wait: after it this handler holds the render that started the save. And the word is for that map alone: when the save
+  // held it, and when it is still edited once its draft was put back. A save by someone who was not editing leaves no
+  // draft, and says nothing: there is no band to say it on.
+  const persist = handler.persistMaps(), told = 'if (shown && command.maps.some(item => item.entity.id === shown) && mapDraft(doc.getState(), shown)) setSavedNotice({ mapId: shown });';
+  inOrder(persist, 'const shown = current?.id;', 'await execute(command);', 'doc.rebaseDrafts(savedMaps(command));', told);
+  // The whole line: nothing stands in front of it, and none of its three conditions is gone.
+  assert.ok(persist.split('\n').map(line => line.trim()).includes(told), `not a line of its own: ${told}`);
+  // The word leaves the band by itself, timed by the editor: after the effect that follows the library, before the one that
+  // brings a refused save into view. Each save sets a new object, so the time starts again. The cleanup clears the timer
+  // that runs, at the next save and as the editor is taken down. And the effect hangs on the word: with an empty list it
+  // would run once, before any save, and "saved" would never leave the band.
+  inOrder(handler.followSaved(), 'useEffect(() => { followSaved(); }', 'window.setTimeout(() => setSavedNotice(null), MAP_SAVED_NOTICE_MS)',
+    'return () => window.clearTimeout(timer);', '}, [savedNotice]);', 'useEffect(() => { if (refused) ');
+  // The effect holds these five lines alone.
+  const all = editor.split('\n').map(line => line.trim()).filter(Boolean), at = all.indexOf('const timer = window.setTimeout(() => setSavedNotice(null), MAP_SAVED_NOTICE_MS);');
+  assert.deepEqual(all.slice(at - 2, at + 3), ['useEffect(() => {', 'if (!savedNotice) return;',
+    'const timer = window.setTimeout(() => setSavedNotice(null), MAP_SAVED_NOTICE_MS);', 'return () => window.clearTimeout(timer);', '}, [savedNotice]);']);
+  // The band is told so on the map that was saved, and on no other: the word names its map, so a save that goes on to
+  // another map (a link that is opened, a new map inside a space) is not told there. "Saving" is the store's own word for
+  // a write to the library: the editor's `busy` is also on while an underlay is uploaded.
+  const strip = handler.strip();
+  for (const part of ['mapEditStatus(draft, pending,', 'savedNotice?.mapId === current.id',
+    'status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)}']) assert.ok(strip.includes(part), `not found: ${part}`);
+  // The same words are read out as it happens, from a region that is not seen.
+  assert.ok(editStrip().includes('<span className="sr-only" role="status">{status.announce}</span>'));
+  // No toast, in any screen of the feature: it would come up in a corner of the window, away from the band that was pressed.
+  for (const name of readdirSync(directory).filter(name => name.endsWith('.tsx'))) assert.doesNotMatch(read(name), /sonner/, name);
+  // And no block over the map: the editor's notice is laid out above the canvas, and one that comes and goes with a save
+  // would move the map under the pointer. Neither save writes it, the word is read by its timer and by the band alone, and
+  // what the band says is in mapEditStatus.ts, not here.
+  for (const path of [persist, handler.saveMap()]) assert.doesNotMatch(path, /setNotice\(/);
+  assert.equal(count(editor, /\bsavedNotice\b/g), 4, 'the state, the timer and what it depends on, the band');
+  assert.ok(!editor.includes('도면을 저장했어요'));
+});
+
 test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the words name a button only to those who see it', () => {
   const gallery = read('BackgroundMapGallery.tsx');
   /** The tag of the one button of the editor that reads this, from the `<button` that opens it. */

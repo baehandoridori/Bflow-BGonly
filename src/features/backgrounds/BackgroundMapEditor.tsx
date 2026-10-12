@@ -25,7 +25,7 @@ import { planMarkCovers, planMarqueeIds, planRect, resolvePlanPress, sameSpotAga
 import type { PlanPressClick, PlanRect, PlanSpot } from './mapPlanSelect';
 import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
-import { mapEditStatus } from './mapEditStatus';
+import { MAP_SAVED_NOTICE_MS, mapEditStatus } from './mapEditStatus';
 import { useMapEditColors } from './useMapEditColors';
 import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode } from './mapCanvas';
 import { backgroundMapPath } from './domain';
@@ -350,6 +350,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   });
   // The four dialogs are in the list so that this runs again as one of them closes.
   useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);
+  // "Saved" leaves the band by itself. Timed here, not in CSS: with reduced motion a CSS timer ends on its first frame.
+  useEffect(() => {
+    if (!savedNotice) return;
+    const timer = window.setTimeout(() => setSavedNotice(null), MAP_SAVED_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [savedNotice]);
   useEffect(() => { if (refused) errorRef.current?.scrollIntoView({ block: 'nearest' }); }, [refused]);
 
   /** Ends the pressed pointer and cancels the gesture in progress. Nothing of it reaches the history. */
@@ -508,10 +514,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     setSettingsForm(structuredClone(source)); setError('');
   }
   async function persistMaps(command: MapSaveCommand) {
+    const shown = current?.id;                                              // the map on show as the save starts
     await execute(command);
     // Saving never ends edit mode: every saved map that was being edited goes on from what was saved. Built from the command.
     // After the wait this handler still holds the snapshot of the render that started the save, with the revision before it.
     doc.rebaseDrafts(savedMaps(command));
+    if (shown && command.maps.some(item => item.entity.id === shown) && mapDraft(doc.getState(), shown)) setSavedNotice({ mapId: shown });
   }
   function enterNewMap(map: BackgroundMap) {
     doc.enterNewMap(map);
@@ -1058,7 +1066,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       </header>
       {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
-      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, false)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
+      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
           <div className="bmap-toolbar" role="toolbar" aria-label="도면 도구">
