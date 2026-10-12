@@ -1226,3 +1226,52 @@ test('anchor 56: only a draft with nothing unsaved follows the library, never du
   // Not through dropDrafts: that ends the field edit that is being typed, which may be on another map.
   assert.doesNotMatch(branch, /dropDrafts\(/);
 });
+
+test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the words name a button only to those who see it', () => {
+  const gallery = read('BackgroundMapGallery.tsx');
+  /** The tag of the one button of the editor that reads this, from the `<button` that opens it. */
+  const button = (label: string) => {
+    const close = `>${label}</button>`, at = editor.indexOf(close);
+    assert.equal(count(editor, new RegExp(close, 'g')), 1, `one button reads: ${label}`);
+    return editor.slice(editor.lastIndexOf('<button', at), at + close.length);
+  };
+  // 편집 시작, the whole tag. A plain button of the library, a border and no fill: not the accent fill (`bg-primary`) of
+  // the button it replaced. While the map is edited it is off and kept from readers, and the stylesheet hides it by that
+  // `aria-hidden`. Its own click hides it, so the click sends the keyboard to the canvas: left on a hidden button, Delete
+  // and Ctrl+Z would reach nothing. And nothing else is on the tag: `hidden`, say, would take it out of the row.
+  const start = button('편집 시작');
+  assert.equal(start, '<button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button>');
+  // It keeps its place in the row: straight after 도면 설정, in no branch. Taken out while editing (`!editing &&`), 도면 설정
+  // would slide under the pointer, and the second click of a double-click on 편집 시작 would open the settings. And it
+  // stays inside what only an account that may edit is shown: a read-only account has no such button.
+  const row = piece(editor, '<div className="bmap-actions">', '</header>');
+  assert.ok(row.includes('>도면 설정</button><button type="button" className="bg-button bmap-edit-start"'));
+  assert.ok(piece(row, '{snapshot.canManage && <>', '</>}').includes(start));
+  // Hidden, it still takes its room. `display:none` would give the room away, as the branch would: the line as written,
+  // and no other line that takes the button out of the layout.
+  const lines = sheetLines();
+  assert.equal(lines[lineOf(lines, '.bmap-edit-start[aria-hidden="true"]')], '.bmap-edit-start[aria-hidden="true"] { visibility:hidden; }');
+  assert.ok(!lines.some(line => line.includes('.bmap-edit-start') && line.includes('display:none')));
+  // The names of the buttons that are gone are said nowhere: 공간 편집 on a button or in a hint, and the 취소 of the header
+  // (the bar of the polygon tool has a 취소 of its own, further down).
+  for (const source of [editor, gallery]) for (const old of ['공간 편집에서', '도면 편집에서', '>공간 편집<']) assert.ok(!source.includes(old), `still there: ${old}`);
+  assert.ok(!row.includes('>취소</button>'));
+  // The name of a button is said only to those who have it on screen. The image list is read while editing as well, right
+  // under the band, where the button is hidden: its two hints speak of editing the map and name no button.
+  assert.equal(count(gallery, /도면을 편집하면서/g), 2);
+  assert.ok(!gallery.includes('편집 시작'));
+  // The hint of an empty map, the whole line. It names the button in the branch of those who are not editing, and there
+  // only to an account that may edit: a read-only account, which has no such button, is told who fills the map. The
+  // editor says the name on the button and in that hint, nowhere else.
+  assert.ok(editor.includes(`<span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '관리자가 공간을 배치하면 여기에 표시됩니다.'}</span>`));
+  assert.equal(count(editor, /편집 시작/g), 2);
+  // The badge beside the title is gone, in either of its wordings and whatever the quotes: the band says it, and its
+  // words are in mapEditStatus.ts.
+  for (const old of ['저장 전 변경사항', '편집 중']) assert.ok(!editor.includes(old), `still there: ${old}`);
+  // The dot of the tree hangs on what it always did, unsaved edits of that map, on show or not: not on the state of the
+  // band, which knows the map on show alone. Only its tooltip changed, to the words of the band.
+  assert.ok(editor.includes('mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 안 한 변경이 있어요">●</span>'));
+  // 연결 해제 is drawn only while there is a link, so the save its own click starts takes the button away, and editing goes
+  // on. The focus is sent to the canvas before that save: left on a button that is gone, Delete, Ctrl+Z and F2 are not heard.
+  assert.ok(button('연결 해제').includes('onClick={() => { focusCanvas(); void linkMap(null, selected.id); }}'));
+});
