@@ -1121,6 +1121,8 @@ export interface ElectronAPI extends CalendarApiInputContract {
   imageGetDir: () => Promise<string>;
   clipboardReadImage: () => Promise<string | null>;
   clipboardReadImageFile: () => Promise<{ fileName: string; dataUrl: string } | null>;
+  /** PNG 바이트를 클립보드에 그림으로 쓴다 — 창이 앞에 없어도 쓰인다. 읽지 못하는 값이면 false. */
+  clipboardWriteImage: (png: Uint8Array) => Promise<boolean>;
   // GAS 연결 (이미지 업로드용 Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) => Promise<SheetsConnectResult>;
   sheetsIsConnected: () => Promise<boolean>;
@@ -1800,7 +1802,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     characterId: string,
     updates: { memo?: string | null; costumeIds?: string[] },
   ) => Promise<void>;
-  storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string, originalDataUrl?: string | null) => Promise<{ ok: boolean; url?: string; error?: string; originalSaved?: boolean }>;
   // ─── 복장 다중 이미지 (character_costume_images) ───
   supabaseLoadCostumeImages: () => Promise<any[]>;
   supabaseAddCostumeImage: (input: {

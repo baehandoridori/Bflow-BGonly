@@ -6,6 +6,16 @@
 
 import * as storageService from '@/services/storageService';
 
+/** File/Blob → data URL (내용 그대로, 다시 인코딩하지 않는다). */
+export function readFileAsDataUrl(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 /** File/Blob → 리사이즈 base64 data URL (기본 JPEG, 옵션으로 PNG — alpha 채널 유지 시).
  *  v1.30.2 (코덱스 P1): 주석 결과(투명 PNG) 가 JPEG 재인코딩되면서 검정 matte 되던 문제 fix —
  *  outputMime 인자로 PNG 유지 가능. */

@@ -6,6 +6,7 @@ import {
   broadcastCommentReactionNotification, broadcastCommentReactionNotificationRemoved, broadcastActivityRemoved,
 } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
+import { withCharacterOriginalPaths } from '../src/shared/characterImageOriginal';
 import { createRetryManager } from './retry-utils';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds, type CharacterCommentSummaries } from '../src/shared/characterCommentSummary';
 import {
@@ -4647,7 +4648,8 @@ async function removeCharacterStorageByUrl(urls: (string | null | undefined)[]):
     .map((u) => (typeof u === 'string' ? u.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/)?.[1] : undefined))
     .filter((p): p is string => !!p);
   if (paths.length === 0) return;
-  const { error } = await supabase.storage.from('scene-images').remove(paths);
+  // 캐릭터 그림은 함께 보관한 원본(.orig)도 같이 지운다.
+  const { error } = await supabase.storage.from('scene-images').remove(withCharacterOriginalPaths(paths));
   if (error) console.warn('[character-board] 스토리지 자산 정리 실패(무시하고 진행):', error.message);
 }
 

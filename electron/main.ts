@@ -3673,8 +3673,8 @@ ipcMain.handle(
 
 ipcMain.handle(
   'storage:upload-character-image',
-  async (_event, characterId: string, costumeId: string, base64Data: string) => {
-    return storageUploadCharacterImage(characterId, costumeId, base64Data);
+  async (_event, characterId: string, costumeId: string, base64Data: string, originalDataUrl?: string | null) => {
+    return storageUploadCharacterImage(characterId, costumeId, base64Data, originalDataUrl);
   },
 );
 
@@ -4472,6 +4472,20 @@ ipcMain.handle('clipboard:read-image-file', async () => {
   } catch (err) {
     console.warn('[clipboard] read-image-file 실패:', err);
     return null;
+  }
+});
+
+// 그림(PNG 바이트)을 클립보드에 쓴다. 화면 쪽 클립보드 API 는 창이 앞에 있을 때만 쓸 수 있어서,
+// 복사를 누르고 곧바로 다른 프로그램(Moho)으로 넘어가면 그림을 받는 사이 창이 바뀌어 실패한다 — main 은 그 조건이 없다.
+ipcMain.handle('clipboard:write-image', (_event, png: Uint8Array) => {
+  try {
+    const image = nativeImage.createFromBuffer(Buffer.from(png));
+    if (image.isEmpty()) return false;
+    clipboard.writeImage(image);
+    return true;
+  } catch (err) {
+    console.warn('[clipboard] write-image 실패:', err);
+    return false;
   }
 });
 

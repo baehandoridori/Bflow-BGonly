@@ -16,6 +16,7 @@ const sidebar = readFileSync('src/components/layout/Sidebar.tsx', 'utf8');
 const card = readFileSync('src/components/characters/CharacterCard.tsx', 'utf8');
 const detailModal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
 const costumeDetail = readFileSync('src/components/characters/CostumeDetail.tsx', 'utf8');
+const pathLinkCard = readFileSync('src/components/common/PathLinkCard.tsx', 'utf8');
 const episodeAssetBoard = readFileSync('src/views/EpisodeAssetBoard.tsx', 'utf8');
 
 test('B4: 이름 없이 추가 — 임시 이름 부여 + 파일명 자동 지정 + 추가 후 상세 오픈', () => {
@@ -72,9 +73,11 @@ test('B8→피드백 53: 카드 좌/우 버튼으로 복장 전환 + 전환 복�
 });
 
 test('B9: 열기 버튼 hover 시 전체 경로', () => {
-  assert.match(costumeDetail, /onClick=\{onOpen\}\s*\n\s*title=\{path\}/);
-  // 이름 텍스트 title 은 경로가 아니라 이름 풀버전(F26) — '열기' 버튼이 경로를 담당.
-  assert.match(costumeDetail, /title=\{path \? displayCharacterPathName\(path\) : undefined\}>\{displayCharacterPathName\(path\)\}/);
+  // 작업 경로 칸은 씬 상세와 함께 쓰는 공용 카드(PathLinkCard)다 (v1.134.2).
+  assert.match(costumeDetail, /<PathLinkCard\s+kind="folder"/);
+  assert.match(pathLinkCard, /onClick=\{onOpen\}\s+disabled=\{opening\}\s+aria-label=\{`\$\{label\} 열기`\}\s+title=\{path \?\? undefined\}/);
+  // 이름 텍스트 title 은 경로가 아니라 이름 풀버전(F26) — '열기' 버튼과 위치 줄이 경로를 담당.
+  assert.match(pathLinkCard, /title=\{name\}>\{name\}/);
 });
 
 test('B10: 복장 드래그 재배치 — 순수 헬퍼 + store + DnD + pending 보호', () => {

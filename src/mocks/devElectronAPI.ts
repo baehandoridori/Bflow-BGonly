@@ -2773,6 +2773,11 @@ export function installDevElectronAPI(): void {
     imageGetDir: async () => '/dev/images',
     clipboardReadImage: async () => null,
     clipboardReadImageFile: async () => null,
+    // 미리보기에는 main 이 없어 브라우저 클립보드로 쓴다(창이 앞에 있을 때만 된다 — 앱과 다른 점).
+    clipboardWriteImage: async (png: Uint8Array) => {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([png.slice()], { type: 'image/png' }) })]);
+      return true;
+    },
 
     sheetsConnect: async () => ({ ok: false, error: 'DEV mock' }),
     sheetsIsConnected: async () => false,
@@ -4165,7 +4170,7 @@ export function installDevElectronAPI(): void {
       }
     },
     // 프리뷰에서 업로드/붙여넣기 이미지가 실제로 렌더되도록 로드 가능한 경로를 돌려준다 (피드백 31b·33 검증용).
-    storageUploadCharacterImage: async () => ({ ok: true, url: MOCK_CHARACTER_IMAGE_URL }),
+    storageUploadCharacterImage: async (_characterId: string, _costumeId: string, _base64Data: string, originalDataUrl?: string | null) => ({ ok: true, url: MOCK_CHARACTER_IMAGE_URL, originalSaved: !!originalDataUrl }),
     // ─── 복장 다중 이미지 (mock) ───
     supabaseLoadCostumeImages: async () => {
       seedMockCharacterData();
