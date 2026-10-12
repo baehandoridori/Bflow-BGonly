@@ -16,6 +16,10 @@ export type BackgroundMapDocument = {
   discard(mapId: string): void;
   /** After a successful save: the saved maps read from the snapshot again. */
   dropDrafts(mapIds: readonly string[]): void;
+  /** After a save: each saved map that has a draft goes on from what was saved. A map without a draft gets none. */
+  rebaseDrafts(maps: readonly BackgroundMap[]): void;
+  /** A draft with nothing unsaved in it follows the library: on to a newer revision of its map, or away with a map that is gone. */
+  followSaved(maps: readonly BackgroundMap[]): void;
   update(map: BackgroundMap, options?: MapUpdateOptions): void;
   endCoalescing(): void;
   undo(mapId: string): void;
@@ -42,6 +46,8 @@ export function useBackgroundMapDocument(): BackgroundMapDocument {
     enterNewMap: (map: BackgroundMap) => store.dispatch({ type: 'enter-new-map', map }),
     discard: (mapId: string) => store.dispatch({ type: 'discard', mapId }),
     dropDrafts: (mapIds: readonly string[]) => store.dispatch({ type: 'drop-drafts', mapIds }),
+    rebaseDrafts: (maps: readonly BackgroundMap[]) => store.dispatch({ type: 'rebase-drafts', maps }),
+    followSaved: (maps: readonly BackgroundMap[]) => store.dispatch({ type: 'follow-saved', maps }),
     update: (map: BackgroundMap, options?: MapUpdateOptions) => store.dispatch({ type: 'update', map, ...options }),
     endCoalescing: () => store.dispatch({ type: 'end-coalescing' }),
     undo: (mapId: string) => store.dispatch({ type: 'undo', mapId }),
