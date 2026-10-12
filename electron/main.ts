@@ -4475,6 +4475,20 @@ ipcMain.handle('clipboard:read-image-file', async () => {
   }
 });
 
+// 그림(PNG 바이트)을 클립보드에 쓴다. 화면 쪽 클립보드 API 는 창이 앞에 있을 때만 쓸 수 있어서,
+// 복사를 누르고 곧바로 다른 프로그램(Moho)으로 넘어가면 그림을 받는 사이 창이 바뀌어 실패한다 — main 은 그 조건이 없다.
+ipcMain.handle('clipboard:write-image', (_event, png: Uint8Array) => {
+  try {
+    const image = nativeImage.createFromBuffer(Buffer.from(png));
+    if (image.isEmpty()) return false;
+    clipboard.writeImage(image);
+    return true;
+  } catch (err) {
+    console.warn('[clipboard] write-image 실패:', err);
+    return false;
+  }
+});
+
 // ─── IPC 핸들러: 위젯 팝업 윈도우 ──────────────────────────────
 
 // 위젯별 첫 오픈 기본값 — 캐릭터 현황판처럼 화면형 팝업은 위젯 기본(420×360·AOT)이 맞지 않는다 (피드백 36).

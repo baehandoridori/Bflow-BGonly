@@ -399,7 +399,8 @@ export function FeaturedImageSlot({
       const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
       const base64 = await resizeBlob(file, CHARACTER_DISPLAY_MAX_PX, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
       // 줄이기 전 파일 그대로를 함께 올린다 — '이미지 복사'는 이 원본을 쓴다(줄인 그림을 복사하면 Moho 에 작게 붙는다).
-      const originalDataUrl = canKeepCharacterOriginal(file) ? await readFileAsDataUrl(file) : null;
+      //   원본은 덤이다 — 읽지 못해도 그림 올리기는 계속한다.
+      const originalDataUrl = canKeepCharacterOriginal(file) ? await readFileAsDataUrl(file).catch(() => null) : null;
       const res = await uploadCharacterImage(character.id, targetCostume.id, base64, originalDataUrl);
       if (!res.ok || !res.url) throw new Error(res.error ?? '업로드 실패');
       // 대표 이미지 자동 지정·featured_* 동기화는 store(addCostumeImage)+DB 트리거가 담당 —

@@ -1,7 +1,7 @@
 import { toast } from 'sonner';
 import { openWorkPath } from '@/services/sceneWorkLinkService';
 import { fetchImageBlob, writeImageBlobToClipboard } from '@/utils/imageActions';
-import { CHARACTER_DISPLAY_MAX_PX, characterOriginalImageUrl } from '@/shared/characterImageOriginal';
+import { copyCharacterImageToClipboard } from '@/utils/characterImageCopy';
 import { getPathBaseName, getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
 
 export function displayCharacterPathName(path: string | null | undefined): string {
@@ -19,28 +19,25 @@ export async function openStoredCharacterPath(targetPath: string | null | undefi
 }
 
 /**
- * 캐릭터 그림 복사 — 올린 파일 그대로(원본)를 먼저 쓴다.
- * 화면에 쓰는 그림은 긴 변 800px 로 줄어 있어서, 그것을 복사하면 Moho 등에 원래보다 작게 붙는다.
- * 원본이 없는 그림(원본 보관 이전에 올렸거나 보관하지 못한 것)만 화면용 그림으로 대신한다.
+ * 캐릭터 그림 복사 — 올린 파일 그대로(원본)를 먼저 쓰고, 없으면 화면용 그림으로 대신한다(규칙은 characterImageCopy).
+ * 원본은 그때 내려받으므로 누르자마자 '복사하는 중'을 보이고, 끝나면 같은 알림을 결과로 바꾼다.
  */
 export async function copyCharacterImage(url: string | null | undefined): Promise<void> {
   if (!url) {
     toast.error('복사할 이미지가 없어요');
     return;
   }
+  const pending = toast.loading('그림을 복사하는 중…');
   try {
-    const originalUrl = characterOriginalImageUrl(url);
-    const original = originalUrl ? await fetchImageBlob(originalUrl).catch(() => null) : null;
-    const size = await writeImageBlobToClipboard(original ?? await fetchImageBlob(url));
-    // 원본 없이 긴 변이 딱 화면용 한계면 줄어든 채로만 남은 그림이다 — 조용히 작게 붙지 않도록 알린다.
-    if (!original && Math.max(size.width, size.height) === CHARACTER_DISPLAY_MAX_PX) {
-      toast.warning('줄어든 크기로 복사됐어요. 원래 크기로 쓰려면 이 그림을 다시 올려 주세요.', { duration: 8000 });
+    const result = await copyCharacterImageToClipboard({ fetchBlob: fetchImageBlob, write: writeImageBlobToClipboard }, url);
+    if (result === 'shrunk') {
+      toast.warning('줄어든 크기로 복사됐어요. 원래 크기로 쓰려면 이 그림을 다시 올려 주세요.', { id: pending, duration: 8000 });
     } else {
-      toast.success('클립보드에 이미지 복사됨');
+      toast.success('클립보드에 이미지 복사됨', { id: pending });
     }
   } catch (err) {
     console.error('[copyCharacterImage] 실패', err);
-    toast.error('이미지 복사 실패');
+    toast.error('이미지 복사 실패', { id: pending });
   }
 }
 

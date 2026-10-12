@@ -2773,6 +2773,11 @@ export function installDevElectronAPI(): void {
     imageGetDir: async () => '/dev/images',
     clipboardReadImage: async () => null,
     clipboardReadImageFile: async () => null,
+    // 미리보기에는 main 이 없어 브라우저 클립보드로 쓴다(창이 앞에 있을 때만 된다 — 앱과 다른 점).
+    clipboardWriteImage: async (png: Uint8Array) => {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([png.slice()], { type: 'image/png' }) })]);
+      return true;
+    },
 
     sheetsConnect: async () => ({ ok: false, error: 'DEV mock' }),
     sheetsIsConnected: async () => false,

@@ -46,9 +46,13 @@ export async function downloadImage(url: string, fileName: string): Promise<void
   }
 }
 
-/** 그림 Blob 을 PNG 로 클립보드에 쓰고, 쓴 그림의 픽셀 크기를 돌려준다. 실패하면 throw — 안내는 호출부가 한다. */
+/**
+ * 그림 Blob 을 PNG 로 클립보드에 쓰고, 쓴 그림의 픽셀 크기를 돌려준다. 실패하면 throw — 안내는 호출부가 한다.
+ * 쓰기는 main 이 한다: 화면 쪽 클립보드 API 는 창이 앞에 있을 때만 쓸 수 있어서, 복사를 누르고 곧바로
+ * 다른 프로그램(Moho)으로 넘어가면 그림을 받는 사이 창이 바뀌어 실패한다.
+ */
 export async function writeImageBlobToClipboard(blob: Blob): Promise<{ width: number; height: number }> {
-  // JPEG → PNG 변환 (Clipboard API 는 PNG 만 안정적으로 받음)
+  // 어떤 형식이든 PNG 로 바꿔 넘긴다 (main 의 nativeImage 는 PNG·JPEG 만 읽는다)
   const img = new Image();
   img.crossOrigin = 'anonymous';
   const objectUrl = URL.createObjectURL(blob);
@@ -64,10 +68,13 @@ export async function writeImageBlobToClipboard(blob: Blob): Promise<{ width: nu
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('canvas context 없음');
     ctx.drawImage(img, 0, 0);
-    const pngBlob: Blob = await new Promise((res, rej) =>
-      canvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob 실패'))), 'image/png'),
-    );
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+    // 그 자리에서 바꾸는 toDataURL 을 쓴다 — toBlob 은 창이 가려지면(곧바로 다른 프로그램으로 넘어간 경우) 1초쯤 미뤄진다.
+    const binary = atob(canvas.toDataURL('image/png').split(',')[1] ?? '');
+    if (!binary) throw new Error('PNG 변환 실패');
+    const png = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) png[i] = binary.charCodeAt(i);
+    const written = await window.electronAPI.clipboardWriteImage(png);
+    if (!written) throw new Error('클립보드 쓰기 실패');
     return { width: canvas.width, height: canvas.height };
   } finally {
     URL.revokeObjectURL(objectUrl);
