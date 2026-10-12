@@ -2,11 +2,7 @@ import { toast } from 'sonner';
 import { openWorkPath } from '@/services/sceneWorkLinkService';
 import { fetchImageBlob, writeImageBlobToClipboard } from '@/utils/imageActions';
 import { copyCharacterImageToClipboard } from '@/utils/characterImageCopy';
-import { getPathBaseName, getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
-
-export function displayCharacterPathName(path: string | null | undefined): string {
-  return getPathBaseName(path) || '미등록';
-}
+import { getResolvedCharacterFolderAfterFilePick } from '@/utils/characterAssets';
 
 export async function openStoredCharacterPath(targetPath: string | null | undefined, label: string): Promise<void> {
   const path = (targetPath ?? '').trim();

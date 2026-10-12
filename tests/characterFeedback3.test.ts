@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 
 const indexCss = readFileSync('src/index.css', 'utf8');
 const costumeDetail = readFileSync('src/components/characters/CostumeDetail.tsx', 'utf8');
+const pathLinkCard = readFileSync('src/components/common/PathLinkCard.tsx', 'utf8');
 const globalTooltip = readFileSync('src/components/ui/GlobalTooltip.tsx', 'utf8');
 const detailModal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
 const mainTs = readFileSync('electron/main.ts', 'utf8');
@@ -28,7 +29,7 @@ test('F25: draggable 요소 HTML5 드래그 복원 CSS + 전역 리셋 보존', 
 
 test('F26: 이름 title=이름 풀버전 + 툴팁 줄바꿈 + key 최적화 유지', () => {
   // 이름 텍스트 title 은 경로가 아니라 이름 풀버전.
-  assert.match(costumeDetail, /title=\{path \? displayCharacterPathName\(path\) : undefined\}/);
+  assert.match(pathLinkCard, /title=\{name\}>\{name\}/);
   // 툴팁 컨테이너: 줄바꿈 허용(whitespace-nowrap 제거, overflow-wrap:anywhere 도입).
   assert.doesNotMatch(globalTooltip, /whitespace-nowrap/);
   assert.match(globalTooltip, /\[overflow-wrap:anywhere\]/);

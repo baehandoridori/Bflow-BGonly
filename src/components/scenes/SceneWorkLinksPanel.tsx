@@ -1,19 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  AlertTriangle,
-  Clipboard,
-  ExternalLink,
-  File,
-  Folder,
-  Link2,
-  Loader2,
-  MousePointerClick,
-  Pencil,
-  Unlink,
-} from 'lucide-react';
+import { AlertTriangle, Clipboard, Link2, MousePointerClick } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { PathLinkCard } from '@/components/common/PathLinkCard';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
 import {
@@ -45,9 +35,9 @@ const DEPT_META: Record<SceneWorkLinkDepartment, { label: string; shortLabel: st
   acting: { label: '액팅', shortLabel: 'ACT', tone: '#E17055' },
 };
 
-const KIND_META: Record<SlotKind, { label: string; Icon: typeof Folder }> = {
-  folder: { label: '작업 폴더', Icon: Folder },
-  primary_file: { label: '대표 파일', Icon: File },
+const KIND_META: Record<SlotKind, { label: string }> = {
+  folder: { label: '작업 폴더' },
+  primary_file: { label: '대표 파일' },
 };
 
 const WARNING_TEXT: Record<WorkLinkWarning | 'missing_path', string> = {
@@ -186,7 +176,6 @@ function WorkLinkRow({
   const [exists, setExists] = useState<boolean | null>(null);
 
   const kindMeta = KIND_META[linkKind];
-  const Icon = kindMeta.Icon;
   const canEdit = !!scene?.id;
   const warningKeys = useMemo(() => {
     if (!link?.path) return [] as Array<WorkLinkWarning | 'missing_path'>;
@@ -310,154 +299,84 @@ function WorkLinkRow({
   const handleUnlink = async () => {
     if (!scene?.id || !link) return;
     const ok = await ConfirmDialog.show({
-      message: '이 작업 링크를 해제할까요?\n실제 파일이나 폴더는 삭제되지 않고, Bflow에 저장된 연결만 사라집니다.',
-      confirmLabel: '링크 해제',
+      message: `${kindMeta.label} 연결을 해제할까요?\n실제 폴더·파일은 그대로 두고 B flow에 저장된 연결만 지워요.`,
+      confirmLabel: '연결 해제',
       tone: 'danger',
     });
     if (!ok) return;
     setSaving(true);
     try {
       await deleteLink(scene.id, department, linkKind);
-      toast.success('작업 링크를 해제했습니다');
+      toast.success('연결을 해제했어요');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(`작업 링크 해제 실패: ${message}`);
+      toast.error(`연결 해제 실패: ${message}`);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="min-w-0 rounded-md border border-bg-border/45 bg-bg-primary/30 px-3 py-2.5">
-      {!link ? (
-        /* ── 빈 슬롯: 아이콘+라벨 + 가운데 '연결' 버튼 ── */
-        <div className="flex flex-col items-center gap-2 py-0.5 text-center">
-          <div className="flex items-center gap-1.5 text-text-secondary/55">
-            <Icon size={14} aria-hidden />
-            <span className="text-[11.5px] font-medium">{kindMeta.label}</span>
+    <>
+      <PathLinkCard
+        kind={linkKind === 'folder' ? 'folder' : 'file'}
+        label={kindMeta.label}
+        path={link?.path}
+        tone={DEPT_META[department].tone}
+        onOpen={handleOpen}
+        opening={opening}
+        onEdit={() => setMenuOpen((value) => !value)}
+        editButtonRef={menuTriggerRef}
+        busy={saving}
+        /* 씬 UUID 누락 등으로 연결 불가 — 사유를 글자로 보인다(툴팁 의존 X) */
+        lockedReason={canEdit ? undefined : '씬 데이터 없음'}
+        onUnlink={handleUnlink}
+      >
+        {warningKeys.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {warningKeys.map((warning) => (
+              <span
+                key={warning}
+                className="inline-flex items-center gap-1 rounded border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[10px] text-amber-200"
+              >
+                <AlertTriangle size={10} aria-hidden />
+                {WARNING_TEXT[warning]}
+              </span>
+            ))}
           </div>
-          {canEdit ? (
+        )}
+
+        {pasteOpen && (
+          <div className="mt-2 flex gap-1.5">
+            <input
+              value={draftPath}
+              onChange={(event) => setDraftPath(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void savePath(draftPath);
+                if (event.key === 'Escape') setPasteOpen(false);
+              }}
+              placeholder="G:\\공유 드라이브\\..."
+              className="h-8 min-w-0 flex-1 rounded-md border border-bg-border bg-bg-primary px-2 text-[11.5px] text-text-primary outline-none transition-colors focus:border-accent/60"
+              autoFocus
+            />
             <button
-              ref={menuTriggerRef}
               type="button"
-              onClick={() => setMenuOpen((value) => !value)}
-              disabled={saving}
-              className="inline-flex h-7 items-center gap-1 rounded-md bg-white/6 px-3 text-[11px] font-medium text-text-primary transition-colors duration-200 hover:bg-white/10 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/45 disabled:opacity-45"
-              title="경로 연결"
+              onClick={() => void savePath(draftPath)}
+              disabled={!draftPath.trim() || saving}
+              className="h-8 rounded-md bg-accent px-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-accent-sub focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-45"
             >
-              {saving ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <Link2 size={12} aria-hidden />}
-              연결
+              저장
             </button>
-          ) : (
-            /* 씬 UUID 누락 등으로 연결 불가 — 사유를 텍스트로 노출(툴팁 의존 X) */
-            <span className="text-[10.5px] text-text-secondary/45">씬 데이터 없음</span>
-          )}
-        </div>
-      ) : (
-        /* ── 채워진 슬롯: 아이콘 | 라벨+경로 + 아이콘 버튼(열기/수정/해제) 왼쪽 아래 ── */
-        <div className="flex items-start gap-2.5">
-          <span
-            className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-current/25"
-            style={{ color: DEPT_META[department].tone }}
-          >
-            <Icon size={15} aria-hidden />
-          </span>
-
-          <div className="min-w-0 flex-1">
-            <div className="text-[11.5px] font-medium text-text-primary">{kindMeta.label}</div>
-            <div
-              className="mt-0.5 truncate text-[10.5px] text-text-secondary"
-              title={link.path}
+            <button
+              type="button"
+              onClick={() => setPasteOpen(false)}
+              className="h-8 rounded-md px-2 text-[11px] text-text-secondary transition-colors hover:bg-white/8 hover:text-text-primary"
             >
-              {link.path}
-            </div>
-
-            <div className="mt-2 flex items-center justify-start gap-1">
-              <button
-                type="button"
-                onClick={handleOpen}
-                disabled={opening}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors duration-200 hover:bg-white/8 hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/45 disabled:opacity-45"
-                aria-label={`${kindMeta.label} 열기`}
-                title="열기"
-              >
-                {opening ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <ExternalLink size={14} aria-hidden />}
-              </button>
-              <button
-                ref={menuTriggerRef}
-                type="button"
-                onClick={() => setMenuOpen((value) => !value)}
-                disabled={!canEdit || saving}
-                className={cn(
-                  'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-accent/45',
-                  canEdit
-                    ? 'text-text-secondary hover:bg-white/10 hover:text-text-primary cursor-pointer'
-                    : 'text-text-secondary/40 cursor-not-allowed',
-                )}
-                aria-label={`${kindMeta.label} 수정`}
-                title="수정"
-              >
-                {saving ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Pencil size={13} aria-hidden />}
-              </button>
-              <button
-                type="button"
-                onClick={handleUnlink}
-                disabled={saving}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors duration-200 hover:bg-red-500/12 hover:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-400/45 disabled:opacity-45"
-                aria-label={`${kindMeta.label} 링크 해제`}
-                title="링크 해제"
-              >
-                <Unlink size={13} aria-hidden />
-              </button>
-            </div>
-
-            {warningKeys.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {warningKeys.map((warning) => (
-                  <span
-                    key={warning}
-                    className="inline-flex items-center gap-1 rounded border border-amber-400/25 bg-amber-400/10 px-1.5 py-0.5 text-[10px] text-amber-200"
-                  >
-                    <AlertTriangle size={10} aria-hidden />
-                    {WARNING_TEXT[warning]}
-                  </span>
-                ))}
-              </div>
-            )}
+              취소
+            </button>
           </div>
-        </div>
-      )}
-
-      {pasteOpen && (
-        <div className="mt-2 flex gap-1.5">
-          <input
-            value={draftPath}
-            onChange={(event) => setDraftPath(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void savePath(draftPath);
-              if (event.key === 'Escape') setPasteOpen(false);
-            }}
-            placeholder="G:\\공유 드라이브\\..."
-            className="h-8 min-w-0 flex-1 rounded-md border border-bg-border bg-bg-primary px-2 text-[11.5px] text-text-primary outline-none transition-colors focus:border-accent/60"
-            autoFocus
-          />
-          <button
-            type="button"
-            onClick={() => void savePath(draftPath)}
-            disabled={!draftPath.trim() || saving}
-            className="h-8 rounded-md bg-accent px-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-accent-sub focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-45"
-          >
-            저장
-          </button>
-          <button
-            type="button"
-            onClick={() => setPasteOpen(false)}
-            className="h-8 rounded-md px-2 text-[11px] text-text-secondary transition-colors hover:bg-white/8 hover:text-text-primary"
-          >
-            취소
-          </button>
-        </div>
-      )}
+        )}
+      </PathLinkCard>
 
       {menuOpen && menuPos && createPortal(
         <div
@@ -484,6 +403,6 @@ function WorkLinkRow({
         </div>,
         document.body,
       )}
-    </div>
+    </>
   );
 }
