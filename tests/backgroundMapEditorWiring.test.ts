@@ -1408,6 +1408,10 @@ test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the wo
   // The badge beside the title is gone, in either of its wordings and whatever the quotes: the band says it, and its
   // words are in mapEditStatus.ts.
   for (const old of ['저장 전 변경사항', '편집 중']) assert.ok(!editor.includes(old), `still there: ${old}`);
+  // Nor is it back with its words borrowed: no badge of any wording stands in the header, and the editor does not take
+  // the label of the band from the status module (the band's own file does).
+  assert.doesNotMatch(piece(editor, '<header className="bmap-header">', '</header>'), /bmap-badge/);
+  assert.ok(!editor.includes('MAP_EDIT_LABEL'));
   // The dot of the tree hangs on what it always did, unsaved edits of that map, on show or not: not on the state of the
   // band, which knows the map on show alone. Only its tooltip changed, to the words of the band.
   assert.ok(editor.includes('mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 안 한 변경이 있어요">●</span>'));
@@ -1430,7 +1434,11 @@ test('anchor 59: the two new test files run in the build', () => {
     const source = readFileSync(new URL(name, tests), 'utf8');
     // And each tests something: a file whose tests are all skipped is green as well.
     assert.ok(count(source, /^test\(/gm) >= 3, `fewer than three tests: ${name}`);
-    for (const skipped of ['test.skip(', 'test.todo(', '{ skip:']) assert.ok(!source.includes(skipped), `${name} skips a test: ${skipped}`);
+    // Whatever the spelling: `test.skip(`, `describe.skip(`, `t.skip()`, an option `skip:` or `todo:` in any place among
+    // the options, `import { skip as test }`. Neither word has any business in these two files, so neither is there at
+    // all (`skipped`, a count in the colour tests, is another word), and `test` is the runner's own.
+    assert.doesNotMatch(source, /\b(?:skip|todo)\b/, `${name} skips a test`);
+    assert.ok(source.startsWith("import test from 'node:test';"), `${name} does not take test from node:test`);
   }
   // The pattern itself, letter for letter, and the two builds that run it.
   const { scripts } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { scripts: Record<string, string> };
