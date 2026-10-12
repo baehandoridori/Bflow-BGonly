@@ -13,6 +13,11 @@ export function mapSaveWasApplied(snapshot: BackgroundSnapshot, command: MapSave
   });
 }
 
+/** The maps of a save as the library holds them once it went through: each on the revision that save gave it. */
+export function savedMaps(command: MapSaveCommand): BackgroundMap[] {
+  return command.maps.map(({ entity, expectedRevision }) => ({ ...entity, revision: (expectedRevision ?? 0) + 1 }));
+}
+
 export function effectiveMaps(snapshot: BackgroundSnapshot, drafts: MapDraftSources): BackgroundMap[] {
   const maps = new Map(snapshot.maps.map(map => [map.id, map]));
   for (const draft of Object.values(drafts)) maps.set(draft.value.id, draft.value);

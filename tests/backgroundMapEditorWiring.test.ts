@@ -68,12 +68,19 @@ function block(source: string, opener: string): string {
 const handler = {
   planGestureOf: () => piece(editor, 'function planGestureOf(', 'function mapPath('),
   onSpaceKey: () => piece(editor, 'const onSpaceKey = useEvent(', 'useEffect('),
+  onSaveKey: () => piece(editor, 'const onSaveKey = useEvent(', 'useEffect('),
   select: () => piece(editor, 'function select(', 'function updateView('),
   navigate: () => piece(editor, 'function navigate(', 'function switchMode('),
   switchMode: () => piece(editor, 'function switchMode(', 'const leave3D = useEvent('),
   leave3D: () => piece(editor, 'const leave3D = useEvent(', 'function expandPath('),
+  persistMaps: () => piece(editor, 'async function persistMaps(', 'function enterNewMap('),
   placeSymbol: () => piece(editor, 'function placeSymbol(', 'function beginEditing('),
+  leaveEditing: () => piece(editor, 'function leaveEditing(', 'function endEditing('),
+  endEditing: () => piece(editor, 'function endEditing(', 'function undo('),
+  saveMap: () => piece(editor, 'async function saveMap(', 'function requestSave('),
+  requestSave: () => piece(editor, 'function requestSave(', 'async function confirmAction('),
   confirmAction: () => piece(editor, 'async function confirmAction(', 'async function createMap('),
+  followSaved: () => piece(editor, 'const followSaved = useEvent(() => {', 'const abortGesture = useEvent('),
   abortGesture: () => piece(editor, 'const abortGesture = useEvent(', 'useLayoutEffect(() => { abortGesture(); }'),
   commitName: () => piece(editor, 'const commitName = useEvent(', 'const cancelName = useEvent('),
   pointerDown: () => piece(editor, 'function pointerDown(', 'function pointerMove('),
@@ -84,6 +91,8 @@ const handler = {
   openSpace: () => piece(editor, 'function openSpace(', 'function beginRename('),
   fitView: () => piece(editor, 'function fitView(', 'function keyboard('),
   keyboard: () => piece(editor, 'function keyboard(', 'const selectNode = useEvent('),
+  /** No handler: the one tag with which the editor draws the edit band, up to the `/>` that closes it. */
+  strip: () => piece(editor, '<BackgroundMapEditStrip ', '/>'),
 };
 /** The opening tag of the plan SVG, through the end of its last attribute. */
 function canvasTag(): string {
@@ -109,6 +118,27 @@ const viewport = {
   onDoubleClick: () => piece(view3d, 'private readonly onDoubleClick =', 'private readonly onContextMenu ='),
   onMouseDown: () => piece(view3d, 'private readonly onMouseDown =', 'private readonly onDragKey ='),
 };
+/** The edit band, read when an anchor asks for it: without the file that anchor fails, not every anchor of this file. */
+const editStrip = () => read('BackgroundMapEditStrip.tsx');
+/** The stylesheet of the editor, line by line and as written: a rule is one line there, and the comments stay. */
+const sheetLines = () => readFileSync(new URL('backgrounds-map.css', directory), 'utf8').replace(/\r\n/g, '\n').split('\n');
+/** The number of the one line that starts with this, at the very start of the line. */
+function lineOf(lines: string[], opening: string): number {
+  const found = lines.flatMap((line, index) => line.startsWith(opening) ? [index] : []);
+  assert.equal(found.length, 1, `one line starts with "${opening}"`);
+  return found[0];
+}
+/** What a rule declares, each `property:value` as it is written. */
+const declarations = (rule: string) => rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}')).split(';').map(part => part.trim()).filter(Boolean);
+/** A base rule: the one line that starts with this selector and its brace. An override inside a media block is indented, and is not it. */
+const baseRule = (lines: string[], opening: string) => declarations(lines[lineOf(lines, opening)]);
+/** A media block written over several lines: its lines without their indent, from the line that opens it to the brace that closes it. */
+function mediaBlock(lines: string[], opening: string): string[] {
+  const start = lineOf(lines, opening), end = lines.indexOf('}', start);
+  assert.equal(lines[start], opening);
+  assert.ok(end > start, `block not closed: ${opening}`);
+  return lines.slice(start + 1, end).map(line => line.trim());
+}
 
 test('anchor 1: the wheel is a native, non-passive listener on the plan SVG, attached again for each map and mode', () => {
   // The registration and the dependency list are one effect: no other effect starts between them.
@@ -912,4 +942,506 @@ test('anchor 49: in 3D a road gives way to a room that stands on it, and behind 
   assert.doesNotMatch(step, /mapFloorPile\(/);
   assert.ok(viewport.pick().includes('again ? mapSpacePile(hits, props.map) : []'));
   assert.doesNotMatch(view3d, /mapFloorPile/);
+});
+
+test('anchor 50: a save never ends edit mode: every saved map that was being edited goes on from what the command saved', () => {
+  // The one function every save of maps goes through. The drafts are put back from the command, in one dispatch.
+  const persist = handler.persistMaps(), waited = 'await execute(command);';
+  inOrder(persist, waited, 'doc.rebaseDrafts(savedMaps(command));');
+  // Only a save that went through puts them back. With a `try` of its own here, a save that failed would leave a draft
+  // with nothing unsaved on a revision the library does not have: the edits would read as saved, and the next save be refused.
+  assert.doesNotMatch(persist, /\b(?:try|catch|finally)\b/);
+  // And no draft is ended here, under any spelling: the drafts that were put back stay.
+  assert.doesNotMatch(persist, /doc\.(?:discard|dispatch)\(/);
+  // After the wait this handler holds the render that started the save: a draft opened from its map would be on the
+  // revision before that save, and the next save would be refused. Nothing after the wait reads that render or opens a draft.
+  const after = persist.slice(positions(persist, waited)[0] + waited.length);
+  for (const stale of [/\bsnapshot\b/, /\bcurrent\b/, /\bdraft\b/, /doc\.beginEditing/, /doc\.enterNewMap/]) assert.doesNotMatch(after, stale);
+  // No save drops a draft any more, and the four saves all go through that function.
+  assert.doesNotMatch(editor, /dropDrafts/);
+  assert.equal(count(editor, /await persistMaps\(/g), 4, 'the map, a new map, a link, the settings');
+  const binding = read('useBackgroundMapDocument.ts');
+  assert.doesNotMatch(binding, /dropDrafts/);
+  // The calls of the editor reach the reducer through these two lines, and each sends its own action. Swapped, a save would
+  // leave its draft on the revision before it, and the library would put fresh drafts over the ones that have unsaved edits.
+  assert.ok(binding.includes("rebaseDrafts: (maps: readonly BackgroundMap[]) => store.dispatch({ type: 'rebase-drafts', maps }),"));
+  assert.ok(binding.includes("followSaved: (maps: readonly BackgroundMap[]) => store.dispatch({ type: 'follow-saved', maps }),"));
+  // Only a map that has a draft gets one: a save by someone who was not editing turns no edit mode on. That draft has nothing unsaved.
+  const reducer = read('mapDocument.ts'), rebase = piece(reducer, 'function rebaseDrafts(', 'function dropDrafts(');
+  assert.ok(rebase.includes('!!draft &&'));
+  assert.ok(rebase.includes('freshDraft(map)'));
+  assert.ok(piece(reducer, 'function freshDraft(', 'function openDraft(').includes('past: [], future: [], dropped: 0'));
+  // Its revision is the one the store and the server give a saved map.
+  assert.ok(piece(read('mapWorkflow.ts'), 'export function savedMaps(', 'export function effectiveMaps(').includes('revision: (expectedRevision ?? 0) + 1'));
+  // Editing goes on with the tool that is in hand.
+  assert.doesNotMatch(handler.saveMap(), /setTool\(/);
+});
+
+test('anchor 51: the map is saved only when something is unsaved and never twice at once, and a save that ends in a message brings the message into view', () => {
+  const save = handler.saveMap();
+  // The checks, in this order. The polygon that is being drawn is asked before the unsaved edits: its points are no part
+  // of the draft, and asked after them, Ctrl+S on a map with nothing else unsaved would end without a word. The unsaved
+  // edits are read from the store, where the field that was just left is committed already. The ref is set after the
+  // checks that return early (set before them, one refused save would leave it set for good) and cleared in `finally`.
+  inOrder(save, 'if (!current || !draft || !canEdit || saving.current) return;',
+    "if (polygon.length) { setError('그리는 중인 다각형을 완성하거나 취소한 뒤 저장해 주세요.'); setRefused(count => count + 1); return; }",
+    'if (!mapDraftChanged(mapDraft(doc.getState(), current.id))) return;', 'if (!current.name.trim()) {', 'const settled = settle()',
+    'saving.current = true; setBusy(true);', 'finally { saving.current = false; setBusy(false); }');
+  // The save itself. The message of the save before is cleared. What goes out is the map and the drafts `settle()` gave,
+  // not those of the render, which do not know the field that was just left. And the command is built inside `try`:
+  // built after the ref is set but outside it, a command that cannot be built would leave the ref and `busy` set for good.
+  inOrder(save, "saving.current = true; setBusy(true); setError('');", 'try {', 'await persistMaps(saveMapChanges(snapshot, settled.drafts, [captured]));',
+    '} catch (cause) { setError(message(cause)); setRefused(count => count + 1); } finally { saving.current = false; setBusy(false); }');
+  // The ref is set in that one place only: a second one before the checks that return early would leave it set after one refused save.
+  assert.equal(count(save, /saving\.current = true/g), 1);
+  // The save ends no draft and opens none, whether it went through or failed: a failed save keeps the unsaved edits.
+  assert.doesNotMatch(save, /doc\.(?:discard|dispatch|beginEditing|enterNewMap)\(/);
+  // The value of the render does not know the field that leaving it has just committed.
+  assert.doesNotMatch(save, /\bdraftChanged\b/);
+  // A save ends in a message instead of a save in three places: the polygon, the empty name, a failure.
+  assert.equal(count(save, /setRefused\(count => count \+ 1\)/g), 3);
+  // Each brings that message into view: it sits above the band and may be scrolled away. `nearest` moves nothing when it is in view.
+  assert.ok(editor.includes("useEffect(() => { if (refused) errorRef.current?.scrollIntoView({ block: 'nearest' }); }, [refused]);"));
+  assert.ok(editor.includes('<div className="bg-error" role="alert" ref={errorRef}>'));
+  // The button of the band. It is on with something to save and nothing running: asked of `disabled` alone it would look on
+  // over a map with nothing unsaved (a press would still save nothing, so only the look is wrong and no other check sees it).
+  // Its tooltip is the one place that says why the dimmed button does nothing.
+  const strip = editStrip();
+  for (const part of ['const idle = !status.canSave || disabled;', 'aria-disabled={idle}', 'onClick={() => { if (!idle) onSave(); }}',
+    "title={status.canSave ? '도면 저장 (Ctrl+S)' : status.phase === 'saving' ? undefined : '저장할 변경이 없어요'}"]) assert.ok(strip.includes(part), `not found: ${part}`);
+  // Dimmed, never switched off: switched off it would leave the Tab order, and its tooltip would not be reached.
+  assert.doesNotMatch(piece(strip, 'className="bmap-edit-save"', '</button>'), /(?<!aria-)\bdisabled\b/);
+});
+
+test('anchor 52: edit mode ends without a question only when nothing would be lost', () => {
+  const leave = handler.leaveEditing(), end = handler.endEditing();
+  // 편집 끝내기, in this order. Nothing while a save runs, and a drag in progress is cancelled first. Then the question,
+  // only when something would be lost: unsaved edits, read from the store (the press on the button has just committed the
+  // field that was being typed in, which the value of the render does not know), or the points of a polygon that is being
+  // drawn, which are no part of the draft. With neither, edit mode ends at once and the keyboard goes to the canvas: the
+  // button that was pressed is gone.
+  inOrder(end, 'if (!current || !editing || disabled) return;', 'abortGesture();',
+    "if (mapDraftChanged(mapDraft(doc.getState(), current.id)) || polygon.length) { setError(''); setConfirmation('discard'); return; }",
+    'leaveEditing(); focusCanvas();');
+  // A draft with every edit undone has nothing to lose: the redo history is not asked.
+  assert.doesNotMatch(end, /future/);
+  // Ended without a question, the band is gone with the click that ended it and everything below has moved up by its
+  // height: the second click of a double-click would land on whatever slid under the pointer (the canvas in a narrow
+  // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
+  // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
+  inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 2);
+  assert.deepEqual(piece(editor, 'function swallowSecondClick() {', 'function navigate(').split('\n').map(line => line.trim()).filter(Boolean), [
+    'function swallowSecondClick() {',
+    'const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };',
+    'for (const type of pressEvents) window.addEventListener(type, stop, true);',
+    'window.setTimeout(() => { for (const type of pressEvents) window.removeEventListener(type, stop, true); }, SECOND_CLICK_MS);',
+    '}']);
+  assert.ok(editor.includes('const SECOND_CLICK_MS = 500;'));
+  assert.ok(editor.includes("const pressEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick'];"));
+  // What ending is: the draft of the map on show goes, and with it the points that were being drawn, the tool in hand,
+  // the editor's message and the word that the map was just saved. The tool is no detail: the bar of the polygon tool
+  // (다각형 완성 · 취소) is drawn for the tool alone, in edit mode or not, and left in hand it would stay over a map that
+  // is no longer edited. Nor is the palette of symbols: left open it would be drawn open, unasked, at the next 편집 시작.
+  for (const part of ['doc.discard(current.id);', 'setPolygon([])', "setTool('select')", 'setSymbolPaletteOpen(false)', "setError('')", 'setSavedNotice(null)']) assert.ok(leave.includes(part), `not found: ${part}`);
+  // The answer of the dialog ends it the same way. Its button is gone with the band, so the keyboard is handed to the
+  // canvas once the dialog has closed.
+  inOrder(block(handler.confirmAction(), "if (confirmation === 'discard') {"), 'leaveEditing();', 'focusAfterConfirm.current = true; setConfirmation(null); return;');
+  // The question is asked from one place, and edit mode is ended from those two alone (the third is the function itself):
+  // a second way out would ask twice, or not at all.
+  assert.equal(count(editor, /setConfirmation\('discard'\)/g), 1);
+  assert.equal(count(editor, /\bleaveEditing\b/g), 3);
+  // Nor does the row of buttons in the header end it, under any name or by any call: 취소 left the header for the band.
+  // One left behind that drops the draft by itself would not ask, and neither count above would see it.
+  assert.doesNotMatch(piece(editor, '<div className="bmap-actions">', '</header>'), /discard|leaveEditing|endEditing/);
+  // The band's 편집 끝내기 is that handler. Wired to `leaveEditing` it would drop unsaved edits without a question, and
+  // everything above would still be found. Both buttons are off while a save or another action of the editor runs.
+  const strip = handler.strip();
+  for (const part of ['onEnd={endEditing}', 'disabled={disabled}']) assert.ok(strip.includes(part), `not found: ${part}`);
+  assert.ok(editStrip().includes('<button type="button" className="bmap-edit-end" disabled={disabled} onClick={onEnd}>편집 끝내기</button>'));
+  // The dialog. Its title and its text part on the same value: with only a polygon being drawn nothing is unsaved (the
+  // band says so, and those points cannot be saved), so the question does not speak of saving. One button fits both.
+  for (const part of ["confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?')",
+    "confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.')",
+    "confirmation === 'discard' ? '버리고 끝내기' : '삭제'"]) assert.ok(editor.includes(part), `not found: ${part}`);
+  // Going back loses nothing. The dialog's 돌아가기 and its own close do one thing, they close it: nothing in the dialog
+  // touches the points that were being drawn or the tool in hand, so the polygon can be gone on with.
+  const dialog = piece(editor, '{confirmation && current && <BackgroundModal ', '</BackgroundModal>}');
+  for (const part of ["onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}",
+    "onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button>"]) assert.ok(dialog.includes(part), `not found: ${part}`);
+  assert.doesNotMatch(dialog, /setPolygon\(|setTool\(/);
+  // Esc in the dialog is 돌아가기 too. The key comes up to the editor's own handler through the portal, and its Escape
+  // branch drops the points being drawn and the tool in hand: it leaves before that line when the key was pressed inside
+  // a dialog, and before the line that cancels a drag (no drag is in progress under an open dialog).
+  const escape = block(handler.keyboard(), "if (event.key === 'Escape') {");
+  inOrder(escape, 'if (event.nativeEvent === handledEscape.current) return;', "if ((event.target as HTMLElement).closest('dialog')) return;",
+    "if (pointerRef.current?.mode === 'marquee' || doc.isGestureActive()) { abortGesture(); return; }", 'setPolygon([]);');
+  // The words of the button this one replaced (취소) are gone, with or without quotes round them.
+  for (const old of ['도면 편집을 취소할까요?', '저장하지 않은 변경사항', '변경사항 버리기']) assert.ok(!editor.includes(old), `still there: ${old}`);
+});
+
+test('anchor 53: Ctrl+S is heard on the window, passes its guards, commits the field being typed in and saves', () => {
+  // The guards, in this order. The key, by its place on the keyboard (the Korean input state does not matter), with Ctrl
+  // and without Alt or Shift. The editor on show and editing: while viewing, for a read-only account and in another tab
+  // of the library the key is not even swallowed. No open dialog, asked of the state and of the document, never of the
+  // target: once Tab has run past the last button of a modal the target is the body. The focus in the library or on
+  // nothing at all (the body, right after a button went away): elsewhere the key belongs to what has the focus, a window
+  // of the app that is neither a dialog element nor marked modal, say. No text field outside the editor. Only then is the
+  // key taken, and taken before its repeats are dropped: a held key saves once and is swallowed all the while.
+  const key = handler.onSaveKey(), steps = [
+    "if (event.code !== 'KeyS' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;",
+    'if (!root || root.offsetParent === null || !editing) return;',
+    'if (createForm || linkForm || settingsForm || confirmation || document.querySelector(openDialogs)) return;',
+    "if (element && element !== document.body && !element.closest('.bg-library')) return;",
+    'if (element?.closest(textFields) && !root.contains(element)) return;',
+    'event.preventDefault(); event.stopPropagation();',
+    'if (event.repeat) return;',
+    'requestSave();',
+  ];
+  inOrder(key, ...steps);
+  // Each is a line of its own: nothing stands in front of one, and none is the tail of another condition.
+  const lines = key.split('\n').map(line => line.trim());
+  for (const step of steps) assert.ok(lines.includes(step), `not a line of its own: ${step}`);
+  // And the handler holds nothing else: its first line, the guards, the line that reads the root and the target, the brace
+  // that closes it. One more return (for a focused button, for 3D, for a composition) would make the key deaf there.
+  const opener = 'const onSaveKey = useEvent((event: KeyboardEvent) => {';
+  assert.deepEqual(block(editor, opener).split('\n').map(line => line.trim()).filter(Boolean),
+    [opener, steps[0], 'const root = rootRef.current, element = event.target instanceof Element ? event.target : null;', ...steps.slice(1), '}']);
+  // No dialog is asked of the target. And a composition is no dead end: a Korean name typed and saved at once is saved,
+  // by the focus leaving the field in requestSave. Swallowed and dropped, that Ctrl+S would die without a word.
+  assert.doesNotMatch(key, /closest\('dialog'\)|closest\(textEntry\)|isComposing|229/);
+  // What the document is asked: a native dialog that is open, and a window that is none but is marked modal.
+  assert.ok(editor.includes('const openDialogs = \'dialog[open], [aria-modal="true"]\';'));
+  // Heard on the window, in the capture phase: the editor's own handler is never reached from the body and is deaf behind a
+  // focused field or button, and a shortcut of the app bound to the same keys listens on the window as it bubbles. Let go
+  // by the cleanup the effect returns, with the same flag: without it the listener would outlive the editor.
+  const effect = piece(editor, "window.addEventListener('keydown', onSaveKey, true);", '}, [onSaveKey]);');
+  assert.ok(effect.includes("return () => window.removeEventListener('keydown', onSaveKey, true);"));
+  // And the effect holds these four lines alone, as the handler holds its own. A return in front of the first would leave the
+  // key deaf everywhere: the editor is mounted while viewing and the handler is stable, so the effect never runs a second
+  // time. A second listener for the release, the shape of the Space effect above, would save on the press and again on the release.
+  const all = editor.split('\n').map(line => line.trim()).filter(Boolean), at = all.indexOf("window.addEventListener('keydown', onSaveKey, true);");
+  assert.deepEqual(all.slice(at - 1, at + 3),
+    ['useEffect(() => {', "window.addEventListener('keydown', onSaveKey, true);", "return () => window.removeEventListener('keydown', onSaveKey, true);", '}, [onSaveKey]);']);
+  // The handler is named where it is made and in those lines, and nowhere else: no second effect, no handler of an element.
+  assert.equal(count(editor, /\bonSaveKey\b/g), 4, 'made, added, removed, and what the effect depends on');
+  // 도면 저장 and Ctrl+S are one function, and it holds these three lines alone. Nothing while a save runs, and nothing
+  // during a drag: the save would cancel it. Then the focus goes to the canvas, before the save: leaving a field commits
+  // what was being typed in it (a syllable still being composed too), and the save reads the draft after that.
+  const request = handler.requestSave(), asked = ['if (!current || !canEdit || saving.current || pointerRef.current || doc.isGestureActive()) return;', 'focusCanvas();', 'void saveMap();'];
+  inOrder(request, ...asked);
+  assert.deepEqual(block(editor, 'function requestSave() {').split('\n').map(line => line.trim()).filter(Boolean), ['function requestSave() {', ...asked, '}']);
+  // The band's button is that function, and the map is saved from nowhere else: a second way would skip the focus.
+  assert.ok(handler.strip().includes('onSave={requestSave}'));
+  assert.equal(count(editor, /\bsaveMap\(/g), 2, 'the function itself and requestSave');
+  // Nor is that function reached from a third place. It asks of no open dialog itself: the key handler does that before it.
+  assert.equal(count(editor, /\brequestSave\b/g), 3, 'the function, the key handler, the band');
+  // The rule lives in one place: keyboard() has no S of its own.
+  assert.doesNotMatch(handler.keyboard(), /'KeyS'|=== 's'/);
+  // Under any spelling of the key: keyboard() also hears the keys pressed inside the editor's own dialogs (its guards for
+  // them say so), and a save from there would save the draft under the open settings dialog.
+  assert.doesNotMatch(handler.keyboard(), /requestSave|saveMap/);
+});
+
+test('anchor 54: the band is one element for the plan and for 3D, stuck over the map at a height that never depends on what it says', () => {
+  // The editor draws the band once, in `.bmap-main` and in front of the panels: the plan and 3D part inside the canvas
+  // area, so both have the same element in the same place. It hangs on `editing`, not on `canEdit`: that one is off
+  // while a save runs, and the band would go and come back with every save, the map moving under the pointer.
+  assert.equal(count(editor, /<BackgroundMapEditStrip/g), 1);
+  // Its place among the children of `.bmap-main`, a column whose first child is the header: after the header, the
+  // editor's message and the notice, in front of the panels and so of the plan. Anywhere before the end of the header it
+  // is above the title, or no child of `.bmap-main` at all: beside the tree it would be a column of the editor's row, not
+  // a band over the map. In front of the message it would cover it: a refused save brings its message to the top of the
+  // tab, which is where the band is stuck.
+  inOrder(editor, '</header>', '<div className="bg-error" role="alert" ref={errorRef}>', '{notice && <div className="bmap-notice" role="status">',
+    '{editing && draft && <BackgroundMapEditStrip ', '<BackgroundMapPanels gallery={gallery}>', "{mode === 'plan' ? <svg ref={svgRef}");
+  // The row of buttons in the header saves nothing, under any name: 도면 저장 went to the band. A second one left here
+  // would be lit with nothing to save, and no check of the band's own button would see it.
+  assert.doesNotMatch(piece(editor, '<div className="bmap-actions">', '</header>'), /[Ss]ave|저장/);
+  // The class the frame, the height taken from the image list and the scroll margin hang on. The whole line: it is the
+  // editor of a map, not the `<div className="bmap-main">` that stands there while no map exists.
+  assert.ok(editor.includes("<main className={`bmap-main${editing ? ' is-editing' : ''}`}>"));
+  // The markup the stylesheet hangs on. The filled box and the tick are drawn by `data-phase` and by the `<span>` round the
+  // words: without either the three states differ in their words alone, and every rule below would still be found.
+  const strip = editStrip();
+  assert.ok(strip.includes('<section className="bmap-edit-strip" data-phase={status.phase}'));
+  assert.ok(strip.includes('<p className="bmap-edit-state"><strong>{MAP_EDIT_LABEL}</strong><span>{status.detail}</span></p>'));
+  for (const name of ['bmap-edit-key', 'bmap-edit-actions', 'bmap-edit-end', 'bmap-edit-save']) assert.equal(count(strip, new RegExp(`className="${name}"`, 'g')), 1, name);
+  // The stylesheet. A base rule is found at the very start of its line, a line of a media block without its indent: the
+  // narrow layout overrides three of these rules under the same selectors, and the frame has a second rule for its motion.
+  const lines = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const part of parts) assert.ok(rule.includes(part), `not declared: ${part} (${rule.join('; ')})`); };
+  // Stuck to the top of the tab, and over the canvas: that comes later in the page and stacks by itself, so without the
+  // z-index the stuck band would be under the map. Its height is the variable, whatever is inside.
+  has(baseRule(lines, '.bmap-edit-strip {'), 'position:sticky', 'top:0', 'z-index:5', 'flex:0 0 var(--bmap-edit-h)', 'height:var(--bmap-edit-h)');
+  // One line of words that gives way to the buttons and ends in an ellipsis: all four are needed for the ellipsis to be
+  // drawn. The least height is that of the filled box: without it the row of buttons of the two-line layout moves at the first edit.
+  has(baseRule(lines, '.bmap-edit-state {'), 'white-space:nowrap', 'min-width:0', 'min-height:23px');
+  has(baseRule(lines, '.bmap-edit-state>span {'), 'text-overflow:ellipsis', 'overflow:hidden');
+  // Nothing between the band and the tab scrolls: `hidden` makes a box a scroll container, and the band would stick to
+  // that box, which never scrolls. `clip` cuts at the same edge and is none.
+  const first = lines.find(line => line.startsWith('.bmap-layout {'));
+  assert.ok(first, 'the first rule of the editor');
+  for (const rule of [declarations(first), baseRule(lines, '.bmap-main {')]) { has(rule, 'overflow:clip'); assert.ok(!rule.includes('overflow:hidden')); }
+  // The frame is laid over the canvas area: a real border would make the map smaller as edit mode starts.
+  has(baseRule(lines, '.bmap-main.is-editing .bmap-canvas-wrap::after {'), 'content:""', 'inset:0', 'position:absolute', 'pointer-events:none');
+  assert.ok(!lines[lineOf(lines, '.bmap-canvas-wrap {')].includes('border'));
+  // The height of the band is taken from the image list, in a wide window only: outside that block these three would
+  // outweigh the heights of the narrow layout.
+  const wide = mediaBlock(lines, '@media(min-width:901px) {');
+  for (const line of ['.bmap-layout:has(.bmap-main.is-editing) { min-height:calc(500px + var(--bmap-edit-h)); }',
+    '.bmap-layout:has(.bmap-main.is-editing):has(.bmap-canvas-wrap.is-3d) { min-height:calc(760px + var(--bmap-edit-h)); }',
+    '.bmap-main.is-editing .bmap-panels:not(.is-sized)>.bmap-gallery { flex-basis:calc(clamp(248px,33dvh,370px) - var(--bmap-edit-h)); }']) assert.ok(wide.includes(line), `not in the wide block: ${line}`);
+  // The order, by line number. The narrow layout overrides these four under selectors of the same weight, so the later
+  // line wins: with the base rules after that block the band would be 40px high around two lines of content.
+  const narrowAt = lineOf(lines, '@media(max-width:900px) {'), bandAt = lineOf(lines, '.bmap-edit-strip {');
+  for (const opening of ['.bmap-layout { --bmap-edit:', '.bmap-edit-strip {', '.bmap-edit-state {', '.bmap-edit-key {']) assert.ok(lineOf(lines, opening) < narrowAt, `after the narrow layout: ${opening}`);
+  // The narrow layout: 72px, the words on a line of their own, the shortcut and the buttons on the second, to the right.
+  const narrow = mediaBlock(lines, '@media(max-width:900px) {');
+  assert.ok(narrow.includes('.bmap-layout { height:auto; min-height:0; --bmap-edit-h:72px; }'));
+  for (const opening of ['.bmap-edit-strip { flex-wrap:wrap', '.bmap-edit-state { flex:1 0 100%', '.bmap-edit-key { margin-left:auto']) assert.equal(narrow.filter(line => line.startsWith(opening)).length, 1, opening);
+  // The shortcut is not hidden there: with nothing to save the tooltip of the button does not name it either.
+  assert.ok(!lines.some(line => line.includes('.bmap-edit-key { display:none')));
+  // Where the header has a narrower side margin the band starts on the same line as the title: after the base rule, which it overrides.
+  const marginAt = lineOf(lines, '@media(max-width:1100px) { .bmap-edit-strip {');
+  assert.equal(lines[marginAt], '@media(max-width:1100px) { .bmap-edit-strip { padding-left:14px; } }');
+  assert.ok(bandAt < marginAt && marginAt < narrowAt);
+  // The states are told apart by shape: unsaved edits stand in a filled box, a save that just went through has a tick.
+  const pill = baseRule(lines, '.bmap-edit-strip[data-phase="changed"] .bmap-edit-state>span {');
+  has(pill, 'background:rgb(var(--bmap-edit-ink))');
+  assert.ok(pill.some(part => part.startsWith('border-radius:')));
+  has(baseRule(lines, '.bmap-edit-strip[data-phase="saved"] .bmap-edit-state>span::before {'), 'content:"✓"');
+  // The save button keeps one width and one weight whatever it says and whether it is on or dimmed: nothing beside it moves.
+  const save = baseRule(lines, '.bg-library .bmap-edit-strip .bmap-edit-save {');
+  has(save, 'font-weight:600', 'transition:none');
+  assert.ok(save.some(part => part.startsWith('min-width:')));
+  // What the two buttons are painted with, so that their words can be read on a band of any colour. A button of the band:
+  // words in the colour of the band's words, on nothing. The save button the other way round: a box in the colour of the
+  // words, with words in the colour of the band.
+  has(baseRule(lines, '.bg-library .bmap-edit-strip button {'), 'color:rgb(var(--bmap-edit-ink))', 'background:transparent');
+  has(save, 'background:rgb(var(--bmap-edit-ink))', 'color:rgb(var(--bmap-edit))');
+  // Under the pointer it stays that box, by a rule of its own: the hover rule of the band's buttons outweighs the save
+  // rule, and would lay its faint wash under words in the colour of the band.
+  has(baseRule(lines, '.bg-library .bmap-edit-strip .bmap-edit-save:hover:not(:disabled) {'), 'background:rgb(var(--bmap-edit-ink) / .86)');
+  // The focus ring is in the colour of the words too: the accent ring of the editor may not show on the band.
+  has(baseRule(lines, '.bg-library .bmap-edit-strip button:focus-visible {'), 'outline:2px solid rgb(var(--bmap-edit-ink))');
+  // Dimmed it is an empty box. The line is counted: asked only for what it must not hold, a deleted line would pass.
+  const dimmedAt = lineOf(lines, '.bg-library .bmap-edit-strip .bmap-edit-save[aria-disabled="true"],'), dimmed = declarations(lines[dimmedAt]);
+  has(dimmed, 'background:transparent', 'cursor:default');
+  assert.ok(!lines[dimmedAt].includes('font-weight'));
+  // Its words are in the colour of the other words, thinned: left to the save rule they would be in the colour of the
+  // band, on the band. How thin is not pinned: that is tuned by eye, in the app.
+  assert.ok(dimmed.some(part => /^color:rgb\(var\(--bmap-edit-ink\) \/ \.\d+\)$/.test(part)), `the dimmed words have no colour of their own (${dimmed.join('; ')})`);
+  // What the keyboard brings into view stops below the stuck band. Not the canvas (no `[tabindex]`): it takes the focus on
+  // a press, and must not scroll then. And not the two buttons of the band: with the margin a focus on them would scroll the tab.
+  assert.ok(lines.includes('.bmap-main.is-editing :is(button,input,select,summary) { scroll-margin-top:var(--bmap-edit-h); }'));
+  assert.ok(lines.includes('.bmap-main.is-editing .bmap-edit-strip button { scroll-margin-top:0; }'));
+  // The motion rules of the app, on every line that styles the band or the editor while editing. The band follows the
+  // scroll, so no backdrop-filter: what is behind it would be blurred again at each step. Nothing repeats. No transition
+  // of its own: its box has its height at once and its words change without one (`transition:none` on the save button
+  // takes one away). And what moves as edit mode starts is declared inside the block for those who want motion, nowhere
+  // else: outside it the band would slide in under "reduce motion" and at the app's own "minimal" as well.
+  const band = lines.flatMap((line, at) => !line.trimStart().startsWith('/*') && /\.bmap-edit|\.bmap-main\.is-editing/.test(line) ? [at] : []);
+  assert.ok(band.length >= 20 && band.includes(bandAt), `${band.length} lines of the band`);
+  const calmAt = lines.indexOf('@media (prefers-reduced-motion: no-preference) {'), calmEnd = lines.indexOf('}', calmAt);
+  for (const at of band) {
+    assert.doesNotMatch(lines[at], /backdrop-filter|infinite|transition(?!:none;)/);
+    if (lines[at].includes('animation')) assert.ok(calmAt > -1 && calmAt < at && at < calmEnd, `moves whatever the motion setting: ${lines[at]}`);
+  }
+});
+
+test('anchor 55: the colours of the band come from the two accents of the theme and the page as they are on screen', () => {
+  const hook = read('useMapEditColors.ts');
+  // Read from what is painted: the computed style of <html>, whether a theme was applied or the values of the stylesheet
+  // stand. The whole call: three values, in the order the function takes them. And the whole call of the observer: it is
+  // <html> that changes with the theme and the colour mode, not the editor. The observer is let go by the cleanup the
+  // effect returns, the whole line: called in the body of the effect it would stop listening as soon as it began, and
+  // the band would keep its colour when the colour mode is switched.
+  for (const part of ['getComputedStyle(document.documentElement)',
+    "mapEditColors(theme.getPropertyValue('--color-accent'), theme.getPropertyValue('--color-accent-sub'), theme.getPropertyValue('--color-bg-primary'))",
+    "root.style.setProperty('--bmap-edit', colors.strip)", "root.style.setProperty('--bmap-edit-ink', colors.ink)",
+    "observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-color-mode', 'class', 'style'] })",
+    'return () => observer.disconnect();']) assert.ok(hook.includes(part), `not found: ${part}`);
+  // Written before the first paint: in a `useEffect` the editor would be painted once in the amber of the stylesheet, in
+  // every theme but the default one, each time it mounts.
+  assert.ok(hook.includes('useLayoutEffect(() => {'));
+  assert.doesNotMatch(hook, /\buseEffect\b/);
+  // Written on the editor's own element: written on <html> it would wake what observes <html>, this hook and the 3D view.
+  assert.ok(!hook.includes('document.documentElement.style.setProperty'));
+  // The tone follows the page that is painted, not the mode attribute: a theme picked by hand may not agree with it.
+  assert.ok(!hook.includes('getAttribute'));
+  // Once at the start: the observer hears only what changes after it. Without that call every theme but the default one
+  // would keep the amber of the stylesheet until the colour mode is switched.
+  inOrder(hook, 'apply();', 'new MutationObserver(apply)');
+  // The editor calls it once, with its own root: the band, the frame and the dot of the tree are all inside that element.
+  assert.equal(count(editor, /useMapEditColors\(rootRef\);/g), 1);
+});
+
+test('anchor 56: only a draft with nothing unsaved follows the library, never during a save or under an open dialog, and a map that went away is left as on a move to another map', () => {
+  // The guard comes first. While a save runs the store shows maps that are not confirmed (a draft that followed would keep
+  // the values of a save that failed, and a map that is only being deleted would read as gone). A dialog of the editor asks
+  // about the map on show: with that map gone under it, a second press on its delete would go to the first map of the list.
+  // Then the draft of the map on show is read before and after. Replaced, the picked point goes: it is a number, and may
+  // now name another point. Gone, what `navigate` clears is cleared, and only then: on a mere newer revision the points
+  // that are being drawn and the tool stay. The four dialogs are dependencies, so what was skipped is done as one closes.
+  const follow = handler.followSaved(), steps = [
+    'if (disabled || doc.isGestureActive() || confirmation || createForm || linkForm || settingsForm) return;',
+    'const before = mapDraft(doc.getState(), current?.id);',
+    'doc.followSaved(snapshot.maps);',
+    'if (mapDraft(doc.getState(), current?.id) !== before) setActiveVertex(null);',
+    "if (before && !mapDraft(doc.getState(), current?.id)) { setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); }",
+    'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);',
+  ];
+  inOrder(follow, ...steps);
+  // Each is a line of its own: nothing stands in front of one (a condition before the call, say).
+  const lines = follow.split('\n').map(line => line.trim());
+  for (const step of steps) assert.ok(lines.includes(step), `not a line of its own: ${step}`);
+  // And the handler holds nothing else: its first line, the five statements, the brace that closes it. A return put in front
+  // of the guard (`if (!editing) return;`, say) would keep the drafts that are not on show from following: the parent that a
+  // link or a new map left behind would stay in the tree after its map was deleted elsewhere, as a map that can never be saved.
+  const opener = 'const followSaved = useEvent(() => {';
+  assert.deepEqual(block(editor, opener).split('\n').map(line => line.trim()).filter(Boolean), [opener, ...steps.slice(0, 5), '}']);
+  // The library is followed from that one place: a second call would not ask the guard.
+  assert.equal(count(editor, /doc\.followSaved\(/g), 1);
+  // The reducer. A draft follows only with nothing unsaved in it, not while it is dragged, and only on to a later revision:
+  // with `>=` the echo of one's own save would empty the redo history. The draft of a map the library no longer has goes
+  // under the same conditions: one with unsaved edits stays, and so does one that is being dragged.
+  const branch = block(read('mapDocument.ts'), "case 'follow-saved': {");
+  for (const rule of ['!mapDraftChanged(draft)', 'state.gesture?.mapId !== map.id', 'map.revision > (draft.baseRevision ?? Infinity)',
+    '!known.has(id) && !mapDraftChanged(followed.drafts[id]) && followed.gesture?.mapId !== id']) assert.ok(branch.includes(rule), `not found: ${rule}`);
+  // Not through dropDrafts: that ends the field edit that is being typed, which may be on another map.
+  assert.doesNotMatch(branch, /dropDrafts\(/);
+});
+
+test('anchor 57: a save is told inside the band, for a moment', () => {
+  // The word is turned on in one place, the function every save of maps goes through. The map on show is taken before the
+  // wait: after it this handler holds the render that started the save. And the word is for that map alone: when the save
+  // held it, and when it is still edited once its draft was put back. A save by someone who was not editing leaves no
+  // draft, and says nothing: there is no band to say it on.
+  const persist = handler.persistMaps(), told = 'if (shown && command.maps.some(item => item.entity.id === shown) && mapDraft(doc.getState(), shown)) setSavedNotice({ mapId: shown });';
+  inOrder(persist, 'const shown = current?.id;', 'await execute(command);', 'doc.rebaseDrafts(savedMaps(command));', told);
+  // The whole line: nothing stands in front of it, and none of its three conditions is gone.
+  assert.ok(persist.split('\n').map(line => line.trim()).includes(told), `not a line of its own: ${told}`);
+  // And the function holds nothing else: its first line, these four statements, the brace that closes it. A line of its own
+  // between them is not seen above. A return after the drafts were put back, on a value of the render that started the save
+  // (`if (draftChanged) return;`, which is true on every save from the band and by Ctrl+S), and the word would never come
+  // up there: anchor 50 forbids three names of that render after the wait, and this is none of them.
+  const opener = 'async function persistMaps(command: MapSaveCommand) {';
+  assert.deepEqual(block(editor, opener).split('\n').map(line => line.trim()).filter(Boolean),
+    [opener, 'const shown = current?.id;', 'await execute(command);', 'doc.rebaseDrafts(savedMaps(command));', told, '}']);
+  // The word leaves the band by itself, timed by the editor: after the effect that follows the library, before the one that
+  // brings a refused save into view. Each save sets a new object, so the time starts again. The cleanup clears the timer
+  // that runs, at the next save and as the editor is taken down. And the effect hangs on the word: with an empty list it
+  // would run once, before any save, and "saved" would never leave the band.
+  inOrder(handler.followSaved(), 'useEffect(() => { followSaved(); }', 'window.setTimeout(() => setSavedNotice(null), MAP_SAVED_NOTICE_MS)',
+    'return () => window.clearTimeout(timer);', '}, [savedNotice]);', 'useEffect(() => { if (refused) ');
+  // The effect holds these five lines alone.
+  const all = editor.split('\n').map(line => line.trim()).filter(Boolean), at = all.indexOf('const timer = window.setTimeout(() => setSavedNotice(null), MAP_SAVED_NOTICE_MS);');
+  assert.deepEqual(all.slice(at - 2, at + 3), ['useEffect(() => {', 'if (!savedNotice) return;',
+    'const timer = window.setTimeout(() => setSavedNotice(null), MAP_SAVED_NOTICE_MS);', 'return () => window.clearTimeout(timer);', '}, [savedNotice]);']);
+  // The band is told so on the map that was saved, and on no other: the word names its map, so a save that goes on to
+  // another map (a link that is opened, a new map inside a space) is not told there. "Saving" is the store's own word for
+  // a write to the library: the editor's `busy` is also on while an underlay is uploaded.
+  const strip = handler.strip();
+  for (const part of ['mapEditStatus(draft, pending,', 'savedNotice?.mapId === current.id',
+    'status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)}']) assert.ok(strip.includes(part), `not found: ${part}`);
+  // The same words are read out as it happens, from a region that is not seen.
+  assert.ok(editStrip().includes('<span className="sr-only" role="status">{status.announce}</span>'));
+  // No toast, in any screen of the feature: it would come up in a corner of the window, away from the band that was pressed.
+  for (const name of readdirSync(directory).filter(name => name.endsWith('.tsx'))) assert.doesNotMatch(read(name), /sonner/, name);
+  // And no block over the map: the editor's notice is laid out above the canvas, and one that comes and goes with a save
+  // would move the map under the pointer. Neither save writes it, the word is read by its timer and by the band alone, and
+  // what the band says is in mapEditStatus.ts, not here.
+  for (const path of [persist, handler.saveMap()]) assert.doesNotMatch(path, /setNotice\(/);
+  assert.equal(count(editor, /\bsavedNotice\b/g), 4, 'the state, the timer and what it depends on, the band');
+  // That count does not see the calls that set the word (`setSavedNotice` is another word). There are three, each held
+  // where it is: the save turns it on and the timer turns it off (both above), and so does the end of edit mode (anchor
+  // 52). A fourth would pass everything else. Turned on by 편집 시작, by a save of the settings made while viewing (the
+  // band would say so on 편집 시작 pressed within the four seconds), after a save that failed, or for the map that a link
+  // or a new map moved on to, the band would say "saved" of a map of which nothing was saved; turned off by an effect of
+  // its own (as a save ends, on a move to another map), the word would leave before its time.
+  assert.equal(count(editor, /\bsetSavedNotice\(/g), 3, 'the save, the timer, the end of edit mode');
+  assert.ok(!editor.includes('도면을 저장했어요'));
+});
+
+test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the words name a button only to those who see it', () => {
+  const gallery = read('BackgroundMapGallery.tsx');
+  /** The tag of the one button of the editor that reads this, from the `<button` that opens it. */
+  const button = (label: string) => {
+    const close = `>${label}</button>`, at = editor.indexOf(close);
+    assert.equal(count(editor, new RegExp(close, 'g')), 1, `one button reads: ${label}`);
+    return editor.slice(editor.lastIndexOf('<button', at), at + close.length);
+  };
+  // 편집 시작, the whole tag. A plain button of the library, a border and no fill: not the accent fill (`bg-primary`) of
+  // the button it replaced. While the map is edited it is off and kept from readers, and the stylesheet hides it by that
+  // `aria-hidden`. Its own click hides it, so the click sends the keyboard to the canvas: left on a hidden button, Delete
+  // and Ctrl+Z would reach nothing. And nothing else is on the tag: `hidden`, say, would take it out of the row.
+  const start = button('편집 시작');
+  assert.equal(start, '<button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button>');
+  // It keeps its place in the row: straight after 도면 설정, in no branch. Taken out while editing (`!editing &&`), 도면 설정
+  // would slide under the pointer, and the second click of a double-click on 편집 시작 would open the settings. And it
+  // stays inside what only an account that may edit is shown: a read-only account has no such button.
+  const row = piece(editor, '<div className="bmap-actions">', '</header>');
+  assert.ok(row.includes('>도면 설정</button><button type="button" className="bg-button bmap-edit-start"'));
+  assert.ok(piece(row, '{snapshot.canManage && <>', '</>}').includes(start));
+  // Hidden, it still takes its room. `display:none` would give the room away, as the branch would: the line as written,
+  // and it is the one line of the sheet that names the class. A second rule could take the button out of the row under
+  // another spelling (`display: none`, `position:absolute`, on `:disabled`), or show it again while the map is edited.
+  const lines = sheetLines();
+  assert.equal(lines[lineOf(lines, '.bmap-edit-start[aria-hidden="true"]')], '.bmap-edit-start[aria-hidden="true"] { visibility:hidden; }');
+  assert.equal(lines.filter(line => line.includes('bmap-edit-start')).length, 1, 'one line of the sheet names the class of 편집 시작');
+  // The names of the buttons that are gone are said nowhere: 공간 편집 on a button or in a hint, and the 취소 of the header
+  // (the bar of the polygon tool has a 취소 of its own, further down).
+  for (const source of [editor, gallery]) for (const old of ['공간 편집에서', '도면 편집에서', '>공간 편집<']) assert.ok(!source.includes(old), `still there: ${old}`);
+  assert.ok(!row.includes('>취소</button>'));
+  // The name of a button is said only to those who have it on screen. The image list is read while editing as well, right
+  // under the band, where the button is hidden: its two hints speak of editing the map and name no button. The whole
+  // choice, like the hint of the editor below: each hint to its last mark, the one about a view under a picked camera
+  // and the other under anything else, and before both the branch of a read-only account, which is not told to edit.
+  assert.ok(gallery.includes("!snapshot.canManage ? '관리자가 도면이나 공간에 연결한 배경이 여기에 표시됩니다.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'"));
+  assert.equal(count(gallery, /도면을 편집하면서/g), 2);
+  assert.ok(!gallery.includes('편집 시작'));
+  // The hint of an empty map, the whole line. It names the button in the branch of those who are not editing, and there
+  // only to an account that may edit: a read-only account, which has no such button, is told who fills the map. The
+  // editor says the name on the button and in that hint, nowhere else.
+  assert.ok(editor.includes(`<span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '관리자가 공간을 배치하면 여기에 표시됩니다.'}</span>`));
+  assert.equal(count(editor, /편집 시작/g), 2);
+  // The badge beside the title is gone, in either of its wordings and whatever the quotes: the band says it, and its
+  // words are in mapEditStatus.ts.
+  for (const old of ['저장 전 변경사항', '편집 중']) assert.ok(!editor.includes(old), `still there: ${old}`);
+  // Nor is it back with its words borrowed: no badge of any wording stands in the header, and the editor does not take
+  // the label of the band from the status module (the band's own file does).
+  assert.doesNotMatch(piece(editor, '<header className="bmap-header">', '</header>'), /bmap-badge/);
+  assert.ok(!editor.includes('MAP_EDIT_LABEL'));
+  // The dot of the tree hangs on what it always did, unsaved edits of that map, on show or not: not on the state of the
+  // band, which knows the map on show alone. Only its tooltip changed, to the words of the band.
+  assert.ok(editor.includes('mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 안 한 변경이 있어요">●</span>'));
+  // 연결 해제 is drawn only while there is a link, so the save its own click starts takes the button away, and editing goes
+  // on. The focus is sent to the canvas before that save: left on a button that is gone, Delete, Ctrl+Z and F2 are not heard.
+  assert.ok(button('연결 해제').includes('onClick={() => { focusCanvas(); void linkMap(null, selected.id); }}'));
+  // Both clicks send the focus to the canvas of the mode on show, and neither canvas is a control: the SVG of the plan and
+  // the stage of the 3D view take it only by their `tabIndex`. Without it `focus()` does nothing there, and the keyboard
+  // stays on the hidden 편집 시작, or on a 연결 해제 that is gone.
+  assert.ok(canvasTag().includes(' tabIndex={0} '));
+  assert.ok(editor.includes('<div className="bmap-3d-main" ref={stageRef} tabIndex={-1} '));
+});
+
+test('anchor 59: the two new test files run in the build', () => {
+  // The build runs every test file a pattern of names finds. A file that is deleted, or renamed out of that pattern, takes
+  // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the two by name.
+  const tests = new URL('./', import.meta.url), names = readdirSync(tests);
+  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts']) {
+    assert.ok(names.includes(name), `not in the tests folder: ${name}`);
+    const source = readFileSync(new URL(name, tests), 'utf8');
+    // And each tests something: a file whose tests are all skipped is green as well.
+    assert.ok(count(source, /^test\(/gm) >= 3, `fewer than three tests: ${name}`);
+    // Whatever the spelling: `test.skip(`, `describe.skip(`, `t.skip()`, an option `skip:` or `todo:` in any place among
+    // the options, `import { skip as test }`. Neither word has any business in these two files, so neither is there at
+    // all (`skipped`, a count in the colour tests, is another word), and `test` is the runner's own.
+    assert.doesNotMatch(source, /\b(?:skip|todo)\b/, `${name} skips a test`);
+    assert.ok(source.startsWith("import test from 'node:test';"), `${name} does not take test from node:test`);
+  }
+  // The pattern itself, letter for letter, and the two builds that run it.
+  const { scripts } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { scripts: Record<string, string> };
+  assert.equal(scripts['test:background'], 'node --test ./tests/background*.test.ts');
+  for (const build of ['build', 'build:vite']) assert.ok(scripts[build].includes('npm run test:background'), `${build} does not run the background tests`);
 });
