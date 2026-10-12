@@ -1301,6 +1301,13 @@ test('anchor 57: a save is told inside the band, for a moment', () => {
   inOrder(persist, 'const shown = current?.id;', 'await execute(command);', 'doc.rebaseDrafts(savedMaps(command));', told);
   // The whole line: nothing stands in front of it, and none of its three conditions is gone.
   assert.ok(persist.split('\n').map(line => line.trim()).includes(told), `not a line of its own: ${told}`);
+  // And the function holds nothing else: its first line, these four statements, the brace that closes it. A line of its own
+  // between them is not seen above. A return after the drafts were put back, on a value of the render that started the save
+  // (`if (draftChanged) return;`, which is true on every save from the band and by Ctrl+S), and the word would never come
+  // up there: anchor 50 forbids three names of that render after the wait, and this is none of them.
+  const opener = 'async function persistMaps(command: MapSaveCommand) {';
+  assert.deepEqual(block(editor, opener).split('\n').map(line => line.trim()).filter(Boolean),
+    [opener, 'const shown = current?.id;', 'await execute(command);', 'doc.rebaseDrafts(savedMaps(command));', told, '}']);
   // The word leaves the band by itself, timed by the editor: after the effect that follows the library, before the one that
   // brings a refused save into view. Each save sets a new object, so the time starts again. The cleanup clears the timer
   // that runs, at the next save and as the editor is taken down. And the effect hangs on the word: with an empty list it
@@ -1326,6 +1333,13 @@ test('anchor 57: a save is told inside the band, for a moment', () => {
   // what the band says is in mapEditStatus.ts, not here.
   for (const path of [persist, handler.saveMap()]) assert.doesNotMatch(path, /setNotice\(/);
   assert.equal(count(editor, /\bsavedNotice\b/g), 4, 'the state, the timer and what it depends on, the band');
+  // That count does not see the calls that set the word (`setSavedNotice` is another word). There are three, each held
+  // where it is: the save turns it on and the timer turns it off (both above), and so does the end of edit mode (anchor
+  // 52). A fourth would pass everything else. Turned on by 편집 시작, by a save of the settings made while viewing (the
+  // band would say so on 편집 시작 pressed within the four seconds), after a save that failed, or for the map that a link
+  // or a new map moved on to, the band would say "saved" of a map of which nothing was saved; turned off by an effect of
+  // its own (as a save ends, on a move to another map), the word would leave before its time.
+  assert.equal(count(editor, /\bsetSavedNotice\(/g), 3, 'the save, the timer, the end of edit mode');
   assert.ok(!editor.includes('도면을 저장했어요'));
 });
 
