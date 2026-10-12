@@ -10,6 +10,8 @@
 
 import { nativeImage } from 'electron';
 import { supabase } from './supabase';
+import { uploadCharacterImageFiles, type CharacterImageStore } from './characterImageUpload';
+import { withCharacterOriginalPaths } from '../src/shared/characterImageOriginal';
 
 const BUCKET = 'scene-images';
 const MAX_PX = 800;
@@ -107,30 +109,35 @@ export async function uploadImage(
 export async function deleteImage(url: string): Promise<void> {
   const path = extractPathFromPublicUrl(url);
   if (!path) return; // 비-Supabase URL은 무시 (legacy drive URL 등)
-  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+  // 캐릭터 그림이면 함께 보관한 원본도 같이 지운다.
+  const { error } = await supabase.storage.from(BUCKET).remove(withCharacterOriginalPaths([path]));
   if (error) console.warn('[Storage] 삭제 실패:', error.message);
 }
+
+const characterImageStore: CharacterImageStore = {
+  upload: async (path, body, contentType) => {
+    const { error } = await supabase.storage.from(BUCKET).upload(path, body, { contentType, upsert: false });
+    if (error) throw error;
+  },
+  publicUrl: (path) => supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl,
+};
 
 /**
  * 캐릭터 복장 대표 이미지 업로드.
  * 씬 이미지(uploadImage)는 sheetName(EP/파트/부서) 경로 규칙에 묶여 있어 캐릭터엔 부적합.
- * 경로: characters/{characterId}/{costumeId}/{uniq}.{ext}
+ * 경로: characters/{characterId}/{costumeId}/{uniq}.{ext} (화면용) + 같은 자리의 {uniq}.orig (올린 파일 그대로).
+ * originalDataUrl 은 줄이기 전 파일 — '이미지 복사'가 원래 크기로 나가도록 함께 보관한다(없으면 화면용만).
  */
 export async function uploadCharacterImage(
   characterId: string,
   costumeId: string,
   base64Data: string,
-): Promise<{ ok: boolean; url?: string; error?: string }> {
+  originalDataUrl?: string | null,
+): Promise<{ ok: boolean; url?: string; error?: string; originalSaved?: boolean }> {
   try {
-    const processed = toBuffer(base64Data);
     const uniq = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    const path = `characters/${characterId}/${costumeId}/${uniq}.${processed.ext}`;
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, processed.buffer, { contentType: processed.mime, upsert: false });
-    if (error) throw error;
-    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-    return { ok: true, url: data.publicUrl };
+    const result = await uploadCharacterImageFiles(characterImageStore, { characterId, costumeId, uniq, display: toBuffer(base64Data), originalDataUrl });
+    return { ok: true, ...result };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[Storage] 캐릭터 이미지 업로드 실패:', msg);

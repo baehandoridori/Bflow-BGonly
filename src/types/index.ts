@@ -1800,7 +1800,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
     characterId: string,
     updates: { memo?: string | null; costumeIds?: string[] },
   ) => Promise<void>;
-  storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  storageUploadCharacterImage: (characterId: string, costumeId: string, base64Data: string, originalDataUrl?: string | null) => Promise<{ ok: boolean; url?: string; error?: string; originalSaved?: boolean }>;
   // ─── 복장 다중 이미지 (character_costume_images) ───
   supabaseLoadCostumeImages: () => Promise<any[]>;
   supabaseAddCostumeImage: (input: {

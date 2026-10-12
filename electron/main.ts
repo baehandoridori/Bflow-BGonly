@@ -3673,8 +3673,8 @@ ipcMain.handle(
 
 ipcMain.handle(
   'storage:upload-character-image',
-  async (_event, characterId: string, costumeId: string, base64Data: string) => {
-    return storageUploadCharacterImage(characterId, costumeId, base64Data);
+  async (_event, characterId: string, costumeId: string, base64Data: string, originalDataUrl?: string | null) => {
+    return storageUploadCharacterImage(characterId, costumeId, base64Data, originalDataUrl);
   },
 );
 

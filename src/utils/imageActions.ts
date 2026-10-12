@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 
 export { generateImageFileName } from './imageVersionUtils';
 
-async function fetchImageBlob(url: string): Promise<Blob> {
+export async function fetchImageBlob(url: string): Promise<Blob> {
   if (url.startsWith('drive-img://')) {
     // Electron 우회 — main 프로세스에서 디스크 읽기
     // (drive-img:// 프로토콜은 electron 측에서 정의됨. fetch 는 안 통할 수 있어 IPC 사용)
@@ -46,35 +46,39 @@ export async function downloadImage(url: string, fileName: string): Promise<void
   }
 }
 
+/** 그림 Blob 을 PNG 로 클립보드에 쓰고, 쓴 그림의 픽셀 크기를 돌려준다. 실패하면 throw — 안내는 호출부가 한다. */
+export async function writeImageBlobToClipboard(blob: Blob): Promise<{ width: number; height: number }> {
+  // JPEG → PNG 변환 (Clipboard API 는 PNG 만 안정적으로 받음)
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  const objectUrl = URL.createObjectURL(blob);
+  img.src = objectUrl;
+  try {
+    await new Promise<void>((res, rej) => {
+      img.onload = () => res();
+      img.onerror = () => rej(new Error('이미지 디코딩 실패'));
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas context 없음');
+    ctx.drawImage(img, 0, 0);
+    const pngBlob: Blob = await new Promise((res, rej) =>
+      canvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob 실패'))), 'image/png'),
+    );
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+    return { width: canvas.width, height: canvas.height };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 export async function copyImageToClipboard(url: string): Promise<boolean> {
   try {
-    const blob = await fetchImageBlob(url);
-
-    // JPEG → PNG 변환 (Clipboard API 는 PNG 만 안정적으로 받음)
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    const objectUrl = URL.createObjectURL(blob);
-    img.src = objectUrl;
-    try {
-      await new Promise<void>((res, rej) => {
-        img.onload = () => res();
-        img.onerror = () => rej(new Error('이미지 디코딩 실패'));
-      });
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('canvas context 없음');
-      ctx.drawImage(img, 0, 0);
-      const pngBlob: Blob = await new Promise((res, rej) =>
-        canvas.toBlob((b) => (b ? res(b) : rej(new Error('toBlob 실패'))), 'image/png'),
-      );
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
-      toast.success('클립보드에 이미지 복사됨');
-      return true;
-    } finally {
-      URL.revokeObjectURL(objectUrl);
-    }
+    await writeImageBlobToClipboard(await fetchImageBlob(url));
+    toast.success('클립보드에 이미지 복사됨');
+    return true;
   } catch (err) {
     console.error('[copyImageToClipboard] 실패', err);
     toast.error('이미지 복사 실패');

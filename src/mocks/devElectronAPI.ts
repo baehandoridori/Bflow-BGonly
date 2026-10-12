@@ -4165,7 +4165,7 @@ export function installDevElectronAPI(): void {
       }
     },
     // 프리뷰에서 업로드/붙여넣기 이미지가 실제로 렌더되도록 로드 가능한 경로를 돌려준다 (피드백 31b·33 검증용).
-    storageUploadCharacterImage: async () => ({ ok: true, url: MOCK_CHARACTER_IMAGE_URL }),
+    storageUploadCharacterImage: async (_characterId: string, _costumeId: string, _base64Data: string, originalDataUrl?: string | null) => ({ ok: true, url: MOCK_CHARACTER_IMAGE_URL, originalSaved: !!originalDataUrl }),
     // ─── 복장 다중 이미지 (mock) ───
     supabaseLoadCostumeImages: async () => {
       seedMockCharacterData();
