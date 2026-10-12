@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Megaphone } from 'lucide-react';
+import { Megaphone } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -16,89 +16,12 @@ import { CharacterHeightEditor } from '@/components/characters/CharacterHeightEd
 import { TagChipSection } from '@/components/characters/TagChips';
 import { claimReactKey } from '@/utils/claimReactKey';
 import { DESIGN_STAGE_META, RIGGING_STAGE_META } from '@/constants/characterStages';
-import {
-  displayCharacterPathName,
-  openStoredCharacterPath,
-} from '@/services/characterPathActions';
+import { openStoredCharacterPath } from '@/services/characterPathActions';
+import { PathLinkCard } from '@/components/common/PathLinkCard';
 
 // 미리 정의된 태그 팔레트 — 토글 칩으로 노출.
 const STRUCTURE_TAG_PALETTE = ['얼굴각도 컨트롤러', '책가방 세트', '뒷모습', '앞모습 없음', '측면'] as const;
 const ASSET_TAG_PALETTE = ['담배', '핸드폰', '가방', '안경', '모자'] as const;
-
-function PathActionRow({
-  label,
-  path,
-  onPick,
-  onOpen,
-  onCreate,
-  onClear,
-  creating = false,
-}: {
-  label: string;
-  path: string | null;
-  onPick: () => void;
-  onOpen: () => void;
-  onCreate?: () => void;
-  /** 피드백 57-2: 등록된 경로만 지운다(실제 폴더·파일은 그대로). 경로가 있을 때만 버튼 표시. */
-  onClear?: () => void;
-  creating?: boolean;
-}) {
-  return (
-    /* 피드백 57-2·3 으로 버튼이 늘고 라벨이 길어져, 2단 배치의 좁은 칸에서는 경로 이름이 거의 안 보였다.
-       한 줄에 다 못 들어가면 버튼 줄을 아래로 내려 경로 이름이 항상 읽히게 한다. */
-    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-bg-border/70 bg-bg-border/10 px-3 py-2">
-      <div className="min-w-0 flex-1 basis-28">
-        <div className="text-xs text-text-secondary whitespace-nowrap">{label}</div>
-        <div className="text-sm text-text-primary truncate" title={path ? displayCharacterPathName(path) : undefined}>{displayCharacterPathName(path)}</div>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {!path && onCreate && (
-          <button
-            type="button"
-            onClick={onCreate}
-            disabled={creating}
-            title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"
-            className="inline-flex items-center gap-1 rounded-md border border-accent/40 px-2 py-1.5 text-xs text-accent hover:bg-accent/10 disabled:opacity-50"
-          >
-            {creating && <Loader2 size={11} className="animate-spin" />}
-            만들기
-          </button>
-        )}
-        {/* 피드백 57-3: '선택' → 상태별 '경로 지정'/'경로 수정' — 이름만 보고 무엇을 하는 버튼인지 알 수 있게. */}
-        <button
-          type="button"
-          onClick={onPick}
-          disabled={creating}
-          title={path ? `${label} 경로를 다른 곳으로 바꿔요` : `탐색기에서 골라 ${label} 경로를 등록해요`}
-          className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50 disabled:opacity-50"
-        >
-          {path ? '경로 수정' : '경로 지정'}
-        </button>
-        {path && (
-          <button
-            type="button"
-            onClick={onOpen}
-            title={path}
-            className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:border-text-secondary/50"
-          >
-            열기
-          </button>
-        )}
-        {path && onClear && (
-          <button
-            type="button"
-            onClick={onClear}
-            disabled={creating}
-            title={`${label} 연결을 지워요 — 실제 폴더·파일은 그대로예요`}
-            className="rounded-md border border-bg-border px-2 py-1.5 text-xs text-text-secondary hover:text-red-400 hover:border-red-400/50 disabled:opacity-50"
-          >
-            지우기
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function VersionNumberInput({
   value,
@@ -165,7 +88,7 @@ export function CostumeDetail({
   onPickFile: () => void;
   onCreateFolder: () => void;
   creatingFolder: boolean;
-  /** 피드백 57-2: 작업 폴더/작업 파일 경로 지우기 — 확인 창은 부모(상세 모달)가 띄운다. */
+  /** 피드백 57-2: 작업 폴더/작업 파일 연결 해제 — 확인 창은 부모(상세 모달)가 띄운다. */
   onClearFolder: () => void;
   onClearFile: () => void;
 }) {
@@ -315,23 +238,26 @@ export function CostumeDetail({
         </div>
       </div>
 
-      {/* 작업 경로 */}
+      {/* 작업 경로 — 씬 상세의 '작업 링크'와 같은 칸(열기 → 수정 → 해제). 폴더는 캐릭터에, 파일은 복장에 붙는다. */}
       <div className="grid gap-2 md:grid-cols-2">
-        <PathActionRow
+        <PathLinkCard
+          kind="folder"
           label="작업 폴더"
           path={character.workFolderPath}
-          onPick={onPickFolder}
           onOpen={() => openStoredCharacterPath(character.workFolderPath, '작업 폴더')}
+          onEdit={onPickFolder}
+          onUnlink={onClearFolder}
           onCreate={onCreateFolder}
-          onClear={onClearFolder}
-          creating={creatingFolder}
+          createTitle="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"
+          busy={creatingFolder}
         />
-        <PathActionRow
+        <PathLinkCard
+          kind="file"
           label="작업 파일"
           path={costume.workFilePath}
-          onPick={onPickFile}
           onOpen={() => openStoredCharacterPath(costume.workFilePath, '작업 파일')}
-          onClear={onClearFile}
+          onEdit={onPickFile}
+          onUnlink={onClearFile}
         />
       </div>
 

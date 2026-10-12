@@ -27,6 +27,7 @@ const tagChipsSource = readFileSync('src/components/characters/TagChips.tsx', 'u
 const characterCardSource = readFileSync('src/components/characters/CharacterCard.tsx', 'utf8');
 const featuredImageSlotSource = readFileSync('src/components/characters/FeaturedImageSlot.tsx', 'utf8');
 const costumeDetailSource = readFileSync('src/components/characters/CostumeDetail.tsx', 'utf8');
+const pathLinkCard = readFileSync('src/components/common/PathLinkCard.tsx', 'utf8');
 const characterDetailModalSource = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
 const addCharacterModalSource = readFileSync('src/components/characters/AddCharacterModal.tsx', 'utf8');
 // 캐릭터 현황판 UI 전체(뷰 + 분리된 컴포넌트 파일) — 모놀리스 시절의 파일 전역 검사(금지 패턴 부재 등)를 보존하기 위한 결합 소스.
@@ -337,8 +338,10 @@ test('character board can create and link a work folder from the configured team
   assert.match(characterDetailModalSource, /createAndLinkCharacterFolder/);
   assert.match(characterDetailModalSource, /const \[creatingFolder, setCreatingFolder\]/);
   assert.match(characterDetailModalSource, /onCreateFolder=\{handleCreateFolder\}/);
-  assert.match(costumeDetailSource, /title="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"/);
-  assert.match(costumeDetailSource, /!path && onCreate/);
+  assert.match(costumeDetailSource, /onCreate=\{onCreateFolder\}\s+createTitle="기준 경로에 캐릭터 이름으로 폴더를 만들어 연결"/);
+  // '만들기'는 비어 있는 칸에서만 — 연결된 칸(열기·수정·해제)에는 두지 않는다.
+  assert.match(pathLinkCard, /\) : \((?:(?!<\/>)[\s\S])*\{onCreate && \(/);
+  assert.doesNotMatch(pathLinkCard.slice(0, pathLinkCard.indexOf(') : (')), /onCreate && /);
 });
 
 test('character card right click opens the compact work menu instead of opening a folder immediately', () => {
