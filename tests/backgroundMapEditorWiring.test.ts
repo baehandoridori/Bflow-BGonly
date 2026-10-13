@@ -91,6 +91,8 @@ const handler = {
   openSpace: () => piece(editor, 'function openSpace(', 'function beginRename('),
   fitView: () => piece(editor, 'function fitView(', 'function keyboard('),
   keyboard: () => piece(editor, 'function keyboard(', 'const selectNode = useEvent('),
+  /** No handler of a key or a press: the begin and the preview of a slide and the scrub object made of them, up to the stable callback that follows. */
+  fieldScrub: () => piece(editor, 'const beginFieldScrub = useEvent(', 'const placeAt = useEvent('),
   /** No handler: the one tag with which the editor draws the edit band, up to the `/>` that closes it. */
   strip: () => piece(editor, '<BackgroundMapEditStrip ', '/>'),
 };
@@ -102,6 +104,8 @@ function canvasTag(): string {
   assert.ok(end > start, 'the end of the plan SVG tag was not found');
   return editor.slice(start, end + 2);
 }
+/** The number fields of the inspector: of each tag what stands between its name and the ` />` that closes it, its attributes as they are written. */
+const numberTags = () => editor.split('<NumberField ').slice(1).map(part => part.slice(0, part.indexOf(' />')));
 const view3d = read('BackgroundMap3D.tsx');
 /** A method of the 3D viewport, cut the same way as a handler of the editor. */
 const viewport = {
@@ -1450,6 +1454,148 @@ test('anchor 59: the new test files run in the build', () => {
   const { scripts } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { scripts: Record<string, string> };
   assert.equal(scripts['test:background'], 'node --test ./tests/background*.test.ts');
   for (const build of ['build', 'build:vite']) assert.ok(scripts[build].includes('npm run test:background'), `${build} does not run the background tests`);
+});
+
+test('anchor 60: every number of the inspector is one component, on one table and one scrub object', () => {
+  // The component comes into the editor under the name its fields always had there, so a tag still reads `<NumberField `
+  // (anchor 44 holds one by its letters). The field the editor had of its own is gone, and no number input is left in
+  // this file: a field left on one would have no grip and no bar, and could only be typed in. Gone with it are the two
+  // limits the editor kept for the plan: what a field accepts is written in one place, the table the component reads.
+  assert.ok(editor.includes("import { BackgroundMapNumberField as NumberField } from './BackgroundMapNumberField';"), 'the number fields of the editor are not the component');
+  for (const old of ['function NumberField(', 'type="number"', 'PLAN_LIMIT', 'MIN_PLAN_SIZE']) assert.ok(!editor.includes(old), `still there: ${old}`);
+  assert.doesNotMatch(editor, /\btype=\{?['"`]number\b/, 'a number input of the editor\'s own, in whatever quotes');
+  // It is drawn by that one import and under that one name, fourteen times. A field drawn under another spelling of its
+  // tag (a line break after the name, the name of the component itself) would be read by nothing below.
+  assert.equal(count(editor, /\bNumberField\b/g), 15, 'the import and the fourteen tags');
+  assert.equal(count(editor, /BackgroundMapNumberField/g), 2, 'the one import: the name and the file');
+  // The fourteen fields: the name on show, the number of the node it is, the value it shows, and what a typed value
+  // does. The second is the key of its row in the table (its limits, its steps, its bar) and the key a slide of it
+  // writes. Two names share a key where two kinds of node have the same number: the height of a camera and the floor of
+  // a space or an object, the two tilts of a camera and of an object.
+  const fields = [
+    ['카메라 높이', 'elevation', 'nodeElevation(selected)', "elevation => patchNode({ elevation }, 'elevation')"],
+    ['방향 (°)', 'angle', 'selected.angle', "angleValue => patchNode({ angle: normalizeAngle(angleValue) }, 'angle')"],
+    ['위아래 각도 (°)', 'pitch', 'angles.pitch', "pitch => patchNode({ pitch }, 'pitch')"],
+    ['기울기 (°)', 'roll', 'angles.roll', "roll => patchNode({ roll }, 'roll')"],
+    ['화각 (°)', 'fov', 'selected.fov', "fov => patchNode({ fov }, 'fov')"],
+    ['바닥 높이', 'elevation', 'nodeElevation(selected)', "elevation => patchNode({ elevation }, 'elevation')"],
+    ['입체 높이', 'volumeHeight', 'nodeVolumeHeight(selected)', "volumeHeight => patchNode({ volumeHeight }, 'volumeHeight')"],
+    ['앞뒤 기울기 (°)', 'pitch', 'nodeAngles(selected).pitch', "pitch => patchNode({ pitch }, 'pitch')"],
+    ['좌우 기울기 (°)', 'roll', 'nodeAngles(selected).roll', "roll => patchNode({ roll }, 'roll')"],
+    ['가로 위치', 'x', 'selected.x', "x => moveSelected({ x: x - selected.x, y: 0 }, 'x')"],
+    ['세로 위치', 'y', 'selected.y', "y => moveSelected({ x: 0, y: y - selected.y }, 'y')"],
+    ['가로 길이', 'width', 'selected.width', "width => patchNode({ width }, 'width')"],
+    ['세로 길이', 'height', 'selected.height', "height => patchNode({ height }, 'height')"],
+    ['회전 (°)', 'rotation', 'selected.rotation', "rotation => patchNode({ rotation: normalizeAngle(rotation) }, 'rotation')"],
+  ];
+  const tags = numberTags(), listed = (rows: string[][]) => rows.map(row => row.join(' | ')).sort();
+  assert.equal(tags.length, 14, 'the number fields of the inspector');
+  // Every tag opens with its name, its key and its value, in that order, and the three are those of one row: compared as
+  // whole lists and in no order, so each field is there once, with its own three. A name on another key ('세로 길이' on
+  // `width`) would slide one number while what is typed in it changes another. Two values swapped ('가로 위치' showing
+  // `selected.y`) would show one number while the slide starts from another.
+  const opening = (tag: string) => /^label="([^"]*)" field="([^"]*)" value=\{([^{}]*)\} /.exec(tag)?.slice(1) ?? [];
+  for (const tag of tags) assert.equal(opening(tag).length, 3, `a number field does not open with its name, its key and its value: ${tag}`);
+  assert.deepEqual(listed(tags.map(tag => opening(tag))), listed(fields.map(row => row.slice(0, 3))));
+  // Every field is off while its node is locked or a save runs, slides through the one scrub object of the editor, and
+  // ends the undo step of what was typed in it as it is left. None is given a limit: its limits are those of its row in
+  // the table, and given here again there would be two sets of them.
+  for (const tag of tags) {
+    for (const given of ['disabled={fieldLocked}', 'scrub={fieldScrub}', 'onDone={doc.endCoalescing}']) assert.ok(tag.includes(` ${given}`), `not given ${given}: ${tag}`);
+    for (const limit of [' min=', ' max=']) assert.ok(!tag.includes(limit), `given a limit of its own (${limit.trim()}): ${tag}`);
+  }
+  // A typed value goes the way it always went, the one of its row: into the edit of its field, which joins the keys of
+  // one stay in the field into one undo step (patchNode, and moveSelected for the two positions, each with the key of
+  // the field). Sent through the scrub object instead, every key typed would be a gesture, and an undo step of its own.
+  for (const [label, , , typed] of fields) {
+    const tag = tags.find(item => item.startsWith(`label="${label}" `)) ?? '';
+    assert.ok(tag.endsWith(` onChange={${typed}}`), `what is typed into ${label} does not go the way of its row: ${tag}`);
+  }
+  // And a tag holds nothing else: those seven attributes, in this order.
+  assert.deepEqual([...tags].sort(), fields.map(([label, field, value, typed]) => `label="${label}" field="${field}" value={${value}} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={${typed}}`).sort());
+});
+
+test('anchor 61: a slide is a gesture of the document, previewed from the map it started on', () => {
+  // A number slid from outside the canvas (a field of the inspector, the lens of the side view) goes through the scrub
+  // object of the editor: a begin and a preview of its own, and the object the controls are given, which is made of
+  // them. `lines` are the lines of the three, without their indent.
+  const scrub = handler.fieldScrub(), lines = scrub.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // The begin. It is refused where there is nothing to slide: no map or no node in hand, a locked node, no right to
+  // edit or a save running, a pointer pressed on the plan, another drag. Then the focus goes to the canvas, before
+  // anything else: leaving a field commits what was being typed in it (an entry out of range lands on its limit, as an
+  // undo step of its own), and an open name box commits its name. Once the gesture has begun that update would be
+  // dropped without a word: a gesture is the only writer of its map. Only after that is the value the drag starts from
+  // read, from the draft in the store and off the node as it is there (a node locked there has no value to start
+  // from). Read off the node of the render (`mapNodeNumber(selected, field)`) it would be the value from before that
+  // commit: a box height of 0 typed a moment ago is 1 once its field is left, and the slide of that very field would
+  // start from the 180 that was still drawn. Then the gesture begins, and what the control gets back is that value,
+  // with that very map.
+  const refused = 'if (!current || !selected || selected.locked || !canEdit || pointerRef.current || doc.isGestureActive()) return null;';
+  const live = 'const map = mapDraft(doc.getState(), current.id)?.value, node = map?.nodes.find(item => item.id === selected.id);';
+  const first = 'const start = node && !node.locked ? mapNodeNumber(node, field) : null;';
+  const begun = 'if (!map || start === null || !doc.beginGesture(current.id)) return null;';
+  own(refused, 'focusCanvas();', live, first, begun, 'return { start, map };');
+  // The preview. It is made from the map the gesture started on, never from the map on show, which is the preview
+  // before it: a space carries its cameras and objects along once, from where they stood. Made from the preview before,
+  // they would be carried further at every step. And it is a preview of the gesture: an update of the map is dropped
+  // while a gesture runs, and nothing would move at all.
+  const origin = 'const start = current && gestureStartMap(doc.getState(), current.id);';
+  const shown = 'if (start && selected && canEdit) doc.previewGesture(setMapNodeNumber(start, selected.id, field, value));';
+  own(origin, shown);
+  // The object. A drag ends through the two callbacks the 3D viewport ends its own with: a release finishes it only
+  // while the map can still be edited, and is a cancel once a save has started. Handed `doc.finishGesture` itself, that
+  // release would make an undo step. And `alive` is the document's own answer: by it the hook and the controls learn
+  // that the editor has cancelled a drag (Escape, a save starting, another map).
+  const ends = 'finish: finishCanvasGesture, cancel: cancelCanvasGesture, alive: doc.isGestureActive';
+  assert.ok(scrub.includes(ends), 'a slide does not end through the callbacks of the editor');
+  inOrder(scrub, refused, 'focusCanvas();', 'mapDraft(doc.getState(), current.id)', first, 'doc.beginGesture(current.id)', 'return { start, map };',
+    origin, 'doc.previewGesture(setMapNodeNumber(start, selected.id, field, value));', ends);
+  // A slide is never an edit that joins others. Joined by the key of its field, as what is typed is, two slides of one
+  // field would be one undo step, and its update would be dropped while a gesture runs. And nothing here finishes a
+  // gesture by itself.
+  for (const none of ['updateMap(', 'doc.update(', 'coalesceKey', 'doc.finishGesture(']) assert.ok(!scrub.includes(none), `still there: ${none}`);
+  // And the three hold nothing else: they are the lines above and what joins them, in this order. What joins them. The
+  // begin and the preview are stable callbacks that run the handler of the latest render (useEvent): kept from the
+  // render that made them, they would go on reading the node that was in hand then. A begin is refused as well where
+  // the store has no draft of the map, where the node has no such number, and where the document starts no gesture. A
+  // preview comes to something only while a gesture runs on the map on show, with a node in hand and the right to edit.
+  // And the object is made once, of callbacks that never change: every control is given the same one at every render.
+  assert.deepEqual(lines, ['const beginFieldScrub = useEvent((field: MapNumberKey) => {', refused, 'focusCanvas();', live, first, begun, 'return { start, map };', '});',
+    'const previewFieldScrub = useEvent((field: MapNumberKey, value: number) => {', origin, shown, '});',
+    `const fieldScrub = useMemo((): MapFieldScrub => ({ begin: beginFieldScrub, preview: previewFieldScrub, ${ends} }),`,
+    '[beginFieldScrub, previewFieldScrub, finishCanvasGesture, cancelCanvasGesture, doc.isGestureActive]);']);
+  // The four callbacks of the 3D viewport are as they were, letter for letter. Its begin answers nothing and moves no
+  // focus: a slide has the begin above, which does both. And the three of the slide stand right behind those four, in
+  // no handler another anchor cuts out: placed before them, the object would be made of two callbacks that are not
+  // there yet, and the editor could not be drawn.
+  const canvas = ['const beginCanvasGesture = useEvent(() => { if (current && canEdit && !pointerRef.current) doc.beginGesture(current.id); });',
+    'const previewCanvasGesture = useEvent((map: BackgroundMap) => { if (canEdit) doc.previewGesture(map); });',
+    'const finishCanvasGesture = useEvent(() => { if (canEdit) doc.finishGesture(); else doc.cancelGesture(); });', 'const cancelCanvasGesture = useEvent(() => doc.cancelGesture());'];
+  assert.ok(editor.includes(canvas[0]), 'the begin of the 3D viewport is not as it was');
+  const all = editor.split('\n').map(line => line.trim()).filter(Boolean), at = all.indexOf(lines[0]);
+  assert.ok(at >= canvas.length, 'the begin of a slide is a line of its own, behind the callbacks of the 3D viewport');
+  assert.deepEqual(all.slice(at - canvas.length, at), canvas);
+  // The write is the pure module's, and the N tests run it. Three things of it are held here as well. A value that is
+  // the one already there is turned away before it is settled, and the same map object comes back: a drag that comes
+  // back to where it started ends without an undo step and invents no key, and a number stored outside its limits (a
+  // field of view of 175) is still what it was. Asked of the settled value alone, that drag would leave the 175 at 170.
+  // A position is placed at the value: moved there by a difference it can land a last digit off, which the values of
+  // the N tests do not show. And a space is written through the function that carries its cameras and objects along,
+  // as when its number is typed, while any other node is replaced alone.
+  const write = piece(read('mapNumberField.ts'), 'export function setMapNodeNumber(', 'export function scrubSteps(');
+  const same = 'if (!node || current === null || !Number.isFinite(value) || value === current) return map;';
+  assert.ok(write.includes(same), 'a value that is already there is not turned away');
+  inOrder(write, 'value === current', 'settleNumber(');
+  for (const writer of ['transformMapSpace(', 'replaceMapNode(', 'placeMapNode(']) assert.ok(write.includes(writer), `nothing is written through ${writer}`);
+  // And the function is those lines and what joins them. A locked node is never written, nor a node that has no such
+  // number. A value that settles on the one already there (171 on a field of view of 170) is turned away as well.
+  assert.deepEqual(write.split('\n').map(line => line.trim()).filter(Boolean), ['export function setMapNodeNumber(map: BackgroundMap, id: string, key: MapNumberKey, value: number): BackgroundMap {',
+    'const node = map.nodes.find(item => item.id === id), current = node && !node.locked ? mapNodeNumber(node, key) : null;', same,
+    'const next = settleNumber(value, key);', 'if (next === current) return map;',
+    "if (key === 'x' || key === 'y') return placeMapNode(map, id, key === 'x' ? { x: next, y: node.y } : { x: node.x, y: next });",
+    'const changed = { ...node, [key]: next } as BackgroundNode;', "return changed.type === 'space' ? transformMapSpace(map, changed) : replaceMapNode(map, changed);", '}']);
 });
 
 test('anchor 62: the pointer of a slide is heard on the window, its capture is only tried, and no listener stays however it ends', () => {

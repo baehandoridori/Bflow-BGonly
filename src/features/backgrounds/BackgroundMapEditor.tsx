@@ -11,9 +11,12 @@ import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { BackgroundMapSelectionSummary } from './BackgroundMapSelectionSummary';
 import { BackgroundMapCameraColor } from './BackgroundMapCameraColor';
 import { BackgroundMapEditStrip } from './BackgroundMapEditStrip';
+import { BackgroundMapNumberField as NumberField } from './BackgroundMapNumberField';
 import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
-import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
+import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
+import { mapNodeNumber, setMapNodeNumber } from './mapNumberField';
+import type { MapNumberKey } from './mapNumberField';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapSelection, mapViewport, pickAction, revealPlanPoint, singleViewId, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
 import { MAP_EDIT_MARK, POLYGON_POINT_LIMIT, doubleClickNodeId, planDoubleClickAction, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
 import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
@@ -27,7 +30,7 @@ import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument'
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
 import { MAP_SAVED_NOTICE_MS, mapEditStatus } from './mapEditStatus';
 import { useMapEditColors } from './useMapEditColors';
-import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode } from './mapCanvas';
+import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode, MapFieldScrub } from './mapCanvas';
 import { backgroundMapPath } from './domain';
 import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
@@ -103,8 +106,6 @@ const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hin
 ];
 const ASPECT_PRESETS = [{ label: '16:9', value: 16 / 9 }, { label: '4:3', value: 4 / 3 }, { label: '1:1', value: 1 }, { label: '2.39:1', value: 2.39 }, { label: '9:16', value: 9 / 16 }];
 const PITCH_PRESETS = [{ label: '수평', pitch: 0 }, { label: '수직 위', pitch: 90 }, { label: '수직 아래', pitch: -90 }];
-/** Saved bounds of plan positions and sizes. */
-const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
 /** The longest a double-click takes (the system's default interval). */
 const SECOND_CLICK_MS = 500;
 const pressEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick'];
@@ -131,28 +132,6 @@ function useEvent<A extends unknown[], R>(handler: (...args: A) => R): (...args:
   const latest = useRef(handler);
   latest.current = handler;
   return useCallback((...args: A) => latest.current(...args), []);
-}
-
-/**
- * Number input that keeps what is being typed. A value inside the limits applies at once; an
- * unfinished or out-of-range entry ("-", or "1" on the way to "150") waits until the field is left.
- */
-function NumberField({ label, value, onChange, onDone, min = -Infinity, max = Infinity, disabled = false }: { label: string; value: number; onChange: (value: number) => void; onDone?: () => void; min?: number; max?: number; disabled?: boolean }) {
-  const [text, setText] = useState<string | null>(null);
-  const parse = (raw: string) => { const next = raw.trim() === '' ? Number.NaN : Number(raw); return Number.isFinite(next) ? next : null; };
-  return <Field label={label}><input type="number" step="any" value={text ?? round(value)} min={Number.isFinite(min) ? min : undefined} max={Number.isFinite(max) ? max : undefined} disabled={disabled}
-    onChange={event => {
-      const raw = event.target.value, next = parse(raw);
-      setText(raw);
-      if (next !== null && next >= min && next <= max && next !== value) onChange(next);
-    }}
-    onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-    onBlur={() => {
-      const next = text === null ? null : parse(text), clamped = next === null ? value : Math.min(max, Math.max(min, next));
-      // An entry outside the limits lands on the nearest limit; when that is the value it already has, nothing is edited.
-      if (clamped !== next && clamped !== value) onChange(clamped);
-      setText(null); onDone?.();
-    }} /></Field>;
 }
 
 const load3D = () => import('./BackgroundMap3D');
@@ -1017,6 +996,24 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const previewCanvasGesture = useEvent((map: BackgroundMap) => { if (canEdit) doc.previewGesture(map); });
   const finishCanvasGesture = useEvent(() => { if (canEdit) doc.finishGesture(); else doc.cancelGesture(); });
   const cancelCanvasGesture = useEvent(() => doc.cancelGesture());
+  /** A number of the node in hand slid from outside the canvas (a field of the inspector, the lens of the side view): one drag, one undo step. */
+  const beginFieldScrub = useEvent((field: MapNumberKey) => {
+    if (!current || !selected || selected.locked || !canEdit || pointerRef.current || doc.isGestureActive()) return null;
+    // Leaving a field commits what was being typed in it, as an undo step of its own. The drag starts from the map after that,
+    // read from the store: this handler still holds the map of the last render.
+    focusCanvas();
+    const map = mapDraft(doc.getState(), current.id)?.value, node = map?.nodes.find(item => item.id === selected.id);
+    const start = node && !node.locked ? mapNodeNumber(node, field) : null;
+    if (!map || start === null || !doc.beginGesture(current.id)) return null;
+    return { start, map };
+  });
+  const previewFieldScrub = useEvent((field: MapNumberKey, value: number) => {
+    const start = current && gestureStartMap(doc.getState(), current.id);
+    // From the map of the start, never from the preview before: the members of a space are carried once.
+    if (start && selected && canEdit) doc.previewGesture(setMapNodeNumber(start, selected.id, field, value));
+  });
+  const fieldScrub = useMemo((): MapFieldScrub => ({ begin: beginFieldScrub, preview: previewFieldScrub, finish: finishCanvasGesture, cancel: cancelCanvasGesture, alive: doc.isGestureActive }),
+    [beginFieldScrub, previewFieldScrub, finishCanvasGesture, cancelCanvasGesture, doc.isGestureActive]);
   const placeAt = useEvent((point: BackgroundPoint) => placeSymbol(point));
   const storeView = useEvent((next: Map3DViewState) => { if (current) viewStates.current[current.id] = next; });
   const changeLookThrough = useEvent((id: string | null) => {
@@ -1221,11 +1218,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               return <>
                 {editing && <BackgroundMapCameraColor color={selected.color} disabled={fieldLocked} onChange={changeCameraColor} />}
                 {editing ? <section className="bmap-camera-properties" key={`camera-${selected.id}`} aria-label="카메라 설정">
-                  <div className="bmap-field-pair"><NumberField label="카메라 높이" value={nodeElevation(selected)} min={MAP_SPATIAL_LIMITS.elevation.min} max={MAP_SPATIAL_LIMITS.elevation.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} /><NumberField label="방향 (°)" value={selected.angle} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={angleValue => patchNode({ angle: normalizeAngle(angleValue) }, 'angle')} /></div>
-                  <div className="bmap-field-pair"><NumberField label="위아래 각도 (°)" value={angles.pitch} min={MAP_SPATIAL_LIMITS.pitch.min} max={MAP_SPATIAL_LIMITS.pitch.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="기울기 (°)" value={angles.roll} min={MAP_SPATIAL_LIMITS.roll.min} max={MAP_SPATIAL_LIMITS.roll.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>
+                  <div className="bmap-field-pair"><NumberField label="카메라 높이" field="elevation" value={nodeElevation(selected)} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} /><NumberField label="방향 (°)" field="angle" value={selected.angle} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={angleValue => patchNode({ angle: normalizeAngle(angleValue) }, 'angle')} /></div>
+                  <div className="bmap-field-pair"><NumberField label="위아래 각도 (°)" field="pitch" value={angles.pitch} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="기울기 (°)" field="roll" value={angles.roll} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>
                   <div className="bmap-pitch-presets" role="group" aria-label="위아래 방향 바로 맞추기">{PITCH_PRESETS.map(item => <button type="button" key={item.label} className="bg-button" aria-pressed={angles.pitch === item.pitch} disabled={fieldLocked} onClick={() => { if (angles.pitch !== item.pitch) patchNode({ pitch: item.pitch }); }}>{item.label}</button>)}</div>
                   <p className="bmap-hint">위를 보면 +, 아래를 보면 − 값이에요. 지금은 <strong>{cameraPitchLabel(angles.pitch)}</strong>. 위아래만 바꿔도 좌우 방향은 그대로예요.</p>
-                  <div className="bmap-field-pair"><NumberField label="화각 (°)" value={selected.fov} min={10} max={170} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={fov => patchNode({ fov }, 'fov')} />
+                  <div className="bmap-field-pair"><NumberField label="화각 (°)" field="fov" value={selected.fov} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={fov => patchNode({ fov }, 'fov')} />
                     <Field label="화면 비율"><select value={preset ? preset.label : 'stored'} disabled={fieldLocked} onChange={event => { const next = ASPECT_PRESETS.find(item => item.label === event.target.value); if (next && next !== preset) patchNode({ aspect: next.value }); }}>{ASPECT_PRESETS.map(item => <option key={item.label} value={item.label}>{item.label}</option>)}{!preset && <option value="stored">{round(aspect)}:1</option>}</select></Field></div>
                   <p className="bmap-hint">평면의 부채꼴은 카메라가 향한 쪽을 알려주는 표시예요. 실제로 화면에 담기는 범위와는 다를 수 있어요.</p>
                 </section> : <p className="bmap-hint">{spaceName(selected.spaceId)} · 방향 {Math.round(selected.angle)}° · {cameraPitchLabel(angles.pitch)} · 높이 {Math.round(nodeElevation(selected))} · 화각 {Math.round(selected.fov)}°</p>}
@@ -1245,14 +1242,14 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             {editing && <>
               {selected.type === 'space' ? <details className="bmap-disclosure" key={`place-${selected.id}`}><summary>배경 장소 연결<span>{snapshot.places.find(place => place.id === selected.placeId)?.name ?? '선택 안 함'}</span></summary><Field label="배경 장소"><select value={selected.placeId ?? ''} disabled={fieldLocked} onChange={event => patchNode({ placeId: event.target.value || null })}><option value="">나중에 연결</option>{snapshot.places.map(place => <option key={place.id} value={place.id}>{place.name}</option>)}</select></Field><p className="bmap-hint">장소를 연결하면 해당 배경 이미지들을 여기서 볼 수 있습니다.</p></details> : selected.type === 'camera' ? <details className="bmap-disclosure" key={`views-${selected.id}`}><summary>시점 연결<span>{selected.viewIds.length}개</span></summary><Field label="카메라가 있는 공간"><select value={selected.spaceId ?? ''} disabled={fieldLocked} onChange={event => patchNode({ spaceId: event.target.value || null })}><option value="">공간 밖 / 미지정</option>{current.nodes.filter(node => node.type === 'space').map(node => <option key={node.id} value={node.id}>{node.name}</option>)}</select></Field><fieldset className="bmap-view-select" disabled={fieldLocked}><legend>연결할 배경 시점</legend>{snapshot.views.map(item => <label key={item.id} className="bmap-check"><input type="checkbox" checked={selected.viewIds.includes(item.id)} onChange={event => patchNode({ viewIds: event.target.checked ? [...selected.viewIds, item.id] : selected.viewIds.filter(id => id !== item.id) })} />{item.name}</label>)}{!snapshot.views.length && <p className="bmap-hint">배경 목록에서 시점을 먼저 등록해 주세요.</p>}</fieldset></details> : null}
               {selected.type !== 'camera' && <details className="bmap-disclosure" open key={`vertical-${selected.id}`}><summary>{selected.type === 'space' ? '높이' : '높이·기울기'}<span>{selectedRoad ? `바닥 ${Math.round(nodeElevation(selected))}` : `입체 ${Math.round(nodeVolumeHeight(selected))}`}</span></summary>
-                <div className="bmap-field-pair"><NumberField label="바닥 높이" value={nodeElevation(selected)} min={MAP_SPATIAL_LIMITS.elevation.min} max={MAP_SPATIAL_LIMITS.elevation.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} />{!selectedRoad && <NumberField label="입체 높이" value={nodeVolumeHeight(selected)} min={MAP_SPATIAL_LIMITS.volumeHeight.min} max={MAP_SPATIAL_LIMITS.volumeHeight.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={volumeHeight => patchNode({ volumeHeight }, 'volumeHeight')} />}</div>
-                {selected.type === 'symbol' && <div className="bmap-field-pair"><NumberField label="앞뒤 기울기 (°)" value={nodeAngles(selected).pitch} min={MAP_SPATIAL_LIMITS.pitch.min} max={MAP_SPATIAL_LIMITS.pitch.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="좌우 기울기 (°)" value={nodeAngles(selected).roll} min={MAP_SPATIAL_LIMITS.roll.min} max={MAP_SPATIAL_LIMITS.roll.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>}
+                <div className="bmap-field-pair"><NumberField label="바닥 높이" field="elevation" value={nodeElevation(selected)} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} />{!selectedRoad && <NumberField label="입체 높이" field="volumeHeight" value={nodeVolumeHeight(selected)} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={volumeHeight => patchNode({ volumeHeight }, 'volumeHeight')} />}</div>
+                {selected.type === 'symbol' && <div className="bmap-field-pair"><NumberField label="앞뒤 기울기 (°)" field="pitch" value={nodeAngles(selected).pitch} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="좌우 기울기 (°)" field="roll" value={nodeAngles(selected).roll} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>}
                 <p className="bmap-hint">{selectedRoad ? '바닥 높이를 바꾸면 이 도로에 속한 카메라와 사물도 같은 만큼 함께 오르내려요. 도로에는 벽이 없어서 입체 높이가 없어요.' : selected.type === 'space' ? '바닥 높이를 바꾸면 이 공간에 속한 카메라와 사물도 같은 만큼 함께 오르내려요. 입체 높이는 3D에서 보이는 벽 높이예요.' : '입체 높이는 3D에서 보이는 사물의 키예요. 기울여도 가로·세로 길이는 그대로예요.'}</p>
               </details>}
               <details className="bmap-disclosure" key={`geometry-${selected.id}`}><summary>위치·크기·잠금</summary>
                 <label className="bmap-check"><input type="checkbox" checked={selected.locked} disabled={!canEdit} onChange={event => patchNode({ locked: event.target.checked })} />위치와 속성 잠금</label>
-                <div className="bmap-field-pair"><NumberField label="가로 위치" value={selected.x} min={-PLAN_LIMIT} max={PLAN_LIMIT} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={x => moveSelected({ x: x - selected.x, y: 0 }, 'x')} /><NumberField label="세로 위치" value={selected.y} min={-PLAN_LIMIT} max={PLAN_LIMIT} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={y => moveSelected({ x: 0, y: y - selected.y }, 'y')} /></div>
-                {selected.type !== 'camera' && <><div className="bmap-field-pair"><NumberField label="가로 길이" value={selected.width} min={MIN_PLAN_SIZE} max={PLAN_LIMIT} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={width => patchNode({ width }, 'width')} /><NumberField label="세로 길이" value={selected.height} min={MIN_PLAN_SIZE} max={PLAN_LIMIT} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={height => patchNode({ height }, 'height')} /></div><NumberField label="회전 (°)" value={selected.rotation} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={rotation => patchNode({ rotation: normalizeAngle(rotation) }, 'rotation')} /></>}
+                <div className="bmap-field-pair"><NumberField label="가로 위치" field="x" value={selected.x} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={x => moveSelected({ x: x - selected.x, y: 0 }, 'x')} /><NumberField label="세로 위치" field="y" value={selected.y} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={y => moveSelected({ x: 0, y: y - selected.y }, 'y')} /></div>
+                {selected.type !== 'camera' && <><div className="bmap-field-pair"><NumberField label="가로 길이" field="width" value={selected.width} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={width => patchNode({ width }, 'width')} /><NumberField label="세로 길이" field="height" value={selected.height} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={height => patchNode({ height }, 'height')} /></div><NumberField label="회전 (°)" field="rotation" value={selected.rotation} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={rotation => patchNode({ rotation: normalizeAngle(rotation) }, 'rotation')} /></>}
                 <button type="button" className="bmap-text-button bmap-danger" disabled={fieldLocked} onClick={() => { setError(''); setConfirmation('delete-node'); }}>이 배치 삭제</button>
               </details>
             </>}
