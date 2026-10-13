@@ -1173,7 +1173,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                   lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} />
               </Suspense></Map3DBoundary>
             </div>
-            <BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} />
+            <BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} />
           </div>}
           {/* An HTML input beside the SVG, placed over its node. Keyed by the node, so each opening starts with that node's name. */}
           {renamingNode && <BackgroundMapNameBox key={renamingNode.id} svgRef={svgRef} anchor={nodeNameAnchor(renamingNode)}

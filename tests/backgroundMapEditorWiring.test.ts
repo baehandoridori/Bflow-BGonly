@@ -1903,3 +1903,162 @@ test('anchor 63: typing and the identity of a field are as they were, and the ar
   assert.doesNotMatch(pure, /from\s+['"]three/, 'mapNumberField.ts imports three.js');
   assert.doesNotMatch(pure, /\b(?:document|window)\.\w/, 'mapNumberField.ts touches the DOM');
 });
+
+test('anchor 64: the lens of the side view is a handle only while its camera can be edited, for a pointer alone, on a scale held for the drag', () => {
+  // The side view is read as this anchor runs: without its file this anchor fails, not every anchor of this file. No test
+  // of Node reaches a React component, so its lines are held by their letters. `lines` are they, without their indent.
+  const part = read('BackgroundMapPlanSide.tsx'), lines = part.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // When the lens is a handle: while the map can be edited right now, and the camera is not locked. Asked of the lock
+  // alone, the lens would be dragged in view mode and while a save runs; asked of the right to edit alone, a locked
+  // camera would be lifted. The pointer is the one hook's (anchor 62), and it is off whenever the lens is no handle.
+  const handle = 'const draggable = canEdit && !camera.locked', pointer = 'useMapScrubPointer(scrub, !draggable)';
+  own(`${handle}, box = PLAN_SIDE_VIEW;`, `const press = ${pointer};`);
+  // The scale. The picture is drawn on the scale of the map as it is, and while a drag of the lens runs, on the scale
+  // that drag started on. Fitted to the map at every step instead (`planSideView(map, camera)`), the picture would be
+  // drawn anew as the lens leaves its range, and the lens would run away from the pointer. And a held scale counts only
+  // while its drag still runs: asked of `frozen` alone, the darker halo and the held scale would stay behind an Escape
+  // until the pointer moves or is let go.
+  const live = 'const live = frozen && scrub.alive() ? frozen : null;', drawn = 'const scale = live ?? planSideScale(map, camera), side = planSideView(map, camera, scale);';
+  own(live, drawn);
+  // The drag. It is the height of the camera, it runs up and down, and it starts past the slop: a press alone, or a move
+  // sideways, changes nothing. The scale is taken as the drag starts, from the map the editor hands over and never from
+  // the map of this render: the field that was being typed in is committed as the drag takes the focus away, and that
+  // may have been a height. It is kept for the sums and given to the picture as well: without `setFrozen(held);` the
+  // sums would run on the held scale and the picture on a fitted one. A place on screen becomes a place in the picture
+  // through the matrix of the SVG: counted in screen pixels (`clientY - rect.top`), the lens would not keep to the
+  // pointer (in a small picture it falls behind, the more the smaller the picture is), while the height still came in
+  // steps of ten. And the lens keeps the offset it has where the drag starts, which is the press moved by the slop:
+  // with none (`grab: 0`) it would jump to the pointer, and measured from the press itself the first value would skip
+  // two or three steps. What the pointer then stands at is a height in the pure module (planSideDragLevel, which the S
+  // tests run). And however the drag ends, the scale is let go: still held, it would be the scale of the picture again,
+  // under the darker halo, during any gesture of the document that runs later (a slide of the height field, a handle
+  // dragged in 3D).
+  const drive = "field: 'elevation', axis: 'y', immediate: false", taken = 'planSideScale(origin.map,', kept = 'setFrozen(held);';
+  const toY = 'const toY = (clientY: number) => inverse ? new DOMPoint(0, clientY).matrixTransform(inverse).y : Number.NaN;';
+  const grab = 'grab: planSideY(held, origin.start) - toY(from.clientY)', level = 'planSideDragLevel(drag.scale, drag.toY(at.clientY) + drag.grab, drag.start)';
+  const closed = 'close: () => setFrozen(null)';
+  const held = `const node = origin.map.nodes.find(item => item.id === camera.id), held = ${taken} node?.type === 'camera' ? node : camera);`;
+  const opened = `return { scale: held, start: origin.start, toY, ${grab} };`, lifted = `read: (drag, at) => ${level},`;
+  own(`${drive},`, held, toY, kept, opened, lifted, `${closed},`);
+  // What the handle adds is drawn only while the lens is one: the halo, the small up-down mark and the area that takes
+  // the press each stand once, on a line of their own that opens with that condition. Drawn without it, a camera that
+  // cannot be edited would be shown a handle that does nothing: a halo, the cursor of a drag, a tooltip.
+  const ring = '{draggable && <circle className="bmap-plan-side-ring" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />}';
+  const marks = '{draggable && <path className="bmap-plan-side-marks" d={`M ${x0 - 3} ${fixed(y - 4)} L ${x0} ${fixed(y - 8)} L ${x0 + 3} ${fixed(y - 4)} M ${x0 - 3} ${fixed(y + 4)} L ${x0} ${fixed(y + 8)} L ${x0 + 3} ${fixed(y + 4)}`} />}';
+  const area = '{draggable && <circle className="bmap-plan-side-grab" onPointerDown={lift} cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot}><title>위아래로 끌어 카메라 높이 바꾸기 · 끄는 도중 Esc는 취소</title></circle>}';
+  for (const added of ['bmap-plan-side-ring', 'bmap-plan-side-marks', 'bmap-plan-side-grab']) {
+    const found = lines.filter(line => line.includes(added));
+    assert.equal(found.length, 1, `one line draws ${added}`);
+    assert.ok(found[0].startsWith('{draggable && '), `drawn for a camera that cannot be edited: ${found[0]}`);
+  }
+  // The caption tells those who can drag the lens that they can, in a span of its own: the stylesheet hides that span
+  // where the picture is too narrow for the longer words (below). Written as one text, the caption would always be cut
+  // off there. To everyone else it reads as it always did.
+  const caption = '<figcaption>옆에서 본 방향{draggable && <span className="bmap-plan-side-tip"> · 점을 끌어 높이 조절</span>}</figcaption>';
+  own(caption);
+  // The handle is for the pointer alone: no stop for Tab, no slider, no key. The keyboard has the height field of the
+  // inspector, which holds the same number: a second stop would be a second rule for joining the undo steps of one
+  // value, and an SVG element that takes the focus is drawn a ring by the engine when it is pressed. The SVG stays the
+  // picture it was, with its words for a reader. No line marks a ceiling: the height is said by the readout. And the
+  // colour of the camera is not told here again: the readout that holds the picture carries it (anchor 45).
+  for (const none of ['bmap-plan-side-ceiling', 'tabIndex', 'role="slider"', 'onKeyDown', 'data-camera-color=']) assert.ok(!part.includes(none), `still there: ${none}`);
+  assert.ok(part.includes('role="img"'), 'the side view is no picture for a reader');
+  // And the file holds nothing else: it is the lines above and what joins them, in this order. What joins them, and what
+  // goes wrong without it. The sums and the box of the picture come from the pure module and the pointer from the one
+  // hook, by these imports: a function of the same name written in this file would pass every line above, and no test
+  // would reach it. The two small helpers are those of the companion plan, a second copy of each: the picture is
+  // written with the rounding it always had. The component is a plain function: wrapped in `memo` it would not be drawn
+  // again as the editor ends a drag by itself, and `live` would not be asked again. The matrix is read once, as the
+  // drag starts, off the SVG, which is found by its ref: without the ref no place on screen becomes a place in the
+  // picture, and a drag changes nothing. How far left of the lens the up-down mark stands
+  // is tuned by eye in the app, so that number is read as any number. The root carries the two states the stylesheet
+  // draws: a lens that can be dragged, and one that is being dragged, asked of the held scale that still counts. Then
+  // the figure as it always was, element for element and in its order: for a camera that cannot be edited (view mode,
+  // a locked camera, a save running) the lines that open with `draggable` draw nothing, and what is left is the room,
+  // the floor line and its six hatches, the pole, the level line, the line of sight with its head, and the lens. The
+  // halo and the mark come before the lens, which is drawn over the inner half of the halo. The area that takes the
+  // press comes last, over everything, and it is the one element with a handler: under the lens, a press on the very
+  // centre of the lens would land on the lens and start nothing.
+  assert.deepEqual(lines.map(line => line.replace(/^(const x0 = box\.cameraX - )[\d.]+(, y = side\.camera\.y;)$/, '$1n$2')), [
+    "import { useRef, useState } from 'react';", "import type { JSX, PointerEvent as ReactPointerEvent } from 'react';", "import type { MapFieldScrub } from './mapCanvas';",
+    "import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';",
+    "import { PLAN_SIDE_VIEW, planSideDragLevel, planSideScale, planSideView, planSideY } from './mapPlanPreview';", "import type { PlanSideScale } from './mapPlanPreview';",
+    "import { useMapScrubPointer } from './useMapScrubPointer';",
+    'const fixed = (value: number) => Math.round(value * 100) / 100 + 0;', "const pointList = (points: BackgroundPoint[]) => points.map(point => `${fixed(point.x)},${fixed(point.y)}`).join(' ');",
+    'export function BackgroundMapPlanSide({ map, camera, canEdit, scrub, label }: {', 'map: BackgroundMap; camera: BackgroundCamera;', 'canEdit: boolean; scrub: MapFieldScrub;', 'label: string }): JSX.Element {',
+    `${handle}, box = PLAN_SIDE_VIEW;`, 'const [frozen, setFrozen] = useState<PlanSideScale | null>(null);', 'const svgRef = useRef<SVGSVGElement>(null);', `const press = ${pointer};`, live, drawn,
+    'const lift = (event: ReactPointerEvent<SVGCircleElement>) => press(event, {', `${drive},`, 'open: (origin, from) => {', held, 'const inverse = svgRef.current?.getScreenCTM()?.inverse();', toY, kept, opened, '},',
+    lifted, `${closed},`, '});', 'const x0 = box.cameraX - n, y = side.camera.y;',
+    "return <figure className={`bmap-plan-side${draggable ? ' is-draggable' : ''}${live ? ' is-lifting' : ''}`}>",
+    '<svg ref={svgRef} viewBox={`0 0 ${box.width} ${box.height}`} role="img" aria-label={label}>',
+    '{side.room && <rect className="bmap-plan-side-room" x={box.left} y={fixed(side.room.top)} width={box.right - box.left} height={fixed(Math.max(1, side.room.bottom - side.room.top))} />}',
+    '<line className="bmap-plan-side-floor" x1={box.left} x2={box.right} y1={fixed(side.floorY)} y2={fixed(side.floorY)} />',
+    '{[0, 1, 2, 3, 4, 5].map(index => <line key={index} className="bmap-plan-side-hatch" x1={box.left + 12 + index * 20} x2={box.left + 6 + index * 20} y1={fixed(side.floorY)} y2={fixed(side.floorY + 6)} />)}',
+    '<line className="bmap-plan-side-pole" x1={side.camera.x} x2={side.camera.x} y1={fixed(side.floorY)} y2={fixed(side.camera.y)} />',
+    '<line className="bmap-plan-side-level" x1={side.camera.x} x2={side.camera.x + box.arrow + box.head} y1={fixed(side.camera.y)} y2={fixed(side.camera.y)} />',
+    '<line className="bmap-plan-sight" x1={side.camera.x} y1={fixed(side.camera.y)} x2={fixed(side.tip.x)} y2={fixed(side.tip.y)} />',
+    '<polygon className="bmap-plan-sight-head" points={pointList(side.head)} />', ring, marks,
+    '<circle className="bmap-plan-dot" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />', area, '</svg>', caption, '</figure>;', '}']);
+  // The hand-over. The editor gives the companion plan the right to edit as it is right now and its one scrub object,
+  // behind the three attributes it always gave (anchor 23 reads those): without the scrub object the lens has nothing
+  // to be dragged through. The plan takes the two and hands them to the readout of the picked camera, and that hands
+  // them to the side view, as they came: handed a right to edit made up on the way, the side view of a camera in view
+  // mode would show a handle. The readout is keyed by its camera: as another camera is picked, a scale still held and
+  // a pointer still pressed go with the readout of the old one. And the contract of the plan names the two.
+  assert.ok(editor.includes('<BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} />'), 'the companion plan is not given the right to edit and the scrub object');
+  assert.equal(count(editor, /<BackgroundMapPlanPreview\b/g), 1, 'the companion plan is drawn once');
+  const preview = read('BackgroundMapPlanPreview.tsx'), keyed = '<CameraReadout key={selected.id} ';
+  for (const text of ['export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub }: MapPlanPreviewProps) {', `${keyed}map={map} camera={selected} canEdit={canEdit} scrub={scrub} />`,
+    'function CameraReadout({ map, camera, canEdit, scrub }: { map: BackgroundMap; camera: BackgroundCamera; canEdit: boolean; scrub: MapFieldScrub }) {',
+    '<BackgroundMapPlanSide map={map} camera={camera} canEdit={canEdit} scrub={scrub} label={`옆에서 본 방향: ${pitchText}, ${heightText}`} />']) assert.ok(preview.includes(text), `not found: ${text}`);
+  assert.equal(count(preview, /<CameraReadout\b/g), 1, 'the readout of a camera is drawn in one place');
+  assert.equal(count(preview, /<BackgroundMapPlanSide\b/g), 1, 'the side view is drawn in one place');
+  assert.ok(read('mapCanvas.ts').includes("export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub };"), 'the contract of the companion plan');
+  // The plan itself has no code for the drag: a press is followed by the hook, on the window. The listeners the plan
+  // has are those of its picks, and anchors 34 and 39 find them by their place in that file. Nor does it draw a side
+  // view of its own any more: left there, a second picture would stand beside the one with the handle.
+  for (const none of ['setPointerCapture', "addEventListener('pointermove'", 'bmap-plan-side', 'planSideView(']) assert.ok(!preview.includes(none), `still in the companion plan: ${none}`);
+  // The stylesheet of the companion plan, line by line and as written: a rule is one line there, and the comments stay.
+  // The handle is drawn by these seven rules and by no other, each one line, in this order: two inside the blocks of
+  // the short and wide plan, then five base rules. They are looked for in what is left of the sheet without its
+  // comments: a rule written behind a comment, or under another selector, could undo any line read below.
+  const plan = readFileSync(new URL('backgrounds-map-plan.css', directory), 'utf8').replace(/\r\n/g, '\n').split('\n');
+  const has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  const bare = plan.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
+  const rules = bare.map(line => line.trim()).filter(line => /bmap-plan-side-(?:grab|ring|marks|tip)|is-lifting/.test(line));
+  assert.deepEqual(rules.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-plan-side-tip {', '.bmap-plan-side-marks {', '.bmap-plan-side-grab {', '.bmap-plan-side-ring {', '.bmap-plan-side-marks {',
+    '.bmap-plan-side.is-lifting .bmap-plan-side-ring {', '.bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong {']);
+  for (const line of rules) assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
+  // Nothing of the handle moves by itself: a drag is the hand moving it. Nothing of it blurs what is behind it. And no
+  // colour is written out: the handle is painted from the camera variables of this plan, or not at all, so the handle
+  // of a camera with a colour of its own is in that colour (the last rule of the sheet sets the variables from it).
+  for (const line of rules) {
+    assert.doesNotMatch(line, /#|transition|animation|backdrop-filter/);
+    for (const paint of declarations(line).filter(item => /^(?:fill|stroke|color):/.test(item)))
+      assert.match(paint, /:(?:none|transparent|var\(--bmap-plan-cam(?:-line|-edge|-soft)?\))$/, `not painted from a camera variable of the plan: ${paint}`);
+  }
+  // The area that takes the press is a circle the size of the lens that paints nothing (it lies over the lens), with a
+  // stroke 24 pixels wide that takes a press like the rest of it: at least 28 pixels across, however small the picture
+  // is drawn. Without that width it is the lens alone, 4 pixels across in the smallest picture. Over it the pointer
+  // says which way a drag goes, and a touch or a pen that starts there scrolls nothing. The halo is a stroke as well,
+  // 6 pixels wide and unfilled: the lens covers its inner half. Both are widths on screen because every shape of this
+  // plan keeps its strokes unscaled, and no rule of the handle undoes that: drawn in the units of the picture, the halo
+  // could not be told from the edge of the lens in the smallest picture, and the area would shrink with the picture.
+  has(baseRule(plan, '.bmap-plan-side-grab {'), 'fill:transparent', 'stroke:transparent', 'stroke-width:24px', 'pointer-events:all', 'cursor:ns-resize', 'touch-action:none');
+  has(baseRule(plan, '.bmap-plan-side-ring {'), 'fill:none', 'stroke-width:6px');
+  has(baseRule(plan, '.bmap-plan-preview :is(rect,polygon,circle,line,path) {'), 'vector-effect:non-scaling-stroke');
+  for (const line of rules) assert.doesNotMatch(line, /vector-effect/);
+  // Where the plan is short and wide the picture stands beside the text and is narrow: the words added to the caption
+  // are hidden there, or the caption would always be cut off. Where that plan is lower still the caption is hidden
+  // whole and the picture is at its smallest: the up-down mark is not drawn there, where it would run into the halo.
+  const wide = '@container bmap-plan (min-aspect-ratio: 3/2) and (min-width: 300px) {', low = '@container bmap-plan (min-aspect-ratio: 3/2) and (min-width: 300px) and (max-height: 159px) {';
+  assert.ok(mediaBlock(plan, wide).includes('.bmap-plan-side-tip { display:none; }'), 'the words added to the caption are shown beside the text');
+  assert.ok(mediaBlock(plan, low).includes('.bmap-plan-side-marks { display:none; }'), 'the up-down mark is drawn in the smallest picture');
+  // The rule that gives a camera with a colour of its own its four variables is still the last rule of the sheet.
+  assert.ok(plan.filter(line => line.trim()).pop()?.startsWith('.bmap-plan-preview [data-camera-color] {'), 'the last rule of the sheet is another one');
+  // The picture is drawn on a scale handed in, and without one on the scale of the map: that is the pure module's, and
+  // the S tests run it. With the third argument dropped there, the line that hands the held scale over would mean nothing.
+  assert.ok(read('mapPlanPreview.ts').includes('scale: PlanSideScale = planSideScale(map, camera)'), 'planSideView takes no scale');
+});

@@ -67,4 +67,4 @@ export type MapFieldScrub = {
   alive(): boolean;
 };
 /** Companion plan shown next to the 3D viewport. It reads the same in-progress draft. */
-export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'onSelect'>;
+export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub };
