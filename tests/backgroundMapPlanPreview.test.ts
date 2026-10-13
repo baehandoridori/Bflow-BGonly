@@ -378,6 +378,16 @@ test('S-2: the scale is what the side view worked out by itself', () => {
   assert.deepEqual(scaleOf(mapOf([{ ...legacySpace, elevation: -90 }])), { low: -90, span: 210 });
   // A road is in the range by its floor alone, whatever wall height it still stores.
   assert.deepEqual(scaleOf(mapOf([{ ...legacyRoad, elevation: 300, volumeHeight: 400 }])), { low: 0, span: 300 });
+  // A height that is no number counts as the default too, for the scale as for the lens. It takes a room lower than 120 to show it:
+  // the lens is then the top of the scale itself. Under a room of 180 the scale is the same whatever that height was taken for.
+  const lowRoom = mapOf([{ ...legacySpace, volumeHeight: 60 }]);
+  for (const elevation of [Number.NaN, Number.POSITIVE_INFINITY]) {
+    const lost: BackgroundCamera = { ...camera, elevation };
+    assert.deepEqual(scaleOf(lowRoom, lost), { low: 0, span: 120 }, `height ${elevation}`);
+    assert.equal(planSideView(lowRoom, lost).camera.y, PLAN_SIDE_VIEW.top, `height ${elevation}`);
+  }
+  // A flat room on the floor with the camera on it has no range at all: the scale is 1 high all the same, never 0.
+  assert.deepEqual(scaleOf(mapOf([{ ...legacySpace, volumeHeight: 0 }]), { ...camera, elevation: 0 }), { low: 0, span: 1 });
 });
 
 test('S-3: a level and its y are each the inverse of the other', () => {
@@ -404,6 +414,9 @@ test('S-4: a drag of the lens gives whole tens, the height it started from, and 
   const at = (level: number) => planSideDragLevel(scale, planSideY(scale, level), 123);
   // Where it started it is the height it started from, decimals and all, and it stays that while no ten is nearer.
   assert.equal(at(123), 123); assert.equal(at(124.9), 123); assert.equal(at(126.6), 130); assert.equal(at(121.4), 120); assert.equal(at(134), 130);
+  // A height with decimals comes back as it is, and the nearness is counted from that height, not from a rounded one: 123.4 and 130 are as near at 126.7.
+  const drag = (start: number, level: number) => planSideDragLevel(scale, planSideY(scale, level), start);
+  assert.equal(drag(123.4, 123.4), 123.4); assert.equal(drag(123.4, 126.65), 123.4); assert.equal(drag(123.4, 126.75), 130);
   // Half way to the next ten the start is as near as the ten: it is still the start.
   assert.equal(planSideDragLevel({ low: 100, span: 100 }, 52, 120), 120);
   // The reach: a quarter of the travel past either end. A pointer further out counts as standing there.
@@ -454,6 +467,31 @@ test('S-5: on a held scale the floor and the room stay, the lens moves, and the 
   assert.ok(side.tip.y <= side.camera.y, `the arrow ends at ${side.tip.y}, under the lens at ${side.camera.y}`);
   assert.deepEqual(side.tip, side.camera);
   assert.equal(side.floorY, box.bottom); assert.deepEqual(side.room, { top: box.top, bottom: box.bottom });
+  // The other end: lowered as far as one drag goes and looking straight down, the lens is nearer the bottom edge than the head is long.
+  // The shaft has no length there either. Only the shaft gives way: the head keeps its size at both ends.
+  const lowered = planSideDragLevel(low, 72, 20);
+  assert.equal(lowered, -10);
+  const under = planSideView(lowRoom, member({ elevation: lowered, pitch: -90 }), low);
+  near(under.camera.y, box.bottom + travel * 10 / 30, 'the lowered lens'); assert.equal(under.camera.y.toFixed(2), '75.33');
+  assert.deepEqual(under.tip, under.camera);
+  const headLength = (drawn: { tip: BackgroundPoint; head: BackgroundPoint[] }) => Math.hypot(drawn.head[0].x - drawn.tip.x, drawn.head[0].y - drawn.tip.y);
+  near(headLength(side), box.head, 'the head of the lifted lens'); near(headLength(under), box.head, 'the head of the lowered lens');
+
+  // The lens is drawn where its height is, outside the box as well. A room 4.5 high: one step of a drag lifts the lens from the floor
+  // to 10, a third of the picture above its top edge, and the arrow of a camera that looks up does not turn round there either.
+  const flatRoom = freeze(mapOf([{ ...legacySpace, volumeHeight: 4.5 }])), flat = planSideScale(flatRoom, member({ elevation: 0 }));
+  assert.deepEqual(flat, { low: 0, span: 4.5 });
+  assert.equal(planSideDragLevel(flat, 12, 0), 10);
+  const above = planSideView(flatRoom, member({ elevation: 10, pitch: 90 }), flat);
+  near(above.camera.y, box.bottom - travel * 10 / 4.5, 'the lens above the box'); assert.equal(above.camera.y.toFixed(1), '-26.9');
+  assert.deepEqual(above.tip, above.camera);
+  // Under the box as well: the same room sunk by its own height, the camera on the ground above it lowered one step and looking down.
+  const pitRoom = freeze(mapOf([{ ...legacySpace, elevation: -4.5, volumeHeight: 4.5 }])), pit = planSideScale(pitRoom, member({ elevation: 0 }));
+  assert.deepEqual(pit, { low: -4.5, span: 4.5 });
+  assert.equal(planSideDragLevel(pit, 72, 0), -10);
+  const below = planSideView(pitRoom, member({ elevation: -10, pitch: -90 }), pit);
+  near(below.camera.y, box.bottom + travel * 5.5 / 4.5, 'the lens under the box'); assert.equal(below.camera.y.toFixed(1), '110.9');
+  assert.deepEqual(below.tip, below.camera);
 });
 
 test('readout strings name direction, up or down view, height and field of view', () => {
