@@ -12,6 +12,7 @@ import { BackgroundMapSelectionSummary } from './BackgroundMapSelectionSummary';
 import { BackgroundMapCameraColor } from './BackgroundMapCameraColor';
 import { BackgroundMapEditStrip } from './BackgroundMapEditStrip';
 import { BackgroundMapNumberField as NumberField } from './BackgroundMapNumberField';
+import { BackgroundMapDeleteDialog } from './BackgroundMapDeleteDialog';
 import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
 import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
@@ -33,6 +34,7 @@ import { useMapEditColors } from './useMapEditColors';
 import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode, MapFieldScrub } from './mapCanvas';
 import { backgroundMapPath } from './domain';
 import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
+import { mapDeleteCauseText, mapDeleteStopText, planMapDelete } from './mapDelete';
 import type { MapDeleteMode, MapDeletePlan } from './mapDelete';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
@@ -215,12 +217,15 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [settingsForm, setSettingsForm] = useState<BackgroundMap | null>(null);
   const settingsRevision = useRef<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [confirmation, setConfirmation] = useState<'discard' | 'delete-map' | 'delete-node' | 'delete-group' | null>(null);
+  const [confirmation, setConfirmation] = useState<'discard' | 'delete-node' | 'delete-group' | null>(null);
   /** The delete dialog of a map. It holds the id of the map it was opened for, and acts on that map alone. */
   const [mapDelete, setMapDelete] = useState<{ mapId: string; name: string; parentId: string | null; mode: MapDeleteMode;
     progress: { done: number; total: number } | null;
     /** The plan of the press that stopped part-way. */
     stopped: MapDeletePlan | null } | null>(null);
+  const deleting = useRef(false);                            // a run is in progress. A ref: a second press can come before `busy` is drawn
+  /** Every map this dialog has set out to delete, over all its presses. */
+  const deleteAimed = useRef<string[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 680 });
@@ -650,18 +655,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       leaveEditing();
       focusAfterConfirm.current = true; setConfirmation(null); return;
     }
-    if (confirmation === 'delete-map' && snapshot.canManage) {
-      if (draft?.baseRevision === null) {
-        doc.discard(current.id);
-        setCurrentId(current.parentId); setConfirmation(null); return;
-      }
-      setBusy(true); setError('');
-      try {
-        await execute({ type: 'delete', kind: 'map', id: current.id, expectedRevision: draft?.baseRevision ?? current.revision });
-        doc.discard(current.id);
-        setCurrentId(current.parentId); setConfirmation(null);
-      } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
-    }
   }
   async function createMap() {
     if (!createForm?.name.trim() || !snapshot.canManage || disabled) return;
@@ -711,6 +704,60 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       const imageUrl = await uploadBackgroundImage(file);
       setSettingsForm(previous => previous?.id === id ? { ...previous, imageUrl } : previous);
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  /** The drafts of maps this dialog deleted without getting an answer: the library no longer has them. Only asked while nothing is being saved. */
+  function dropGoneDrafts() { for (const id of deleteAimed.current) if (!snapshot.maps.some(map => map.id === id)) doc.discard(id); }
+  /** 도면 삭제 of the settings dialog. The dialog is bound to the map those settings were opened for, never to the map on show. */
+  function openMapDelete() {
+    if (!settingsForm || disabled || !snapshot.canManage) return;
+    const map = maps.find(item => item.id === settingsForm.id);
+    deleteAimed.current = [];
+    setMapDelete({ mapId: settingsForm.id, name: map?.name ?? settingsForm.name, parentId: map?.parentId ?? null, mode: 'keep-children', progress: null, stopped: null });
+    setSettingsForm(null); setError('');
+    // This dialog comes up where the settings dialog was: the second click of a double-click would land on a choice or a button of it.
+    swallowSecondClick();
+  }
+  async function runMapDelete() {
+    if (!mapDelete || disabled || deleting.current) return;
+    dropGoneDrafts();
+    // The whole plan, the revisions it expects and where the screen goes are settled here, before the first wait.
+    const plan = planMapDelete(snapshot, settle().drafts, mapDelete.mapId, mapDelete.mode);
+    if (!plan.target || plan.refusal) return;                // the dialog is drawn from the same plan and says why
+    const steps = plan.steps, total = plan.removed.length, parentId = plan.target.parentId, opened = parentId ? mapPath(maps, parentId).map(map => map.id) : [];
+    deleteAimed.current = [...new Set([...deleteAimed.current, ...plan.removed])];
+    deleting.current = true; setBusy(true); setError('');
+    // What is counted is maps deleted, the number the button named: the save that comes first counts for none.
+    setMapDelete(previous => previous && { ...previous, progress: { done: 0, total }, stopped: null });
+    let done = 0;
+    try {
+      for (const step of steps) {
+        // The save comes first and goes the way every save of maps goes: the drafts of the maps it wrote are put back.
+        if (step.type === 'save-maps') await persistMaps(step);
+        // What was being edited on a map is let go only once that map itself is gone.
+        else { await execute(step); doc.discard(step.id); done += 1; }
+        setMapDelete(previous => previous && { ...previous, progress: { done, total } });
+      }
+      setCurrentId(parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);
+      setCollapsed(previous => new Set([...previous].filter(id => !opened.includes(id))));
+      setMapDelete(null);
+    } catch (cause) {
+      // Said in the dialog, in plain words: never the wrapper Electron puts round what the main process throws.
+      setError(mapDeleteCauseText(cause));
+      setMapDelete(previous => previous && { ...previous, progress: null, stopped: plan });
+      // The dialog arms itself again under the pointer, and two more paragraphs push its buttons down: a click still on its way lands nowhere.
+      swallowSecondClick();
+    } finally { deleting.current = false; setBusy(false); }
+  }
+  /** 돌아가기, Esc, the close button and 닫기. Not while a run is in progress. */
+  function closeMapDelete() {
+    if (!mapDelete || disabled) return;
+    dropGoneDrafts();
+    // The map is gone (deleted here without an answer, or elsewhere): its draft goes with it and the screen moves to where it hung.
+    if (!snapshot.maps.some(map => map.id === mapDelete.mapId)) {
+      doc.discard(mapDelete.mapId);
+      setCurrentId(mapDelete.parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);
+    }
+    setMapDelete(null); setError('');
   }
   function newSpace(shape: BackgroundSpace['shape'], origin: BackgroundPoint, road = false): BackgroundSpace {
     return { id: uuid(), type: 'space', name: road ? '새 도로' : '새 공간', placeId: null, childMapId: null, x: origin.x, y: origin.y, width: 10, height: 10, rotation: 0, shape, points: [], locked: false,
@@ -1045,6 +1092,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const linkTarget = maps.find(map => map.id === linkForm?.mapId);
   const movedLink = linkTarget && current && linkTarget.parentId !== current.id;
   const draftChanged = mapDraftChanged(draft);
+  const deletePlan = useMemo(() => mapDelete ? planMapDelete(snapshot, drafts, mapDelete.mapId, mapDelete.mode) : null, [snapshot, drafts, mapDelete?.mapId, mapDelete?.mode]);
   const fieldLocked = !canEdit || !!selected?.locked;
   /** The node in hand is a road: it has a floor height and no walls. */
   const selectedRoad = selected?.type === 'space' && isRoadSpace(selected);
@@ -1304,8 +1352,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <details className="bmap-disclosure"><summary>도면 위치와 배경 장소</summary><Field label="도면 위치"><select value={settingsForm.parentId ?? ''} disabled={disabled} onChange={event => setSettingsForm({ ...settingsForm, parentId: event.target.value || null })}><option value="">최상위</option>{parentOptions.map(map => <option key={map.id} value={map.id}>{mapPath(maps, map.id).map(item => item.name).join(' / ')}</option>)}</select></Field><Field label="대표 장소"><select value={settingsForm.placeId ?? ''} disabled={disabled} onChange={event => setSettingsForm({ ...settingsForm, placeId: event.target.value || null })}><option value="">나중에 연결</option>{snapshot.places.map(place => <option key={place.id} value={place.id}>{place.name}</option>)}</select></Field>{settingsForm.parentId !== current?.parentId && <p className="bmap-move-note">하위 도면도 함께 옮깁니다. 이전 공간에서 이 도면을 열던 연결은 해제됩니다.</p>}</details>
       {draftChanged && <p className="bmap-hint">현재 공간의 편집 내용도 함께 저장됩니다.</p>}
       {error && <p className="bg-error" role="alert">{error}</p>}
-      <div className="bmap-modal-actions"><button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); setConfirmation('delete-map'); }}>도면 삭제</button><button type="button" className="bg-button" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); }}>취소</button><button type="submit" className="bg-button bg-primary" disabled={disabled || !settingsForm.name.trim()}>{busy ? '저장 중…' : '설정 저장'}</button></div>
+      <div className="bmap-modal-actions"><button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={openMapDelete}>도면 삭제</button><button type="button" className="bg-button" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); }}>취소</button><button type="submit" className="bg-button bg-primary" disabled={disabled || !settingsForm.name.trim()}>{busy ? '저장 중…' : '설정 저장'}</button></div>
     </form></BackgroundModal>}
-    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?') : confirmation === 'delete-map' ? '도면을 삭제할까요?' : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.') : confirmation === 'delete-map' ? '도면 배치만 삭제합니다. 장소와 배경 원본은 유지됩니다. 하위 도면이나 연결이 남아 있으면 먼저 해제해 주세요.' : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}
+    {mapDelete && deletePlan && <BackgroundMapDeleteDialog name={mapDelete.name} plan={deletePlan} mode={mapDelete.mode} progress={mapDelete.progress}
+      stopped={mapDelete.stopped && mapDeleteStopText(mapDelete.stopped, snapshot)} error={error} disabled={disabled}
+      onMode={mode => setMapDelete(previous => previous && { ...previous, mode })} onClose={closeMapDelete} onConfirm={() => void runMapDelete()} />}
+    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?') : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.') : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}
   </div>;
 }

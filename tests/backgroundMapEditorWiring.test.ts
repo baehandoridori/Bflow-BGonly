@@ -80,6 +80,11 @@ const handler = {
   saveMap: () => piece(editor, 'async function saveMap(', 'function requestSave('),
   requestSave: () => piece(editor, 'function requestSave(', 'async function confirmAction('),
   confirmAction: () => piece(editor, 'async function confirmAction(', 'async function createMap('),
+  /** The four of the delete dialog of a map, as they stand in the file: each up to the next, the last up to the function behind them. */
+  dropGoneDrafts: () => piece(editor, 'function dropGoneDrafts(', 'function openMapDelete('),
+  openMapDelete: () => piece(editor, 'function openMapDelete(', 'async function runMapDelete('),
+  runMapDelete: () => piece(editor, 'async function runMapDelete(', 'function closeMapDelete('),
+  closeMapDelete: () => piece(editor, 'function closeMapDelete(', 'function newSpace('),
   followSaved: () => piece(editor, 'const followSaved = useEvent(() => {', 'const abortGesture = useEvent('),
   abortGesture: () => piece(editor, 'const abortGesture = useEvent(', 'useLayoutEffect(() => { abortGesture(); }'),
   commitName: () => piece(editor, 'const commitName = useEvent(', 'const cancelName = useEvent('),
@@ -961,9 +966,9 @@ test('anchor 50: a save never ends edit mode: every saved map that was being edi
   // revision before that save, and the next save would be refused. Nothing after the wait reads that render or opens a draft.
   const after = persist.slice(positions(persist, waited)[0] + waited.length);
   for (const stale of [/\bsnapshot\b/, /\bcurrent\b/, /\bdraft\b/, /doc\.beginEditing/, /doc\.enterNewMap/]) assert.doesNotMatch(after, stale);
-  // No save drops a draft any more, and the four saves all go through that function.
+  // No save drops a draft any more, and the five saves all go through that function.
   assert.doesNotMatch(editor, /dropDrafts/);
-  assert.equal(count(editor, /await persistMaps\(/g), 4, 'the map, a new map, a link, the settings');
+  assert.equal(count(editor, /await persistMaps\(/g), 5, 'the map, a new map, a link, the settings, the save step of a map delete');
   const binding = read('useBackgroundMapDocument.ts');
   assert.doesNotMatch(binding, /dropDrafts/);
   // The calls of the editor reach the reducer through these two lines, and each sends its own action. Swapped, a save would
@@ -1034,7 +1039,9 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
   // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
   inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
-  assert.equal(count(editor, /\bswallowSecondClick\b/g), 2);
+  // The word stands four times: the function, this call, and the delete dialog of a map as it comes up and as a run of
+  // it stops (anchor 66 holds those two where they are).
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 4, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops');
   assert.deepEqual(piece(editor, 'function swallowSecondClick() {', 'function navigate(').split('\n').map(line => line.trim()).filter(Boolean), [
     'function swallowSecondClick() {',
     'const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };',
@@ -2106,6 +2113,151 @@ test('anchor 65: an open dialog of the editor is one line, and three places read
 });
 
 test('anchor 66: the delete dialog acts on the map it was opened for, sends the plan in its order, and lets a draft go only once its own map is gone', () => {
+  // The editor first. What it does with the delete dialog of a map is four functions, each read from its own first line
+  // up to the next (the last up to the function behind them): they stand together, in this order, in no handler another
+  // anchor cuts out. `lined` is a piece as its lines, without their indent, and `all` is the editor so. A value of the
+  // render is looked for by its name alone: `current`, never the `.current` of a ref, and no part of a longer name.
+  const drop = handler.dropGoneDrafts(), open = handler.openMapDelete(), run = handler.runMapDelete(), close = handler.closeMapDelete();
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean), all = lined(editor);
+  // 도면 삭제 of the settings dialog opens it, for the map those settings were opened for: the dialog holds that id, and
+  // every plan, command and word comes of it. Held from the map on show (`current.id`) it could be another map: while
+  // viewing, the map on show changes under the open settings as soon as it is deleted elsewhere, to the first map of
+  // the list and without a word. Nothing for a read-only account, and nothing while a save or a run is in progress. The
+  // dialog opens on 하위 도면은 남기기, every time: the choice that deletes less. And it comes up where the settings dialog
+  // was, so for the length of a double-click no press reaches the page: the second click of a double-click on 도면 삭제
+  // would land on a choice or on a button of it.
+  for (const text of ['if (!settingsForm || disabled || !snapshot.canManage) return;', 'mapId: settingsForm.id', "mode: 'keep-children'", 'swallowSecondClick();'])
+    assert.ok(open.includes(text), `not in openMapDelete: ${text}`);
+  assert.doesNotMatch(open, /(?<![.\w])(?:current)\b/, 'the delete dialog is opened for the map on show');
+  // And the function holds nothing else. The name and the place of that map as the editor has them now, for the sentence
+  // of a map that is gone and for the way back from it; where the map is gone already, the name the settings were opened
+  // with. The list of the maps this dialog has set out to delete starts empty: left over from the dialog before, it
+  // would let go of the draft of a map that one aimed at and that has gone since. The settings dialog goes, with what
+  // was typed in it, and so does the message of the editor: under this dialog it would be drawn inside it.
+  assert.deepEqual(lined(open), ['function openMapDelete() {', 'if (!settingsForm || disabled || !snapshot.canManage) return;', 'const map = maps.find(item => item.id === settingsForm.id);',
+    'deleteAimed.current = [];',
+    "setMapDelete({ mapId: settingsForm.id, name: map?.name ?? settingsForm.name, parentId: map?.parentId ?? null, mode: 'keep-children', progress: null, stopped: null });",
+    "setSettingsForm(null); setError('');", 'swallowSecondClick();', '}']);
+  // A delete that went through without an answer never reaches the line that lets its draft go, and the draft of a map
+  // the library no longer has would stay in the tree, as a map that is being edited and can never be saved. So the
+  // dialog lets go of the drafts of the maps it set out to delete, once the library no longer has them: of those alone,
+  // and of none the library still has. That one line and no other. Without its condition, going back after a run that
+  // stopped would drop the unsaved edits of the maps it aimed at that are still there; turned round, it would drop
+  // those alone, and keep the drafts of the ones that are gone.
+  assert.deepEqual(lined(drop), ['function dropGoneDrafts() { for (const id of deleteAimed.current) if (!snapshot.maps.some(map => map.id === id)) doc.discard(id); }']);
+  // The run, in this order. Nothing without the dialog, while the editor is busy (the snapshot then shows maps that are
+  // not confirmed), or while a run is in progress: asked of the ref, because a second press can come before `busy` is
+  // drawn. The drafts of maps deleted without an answer go first. Then the plan: for the map the dialog holds, never the
+  // map on show, and from the drafts as the store has them at this moment. A map that is gone or a plan that is refused
+  // ends it there, and the dialog, drawn from the same plan, says why. Every map the plan deletes is noted as aimed at,
+  // over all presses. Only then is the ref set: set before the checks that return early, one refused press would leave it set
+  // for good. The save that comes first goes the way every save of maps goes, which puts the drafts of the maps it wrote
+  // back: sent by `execute` they would stay on the revision before it, and their next save would be refused. Each delete
+  // is sent by itself, and the draft of its map goes on that very line, once that map is gone: let go all at once before
+  // the loop, a run that stops would have taken the unsaved edits of maps that are still there. Then the screen goes to
+  // where the map hung. A run that stops says why in the words of the dialog (by `message` the wrapper Electron puts
+  // round what the main process throws would be shown), keeps the plan of that press for what the dialog says was done,
+  // and for the length of a double-click no press reaches the page: the dialog arms itself again under the pointer, and a
+  // click still on its way would send a plan nobody has read. However it ends, the ref and `busy` are cleared.
+  inOrder(run, 'if (!mapDelete || disabled || deleting.current) return;', 'dropGoneDrafts();', 'planMapDelete(snapshot, settle().drafts, mapDelete.mapId, mapDelete.mode)',
+    'if (!plan.target || plan.refusal) return;', 'deleteAimed.current = [...new Set([...deleteAimed.current, ...plan.removed])];', 'deleting.current = true; setBusy(true);',
+    "if (step.type === 'save-maps') await persistMaps(step);", 'else { await execute(step); doc.discard(step.id); done += 1; }', 'setCurrentId(parentId);',
+    'setError(mapDeleteCauseText(cause));', 'stopped: plan', 'swallowSecondClick();', 'finally { deleting.current = false; setBusy(false); }');
+  assert.ok(!run.includes('message(cause)'), 'why a run stopped is said with the wrapper of Electron round it');
+  assert.doesNotMatch(run, /(?<![.\w])(?:current)\b/, 'the run reads the map on show');
+  // After the first wait this handler still holds the render that started the run: its library, its map on show, its
+  // draft and its maps are those from before the commands. So the steps, the place the screen goes to and the branch
+  // that is unfolded there are values settled before that wait, and the state of the dialog is written by functions of
+  // the state before. Read after it, they would pass for the library and the screen as the commands left them, which
+  // this handler never sees.
+  const waited = run.slice(positions(run, 'await ')[0]);
+  assert.doesNotMatch(waited, /(?<![.\w])(?:snapshot|current|draft|maps)\b/, 'the run reads its render after the first wait');
+  // A draft is let go in that one line, the ref is set in that one place, and the lost drafts are asked for once.
+  assert.equal(count(run, /doc\.discard\(/g), 1, 'the draft of a map goes in one place, behind its own delete');
+  assert.equal(count(run, /deleting\.current = true/g), 1, 'the ref is set once, behind the checks that return early');
+  assert.equal(count(run, /dropGoneDrafts\(\);/g), 1);
+  // The ref starts clear, and the list of the maps aimed at starts empty: with the ref set from the start no run would
+  // ever begin. Both are refs of the editor, read and written at once: as state they would be a render behind.
+  for (const made of ['const deleting = useRef(false);', 'const deleteAimed = useRef<string[]>([]);']) assert.ok(all.includes(made), `not a line of its own: ${made}`);
+  // And the run holds nothing else: the lines above and what joins them. What is counted for the button is maps
+  // deleted, of the number the button named: the save that comes first counts for none. The message of the press before
+  // is cleared, and with it what the dialog said that press had done. At its end the screen is left as on a move to
+  // another map (the points being drawn, the tool, the palette, the focus request), and the branch down to where the
+  // map hung is unfolded, so the maps that moved up can be seen.
+  assert.deepEqual(lined(run), ['async function runMapDelete() {', 'if (!mapDelete || disabled || deleting.current) return;', 'dropGoneDrafts();',
+    'const plan = planMapDelete(snapshot, settle().drafts, mapDelete.mapId, mapDelete.mode);', 'if (!plan.target || plan.refusal) return;',
+    'const steps = plan.steps, total = plan.removed.length, parentId = plan.target.parentId, opened = parentId ? mapPath(maps, parentId).map(map => map.id) : [];',
+    'deleteAimed.current = [...new Set([...deleteAimed.current, ...plan.removed])];', "deleting.current = true; setBusy(true); setError('');",
+    'setMapDelete(previous => previous && { ...previous, progress: { done: 0, total }, stopped: null });', 'let done = 0;', 'try {', 'for (const step of steps) {',
+    "if (step.type === 'save-maps') await persistMaps(step);", 'else { await execute(step); doc.discard(step.id); done += 1; }',
+    'setMapDelete(previous => previous && { ...previous, progress: { done, total } });', '}',
+    "setCurrentId(parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);",
+    'setCollapsed(previous => new Set([...previous].filter(id => !opened.includes(id))));', 'setMapDelete(null);', '} catch (cause) {', 'setError(mapDeleteCauseText(cause));',
+    'setMapDelete(previous => previous && { ...previous, progress: null, stopped: plan });', 'swallowSecondClick();', '} finally { deleting.current = false; setBusy(false); }', '}']);
+  // 돌아가기, Esc, the close button and 닫기. Not while a run is in progress: the editor is busy then. The drafts of maps
+  // deleted without an answer go. The draft of the map the dialog holds goes, and the screen moves to where that map
+  // hung, only when the library no longer has that map (deleted here without an answer, or elsewhere): outside that
+  // branch, going back would drop the unsaved edits of a map that is still there without a word, and leave it for the
+  // map above. Nothing is sent as the dialog closes, and nothing of it is read from the map on show.
+  inOrder(close, 'if (!mapDelete || disabled) return;', 'dropGoneDrafts();');
+  const gone = block(close, 'if (!snapshot.maps.some(map => map.id === mapDelete.mapId)) {');
+  for (const text of ['doc.discard(mapDelete.mapId);', 'setCurrentId(mapDelete.parentId);']) assert.ok(gone.includes(text), `not in the branch of a map that is gone: ${text}`);
+  assert.equal(count(close, /doc\.discard\(/g), 1, 'a draft is let go as the dialog closes, outside the branch of a map that is gone');
+  assert.equal(count(close, /setCurrentId\(/g), 1, 'the screen moves as the dialog closes, outside the branch of a map that is gone');
+  assert.doesNotMatch(close, /(?<![.\w])(?:current)\b/, 'the close reads the map on show');
+  assert.ok(!close.includes('execute('), 'the close sends a command');
+  assert.deepEqual(lined(close), ['function closeMapDelete() {', 'if (!mapDelete || disabled) return;', 'dropGoneDrafts();', 'if (!snapshot.maps.some(map => map.id === mapDelete.mapId)) {',
+    'doc.discard(mapDelete.mapId);', "setCurrentId(mapDelete.parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);", '}',
+    "setMapDelete(null); setError('');", '}']);
+  // The old way is gone from the editor: the question that asked about the map on show, its title, and the sentence
+  // that told to take the links off first. Nothing is sent from that question any more (it deletes placements and ends
+  // edit mode), and the editor writes no delete of its own: a command goes out in two places, the function every save
+  // of maps goes through and the line of the run, and what is deleted is what the plan says.
+  for (const old of ['delete-map', '먼저 해제해 주세요', '도면을 삭제할까요']) assert.ok(!editor.includes(old), `still there: ${old}`);
+  assert.doesNotMatch(handler.confirmAction(), /\bexecute\(|\bawait\b/, 'the question of the editor sends a command');
+  assert.equal(count(editor, /\bexecute\(/g), 2, 'every save of maps, and the deletes of a plan');
+  assert.ok(!editor.includes("type: 'delete'"), 'the editor writes a delete of its own');
+  // The dialog is drawn while the editor holds one, from the plan of the map it holds: by these three lines, once, with
+  // nothing in front of them. Hung on the map on show as well (`current &&`), there would be no dialog to say that the
+  // map is gone once the last map of the library is. And they stand where the editor draws its dialogs, right behind the
+  // settings dialog and before the question: inside what is drawn only for a map on show, the same would be lost.
+  // What it is given: the name it was opened with, the plan, the choice and the run as the editor holds them, what a run
+  // that stopped has done, read from the library as it is now, the message of the editor, and what it hands back: the
+  // choice, the close, and the press that deletes.
+  const drawn = ['{mapDelete && deletePlan && <BackgroundMapDeleteDialog name={mapDelete.name} plan={deletePlan} mode={mapDelete.mode} progress={mapDelete.progress}',
+    'stopped={mapDelete.stopped && mapDeleteStopText(mapDelete.stopped, snapshot)} error={error} disabled={disabled}',
+    'onMode={mode => setMapDelete(previous => previous && { ...previous, mode })} onClose={closeMapDelete} onConfirm={() => void runMapDelete()} />}'];
+  assert.ok(editor.includes('{mapDelete && deletePlan && <BackgroundMapDeleteDialog '), 'the delete dialog is not drawn, or hangs on something else');
+  assert.equal(count(editor, /<BackgroundMapDeleteDialog\b/g), 1, 'the delete dialog is drawn once');
+  const at = all.indexOf(drawn[0]);
+  assert.ok(at > 0, `not a line of its own: ${drawn[0]}`);
+  assert.deepEqual(all.slice(at - 1, at + drawn.length), ['</form></BackgroundModal>}', ...drawn]);
+  assert.ok(all[at + drawn.length].startsWith('{confirmation && current && <BackgroundModal '), 'the delete dialog is not drawn right before the question of the editor');
+  const settings = piece(editor, '{settingsForm && <BackgroundModal title="도면 설정"', drawn[0]);
+  assert.equal(count(settings, /<\/form><\/BackgroundModal>\}/g), 1, 'the delete dialog is not drawn right behind the settings dialog');
+  // The plan on show is made by the function the run makes its own with, for the same map and the same choice, from the
+  // library and the drafts of the render: read anew after a run that stopped, it is what is left to do, and without a
+  // target once the map is gone. It hangs on the library: without that the dialog would go on showing a map that is gone.
+  assert.ok(all.includes('const deletePlan = useMemo(() => mapDelete ? planMapDelete(snapshot, drafts, mapDelete.mapId, mapDelete.mode) : null, [snapshot, drafts, mapDelete?.mapId, mapDelete?.mode]);'),
+    'the plan the delete dialog is drawn from');
+  assert.equal(count(editor, /\bplanMapDelete\(/g), 2, 'the plan on show and the plan of the press');
+  // The button of the settings dialog is that function, the whole tag, and the dialog is given its map in that one
+  // place. Each of the four is named where it is made and where it is handed over, and nowhere else: a second way in
+  // would open the dialog for another map, and a second way to run would be a delete nobody pressed.
+  assert.ok(settings.includes('<button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={openMapDelete}>도면 삭제</button>'), 'the button of the settings dialog does not open the delete dialog');
+  assert.ok(editor.includes('onClick={openMapDelete}>도면 삭제</button>'));
+  assert.equal(count(editor, />도면 삭제<\/button>/g), 1, 'one button reads: 도면 삭제');
+  assert.equal(count(editor, /\bsetMapDelete\(\{/g), 1, 'the delete dialog is given its map in one place');
+  for (const [name, times] of Object.entries({ openMapDelete: 2, runMapDelete: 2, closeMapDelete: 2, dropGoneDrafts: 3 }))
+    assert.equal(count(editor, new RegExp(`\\b${name}\\b`, 'g')), times, `${name} is named in another place`);
+  // And the state of the dialog is written in the places held above and in no other: the open, the four of the run,
+  // the close, and the choice the dialog hands back. Closed by an effect of the editor's own (as the map on show
+  // changes, say), it would go while a run is in progress, and what a run that stopped has to say could be read nowhere.
+  assert.equal(count(editor, /\bsetMapDelete\(/g), 7, 'the open, the run (four), the close, the choice');
+  // The dialog, the plan and the two sentences come in by their imports. The plan and the sentences are the pure
+  // module's, which the D tests run: one of the same name written in the editor would be reached by no test.
+  for (const text of ["import { BackgroundMapDeleteDialog } from './BackgroundMapDeleteDialog';", "import { mapDeleteCauseText, mapDeleteStopText, planMapDelete } from './mapDelete';"])
+    assert.ok(all.includes(text), `not imported: ${text}`);
   // The plan of a delete and the words the dialog says of it are a module of their own, read as this anchor runs: without
   // its file this anchor fails, not every anchor of this file. Node runs that module as it is, so what a plan holds and
   // what is said of it are tested by running them (the D tests). Held here, by its letters, is what those tests cannot
