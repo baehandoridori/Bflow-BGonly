@@ -99,7 +99,7 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - 개발용 `?preview=feedback-hub` 뿌리에는 창의 호스트가 없다(거기서는 묻지 않는 것이 맞다).
 - 씬 작업 링크 테스트는 `npm run test:scene-links`.
 
-### 저장소 그림 삭제 경계 (v1.134.3)
+### 저장소 그림 삭제 경계 (v1.135.2)
 
 - `scene-images` 버킷의 삭제는 버킷이 생긴 2026-04-17부터 2026-10까지 **한 번도 실제로 되지 않았다**. anon 읽기 정책이 없어 `remove()`가 오류 없이 빈 목록만 돌려줬고, 앱은 오류가 없다는 것만 보고 넘어갔다. 정책은 `DEVLOG/migrations/2026-10-12-scene-images-delete-policy.sql`.
 - 읽기 정책은 **지우는 작업에만** 열려 있다(`storage.allow_any_operation`). 작업을 가리지 않는 anon 읽기 정책을 더하지 않는다 — 버킷의 파일 이름을 전부 나열할 수 있게 된다.

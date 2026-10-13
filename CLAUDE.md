@@ -26,7 +26,7 @@
 8. **간트 삭제 후 버전 보존**: 비공개 `gantt_entity_revisions`와 preview revision 기록으로 복원 시 버전을 증가시킨다. 실행 취소 응답은 새 버전만 정규화하며 원격 내용 변경까지 승인하지 않는다. 배포 시 `20260905173804_gantt_revision_ledger.sql` 적용을 확인한다.
 9. **새 로그인은 서버 전용**: v1.117.4부터 `app_login` 서버 결과만 인증 근거로 사용한다. 서버 불가·로그인 기능 누락·통신 예외 시 새 로그인을 보류하며 `users.dat`나 표시용 사용자 디렉터리로 인증을 대신하지 않는다. 기존 저장 데이터·토큰 복원 정책은 임의로 초기화하거나 변경하지 않는다.
 10. **팀 할 일은 세션 토큰 래퍼 + 내용 없는 신호**: `comment_thread_todos`는 anon 직접 권한 없이 `comment_thread_todos_session_*` 래퍼로만 열고, 실시간은 내용 없는 `thread-todos-changed` 신호 → 재조회만 쓴다(publication 금지). preview는 `src/mocks/threadTodoPreviewStore.ts`(localStorage + Web Locks + BroadcastChannel)로 같은 규칙을 지킨다. 상세는 AGENTS.md '팀 할 일 경계'.
-11. **그림 파일 삭제는 서버가 판정한다 (v1.134.3~)**: DB가 아직 가리키는 그림은 서버가 삭제를 거절하므로, 그림 주소를 적는 열을 새로 만들면 `storage_private.scene_image_is_referenced`에 반드시 넣는다(빠지면 그 그림이 주인 없는 것으로 보여 지워질 수 있다). 거꾸로 그 함수가 읽는 표·열의 이름을 바꾸거나 없애면 삭제가 전부 막히므로 함수를 함께 고친다. main에서 그림 파일은 가리키던 기록을 지운 뒤에 `electron/storage.ts`의 `deleteImages`로만 지우고, 지워졌는지는 오류 유무가 아니라 지웠다고 돌아온 이름으로 본다. 작업을 가리지 않는 anon 읽기 정책을 `storage.objects`에 더하지 않는다. 상세는 AGENTS.md '저장소 그림 삭제 경계'.
+11. **그림 파일 삭제는 서버가 판정한다 (v1.135.2~)**: DB가 아직 가리키는 그림은 서버가 삭제를 거절하므로, 그림 주소를 적는 열을 새로 만들면 `storage_private.scene_image_is_referenced`에 반드시 넣는다(빠지면 그 그림이 주인 없는 것으로 보여 지워질 수 있다). 거꾸로 그 함수가 읽는 표·열의 이름을 바꾸거나 없애면 삭제가 전부 막히므로 함수를 함께 고친다. main에서 그림 파일은 가리키던 기록을 지운 뒤에 `electron/storage.ts`의 `deleteImages`로만 지우고, 지워졌는지는 오류 유무가 아니라 지웠다고 돌아온 이름으로 본다. 작업을 가리지 않는 anon 읽기 정책을 `storage.objects`에 더하지 않는다. 상세는 AGENTS.md '저장소 그림 삭제 경계'.
 
 ---
 
