@@ -75,10 +75,14 @@ export function RiggingAnnounceModal({
   const pastedRef = useRef<PastedImage[]>([]);
   useEffect(() => { pastedRef.current = pasted; }, [pasted]);
 
+  // 한 번이라도 전송을 시도한 그림 — 실패로 보였어도 슬랙에는 나갔을 수 있어(응답만 끊긴 경우) 지우지 않는다.
+  //   이 그림은 DB 에 주소가 없어 서버가 삭제를 막아 주지 못한다(슬랙 메시지만 가리킨다).
+  const attemptedUrlsRef = useRef(new Set<string>());
+
   /** 공지 전용 업로드 정리 — keepUrls(전송에 쓴 이미지들)만 남기고 스토리지에서 삭제(고아 방지, fire-and-forget). */
   const cleanupPastedUploads = (keepUrls: ReadonlySet<string>) => {
     for (const img of pastedRef.current) {
-      if (keepUrls.has(img.url)) continue;
+      if (keepUrls.has(img.url) || attemptedUrlsRef.current.has(img.url)) continue;
       deleteImage(img.url).catch((e) => console.warn('[rigging-announce] 붙여넣기 이미지 정리 실패:', e));
     }
   };
@@ -203,6 +207,7 @@ export function RiggingAnnounceModal({
   const onSend = async () => {
     if (sending || pasting) return;
     setSending(true);
+    for (const url of selectedUrlSet) attemptedUrlsRef.current.add(url);
     try {
       await sendRiggingAnnounce({
         // 피드백 34(b): [내용] 줄 포맷 — '"캐릭터 이름" - "복장 이름" 리깅완료'. 입력 없이도 완성 공지가 나간다.

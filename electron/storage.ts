@@ -11,7 +11,7 @@
 import { nativeImage } from 'electron';
 import { supabase } from './supabase';
 import { uploadCharacterImageFiles, type CharacterImageStore } from './characterImageUpload';
-import { withCharacterOriginalPaths } from '../src/shared/characterImageOriginal';
+import { removeStoragePaths, storagePathFromPublicUrl, type StorageRemover } from './storageRemove';
 
 const BUCKET = 'scene-images';
 const MAX_PX = 800;
@@ -34,12 +34,6 @@ function buildPath(sheetName: string, sceneId: string, imageType: string, ext: '
   }
   const { ep, partId, dept } = parseSheetName(sheetName);
   return `${ep}/${partId}/${dept}/${sceneId}/${imageType}_${uniq}.${ext}`;
-}
-
-/** public URL → storage 경로 추출 */
-export function extractPathFromPublicUrl(url: string): string | null {
-  const m = url.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/);
-  return m ? m[1] : null;
 }
 
 interface ProcessedImage {
@@ -106,12 +100,20 @@ export async function uploadImage(
   }
 }
 
+const removeFromBucket: StorageRemover = (paths) => supabase.storage.from(BUCKET).remove(paths);
+
+/**
+ * 공개 주소들의 저장소 파일을 지운다 (캐릭터 그림은 함께 보관한 원본도).
+ * 비-Supabase URL(legacy drive URL 등)은 무시. 지우지 못한 것은 기록만 하고 던지지 않는다.
+ * 서버는 DB 가 아직 가리키는 그림의 삭제를 거절한다 — 그 그림을 가리키던 기록을 지우거나 바꾼 뒤에 부를 것.
+ */
+export async function deleteImages(urls: readonly unknown[], tag = '[Storage]'): Promise<void> {
+  const paths = urls.map(storagePathFromPublicUrl).filter((path): path is string => !!path);
+  await removeStoragePaths(removeFromBucket, paths, tag);
+}
+
 export async function deleteImage(url: string): Promise<void> {
-  const path = extractPathFromPublicUrl(url);
-  if (!path) return; // 비-Supabase URL은 무시 (legacy drive URL 등)
-  // 캐릭터 그림이면 함께 보관한 원본도 같이 지운다.
-  const { error } = await supabase.storage.from(BUCKET).remove(withCharacterOriginalPaths([path]));
-  if (error) console.warn('[Storage] 삭제 실패:', error.message);
+  await deleteImages([url]);
 }
 
 const characterImageStore: CharacterImageStore = {
