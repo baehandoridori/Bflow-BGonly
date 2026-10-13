@@ -136,6 +136,11 @@ test('N-3: a value slid is the value typed', () => {
     }
   }
   assert.equal(cases, 29 * 4);
+  // A value typing misses by its last digit (220.5 + (0.1 - 220.5) is 0.09999999999999432): the slid node stands on it all the same.
+  assert.notEqual(nodeOf(typed(base, chair, 'x', 0.1), chair).x, 0.1);
+  assert.equal(nodeOf(setMapNodeNumber(base, chair.id, 'x', 0.1), chair).x, 0.1);
+  assert.notEqual(nodeOf(typed(base, room, 'y', 0.1), room).y, 0.1);
+  assert.equal(nodeOf(setMapNodeNumber(base, room.id, 'y', 0.1), room).y, 0.1);
 });
 
 test('N-4: with nothing to write the same map object comes back', () => {
@@ -192,6 +197,8 @@ test('N-6: steps, settling and a slide are a matter of where the pointer is', ()
   // No step: the value itself, decimals and all.
   assert.equal(stepNumber(244.65, 0, 'x', false), 244.65);
   assert.equal(stepNumber(244.65, 0, 'x', true), 244.65);
+  // A value stored outside the limits or outside the turn too: nothing is settled before the first step.
+  assert.deepEqual([stepNumber(175, 0, 'fov', false), stepNumber(-90, 0, 'rotation', true)], [175, -90]);
   // Off the grid, the first step lands on the next grid value on the way.
   assert.deepEqual([1, 2, -1].map(steps => stepNumber(244.65, steps, 'x', false)), [245, 246, 244]);
   assert.deepEqual([1, -1].map(steps => stepNumber(244.65, steps, 'x', true)), [250, 240]);
@@ -226,7 +233,9 @@ test('N-6: steps, settling and a slide are a matter of where the pointer is', ()
   assert.deepEqual([175, 5, 60.5].map(value => settleNumber(value, 'fov')), [170, 10, 60.5]);
   assert.deepEqual([-90, 360, 725, 94.3].map(value => settleNumber(value, 'rotation')), [270, 0, 5, 94.3]);
   assert.equal(settleNumber(-0, 'x'), 0);
+  // A value that is no number settles to none: an endless one is not held at the limit on its side.
   assert.deepEqual([Number.NaN, Infinity].map(value => settleNumber(value, 'angle')), [Number.NaN, Number.NaN]);
+  assert.deepEqual([Infinity, -Infinity].map(value => settleNumber(value, 'fov')), [Number.NaN, Number.NaN]);
 
   // A slide that started at A. The places below are made of the names of MAP_NUMBER_SCRUB, never written as pixels.
   const A = 104, begun = (value: number): MapNumberSlide => ({ anchorX: A, anchorValue: value, big: false, value });
@@ -244,6 +253,9 @@ test('N-6: steps, settling and a slide are a matter of where the pointer is', ()
   assert.deepEqual([A + stepPx, A, A - stepPx].map(x => slideNumber(fine, x, false, 'x')), [245, 244.65, 244]);
   // The slide is brought up to date in place.
   assert.deepEqual(fine, { anchorX: A, anchorValue: 244.65, big: false, value: 244 });
+  // A field of view stored outside the limits comes inside them with its first step, and is itself again back where the slide started.
+  const wide = begun(175);
+  assert.deepEqual([A + stepPx, A].map(x => slideNumber(wide, x, false, 'fov')), [170, 175]);
   // Dragged on past a limit, that much has to be retraced before the value moves again.
   const held = begun(168);
   assert.deepEqual([10, 5, 1, 0].map(steps => slideNumber(held, A + steps * stepPx, false, 'fov')), [170, 170, 169, 168]);
@@ -269,6 +281,8 @@ test('N-7: the bar: where its dot stands, the value at a place on it, and a pres
   const pitchAt = (degrees: number) => (degrees + 90) / 180;
   assert.equal(trackNumber(pitchAt(47.2), 'pitch', true, 47), 47);
   assert.equal(trackNumber(pitchAt(55), 'pitch', true, 47), 60);
+  // A tilt below level is compared as it is stored: only a direction is brought inside the turn first.
+  assert.equal(trackNumber(pitchAt(-34.8), 'pitch', true, -35), -35);
   // A place a hair under level rounds to 0, not to -0.
   assert.equal(trackNumber(pitchAt(-0.2), 'pitch', false, 47), 0);
   // A rotation stored outside the turn is compared as the bar shows it, at 270, and comes back as it is stored.
@@ -311,6 +325,11 @@ test('N-7: the bar: where its dot stands, the value at a place on it, and a pres
   const placed = pressNumberTrack(90, 'fov', 300 + dot(90) + off, 300, width);
   assert.ok(placed); assert.equal(placed.immediate, false);
   assert.deepEqual([0, 10].map(moved => valueAt(placed, 300 + dot(90) + off + moved)), [90, 100]);
+  // The dot that is pressed is the dot as it is drawn. A field of view stored past the end of the bar has it at that end: the press
+  // is at the inner edge of its reach, where a dot standing further out would not be touched. A rotation stored outside the turn
+  // has it where the bar shows 270.
+  assert.equal(pressNumberTrack(179, 'fov', dot(170) - grabPx, 0, width)?.immediate, false);
+  assert.equal(pressNumberTrack(-90, 'rotation', thumbPx / 2 + 270 / 359 * 160, 0, width)?.immediate, false);
   // A bar no wider than its dot, or of no width that is a number, has nowhere for the dot to go.
   for (const narrow of [thumbPx, thumbPx - 1, 0, Number.NaN]) assert.equal(pressNumberTrack(90, 'fov', 0, 0, narrow), null, String(narrow));
   assert.notEqual(pressNumberTrack(90, 'fov', 0, 0, thumbPx + 1), null);
