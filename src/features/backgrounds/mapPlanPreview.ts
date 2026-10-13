@@ -1,5 +1,5 @@
 import { stackedMapNodeIds } from './mapGeometry.ts';
-import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraPitchLabel, isRoadSpace, mapPlanBounds, nodeElevation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees, projectCameraToPlan } from './mapSpatial.ts';
+import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraPitchLabel, isRoadSpace, mapPlanBounds, nodeElevation, nodePlanOutline, nodeVolumeHeight, normalizeDegrees, normalizeSignedDegrees, projectCameraToPlan } from './mapSpatial.ts';
 import type { CameraPlanProjection } from './mapSpatial.ts';
 import { spacesAt } from './mapStack.ts';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types.ts';
@@ -234,29 +234,60 @@ export type PlanSideView = {
   /** Floor and top of the camera's own space, when it has one that is no road. */
   room: { top: number; bottom: number } | null;
 };
-/** Side elevation of one camera: how high it is and how far up or down it looks. */
-export function planSideView(map: BackgroundMap, camera: BackgroundCamera): PlanSideView {
-  const box = PLAN_SIDE_VIEW, projection = projectCameraToPlan(camera);
+/** The vertical scale of the side view: the level on the bottom line of the travel, and the levels from there up to the top line (at least 1). */
+export type PlanSideScale = { low: number; span: number };
+/** A drag of the lens: how far past the scale it started on it may go, in drawing units (a quarter of the travel at each end), and the step of its heights (10 on every map, as the owner was told). */
+export const PLAN_SIDE_DRAG = { reach: 10, step: 10 } as const;
+/** The scale the side view of this camera is drawn on: what planSideView works out when it is given none. */
+export function planSideScale(map: BackgroundMap, camera: BackgroundCamera): PlanSideScale {
+  const projection = projectCameraToPlan(camera);
   const elevation = Number.isFinite(projection.elevation) ? projection.elevation : MAP_SPATIAL_DEFAULTS.cameraElevation;
-  let low = Math.min(0, elevation), high = Math.max(0, elevation), spaces = 0, own: { floor: number; top: number } | null = null;
+  let low = Math.min(0, elevation), high = Math.max(0, elevation), spaces = 0;
   for (const node of map.nodes) {
     if (node.type !== 'space') continue;
-    // A road has no walls: its floor level alone is part of the range, and it is neither a yardstick nor a room.
+    // A road has no walls: its floor level alone is part of the range, and it is no yardstick.
     const road = isRoadSpace(node), floor = nodeElevation(node), top = road ? floor : floor + nodeVolumeHeight(node);
     if (!Number.isFinite(floor) || !Number.isFinite(top)) continue;
     low = Math.min(low, floor, top); high = Math.max(high, floor, top);
-    if (road) continue;
-    spaces++;
-    if (node.id === camera.spaceId) own = { floor, top };
+    if (!road) spaces++;
   }
   // Without any room the default room height is the yardstick, so the camera still moves as it is lifted.
   if (!spaces) high = Math.max(high, MAP_SPATIAL_DEFAULTS.spaceVolumeHeight);
-  const span = Math.max(high - low, 1), y = (level: number) => box.bottom - (level - low) / span * (box.bottom - box.top);
+  return { low, span: Math.max(high - low, 1) };
+}
+/** The y of a level on a scale, and the level at a y. Neither is held inside the box. */
+export function planSideY(scale: PlanSideScale, level: number): number {
+  return PLAN_SIDE_VIEW.bottom - (level - scale.low) / scale.span * (PLAN_SIDE_VIEW.bottom - PLAN_SIDE_VIEW.top);
+}
+export function planSideLevel(scale: PlanSideScale, y: number): number {
+  return scale.low + (PLAN_SIDE_VIEW.bottom - y) / (PLAN_SIDE_VIEW.bottom - PLAN_SIDE_VIEW.top) * scale.span;
+}
+/** The height a drag of the lens gives at `y`: a whole step, or `start` itself where that is as near or nearer. `start` when `y` is no number. */
+export function planSideDragLevel(scale: PlanSideScale, y: number, start: number): number {
+  const box = PLAN_SIDE_VIEW, limits = MAP_SPATIAL_LIMITS.elevation, step = PLAN_SIDE_DRAG.step;
+  if (!Number.isFinite(y)) return start;
+  const level = planSideLevel(scale, clamp(y, box.top - PLAN_SIDE_DRAG.reach, box.bottom + PLAN_SIDE_DRAG.reach));
+  const snapped = clamp(Math.round(level / step) * step, limits.min, limits.max) + 0;
+  return Math.abs(level - start) <= Math.abs(level - snapped) ? start : snapped;
+}
+/** Side elevation of one camera: how high it is and how far up or down it looks. */
+export function planSideView(map: BackgroundMap, camera: BackgroundCamera, scale: PlanSideScale = planSideScale(map, camera)): PlanSideView {
+  // A scale handed in is one held for a drag of the lens: the floor line and the room stay, and the lens moves alone, past the two lines of its travel as well.
+  const box = PLAN_SIDE_VIEW, projection = projectCameraToPlan(camera), y = (level: number) => planSideY(scale, level);
+  const elevation = Number.isFinite(projection.elevation) ? projection.elevation : MAP_SPATIAL_DEFAULTS.cameraElevation;
+  // The camera's own room is read apart from the scale. A road has no walls and is none, and neither is a space whose floor or top is no number.
+  let own: { floor: number; top: number } | null = null;
+  for (const node of map.nodes) {
+    if (node.type !== 'space' || node.id !== camera.spaceId || isRoadSpace(node)) continue;
+    const floor = nodeElevation(node), top = floor + nodeVolumeHeight(node);
+    if (Number.isFinite(floor) && Number.isFinite(top)) own = { floor, top };
+  }
   const lens = { x: box.cameraX, y: y(elevation) };
   const tilt = (Number.isFinite(projection.pitch) ? clamp(projection.pitch, -90, 90) : 0) * RADIANS;
   const unit = { x: Math.cos(tilt), y: -Math.sin(tilt) + 0 };
   // The angle is exact; only the length gives way so a steep arrow stays inside the box. A level one always fits.
   const reach = unit.y < 0 ? (lens.y - box.edge) / -unit.y : unit.y > 0 ? (box.height - box.edge - lens.y) / unit.y : Infinity;
-  const tip = along(lens, unit, Math.min(box.arrow, reach - box.head));
+  // On a held scale the lens can stand nearer an edge than the head is long: the shaft has no length then, and never turns round.
+  const tip = along(lens, unit, Math.max(0, Math.min(box.arrow, reach - box.head)));
   return { floorY: y(0), camera: lens, tip, head: arrowHead(tip, unit, box.head), room: own && { top: y(own.top), bottom: y(own.floor) } };
 }

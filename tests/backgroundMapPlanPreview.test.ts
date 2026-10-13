@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PLAN_FALLBACK_SIZE, PLAN_KIND_LABELS, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_VIEW,
+  PLAN_FALLBACK_SIZE, PLAN_KIND_LABELS, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_DRAG, PLAN_SIDE_VIEW,
   nextPlanSelection, planArrowTip, planCameraGlyph, planCameraReadout, planDegrees, planKindLabel, planNodeCovers, planNodeLabel, planNodeReadout, planNodeSummary,
-  planNumber, planOutlinePoints, planPileAt, planReadoutText, planSelectedNode, planSideView, planSightMark, planStackUnder, planUnitsPerPixel, planViewBox, planVolumeReadout,
+  planNumber, planOutlinePoints, planPileAt, planReadoutText, planSelectedNode, planSideDragLevel, planSideLevel, planSideScale, planSideView, planSideY,
+  planSightMark, planStackUnder, planUnitsPerPixel, planViewBox, planVolumeReadout,
 } from '../src/features/backgrounds/mapPlanPreview.ts';
 import { addMapCamera } from '../src/features/backgrounds/mapGeometry.ts';
 import { cameraPitchLabel, createMapCamera, projectCameraToPlan } from '../src/features/backgrounds/mapSpatial.ts';
@@ -334,6 +335,125 @@ test('the side view takes a road by its floor level alone: no wall height, no ro
   // Above the room's range its floor sets the scale like any other level: the room shrinks below it.
   const over = planSideView(mapOf([legacySpace, { ...legacyRoad, elevation: 300 }]), cameraAt({ spaceId: 'space' }));
   near(over.camera.y, 46); near(over.room!.top, box.bottom - travel * 180 / 300); near(over.room!.bottom, box.bottom);
+});
+
+test('S-1: a room whose numbers are no numbers is no part of the scale, and is not drawn', () => {
+  const box = PLAN_SIDE_VIEW, camera = cameraAt({ spaceId: 'space' });
+  // The camera belongs to the broken room each time. A wall height that is no number: the room is left out, and without another room the default height is the yardstick.
+  const noTop = freeze(mapOf([{ ...legacySpace, volumeHeight: Number.NaN }]));
+  assert.deepEqual(planSideScale(noTop, camera), { low: 0, span: 180 });
+  // Beside a sound room, that one alone sets the scale.
+  const beside = freeze(mapOf([{ ...legacySpace, volumeHeight: Number.NaN }, { ...legacySpace, id: 'hall', volumeHeight: 300 }]));
+  assert.deepEqual(planSideScale(beside, camera), { low: 0, span: 300 });
+  // A floor level that is no number takes the top of the room with it.
+  const noFloor = freeze(mapOf([{ ...legacySpace, elevation: Number.NaN }]));
+  assert.deepEqual(planSideScale(noFloor, camera), { low: 0, span: 180 });
+  for (const map of [noTop, beside, noFloor]) {
+    const side = planSideView(map, camera);
+    assert.equal(side.room, null);
+    for (const value of [side.floorY, ...[side.camera, side.tip, ...side.head].flatMap(point => [point.x, point.y])]) assert.ok(Number.isFinite(value), `${value}`);
+  }
+  // The sound room is still drawn around a camera of its own.
+  assert.deepEqual(planSideView(beside, cameraAt({ spaceId: 'hall' })).room, { top: box.top, bottom: box.bottom });
+});
+
+test('S-2: the scale is what the side view worked out by itself', () => {
+  // A camera that stores no height stands at the default, 120.
+  const camera: BackgroundCamera = { ...legacyCamera, spaceId: null };
+  assert.equal('elevation' in camera, false);
+  const scaleOf = (map: BackgroundMap, lens: BackgroundCamera = camera) => {
+    const scale = planSideScale(freeze(map), lens);
+    // The picture drawn without a scale is the picture on this one.
+    assert.deepEqual(planSideView(map, lens, scale), planSideView(map, lens));
+    return scale;
+  };
+  assert.deepEqual(scaleOf(mapOf([legacySpace])), { low: 0, span: 180 });
+  // Without any room the default room height is the top.
+  assert.deepEqual(scaleOf(mapOf()), { low: 0, span: 180 });
+  // A camera above every room is the top itself.
+  assert.deepEqual(scaleOf(mapOf([legacySpace]), { ...camera, elevation: 720 }), { low: 0, span: 720 });
+  // A sunken road is no room, so the default height is still the top.
+  assert.deepEqual(scaleOf(mapOf([{ ...legacyRoad, elevation: -90 }])), { low: -90, span: 270 });
+  // A sunken room is one: its top is at 90, and the camera at 120 is the top.
+  assert.deepEqual(scaleOf(mapOf([{ ...legacySpace, elevation: -90 }])), { low: -90, span: 210 });
+  // A road is in the range by its floor alone, whatever wall height it still stores.
+  assert.deepEqual(scaleOf(mapOf([{ ...legacyRoad, elevation: 300, volumeHeight: 400 }])), { low: 0, span: 300 });
+});
+
+test('S-3: a level and its y are each the inverse of the other', () => {
+  const box = PLAN_SIDE_VIEW, close = (actual: number, expected: number, label: string) => assert.ok(Math.abs(actual - expected) <= 1e-9, `${label}: ${actual} != ${expected}`);
+  for (const scale of [{ low: 0, span: 180 }, { low: -90, span: 270 }, { low: 0, span: 30 }, { low: -100000, span: 100000 }]) {
+    const label = `from ${scale.low}, ${scale.span} up`;
+    for (const level of [-40, 0, 37, 120, 180, 225]) close(planSideLevel(scale, planSideY(scale, level)), level, `level ${level} ${label}`);
+    for (const y of [0, 12, 22, 33.5, 62, 72, 84]) close(planSideY(scale, planSideLevel(scale, y)), y, `y ${y} ${label}`);
+    // The bottom line of the travel is the lowest level of the scale, and the top line its highest.
+    assert.equal(planSideLevel(scale, box.bottom), scale.low, label); assert.equal(planSideLevel(scale, box.top), scale.low + scale.span, label);
+    assert.equal(planSideY(scale, scale.low), box.bottom, label); assert.equal(planSideY(scale, scale.low + scale.span), box.top, label);
+  }
+  // Neither stops at the travel or at the box: a level above the scale is a y above the top line, and the other way round.
+  const scale = { low: 0, span: 180 };
+  assert.equal(planSideY(scale, 225), 12); assert.equal(planSideY(scale, -45), 72); assert.equal(planSideY(scale, 720), -98);
+  assert.equal(planSideLevel(scale, 12), 225); assert.equal(planSideLevel(scale, 72), -45); assert.equal(planSideLevel(scale, -98), 720);
+  assert.equal(PLAN_SIDE_DRAG.step, 10);
+});
+
+test('S-4: a drag of the lens gives whole tens, the height it started from, and stops at the reach and at the saved limits', () => {
+  const scale = planSideScale(mapOf([legacySpace]), cameraAt({ spaceId: 'space', elevation: 123 }));
+  assert.deepEqual(scale, { low: 0, span: 180 });
+  /** The height a drag that started at 123 gives with the pointer where `level` is drawn. */
+  const at = (level: number) => planSideDragLevel(scale, planSideY(scale, level), 123);
+  // Where it started it is the height it started from, decimals and all, and it stays that while no ten is nearer.
+  assert.equal(at(123), 123); assert.equal(at(124.9), 123); assert.equal(at(126.6), 130); assert.equal(at(121.4), 120); assert.equal(at(134), 130);
+  // Half way to the next ten the start is as near as the ten: it is still the start.
+  assert.equal(planSideDragLevel({ low: 100, span: 100 }, 52, 120), 120);
+  // The reach: a quarter of the travel past either end. A pointer further out counts as standing there.
+  assert.equal(planSideDragLevel(scale, 12, 123), 230); assert.equal(planSideDragLevel(scale, -500, 123), 230);
+  assert.equal(planSideDragLevel(scale, 72, 123), -40); assert.equal(planSideDragLevel(scale, 500, 123), -40);
+  // A pointer that cannot be placed on the picture changes nothing.
+  for (const y of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) assert.equal(planSideDragLevel(scale, y, 123), 123, `y ${y}`);
+  // The saved limits stop it at either end, where the place on the picture is 125000 above level 0 or below it.
+  assert.equal(planSideDragLevel({ low: 0, span: 100000 }, 12, 123), 100000);
+  assert.equal(planSideDragLevel({ low: -100000, span: 100000 }, 72, 123), -100000);
+  // A low map goes by tens as well: a room 30 high with its camera at 20 has six places, and nothing in between.
+  const low = planSideScale(mapOf([{ ...legacySpace, volumeHeight: 30 }]), cameraAt({ spaceId: 'space', elevation: 20 }));
+  assert.deepEqual(low, { low: 0, span: 30 });
+  const reached: number[] = [];
+  for (let y = 0; y <= 84; y += 0.25) { const level = planSideDragLevel(low, y, 20); if (!reached.some(value => Object.is(value, level))) reached.push(level); }
+  assert.deepEqual(reached.sort((a, b) => a - b), [-10, 0, 10, 20, 30, 40]);
+});
+
+test('S-5: on a held scale the floor and the room stay, the lens moves, and the arrow never turns round', () => {
+  const box = PLAN_SIDE_VIEW, travel = box.bottom - box.top, room = freeze(mapOf([legacySpace]));
+  const member = (extra: Partial<BackgroundCamera> = {}) => cameraAt({ spaceId: 'space', ...extra });
+  // What a drag starts on: the camera at 120 in its room of 180, and the scale of that picture.
+  const first = planSideView(room, member()), held = planSideScale(room, member());
+  assert.deepEqual(held, { low: 0, span: 180 });
+  assert.equal(first.floorY, box.bottom); assert.deepEqual(first.room, { top: box.top, bottom: box.bottom });
+  for (const elevation of [-40, 0, 60, 180, 230]) for (const pitch of [0, 45, 90, -90]) {
+    const label = `${elevation}/${pitch}`, side = planSideView(room, member({ elevation, pitch }), held);
+    assert.equal(side.floorY, first.floorY, label); assert.deepEqual(side.room, first.room, label);
+    // The lens is where its height is on that scale, past the two lines of the travel as well.
+    assert.equal(side.camera.x, box.cameraX, label); near(side.camera.y, planSideY(held, elevation), label);
+    const dx = side.tip.x - side.camera.x, dy = side.tip.y - side.camera.y;
+    // Screen y grows downwards: looking up is a negative dy, however near an edge of the box the lens is.
+    if (pitch > 0) assert.ok(dy < 0, `${label} dy ${dy}`);
+    if (pitch < 0) assert.ok(dy > 0, `${label} dy ${dy}`);
+    if (pitch === 0) { assert.equal(dy, 0, label); assert.ok(dx > 0, label); }
+    for (const point of [side.camera, side.tip, ...side.head]) assert.ok(point.x >= 0 && point.x <= box.width && point.y >= 0 && point.y <= box.height, `${label} (${point.x}, ${point.y})`);
+  }
+  // Given no scale the picture is fitted anew: the lens is on the top line again. On the held one it is above that line.
+  near(planSideView(room, member({ elevation: 230 })).camera.y, box.top); near(planSideView(room, member({ elevation: 230 }), held).camera.y, box.bottom - travel * 230 / 180);
+
+  // A low map: a room 30 high, its camera lifted from 20 as far as one drag goes and looking straight up. The lens is nearer the
+  // top edge than an arrow head is long, so the shaft has no length left: it ends on the lens and does not turn round to end under it.
+  const lowRoom = freeze(mapOf([{ ...legacySpace, volumeHeight: 30 }])), low = planSideScale(lowRoom, member({ elevation: 20 }));
+  const lifted = planSideDragLevel(low, 12, 20);
+  assert.equal(lifted, 40);
+  const side = planSideView(lowRoom, member({ elevation: lifted, pitch: 90 }), low);
+  near(side.camera.y, box.bottom - travel * 40 / 30); assert.equal(side.camera.y.toFixed(2), '8.67');
+  assert.ok(side.tip.y <= side.camera.y, `the arrow ends at ${side.tip.y}, under the lens at ${side.camera.y}`);
+  assert.deepEqual(side.tip, side.camera);
+  assert.equal(side.floorY, box.bottom); assert.deepEqual(side.room, { top: box.top, bottom: box.bottom });
 });
 
 test('readout strings name direction, up or down view, height and field of view', () => {
