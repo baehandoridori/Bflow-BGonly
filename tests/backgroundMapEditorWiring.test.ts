@@ -1095,7 +1095,7 @@ test('anchor 53: Ctrl+S is heard on the window, passes its guards, commits the f
   const key = handler.onSaveKey(), steps = [
     "if (event.code !== 'KeyS' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;",
     'if (!root || root.offsetParent === null || !editing) return;',
-    'if (createForm || linkForm || settingsForm || confirmation || document.querySelector(openDialogs)) return;',
+    'if (dialogOpen || document.querySelector(openDialogs)) return;',
     "if (element && element !== document.body && !element.closest('.bg-library')) return;",
     'if (element?.closest(textFields) && !root.contains(element)) return;',
     'event.preventDefault(); event.stopPropagation();',
@@ -1292,14 +1292,14 @@ test('anchor 56: only a draft with nothing unsaved follows the library, never du
   // about the map on show: with that map gone under it, a second press on its delete would go to the first map of the list.
   // Then the draft of the map on show is read before and after. Replaced, the picked point goes: it is a number, and may
   // now name another point. Gone, what `navigate` clears is cleared, and only then: on a mere newer revision the points
-  // that are being drawn and the tool stay. The four dialogs are dependencies, so what was skipped is done as one closes.
+  // that are being drawn and the tool stay. `dialogOpen` is a dependency, so what was skipped is done as the dialog closes.
   const follow = handler.followSaved(), steps = [
-    'if (disabled || doc.isGestureActive() || confirmation || createForm || linkForm || settingsForm) return;',
+    'if (disabled || doc.isGestureActive() || dialogOpen) return;',
     'const before = mapDraft(doc.getState(), current?.id);',
     'doc.followSaved(snapshot.maps);',
     'if (mapDraft(doc.getState(), current?.id) !== before) setActiveVertex(null);',
     "if (before && !mapDraft(doc.getState(), current?.id)) { setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); }",
-    'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);',
+    'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);',
   ];
   inOrder(follow, ...steps);
   // Each is a line of its own: nothing stands in front of one (a condition before the call, say).
@@ -2077,6 +2077,32 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // The picture is drawn on a scale handed in, and without one on the scale of the map: that is the pure module's, and
   // the S tests run it. With the third argument dropped there, the line that hands the held scale over would mean nothing.
   assert.ok(read('mapPlanPreview.ts').includes('scale: PlanSideScale = planSideScale(map, camera)'), 'planSideView takes no scale');
+});
+
+test('anchor 65: an open dialog of the editor is one line, and three places read it', () => {
+  // That a dialog of the editor is open is said in one line, of all five: the question (discard, delete), the three
+  // forms (a new map, a link, the settings) and the delete dialog of a map. Each asks about a map it holds: nothing may
+  // change the maps under it, and what the editor has to say is shown inside it. One of the five left out of that line
+  // is a dialog under which the drafts follow the library and the message is drawn a second time, behind it. Without
+  // `mapDelete` that dialog is the delete dialog of a map.
+  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete);';
+  const lines = editor.split('\n').map(line => line.trim());
+  assert.ok(lines.includes(made), `not a line of its own: ${made}`);
+  // The word stands five times, on five lines: the one that makes it and, in this order, the three places that read it.
+  // The drafts follow the library only while no dialog is open, and the effect that asks them to waits for the value:
+  // it asks again as the dialog closes, and without the value there a draft would stay behind the library after the
+  // dialog is closed (anchor 56 holds both lines in their place). Ctrl+S is left to an open dialog (anchor 53). And the
+  // editor's own message, the block above the band, is not drawn while a dialog is open: the sentence is inside the
+  // dialog then. A sixth place would be a reader no anchor knows, and with a place less one of the three asks something else.
+  const guard = 'if (disabled || doc.isGestureActive() || dialogOpen) return;', waited = 'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);';
+  const key = 'if (dialogOpen || document.querySelector(openDialogs)) return;', band = '{error && !dialogOpen && <div className="bg-error" role="alert" ref={errorRef}>';
+  assert.equal(count(editor, /\bdialogOpen\b/g), 5, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the message');
+  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, `${band}{error}</div>}`]);
+  // The dialogs are listed in that one line and nowhere else: in neither order the three places used to write four of
+  // them in, nor denied one by one as the message did. A place with a list of its own would not know the next dialog
+  // the editor is given.
+  assert.equal(count(editor, /confirmation \|\| createForm/g), 1, 'the dialogs are listed once, where dialogOpen is made');
+  for (const old of ['!confirmation && !createForm', 'createForm || linkForm || settingsForm || confirmation']) assert.ok(!editor.includes(old), `still there: ${old}`);
 });
 
 test('anchor 66: the delete dialog acts on the map it was opened for, sends the plan in its order, and lets a draft go only once its own map is gone', () => {

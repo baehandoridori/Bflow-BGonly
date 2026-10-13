@@ -33,6 +33,7 @@ import { useMapEditColors } from './useMapEditColors';
 import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode, MapFieldScrub } from './mapCanvas';
 import { backgroundMapPath } from './domain';
 import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
+import type { MapDeleteMode, MapDeletePlan } from './mapDelete';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
@@ -215,6 +216,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const settingsRevision = useRef<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [confirmation, setConfirmation] = useState<'discard' | 'delete-map' | 'delete-node' | 'delete-group' | null>(null);
+  /** The delete dialog of a map. It holds the id of the map it was opened for, and acts on that map alone. */
+  const [mapDelete, setMapDelete] = useState<{ mapId: string; name: string; parentId: string | null; mode: MapDeleteMode;
+    progress: { done: number; total: number } | null;
+    /** The plan of the press that stopped part-way. */
+    stopped: MapDeletePlan | null } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 680 });
@@ -258,6 +264,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const editing = !!draft && snapshot.canManage;
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
+  /** A dialog of the editor is open. Each asks about a map it holds: nothing may change the maps under it, and the editor's own message is shown inside it. */
+  const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete);
   // The name box is drawn only while its node can still be renamed here; otherwise it goes without a commit.
   const renamingNode = renaming && mode === 'plan' && canEdit && renaming.mapId === current?.id
     ? current.nodes.find(node => node.id === renaming.nodeId && !node.locked) : undefined;
@@ -322,7 +330,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const followSaved = useEvent(() => {
     // Never while a save runs: the store then shows maps that are not confirmed yet. Never during a drag. And never under an
     // open dialog of the editor: it asks about the map on show, and that must still be the same map when it is answered.
-    if (disabled || doc.isGestureActive() || confirmation || createForm || linkForm || settingsForm) return;
+    if (disabled || doc.isGestureActive() || dialogOpen) return;
     const before = mapDraft(doc.getState(), current?.id);
     doc.followSaved(snapshot.maps);
     // The map on show was replaced under the picked point: its index may now name another point (as after an undo).
@@ -330,8 +338,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     // The map on show went with its draft: the screen moves on to another map without `navigate`, so what `navigate` clears is cleared here.
     if (before && !mapDraft(doc.getState(), current?.id)) { setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); }
   });
-  // The four dialogs are in the list so that this runs again as one of them closes.
-  useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);
+  // An open dialog is in the list so that this runs again as it closes.
+  useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);
   // "Saved" leaves the band by itself. Timed here, not in CSS: with reduced motion a CSS timer ends on its first frame.
   useEffect(() => {
     if (!savedNotice) return;
@@ -408,7 +416,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     // The key is the editor's only while it is on show and editing. While viewing, for a read-only account and in another tab of the library it is left alone.
     if (!root || root.offsetParent === null || !editing) return;
     // An open dialog keeps the key. Asked from the state and from the document, never from the target: once Tab has run past the last button of a modal, the focus (and so the target) is the body.
-    if (createForm || linkForm || settingsForm || confirmation || document.querySelector(openDialogs)) return;
+    if (dialogOpen || document.querySelector(openDialogs)) return;
     // The key is the editor's while the focus is in the library, or on nothing at all. Elsewhere it belongs to what has the focus:
     // a window of the app that is neither a dialog element nor marked modal (changing the password, managing users), a button of the app's own frame.
     if (element && element !== document.body && !element.closest('.bg-library')) return;
@@ -1076,7 +1084,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2></div></div>
         <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button><button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button></>}</div>
       </header>
-      {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
+      {error && !dialogOpen && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
       {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
