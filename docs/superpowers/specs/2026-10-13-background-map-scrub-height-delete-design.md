@@ -753,7 +753,7 @@ export function BackgroundMapPlanSide({ map, camera, canEdit, scrub, label }: {
 
 **끌 수 있다는 표시**는 그림의 크기를 따라 줄어들면 안 된다. 고리는 화면 픽셀의 선이라 어느 배율에서든 점의 테두리 밖으로 2.25px 보인다. 위·아래 표시는 그림의 단위라 줄어든다: 보통 배치의 가장 작은 그림(높이 54px)에서 3.9×2.6px이고 고리와 0.9px 떨어지며, 가장 작은 배치(38px)에서는 2.7×1.8px로 뭉개지고 고리와 겹친다 — 그 배치에서는 그리지 않고 고리·커서·풍선이 남는다.
 
-`backgrounds-map-plan.css`, **마지막 규칙 줄(`.bmap-plan-preview [data-camera-color] {`, :108) 앞에** 둔다. 색 이름도 호박색 값도 적지 않는다 — 카메라 변수만 쓴다(색 있는 카메라는 요약 칸의 `data-camera-color`가 그 변수를 바꿔 준다).
+`backgrounds-map-plan.css`, **마지막 규칙(`.bmap-plan-preview [data-camera-color] {`, :108)의 주석 줄 앞에** 둔다(그 주석은 자기 규칙에 붙은 채로 남는다). 색 이름도 호박색 값도 적지 않는다 — 카메라 변수만 쓴다(색 있는 카메라는 요약 칸의 `data-camera-color`가 그 변수를 바꿔 준다).
 
 ```css
 /* The lens of the side view while its camera can be edited: a wider area takes the press, and a halo with a small up-down mark says it can be dragged. The halo is in screen pixels, so it shows at any size of the picture. Painted from the camera variables of this plan. Nothing here moves by itself. */
@@ -1169,7 +1169,7 @@ CSS — `backgrounds-map.css`, `.bmap-modal-actions>.bmap-text-button:first-chil
 | `mapPlanPreview.ts` | 고침 | 4.2의 더하기. `planSideView`의 셋째 인자. import에 `MAP_SPATIAL_LIMITS` |
 | `BackgroundMapPlanPreview.tsx` | 고침 | props 둘을 받아 넘긴다. 옆 그림을 새 부품으로(4.3). 리스너·`activate`·요약 줄은 그대로 |
 | `BackgroundMapEditor.tsx` | 고침 | 아래 표 |
-| `backgrounds-map.css` · `backgrounds-map-plan.css` | 고침 | 3.5(`.bmap-field-pair` 다음)와 5.4(:238 다음) · 4.4(마지막 규칙 줄 앞, 그리고 가로로 긴 칸의 두 컨테이너 블록에 한 줄씩). `backgrounds-map.css`의 미디어 블록과 띠의 줄은 건드리지 않는다 |
+| `backgrounds-map.css` · `backgrounds-map-plan.css` | 고침 | 3.5(`.bmap-field-pair` 다음)와 5.4(:238 다음) · 4.4(마지막 규칙의 주석 줄 앞, 그리고 가로로 긴 칸의 두 컨테이너 블록에 한 줄씩). `backgrounds-map.css`의 미디어 블록과 띠의 줄은 건드리지 않는다 |
 | `tests/backgroundMapPlanPreview.test.ts` · `backgroundMapEditorWiring.test.ts` · `backgroundDatabaseContract.test.ts` | 고침 | 7.2 · 6.2 · 7.3의 끝 |
 | `package.json` · `package-lock.json` · `DEVLOG/update-notes.json` · 문서 | 고침 | 8절 |
 
