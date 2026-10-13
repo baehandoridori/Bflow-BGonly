@@ -1431,17 +1431,17 @@ test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the wo
   assert.ok(editor.includes('<div className="bmap-3d-main" ref={stageRef} tabIndex={-1} '));
 });
 
-test('anchor 59: the two new test files run in the build', () => {
+test('anchor 59: the new test files run in the build', () => {
   // The build runs every test file a pattern of names finds. A file that is deleted, or renamed out of that pattern, takes
-  // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the two by name.
+  // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the new ones by name.
   const tests = new URL('./', import.meta.url), names = readdirSync(tests);
-  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts']) {
+  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts']) {
     assert.ok(names.includes(name), `not in the tests folder: ${name}`);
     const source = readFileSync(new URL(name, tests), 'utf8');
     // And each tests something: a file whose tests are all skipped is green as well.
     assert.ok(count(source, /^test\(/gm) >= 3, `fewer than three tests: ${name}`);
     // Whatever the spelling: `test.skip(`, `describe.skip(`, `t.skip()`, an option `skip:` or `todo:` in any place among
-    // the options, `import { skip as test }`. Neither word has any business in these two files, so neither is there at
+    // the options, `import { skip as test }`. Neither word has any business in these files, so neither is there at
     // all (`skipped`, a count in the colour tests, is another word), and `test` is the runner's own.
     assert.doesNotMatch(source, /\b(?:skip|todo)\b/, `${name} skips a test`);
     assert.ok(source.startsWith("import test from 'node:test';"), `${name} does not take test from node:test`);
