@@ -1575,4 +1575,11 @@ test('anchor 62: the pointer of a slide is heard on the window, its capture is o
     'const swallow = (click: Event) => { click.stopPropagation(); click.preventDefault(); };', ...swallow, '}',
     'function cancel(event: Event) {', "if ('pointerId' in event && event.pointerId !== active.pointerId) return;", 'giveUp();', '}',
     'session.current = active;', ...added, `${captured} { }`, 'if (drive.immediate) begin(active.press, 0);', '}, []);', '}']);
+  // What is left is where the slop of those lines comes from: the table of the number fields, by this import. A number
+  // of the hook's own in its place (`const MAP_NUMBER_SCRUB = { slopPx: 0 };`) leaves every line above as it is, and
+  // then a press that slips by one pixel, across the axis as well, starts a gesture, is no tap, and has its click
+  // swallowed. Three places name the table: the import, the move and the start. A fourth would be another source of
+  // it, or the table itself rewritten from the hook's file.
+  own("import { MAP_NUMBER_SCRUB } from './mapNumberField.ts';");
+  assert.equal(count(hook, /\bMAP_NUMBER_SCRUB\b/g), 3, 'the import, the slop of the move and the slop of the start');
 });
