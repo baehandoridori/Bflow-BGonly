@@ -2254,6 +2254,16 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
   // the close, and the choice the dialog hands back. Closed by an effect of the editor's own (as the map on show
   // changes, say), it would go while a run is in progress, and what a run that stopped has to say could be read nowhere.
   assert.equal(count(editor, /\bsetMapDelete\(/g), 7, 'the open, the run (four), the close, the choice');
+  // So are the two refs. Each is named on the line that makes it and in the lines of the functions held above, and in
+  // no other place. The list of the maps aimed at: made, read as the lost drafts are let go, emptied as the dialog
+  // opens, and read and written by the one line of the run that adds the maps of a press. Emptied in a place of its
+  // own as well (a line of the render, or an effect that tidies up as the dialog changes), it is empty by the time it
+  // is read, and the draft of a map deleted without an answer stays in the tree after all. The ref of a run: made,
+  // asked by the guard of the run, set behind its checks, cleared as the run ends. Cleared in a place of its own as
+  // well, it says that no run is in progress while one is: the guard is left with `busy`, and a second press can
+  // come before that is drawn.
+  assert.equal(count(editor, /\bdeleteAimed\b/g), 5, 'made, the lost drafts, the open, and twice in the line of the run that adds to it');
+  assert.equal(count(editor, /\bdeleting\b/g), 4, 'made, the guard of the run, set, cleared');
   // The dialog, the plan and the two sentences come in by their imports. The plan and the sentences are the pure
   // module's, which the D tests run: one of the same name written in the editor would be reached by no test.
   for (const text of ["import { BackgroundMapDeleteDialog } from './BackgroundMapDeleteDialog';", "import { mapDeleteCauseText, mapDeleteStopText, planMapDelete } from './mapDelete';"])
