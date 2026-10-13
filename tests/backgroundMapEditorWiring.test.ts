@@ -1504,6 +1504,13 @@ test('anchor 60: every number of the inspector is one component, on one table an
     for (const given of ['disabled={fieldLocked}', 'scrub={fieldScrub}', 'onDone={doc.endCoalescing}']) assert.ok(tag.includes(` ${given}`), `not given ${given}: ${tag}`);
     for (const limit of [' min=', ' max=']) assert.ok(!tag.includes(limit), `given a limit of its own (${limit.trim()}): ${tag}`);
   }
+  // And that name means what it says, in one line: no right to edit (nothing is being edited, or a save runs), or a
+  // locked node in hand. Cut to its first half, the name, the grip and the bar of a locked node would look live, and
+  // its boxes would take what is typed: `patchNode` turns away a locked space and no other node, so a height, an angle
+  // or a size typed into a locked camera or object would be written. And the name is given that meaning nowhere else:
+  // a second one, in the block of the camera say, would be the one the five fields there read.
+  assert.ok(editor.includes('const fieldLocked = !canEdit || !!selected?.locked;'), 'a field is not off for a locked node, or not while a save runs');
+  assert.equal(count(editor, /\bfieldLocked\s*=(?!=)/g), 1, 'the name is given its meaning once');
   // A typed value goes the way it always went, the one of its row: into the edit of its field, which joins the keys of
   // one stay in the field into one undo step (patchNode, and moveSelected for the two positions, each with the key of
   // the field). Sent through the scrub object instead, every key typed would be a gesture, and an undo step of its own.
@@ -1513,6 +1520,16 @@ test('anchor 60: every number of the inspector is one component, on one table an
   }
   // And a tag holds nothing else: those seven attributes, in this order.
   assert.deepEqual([...tags].sort(), fields.map(([label, field, value, typed]) => `label="${label}" field="${field}" value={${value}} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={${typed}}`).sort());
+  // Every field is taken down as another node comes into hand: each stands in an element whose key holds the id of that
+  // node, the five of a camera, the four heights and tilts, the five of the place, the size and the turn. A pick is no
+  // release and no cancel: a pointer pressed on a field is let go then only as the field is taken down (anchor 62),
+  // and the begin and the preview of a slide write to the node in hand at the latest render (anchor 61). In an element
+  // without that key the fields would stay up across a pick, with the press of the node before: the next move would
+  // start the drag on the node just picked, and a drag already running would write its value into that node.
+  const keyed = [piece(editor, '<section className="bmap-camera-properties" key={`camera-${selected.id}`} ', '</section>'),
+    piece(editor, '<details className="bmap-disclosure" open key={`vertical-${selected.id}`}>', '</details>'),
+    piece(editor, '<details className="bmap-disclosure" key={`geometry-${selected.id}`}>', '</details>')];
+  assert.deepEqual(keyed.map(part => count(part, /<NumberField /g)), [5, 4, 5], 'a number field stands outside the elements keyed by the node in hand');
 });
 
 test('anchor 61: a slide is a gesture of the document, previewed from the map it started on', () => {
