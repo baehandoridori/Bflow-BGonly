@@ -173,11 +173,11 @@
 .bmap-num-label { align-self:flex-start; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:500; color:var(--bg-muted); cursor:ew-resize; touch-action:pan-y; }
 .bmap-num-row { position:relative; }
 /* The selector has to outweigh the shared input rule of the library, which sets the padding. */
-.bg-library .bmap-num-row input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { padding-left:28px; font-variant-numeric:tabular-nums; }
+.bg-library .bmap-num-row input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { padding-left:24px; font-variant-numeric:tabular-nums; }
 /* The two small arrows of the engine are not drawn: the grip does their job. The element stays, so the arrow keys and the wheel over a focused field step the value as before. */
 .bmap-num-row input::-webkit-inner-spin-button,.bmap-num-row input::-webkit-outer-spin-button { -webkit-appearance:none; appearance:none; margin:0; }
 /* At the left end of the box: the inspector hugs the right edge of the screen, and a grip at the right end would leave no room to drag towards more. */
-.bmap-num-grip { position:absolute; top:1px; left:1px; bottom:1px; display:grid; place-items:center; width:22px; border-right:1px solid rgb(var(--color-bg-border)); border-radius:6px 0 0 6px; color:rgb(var(--color-text-secondary)); cursor:ew-resize; touch-action:pan-y; }
+.bmap-num-grip { position:absolute; top:1px; left:1px; bottom:1px; display:grid; place-items:center; width:18px; border-right:1px solid rgb(var(--color-bg-border)); border-radius:6px 0 0 6px; color:rgb(var(--color-text-secondary)); cursor:ew-resize; touch-action:pan-y; }
 /* Pointed at and dragged: the tint marks it, and the mark itself takes the text colour. The lighter accent would all but vanish on the tint in the light themes. */
 .bmap-num-grip:hover,.bmap-num.is-dragging .bmap-num-grip { color:rgb(var(--color-text-primary)); background:rgb(var(--color-accent) / .14); }
 .bmap-num.is-dragging .bmap-num-label { color:rgb(var(--color-text-primary)); }

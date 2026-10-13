@@ -1884,7 +1884,7 @@ test('anchor 63: typing and the identity of a field are as they were, and the ar
   has(baseRule(sheet, '.bmap-num-row {'), 'position:relative');
   has(grip, 'position:absolute', 'left:1px');
   assert.ok(!sheet[gripAt].includes(' right:') && !grip.some(item => item.startsWith('right:')), 'the grip is held to the right end as well');
-  has(baseRule(sheet, room), 'padding-left:28px');
+  has(baseRule(sheet, room), 'padding-left:24px');
   // And the grip ends inside that room: its inset and its width are together no more than the padding of the box. How
   // wide it is drawn is tuned by eye in the app and is not held, only that it fits. Wider than the room it lies over the
   // number, and with no width of its own it ends where its picture does, which is tuned in the app as well. The two
