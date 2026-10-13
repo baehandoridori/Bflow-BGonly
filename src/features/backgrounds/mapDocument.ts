@@ -1,5 +1,5 @@
 import type { BackgroundMap, BackgroundPoint } from './types.ts';
-import { beginMapGesture, cancelMapGesture, commitMapHistory, finishMapGesture, previewMapGesture, redoMapHistory, replaceMapHistoryValue, undoMapHistory } from './mapEditSession.ts';
+import { MAP_HISTORY_LIMIT, beginMapGesture, cancelMapGesture, commitMapHistory, finishMapGesture, previewMapGesture, redoMapHistory, replaceMapHistoryValue, undoMapHistory } from './mapEditSession.ts';
 import type { MapGesture } from './mapEditSession.ts';
 import { MAP_PLAN_EXTENT, mapPlanBounds } from './mapSpatial.ts';
 
@@ -9,7 +9,9 @@ import { MAP_PLAN_EXTENT, mapPlanBounds } from './mapSpatial.ts';
  * gesture in progress. The display mode is not document state: switching between the plan and
  * 3D is not an action here, so it can never change a draft, the selection or the history.
  */
-export type MapDraft = { value: BackgroundMap; baseRevision: number | null; past: BackgroundMap[]; future: BackgroundMap[] };
+export type MapDraft = { value: BackgroundMap; baseRevision: number | null; past: BackgroundMap[]; future: BackgroundMap[];
+  /** Finished edits the undo history no longer holds (it keeps the newest MAP_HISTORY_LIMIT). They are still unsaved. */
+  dropped: number };
 export type MapViewport = { x: number; y: number; zoom: number;
   /**
    * The node the views that show one node (the 3D view, its companion plan) work on. `select` and `select-many` set it
@@ -41,6 +43,8 @@ export type MapDocumentAction =
   | { type: 'enter-new-map'; map: BackgroundMap }
   | { type: 'discard'; mapId: string }
   | { type: 'drop-drafts'; mapIds: readonly string[] }
+  | { type: 'rebase-drafts'; maps: readonly BackgroundMap[] }
+  | { type: 'follow-saved'; maps: readonly BackgroundMap[] }
   | ({ type: 'update'; map: BackgroundMap } & MapUpdateOptions)
   | { type: 'end-coalescing' }
   | { type: 'undo'; mapId: string }
@@ -66,9 +70,24 @@ export function createMapDocument(): MapDocumentState {
   return { drafts: {}, viewports: {}, gesture: null, coalescing: null };
 }
 
+/** A draft with nothing unsaved in it, on the revision of `map`. */
+function freshDraft(map: BackgroundMap): MapDraft {
+  return { value: structuredClone(map), baseRevision: map.revision, past: [], future: [], dropped: 0 };
+}
 function openDraft(state: MapDocumentState, map: BackgroundMap): MapDocumentState {
-  const draft: MapDraft = { value: structuredClone(map), baseRevision: map.revision, past: [], future: [] };
-  return { ...state, drafts: { ...state.drafts, [map.id]: draft }, gesture: state.gesture?.mapId === map.id ? null : state.gesture, coalescing: null };
+  return { ...state, drafts: { ...state.drafts, [map.id]: freshDraft(map) }, gesture: state.gesture?.mapId === map.id ? null : state.gesture, coalescing: null };
+}
+/**
+ * Each listed map that has a draft, and passes `only`, gets a fresh draft on that map. A map without a draft is left
+ * alone: nothing here opens one. A gesture or a field edit on a replaced draft ends with it; the others go on.
+ */
+function rebaseDrafts(state: MapDocumentState, maps: readonly BackgroundMap[], only?: (draft: MapDraft, map: BackgroundMap) => boolean): MapDocumentState {
+  const targets = maps.filter(map => { const draft = mapDraft(state, map.id); return !!draft && (!only || only(draft, map)); });
+  if (!targets.length) return state;
+  const drafts = { ...state.drafts }, replaced = new Set(targets.map(map => map.id));
+  for (const map of targets) drafts[map.id] = freshDraft(map);
+  return { ...state, drafts, gesture: state.gesture && replaced.has(state.gesture.mapId) ? null : state.gesture,
+    coalescing: state.coalescing && replaced.has(state.coalescing.mapId) ? null : state.coalescing };
 }
 function dropDrafts(state: MapDocumentState, mapIds: readonly string[]): MapDocumentState {
   const removed = mapIds.filter(id => has(state.drafts, id));
@@ -77,6 +96,11 @@ function dropDrafts(state: MapDocumentState, mapIds: readonly string[]): MapDocu
   const drafts = { ...state.drafts };
   for (const id of removed) delete drafts[id];
   return { ...state, drafts: removed.length ? drafts : state.drafts, gesture, coalescing: null };
+}
+/** One finished edit of a draft: an undo step. A step the full history lets go of is counted, so it still reads as unsaved. */
+function commitDraft(draft: MapDraft, next: BackgroundMap, entry?: BackgroundMap): MapDraft {
+  const committed = commitMapHistory(draft, next, entry);
+  return draft.past.length < MAP_HISTORY_LIMIT ? committed : { ...committed, dropped: draft.dropped + 1 };
 }
 function withDraft(state: MapDocumentState, mapId: string, draft: MapDraft, rest?: Partial<MapDocumentState>): MapDocumentState {
   const drafts = draft === state.drafts[mapId] ? state.drafts : { ...state.drafts, [mapId]: draft };
@@ -106,6 +130,21 @@ export function reduceMapDocument(state: MapDocumentState, action: MapDocumentAc
       return dropDrafts(state, [action.mapId]);
     case 'drop-drafts':
       return dropDrafts(state, action.mapIds);
+    case 'rebase-drafts':
+      return rebaseDrafts(state, action.maps);
+    case 'follow-saved': {
+      // The library moved on under a draft with nothing unsaved in it: that draft follows. A draft with unsaved edits,
+      // one that is being dragged, and one already on that revision or a later one are left as they are.
+      const followed = rebaseDrafts(state, action.maps, (draft, map) => !mapDraftChanged(draft) && state.gesture?.mapId !== map.id && map.revision > (draft.baseRevision ?? Infinity));
+      // A draft with nothing unsaved in it whose map the library no longer has (deleted elsewhere) goes: kept, it would put
+      // the map back in the tree as one that can be edited and never saved. A map that was never saved counts as changed.
+      const known = new Set(action.maps.map(map => map.id));
+      const gone = Object.keys(followed.drafts).filter(id => !known.has(id) && !mapDraftChanged(followed.drafts[id]) && followed.gesture?.mapId !== id);
+      if (!gone.length) return followed;
+      const drafts = { ...followed.drafts };
+      for (const id of gone) delete drafts[id];
+      return { ...followed, drafts };
+    }
     case 'update': {
       const id = action.map.id, draft = mapDraft(state, id);
       // While a gesture previews a map, that gesture is the only writer of the map.
@@ -113,7 +152,7 @@ export function reduceMapDocument(state: MapDocumentState, action: MapDocumentAc
       if (action.history === false) return withDraft(state, id, replaceMapHistoryValue(draft, action.map), { coalescing: null });
       const key = action.coalesceKey ?? null;
       const joins = key !== null && state.coalescing?.mapId === id && state.coalescing.key === key;
-      return withDraft(state, id, joins ? replaceMapHistoryValue(draft, action.map) : commitMapHistory(draft, action.map),
+      return withDraft(state, id, joins ? replaceMapHistoryValue(draft, action.map) : commitDraft(draft, action.map),
         { coalescing: key === null ? null : joins ? state.coalescing : { mapId: id, key } });
     }
     case 'end-coalescing':
@@ -143,7 +182,7 @@ export function reduceMapDocument(state: MapDocumentState, action: MapDocumentAc
       if (!gesture) return state;
       if (!draft) return { ...state, gesture: null };
       const { value, historyEntry } = finishMapGesture(gesture);
-      return withDraft(state, gesture.mapId, historyEntry ? commitMapHistory(draft, value, historyEntry) : replaceMapHistoryValue(draft, value), { gesture: null });
+      return withDraft(state, gesture.mapId, historyEntry ? commitDraft(draft, value, historyEntry) : replaceMapHistoryValue(draft, value), { gesture: null });
     }
     case 'gesture-cancel': {
       const gesture = state.gesture, draft = mapDraft(state, gesture?.mapId);
@@ -221,9 +260,13 @@ export function fieldEditStartMap(state: MapDocumentState, mapId: string | null 
   const draft = mapDraft(state, mapId), edit = state.coalescing;
   return draft && edit && edit.mapId === mapId && edit.key === key ? draft.past[draft.past.length - 1] : undefined;
 }
-/** A new map, or a draft with at least one undo step, has something to save. */
+/** Finished edits of a draft that are not saved: what undo can still take back, and what the history no longer holds. */
+export function mapDraftSteps(draft: MapDraft | undefined): number {
+  return draft ? draft.dropped + draft.past.length : 0;
+}
+/** A new map, or a draft with at least one finished edit that was not undone, has something to save. */
 export function mapDraftChanged(draft: MapDraft | undefined): boolean {
-  return !!draft && (draft.baseRevision === null || draft.past.length > 0);
+  return !!draft && (draft.baseRevision === null || draft.past.length > 0 || draft.dropped > 0);
 }
 export function canUndoMap(state: MapDocumentState, mapId: string | null | undefined): boolean {
   return !state.gesture && !!mapDraft(state, mapId)?.past.length;

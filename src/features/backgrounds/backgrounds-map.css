@@ -1,4 +1,4 @@
-.bmap-layout { display:flex; min-height:500px; height:100%; overflow:hidden; border-top:1px solid rgb(var(--color-bg-border)); background:rgb(var(--color-bg-primary)); color:rgb(var(--color-text-primary)); }
+.bmap-layout { display:flex; min-height:500px; height:100%; overflow:clip; border-top:1px solid rgb(var(--color-bg-border)); background:rgb(var(--color-bg-primary)); color:rgb(var(--color-text-primary)); }
 /* Colours of the map editor that are no theme colour: one camera (default = the amber it always was), and the road. */
 .bmap-layout { --bmap-cam:230 181 120; --bmap-cam-mark:55 39 21; --bmap-road:154 161 173; --bmap-road-mark:227 230 236; }
 [data-color-mode="light"] .bmap-layout { --bmap-road:93 100 112; --bmap-road-mark:58 63 71; }
@@ -19,6 +19,8 @@
 .bmap-layout button { cursor:pointer; }
 .bmap-layout button:disabled { cursor:not-allowed; opacity:.42; }
 .bmap-layout button:focus-visible,.bmap-layout input:focus-visible,.bmap-layout select:focus-visible,.bmap-canvas:focus-visible { outline:2px solid rgb(var(--color-accent-sub)); outline-offset:2px; }
+/* A press on the map, and the buttons that hand the keyboard to it (편집 시작, 도면 저장, 편집 끝내기), focus the canvas without the keyboard. The engine draws its own ring round a focused svg then, orange like the edit frame: it would stay round a map that is not edited. The ring above is the keyboard's. */
+.bmap-canvas:focus:not(:focus-visible) { outline:none; }
 .bmap-tree { flex:0 0 196px; display:flex; flex-direction:column; border-right:1px solid rgb(var(--color-bg-border)); padding:16px 0 10px; background:rgb(var(--color-bg-card) / .45); overflow-y:auto; }
 .bmap-section-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:13px; font-size:13px; }
 .bmap-tree .bmap-section-heading,.bmap-tree>.bmap-hint { margin-left:16px; margin-right:12px; }
@@ -27,9 +29,45 @@
 .bmap-tree-row>span:nth-child(2) { overflow:hidden; text-overflow:ellipsis; }
 .bg-library .bmap-tree-row:hover { background:rgb(var(--color-bg-border) / .35); color:rgb(var(--color-text-primary)); }
 .bg-library .bmap-tree-row.is-active { border-left-color:rgb(var(--color-accent)); background:rgb(var(--color-accent) / .13); color:rgb(var(--color-accent-sub)); }
-.bmap-draft-dot { font-size:8px; color:#eab76b; margin-left:auto; }
+.bmap-draft-dot { font-size:8px; color:rgb(var(--bmap-edit)); margin-left:auto; }
 .bmap-tree-footer { margin-top:auto; padding:24px 16px 4px; color:rgb(var(--color-text-secondary)); font-size:11px; line-height:1.7; }
-.bmap-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.bmap-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:clip; }
+/* Edit mode: a band over the map and a frame around it, in two colours worked out from the theme (useMapEditColors sets them on this element; these are the values of the default theme). Keep this block before the media queries: the narrow layout overrides it with rules of the same weight. */
+.bmap-layout { --bmap-edit:245 178 64; --bmap-edit-ink:28 22 8; --bmap-edit-h:40px; }
+.bmap-edit-strip { position:sticky; top:0; z-index:5; flex:0 0 var(--bmap-edit-h); height:var(--bmap-edit-h); display:flex; align-items:center; gap:10px; padding:0 12px 0 18px; overflow:hidden; background:rgb(var(--bmap-edit)); color:rgb(var(--bmap-edit-ink)); font-size:12px; }
+/* One height whatever it says: the words in a filled box are 4px taller than bare words, and in the two-line layout a taller first line would push the buttons down under the pointer. */
+.bmap-edit-state { display:flex; flex:1; min-width:0; min-height:23px; align-items:center; gap:8px; margin:0; overflow:hidden; white-space:nowrap; }
+.bmap-edit-state>strong { flex-shrink:0; font-weight:700; }
+/* What the band says. Where it does not fit it ends in an ellipsis: never cut without a sign. */
+.bmap-edit-state>span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+/* The states are told apart by shape, not by colour or motion. Unsaved edits: the words stand in a filled box, painted like the save button beside them. */
+.bmap-edit-strip[data-phase="changed"] .bmap-edit-state>span { padding:2px 9px; border-radius:999px; background:rgb(var(--bmap-edit-ink)); color:rgb(var(--bmap-edit)); font-weight:600; }
+/* Just saved: bold, with a tick before the words. */
+.bmap-edit-strip[data-phase="saved"] .bmap-edit-state>span { font-weight:600; }
+.bmap-edit-strip[data-phase="saved"] .bmap-edit-state>span::before { content:"✓"; margin-right:5px; }
+.bmap-edit-key { flex-shrink:0; padding:1px 5px; border:1px solid rgb(var(--bmap-edit-ink) / .35); border-radius:4px; font-size:10px; opacity:.8; }
+.bmap-edit-actions { display:flex; flex-shrink:0; gap:6px; }
+.bg-library .bmap-edit-strip button { min-height:28px; padding:0 11px; border-color:rgb(var(--bmap-edit-ink) / .45); border-radius:6px; background:transparent; color:rgb(var(--bmap-edit-ink)); font-size:12px; white-space:nowrap; }
+.bg-library .bmap-edit-strip button:hover:not(:disabled) { border-color:rgb(var(--bmap-edit-ink) / .7); background:rgb(var(--bmap-edit-ink) / .12); }
+.bg-library .bmap-edit-strip button:focus-visible { outline:2px solid rgb(var(--bmap-edit-ink)); outline-offset:1px; }
+/* One weight and one least width whatever it says and whether it is on or dimmed: nothing beside it moves. No fade: its words would show in the colour of the band on a box that is not filled yet. */
+.bg-library .bmap-edit-strip .bmap-edit-save { min-width:80px; border-color:transparent; background:rgb(var(--bmap-edit-ink)); color:rgb(var(--bmap-edit)); font-weight:600; transition:none; }
+.bg-library .bmap-edit-strip .bmap-edit-save:hover:not(:disabled) { border-color:transparent; background:rgb(var(--bmap-edit-ink) / .86); }
+.bg-library .bmap-edit-strip .bmap-edit-save[aria-disabled="true"],.bg-library .bmap-edit-strip .bmap-edit-save[aria-disabled="true"]:hover:not(:disabled) { border-color:rgb(var(--bmap-edit-ink) / .3); background:transparent; color:rgb(var(--bmap-edit-ink) / .55); cursor:default; }
+.bmap-main.is-editing .bmap-canvas-wrap::after { content:""; position:absolute; inset:0; z-index:1; border:2px solid rgb(var(--bmap-edit)); pointer-events:none; }
+/* The band stays at the top of the tab while the page scrolls under it: a field or button the keyboard brings into view stops below it. Not the canvas: it takes the focus on a press, and must not scroll then. */
+.bmap-main.is-editing :is(button,input,select,summary) { scroll-margin-top:var(--bmap-edit-h); }
+/* Not the two buttons of the band itself: the band cannot hide them, and with the margin a focus on them would scroll the tab while the band is stuck. */
+.bmap-main.is-editing .bmap-edit-strip button { scroll-margin-top:0; }
+/* 편집 시작 keeps its place in the header while editing, unseen: nothing slides under the pointer of a double-click. */
+.bmap-edit-start[aria-hidden="true"] { visibility:hidden; }
+/* The band and the frame come in with edit mode. Their box is there at once: only what is inside the band moves, and only where motion is wanted. */
+@keyframes bmap-edit-in { from { opacity:0; transform:translateY(-4px); } }
+@keyframes bmap-edit-frame-in { from { opacity:0; } }
+@media (prefers-reduced-motion: no-preference) {
+  .bmap-edit-strip>* { animation:bmap-edit-in var(--motion-base) var(--ease-out) both; }
+  .bmap-main.is-editing .bmap-canvas-wrap::after { animation:bmap-edit-frame-in var(--motion-base) var(--ease-out) both; }
+}
 .bmap-header { display:flex; flex-shrink:0; align-items:center; justify-content:space-between; gap:14px; padding:10px 18px; border-bottom:1px solid rgb(var(--color-bg-border)); }
 .bmap-breadcrumb { font-size:11px; color:rgb(var(--color-text-secondary)); display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-bottom:7px; }
 .bg-library .bmap-breadcrumb button { border:0; padding:0; background:transparent; min-height:0; color:rgb(var(--color-text-secondary)); font-size:11px; }
@@ -277,8 +315,12 @@
 .bmap-gallery-empty p { font-size:11px; margin-top:4px; }
 .bmap-gallery-empty>svg { flex-shrink:0; opacity:.65; }
 @media(max-width:1100px) { .bmap-gallery-grid { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; } .bmap-gallery-actions { gap:0; } .bmap-gallery-filters { order:3; flex:1 0 100%; } .bmap-header { padding:10px 14px; } }
+@media(max-width:1100px) { .bmap-edit-strip { padding-left:14px; } }
 @media(max-width:900px) {
-  .bmap-layout { height:auto; min-height:0; }
+  .bmap-layout { height:auto; min-height:0; --bmap-edit-h:72px; }
+  .bmap-edit-strip { flex-wrap:wrap; align-content:center; row-gap:6px; }
+  .bmap-edit-state { flex:1 0 100%; }
+  .bmap-edit-key { margin-left:auto; }
   .bmap-tree { flex-basis:135px; }
   .bmap-header { flex-wrap:wrap; }
   .bmap-actions { gap:4px; flex-wrap:wrap; }
@@ -326,6 +368,10 @@
   .bmap-layout:has(.bmap-canvas-wrap.is-3d) { min-height:760px; }
   .bmap-panels:has(.bmap-canvas-wrap.is-3d) { min-height:640px; }
   .bmap-panels:not(.is-sized):has(.bmap-canvas-wrap.is-3d)>.bmap-workspace { min-height:440px; }
+  /* While editing the band takes its height from the image list, not from the map: the canvas keeps its size as edit mode starts and ends. */
+  .bmap-layout:has(.bmap-main.is-editing) { min-height:calc(500px + var(--bmap-edit-h)); }
+  .bmap-layout:has(.bmap-main.is-editing):has(.bmap-canvas-wrap.is-3d) { min-height:calc(760px + var(--bmap-edit-h)); }
+  .bmap-main.is-editing .bmap-panels:not(.is-sized)>.bmap-gallery { flex-basis:calc(clamp(248px,33dvh,370px) - var(--bmap-edit-h)); }
 }
 /* Stacked by default: the 3D view on top, the companion plan below at about 40% of the height, and neither gives way
    completely. Side by side once the canvas area is wide, or too short to stack two usable views. */

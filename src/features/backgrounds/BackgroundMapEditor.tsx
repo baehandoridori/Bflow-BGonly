@@ -10,6 +10,7 @@ import { MapMarquee, MapNodeHandles, MapSnapGuides, MapVertexHandles } from './B
 import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { BackgroundMapSelectionSummary } from './BackgroundMapSelectionSummary';
 import { BackgroundMapCameraColor } from './BackgroundMapCameraColor';
+import { BackgroundMapEditStrip } from './BackgroundMapEditStrip';
 import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
 import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
@@ -24,9 +25,11 @@ import { planMarkCovers, planMarqueeIds, planRect, resolvePlanPress, sameSpotAga
 import type { PlanPressClick, PlanRect, PlanSpot } from './mapPlanSelect';
 import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument';
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
+import { MAP_SAVED_NOTICE_MS, mapEditStatus } from './mapEditStatus';
+import { useMapEditColors } from './useMapEditColors';
 import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode } from './mapCanvas';
 import { backgroundMapPath } from './domain';
-import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, type MapSaveCommand } from './mapWorkflow';
+import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
@@ -87,6 +90,7 @@ const textEntry = `${textFields}, dialog`;
 const tickInputs = 'input:is([type="checkbox"], [type="radio"])';
 /** Where Space is text (it types, or opens the list of a select) or belongs to an open dialog: `textEntry` without the inputs Space only ticks. */
 const spaceEntry = `:is(${textEntry}):not(${tickInputs})`;
+const openDialogs = 'dialog[open], [aria-modal="true"]';
 const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔어요. 편집 내용은 그대로예요.';
 // The last sentence is how to get hold of a road that another space covers: it cannot be pressed there directly.
 const ROAD_HINT = '도로는 벽 없는 바닥이에요. 다른 공간과 겹치면 늘 아래에 깔려요. 다른 공간에 덮인 도로는 그 자리를 천천히 한 번 더 누르거나 오른쪽 목록에서 골라요.';
@@ -101,6 +105,9 @@ const ASPECT_PRESETS = [{ label: '16:9', value: 16 / 9 }, { label: '4:3', value:
 const PITCH_PRESETS = [{ label: '수평', pitch: 0 }, { label: '수직 위', pitch: 90 }, { label: '수직 아래', pitch: -90 }];
 /** Saved bounds of plan positions and sizes. */
 const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
+/** The longest a double-click takes (the system's default interval). */
+const SECOND_CLICK_MS = 500;
+const pressEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick'];
 /**
  * The plan gesture a pressed pointer performs. Only the sessions that edit the map have one (`pan` and `marquee`
  * never ask): any other names no node, so nothing is previewed for it. The editing modes are told apart by
@@ -216,7 +223,13 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const renamingRef = useRef<NameEdit | null>(null);       // handlers read this, so a late blur after a close is a no-op
   function setRenaming(next: NameEdit | null) { renamingRef.current = next; setRenamingState(next); }
   const [error, setError] = useState('');
+  /** Counts the saves of the map that ended in a message instead of a save. Each one brings that message into view. */
+  const [refused, setRefused] = useState(0);
+  const errorRef = useRef<HTMLDivElement>(null);            // the editor's own error block, above the band
   const [busy, setBusy] = useState(false);
+  const saving = useRef(false);                             // a save of the map is running. A ref: a second Ctrl+S can come before `busy` is drawn
+  /** The map whose save just went through, while the band still says so. */
+  const [savedNotice, setSavedNotice] = useState<{ mapId: string } | null>(null);
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
   const [linkForm, setLinkForm] = useState<{ spaceId: string; mapId: string; search: string } | null>(null);
   const [settingsForm, setSettingsForm] = useState<BackgroundMap | null>(null);
@@ -241,6 +254,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const spaceHeld = useRef(false);
   const [spacePan, setSpacePan] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);                 // the root of the editor, `.bmap-layout`
+  useMapEditColors(rootRef);
   /** Orbit pose of the 3D viewport per map. UI state only: never history, never a render. */
   const viewStates = useRef<Record<string, Map3DViewState>>({});
   const focusNonce = useRef(0);
@@ -324,6 +338,28 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     return () => svg.removeEventListener('wheel', onWheel);
   }, [onWheel, current?.id, mode]);
   useEffect(() => { if (!snapshot.canManage) { setTool('select'); setPolygon([]); setSymbolPaletteOpen(false); } }, [snapshot.canManage]);
+  // Saving no longer ends edit mode, so a draft can stay open for hours. One with nothing unsaved in it follows the library
+  // when its map is saved elsewhere, and goes when its map is deleted there.
+  const followSaved = useEvent(() => {
+    // Never while a save runs: the store then shows maps that are not confirmed yet. Never during a drag. And never under an
+    // open dialog of the editor: it asks about the map on show, and that must still be the same map when it is answered.
+    if (disabled || doc.isGestureActive() || confirmation || createForm || linkForm || settingsForm) return;
+    const before = mapDraft(doc.getState(), current?.id);
+    doc.followSaved(snapshot.maps);
+    // The map on show was replaced under the picked point: its index may now name another point (as after an undo).
+    if (mapDraft(doc.getState(), current?.id) !== before) setActiveVertex(null);
+    // The map on show went with its draft: the screen moves on to another map without `navigate`, so what `navigate` clears is cleared here.
+    if (before && !mapDraft(doc.getState(), current?.id)) { setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); }
+  });
+  // The four dialogs are in the list so that this runs again as one of them closes.
+  useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);
+  // "Saved" leaves the band by itself. Timed here, not in CSS: with reduced motion a CSS timer ends on its first frame.
+  useEffect(() => {
+    if (!savedNotice) return;
+    const timer = window.setTimeout(() => setSavedNotice(null), MAP_SAVED_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [savedNotice]);
+  useEffect(() => { if (refused) errorRef.current?.scrollIntoView({ block: 'nearest' }); }, [refused]);
 
   /** Ends the pressed pointer and cancels the gesture in progress. Nothing of it reaches the history. */
   const abortGesture = useEvent(() => {
@@ -386,6 +422,29 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     window.addEventListener('keydown', onSpaceKey, true); window.addEventListener('keyup', onSpaceKey, true); window.addEventListener('blur', release);
     return () => { window.removeEventListener('keydown', onSpaceKey, true); window.removeEventListener('keyup', onSpaceKey, true); window.removeEventListener('blur', release); };
   }, [onSpaceKey]);
+  /** Ctrl+S saves the map being edited. Heard on the window, like Space above: right after a button was pressed the focus is on nothing at all, and a field keeps its keys from the editor's own handler. */
+  const onSaveKey = useEvent((event: KeyboardEvent) => {
+    if (event.code !== 'KeyS' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+    const root = rootRef.current, element = event.target instanceof Element ? event.target : null;
+    // The key is the editor's only while it is on show and editing. While viewing, for a read-only account and in another tab of the library it is left alone.
+    if (!root || root.offsetParent === null || !editing) return;
+    // An open dialog keeps the key. Asked from the state and from the document, never from the target: once Tab has run past the last button of a modal, the focus (and so the target) is the body.
+    if (createForm || linkForm || settingsForm || confirmation || document.querySelector(openDialogs)) return;
+    // The key is the editor's while the focus is in the library, or on nothing at all. Elsewhere it belongs to what has the focus:
+    // a window of the app that is neither a dialog element nor marked modal (changing the password, managing users), a button of the app's own frame.
+    if (element && element !== document.body && !element.closest('.bg-library')) return;
+    // Text typed outside the editor is not the editor's.
+    if (element?.closest(textFields) && !root.contains(element)) return;
+    event.preventDefault(); event.stopPropagation();
+    // Taken, and nothing done: the repeats of a held key. A syllable still being composed is no reason to stop: the
+    // focus leaves the field in requestSave, which ends the composition and commits it, as a press on 도면 저장 does.
+    if (event.repeat) return;
+    requestSave();
+  });
+  useEffect(() => {
+    window.addEventListener('keydown', onSaveKey, true);
+    return () => window.removeEventListener('keydown', onSaveKey, true);
+  }, [onSaveKey]);
   // A press the canvas did not take can never be the first half of a double-click on a node.
   useEffect(() => {
     const forget = (event: PointerEvent) => {
@@ -423,6 +482,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function liveSelection(mapId: string, map: BackgroundMap): MapSelection { return mapSelection(map, mapViewport(doc.getState(), mapId).selectedIds); }
   function updateView(changes: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>>, mapId = current?.id) { if (mapId) doc.setViewport(mapId, changes); }
   function focusCanvas() { (mode === 'plan' ? svgRef.current : stageRef.current)?.focus({ preventScroll: true }); }
+  /** For the length of a double-click no press reaches the page: what was pressed has gone, and something else lies under the pointer. */
+  function swallowSecondClick() {
+    const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };
+    for (const type of pressEvents) window.addEventListener(type, stop, true);
+    window.setTimeout(() => { for (const type of pressEvents) window.removeEventListener(type, stop, true); }, SECOND_CLICK_MS);
+  }
   function navigate(id: string) { if (disabled) return; abortGesture(); setCurrentId(id); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); setConfirmation(null); }
   function switchMode(next: MapDisplayMode) {
     if (next === mode) return;
@@ -458,8 +523,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     setSettingsForm(structuredClone(source)); setError('');
   }
   async function persistMaps(command: MapSaveCommand) {
+    const shown = current?.id;                                              // the map on show as the save starts
     await execute(command);
-    doc.dropDrafts(command.maps.map(item => item.entity.id));
+    // Saving never ends edit mode: every saved map that was being edited goes on from what was saved. Built from the command.
+    // After the wait this handler still holds the snapshot of the render that started the save, with the revision before it.
+    doc.rebaseDrafts(savedMaps(command));
+    if (shown && command.maps.some(item => item.entity.id === shown) && mapDraft(doc.getState(), shown)) setSavedNotice({ mapId: shown });
   }
   function enterNewMap(map: BackgroundMap) {
     doc.enterNewMap(map);
@@ -528,22 +597,51 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     doc.beginEditing(current);
     setTool('select'); setError('');
   }
+  /** Edit mode ends for the map on show: its draft goes, and what was not saved goes with it. */
+  function leaveEditing() {
+    if (!current) return;
+    doc.discard(current.id);
+    setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setError(''); setSavedNotice(null);
+  }
+  /** 편집 끝내기. With nothing to lose edit mode ends at once; otherwise the question comes first. */
+  function endEditing() {
+    if (!current || !editing || disabled) return;
+    abortGesture();
+    // Asked when something would be lost: unsaved edits (read from the store: the press on the button has just committed
+    // the field that was being typed in), or the points of a polygon that is being drawn.
+    if (mapDraftChanged(mapDraft(doc.getState(), current.id)) || polygon.length) { setError(''); setConfirmation('discard'); return; }
+    // The button goes away with this click. The focus goes to the canvas, or the keys would reach nothing.
+    leaveEditing(); focusCanvas();
+    // The band goes with it, and what is below moves up by its height: the second click of a double-click would land on
+    // whatever slides under the pointer (the canvas in a narrow window, where it drops the selection or enters a space).
+    swallowSecondClick();
+  }
   function undo(redo = false) {
     if (!current || !canEdit || pointerRef.current || doc.isGestureActive()) return;
     if (redo) doc.redo(current.id); else doc.undo(current.id);
     setPolygon([]); setActiveVertex(null);        // after the step the index may name another point
   }
   async function saveMap() {
-    if (!current || !draft || !canEdit) return;
-    if (!current.name.trim()) { setError('도면 이름을 입력해 주세요.'); return; }
-    if (polygon.length) { setError('그리는 중인 다각형을 완성하거나 취소한 뒤 저장해 주세요.'); return; }
+    if (!current || !draft || !canEdit || saving.current) return;
+    // Not saved: the reason is shown, and brought into view. It sits above the band and may be scrolled away, while the band and Ctrl+S are always at hand.
+    // The points of a polygon that is being drawn are no part of the draft. Asked first: after the check below, Ctrl+S on a map with nothing else unsaved would end without a word.
+    if (polygon.length) { setError('그리는 중인 다각형을 완성하거나 취소한 뒤 저장해 주세요.'); setRefused(count => count + 1); return; }
+    // Nothing unsaved: no write. A save of an untouched map would still raise its revision and signal every open screen.
+    // Read from the store: the field that was being typed in has just been committed by leaving it.
+    if (!mapDraftChanged(mapDraft(doc.getState(), current.id))) return;
+    if (!current.name.trim()) { setError('도면 이름을 입력해 주세요.'); setRefused(count => count + 1); return; }
     const settled = settle(), captured = settled.maps.find(map => map.id === current.id);
     if (!captured) return;
-    setBusy(true); setError('');
+    saving.current = true; setBusy(true); setError('');
     try {
       await persistMaps(saveMapChanges(snapshot, settled.drafts, [captured]));
-      setTool('select');
-    } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+    } catch (cause) { setError(message(cause)); setRefused(count => count + 1); } finally { saving.current = false; setBusy(false); }
+  }
+  /** 도면 저장 and Ctrl+S. The focus goes to the canvas first: leaving a field commits what was being typed in it, and afterwards the editor's keys work without a detour. */
+  function requestSave() {
+    if (!current || !canEdit || saving.current || pointerRef.current || doc.isGestureActive()) return;
+    focusCanvas();
+    void saveMap();
   }
   async function confirmAction() {
     if (!current || disabled) return;
@@ -562,8 +660,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       focusAfterConfirm.current = true; setConfirmation(null); return;
     }
     if (confirmation === 'discard') {
-      doc.discard(current.id);
-      setPolygon([]); setTool('select'); setConfirmation(null); setError(''); return;
+      leaveEditing();
+      focusAfterConfirm.current = true; setConfirmation(null); return;
     }
     if (confirmation === 'delete-map' && snapshot.canManage) {
       if (draft?.baseRevision === null) {
@@ -870,6 +968,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function keyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
       if (event.nativeEvent === handledEscape.current) return;
+      // Pressed inside an open dialog it closes that dialog and nothing more. The key comes up here through the portal,
+      // and the points being drawn and the tool in hand are what the question of 편집 끝내기 is asked about.
+      if ((event.target as HTMLElement).closest('dialog')) return;
       // A drag in progress, a marquee included, is cancelled first; the tool is left as it is.
       if (pointerRef.current?.mode === 'marquee' || doc.isGestureActive()) { abortGesture(); return; }
       setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setActiveVertex(null);
@@ -969,17 +1070,18 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <div className="bmap-section-heading"><strong>도면</strong>{snapshot.canManage && <button type="button" className="bmap-new-root" disabled={disabled} onClick={() => openCreate(null)}>＋ 새 도면</button>}</div>
       <nav aria-label="도면 목록">{treeRows.filter(({ map }) => !mapPath(maps, map.id).slice(0, -1).some(parent => collapsed.has(parent.id))).map(({ map, depth }) => <div key={map.id} className={`bmap-tree-item ${map.id === current?.id ? 'is-active' : ''}`} style={{ paddingLeft: 6 + depth * 13 }}>
         {maps.some(child => child.parentId === map.id) ? <button type="button" className="bmap-tree-toggle" aria-label={`${map.name} ${collapsed.has(map.id) ? '펼치기' : '접기'}`} aria-expanded={!collapsed.has(map.id)} onClick={() => setCollapsed(previous => { const next = new Set(previous); if (next.has(map.id)) next.delete(map.id); else next.add(map.id); return next; })}>{collapsed.has(map.id) ? '›' : '⌄'}</button> : <span className="bmap-tree-spacer" />}
-        <button type="button" className="bmap-tree-row" onClick={() => navigate(map.id)} aria-current={map.id === current?.id ? 'page' : undefined}><span>{map.name}</span>{mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 전 변경사항">●</span>}</button>
+        <button type="button" className="bmap-tree-row" onClick={() => navigate(map.id)} aria-current={map.id === current?.id ? 'page' : undefined}><span>{map.name}</span>{mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 안 한 변경이 있어요">●</span>}</button>
       </div>)}</nav>
       {!maps.length && <p className="bmap-hint">등록된 도면이 없습니다.</p>}
       <div className="bmap-tree-footer">공간을 선택해 내부 도면을 만들고 이어가세요.</div>
     </aside>
-    {!current ? <div className="bmap-main"><EmptyState title="첫 도면을 만들어 보세요" description={snapshot.canManage ? '이름을 정하고 공간을 그리면 시작할 수 있습니다.' : '관리자가 도면을 등록하면 이곳에서 탐색할 수 있습니다.'}>{snapshot.canManage && <button type="button" className="bg-button bg-primary" onClick={() => openCreate(null)}>도면 만들기</button>}</EmptyState></div> : <main className="bmap-main">
-      <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2>{editing && <span className="bmap-badge">{draftChanged ? '저장 전 변경사항' : '편집 중'}</span>}</div></div>
-        <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button>{editing ? <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={() => { setError(''); setConfirmation('discard'); }}>취소</button><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => void saveMap()}>{busy ? '저장 중…' : '도면 저장'}</button></> : <button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => { beginEditing(); setInspectorOpen(true); }}>공간 편집</button>}</>}</div>
+    {!current ? <div className="bmap-main"><EmptyState title="첫 도면을 만들어 보세요" description={snapshot.canManage ? '이름을 정하고 공간을 그리면 시작할 수 있습니다.' : '관리자가 도면을 등록하면 이곳에서 탐색할 수 있습니다.'}>{snapshot.canManage && <button type="button" className="bg-button bg-primary" onClick={() => openCreate(null)}>도면 만들기</button>}</EmptyState></div> : <main className={`bmap-main${editing ? ' is-editing' : ''}`}>
+      <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2></div></div>
+        <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button><button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button></>}</div>
       </header>
-      {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert">{error}</div>}
+      {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
+      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
           <div className="bmap-toolbar" role="toolbar" aria-label="도면 도구">
@@ -1081,7 +1183,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             drop={renamingNode.type === 'camera' ? MAP_EDIT_MARK.nameBoxCameraDrop : 0} label={`${kindLabel(renamingNode)} 이름`}
             initial={renamingNode.name} positionKey={`${view.x}:${view.y}:${view.zoom}:${canvasSize.width}:${canvasSize.height}`}
             onCommit={commitName} onCancel={cancelName} onHistory={passNameHistory} />}
-          {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : '도면 편집에서 공간·문·사물·카메라를 배치할 수 있습니다.'}</span></div>}
+          {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '관리자가 공간을 배치하면 여기에 표시됩니다.'}</span></div>}
           <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' ? footerHint : undefined}>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
@@ -1094,7 +1196,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             {selected.type === 'space' && <section className="bmap-connection" aria-label="공간의 상세 도면">
               <span className="bmap-eyebrow">이 공간 안으로</span>
               {linkedMap ? <><strong>{linkedMap.name}</strong><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => navigate(linkedMap.id)}>상세 도면 열기 →</button><p>{editing && mode === 'plan' ? '공간을 더블클릭해도 열립니다. 이름은 F2 키나 위의 이름 칸에서 바꿔요.' : '공간을 더블클릭해도 열립니다.'}</p></> : <><p>이 공간의 내부를 별도 도면으로 이어보세요.</p>{snapshot.canManage && <button type="button" className="bg-button bg-primary" disabled={disabled || selected.locked || !!polygon.length} onClick={() => openCreate(current.id, selected)}>내부 도면 만들기</button>}</>}
-              {snapshot.canManage && <div className="bmap-link-actions"><button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => { setError(''); setLinkForm({ spaceId: selected.id, mapId: selected.childMapId ?? '', search: '' }); }}>{linkedMap ? '연결 변경' : '기존 도면 연결'}</button>{linkedMap && <button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => void linkMap(null, selected.id)}>연결 해제</button>}</div>}
+              {snapshot.canManage && <div className="bmap-link-actions"><button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => { setError(''); setLinkForm({ spaceId: selected.id, mapId: selected.childMapId ?? '', search: '' }); }}>{linkedMap ? '연결 변경' : '기존 도면 연결'}</button>{linkedMap && <button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => { focusCanvas(); void linkMap(null, selected.id); }}>연결 해제</button>}</div>}
               {selected.locked && <p>잠금을 해제하면 연결을 바꿀 수 있습니다.</p>}
               {draftChanged && <p className="bmap-save-note">연결할 때 현재 공간 편집 내용도 함께 저장됩니다.</p>}
             </section>}
@@ -1199,6 +1301,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       {error && <p className="bg-error" role="alert">{error}</p>}
       <div className="bmap-modal-actions"><button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); setConfirmation('delete-map'); }}>도면 삭제</button><button type="button" className="bg-button" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); }}>취소</button><button type="submit" className="bg-button bg-primary" disabled={disabled || !settingsForm.name.trim()}>{busy ? '저장 중…' : '설정 저장'}</button></div>
     </form></BackgroundModal>}
-    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? '도면 편집을 취소할까요?' : confirmation === 'delete-map' ? '도면을 삭제할까요?' : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? '이 도면에서 저장하지 않은 변경사항은 사라집니다.' : confirmation === 'delete-map' ? '도면 배치만 삭제합니다. 장소와 배경 원본은 유지됩니다. 하위 도면이나 연결이 남아 있으면 먼저 해제해 주세요.' : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '변경사항 버리기' : '삭제'}</button></div></BackgroundModal>}
+    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?') : confirmation === 'delete-map' ? '도면을 삭제할까요?' : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.') : confirmation === 'delete-map' ? '도면 배치만 삭제합니다. 장소와 배경 원본은 유지됩니다. 하위 도면이나 연결이 남아 있으면 먼저 해제해 주세요.' : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}
   </div>;
 }
