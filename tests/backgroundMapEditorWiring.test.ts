@@ -1451,3 +1451,128 @@ test('anchor 59: the new test files run in the build', () => {
   assert.equal(scripts['test:background'], 'node --test ./tests/background*.test.ts');
   for (const build of ['build', 'build:vite']) assert.ok(scripts[build].includes('npm run test:background'), `${build} does not run the background tests`);
 });
+
+test('anchor 62: the pointer of a slide is heard on the window, its capture is only tried, and no listener stays however it ends', () => {
+  // The hook is read as this anchor runs: without its file this anchor fails, not every anchor of this file. No test of
+  // Node reaches a React hook, so its lines are held by their letters. `lines` are those lines without their indent.
+  const hook = read('useMapScrubPointer.ts'), lines = hook.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // The listeners. The moves and the release are heard on the window, in the capture phase: with a capture the events of
+  // the pressed element pass there, and without one (the inspection window has none) those of whatever is under the
+  // pointer do. Heard on the element alone, a drag would hang on its capture, and would follow no pointer where there is
+  // none. The blur is not heard in the capture phase: the blur of the field the drag takes the focus from would be heard
+  // too, and would cancel the drag as it starts. And the same five are taken away, under the same flags: one that stays
+  // goes on reading every move of the window.
+  const added = ["window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', cancel, true);",
+    "window.addEventListener('blur', cancel); target.addEventListener('lostpointercapture', cancel);"];
+  const removed = ["window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', cancel, true);",
+    "window.removeEventListener('blur', cancel); target.removeEventListener('lostpointercapture', cancel);"];
+  own(...added, ...removed);
+  // The capture is only tried: where there is none the call may throw, and the window listeners follow the pointer anyway.
+  const captured = 'try { target.setPointerCapture(pointerId); } catch';
+  assert.ok(hook.includes(captured), 'the capture is tried');
+  // The press, in this order. A pointer that is not the primary one, another button or a control that is off: nothing
+  // happens, and the default of that press is left alone. The same while a session of another pointer runs. A session of
+  // this very pointer that is still here never heard its release (the pressed element went away, and the button came up
+  // outside the window): it is given up first. Turned away instead, the control would take no press until it is drawn
+  // anew. Only then is the default prevented, which keeps the focus in a field that is being typed in until the drag
+  // starts and moves it.
+  const press = ['if (!event.isPrimary || event.button !== 0 || latest.current.disabled) return;',
+    'if (session.current) { if (session.current.pointerId !== event.pointerId) return; session.current.giveUp(); }', 'event.preventDefault();'];
+  own(...press);
+  inOrder(hook, ...press);
+  // The guard: what another pointer does is none of this session's business. Three, one in each of the three listeners:
+  // without the one of `up`, the release of a second pointer would end the drag of the first.
+  const inMove = piece(hook, 'function move(', 'function up('), inUp = piece(hook, 'function up(', 'function cancel('), inCancel = piece(hook, 'function cancel(', 'session.current = active;');
+  assert.equal(count(hook, /event\.pointerId !== active\.pointerId/g), 3, 'the guards of move, up and cancel');
+  for (const listener of [inMove, inUp, inCancel]) assert.equal(count(listener, /event\.pointerId !== active\.pointerId/g), 1, 'one guard in each');
+  // The move. With the left button up it is the release, read where the pointer is: letting go of the left button while
+  // another one is held arrives as a move, and so does a pointer that comes back after its button came up outside the
+  // window. Without that line the value would go on following a pointer that nothing holds. The slop is measured along
+  // the axis of the control alone: measured as a distance, a grip moved up or a lens moved sideways would start a drag.
+  // And it is asked at all: without it a mere press on the name of a field would start a gesture.
+  const move = ['if ((event.buttons & 1) === 0) { up(event); return; }',
+    "const along = drive.axis === 'x' ? event.clientX - active.press.clientX : event.clientY - active.press.clientY;",
+    'if (Math.abs(along) >= MAP_NUMBER_SCRUB.slopPx) begin(event, along);'];
+  own(...move);
+  // The start. Beginning moves the focus, and what that commits is drawn at once: a control that was taken down meanwhile
+  // cancels the gesture it has just opened, which nobody else would end. A start that is refused ends the session. And the
+  // drag opens where it starts, the press moved by the slop along the axis and towards the pointer, never where the
+  // pointer is by then: a fast start would lose that much of its way, and measured from the press itself the first value
+  // of the lens would jump. That place is held as the whole line, down to the Shift of the move that started the drag.
+  const start = ['if (session.current !== active) { if (origin && latest.current.scrub.alive()) latest.current.scrub.cancel(); return; }',
+    'if (!origin) { end(); return; }', 'const slop = Math.sign(along) * MAP_NUMBER_SCRUB.slopPx;',
+    "const from = drive.immediate ? active.press : { clientX: active.press.clientX + (drive.axis === 'x' ? slop : 0), clientY: active.press.clientY + (drive.axis === 'y' ? slop : 0), shiftKey: at.shiftKey };",
+    "drag = drive.open(origin, from); active.last = origin.start; active.phase = 'dragging';"];
+  own(...start);
+  assert.ok(!hook.includes('.open(origin, at)'));
+  // The reading. Once the editor has cancelled the drag (Escape, a save starting) nothing more comes of this press. And a
+  // value is shown only when it is another one: previewed at every pixel, the editor would be drawn again at every pixel.
+  const reading = ["if (!latest.current.scrub.alive()) { active.phase = 'dead'; drive.close?.(); return; }",
+    'if (Number.isFinite(value) && value !== active.last) { active.last = value; latest.current.scrub.preview(drive.field, value); }'];
+  own(...reading);
+  assert.equal(count(hook, /scrub\.preview\(/g), 1, 'one preview, in the reading');
+  // The release, read inside `up`: a move reads the pointer too. A press that never became a drag is a tap, and the control
+  // is told so (a field takes the focus): untold, a press on a grip would do nothing at all. A drag reads the place of the
+  // release, and is finished only if it is still a drag after that: finished unasked, the release that follows an Escape
+  // would end a gesture that is not this one. Then the click that follows a drag is swallowed (on the name of a field it
+  // would put the caret in the box), and the swallowing is taken away again: left there, the window would hear no click.
+  const tap = "if (active.phase === 'pressed') { end(); drive.tap?.(); return; }", finish = "if (active.phase === 'dragging') { latest.current.scrub.finish(); drive.close?.(); }";
+  const swallow = ["window.addEventListener('click', swallow, true);", "window.setTimeout(() => window.removeEventListener('click', swallow, true), 0);"];
+  own(tap, finish, ...swallow);
+  inOrder(inUp, tap, 'read(event);', finish, ...swallow);
+  assert.equal(count(hook, /drive\.tap\?\.\(\)/g), 1, 'one tap, of a press that is released');
+  assert.equal(count(hook, /scrub\.finish\(\)/g), 1, 'one finish, of a drag that is released');
+  // Given up (the pointer is cancelled, the window loses the focus, the capture is lost, the same pointer presses again):
+  // a drag that still runs is cancelled, never finished.
+  const gaveUp = "if (active.phase === 'dragging') { if (latest.current.scrub.alive()) latest.current.scrub.cancel(); drive.close?.(); }";
+  own(gaveUp);
+  // Taken down with a press still on it: a drag that runs is cancelled, and the listeners go on the very next line, under
+  // no condition. Kept for a press that had not become a drag yet, the next move would start the drag on the node that
+  // was picked meanwhile.
+  const down = "if (active.phase === 'dragging' && latest.current.scrub.alive()) latest.current.scrub.cancel();", downAt = lines.indexOf(down);
+  assert.ok(downAt > -1, 'taken down, a drag that runs is cancelled');
+  assert.equal(lines[downAt + 1], 'active.end();');
+  // A drag is cancelled in those three places (given up, taken down, taken down while it started) and nowhere else, each
+  // time after asking whether one still runs: the editor may have cancelled it already (Escape, a save starting).
+  assert.equal(count(hook, /scrub\.cancel\(\)/g), 3, 'given up, taken down, taken down while it started');
+  assert.equal(count(hook, /scrub\.alive\(\)\) latest\.current\.scrub\.cancel\(\)/g), 3, 'each cancel asks first');
+  // Shift is the one modifier that is read, off the pointer events themselves: no key is listened for, and Alt means
+  // nothing here (on the plan it is kept from the window menu, anchor 17; a drag that starts outside the canvas is not).
+  for (const none of ['altKey', 'ctrlKey', 'metaKey', "addEventListener('keydown'"]) assert.ok(!hook.includes(none), `still there: ${none}`);
+  // And the hook holds nothing else: from its first line through the brace that closes it, it is the lines above and what
+  // joins them, in this order. What joins them, and what goes wrong without it. `latest` is brought up to date at every
+  // render: a control that was off when it was first drawn (view mode, a locked node) would stay deaf once it is on. The
+  // cleanup is what an effect that runs once returns, and all that stands in front of its two lines is the return for no
+  // session: with a return for a session that is no drag yet the listeners of a mere press would stay, and run after
+  // every render it would cancel a drag at its first step. The element is the one that was given the handler, not what
+  // was pressed inside it (the picture of a grip). `end` lets the capture go only after the listeners (the
+  // lostpointercapture that raises is no cancel) and empties the ref of this session alone. Giving up ends the session,
+  // and a cancel gives up: left out, the listeners of a drag that was cancelled from outside would stay. A start reads the
+  // pointer at once: a fast start shows the way it has already gone, and a press on the bar shows its value at the press.
+  // A drag reads every move, and one the editor cancelled stays dead until the release: without that line the next move
+  // would start it again from the press, and Escape would not hold while the hand still moves. A release ends the session
+  // after a drag as after a tap. The click that follows is stopped and its default is prevented: stopped alone, the name
+  // of a field would still put the caret in its box, and prevented alone, what the pointer was released over would still
+  // hear a click. The session is recorded before the press may start a drag: recorded after, a press on the bar would
+  // cancel what it has just begun. And a press starts at once only where the control says so (on the bar, away from its
+  // dot): started at once everywhere, a press on a name would be no tap, and would open a gesture.
+  const signature = 'export function useMapScrubPointer(scrub: MapFieldScrub, disabled: boolean): <S>(event: ReactPointerEvent<Element>, drive: MapScrubDrive<S>) => void {';
+  // Read as above, with one blank where a comment was taken out of a pair of braces.
+  assert.deepEqual(block(hook, signature).split('\n').map(line => line.trim().replace(/\{\s+\}/, '{ }')).filter(Boolean), [signature,
+    'const latest = useRef({ scrub, disabled }), session = useRef<Session | null>(null);', 'latest.current = { scrub, disabled };',
+    'useEffect(() => () => {', 'const active = session.current;', 'if (!active) return;', down, 'active.end();', '}, []);',
+    'return useCallback(<S>(event: ReactPointerEvent<Element>, drive: MapScrubDrive<S>) => {', ...press,
+    'const target = event.currentTarget, pointerId = event.pointerId;', 'let drag: S;',
+    "const active: Session = { pointerId, press: { clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey }, phase: 'pressed', last: Number.NaN, end, giveUp };",
+    'function end() {', ...removed, 'try { if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId); } catch { }', 'if (session.current === active) session.current = null;', '}',
+    'function giveUp() {', gaveUp, 'end();', '}',
+    'function read(at: MapScrubPoint) {', reading[0], 'const value = drive.read(drag, at);', reading[1], '}',
+    'function begin(at: MapScrubPoint, along: number) {', 'const origin = latest.current.scrub.begin(drive.field);', ...start, 'read(at);', '}',
+    'function move(event: PointerEvent) {', 'if (event.pointerId !== active.pointerId) return;', move[0], "if (active.phase === 'dragging') { read(event); return; }", "if (active.phase === 'dead') return;", move[1], move[2], '}',
+    'function up(event: PointerEvent) {', 'if (event.pointerId !== active.pointerId) return;', tap, "if (active.phase === 'dragging') {", 'read(event);', finish, '}', 'end();',
+    'const swallow = (click: Event) => { click.stopPropagation(); click.preventDefault(); };', ...swallow, '}',
+    'function cancel(event: Event) {', "if ('pointerId' in event && event.pointerId !== active.pointerId) return;", 'giveUp();', '}',
+    'session.current = active;', ...added, `${captured} { }`, 'if (drive.immediate) begin(active.press, 0);', '}, []);', '}']);
+});
