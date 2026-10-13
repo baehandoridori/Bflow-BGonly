@@ -1680,12 +1680,20 @@ test('anchor 63: typing and the identity of a field are as they were, and the ar
   const sheet = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
   const arrows = '.bmap-num-row input::-webkit-inner-spin-button,.bmap-num-row input::-webkit-outer-spin-button { -webkit-appearance:none; appearance:none; margin:0; }';
   const room = '.bg-library .bmap-num-row input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) {', off = '.bmap-num[data-disabled] :is(.bmap-num-label,.bmap-num-grip,.bmap-num-track) {';
-  const num = sheet.filter(line => line.includes('.bmap-num') && !line.trimStart().startsWith('/*'));
+  // The rules are looked for in what is left of the sheet without its comments, wherever a comment stands and however
+  // many lines it runs over. Were a line dropped whole because it starts with a comment, a rule written behind that
+  // comment would be read by nothing below: it could hold the grip to the right end, or lay a motion on the dot, unseen.
+  const bare = sheet.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
+  const num = bare.map(line => line.trim()).filter(line => line.includes('.bmap-num'));
   assert.deepEqual(num.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-num-label {', '.bmap-num-row {', room, arrows.slice(0, arrows.indexOf('{') + 1), '.bmap-num-grip {',
     '.bmap-num-grip:hover,.bmap-num.is-dragging .bmap-num-grip {', '.bmap-num.is-dragging .bmap-num-label {', '.bmap-num-track {', '.bmap-num-track::before {', '.bmap-num-thumb {',
     off, '.bmap-num[data-disabled] .bmap-num-grip:hover {']);
-  // Nothing of a number field moves by itself: a drag is the hand moving it.
-  for (const line of num) assert.doesNotMatch(line, /transition|animation/);
+  // And each of those lines is one rule: a second one written behind the first would be read by nothing below either.
+  for (const line of num) assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
+  // Nothing of a number field moves by itself: a drag is the hand moving it. And nothing of one blurs what is behind it:
+  // the inspector shows several at once, and the dot is drawn anew at every step of the pointer (the motion rules of the
+  // app: no backdrop-filter on what repeats or moves).
+  for (const line of num) assert.doesNotMatch(line, /transition|animation|backdrop-filter/);
   // The two small arrows of the engine are not drawn, by that one line as it is written. The element stays, so the arrow
   // keys and the wheel over a focused field step the value as before. And no other line of the sheet names the arrows.
   assert.ok(sheet.includes(arrows), 'the small arrows of the engine are drawn');
@@ -1714,6 +1722,14 @@ test('anchor 63: typing and the identity of a field are as they were, and the ar
   has(grip, 'position:absolute', 'left:1px');
   assert.ok(!sheet[gripAt].includes(' right:') && !grip.some(item => item.startsWith('right:')), 'the grip is held to the right end as well');
   has(baseRule(sheet, room), 'padding-left:28px');
+  // And the grip ends inside that room: its inset and its width are together no more than the padding of the box. How
+  // wide it is drawn is tuned by eye in the app and is not held, only that it fits. Wider than the room it lies over the
+  // number, and with no width of its own it ends where its picture does, which is tuned in the app as well. The two
+  // numbers are changed together (a narrower grip in a narrower room, should a long number be cut off), and this needs
+  // no change then. A length is read as the engine reads it: of a property written twice in a rule, the last counts.
+  const px = (rule: string[], property: string) => Number(/^(\d+(?:\.\d+)?)px$/.exec(rule.filter(item => item.startsWith(`${property}:`)).pop()?.slice(property.length + 1) ?? '')?.[1]);
+  const inset = px(grip, 'left'), wide = px(grip, 'width'), cleared = px(baseRule(sheet, room), 'padding-left');
+  assert.ok(inset + wide <= cleared, `the grip does not end inside the room of the box: left ${inset} + width ${wide} against padding-left ${cleared} (px; NaN is a length not written in px)`);
   // The two states the component marks are among those rules: a drag tints the grip and darkens the name, and a field
   // that is off dims its three controls. Off, they take no press (the hook turns it away) and say so by the plain cursor.
   // How much they are dimmed is not held: that is tuned by eye, in the app.
