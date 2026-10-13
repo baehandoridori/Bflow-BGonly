@@ -2220,19 +2220,27 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
   assert.deepEqual(looks(part), looks(raw), 'a comment mark inside what the dialog draws: there it is text on screen, and the anchor does not see its line');
   // The stylesheet, line by line and as written. The dialog is drawn by these seven rules and by no other, each a base
   // rule on a line of its own, in this order; they are looked for in what is left of the sheet without its comments, so
-  // that a rule written behind a comment or under another selector is seen. Its paragraphs and its two choices stand
-  // one above the other: the library takes the margin off every paragraph, so the room between them is the gap of that
-  // column. Nothing of the dialog moves by itself, and nothing of it blurs what is behind it: the design adds no
-  // motion, so none of these rules needs a twin for reduced motion. What the rules paint with is tuned by eye in the
-  // app, and is not held.
+  // that a rule written behind a comment or under another selector is seen. Each is listed as its line begins, indent
+  // and all, and each begins its line. A rule of the dialog inside a media block is not one of the seven: there it
+  // stands behind the head of the block or indented under it, as the lines of a block do in this sheet, and it would
+  // hold only where the condition of the block does. Its paragraphs and its two choices stand one above the other: the
+  // library takes the margin off every paragraph, so the room between them is the gap of that column. Nothing of the
+  // dialog moves by itself, and nothing of it blurs what is behind it: the design adds no motion, so none of these
+  // rules needs a twin for reduced motion. No letter of it is slanted, by `font-style` or through the `font`
+  // shorthand: the screens of this app are set without italics. And no colour is written out, as a hex or as numbers:
+  // the dialog is painted with the colours of the theme, and the light screen and the dark one each have their own.
+  // The near-white of the dark screen, written out for the title of a choice, could not be read on the light one.
+  // Which colour of the theme a rule paints with is tuned by eye in the app, and is not held.
   const sheet = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
   const bare = sheet.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
-  const rules = bare.map(line => line.trim()).filter(line => line.includes('.bmap-delete'));
+  const rules = bare.filter(line => line.includes('.bmap-delete'));
   assert.deepEqual(rules.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-delete-lead {', '.bmap-delete-choices {', '.bmap-delete-choice {', '.bmap-delete-choice:has(input:checked) {',
     '.bmap-delete-choice strong {', '.bmap-delete-choice input {', '.bmap-delete-choices:disabled .bmap-delete-choice {']);
   for (const line of rules) {
     assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
     assert.doesNotMatch(line, /transition|animation|backdrop-filter/);
+    assert.doesNotMatch(line, /font-style|italic|oblique/);
+    assert.doesNotMatch(line, /#|\b(?:rgb|hsl)a?\((?!var\()/);
   }
   for (const column of ['.bmap-delete-lead {', '.bmap-delete-choices {']) has(baseRule(sheet, column), 'display:flex', 'flex-direction:column');
 });
