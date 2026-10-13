@@ -2015,6 +2015,16 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
     '<BackgroundMapPlanSide map={map} camera={camera} canEdit={canEdit} scrub={scrub} label={`옆에서 본 방향: ${pitchText}, ${heightText}`} />']) assert.ok(preview.includes(text), `not found: ${text}`);
   assert.equal(count(preview, /<CameraReadout\b/g), 1, 'the readout of a camera is drawn in one place');
   assert.equal(count(preview, /<BackgroundMapPlanSide\b/g), 1, 'the side view is drawn in one place');
+  // In the file of the plan nothing on that way is wrapped in `memo`: not the plan, not the readout of a camera, not the
+  // side view where it is brought in (in its own file it is a plain function, by the list above). As the editor ends a
+  // drag by itself before a value has changed (Escape), what is handed down that way is what was handed down before:
+  // behind a wrapper the side view would not be drawn again, `live` would not be asked again, and the darker halo and
+  // the coloured height would stay until the pointer moves or is let go. So every place the word stands in that file
+  // is read: its import, and the two wrappers the plan always had, around the shapes and the cameras it draws. A
+  // wrapper under any other spelling is one place more: a function handed over by its name, an arrow function, a type
+  // argument in front of the parenthesis, the call through the namespace of React.
+  const wrappers = preview.match(/\bmemo\b(?:\(function \w+)?/g) ?? [];
+  assert.deepEqual(wrappers, ['memo', 'memo(function PlanShape', 'memo(function PlanCamera'], `the plan, the readout of a camera or the side view is wrapped in memo, or a wrapper of the plan is gone: ${wrappers.join(' | ')}`);
   assert.ok(read('mapCanvas.ts').includes("export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub };"), 'the contract of the companion plan');
   // The plan itself has no code for the drag: a press is followed by the hook, on the window. The listeners the plan
   // has are those of its picks, and anchors 34 and 39 find them by their place in that file. Nor does it draw a side
@@ -2050,6 +2060,10 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   has(baseRule(plan, '.bmap-plan-side-ring {'), 'fill:none', 'stroke-width:6px');
   has(baseRule(plan, '.bmap-plan-preview :is(rect,polygon,circle,line,path) {'), 'vector-effect:non-scaling-stroke');
   for (const line of rules) assert.doesNotMatch(line, /vector-effect/);
+  // The up-down mark is two open lines, and unfilled like the halo. What a shape is filled with has to be written: the
+  // check of the colours above reads only what a rule declares, and a shape with no fill declared is filled in black
+  // by the engine, the colour of no camera. Each of the two lines would be closed into a small black wedge.
+  has(baseRule(plan, '.bmap-plan-side-marks {'), 'fill:none');
   // Where the plan is short and wide the picture stands beside the text and is narrow: the words added to the caption
   // are hidden there, or the caption would always be cut off. Where that plan is lower still the caption is hidden
   // whole and the picture is at its smallest: the up-down mark is not drawn there, where it would run into the halo.
