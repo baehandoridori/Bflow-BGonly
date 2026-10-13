@@ -25,11 +25,12 @@ export function BackgroundMapPlanSide({ map, camera, canEdit, scrub, label }: {
   /** What the picture says, for a reader: `옆에서 본 방향: 아래 45°, 높이 120`. */
   label: string }): JSX.Element {
   const draggable = canEdit && !camera.locked, box = PLAN_SIDE_VIEW;
-  const [frozen, setFrozen] = useState<PlanSideScale | null>(null);
+  const frozen = useRef<PlanSideScale | null>(null), [, redraw] = useState(0);
   const svgRef = useRef<SVGSVGElement>(null);
   const press = useMapScrubPointer(scrub, !draggable);
   // The scale is held only while its drag still runs. The editor can end the drag by itself (Escape, a save starting): it draws this again then.
-  const live = frozen && scrub.alive() ? frozen : null;
+  // It is held in a ref, not in state: the first step of a drag is drawn at once, before a state set in the same pointer event would arrive, and for that one frame the picture would be fitted anew.
+  const live = frozen.current && scrub.alive() ? frozen.current : null;
   const scale = live ?? planSideScale(map, camera), side = planSideView(map, camera, scale);
   const lift = (event: ReactPointerEvent<SVGCircleElement>) => press(event, {
     field: 'elevation', axis: 'y', immediate: false,
@@ -38,12 +39,12 @@ export function BackgroundMapPlanSide({ map, camera, canEdit, scrub, label }: {
       const node = origin.map.nodes.find(item => item.id === camera.id), held = planSideScale(origin.map, node?.type === 'camera' ? node : camera);
       const inverse = svgRef.current?.getScreenCTM()?.inverse();
       const toY = (clientY: number) => inverse ? new DOMPoint(0, clientY).matrixTransform(inverse).y : Number.NaN;
-      setFrozen(held);
+      frozen.current = held; redraw(turn => turn + 1);
       // The lens keeps the offset it has where the drag starts: there the value is the height it started from, at any size of the picture.
       return { scale: held, start: origin.start, toY, grab: planSideY(held, origin.start) - toY(from.clientY) };
     },
     read: (drag, at) => planSideDragLevel(drag.scale, drag.toY(at.clientY) + drag.grab, drag.start),
-    close: () => setFrozen(null),
+    close: () => { frozen.current = null; redraw(turn => turn + 1); },
   });
   // The up-down mark: two small chevrons to the left of the lens, clear of its halo, in the units of the picture.
   const x0 = box.cameraX - 14, y = side.camera.y;

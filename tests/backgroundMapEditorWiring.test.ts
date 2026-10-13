@@ -1918,14 +1918,16 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // The scale. The picture is drawn on the scale of the map as it is, and while a drag of the lens runs, on the scale
   // that drag started on. Fitted to the map at every step instead (`planSideView(map, camera)`), the picture would be
   // drawn anew as the lens leaves its range, and the lens would run away from the pointer. And a held scale counts only
-  // while its drag still runs: asked of `frozen` alone, the darker halo and the held scale would stay behind an Escape
-  // until the pointer moves or is let go.
-  const live = 'const live = frozen && scrub.alive() ? frozen : null;', drawn = 'const scale = live ?? planSideScale(map, camera), side = planSideView(map, camera, scale);';
+  // while its drag still runs: asked of `frozen.current` alone, the darker halo and the held scale would stay behind an
+  // Escape until the pointer moves or is let go. It is held in a ref and not in state (gate S): the first step of a
+  // drag is drawn at once, a state set in the same pointer event arrives one commit later, and for that one frame the
+  // room and the floor line were drawn on a scale fitted anew.
+  const live = 'const live = frozen.current && scrub.alive() ? frozen.current : null;', drawn = 'const scale = live ?? planSideScale(map, camera), side = planSideView(map, camera, scale);';
   own(live, drawn);
   // The drag. It is the height of the camera, it runs up and down, and it starts past the slop: a press alone, or a move
   // sideways, changes nothing. The scale is taken as the drag starts, from the map the editor hands over and never from
   // the map of this render: the field that was being typed in is committed as the drag takes the focus away, and that
-  // may have been a height. It is kept for the sums and given to the picture as well: without `setFrozen(held);` the
+  // may have been a height. It is kept for the sums and given to the picture as well: without `frozen.current = held;` the
   // sums would run on the held scale and the picture on a fitted one. A place on screen becomes a place in the picture
   // through the matrix of the SVG: counted in screen pixels (`clientY - rect.top`), the lens would not keep to the
   // pointer (in a small picture it falls behind, the more the smaller the picture is), while the height still came in
@@ -1935,10 +1937,10 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // tests run). And however the drag ends, the scale is let go: still held, it would be the scale of the picture again,
   // under the darker halo, during any gesture of the document that runs later (a slide of the height field, a handle
   // dragged in 3D).
-  const drive = "field: 'elevation', axis: 'y', immediate: false", taken = 'planSideScale(origin.map,', kept = 'setFrozen(held);';
+  const drive = "field: 'elevation', axis: 'y', immediate: false", taken = 'planSideScale(origin.map,', kept = 'frozen.current = held; redraw(turn => turn + 1);';
   const toY = 'const toY = (clientY: number) => inverse ? new DOMPoint(0, clientY).matrixTransform(inverse).y : Number.NaN;';
   const grab = 'grab: planSideY(held, origin.start) - toY(from.clientY)', level = 'planSideDragLevel(drag.scale, drag.toY(at.clientY) + drag.grab, drag.start)';
-  const closed = 'close: () => setFrozen(null)';
+  const closed = 'close: () => { frozen.current = null; redraw(turn => turn + 1); }';
   const held = `const node = origin.map.nodes.find(item => item.id === camera.id), held = ${taken} node?.type === 'camera' ? node : camera);`;
   const opened = `return { scale: held, start: origin.start, toY, ${grab} };`, lifted = `read: (drag, at) => ${level},`;
   own(`${drive},`, held, toY, kept, opened, lifted, `${closed},`);
@@ -1988,7 +1990,7 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
     "import { useMapScrubPointer } from './useMapScrubPointer';",
     'const fixed = (value: number) => Math.round(value * 100) / 100 + 0;', "const pointList = (points: BackgroundPoint[]) => points.map(point => `${fixed(point.x)},${fixed(point.y)}`).join(' ');",
     'export function BackgroundMapPlanSide({ map, camera, canEdit, scrub, label }: {', 'map: BackgroundMap; camera: BackgroundCamera;', 'canEdit: boolean; scrub: MapFieldScrub;', 'label: string }): JSX.Element {',
-    `${handle}, box = PLAN_SIDE_VIEW;`, 'const [frozen, setFrozen] = useState<PlanSideScale | null>(null);', 'const svgRef = useRef<SVGSVGElement>(null);', `const press = ${pointer};`, live, drawn,
+    `${handle}, box = PLAN_SIDE_VIEW;`, 'const frozen = useRef<PlanSideScale | null>(null), [, redraw] = useState(0);', 'const svgRef = useRef<SVGSVGElement>(null);', `const press = ${pointer};`, live, drawn,
     'const lift = (event: ReactPointerEvent<SVGCircleElement>) => press(event, {', `${drive},`, 'open: (origin, from) => {', held, 'const inverse = svgRef.current?.getScreenCTM()?.inverse();', toY, kept, opened, '},',
     lifted, `${closed},`, '});', 'const x0 = box.cameraX - n, y = side.camera.y;',
     "return <figure className={`bmap-plan-side${draggable ? ' is-draggable' : ''}${live ? ' is-lifting' : ''}`}>",
