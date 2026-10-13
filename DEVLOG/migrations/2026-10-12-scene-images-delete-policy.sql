@@ -1,5 +1,8 @@
 -- 2026-10-12 v1.134.3 — scene-images 버킷: 그림 삭제가 실제로 되게 + 아직 쓰이는 그림은 지워지지 않게
--- 운영 적용: (아직 적용 전 — 적용하면 이 줄에 날짜와 migration 버전을 적는다)
+-- 운영 적용: 2026-10-13 에 20261013143155 (scene_images_delete_policy) 로 적용. 함수 본문 md5 대조 일치.
+--   적용 뒤 실제 Storage 서버에서 anon 키로 확인: 나열은 빈 목록 / DB 가 가리키는 시험용 파일은 remove() 가 빈 목록이고
+--   파일이 남음 / 가리키던 행을 지우자 같은 파일이 지워짐 / REST 로 storage_private 호출은 406(스키마 비노출).
+--   2026-10-12 에 남았던 탐침 파일 2개도 이때 지웠다.
 --
 -- 무엇이 문제였나
 --   storage.objects 에 anon 정책이 INSERT·DELETE 둘뿐이고 SELECT 가 없었다. Postgres 는 DELETE 의 WHERE 를
