@@ -19,6 +19,8 @@
 .bmap-layout button { cursor:pointer; }
 .bmap-layout button:disabled { cursor:not-allowed; opacity:.42; }
 .bmap-layout button:focus-visible,.bmap-layout input:focus-visible,.bmap-layout select:focus-visible,.bmap-canvas:focus-visible { outline:2px solid rgb(var(--color-accent-sub)); outline-offset:2px; }
+/* A press on the map, and the buttons that hand the keyboard to it (편집 시작, 도면 저장, 편집 끝내기), focus the canvas without the keyboard. The engine draws its own ring round a focused svg then, orange like the edit frame: it would stay round a map that is not edited. The ring above is the keyboard's. */
+.bmap-canvas:focus:not(:focus-visible) { outline:none; }
 .bmap-tree { flex:0 0 196px; display:flex; flex-direction:column; border-right:1px solid rgb(var(--color-bg-border)); padding:16px 0 10px; background:rgb(var(--color-bg-card) / .45); overflow-y:auto; }
 .bmap-section-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:13px; font-size:13px; }
 .bmap-tree .bmap-section-heading,.bmap-tree>.bmap-hint { margin-left:16px; margin-right:12px; }

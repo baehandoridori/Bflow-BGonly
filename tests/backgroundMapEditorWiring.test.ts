@@ -1224,6 +1224,12 @@ test('anchor 54: the band is one element for the plan and for 3D, stuck over the
   has(baseRule(lines, '.bg-library .bmap-edit-strip .bmap-edit-save:hover:not(:disabled) {'), 'background:rgb(var(--bmap-edit-ink) / .86)');
   // The focus ring is in the colour of the words too: the accent ring of the editor may not show on the band.
   has(baseRule(lines, '.bg-library .bmap-edit-strip button:focus-visible {'), 'outline:2px solid rgb(var(--bmap-edit-ink))');
+  // The frame is the sign of edit mode, so nothing else may ring the canvas in its hue. The engine rings a focused svg
+  // in orange whenever it was not the keyboard that focused it (a press on the map; 편집 시작 · 도면 저장 · 편집 끝내기, which
+  // hand the keyboard to the canvas): after 편집 끝내기 a map that is no longer edited would still wear a ring. That ring
+  // is taken off, as a rule of its own line, and the keyboard's ring (the accent, 2px) stays.
+  assert.ok(lines.includes('.bmap-canvas:focus:not(:focus-visible) { outline:none; }'), 'the canvas keeps the engine ring after a press');
+  assert.ok(lines.some(line => line.includes('.bmap-canvas:focus-visible { outline:2px solid rgb(var(--color-accent-sub)); outline-offset:2px; }')), 'the keyboard ring of the canvas is gone');
   // Dimmed it is an empty box. The line is counted: asked only for what it must not hold, a deleted line would pass.
   const dimmedAt = lineOf(lines, '.bg-library .bmap-edit-strip .bmap-edit-save[aria-disabled="true"],'), dimmed = declarations(lines[dimmedAt]);
   has(dimmed, 'background:transparent', 'cursor:default');
