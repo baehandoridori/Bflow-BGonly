@@ -169,6 +169,24 @@
 .bmap-inspector input:disabled,.bmap-inspector select:disabled { opacity:.55; }
 .bmap-inspector input[type=file] { font-size:10px; }
 .bmap-field-pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+/* Number fields of the inspector: the name and the grip slide the value, and a value with fixed ends has a bar under its box. Nothing here moves by itself. */
+.bmap-num-label { align-self:flex-start; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:500; color:var(--bg-muted); cursor:ew-resize; touch-action:pan-y; }
+.bmap-num-row { position:relative; }
+/* The selector has to outweigh the shared input rule of the library, which sets the padding. */
+.bg-library .bmap-num-row input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { padding-left:28px; font-variant-numeric:tabular-nums; }
+/* The two small arrows of the engine are not drawn: the grip does their job. The element stays, so the arrow keys and the wheel over a focused field step the value as before. */
+.bmap-num-row input::-webkit-inner-spin-button,.bmap-num-row input::-webkit-outer-spin-button { -webkit-appearance:none; appearance:none; margin:0; }
+/* At the left end of the box: the inspector hugs the right edge of the screen, and a grip at the right end would leave no room to drag towards more. */
+.bmap-num-grip { position:absolute; top:1px; left:1px; bottom:1px; display:grid; place-items:center; width:22px; border-right:1px solid rgb(var(--color-bg-border)); border-radius:6px 0 0 6px; color:rgb(var(--color-text-secondary)); cursor:ew-resize; touch-action:pan-y; }
+/* Pointed at and dragged: the tint marks it, and the mark itself takes the text colour. The lighter accent would all but vanish on the tint in the light themes. */
+.bmap-num-grip:hover,.bmap-num.is-dragging .bmap-num-grip { color:rgb(var(--color-text-primary)); background:rgb(var(--color-accent) / .14); }
+.bmap-num.is-dragging .bmap-num-label { color:rgb(var(--color-text-primary)); }
+.bmap-num-track { position:relative; height:14px; margin-top:-2px; cursor:pointer; touch-action:pan-y; }
+.bmap-num-track::before { content:""; position:absolute; left:0; right:0; top:5px; height:4px; border-radius:2px; background:rgb(var(--color-bg-border)); }
+/* The edge keeps the dot apart from the page where the accent of a theme is close to it. */
+.bmap-num-thumb { position:absolute; top:2px; left:calc(var(--bmap-num-at,0) * (100% - 10px)); width:10px; height:10px; border-radius:50%; background:rgb(var(--color-accent)); box-shadow:inset 0 0 0 1px rgb(var(--color-text-secondary)); pointer-events:none; }
+.bmap-num[data-disabled] :is(.bmap-num-label,.bmap-num-grip,.bmap-num-track) { cursor:default; opacity:.55; }
+.bmap-num[data-disabled] .bmap-num-grip:hover { color:rgb(var(--color-text-secondary)); background:transparent; }
 .bmap-hint { font-size:11px; line-height:1.7; color:rgb(var(--color-text-secondary)); margin-bottom:14px; }
 .bmap-check { display:flex; align-items:flex-start; gap:8px; font-size:11px; line-height:1.6; margin:9px 0 14px; }
 .bmap-check input { accent-color:rgb(var(--color-accent)); margin-top:3px; }

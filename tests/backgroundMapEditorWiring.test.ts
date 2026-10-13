@@ -1583,3 +1583,144 @@ test('anchor 62: the pointer of a slide is heard on the window, its capture is o
   own("import { MAP_NUMBER_SCRUB } from './mapNumberField.ts';");
   assert.equal(count(hook, /\bMAP_NUMBER_SCRUB\b/g), 3, 'the import, the slop of the move and the slop of the start');
 });
+
+test('anchor 63: typing and the identity of a field are as they were, and the arithmetic of a slide is the pure module\'s', () => {
+  // The component is read as this anchor runs: without its file this anchor fails, not every anchor of this file. No test
+  // of Node reaches a React component, so its lines are held by their letters. `lines` are they, without their indent.
+  const part = read('BackgroundMapNumberField.tsx'), lines = part.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // What the field is. Its name is a label tied to the box by an id, where it used to be a label round the box: the box
+  // keeps its name and its role, and a press on the name still puts the focus in it. Without the `htmlFor` the box has no
+  // name at all. The box is the number input it always was, the whole line: it shows what is being typed, or the value
+  // to two decimals (rounded to a whole number, 244.65 would read 245); the engine is told the limits, which its arrow
+  // keys stop at; and a field that is off takes no typing.
+  const name = '<label className="bmap-num-label" htmlFor={id}';
+  const box = '<input ref={box} id={id} type="number" step="any" value={text ?? round(value)} min={Number.isFinite(min) ? min : undefined} max={Number.isFinite(max) ? max : undefined} disabled={disabled}';
+  const round = 'const round = (value: number) => Math.round(value * 100) / 100;';
+  assert.ok(part.includes(name), 'the name of a field is not tied to its box');
+  own(box, round);
+  // Typing: the nine lines the field of the editor had, letter for letter and in this order. What is typed is kept as
+  // text (dropped, an unfinished entry would vanish from the box at every key), and an empty box is no number (read as
+  // zero, a field would be set to 0 the moment it is cleared). A value inside the limits applies at once, and only when
+  // it is another one. Enter leaves the field. Leaving it brings an entry outside the limits to the nearest limit, then
+  // drops the text and ends the undo step of the field.
+  const typing = ['const [text, setText] = useState<string | null>(null);',
+    "const parse = (raw: string) => { const next = raw.trim() === '' ? Number.NaN : Number(raw); return Number.isFinite(next) ? next : null; };",
+    'const raw = event.target.value, next = parse(raw);', 'setText(raw);', 'if (next !== null && next >= min && next <= max && next !== value) onChange(next);',
+    "onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}",
+    'const next = text === null ? null : parse(text), clamped = next === null ? value : Math.min(max, Math.max(min, next));',
+    'if (clamped !== next && clamped !== value) onChange(clamped);', 'setText(null); onDone?.();'];
+  own(...typing);
+  inOrder(part, ...typing);
+  // The limits typing is held to are those of the one table, by the key of the field. Given as props again, there would
+  // be two sets of them: the one a value is typed against and the one it is slid against.
+  const table = 'const id = useId(), box = useRef<HTMLInputElement>(null), { min, max, track } = MAP_NUMBER_FIELDS[field];';
+  own(table);
+  // The slide. The pointer is the one hook's, and it is off while the field is off. The look of a drag goes as soon as
+  // the editor ends the drag by itself (Escape, a save starting): asked of `dragging` alone, the field would stay lit
+  // until the next pointer event. A drag of the name or of the grip opens where the hook says it starts, on the value the
+  // editor gave it and never on the value of this render: the field that was being typed in is committed as the drag
+  // takes the focus away, and this render knows nothing of that. Where the pointer is then becomes a value in the pure
+  // module (slideNumber), and a press that is released without a drag puts the focus in the box. A press on the bar is
+  // read by the pure module as well (pressNumberTrack): it starts a drag at once only away from the dot (started at once
+  // on the dot too, a mere press there would open a gesture), and the value under the pointer is trackNumber's.
+  const pointer = 'const press = useMapScrubPointer(scrub, disabled);', lit = 'const lit = dragging && scrub.alive();';
+  const opened = 'open: (origin, from): MapNumberSlide => { setDragging(true); return { anchorX: from.clientX, anchorValue: origin.start, big: from.shiftKey, value: origin.start }; },';
+  const slid = 'read: (drag, at) => slideNumber(drag, at.clientX, at.shiftKey, field),', tap = 'tap: () => box.current?.focus()';
+  const onBar = 'pressNumberTrack(value, field, event.clientX, rect.left, rect.width)', immediate = 'immediate: bar.immediate';
+  const barRead = 'read: (start, at) => trackNumber(bar.fraction(at.clientX), field, at.shiftKey, start),';
+  own(pointer, lit, opened, slid, barRead);
+  for (const text of [tap, onBar, immediate]) assert.ok(part.includes(text), `not found: ${text}`);
+  // Three controls take a press: the name and the grip slide, and the bar is pressed or dragged.
+  assert.equal(count(part, /onPointerDown=\{slide\}/g), 2, 'the name and the grip');
+  assert.equal(count(part, /onPointerDown=\{slideBar\}/g), 1, 'the bar');
+  // The sums that turn a place into a value are not written again here: the pure tests run them where they are (N-6,
+  // N-7), and no test would reach them in a component. Counted here, steps would be added at every event.
+  for (const none of ['stepNumber(', 'scrubSteps(']) assert.ok(!part.includes(none), `still there: ${none}`);
+  // Nothing joins the Tab order. The grip and the bar are for the pointer and are kept from readers: the keyboard and a
+  // screen reader have the box, which holds the same value.
+  for (const hidden of ['className="bmap-num-grip" aria-hidden="true"', 'className="bmap-num-track" aria-hidden="true"']) assert.ok(part.includes(hidden), `not found: ${hidden}`);
+  assert.ok(!part.includes('tabIndex'), 'a control of the pointer is in the Tab order');
+  // And the file holds nothing else: it is the lines above and what joins them, in this order. What joins them, and what
+  // goes wrong without it. The table, the sums and the place of the dot come from the pure module and the pointer from
+  // the one hook, by these imports: a function of the same name written in this file would pass every line above, and
+  // no test would reach it. The picture of the grip is the arrow with a shaft, as it was announced (↔); how large it is
+  // drawn is tuned by eye in the app, so its two numbers are read as any number. The two tooltips are the words of the
+  // design, and a control that is off has none. The component is a plain function: wrapped in `memo` it would not be
+  // drawn again as the editor ends a drag by itself, and `lit` would not be asked again. `dragging` is on from the start
+  // of a drag to its end, however it ends: left on, the field would be lit by any gesture of the document that runs
+  // later (a handle dragged in 3D). A slide runs sideways and starts past the slop: started at the press, a press on
+  // the name would be no tap. The bar is measured where it stands on screen, and one too narrow for its dot takes no
+  // press; its drag starts on the value the editor gave as well, and lights the field as a slide does. The root carries
+  // the two states the stylesheet draws, a drag and a field that is off, and it is still a field of the library
+  // (`bg-field`). Only a number with fixed ends has a bar, and its dot stands where the pure module says: at the
+  // fraction pressNumberTrack counts with.
+  assert.deepEqual(lines.map(line => line.replace(/(<MoveHorizontal size=\{)[\d.]+(\} strokeWidth=\{)[\d.]+(\} \/>)/, '$1n$2n$3')), [
+    "import { useId, useRef, useState } from 'react';", "import type { CSSProperties, JSX, PointerEvent as ReactPointerEvent } from 'react';", "import { MoveHorizontal } from 'lucide-react';",
+    "import type { MapFieldScrub } from './mapCanvas';", "import { MAP_NUMBER_FIELDS, pressNumberTrack, slideNumber, trackFraction, trackNumber } from './mapNumberField';",
+    "import type { MapNumberKey, MapNumberSlide } from './mapNumberField';", "import { useMapScrubPointer } from './useMapScrubPointer';",
+    "const SLIDE_TITLE = '좌우로 끌어 값 바꾸기 · Shift를 누르면 큰 걸음 · 끄는 도중 Esc는 취소';", "const BAR_TITLE = '눌러서 바로 맞추거나 점을 끌어요 · Shift를 누르면 큰 걸음';", round,
+    'export function BackgroundMapNumberField({ label, field, value, disabled = false, onChange, onDone, scrub }: {',
+    'label: string; field: MapNumberKey; value: number; disabled?: boolean;', 'onChange(value: number): void; onDone?(): void; scrub: MapFieldScrub }): JSX.Element {',
+    typing[0], typing[1], table, pointer, 'const [dragging, setDragging] = useState(false);', lit,
+    'const slide = (event: ReactPointerEvent<Element>) => press(event, {', "field, axis: 'x', immediate: false,", opened, slid, `${tap},`, 'close: () => setDragging(false),', '});',
+    'const slideBar = (event: ReactPointerEvent<HTMLDivElement>) => {', `const rect = event.currentTarget.getBoundingClientRect(), bar = ${onBar};`, 'if (!bar) return;',
+    `press(event, { field, axis: 'x', ${immediate},`, 'open: origin => { setDragging(true); return origin.start; },', barRead, 'close: () => setDragging(false) });', '};',
+    "return <div className={`bg-field bmap-num${lit ? ' is-dragging' : ''}`} data-disabled={disabled || undefined}>",
+    `${name} title={disabled ? undefined : SLIDE_TITLE} onPointerDown={slide}>{label}</label>`, '<div className="bmap-num-row">', box,
+    'onChange={event => {', typing[2], typing[3], typing[4], '}}', typing[5], 'onBlur={() => {', typing[6], typing[7], typing[8], '}} />',
+    '<span className="bmap-num-grip" aria-hidden="true" title={disabled ? undefined : SLIDE_TITLE} onPointerDown={slide}><MoveHorizontal size={n} strokeWidth={n} /></span>', '</div>',
+    '{track && <div className="bmap-num-track" aria-hidden="true" title={disabled ? undefined : BAR_TITLE} onPointerDown={slideBar}>',
+    `<span className="bmap-num-thumb" style={{ '--bmap-num-at': trackFraction(value, field) } as CSSProperties} />`, '</div>}', '</div>;', '}']);
+  // The stylesheet, line by line and as written. A number field is drawn by these twelve rules and by no other: each is
+  // a base rule, one line that starts so, in this order. No line of a media block names a number field (its width looks
+  // after itself): a second rule under another selector could undo any line read below, put the grip at the right end in
+  // a narrow window or lay a motion on the dot. What the rules paint with is tuned by eye in the app, and is not held.
+  const sheet = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  const arrows = '.bmap-num-row input::-webkit-inner-spin-button,.bmap-num-row input::-webkit-outer-spin-button { -webkit-appearance:none; appearance:none; margin:0; }';
+  const room = '.bg-library .bmap-num-row input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) {', off = '.bmap-num[data-disabled] :is(.bmap-num-label,.bmap-num-grip,.bmap-num-track) {';
+  const num = sheet.filter(line => line.includes('.bmap-num') && !line.trimStart().startsWith('/*'));
+  assert.deepEqual(num.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-num-label {', '.bmap-num-row {', room, arrows.slice(0, arrows.indexOf('{') + 1), '.bmap-num-grip {',
+    '.bmap-num-grip:hover,.bmap-num.is-dragging .bmap-num-grip {', '.bmap-num.is-dragging .bmap-num-label {', '.bmap-num-track {', '.bmap-num-track::before {', '.bmap-num-thumb {',
+    off, '.bmap-num[data-disabled] .bmap-num-grip:hover {']);
+  // Nothing of a number field moves by itself: a drag is the hand moving it.
+  for (const line of num) assert.doesNotMatch(line, /transition|animation/);
+  // The two small arrows of the engine are not drawn, by that one line as it is written. The element stays, so the arrow
+  // keys and the wheel over a focused field step the value as before. And no other line of the sheet names the arrows.
+  assert.ok(sheet.includes(arrows), 'the small arrows of the engine are drawn');
+  assert.equal(sheet.filter(line => line.includes('spin-button')).length, 1, 'one line of the sheet names the small arrows');
+  // A sideways drag belongs to the control, and a touch or a pen that goes up or down scrolls the inspector: on each of
+  // the three that take a press.
+  const gripAt = lineOf(sheet, '.bmap-num-grip {'), grip = declarations(sheet[gripAt]), track = baseRule(sheet, '.bmap-num-track {'), thumb = baseRule(sheet, '.bmap-num-thumb {');
+  for (const rule of [baseRule(sheet, '.bmap-num-label {'), grip, track]) has(rule, 'touch-action:pan-y');
+  // The dot takes no press of its own: the bar under it does, and tells a press on the dot from one beside it. It is
+  // placed inside the bar, and travels from half a dot inside one end to half a dot inside the other, the way
+  // pressNumberTrack counts. Over the whole width it would leave the bar at the right end, and be drawn up to 10px from
+  // the place a press is counted at.
+  has(track, 'position:relative');
+  has(thumb, 'position:absolute', 'pointer-events:none', 'left:calc(var(--bmap-num-at,0) * (100% - 10px))');
+  // The dot is as wide in the sheet as in the table of the slide (`thumbPx`): one number in two files, changed together.
+  const pure = read('mapNumberField.ts'), thumbPx = /\bthumbPx: (\d+)\b/.exec(pure)?.[1];
+  assert.ok(thumbPx, 'the width of the dot in the table of the slide');
+  has(thumb, `width:${thumbPx}px`, `left:calc(var(--bmap-num-at,0) * (100% - ${thumbPx}px))`);
+  // The line of the bar is a box the sheet makes up: without `content` there is none. Its colour is tuned in the app.
+  has(baseRule(sheet, '.bmap-num-track::before {'), 'content:""', 'position:absolute');
+  // The grip is laid over the left end of the box, and the box keeps its number clear of it. The inspector hugs the right
+  // edge of the screen: with the grip at the right end there would be no room to drag towards more. The room is made
+  // under a selector that outweighs the shared input rule of the library, which sets the padding: under a lighter one
+  // the number would stand beneath the grip.
+  has(baseRule(sheet, '.bmap-num-row {'), 'position:relative');
+  has(grip, 'position:absolute', 'left:1px');
+  assert.ok(!sheet[gripAt].includes(' right:') && !grip.some(item => item.startsWith('right:')), 'the grip is held to the right end as well');
+  has(baseRule(sheet, room), 'padding-left:28px');
+  // The two states the component marks are among those rules: a drag tints the grip and darkens the name, and a field
+  // that is off dims its three controls. Off, they take no press (the hook turns it away) and say so by the plain cursor.
+  // How much they are dimmed is not held: that is tuned by eye, in the app.
+  const dimmed = baseRule(sheet, off);
+  has(dimmed, 'cursor:default');
+  assert.ok(dimmed.some(item => /^opacity:0?\.\d+$/.test(item)), `the controls of a field that is off are not dimmed (${dimmed.join('; ')})`);
+  // The sums of a slide are in a module that Node runs as it is: no three.js, no DOM.
+  assert.doesNotMatch(pure, /from\s+['"]three/, 'mapNumberField.ts imports three.js');
+  assert.doesNotMatch(pure, /\b(?:document|window)\.\w/, 'mapNumberField.ts touches the DOM');
+});
