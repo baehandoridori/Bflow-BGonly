@@ -254,6 +254,14 @@
 .bg-library .bmap-map-picker button.is-selected { border-color:rgb(var(--color-accent)); background:rgb(var(--color-accent) / .09); }
 .bmap-move-note { background:rgb(var(--color-accent) / .07); border-radius:7px; padding:12px; font-size:12px; line-height:1.8; color:rgb(var(--color-text-secondary)); margin:12px 0; }
 .bmap-modal-actions>.bmap-text-button:first-child { margin-right:auto; }
+/* The delete dialog of a map: what it says, and its two choices as cards. */
+.bmap-delete-lead { display:flex; flex-direction:column; gap:8px; }
+.bmap-delete-choices { display:flex; flex-direction:column; gap:8px; min-width:0; margin:14px 0; padding:0; border:0; }
+.bmap-delete-choice { display:flex; align-items:flex-start; gap:10px; padding:11px 13px; border:1px solid rgb(var(--color-bg-border)); border-radius:8px; font-size:12px; line-height:1.7; color:rgb(var(--color-text-secondary)); cursor:pointer; }
+.bmap-delete-choice:has(input:checked) { border-color:rgb(var(--color-accent)); background:rgb(var(--color-accent) / .09); }
+.bmap-delete-choice strong { display:block; font-size:13px; font-weight:550; color:rgb(var(--color-text-primary)); }
+.bmap-delete-choice input { flex-shrink:0; margin-top:5px; accent-color:rgb(var(--color-accent)); }
+.bmap-delete-choices:disabled .bmap-delete-choice { cursor:default; opacity:.6; }
 .bmap-underlay-setting { display:flex; gap:16px; align-items:center; }
 .bmap-underlay-setting img { max-width:220px; }
 .bmap-canvas.tool-symbol { cursor:crosshair; }

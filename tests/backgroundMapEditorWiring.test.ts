@@ -2126,4 +2126,113 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
   // And the module stays one that Node runs as it is: no three.js, no DOM.
   assert.doesNotMatch(plan, /from\s+['"]three/, 'mapDelete.ts imports three.js');
   assert.doesNotMatch(plan, /\b(?:document|window)\.\w/, 'mapDelete.ts touches the DOM');
+  // The dialog itself, read as this anchor runs, as the module above is. No test of Node reaches a React component, so
+  // its lines are held by their letters. `lines` are they, without their indent.
+  const part = read('BackgroundMapDeleteDialog.tsx'), lines = part.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // While the dialog is drawn it is meant to be open. A run in progress does not hear Esc: the editor turns the close
+  // away. But two presses of Esc in a row close a native dialog whatever its cancel handler says, and the editor would
+  // then hold a dialog that is nowhere on screen: what a run that stopped has to say could be read nowhere. So the
+  // dialog hears the `close` of its own element and opens it again, as long as that element is still in the page.
+  const reopen = 'const reopen = () => { if (dialog.isConnected && !dialog.open) dialog.showModal(); };';
+  own(reopen);
+  // And no key pressed while it is up is for the page behind it. Every keydown is stopped on the window, in the capture
+  // phase: the shortcuts of the app listen there as a key bubbles, and hear any key that does not come from a text
+  // field. Once Tab has run past the last button the keys come from the body, and during a run the buttons are off:
+  // Ctrl and a digit would change the screen, the library would be taken down with it, and the rest of the run would
+  // end without a word. An empty handler lets every key through. Two keys are swallowed whole, default and all, because
+  // a key that is stopped no longer reaches the handler that used to swallow it: Ctrl+R, which then falls to the menu
+  // of the window and loads the whole page anew (the run is cut off, and the unsaved edits of every map are gone), and
+  // Ctrl+Z and Ctrl+Y, which the engine turns into an undo of the text last typed in a field of the page behind. Each
+  // by its place on the keyboard, whatever the Korean input state. The handler is those two lines and no other: a third
+  // that leaves early for some key would hand that key back to the page behind.
+  const opener = 'const hold = (event: KeyboardEvent) => {';
+  const held = ['event.stopPropagation();', "if ((event.ctrlKey || event.metaKey) && ['KeyR', 'KeyZ', 'KeyY'].includes(event.code)) event.preventDefault();"];
+  assert.deepEqual(block(part, opener).split('\n').map(line => line.trim()).filter(Boolean), [opener, ...held, '}'], 'what the dialog does with a key pressed while it is up');
+  // Both are heard from the first drawing of the dialog until it is taken down, by one effect that runs once: it finds
+  // the dialog element from the paragraphs it draws, adds the two and returns the cleanup that removes them, the key
+  // with the same flag. A listener that is never added does nothing, and one that is never removed would go on
+  // stopping every key of the app after the dialog has gone. Each name stands three times: made, added, removed.
+  const added = "dialog.addEventListener('close', reopen); window.addEventListener('keydown', hold, true);";
+  const removed = "return () => { dialog.removeEventListener('close', reopen); window.removeEventListener('keydown', hold, true); };";
+  const once = ['useEffect(() => {', "const dialog = body.current?.closest('dialog');", 'if (!dialog) return;', reopen, opener, ...held, '};', added, removed, '}, []);'];
+  own(added, removed);
+  for (const name of [/\breopen\b/g, /\bhold\b/g]) assert.equal(count(part, name), 3, `made, added and removed: ${name.source}`);
+  // The focus is brought back to the button that only closes whenever it has dropped out of the dialog: as a run stops
+  // short (its buttons were off while it ran), and as the map goes and 돌아가기 goes with it. Left outside, the next
+  // key would be pressed on nothing at all.
+  const refocus = 'useEffect(() => { if (!progress) back.current?.focus(); }, [progress, plan.target === null]);';
+  own(refocus);
+  // That button is where the dialog opens: 돌아가기, and 닫기 once the map is gone. Each carries the mark the modal looks
+  // for as it comes up, and the ref the effect above sends the focus to. So Enter, pressed at once, goes back. And the
+  // dialog is no form: the button that deletes is a plain button, pressed on purpose. Inside a form, or as its submit
+  // button, Enter anywhere in the dialog would delete.
+  const goBack = '<button type="button" className="bg-button" data-autofocus ref={back} disabled={!!progress} onClick={onClose}>돌아가기</button>';
+  const shut = '<button type="button" className="bg-button" data-autofocus ref={back} onClick={onClose}>닫기</button>';
+  const deletes = '<button type="button" className="bg-button bmap-danger" disabled={!!progress || disabled || !!text.refusal} onClick={onConfirm}>';
+  own(goBack);
+  for (const text of [shut, deletes]) assert.ok(part.includes(text), `not found: ${text}`);
+  assert.equal(count(part, /data-autofocus/g), 2, '돌아가기 and 닫기, and no other');
+  assert.equal(count(part, /<button\b/g), 3, 'the three buttons of the dialog');
+  assert.equal(count(part, /<button type="button" /g), 3, 'a button of the dialog is not a plain button');
+  for (const none of ['<form', 'type="submit"', 'onSubmit']) assert.ok(!part.includes(none), `still there: ${none}`);
+  // And the file holds nothing else: it is the lines above and what joins them, in this order. What joins them, and what
+  // goes wrong without it. The words are the pure module's, by that import (the D tests run them): a sentence made up
+  // here would be reached by no test. During a run they are the words of the press, kept from the last drawing in which
+  // no run was in progress: the plan is made anew from the optimistic snapshot at every command, and drawn from that
+  // the counts and the two choices would change and go while the run goes on. A map that is gone has no words. The
+  // dialog then says so by the name it was opened with, over one button that closes, and shows neither the message
+  // of the editor nor a button that deletes: nothing can be sent, so nothing can go to another map. In both looks the
+  // paragraphs stand in the element the effect finds the dialog from: without that ref in one of them, a dialog first
+  // drawn in that look would hear neither its `close` nor a key. Otherwise the question, from the top: why a run
+  // stopped and what it has done, when one has; what goes; the two choices when maps hang under this one, radios of
+  // one group that hand the pick to the editor, off during a run and while the editor is busy; what else is saved or
+  // lost; why the plan is refused. Then the two buttons. 돌아가기 is off during a run only. The button that deletes is
+  // off during a run, while the editor is busy, and when the plan is refused: left on then, it would read as a way
+  // past the refusal. During a run it counts the maps deleted, of the number it named when it was pressed, and says
+  // only that it is deleting when that number is one.
+  const modal = '<BackgroundModal title="도면 삭제" onClose={onClose}>', lead = '<div className="bmap-delete-lead" ref={body}>';
+  const choice = (mode: string, words: string) => `<label className="bmap-delete-choice"><input type="radio" name={group} checked={mode === '${mode}'} onChange={() => onMode('${mode}')} /><span><strong>{text.${words}[0]}</strong>{text.${words}[1]}</span></label>`;
+  const running = "{progress ? (progress.total === 1 ? '삭제 중…' : `삭제 중… ${progress.done}/${progress.total}`) : text.confirm}";
+  assert.deepEqual(lines, [
+    "import { useEffect, useId, useRef } from 'react';", "import type { JSX } from 'react';", "import { BackgroundModal } from './BackgroundUI';",
+    "import { mapDeleteText } from './mapDelete';", "import type { MapDeleteMode, MapDeletePlan, MapDeleteText } from './mapDelete';",
+    'export function BackgroundMapDeleteDialog({ name, plan, mode, progress, stopped, error, disabled, onMode, onClose, onConfirm }: {',
+    'name: string; plan: MapDeletePlan; mode: MapDeleteMode; progress: { done: number; total: number } | null;', 'stopped: string | null; error: string; disabled: boolean;',
+    'onMode(mode: MapDeleteMode): void; onClose(): void; onConfirm(): void }): JSX.Element {',
+    'const group = useId();', 'const live = mapDeleteText(plan, mode), kept = useRef<MapDeleteText | null>(null);', 'if (live && !progress) kept.current = live;', 'const text = progress ? kept.current : live;',
+    'const body = useRef<HTMLDivElement>(null), back = useRef<HTMLButtonElement>(null);', ...once, refocus,
+    `if (!text) return ${modal}`, `${lead}<p className="bmap-confirm-text">‘{name}’ 도면은 이미 삭제됐어요.</p></div>`, `<div className="bmap-modal-actions">${shut}</div>`, '</BackgroundModal>;',
+    `return ${modal}`, '{error && <p className="bg-error" role="alert">{error}</p>}', '{stopped && <p className="bmap-move-note" role="status">{stopped}</p>}',
+    `${lead}{text.lead.map((line, index) => <p key={index} className="bmap-confirm-text">{line}</p>)}</div>`,
+    '{text.keep && text.all && <fieldset className="bmap-delete-choices" disabled={!!progress || disabled}>', '<legend className="sr-only">하위 도면을 어떻게 할까요</legend>',
+    choice('keep-children', 'keep'), choice('with-children', 'all'), '</fieldset>}',
+    '{text.notes.map((note, index) => <p key={index} className="bmap-hint">{note}</p>)}', '{text.refusal && <p className="bg-error" role="alert">{text.refusal}</p>}',
+    '<div className="bmap-modal-actions">', goBack, `${deletes}${running}</button>`, '</div>', '</BackgroundModal>;', '}']);
+  // And in what the dialog draws, `read` took nothing away. Between the tags of JSX a `//` or a `/*` is no comment: it
+  // is text that is drawn, and an expression written behind it still runs. `read` drops it all the same, and the list
+  // above never sees that line. So each of the two looks is the same letters with and without what `read` drops: a
+  // comment of this file stands above a `return`, never inside one.
+  const raw = readFileSync(new URL('BackgroundMapDeleteDialog.tsx', directory), 'utf8').replace(/\r\n/g, '\n');
+  const looks = (source: string) => source.split(`return ${modal}`).slice(1).map(tail => tail.slice(0, tail.indexOf('</BackgroundModal>;')));
+  assert.equal(looks(raw).length, 2, 'the two looks the dialog returns');
+  assert.deepEqual(looks(part), looks(raw), 'a comment mark inside what the dialog draws: there it is text on screen, and the anchor does not see its line');
+  // The stylesheet, line by line and as written. The dialog is drawn by these seven rules and by no other, each a base
+  // rule on a line of its own, in this order; they are looked for in what is left of the sheet without its comments, so
+  // that a rule written behind a comment or under another selector is seen. Its paragraphs and its two choices stand
+  // one above the other: the library takes the margin off every paragraph, so the room between them is the gap of that
+  // column. Nothing of the dialog moves by itself, and nothing of it blurs what is behind it: the design adds no
+  // motion, so none of these rules needs a twin for reduced motion. What the rules paint with is tuned by eye in the
+  // app, and is not held.
+  const sheet = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  const bare = sheet.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
+  const rules = bare.map(line => line.trim()).filter(line => line.includes('.bmap-delete'));
+  assert.deepEqual(rules.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-delete-lead {', '.bmap-delete-choices {', '.bmap-delete-choice {', '.bmap-delete-choice:has(input:checked) {',
+    '.bmap-delete-choice strong {', '.bmap-delete-choice input {', '.bmap-delete-choices:disabled .bmap-delete-choice {']);
+  for (const line of rules) {
+    assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
+    assert.doesNotMatch(line, /transition|animation|backdrop-filter/);
+  }
+  for (const column of ['.bmap-delete-lead {', '.bmap-delete-choices {']) has(baseRule(sheet, column), 'display:flex', 'flex-direction:column');
 });
