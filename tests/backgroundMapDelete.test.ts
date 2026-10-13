@@ -351,6 +351,10 @@ test('D-12: the save step holds a hundred maps at most', () => {
   // What a draft holds is said before the count is: it names a map the user can go to.
   const child = big.maps[1], blocked = planMapDelete(big, draftsOf([child, nameless(child)]), top, 'keep-children');
   assert.deepEqual([blocked.refusal, blocked.unsavable, blocked.save?.maps.length], ['unsavable', ['하위 1'], 101]);
+  // So is an old draft, and so are the rights: the count is asked last of the four, whichever of the others stands beside it.
+  const stale = planMapDelete(big, outdated(child), top, 'keep-children');
+  assert.deepEqual([stale.refusal, stale.outdated, stale.save?.maps.length], ['outdated', ['하위 1'], 101]);
+  assert.equal(planMapDelete({ ...big, canManage: false }, {}, top, 'keep-children').refusal, 'rights');
 });
 
 test('D-13: no rights, and a map that is gone', () => {
@@ -365,6 +369,9 @@ test('D-13: no rights, and a map that is gone', () => {
   // The rights are asked first: of the other reasons the lists still tell.
   const both = planMapDelete(viewer, outdated(school), MAIN, 'keep-children');
   assert.deepEqual([both.refusal, both.outdated], ['rights', ['학교']]);
+  // Before a draft that no save takes as well (and before the count: D-12).
+  const held = planMapDelete(viewer, draftsOf([main, nameless(main)]), MAIN, 'keep-children');
+  assert.deepEqual([held.refusal, held.unsavable], ['rights', ['본관']]);
   // A map the library does not have: nothing to do and nothing refused, with the rights and without.
   for (const snapshot of [library, viewer]) for (const mode of MODES) {
     const plan = planMapDelete(snapshot, {}, uid(0xdead), mode);
@@ -481,6 +488,9 @@ test('D-15: what a run that stopped has done is read from the library as it is',
   // A child that moved up and was then deleted elsewhere is not counted: what is said is what the library shows.
   const pressed = planMapDelete(library, {}, MAIN, 'keep-children'), elsewhere = run(run(library, pressed.steps[0]), remove(CELLAR, 2));
   assert.equal(mapDeleteStopText(pressed, elsewhere), `지울 도면을 열던 공간의 연결은 풀었어요. 하위 도면 1개는 위로 옮겼어요.${REST}`);
+  // One that was moved on from there elsewhere, under another map, is counted: it is there, and it is not under the map that is to go.
+  const saved = run(library, pressed.steps[0]), onward = run(saved, { type: 'save', kind: 'map', entity: { ...at(saved, CELLAR), parentId: ANNEX }, expectedRevision: 2 });
+  assert.equal(mapDeleteStopText(pressed, onward), `지울 도면을 열던 공간의 연결은 풀었어요. 하위 도면 2개는 위로 옮겼어요.${REST}`);
   // And the links are said to be off only once none is left: here two spaces opened the map, and one of them was closed elsewhere.
   const twoDoors = withMap({ ...school, nodes: [...school.nodes, space('뒷문', MAIN)] }), asked = planMapDelete(twoDoors, {}, MAIN, 'keep-children');
   const oneLeft = run(twoDoors, { type: 'save', kind: 'map', entity: { ...at(twoDoors, SCHOOL), nodes: [school.nodes[0], space('뒷문')] }, expectedRevision: 1 });
