@@ -1439,7 +1439,7 @@ test('anchor 59: the new test files run in the build', () => {
   // The build runs every test file a pattern of names finds. A file that is deleted, or renamed out of that pattern, takes
   // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the new ones by name.
   const tests = new URL('./', import.meta.url), names = readdirSync(tests);
-  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts']) {
+  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts', 'backgroundMapDelete.test.ts']) {
     assert.ok(names.includes(name), `not in the tests folder: ${name}`);
     const source = readFileSync(new URL(name, tests), 'utf8');
     // And each tests something: a file whose tests are all skipped is green as well.
@@ -2077,4 +2077,27 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // The picture is drawn on a scale handed in, and without one on the scale of the map: that is the pure module's, and
   // the S tests run it. With the third argument dropped there, the line that hands the held scale over would mean nothing.
   assert.ok(read('mapPlanPreview.ts').includes('scale: PlanSideScale = planSideScale(map, camera)'), 'planSideView takes no scale');
+});
+
+test('anchor 66: the delete dialog acts on the map it was opened for, sends the plan in its order, and lets a draft go only once its own map is gone', () => {
+  // The plan of a delete and the words the dialog says of it are a module of their own, read as this anchor runs: without
+  // its file this anchor fails, not every anchor of this file. Node runs that module as it is, so what a plan holds and
+  // what is said of it are tested by running them (the D tests). Held here, by its letters, is what those tests cannot
+  // tell apart: whose definitions the module goes by.
+  const plan = read('mapDelete.ts');
+  // A draft has something unsaved by the one definition the edit band and 도면 저장 go by. The value of a draft that the
+  // save would write is checked, before anything is sent, by the check the library itself runs on a map. And the wrapper
+  // Electron puts round what the main process throws is taken off by the one function the app has for that. Each comes in
+  // by its import and is called: a function of the same name written in this module would pass every D test today, and
+  // part from the real one unseen.
+  for (const text of ["import { mapDraftChanged } from './mapDocument.ts';", "import { validateBackgroundEntity } from './domain.ts';", "import { cleanIpcErrorMessage } from '../../utils/ipcErrorMessage.ts';",
+    'mapDraftChanged(', "validateBackgroundEntity('map',", 'cleanIpcErrorMessage(']) assert.ok(plan.includes(text), `not in mapDelete.ts: ${text}`);
+  // A map is deleted on the revision the library has for it, and on the one after it where the save that comes first
+  // wrote that map: one expression, the revision plus one or plus nothing. (The revision the save itself expects is not
+  // held here: its line begins with the same letters. D-9 runs it.)
+  for (const text of ['map.revision + (', '? 1 : 0)']) assert.ok(plan.includes(text), `not in mapDelete.ts: ${text}`);
+  assert.match(plan, /map\.revision \+ \(.+ \? 1 : 0\)/, 'the revision a delete expects is not written as the revision of the library, plus one for a map the save wrote');
+  // And the module stays one that Node runs as it is: no three.js, no DOM.
+  assert.doesNotMatch(plan, /from\s+['"]three/, 'mapDelete.ts imports three.js');
+  assert.doesNotMatch(plan, /\b(?:document|window)\.\w/, 'mapDelete.ts touches the DOM');
 });
