@@ -2663,7 +2663,7 @@ test('anchor 71: the chip takes no room in the footer, and the new classes are w
     '.bmap-objects .bmap-badge { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; }',
     '.bmap-objects>.bmap-node-list+.bmap-hint { margin-top:8px; }',
     '.bmap-hidden-slot { position:relative; flex:0 0 0; width:0; height:0; margin:0 -10px 0 auto; }',
-    '.bg-library .bmap-hidden-chip { position:absolute; right:10px; top:-13px; height:26px; min-height:26px; padding:0 10px; border-color:rgb(var(--color-accent) / .45); border-radius:13px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:11px; white-space:nowrap; }',
+    '.bg-library .bmap-hidden-chip { position:absolute; right:10px; top:-13px; height:26px; min-height:26px; padding:0 10px; border-color:rgb(var(--color-accent) / .45); border-radius:13px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:11px; white-space:nowrap; box-shadow:0 0 0 3px color-mix(in srgb, rgb(var(--color-bg-card)) 40%, rgb(var(--color-bg-primary))); }',
     '.bg-library .bmap-hidden-chip:hover:not(:disabled) { border-color:rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-card)); }',
   ];
   for (const rule of rules) assert.equal(lines.filter(line => line === rule).length, 1, `not once, as a line of its own: ${rule}`);
@@ -2679,8 +2679,10 @@ test('anchor 71: the chip takes no room in the footer, and the new classes are w
   has(baseRule(lines, '.bmap-hidden-slot {'), 'flex:0 0 0', 'width:0', 'height:0', 'margin:0 -10px 0 auto');
   has(baseRule(lines, '.bmap-canvas-footer {'), 'gap:10px');
   // The chip floats on it, over the free end of the footer, in the text colour: the lighter accent is 2.4:1 on a white card.
+  // A ring of the colour between the card and the page keeps a letter of the hint it half covers apart from its edge, where
+  // the footer is narrow (gate A, at 1280 and 740: without it the letter ran into the border as if broken).
   const chip = baseRule(lines, '.bg-library .bmap-hidden-chip {');
-  has(chip, 'position:absolute', 'white-space:nowrap');
+  has(chip, 'position:absolute', 'white-space:nowrap', 'box-shadow:0 0 0 3px color-mix(in srgb, rgb(var(--color-bg-card)) 40%, rgb(var(--color-bg-primary)))');
   assert.deepEqual(chip.filter(item => item.startsWith('color:')), ['color:rgb(var(--color-text-primary))'], 'the colour of the chip');
   // A hidden row is dimmed to .7, still read and pressed to bring the node back. Its word for the kind gives up its own
   // dimming there, or the two would multiply to .525.
