@@ -649,7 +649,9 @@ test('anchor 36: the image grid, the look-through, the picked point and the obje
     "if (mode === 'plan') return group;", 'const id = singleViewId(settledCurrent, group, view.selectedId);',
     'return id === null ? mapSelection(undefined, group.ids) : { ids: [id], primaryId: id };',
     '}, [settledCurrent, view.selectedIds, view.selectedId, mode]);');
-  assert.match(editor, /<ObjectList nodes=\{settledCurrent\?\.nodes \?\? current\.nodes\} selectedIds=\{listSelection\.ids\} primaryId=\{listSelection\.primaryId\} onSelect=\{selectNode\} \/>/);
+  // It is told what the eye hides and how many of those the editor counted, and a row is picked through selectFromList,
+  // which shows a hidden node first: nothing hidden is ever selected.
+  assert.match(editor, /<ObjectList nodes=\{settledCurrent\?\.nodes \?\? current\.nodes\} selectedIds=\{listSelection\.ids\} primaryId=\{listSelection\.primaryId\} hiddenIds=\{hiddenIds\} hiddenCount=\{hiddenCount\} onSelect=\{selectFromList\} onToggleHidden=\{toggleHidden\} onShowAll=\{showAll\} \/>/);
   // Every selected row is marked; the primary alone is the current one.
   assert.match(piece(editor, 'const ObjectList = memo(function ObjectList(', 'export function BackgroundMapEditor('),
     /className=\{selectedIds\.includes\(node\.id\) \? 'is-selected' : ''\} aria-current=\{node\.id === primaryId \? 'true' : undefined\}/);
@@ -2530,6 +2532,9 @@ test('anchor 67: the eye filters what is drawn and what a pointer is asked about
   for (const pass of ["{current.nodes.filter((node): node is BackgroundSymbol => node.type === 'symbol' && !hiddenIds.has(node.id)).map(node => {",
     "{current.nodes.filter((node): node is BackgroundCamera => node.type === 'camera' && !hiddenIds.has(node.id)).map(node => {"])
     assert.ok(editor.includes(pass), `a hidden node is drawn: ${pass}`);
+  // Whether one node is hidden is asked in these six places and no other: the row of the object list, its eye and its
+  // name (toggleHidden, selectFromList), the pass over the spaces and the two filters. A seventh is a filter of its own.
+  assert.equal(count(editor, /hiddenIds\.has\(/g), 6, 'the row of the list, toggleHidden, selectFromList, the pass over the spaces and the two filters');
 });
 
 test('anchor 68: what is hidden is never selected, and a view setting writes no map', () => {
@@ -2595,4 +2600,97 @@ test('anchor 68: what is hidden is never selected, and a view setting writes no 
   // press: the pick the 3D view stored as well, not only the node in hand, so a group that grows again (a redo) puts
   // nothing hidden in hand.
   assert.ok(editor.includes("selectionWithout(live, liveSelection(current.id, live), mapViewport(doc.getState(), current.id).selectedId, ids, mode === 'plan')"), 'what is left selected is asked of other values');
+});
+
+test('anchor 69: a row of the object list is a name and an eye beside it, and the heading puts the hidden count first', () => {
+  const list = piece(editor, 'const ObjectList = memo(function ObjectList(', 'export function BackgroundMapEditor(');
+  // Three buttons: 모두 보이기 in the heading, and in each row the name and the eye. A button holds no button, so the eye is
+  // the sibling right behind the name, the last thing in its row.
+  assert.equal(count(list, /<button\b/g), 3, 'the heading, the name and the eye');
+  assert.match(list, /<\/button>\s*<button type="button" className="bmap-node-eye"[^\n]*<\/button>\s*<\/li>/, 'the eye is not the sibling behind the name');
+  // The eye, its whole tag: named by what a press does, with a short title that says this PC alone, the closed eye drawn on
+  // a hidden row and the open one on a row on show. It hides and shows, and never picks.
+  assert.equal(count(list, /className="bmap-node-eye"/g), 1, 'one eye in a row');
+  assert.ok(list.includes(`<button type="button" className="bmap-node-eye" aria-label={\`\${name} \${hidden ? '다시 보이기' : '숨기기'}\`} title={hidden ? '다시 보이기' : '숨기기 · 이 PC에서만 안 보여요'} onClick={() => onToggleHidden(node.id)}>{hidden ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}</button>`), 'the eye is not as written');
+  // Its state is in its name, which changes: with aria-pressed as well a reader would say 숨기기, pressed. The one press that
+  // picks is the name's.
+  assert.ok(!list.includes('aria-pressed'), 'the eye says its state twice');
+  assert.equal(count(list, /\bonSelect\(node\.id\)/g), 1, 'the eye picks');
+  // A hidden row is marked on the row, so the name button keeps its classes as anchor 36 reads them, and its name says it.
+  assert.ok(list.includes("<li key={node.id} className={hidden ? 'is-hidden' : undefined}>"), 'a hidden row is not marked on the row');
+  assert.ok(list.includes("aria-label={`${name}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}${hidden ? ', 숨김' : ''}`}"), 'the name of a hidden row does not say so');
+  // The heading: the hidden count comes first, so a narrow panel cuts the count of all and keeps it. 모두 보이기 stands beside
+  // it while anything is hidden, and its title says what hiding does.
+  assert.ok(list.includes("<span className=\"bmap-badge\">{hiddenCount > 0 ? `숨김 ${hiddenCount} · ` : ''}{ordered.length}개</span>"), 'the count of the heading');
+  assert.ok(list.includes('title={HIDDEN_NOTE} onClick={onShowAll}>모두 보이기</button>'), '모두 보이기 of the heading');
+  // What hiding does is said under the rows at all times, hidden or not: a line that came with the first eye would move the
+  // list under the pointer. And a reader is told the count as it changes.
+  assert.ok(list.includes('</ul><p className="bmap-hint">{HIDDEN_NOTE}</p></>'), 'the line under the list');
+  assert.ok(list.includes("<span className=\"sr-only\" role=\"status\">{hiddenCount > 0 ? `숨긴 것 ${hiddenCount}개` : '숨긴 것이 없어요'}</span>"), 'what a reader is told');
+  // The list counts nothing: it is handed the count, and asks about the hidden nodes once, for the row it draws. The editor
+  // counts in one line, from the map the list is drawn from. The size of the set counts the id of a node that is gone too.
+  assert.equal(count(list, /hiddenIds\.has\(/g), 1, 'the list asks about the hidden nodes elsewhere');
+  assert.doesNotMatch(list, /\bfilter\((?:[^()]|\([^()]*\))*\bhiddenIds\b/, 'the list counts the hidden nodes');
+  const counted = 'const hiddenCount = useMemo(() => hiddenNodeCount(settledCurrent, hiddenIds), [settledCurrent, hiddenIds]);';
+  assert.equal(editor.split(counted).length - 1, 1, `not once: ${counted}`);
+  assert.ok(!editor.includes('hiddenIds.size'), 'the hidden nodes are counted by the size of the set');
+  // The words: a hidden node never reads as a deleted one. Made once, and said under the list, as the title of 모두 보이기
+  // and as the title of the chip in the footer.
+  assert.equal(editor.split("const HIDDEN_NOTE = '숨긴 것은 이 PC의 내 화면에서만 안 보여요. 도면에는 그대로 있어서, 저장해도 지워지지 않아요.';").length - 1, 1, 'the words of the eye');
+  assert.equal(count(editor, /\bHIDDEN_NOTE\b/g), 4, 'made, the heading, under the list, the chip');
+});
+
+test('anchor 71: the chip takes no room in the footer, and the new classes are written in their own lines alone', () => {
+  const lines = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  // The rules of a row and its eye, the hidden row, the heading, the line under the list and the chip, as written, each once.
+  const rules = [
+    '.bmap-node-list li { display:flex; align-items:center; gap:2px; }',
+    '.bg-library .bmap-node-list li>button:not(.bmap-node-eye) { flex:1 1 0; width:auto; min-width:0; }',
+    '.bg-library .bmap-node-list .bmap-node-eye { flex:0 0 28px; width:28px; min-width:28px; padding:0; gap:0; justify-content:center; }',
+    '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye) { opacity:.7; }',
+    '.bg-library .bmap-node-list li.is-hidden .bmap-node-type { opacity:1; }',
+    '.bg-library .bmap-objects .bmap-show-all { position:relative; flex-shrink:0; min-height:0; margin-left:auto; padding:0 2px; font-size:11px; line-height:1.4; white-space:nowrap; }',
+    '.bg-library .bmap-objects .bmap-show-all::after { content:""; position:absolute; inset:-5px 0; }',
+    '.bmap-objects .bmap-section-heading>strong { flex-shrink:0; }',
+    '.bmap-objects .bmap-badge { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; }',
+    '.bmap-objects>.bmap-node-list+.bmap-hint { margin-top:8px; }',
+    '.bmap-hidden-slot { position:relative; flex:0 0 0; width:0; height:0; margin:0 -10px 0 auto; }',
+    '.bg-library .bmap-hidden-chip { position:absolute; right:10px; top:-13px; height:26px; min-height:26px; padding:0 10px; border-color:rgb(var(--color-accent) / .45); border-radius:13px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:11px; white-space:nowrap; }',
+    '.bg-library .bmap-hidden-chip:hover:not(:disabled) { border-color:rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-card)); }',
+  ];
+  for (const rule of rules) assert.equal(lines.filter(line => line === rule).length, 1, `not once, as a line of its own: ${rule}`);
+  // No other line names a new class: not a comment, not an override in a media block. One that hid the eye in a narrow
+  // window would leave every line above as it is.
+  for (const [name, times] of Object.entries({ 'bmap-node-eye': 3, 'bmap-hidden-chip': 2, 'bmap-hidden-slot': 1, 'bmap-show-all': 2, 'is-hidden': 2 }))
+    assert.equal(lines.filter(line => line.includes(name)).length, times, `lines that name ${name}`);
+  // Nothing of them moves by itself, and a hidden row is not slanted: it is dimmed by its opacity alone.
+  const named = lines.filter(line => /bmap-node-eye|bmap-hidden-chip|bmap-hidden-slot|bmap-show-all|is-hidden/.test(line));
+  for (const line of new Set([...rules, ...named])) assert.doesNotMatch(line, /transition|animation|font-style|backdrop-filter/, line);
+  // The anchor of the chip takes no room: no width, no height, and its right margin gives back the one gap it adds to the
+  // footer (the two numbers are one). So the hint beside it wraps as without it, and the footer and the map keep their size.
+  has(baseRule(lines, '.bmap-hidden-slot {'), 'flex:0 0 0', 'width:0', 'height:0', 'margin:0 -10px 0 auto');
+  has(baseRule(lines, '.bmap-canvas-footer {'), 'gap:10px');
+  // The chip floats on it, over the free end of the footer, in the text colour: the lighter accent is 2.4:1 on a white card.
+  const chip = baseRule(lines, '.bg-library .bmap-hidden-chip {');
+  has(chip, 'position:absolute', 'white-space:nowrap');
+  assert.deepEqual(chip.filter(item => item.startsWith('color:')), ['color:rgb(var(--color-text-primary))'], 'the colour of the chip');
+  // A hidden row is dimmed to .7, still read and pressed to bring the node back. Its word for the kind gives up its own
+  // dimming there, or the two would multiply to .525.
+  has(baseRule(lines, '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye) {'), 'opacity:.7');
+  has(baseRule(lines, '.bg-library .bmap-node-list li.is-hidden .bmap-node-type {'), 'opacity:1');
+  // The heading never wraps: its word and 모두 보이기 keep their width, and the count gives way with an ellipsis. The button
+  // is pressed on 5px more above and below, by a layer that takes no room in the heading.
+  has(baseRule(lines, '.bmap-objects .bmap-section-heading>strong {'), 'flex-shrink:0');
+  has(baseRule(lines, '.bg-library .bmap-objects .bmap-show-all {'), 'position:relative', 'flex-shrink:0', 'white-space:nowrap');
+  has(baseRule(lines, '.bmap-objects .bmap-badge {'), 'min-width:0', 'overflow:hidden', 'text-overflow:ellipsis');
+  has(baseRule(lines, '.bg-library .bmap-objects .bmap-show-all::after {'), 'position:absolute', 'inset:-5px 0');
+  // The line under the rows takes its room above alone: the list ends the section.
+  has(baseRule(lines, '.bmap-objects>.bmap-node-list+.bmap-hint {'), 'margin-top:8px');
+  // The chip stands in the footer of both modes, outside the properties that fold away, between the hint and the zoom of the
+  // plan: in no branch of a mode, and nothing else stands there.
+  const chipTag = '{hiddenCount > 0 && <div className="bmap-hidden-slot"><button type="button" className="bmap-hidden-chip" title={HIDDEN_NOTE} onClick={showAll}>숨김 {hiddenCount}개 · 모두 보이기</button></div>}';
+  assert.equal(editor.split(chipTag).length - 1, 1, 'the chip is not drawn once, as written');
+  assert.equal(piece(editor, '{footerHint}</span>', '{mode === \'plan\' && <div className="bmap-zoom">'), `{footerHint}</span>${chipTag}`, 'the chip is not between the hint and the zoom');
+  // The chip may lie over the end of the hint: while it is there the whole hint is in its title, in 3D as well.
+  assert.ok(editor.includes("<span className=\"bmap-footer-hint\" title={mode === 'plan' || hiddenCount > 0 ? footerHint : undefined}>{footerHint}</span>"), 'the title of the hint');
 });

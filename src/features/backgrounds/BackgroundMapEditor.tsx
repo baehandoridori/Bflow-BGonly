@@ -1,6 +1,6 @@
 import { Component, Fragment, Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { Move3d, Orbit, Rotate3d, Scale3d } from 'lucide-react';
+import { Eye, EyeOff, Move3d, Orbit, Rotate3d, Scale3d } from 'lucide-react';
 import type { BackgroundCamera, BackgroundCameraColor, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSnapshot, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbol, BackgroundSymbolKind } from './types';
 import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './BackgroundUI';
 import { BackgroundMapGallery } from './BackgroundMapGallery';
@@ -103,6 +103,8 @@ const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔
 const ROAD_HINT = '도로는 벽 없는 바닥이에요. 다른 공간과 겹치면 늘 아래에 깔려요. 다른 공간에 덮인 도로는 그 자리를 천천히 한 번 더 누르거나 오른쪽 목록에서 골라요.';
 const ROAD_HINT_ROUND = '둥근 도로에는 가운데 점선이 없어요.';
 const ROAD_HINT_NO_STRIP = '가운데 점선은 길 양쪽 옆줄의 점이 같은 수로 서로 마주 볼 때 보여요. 한쪽에 점을 더했으면 맞은편에도 하나 더해 주세요. 광장처럼 길 모양이 아닌 곳에는 그리지 않아요.';
+/** What the eye does, said under the object list at all times: hidden on this screen only, and still part of the map. A hidden node must never read as a deleted one. */
+const HIDDEN_NOTE = '숨긴 것은 이 PC의 내 화면에서만 안 보여요. 도면에는 그대로 있어서, 저장해도 지워지지 않아요.';
 const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string }[] = [
   { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기' },
   { id: 'rotate', label: '회전', Icon: Rotate3d, hint: '고리를 끌어 돌리기' },
@@ -157,18 +159,23 @@ class Map3DBoundary extends Component<{ onFail: (reason: string) => void; childr
 const kindLabel = (node: BackgroundNode) => node.type === 'camera' ? '카메라' : node.type === 'space' ? (isRoadSpace(node) ? '도로' : '공간') : getSymbolPreset(node.symbol).label;
 
 /** Every placement of the map, so items hidden under others (cameras on one spot) can each be picked. Every selected row is marked; the primary alone is the current one. */
-const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, onSelect }: { nodes: BackgroundNode[]; selectedIds: readonly string[]; primaryId: string | null; onSelect: (id: string) => void }) {
+const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, hiddenIds, hiddenCount, onSelect, onToggleHidden, onShowAll }: { nodes: BackgroundNode[]; selectedIds: readonly string[]; primaryId: string | null; hiddenIds: ReadonlySet<string>; hiddenCount: number; onSelect: (id: string) => void; onToggleHidden: (id: string) => void; onShowAll: () => void }) {
   const ordered = [...nodes.filter(node => node.type === 'camera'), ...nodes.filter(node => node.type === 'symbol'), ...nodes.filter(node => node.type === 'space')];
   return <section className="bmap-objects" aria-label="오브젝트 목록">
-    <div className="bmap-section-heading"><strong>오브젝트</strong><span className="bmap-badge">{ordered.length}개</span></div>
-    {ordered.length ? <ul className="bmap-node-list">{ordered.map(node => <li key={node.id}>
-      <button type="button" className={selectedIds.includes(node.id) ? 'is-selected' : ''} aria-current={node.id === primaryId ? 'true' : undefined} aria-label={`${node.name || '이름 없음'}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}`} onClick={() => onSelect(node.id)}>
-        <span className={`bmap-node-kind is-${node.type}`} data-camera-color={node.type === 'camera' ? node.color : undefined} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : isRoadSpace(node) ? '═' : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
-        <span className="bmap-node-name">{node.name || '이름 없음'}</span>
-        {node.locked && <span className="bmap-node-lock" aria-hidden="true">🔒</span>}
-        <span className="bmap-node-type" aria-hidden="true">{kindLabel(node)}</span>
-      </button>
-    </li>)}</ul> : <p className="bmap-hint">아직 배치된 것이 없어요.</p>}
+    <div className="bmap-section-heading"><strong>오브젝트</strong>{hiddenCount > 0 && <button type="button" className="bmap-text-button bmap-show-all" title={HIDDEN_NOTE} onClick={onShowAll}>모두 보이기</button>}<span className="bmap-badge">{hiddenCount > 0 ? `숨김 ${hiddenCount} · ` : ''}{ordered.length}개</span></div>
+    <span className="sr-only" role="status">{hiddenCount > 0 ? `숨긴 것 ${hiddenCount}개` : '숨긴 것이 없어요'}</span>
+    {ordered.length ? <><ul className="bmap-node-list">{ordered.map(node => {
+      const hidden = hiddenIds.has(node.id), name = node.name || '이름 없음';
+      return <li key={node.id} className={hidden ? 'is-hidden' : undefined}>
+        <button type="button" className={selectedIds.includes(node.id) ? 'is-selected' : ''} aria-current={node.id === primaryId ? 'true' : undefined} aria-label={`${name}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}${hidden ? ', 숨김' : ''}`} onClick={() => onSelect(node.id)}>
+          <span className={`bmap-node-kind is-${node.type}`} data-camera-color={node.type === 'camera' ? node.color : undefined} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : isRoadSpace(node) ? '═' : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
+          <span className="bmap-node-name">{node.name || '이름 없음'}</span>
+          {node.locked && <span className="bmap-node-lock" aria-hidden="true">🔒</span>}
+          <span className="bmap-node-type" aria-hidden="true">{kindLabel(node)}</span>
+        </button>
+        <button type="button" className="bmap-node-eye" aria-label={`${name} ${hidden ? '다시 보이기' : '숨기기'}`} title={hidden ? '다시 보이기' : '숨기기 · 이 PC에서만 안 보여요'} onClick={() => onToggleHidden(node.id)}>{hidden ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}</button>
+      </li>;
+    })}</ul><p className="bmap-hint">{HIDDEN_NOTE}</p></> : <p className="bmap-hint">아직 배치된 것이 없어요.</p>}
   </section>;
 });
 
@@ -1271,7 +1278,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             initial={renamingNode.name} positionKey={`${view.x}:${view.y}:${view.zoom}:${canvasSize.width}:${canvasSize.height}`}
             onCommit={commitName} onCancel={cancelName} onHistory={passNameHistory} />}
           {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '관리자가 공간을 배치하면 여기에 표시됩니다.'}</span></div>}
-          <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' ? footerHint : undefined}>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
+          <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' || hiddenCount > 0 ? footerHint : undefined}>{footerHint}</span>{hiddenCount > 0 && <div className="bmap-hidden-slot"><button type="button" className="bmap-hidden-chip" title={HIDDEN_NOTE} onClick={showAll}>숨김 {hiddenCount}개 · 모두 보이기</button></div>}{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
         <aside className="bmap-inspector" id="bmap-selection-properties" aria-label="선택 속성" hidden={!inspectorOpen}>
@@ -1358,7 +1365,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               {snapshot.canManage && <button type="button" className="bmap-text-button" disabled={disabled || !!polygon.length} onClick={() => openCreate(current.id)}>＋ 하위 도면 만들기</button>}
             </section>
           </>}
-          <ObjectList nodes={settledCurrent?.nodes ?? current.nodes} selectedIds={listSelection.ids} primaryId={listSelection.primaryId} onSelect={selectNode} />
+          <ObjectList nodes={settledCurrent?.nodes ?? current.nodes} selectedIds={listSelection.ids} primaryId={listSelection.primaryId} hiddenIds={hiddenIds} hiddenCount={hiddenCount} onSelect={selectFromList} onToggleHidden={toggleHidden} onShowAll={showAll} />
         </aside>
       </BackgroundMapPanels>
     </main>}
