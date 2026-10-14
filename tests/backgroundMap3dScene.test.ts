@@ -4110,6 +4110,13 @@ test('W-5: viewport — a closed room dragged by the gizmo stays closed and keep
   near(carried.x - viewChair.x, moved.x - viewRoom.x, 'the chair went with the room');
   assert.deepEqual(seen(), [CLOSED_ROOM, false], 'after the drag');
   editor.viewport.dispose();
+  // A node the box holds, picked from the list, is drawn with the gizmo on its root; let go, it is not drawn again (final review).
+  const held = await mountViewport({ selectedId: viewChair.id, solidIds: new Set([viewRoom.id]) });
+  assert.equal(held.root(viewChair.id).visible, true, 'the selected chair the box holds is not drawn');
+  same(held.dev().transform.object, held.root(viewChair.id), 'no gizmo on the selected chair the box holds');
+  held.render({ selectedId: null });
+  assert.equal(held.root(viewChair.id).visible, false, 'the chair the box holds is drawn when let go');
+  held.viewport.dispose();
 });
 
 /** A ray straight down on a plan spot, cut at the first closed face as the viewport cuts it. */

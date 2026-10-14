@@ -2751,6 +2751,7 @@ test('anchor 71: the chip takes no room in the footer, and the new classes are w
     '.bg-library .bmap-node-list li>button:not(.bmap-node-eye) { flex:1 1 0; width:auto; min-width:0; }',
     '.bg-library .bmap-node-list .bmap-node-eye { flex:0 0 28px; width:28px; min-width:28px; padding:0; gap:0; justify-content:center; }',
     '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye) { opacity:.7; }',
+    '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye):focus-visible { opacity:1; }',
     '.bg-library .bmap-node-list li.is-hidden .bmap-node-type { opacity:1; }',
     '.bg-library .bmap-objects .bmap-show-all { position:relative; flex-shrink:0; min-height:0; margin-left:auto; padding:0 2px; font-size:11px; line-height:1.4; white-space:nowrap; }',
     '.bg-library .bmap-objects .bmap-show-all::after { content:""; position:absolute; inset:-5px 0; }',
@@ -2767,7 +2768,7 @@ test('anchor 71: the chip takes no room in the footer, and the new classes are w
   for (const rule of rules) assert.equal(lines.filter(line => line === rule).length, 1, `not once, as a line of its own: ${rule}`);
   // No other line names a new class: not a comment, not an override in a media block. One that hid the eye in a narrow
   // window would leave every line above as it is.
-  for (const [name, times] of Object.entries({ 'bmap-node-eye': 3, 'bmap-hidden-chip': 2, 'bmap-hidden-slot': 1, 'bmap-show-all': 2, 'is-hidden': 2, 'bmap-solid': 3 }))
+  for (const [name, times] of Object.entries({ 'bmap-node-eye': 4, 'bmap-hidden-chip': 2, 'bmap-hidden-slot': 1, 'bmap-show-all': 2, 'is-hidden': 3, 'bmap-solid': 3 }))
     assert.equal(lines.filter(line => line.includes(name)).length, times, `lines that name ${name}`);
   // Nothing of them moves by itself, and a hidden row is not slanted: it is dimmed by its opacity alone.
   const named = lines.filter(line => /bmap-node-eye|bmap-hidden-chip|bmap-hidden-slot|bmap-show-all|is-hidden|bmap-solid/.test(line));
@@ -2786,6 +2787,9 @@ test('anchor 71: the chip takes no room in the footer, and the new classes are w
   // dimming there, or the two would multiply to .525.
   has(baseRule(lines, '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye) {'), 'opacity:.7');
   has(baseRule(lines, '.bg-library .bmap-node-list li.is-hidden .bmap-node-type {'), 'opacity:1');
+  // Its focus ring is drawn inside the dimmed name and would fade with it (2.5:1 on the dark card): under the keys the name
+  // that brings the node back is at full strength again (final review).
+  has(baseRule(lines, '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye):focus-visible {'), 'opacity:1');
   // The heading never wraps: its word and 모두 보이기 keep their width, and the count gives way with an ellipsis. The button
   // is pressed on 5px more above and below, by a layer that takes no room in the heading.
   has(baseRule(lines, '.bmap-objects .bmap-section-heading>strong {'), 'flex-shrink:0');
@@ -2853,6 +2857,11 @@ test('anchor 72: the closed box is a view setting of a room in 3D, below the kin
   assert.doesNotMatch(prefs, /from\s+['"]three/, 'the view settings import three.js');
   for (const global of ['document.', 'window.']) assert.ok(!prefs.includes(global), `the view settings reach the page: ${global}`);
   assert.ok(prefs.includes("MAP_VIEW_PREFS_KEY = 'bflow.background-map.view.v1'"), 'the key of the view settings');
+  // Kept by this PC past a closed app, read and written there unless a test hands another storage. Node has no such
+  // storage, so the pure tests never reach this default (V-5 reads without it, and writes none): these lines hold it (final review).
+  assert.ok(prefs.includes('try { return localStorage; } catch { return null; }'), 'the view settings are not kept in the storage of this PC');
+  assert.ok(!prefs.includes('sessionStorage'), 'the view settings last for the session only');
+  assert.equal(prefs.split('storage: MapViewStorage | null = deviceStorage())').length - 1, 2, 'reading and writing do not both default to the storage of this PC');
   // And never of the map: what is saved knows neither word. A node with such a key is refused whole by the save.
   for (const name of ['types.ts', 'domain.ts', 'mapWorkflow.ts', 'mapDocument.ts'])
     assert.doesNotMatch(read(name), /\b(?:hidden|solid)(?:Ids)?\b/, `${name} knows a view setting`);

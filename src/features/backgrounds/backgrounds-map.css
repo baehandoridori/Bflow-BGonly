@@ -224,6 +224,8 @@
 .bg-library .bmap-node-list .bmap-node-eye { flex:0 0 28px; width:28px; min-width:28px; padding:0; gap:0; justify-content:center; }
 /* Hidden: the name is dimmed, by opacity alone, and stays readable (it is pressed to bring the node back). The fade is the shared one of the library's buttons, and reduced motion takes it away there. The eye keeps its full strength. */
 .bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye) { opacity:.7; }
+/* Its focus ring is drawn inside it and would fade with it: under the keys the name is at full strength again (the eye beside it still shows it is hidden). */
+.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye):focus-visible { opacity:1; }
 /* The word for the kind is dimmed once, with its row: its own dimming on top of that would leave it unreadable. */
 .bg-library .bmap-node-list li.is-hidden .bmap-node-type { opacity:1; }
 /* 모두 보이기 beside the count: never taller than the badge, so the heading keeps its height as it comes and goes. */
