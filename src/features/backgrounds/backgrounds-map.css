@@ -259,6 +259,10 @@
 .bg-library .bmap-text-button { border:0; background:transparent; min-height:36px; padding:5px 0; color:rgb(var(--color-text-secondary)); font-size:12px; }
 .bg-library .bmap-text-button:hover { color:rgb(var(--color-accent-sub)); background:transparent; }
 .bmap-shape-actions { margin:10px 0 4px; }
+/* A view setting of this PC under the properties of a room, in 3D. */
+.bmap-solid { margin:14px 0 8px; }
+.bmap-solid .bmap-check { margin:0 0 6px; }
+.bmap-solid .bmap-hint { margin-bottom:2px; }
 .bmap-disclosure { margin:12px 0; border-top:1px solid rgb(var(--color-bg-border) / .65); }
 .bmap-disclosure>summary { cursor:pointer; padding:14px 0; color:rgb(var(--color-text-secondary)); font-size:12px; }
 .bmap-disclosure>summary>span { float:right; max-width:95px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:10px; opacity:.8; }

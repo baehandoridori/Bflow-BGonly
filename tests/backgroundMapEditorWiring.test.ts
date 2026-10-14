@@ -2542,6 +2542,10 @@ test('anchor 67: the eye filters what is drawn and what a pointer is asked about
   // The 3D view is handed what is hidden behind the attributes it always had (the companion plan is, by anchor 64). Not
   // handed it, the 3D view would draw every hidden node and take its clicks.
   assert.ok(piece(editor, '<Map3D map={current}', '/>').includes(' onUnavailable={leave3D} hiddenIds={hiddenIds} '), 'the 3D view is not handed what is hidden');
+  // And last, the rooms it draws as closed boxes: while the symbol tool is in hand in edit mode, the one empty set of the
+  // view settings instead, the same object at every render, so every room is see-through where a floor is aimed at and
+  // the scene is synced once as the tool is taken up. Without that choice the boxes stay closed under the symbol tool.
+  assert.ok(`${piece(editor, '<Map3D map={current}', '/>')}/>`.endsWith('onUnavailable={leave3D} hiddenIds={hiddenIds} solidIds={roomsOpen ? NO_MAP_VIEW_PREFS.solid : solidIds} />'), 'the 3D view is not handed the closed rooms as the editor says');
   // The companion plan makes the map without the hidden nodes once, for what a click lands on and steps through alone: it
   // is framed from the whole map (a view box made from the shown one would jump at every eye pressed), and each of its
   // three passes leaves a hidden node out.
@@ -2740,7 +2744,8 @@ test('anchor 70: in 3D a hidden node and what a closed room holds are not drawn,
 
 test('anchor 71: the chip takes no room in the footer, and the new classes are written in their own lines alone', () => {
   const lines = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
-  // The rules of a row and its eye, the hidden row, the heading, the line under the list and the chip, as written, each once.
+  // The rules of a row and its eye, the hidden row, the heading, the line under the list, the chip and the section of the
+  // closed box under the properties of a room in 3D, as written, each once.
   const rules = [
     '.bmap-node-list li { display:flex; align-items:center; gap:2px; }',
     '.bg-library .bmap-node-list li>button:not(.bmap-node-eye) { flex:1 1 0; width:auto; min-width:0; }',
@@ -2755,14 +2760,17 @@ test('anchor 71: the chip takes no room in the footer, and the new classes are w
     '.bmap-hidden-slot { position:relative; flex:0 0 0; width:0; height:0; margin:0 -10px 0 auto; }',
     '.bg-library .bmap-hidden-chip { position:absolute; right:10px; top:-13px; height:26px; min-height:26px; padding:0 10px; border-color:rgb(var(--color-accent) / .45); border-radius:13px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:11px; white-space:nowrap; box-shadow:0 0 0 3px color-mix(in srgb, rgb(var(--color-bg-card)) 40%, rgb(var(--color-bg-primary))); }',
     '.bg-library .bmap-hidden-chip:hover:not(:disabled) { border-color:rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-card)); }',
+    '.bmap-solid { margin:14px 0 8px; }',
+    '.bmap-solid .bmap-check { margin:0 0 6px; }',
+    '.bmap-solid .bmap-hint { margin-bottom:2px; }',
   ];
   for (const rule of rules) assert.equal(lines.filter(line => line === rule).length, 1, `not once, as a line of its own: ${rule}`);
   // No other line names a new class: not a comment, not an override in a media block. One that hid the eye in a narrow
   // window would leave every line above as it is.
-  for (const [name, times] of Object.entries({ 'bmap-node-eye': 3, 'bmap-hidden-chip': 2, 'bmap-hidden-slot': 1, 'bmap-show-all': 2, 'is-hidden': 2 }))
+  for (const [name, times] of Object.entries({ 'bmap-node-eye': 3, 'bmap-hidden-chip': 2, 'bmap-hidden-slot': 1, 'bmap-show-all': 2, 'is-hidden': 2, 'bmap-solid': 3 }))
     assert.equal(lines.filter(line => line.includes(name)).length, times, `lines that name ${name}`);
   // Nothing of them moves by itself, and a hidden row is not slanted: it is dimmed by its opacity alone.
-  const named = lines.filter(line => /bmap-node-eye|bmap-hidden-chip|bmap-hidden-slot|bmap-show-all|is-hidden/.test(line));
+  const named = lines.filter(line => /bmap-node-eye|bmap-hidden-chip|bmap-hidden-slot|bmap-show-all|is-hidden|bmap-solid/.test(line));
   for (const line of new Set([...rules, ...named])) assert.doesNotMatch(line, /transition|animation|font-style|backdrop-filter/, line);
   // The anchor of the chip takes no room: no width, no height, and its right margin gives back the one gap it adds to the
   // footer (the two numbers are one). So the hint beside it wraps as without it, and the footer and the map keep their size.
@@ -2793,4 +2801,60 @@ test('anchor 71: the chip takes no room in the footer, and the new classes are w
   assert.equal(piece(editor, '{footerHint}</span>', '{mode === \'plan\' && <div className="bmap-zoom">'), `{footerHint}</span>${chipTag}`, 'the chip is not between the hint and the zoom');
   // The chip may lie over the end of the hint: while it is there the whole hint is in its title, in 3D as well.
   assert.ok(editor.includes("<span className=\"bmap-footer-hint\" title={mode === 'plan' || hiddenCount > 0 ? footerHint : undefined}>{footerHint}</span>"), 'the title of the hint');
+});
+
+test('anchor 72: the closed box is a view setting of a room in 3D, below the kind of the space, and nothing of it is saved', () => {
+  // The switch of the closed box is one section of the inspector, drawn while a room is in hand in 3D: not on the plan,
+  // where it would change nothing on screen, and not for a road, a camera or a symbol.
+  const opener = `{mode === '3d' && selected.type === 'space' && !selectedRoad && <section className="bmap-solid"`;
+  assert.equal(editor.split(opener).length - 1, 1, 'the section of the closed box is not drawn once, on this condition');
+  assert.equal(count(editor, /\bbmap-solid\b/g), 1, 'the class of the closed box is drawn in another place');
+  // It stands right behind the section of the kind of the space, out of its branch: there while viewing too, and below its
+  // select, so switching a room to a road takes the section away under nothing that was just pressed. Nothing else stands
+  // between the two: the `</>}` that closes the kind, and this section as written (spaces do not count, and its comment
+  // leaves a `{}`).
+  const squeeze = (text: string) => text.replace(/\s+/g, '');
+  const written = [
+    `{mode === '3d' && selected.type === 'space' && !selectedRoad && <section className="bmap-solid" aria-label="3D에서 보는 방식">`,
+    `<label className="bmap-check"><input type="checkbox" checked={solidIds.has(selected.id)} onChange={event => setSpacesSolid([selected.id], event.target.checked)} />속이 안 보이는 박스로 보기</label>`,
+    `<p className="bmap-hint">이 PC에서 3D를 보는 방식만 바뀌어요. 도면에는 저장되지 않아요. 박스 안에 든 것은 3D에서 안 보여요. 오브젝트 목록에서 고를 수 있어요.{roomsOpen ? ' 기호를 놓는 동안에는 모든 공간이 비쳐 보여요.' : ''}</p>`,
+    `<div className="bmap-link-actions"><button type="button" className="bmap-text-button" onClick={() => setSpacesSolid(mapRoomIds(current), true)}>모든 공간을 박스로</button><button type="button" className="bmap-text-button" onClick={() => setSpacesSolid([...solidIds], false)}>모두 비치게</button></div>`,
+    '</section>}'].join('');
+  assert.equal(squeeze(piece(editor, 'ROAD_HINT_ROUND : ROAD_HINT_NO_STRIP}</p>}', "{selected.type === 'camera' && (() => {")).replace(/\{\}/g, ''),
+    `ROAD_HINT_ROUND:ROAD_HINT_NO_STRIP}</p>}</>}${squeeze(written)}`, 'the section of the closed box is not as written, right behind the kind of the space');
+  // A view setting of this PC writes no map: neither viewing, a lock, a read-only account nor a save switches it off. Only a
+  // drag holds it back, in its handler (anchor 68).
+  const box = piece(editor, opener, '</section>}');
+  assert.ok(!box.includes(' disabled='), 'the closed box is switched off');
+  // The words of the section and what its buttons do: the check, what it changes and where what a box holds is reached, the
+  // sentence while the symbol tool is in hand, every room of the map closed (no road), every box of the map opened.
+  for (const text of ['/>속이 안 보이는 박스로 보기</label>', '이 PC에서 3D를 보는 방식만 바뀌어요. 도면에는 저장되지 않아요. 박스 안에 든 것은 3D에서 안 보여요. 오브젝트 목록에서 고를 수 있어요.',
+    "{roomsOpen ? ' 기호를 놓는 동안에는 모든 공간이 비쳐 보여요.' : ''}", 'onClick={() => setSpacesSolid(mapRoomIds(current), true)}>모든 공간을 박스로</button>',
+    'onClick={() => setSpacesSolid([...solidIds], false)}>모두 비치게</button>'])
+    assert.ok(box.includes(text), `not in the section of the closed box: ${text}`);
+  // That a setting is not saved in the map is said of the way 3D is seen, there alone: said of the eye, it would read as if
+  // a hidden node were not saved.
+  assert.equal(count(editor, /도면에는 저장되지 않아요/g), 1, 'not saved in the map is said in another place');
+  // The rooms are see-through while the symbol tool is in hand in edit mode, through a save as well: one value, read by the
+  // 3D view (anchor 67) and by the sentence of the section. Hung on canEdit, a save with the tool in hand would close and
+  // open every box, and take the sentence away and back.
+  assert.equal(editor.split("const roomsOpen = tool === 'symbol' && editing;").length - 1, 1, 'when the rooms are see-through');
+  assert.equal(count(editor, /\broomsOpen\b/g), 3, 'made, the sentence of the section, the 3D view');
+  // With nothing in hand in 3D, the composition of the map says where the switch is, right under its first hint.
+  const where = `{mode === '3d' && <p className="bmap-hint">공간을 고르면 속이 안 보이는 박스로 볼 수 있어요.</p>}`;
+  assert.equal(editor.split(where).length - 1, 1, 'the line of the composition is not drawn once, in 3D alone');
+  assert.match(editor, /공간을 선택하면 내부 도면을 만들거나 연결할 수 있습니다\.<\/p>\s*\{mode === '3d' && <p className="bmap-hint">공간을 고르면 속이 안 보이는 박스로 볼 수 있어요\.<\/p>\}/,
+    'the line of the composition is not right under its first hint');
+  // The settings are of this PC: their module draws nothing and reaches no page by itself, and its key names its shape.
+  const prefs = read('mapViewPrefs.ts');
+  assert.doesNotMatch(prefs, /from\s+['"]three/, 'the view settings import three.js');
+  for (const global of ['document.', 'window.']) assert.ok(!prefs.includes(global), `the view settings reach the page: ${global}`);
+  assert.ok(prefs.includes("MAP_VIEW_PREFS_KEY = 'bflow.background-map.view.v1'"), 'the key of the view settings');
+  // And never of the map: what is saved knows neither word. A node with such a key is refused whole by the save.
+  for (const name of ['types.ts', 'domain.ts', 'mapWorkflow.ts', 'mapDocument.ts'])
+    assert.doesNotMatch(read(name), /\b(?:hidden|solid)(?:Ids)?\b/, `${name} knows a view setting`);
+  // Each account its own: the library hands the editor the one signed in, and draws the editor anew for another.
+  const library = read('BackgroundLibraryView.tsx');
+  assert.ok(library.includes("viewerId={user?.id ?? ''}"), 'the editor is not handed the account signed in');
+  assert.ok(library.includes('key={user?.id || "signed-out"}'), 'the editor is not drawn anew for another account');
 });

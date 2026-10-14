@@ -1136,6 +1136,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const fieldLocked = !canEdit || !!selected?.locked;
   /** The node in hand is a road: it has a floor height and no walls. */
   const selectedRoad = selected?.type === 'space' && isRoadSpace(selected);
+  /** In 3D every room is see-through while the symbol tool is in hand: a floor has to be aimed at. It hangs on `editing`, not on `canEdit`: that one goes with every save, and each box would close and open with it. */
+  const roomsOpen = tool === 'symbol' && editing;
   /** Of the selected nodes, those a group delete leaves because they are locked, and those it removes. */
   const groupLocked = groupNodes.filter(node => node.locked).length, groupFree = groupNodes.length - groupLocked;
   const spaceName = (id: string | null) => current?.nodes.find(node => node.type === 'space' && node.id === id)?.name ?? '공간 미지정';
@@ -1267,7 +1269,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                   onBeginGesture={beginCanvasGesture} onPreview={previewCanvasGesture} onFinishGesture={finishCanvasGesture} onCancelGesture={cancelCanvasGesture}
                   tool={tool === 'hand' ? 'look' : 'select'} gizmoMode={gizmoMode} placing={tool === 'symbol' && canEdit} onPlace={placeAt}
                   focusRequest={focusRequest} initialView={viewStates.current[current.id] ?? null} onViewChange={storeView}
-                  lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} hiddenIds={hiddenIds} />
+                  lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} hiddenIds={hiddenIds} solidIds={roomsOpen ? NO_MAP_VIEW_PREFS.solid : solidIds} />
               </Suspense></Map3DBoundary>
             </div>
             <BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} hiddenIds={hiddenIds} />
@@ -1310,6 +1312,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               {/* The centre line is the look of a road: where the shape has none, say why, or it reads as a bug. */}
               {isRoadSpace(selected) && !roadCentreLine(selected) && <p className="bmap-hint">{selected.shape === 'ellipse' ? ROAD_HINT_ROUND : ROAD_HINT_NO_STRIP}</p>}
             </>}
+            {/* A view setting of this PC, not a property of the space: there while viewing too, and never switched off by a lock or a save. In 3D only, where it shows. Below the kind of the space: a road has no such section, and nothing above that select may move when it is switched. */}
+            {mode === '3d' && selected.type === 'space' && !selectedRoad && <section className="bmap-solid" aria-label="3D에서 보는 방식">
+              <label className="bmap-check"><input type="checkbox" checked={solidIds.has(selected.id)} onChange={event => setSpacesSolid([selected.id], event.target.checked)} />속이 안 보이는 박스로 보기</label>
+              <p className="bmap-hint">이 PC에서 3D를 보는 방식만 바뀌어요. 도면에는 저장되지 않아요. 박스 안에 든 것은 3D에서 안 보여요. 오브젝트 목록에서 고를 수 있어요.{roomsOpen ? ' 기호를 놓는 동안에는 모든 공간이 비쳐 보여요.' : ''}</p>
+              <div className="bmap-link-actions"><button type="button" className="bmap-text-button" onClick={() => setSpacesSolid(mapRoomIds(current), true)}>모든 공간을 박스로</button><button type="button" className="bmap-text-button" onClick={() => setSpacesSolid([...solidIds], false)}>모두 비치게</button></div>
+            </section>}
             {selected.type === 'camera' && (() => {
               const angles = cameraAngles(selected), aspect = cameraAspect(selected), preset = ASPECT_PRESETS.find(item => Math.abs(item.value - aspect) < 0.005);
               return <>
@@ -1358,6 +1366,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             onDelete={() => { setError(''); setConfirmation('delete-group'); }} /> : <>
             <div className="bmap-section-heading"><strong>도면 구성</strong><span className="bmap-badge">{current.nodes.filter(node => node.type === 'space').length}개 공간</span></div>
             <p className="bmap-hint">공간을 선택하면 내부 도면을 만들거나 연결할 수 있습니다.</p>
+            {mode === '3d' && <p className="bmap-hint">공간을 고르면 속이 안 보이는 박스로 볼 수 있어요.</p>}
             {snapshot.canManage && <button type="button" className="bg-button bmap-draw-action" disabled={disabled} title={mode === '3d' ? '공간은 평면에서 그려요. 평면으로 바꿔 드릴게요.' : undefined} onClick={() => { if (!editing) beginEditing(); if (mode !== 'plan') switchMode('plan'); setTool('rect'); }}>＋ 공간 그리기</button>}
             <section className="bmap-children"><div className="bmap-section-heading"><strong>하위 도면</strong><span>{childMaps.length}</span></div>
               {childMaps.map(map => <button type="button" key={map.id} className="bmap-child-row" disabled={disabled} onClick={() => navigate(map.id)}><span>{map.name}</span><span>→</span></button>)}
