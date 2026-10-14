@@ -93,7 +93,9 @@ test('V-2: an account never reads another account, and without an account nothin
 
 test('V-3: anything of another shape reads as nothing, entry by entry, and the two lists are read apart', () => {
   const entries = ['1', 'null', '"a"', '["m"]', '{"id":3}', '{"id":""}', '{"id":"m"}', '{"id":"m","hidden":"a","solid":"b"}',
-    '{"id":"m","hidden":[1,null,{},["a"],true],"solid":[2,false]}', '{"id":"m","hidden":[""],"solid":[]}'];
+    '{"id":"m","hidden":[1,null,{},["a"],true],"solid":[2,false]}', '{"id":"m","hidden":[""],"solid":[]}',
+    // A map id that is not a string of one to sixty-four letters throws its entry away, lists it could use and all.
+    '{"id":3,"hidden":["a"]}', '{"id":"","solid":["s"]}', '{"id":["m"],"hidden":["a"]}', '{"id":{"length":1},"solid":["a"]}'];
   const texts = [null, undefined, '', 'x', '[]', '{}', '{"maps":{}}', '{"maps":"a"}', 'null', '3', '"maps"', '{"maps":[]}',
     ...entries.map(entry => `{"maps":[${entry}]}`)];
   for (const text of texts) {
@@ -152,6 +154,16 @@ test('V-4: a hundred maps, a thousand ids and sixty-four letters at most, and a 
   const roomy = mapViewPrefsOf(withHiddenNodes(full, crowded, [nodes[997].id], true), crowded.id).hidden;
   assert.equal(roomy.size, 998);
   assert.deepEqual([...roomy], [...listed, nodes[997].id]);
+  // A full list with one id of a node that is gone: that one goes and the new node comes in. The list is as long as
+  // before and still another list, so the settings that come back are new.
+  const tight = Array.from({ length: 1000 }, (_, index) => symbol(uid(2000 + index), index, 0)), snug = mapOf(uid(302), tight);
+  const onList = tight.slice(0, 999).map(node => node.id);
+  const brim = parseMapViewPrefs(JSON.stringify({ maps: [{ id: snug.id, hidden: [...onList.slice(0, 500), dead[0], ...onList.slice(500)] }] }));
+  assert.equal(mapViewPrefsOf(brim, snug.id).hidden.size, 1000);
+  const swapped = withHiddenNodes(brim, snug, [tight[999].id], true);
+  assert.notEqual(swapped, brim);
+  assert.equal(mapViewPrefsOf(swapped, snug.id).hidden.size, 1000);
+  assert.deepEqual([...mapViewPrefsOf(swapped, snug.id).hidden], [...onList, tight[999].id]);
   // A list that is not full keeps the ids of nodes that are gone.
   const few = parseMapViewPrefs(JSON.stringify({ maps: [{ id: crowded.id, hidden: [...dead, listed[0]] }] }));
   assert.deepEqual([...mapViewPrefsOf(withHiddenNodes(few, crowded, [listed[1]], true), crowded.id).hidden], [...dead, listed[0], listed[1]]);
