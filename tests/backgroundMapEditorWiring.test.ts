@@ -2534,6 +2534,13 @@ test('anchor 68: what is hidden is never selected, and a view setting writes no 
   assert.ok(editor.includes('const [viewPrefs, setViewPrefs] = useState(() => readMapViewPrefs(viewerId));'), 'the settings are not read once, for the account on show');
   assert.equal(count(editor, /\breadMapViewPrefs\(/g), 1, 'the settings are read in another place');
   assert.equal(count(editor, /\bsetViewPrefs\(/g), 2, 'the eye and the box, and nowhere else');
+  // The account on show is the library's: it hands the editor the one signed in, and keys the body that holds the
+  // editor by it, so another account draws the editor anew. Handed no account, the editor neither reads nor writes this
+  // PC, and no setting outlives the screen; with no key on that body, it keeps the settings of the account before and
+  // writes them under the next one's name at its first eye or box.
+  const library = read('BackgroundLibraryView.tsx');
+  assert.ok(library.includes("viewerId={user?.id ?? ''}"), 'the editor is not handed the account signed in');
+  assert.ok(library.includes('key={user?.id || "signed-out"}'), 'the editor is not drawn anew for another account');
   // What the map on show is shown with is read in one line, for the map on show. Read for `currentId`, the first map
   // opened would show nothing hidden and no box: no map has been chosen yet, and that id is null.
   const shown = 'const { hidden: hiddenIds, solid: solidIds } = mapViewPrefsOf(viewPrefs, current?.id);';
