@@ -3801,40 +3801,41 @@ test('the gizmo restyle is all or nothing, happens once, and releases what it re
   }
 });
 
+/** Whether the root of a node is drawn, and what follows the root (its name, the drop line of a camera), listed like the roots. */
+const drawnIn = (scene: Map3DScene, node: BackgroundNode): boolean[] => {
+  const root = rootOf(scene, node), companion = named(scene.scene, 'map-companions').children[named(scene.scene, 'map-nodes').children.indexOf(root)];
+  return [root.visible, companion.visible];
+};
+
 test('S-2: a hidden node is not drawn and takes no click, and a hidden room leaves its members drawn', () => {
   const room = space(1), chair = symbol(12, 'chair', { spaceId: room.id }), lens = camera(20, { spaceId: room.id });
   const map = mapOf([room, chair, lens]), scene = new Map3DScene();
-  /** Whether the root of a node is drawn, and what follows the root (its name, the drop line of a camera), listed like the roots. */
-  const drawn = (node: BackgroundNode): boolean[] => {
-    const root = rootOf(scene, node), companion = named(scene.scene, 'map-companions').children[named(scene.scene, 'map-nodes').children.indexOf(root)];
-    return [root.visible, companion.visible];
-  };
   const onChair = () => pickMapNode(cast(scene, [160, 600, 230], [0, -1, 0]), map);
   // The eye hides one node: a hidden room leaves what belongs to it drawn, and that is clicked where it stands. The bare
   // floor of the room takes no click.
   scene.sync(map, null, { hiddenIds: new Set([room.id]) });
-  assert.deepEqual([drawn(room), drawn(chair), drawn(lens)], [[false, false], [true, true], [true, true]]);
+  assert.deepEqual([drawnIn(scene, room), drawnIn(scene, chair), drawnIn(scene, lens)], [[false, false], [true, true], [true, true]]);
   assert.equal(onChair(), chair.id);
   assert.equal(pickMapNode(cast(scene, [350, 600, 250], [0, -1, 0]), map), null);
   // Its members hidden instead: the spot of the chair and the camera behind the wall are clicks on the room.
   const members = new Set([chair.id, lens.id]);
   scene.sync(map, null, { hiddenIds: members });
-  assert.deepEqual([drawn(room), drawn(chair), drawn(lens)], [[true, true], [false, false], [false, false]]);
+  assert.deepEqual([drawnIn(scene, room), drawnIn(scene, chair), drawnIn(scene, lens)], [[true, true], [false, false], [false, false]]);
   assert.equal(onChair(), room.id);
   assert.equal(pickMapNode(cast(scene, [250, 120, 700], [0, 0, -1]), map), room.id);
   // A change of theme syncs again with what was hidden: still not drawn, and no target of a click.
   scene.setPalette({ ...MAP3D_DARK_PALETTE, light: true, accent: 0x123456 });
-  assert.deepEqual([drawn(chair), drawn(lens)], [[false, false], [false, false]]);
+  assert.deepEqual([drawnIn(scene, chair), drawnIn(scene, lens)], [[false, false], [false, false]]);
   assert.ok(scene.pickTargets().every(target => !members.has(String(target.userData.nodeId))), 'a hidden node is a target after a change of theme');
   assert.equal(onChair(), room.id);
   // The camera that is looked through is still hidden beside what the eye hides, and on its own.
   scene.sync(map, null, { hiddenId: lens.id, hiddenIds: new Set([chair.id]) });
-  assert.deepEqual([drawn(room), drawn(chair), drawn(lens)], [[true, true], [false, false], [false, false]]);
+  assert.deepEqual([drawnIn(scene, room), drawnIn(scene, chair), drawnIn(scene, lens)], [[true, true], [false, false], [false, false]]);
   scene.sync(map, null, { hiddenId: lens.id });
-  assert.deepEqual([drawn(chair), drawn(lens)], [[true, true], [false, false]]);
+  assert.deepEqual([drawnIn(scene, chair), drawnIn(scene, lens)], [[true, true], [false, false]]);
   // Synced without the options: everything is drawn and clicked again.
   scene.sync(map, null);
-  assert.deepEqual([drawn(room), drawn(chair), drawn(lens)], [[true, true], [true, true], [true, true]]);
+  assert.deepEqual([drawnIn(scene, room), drawnIn(scene, chair), drawnIn(scene, lens)], [[true, true], [true, true], [true, true]]);
   assert.equal(onChair(), chair.id);
   assert.equal(pickMapNode(cast(scene, [250, 120, 700], [0, 0, -1]), map), lens.id);
   scene.dispose();
@@ -3906,11 +3907,6 @@ test('W-2: viewport — the scene is synced again for a new set alone, and never
   bare.viewport.dispose();
 });
 
-/** Whether the root of a node is drawn, and what follows the root (its name, the drop line of a camera), listed like the roots. */
-const drawnIn = (scene: Map3DScene, node: BackgroundNode): boolean[] => {
-  const root = rootOf(scene, node), companion = named(scene.scene, 'map-companions').children[named(scene.scene, 'map-nodes').children.indexOf(root)];
-  return [root.visible, companion.visible];
-};
 /** The parts of a room drawn closed, and of one drawn see-through, in the order they are added to its root. */
 const CLOSED_ROOM = ['space-floor', 'space-walls', 'space-lid', 'space-outline'], OPEN_ROOM = ['space-floor', 'space-walls', 'space-outline'];
 
