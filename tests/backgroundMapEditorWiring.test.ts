@@ -2619,10 +2619,18 @@ test('anchor 69: a row of the object list is a name and an eye beside it, and th
   // A hidden row is marked on the row, so the name button keeps its classes as anchor 36 reads them, and its name says it.
   assert.ok(list.includes("<li key={node.id} className={hidden ? 'is-hidden' : undefined}>"), 'a hidden row is not marked on the row');
   assert.ok(list.includes("aria-label={`${name}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}${hidden ? ', 숨김' : ''}`}"), 'the name of a hidden row does not say so');
+  // The row asks once, as written, and its mark, its name and its eye all read that: a row is hidden when its node is in
+  // the set (asked the other way round, every row on show is dimmed, drawn with the closed eye and named as hidden), and it
+  // is named by the node's name, as the row shows it, not by its id.
+  assert.ok(list.includes("const hidden = hiddenIds.has(node.id), name = node.name || '이름 없음';"), 'the row is not as written');
   // The heading: the hidden count comes first, so a narrow panel cuts the count of all and keeps it. 모두 보이기 stands beside
   // it while anything is hidden, and its title says what hiding does.
   assert.ok(list.includes("<span className=\"bmap-badge\">{hiddenCount > 0 ? `숨김 ${hiddenCount} · ` : ''}{ordered.length}개</span>"), 'the count of the heading');
   assert.ok(list.includes('title={HIDDEN_NOTE} onClick={onShowAll}>모두 보이기</button>'), '모두 보이기 of the heading');
+  // And the whole heading, as written: 모두 보이기 is there only while anything is hidden, it stands to the left of the
+  // count, and it wears its own class, which keeps it lower than the badge. As a plain text button it is 36px tall, and the
+  // heading would grow under the pointer at the first eye pressed.
+  assert.ok(list.includes('<div className="bmap-section-heading"><strong>오브젝트</strong>{hiddenCount > 0 && <button type="button" className="bmap-text-button bmap-show-all" title={HIDDEN_NOTE} onClick={onShowAll}>모두 보이기</button>}<span className="bmap-badge">{hiddenCount > 0 ? `숨김 ${hiddenCount} · ` : \'\'}{ordered.length}개</span></div>'), 'the heading is not as written');
   // What hiding does is said under the rows at all times, hidden or not: a line that came with the first eye would move the
   // list under the pointer. And a reader is told the count as it changes.
   assert.ok(list.includes('</ul><p className="bmap-hint">{HIDDEN_NOTE}</p></>'), 'the line under the list');
