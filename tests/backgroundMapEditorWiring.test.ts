@@ -2809,6 +2809,9 @@ test('anchor 72: the closed box is a view setting of a room in 3D, below the kin
   const opener = `{mode === '3d' && selected.type === 'space' && !selectedRoad && <section className="bmap-solid"`;
   assert.equal(editor.split(opener).length - 1, 1, 'the section of the closed box is not drawn once, on this condition');
   assert.equal(count(editor, /\bbmap-solid\b/g), 1, 'the class of the closed box is drawn in another place');
+  // Nor is it drawn a second time under another class, and the line of the composition that points to it (below) is not
+  // drawn on the plan as well: the words they share are in the editor twice, the check of this section and that line.
+  assert.equal(count(editor, /속이 안 보이는 박스로/g), 2, 'the switch and the line of the composition, once each');
   // It stands right behind the section of the kind of the space, out of its branch: there while viewing too, and below its
   // select, so switching a room to a road takes the section away under nothing that was just pressed. Nothing else stands
   // between the two: the `</>}` that closes the kind, and this section as written (spaces do not count, and its comment
