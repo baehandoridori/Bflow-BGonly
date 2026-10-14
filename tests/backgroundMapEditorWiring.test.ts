@@ -1452,7 +1452,7 @@ test('anchor 59: the new test files run in the build', () => {
   // The build runs every test file a pattern of names finds. A file that is deleted, or renamed out of that pattern, takes
   // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the new ones by name.
   const tests = new URL('./', import.meta.url), names = readdirSync(tests);
-  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts', 'backgroundMapDelete.test.ts', 'backgroundMapViewPrefs.test.ts']) {
+  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts', 'backgroundMapDelete.test.ts', 'backgroundMapViewPrefs.test.ts', 'backgroundMapImageDrop.test.ts']) {
     assert.ok(names.includes(name), `not in the tests folder: ${name}`);
     const source = readFileSync(new URL(name, tests), 'utf8');
     // And each tests something: a file whose tests are all skipped is green as well.
@@ -2869,4 +2869,18 @@ test('anchor 72: the closed box is a view setting of a room in 3D, below the kin
   const library = read('BackgroundLibraryView.tsx');
   assert.ok(library.includes("viewerId={user?.id ?? ''}"), 'the editor is not handed the account signed in');
   assert.ok(library.includes('key={user?.id || "signed-out"}'), 'the editor is not drawn anew for another account');
+});
+
+test('anchor 78: what is shown stays in the image list, motion stays in its block, the file dialog is one function, the new channel is four places, and the pure module is pure', () => {
+  // The rules and the words of adding pictures are one pure module, read here when this anchor asks for it: its tests run it
+  // under Node as it is, with no page, no React, no three.js and no alias of the bundler.
+  const drop = read('mapImageDrop.ts');
+  assert.doesNotMatch(drop, /from\s+['"]three/, 'the module of adding pictures imports three.js');
+  for (const word of ['document.', 'window.', '@/', 'react']) assert.ok(!drop.includes(word), `the module of adding pictures reaches past itself: ${word}`);
+  // What is saved and its checks, the drafts, the stack of the plan, the store and who sees the menu stay as they are: not a
+  // line of them knows the feature, not a comment either (they are read as written).
+  const raw = (url: URL) => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
+  for (const name of ['types.ts', 'domain.ts', 'mapWorkflow.ts', 'mapDocument.ts', 'mapStack.ts', 'useBackgroundStore.ts'])
+    assert.ok(!raw(new URL(name, directory)).includes('mapImage'), `${name} knows the feature`);
+  assert.ok(!raw(new URL('../src/features/playground/featureFlag.ts', import.meta.url)).includes('mapImage'), 'featureFlag.ts knows the feature');
 });
