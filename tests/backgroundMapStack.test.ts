@@ -332,7 +332,8 @@ test('K-1: a room holds a node only whole, a camera on its wall line or at the l
   assert.equal(spaceHoldsNode(raised, lens('lens', centre)), true, 'no height of its own: 120');
   assert.equal(spaceHoldsNode(raised, lens('lens', { x: 420, y: 150 }, { elevation: 90 })), false, 'off the outline');
   assert.equal(at(NaN), false, 'a height that is no number');
-  // The slack is a millionth: a ten-millionth over the lid or off the wall line is still on it, a hundred-thousandth is not.
+  // The slack is a millionth: a ten-millionth under the floor, over the lid or off the wall line is still on it, a hundred-thousandth is not.
+  assert.equal(at(40 - 1e-7), true, 'a ten-millionth under the floor'); assert.equal(at(40 - 1e-5), false, 'a hundred-thousandth under the floor');
   assert.equal(at(140 + 1e-7), true, 'a ten-millionth over the lid'); assert.equal(at(140 + 1e-5), false, 'a hundred-thousandth over the lid');
   assert.equal(spaceHoldsNode(raised, lens('lens', { x: 400 + 1e-7, y: 150 }, { elevation: 90 })), true, 'a ten-millionth off the wall line');
   assert.equal(spaceHoldsNode(raised, lens('lens', { x: 400 + 1e-5, y: 150 }, { elevation: 90 })), false, 'a hundred-thousandth off the wall line');
@@ -377,6 +378,7 @@ test('K-1: a room holds a node only whole, a camera on its wall line or at the l
   const left = space('left', 100, 100, 300, 200), right = space('right', 300, 150, 300, 200);
   assert.equal(spaceHoldsNode(left, right), false, 'half over'); assert.equal(spaceHoldsNode(right, left), false, 'half over, the other way round');
   assert.equal(spaceHoldsNode(house, space('beyond', 700.5, 450, 200, 150)), false, 'half a unit through a wall');
+  assert.equal(spaceHoldsNode(house, space('beyond', 700.001, 450, 200, 150)), false, 'a thousandth through a wall');
   assert.equal(spaceHoldsNode(house, space('taller', 350, 200, 200, 200, { volumeHeight: 181 })), false, 'a unit taller');
   assert.equal(spaceHoldsNode(house, space('sunk', 350, 200, 200, 200, { elevation: -1 })), false, 'a unit lower');
   assert.equal(spaceHoldsNode(house, space('level', 350, 200, 200, 200, { volumeHeight: 180 })), true, 'as tall');
@@ -417,6 +419,16 @@ test('K-1: a room holds a node only whole, a camera on its wall line or at the l
   const bentBox = polygon('bentBox', 0, 0, 400, 300, [0, 0], [1, 0], [1, 0.4], [0.4, 0.4], [0.4, 1], [0, 1]);
   assert.equal(spaceHoldsNode(bentBox, space('notched', 220, 160, 120, 100)), false, 'in the cut-out');
   assert.equal(spaceHoldsNode(bentBox, space('arm', 200, 20, 150, 80)), true, 'in an arm');
+  assert.equal(spaceHoldsNode(bentBox, space('ledge', 200, 40, 150, 80)), true, 'flush against the wall of the cut-out');
+  // Every corner in an arm and the middle in the cut-out: across the cut-out, so outside.
+  assert.equal(spaceHoldsNode(bentBox, thing('bar', 20, 145, 350, 10, { rotation: 141 })), false, 'a bar from arm to arm, its middle in the cut-out');
+  assert.equal(spaceHoldsNode(bentBox, thing('bridge', 115, 155, 170, 10, { rotation: 135 })), false, 'a table bridging the arms over the cut-out');
+  // L corridors, one along the outer walls of the L and one along its cut-out: the middle of the box of each is no point
+  // of it (it lies in the cut-out), and every corner stands inside or on a wall. Both are inside.
+  assert.equal(spaceHoldsNode(bentBox, polygon('along', 0, 0, 400, 300, [0, 0], [1, 0], [1, 40 / 300], [0.1, 40 / 300], [0.1, 1], [0, 1])), true, 'an L corridor along the outer walls');
+  assert.equal(spaceHoldsNode(bentBox, polygon('round', 120, 80, 280, 220, [0, 0], [1, 0], [1, 40 / 220], [40 / 280, 40 / 220], [40 / 280, 1], [0, 1])), true, 'an L corridor along the cut-out');
+  // A right triangle has the middle of its box on its long side: still asked. Here that side crosses the cut-out, every corner in an arm.
+  assert.equal(spaceHoldsNode(bentBox, polygon('slope', 100, 40, 280, 240, [0, 0], [1, 0], [0, 1])), false, 'a right triangle whose long side crosses the cut-out');
 });
 
 test('K-2: nodesHeldBy lists what closed rooms hold, once, and of two identical boxes the earlier in the map holds the later', () => {
@@ -437,10 +449,23 @@ test('K-2: nodesHeldBy lists what closed rooms hold, once, and of two identical 
   // Every room a box: all that is in the building, but the building itself. The camera over the lid is over its roof as well.
   const inside = ['middle', 'nook', 'seat', 'on the wall', 'at the lid', 'off the wall'];
   assert.deepEqual(held([house, middle, nook]), inside); assert.deepEqual(held([nook, middle, house]), inside);
+  // The same with the rooms before the building in the map: a box held by a box later in the map is held all the same.
+  assert.deepEqual(held([house, middle, nook], mapOf([...map.nodes].reverse())), [...inside].reverse());
+  assert.deepEqual([...nodesHeldBy(mapOf([nook, middle, seat, house]), [house, middle, nook])].sort(), ['middle', 'nook', 'seat']);
   // Two boxes of one outline on the same levels hold each other: the later in the map is held, whatever the order of the boxes.
   const twin = space('twin', 350, 200, 200, 200);
   for (const order of [[middle, twin], [twin, middle]]) for (const boxes of [[middle, twin], [twin, middle]])
     assert.deepEqual(held(boxes, mapOf([...order, seat])), [order[1].id, 'seat'], `map ${ids(order).join(' ')}, boxes ${ids(boxes).join(' ')}`);
+  // So do two of a shape whose box has its middle outside it or on its edge, or whose corners do not all see that middle
+  // from inside: an L, a T, and a right triangle standing four ways, each turned.
+  const shapes: Record<string, [number, number][]> = {
+    L: [[0, 0], [1, 0], [1, 0.4], [0.4, 0.4], [0.4, 1], [0, 1]], T: [[0, 0], [1, 0], [1, 0.3], [0.6, 0.3], [0.6, 1], [0.4, 1], [0.4, 0.3], [0, 0.3]],
+    'right triangle 1': [[0, 0], [1, 0], [0, 1]], 'right triangle 2': [[0, 0], [1, 0], [1, 1]], 'right triangle 3': [[1, 0], [1, 1], [0, 1]], 'right triangle 4': [[0, 0], [1, 1], [0, 1]],
+  };
+  for (const [name, points] of Object.entries(shapes)) for (const rotation of [0, 17, 45, 90, 213]) {
+    const first = { ...polygon('first', 0, 0, 400, 300, ...points), rotation }, second = { ...first, id: 'second' };
+    for (const order of [[first, second], [second, first]]) assert.deepEqual(held(order, mapOf(order)), [order[1].id], `${name} turned ${rotation}, map ${ids(order).join(' ')}`);
+  }
   // A room not drawn closed, in just the place of a box, is held by it in either order.
   const ghost = space('ghost', 350, 200, 200, 200);
   for (const order of [[middle, ghost], [ghost, middle]]) assert.deepEqual(held([middle], mapOf(order)), ['ghost'], ids(order).join(' '));

@@ -70,16 +70,16 @@ export function spacesOverlap(a: BackgroundSpace, b: BackgroundSpace): boolean {
   return false;
 }
 
-/** Slack of the hold test: a share of the way to the middle of a space or a symbol, plan units around a camera, and level units. What stands flush against a wall, on the floor or up to the top is inside. */
+/** Slack of the hold test: a share of the way from a corner towards the middle of its two neighbours, plan units around a camera or a corner, and level units. What stands flush against a wall, on the floor or up to the top is inside. */
 const HOLD_SLACK = 1e-6;
 /** The eight directions around a plan point. */
 const AROUND: readonly (readonly [number, number])[] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
 /** No node is held: one set for every time, so nothing that reads it by identity is woken. */
 const NONE_HELD: ReadonlySet<string> = new Set();
 /**
- * Whether a room holds a node whole: its plan outline (the middle and every corner of a space or a symbol, the position
- * of a camera) lies inside the outline of the room or on it, and it stands between the floor and the top of the walls,
- * both included. A road has no volume, and a room does not hold itself.
+ * Whether a room holds a node whole: its plan outline (every corner of a space or a symbol, and the middle of its box
+ * where that middle is a point of the node; the position of a camera) lies inside the outline of the room or on it, and
+ * it stands between the floor and the top of the walls, both included. A road has no volume, and a room does not hold itself.
  */
 export function spaceHoldsNode(space: BackgroundSpace, node: BackgroundNode): boolean {
   if (node.id === space.id || isRoadSpace(space)) return false;
@@ -90,8 +90,18 @@ export function spaceHoldsNode(space: BackgroundSpace, node: BackgroundNode): bo
   // A camera on a wall line is inside, whatever the shape of the room: containsPoint reads the edges of a polygon half open, so the point is asked a hair away on every side.
   if (node.type === 'camera') return AROUND.some(([dx, dy]) => containsPoint(space, { x: node.x + dx * HOLD_SLACK, y: node.y + dy * HOLD_SLACK }));
   const middle = { x: node.x + node.width / 2, y: node.y + node.height / 2 };
-  // Each corner is asked a hair towards the middle: a wall the node stands flush against does not put it outside.
-  return containsPoint(space, middle) && nodePlanOutline(node).every(point => containsPoint(space, { x: point.x + (middle.x - point.x) * HOLD_SLACK, y: point.y + (middle.y - point.y) * HOLD_SLACK }));
+  // Inside an outline or on it: a hair away on one side or another is inside, as a camera is asked.
+  const near = (area: BackgroundSpace, point: BackgroundPoint) => AROUND.some(([dx, dy]) => containsPoint(area, { x: point.x + dx * HOLD_SLACK, y: point.y + dy * HOLD_SLACK }));
+  // The middle of the box is asked where it is a point of the node. A space may not hold it: it lies outside an L or a U
+  // (not asked) and on the long side of a right triangle (asked, and then it may lie on a wall of the room).
+  if (!containsPoint(space, middle) && (node.type !== 'space' || (near(node, middle) && !near(space, middle)))) return false;
+  // Each corner is asked a hair towards the middle of its two neighbours (for a rectangle, its middle), or on the outline:
+  // a wall the node stands flush against does not put it outside, whatever its shape. The first finds the inside at a
+  // sharp corner, the second at a corner that turns inwards or lies on a straight stretch of outline.
+  return nodePlanOutline(node).every((point, index, outline) => {
+    const before = outline[(index + outline.length - 1) % outline.length], after = outline[(index + 1) % outline.length];
+    return containsPoint(space, { x: point.x + ((before.x + after.x) / 2 - point.x) * HOLD_SLACK, y: point.y + ((before.y + after.y) / 2 - point.y) * HOLD_SLACK }) || near(space, point);
+  });
 }
 /**
  * The nodes that rooms drawn closed in 3D hold whole: what is not drawn there. `boxes`: those rooms. Two of them that
