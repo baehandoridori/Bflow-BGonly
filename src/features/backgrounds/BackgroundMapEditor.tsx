@@ -15,6 +15,7 @@ import { BackgroundMapNumberField as NumberField } from './BackgroundMapNumberFi
 import { BackgroundMapDeleteDialog } from './BackgroundMapDeleteDialog';
 import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
+import { NO_MAP_VIEW_PREFS, hiddenNodeCount, mapRoomIds, mapViewPrefsOf, readMapViewPrefs, selectionWithout, shownMap, storeMapViewPrefs, withHiddenNodes, withSolidSpaces } from './mapViewPrefs';
 import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
 import { mapNodeNumber, setMapNodeNumber } from './mapNumberField';
 import type { MapNumberKey } from './mapNumberField';
@@ -40,7 +41,7 @@ import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
 
-type Props = { snapshot: BackgroundSnapshot; pending: boolean; execute: (command: BackgroundCommand) => Promise<void>; onOpenView: (id: string, variantId?: string) => void; onOpenCatalog: () => void };
+type Props = { snapshot: BackgroundSnapshot; pending: boolean; execute: (command: BackgroundCommand) => Promise<void>; onOpenView: (id: string, variantId?: string) => void; onOpenCatalog: () => void; viewerId: string };
 /** `hand` pans the plan and orbits the 3D world. The drawing tools exist on the plan only. */
 type Tool = 'select' | 'hand' | 'rect' | 'ellipse' | 'polygon' | 'road' | 'symbol';
 type CreateForm = { id: string; name: string; parentId: string | null; spaceId: string | null; placeId: string | null };
@@ -171,7 +172,7 @@ const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, onS
   </section>;
 });
 
-export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, onOpenCatalog }: Props) {
+export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, onOpenCatalog, viewerId }: Props) {
   const doc = useBackgroundMapDocument();
   const { state } = doc, drafts = state.drafts;
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -189,6 +190,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   // state is set: a state update that comes after the preview of the same pointer move runs this whole component
   // once more even when it changes nothing, so a drag would render twice for every move.
   const [snapEnabled, setSnapEnabled] = useState(readSnapPreference);
+  const [viewPrefs, setViewPrefs] = useState(() => readMapViewPrefs(viewerId));   // the eye and the box, by map: read once, the editor is drawn anew for another account
   const [guides, setGuides] = useState<readonly SnapGuide[]>(NO_GUIDES);
   const shownGuides = useRef<readonly SnapGuide[]>(NO_GUIDES);
   const showGuides = (next: readonly SnapGuide[]) => {
@@ -252,6 +254,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const maps = useMemo(() => effectiveMaps(snapshot, drafts), [snapshot, drafts]);
   const current = maps.find(map => map.id === currentId) ?? maps[0];
   const draft = mapDraft(state, current?.id);
+  const { hidden: hiddenIds, solid: solidIds } = mapViewPrefsOf(viewPrefs, current?.id);   // the same sets until an eye or a box is pressed: a drag wakes neither the list nor 3D
   const view = mapViewport(state, current?.id);
   // Keyed on the stored list, not on the viewport: a pan or a zoom keeps `selectedIds` and so keeps this value.
   const selection = useMemo(() => mapSelection(current, view.selectedIds), [current, view.selectedIds]);
@@ -290,6 +293,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const settledMaps = settledMapsRef.current;
   const settledCurrent = current && (gestureStartMap(state, current.id) ?? current);
   const settledSelected = settledCurrent?.nodes.find(node => node.id === selected?.id);
+  const hiddenCount = useMemo(() => hiddenNodeCount(settledCurrent, hiddenIds), [settledCurrent, hiddenIds]);   // said by the list and the footer: hidden nodes of the map the list is drawn from, never the id of one that is gone
   // What the object list marks, read from the settled map and memoised, so a drag does not draw the list again.
   const listSelection = useMemo((): MapSelection => {
     const group = mapSelection(settledCurrent, view.selectedIds);
@@ -1047,6 +1051,33 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   // Stable callbacks: the 3D viewport, the companion plan and the image grid must not re-subscribe on every preview.
   const selectNode = useEvent((id: string | null) => select(id));
   const clearSelection = useEvent(() => select(null));
+  // View settings of this PC: the eye of the object list and the closed box of a room in 3D. They write no map: no undo step, nothing to save.
+  const setNodesHidden = useEvent((ids: readonly string[], hidden: boolean): boolean => {
+    // Not during a drag: its session works on what was drawn and stacked at the press.
+    if (!current || pointerRef.current || doc.isGestureActive()) return false;
+    const next = withHiddenNodes(viewPrefs, current, ids, hidden);
+    if (next !== viewPrefs) { setViewPrefs(next); storeMapViewPrefs(viewerId, next); }
+    if (!hidden) return true;
+    // What is hidden is never selected: it leaves the group picked on the plan, the hand of the 3D view, and the pick that view stored.
+    const live = mapDraft(doc.getState(), current.id)?.value ?? current;
+    const left = selectionWithout(live, liveSelection(current.id, live), mapViewport(doc.getState(), current.id).selectedId, ids, mode === 'plan');
+    if (!left.changed) return true;
+    doc.selectMany(current.id, left.ids);
+    // In 3D, with a group still picked on the plan, the node in hand is a pick of its own: kept, or let go.
+    if (mode === '3d' && left.ids.length > 1) select(left.inHand);
+    // The list moves under the pointer only when the properties above it show something else.
+    if (left.moved) swallowSecondClick();
+    return true;
+  });
+  const toggleHidden = useEvent((id: string) => { setNodesHidden([id], !hiddenIds.has(id)); });
+  const showAll = useEvent(() => { if (setNodesHidden([...hiddenIds], false)) focusCanvas(); });
+  /** A row of the object list. A hidden one is shown first: nothing hidden is ever selected. */
+  const selectFromList = useEvent((id: string) => { if (!hiddenIds.has(id) || setNodesHidden([id], false)) select(id); });
+  const setSpacesSolid = useEvent((ids: readonly string[], solid: boolean) => {
+    if (!current || pointerRef.current || doc.isGestureActive()) return;
+    const next = withSolidSpaces(viewPrefs, current, ids, solid);
+    if (next !== viewPrefs) { setViewPrefs(next); storeMapViewPrefs(viewerId, next); }
+  });
   const openView = useEvent(onOpenView), openCatalog = useEvent(onOpenCatalog);
   const beginCanvasGesture = useEvent(() => { if (current && canEdit && !pointerRef.current) doc.beginGesture(current.id); });
   const previewCanvasGesture = useEvent((map: BackgroundMap) => { if (canEdit) doc.previewGesture(map); });

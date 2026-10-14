@@ -96,6 +96,8 @@ const handler = {
   openSpace: () => piece(editor, 'function openSpace(', 'function beginRename('),
   fitView: () => piece(editor, 'function fitView(', 'function keyboard('),
   keyboard: () => piece(editor, 'function keyboard(', 'const selectNode = useEvent('),
+  /** The five handlers of the view settings of this PC (the eye of the object list, the closed box of a room in 3D), up to the stable callback that follows them. */
+  viewPrefs: () => piece(editor, 'const setNodesHidden = useEvent(', 'const openView = useEvent('),
   /** No handler of a key or a press: the begin and the preview of a slide and the scrub object made of them, up to the stable callback that follows. */
   fieldScrub: () => piece(editor, 'const beginFieldScrub = useEvent(', 'const placeAt = useEvent('),
   /** No handler: the one tag with which the editor draws the edit band, up to the `/>` that closes it. */
@@ -382,8 +384,9 @@ test('anchor 23: the 3D view and its companion plan are given one node, and a pi
   assert.doesNotMatch(editor, /pick-one/);
   assert.match(editor, /const selectNode = useEvent\(\(id: string \| null\) => select\(id\)\);/);
   assert.equal(count(editor, /\bdoc\.dispatch\(/g), 1, 'the editor dispatches nowhere else');
-  // The list is written in three more places, all of them on the plan: a box, a Shift+click and a group delete.
-  assert.equal(count(editor, /\bdoc\.selectMany\(/g), 3);
+  // The list is written in four more places: on the plan a box, a Shift+click and a group delete, and in either mode
+  // hiding a node, which takes it out of what is selected (setNodesHidden).
+  assert.equal(count(editor, /\bdoc\.selectMany\(/g), 4);
   // Deleting one node still ends with an empty pick: in 3D that empties the node in hand and keeps the rest of the group.
   assert.match(block(handler.confirmAction(), "if (confirmation === 'delete-node' && selected && canEdit) {"), /select\(null\); setConfirmation\(null\); return;\s*\}$/);
   // The contract of the views that show one node knows one selected id, and so do they.
@@ -1039,9 +1042,10 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
   // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
   inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
-  // The word stands four times: the function, this call, and the delete dialog of a map as it comes up and as a run of
-  // it stops (anchor 66 holds those two where they are).
-  assert.equal(count(editor, /\bswallowSecondClick\b/g), 4, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops');
+  // The word stands five times: the function, this call, the delete dialog of a map as it comes up and as a run of it
+  // stops (anchor 66 holds those two where they are), and hiding a node when what the properties show changes
+  // (setNodesHidden).
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 5, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, and hiding that changes what the properties show');
   assert.deepEqual(piece(editor, 'function swallowSecondClick() {', 'function navigate(').split('\n').map(line => line.trim()).filter(Boolean), [
     'function swallowSecondClick() {',
     'const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };',
@@ -2481,4 +2485,62 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
     assert.doesNotMatch(line, /#|\b(?:rgb|hsl)a?\((?!var\()/);
   }
   for (const column of ['.bmap-delete-lead {', '.bmap-delete-choices {']) has(baseRule(sheet, column), 'display:flex', 'flex-direction:column');
+});
+
+test('anchor 68: what is hidden is never selected, and a view setting writes no map', () => {
+  // The view settings of this PC are five handlers that stand together right behind the stable pick of the empty
+  // selection, in no handler another anchor cuts out: the eye of a row, 모두 보이기, a row of the object list, and the
+  // closed box of a room in 3D. They are these lines and what joins them, in this order. Neither the eye nor the box
+  // is heard during a drag: its session works on what was drawn and stacked at the press. A change that changes
+  // nothing writes nothing, and a change is written to this PC at once, by the handler itself. Showing a node again
+  // leaves the selection alone. Hiding one takes it out of what is selected, read from the store as it is at this
+  // moment (a handler may run before the next render): the group of the plan, the node in hand in 3D, and the pick
+  // that view stored while it is not in hand. The list is written first. In 3D, while two or more stay selected, the
+  // node in hand is a pick of its own, kept or let go; with one or none left there is nothing to pick, the one selected
+  // is the one in hand. For the length of a double-click no press reaches the page, and only when what the properties
+  // show changes: the eyes of a group can be pressed one after the other. A row of the list shows a hidden node first,
+  // and picks it only once that went through. 모두 보이기 sends the keyboard to the canvas: its button goes with its own press.
+  const handlers = handler.viewPrefs();
+  assert.deepEqual(handlers.split('\n').map(line => line.trim()).filter(Boolean), [
+    'const setNodesHidden = useEvent((ids: readonly string[], hidden: boolean): boolean => {',
+    'if (!current || pointerRef.current || doc.isGestureActive()) return false;',
+    'const next = withHiddenNodes(viewPrefs, current, ids, hidden);',
+    'if (next !== viewPrefs) { setViewPrefs(next); storeMapViewPrefs(viewerId, next); }',
+    'if (!hidden) return true;',
+    'const live = mapDraft(doc.getState(), current.id)?.value ?? current;',
+    "const left = selectionWithout(live, liveSelection(current.id, live), mapViewport(doc.getState(), current.id).selectedId, ids, mode === 'plan');",
+    'if (!left.changed) return true;',
+    'doc.selectMany(current.id, left.ids);',
+    "if (mode === '3d' && left.ids.length > 1) select(left.inHand);",
+    'if (left.moved) swallowSecondClick();',
+    'return true;',
+    '});',
+    'const toggleHidden = useEvent((id: string) => { setNodesHidden([id], !hiddenIds.has(id)); });',
+    'const showAll = useEvent(() => { if (setNodesHidden([...hiddenIds], false)) focusCanvas(); });',
+    'const selectFromList = useEvent((id: string) => { if (!hiddenIds.has(id) || setNodesHidden([id], false)) select(id); });',
+    'const setSpacesSolid = useEvent((ids: readonly string[], solid: boolean) => {',
+    'if (!current || pointerRef.current || doc.isGestureActive()) return;',
+    'const next = withSolidSpaces(viewPrefs, current, ids, solid);',
+    'if (next !== viewPrefs) { setViewPrefs(next); storeMapViewPrefs(viewerId, next); }',
+    '});']);
+  // A view setting is no edit: none of the five writes the map, previews it or opens a gesture of the document. So it
+  // leaves no undo step, the band counts nothing for it, and there is nothing to save.
+  for (const writer of ['updateMap(', 'doc.update(', 'doc.previewGesture(', 'patchNode(', 'doc.beginGesture(']) assert.ok(!handlers.includes(writer), `a view setting writes the map: ${writer}`);
+  // This PC is written in those two places alone, as a setting is changed: never by an effect, at every render.
+  assert.equal(count(editor, /\bstoreMapViewPrefs\(/g), 2, 'the eye and the box, and nowhere else');
+  assert.equal(count(handlers, /\bstoreMapViewPrefs\(/g), 2, 'this PC is written outside the five handlers');
+  // Read once, as the editor comes up, for the account on show: the library draws the editor anew for another account
+  // (the key of its body). And the settings in hand are set in those two places alone.
+  assert.ok(editor.includes('const [viewPrefs, setViewPrefs] = useState(() => readMapViewPrefs(viewerId));'), 'the settings are not read once, for the account on show');
+  assert.equal(count(editor, /\breadMapViewPrefs\(/g), 1, 'the settings are read in another place');
+  assert.equal(count(editor, /\bsetViewPrefs\(/g), 2, 'the eye and the box, and nowhere else');
+  // What the map on show is shown with is read in one line, for the map on show. Read for `currentId`, the first map
+  // opened would show nothing hidden and no box: no map has been chosen yet, and that id is null.
+  const shown = 'const { hidden: hiddenIds, solid: solidIds } = mapViewPrefsOf(viewPrefs, current?.id);';
+  assert.equal(editor.split(shown).length - 1, 1, `not once: ${shown}`);
+  assert.equal(count(editor, /\bmapViewPrefsOf\(/g), 1, 'the settings of a map are read in another place');
+  // What is left selected is asked of the pure module (the V tests run it), with its five arguments as they are at the
+  // press: the pick the 3D view stored as well, not only the node in hand, so a group that grows again (a redo) puts
+  // nothing hidden in hand.
+  assert.ok(editor.includes("selectionWithout(live, liveSelection(current.id, live), mapViewport(doc.getState(), current.id).selectedId, ids, mode === 'plan')"), 'what is left selected is asked of other values');
 });
