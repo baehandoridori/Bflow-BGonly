@@ -82,12 +82,14 @@ export function resolveMapImageTarget(snapshot: BackgroundSnapshot, maps: readon
 export type MapImageWords = { title: string; detail: string; blocked: boolean };
 /** Where a lock is undone: in edit mode alone, folded under 위치·크기·잠금, so the words say it. */
 const UNLOCK = '도면을 편집하면서 속성의 ‘위치·크기·잠금’에서 잠금을 해제하고 다시 넣어 주세요.';
+/** Why a file of another type goes in nowhere, one sentence: the overlay says it while such files are dragged, the list of what was refused after (4.6). */
+const WRONG_TYPE = 'PNG·JPG·WebP 그림만 넣을 수 있어요.';
 /** What the overlay says of a target, and why nothing goes in: the first row of 3.3 that fits. */
 export function mapImageTargetWords(target: MapImageTarget, facts: { editing: boolean; running: boolean; wrongType: boolean }): MapImageWords {
   if (target.status === 'blocked' && target.reason === 'no-map') return { title: '여기에는 넣을 수 없어요', detail: '도면을 먼저 만들어 주세요.', blocked: true };
   if (target.status === 'blocked' && target.reason === 'read-only') return { title: '여기에는 넣을 수 없어요', detail: '이 계정으로는 그림을 넣을 수 없어요.', blocked: true };
   if (facts.running) return { title: '지금은 넣을 수 없어요', detail: '앞에 넣던 그림을 마치는 중이에요. 끝난 뒤에 다시 넣어 주세요.', blocked: true };
-  if (facts.wrongType) return { title: '넣을 수 없는 파일이에요', detail: 'PNG·JPG·WebP 그림만 넣을 수 있어요.', blocked: true };
+  if (facts.wrongType) return { title: '넣을 수 없는 파일이에요', detail: WRONG_TYPE, blocked: true };
   if (target.status === 'blocked') return { title: `${quoted(target.name)}에는 넣을 수 없어요`,
     detail: target.reason === 'locked-camera' ? `잠긴 카메라예요. ${UNLOCK}` : `잠겨 있어서 배경 장소를 이어 줄 수 없어요. ${UNLOCK}`, blocked: true };
   // What the pictures go in as. 도면에 추가 alone would read as the picture under the map.
@@ -150,7 +152,7 @@ export function sortMapImageFiles(files: readonly MapImageFileFacts[]): { accept
   return { accepted, refused, over };
 }
 export const MAP_IMAGE_REFUSAL_TEXT: Record<MapImageRefusal, string> = {
-  'webp-path': "WebP 파일은 복사해서 붙여 넣을 수 없어요. 끌어다 놓거나 '＋ 이미지 추가'로 넣어 주세요.", type: 'PNG·JPG·WebP 그림만 넣을 수 있어요.', size: '20MB보다 큰 그림은 넣을 수 없어요.',
+  'webp-path': "WebP 파일은 복사해서 붙여 넣을 수 없어요. 끌어다 놓거나 '＋ 이미지 추가'로 넣어 주세요.", type: WRONG_TYPE, size: '20MB보다 큰 그림은 넣을 수 없어요.',
 };
 /** What was refused, in the order it came: each file by its name, with why. */
 export function mapImageRefusedList(files: readonly MapImageFileFacts[], refused: readonly { index: number; reason: MapImageRefusal }[]): { name: string; reason: string }[] {

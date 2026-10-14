@@ -397,11 +397,16 @@ test('M-3: which files are taken, refused or over the count, and whether a drag 
   const MB = 1024 * 1024;
   assert.deepEqual(sortMapImageFiles([pageFile('a.png', 'image/png', { size: 20 * MB }), pageFile('b.png', 'image/png', { size: 20 * MB + 1 })]),
     { accepted: [0], refused: [{ index: 1, reason: 'size' }], over: 0 });
+  // The type is asked before the size, in the order of 4.6: a GIF over 20MB is refused for its type, as a smaller GIF would be too.
+  assert.deepEqual(sortMapImageFiles([pageFile('큰.gif', 'image/gif', { size: 20 * MB + 1 })]), { accepted: [], refused: [{ index: 0, reason: 'type' }], over: 0 });
   // PNG, JPEG and WebP go in. No type (.psd), GIF and BMP do not, nor a WebP the main process would read by its path.
   const kinds = [pageFile('a.png', 'image/png'), pageFile('b.jpg', 'image/jpeg'), pageFile('c.webp', 'image/webp'), pageFile('d.psd', ''), pageFile('e.gif', 'image/gif'),
     copied('C:\\x\\그림.WEBP'), copied('C:\\x\\사진.PNG'), copied('C:\\x\\f.bmp'), copied('C:\\x\\g.jpeg')];
   assert.deepEqual(sortMapImageFiles(kinds), { accepted: [0, 1, 2, 6, 8],
     refused: [{ index: 3, reason: 'type' }, { index: 4, reason: 'type' }, { index: 5, reason: 'webp-path' }, { index: 7, reason: 'type' }], over: 0 });
+  // A WebP the paste carries goes in as it is (K6), with the path of the disk or without one: being pasted refuses nothing, a path the main process reads does.
+  assert.deepEqual(sortMapImageFiles([pageFile('그림.webp', 'image/webp', { path: 'C:\\x\\그림.webp', pasted: true }), pageFile('image.webp', 'image/webp', { pasted: true })]),
+    { accepted: [0, 1], refused: [], over: 0 });
 
   // Ten at a time. What is over is counted, named nowhere, and counted once however often it is given.
   const ten = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -474,6 +479,10 @@ test('M-4: the name of a background made from a file', () => {
   const full = '가'.repeat(160), numbered = uniqueMapImageName(full, new Set([full]));
   assert.equal(numbered, `${'가'.repeat(156)} (2)`);
   assert.equal(numbered.length, 160);
+  // A number of two digits takes a unit more, and the name makes room for it: the tenth is within 160 units as well.
+  const tenth = uniqueMapImageName(full, new Set([full, ...[2, 3, 4, 5, 6, 7, 8, 9].map(count => `${'가'.repeat(156)} (${count})`)]));
+  assert.equal(tenth, `${'가'.repeat(155)} (10)`);
+  assert.equal(tenth.length, 160);
   const parted = `${'가'.repeat(155)}🏫${'가'.repeat(3)}`;
   assert.equal(parted.length, 160);
   assert.equal(uniqueMapImageName(parted, new Set([parted])), `${'가'.repeat(155)} (2)`);
