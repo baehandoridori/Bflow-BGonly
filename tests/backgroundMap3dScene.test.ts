@@ -4112,16 +4112,18 @@ test('W-5: viewport — a closed room dragged by the gizmo stays closed and keep
   editor.viewport.dispose();
 });
 
+/** A ray straight down on a plan spot, cut at the first closed face as the viewport cuts it. */
+const castDown = (scene: Map3DScene, x: number, z: number) => visibleMapHits(cast(scene, [x, 900, z], [0, -1, 0]));
+
 test('S-3: a click stops at the first closed face on its ray, and what a closed room holds is neither drawn nor clicked', () => {
   // A box with a see-through room in front of it, a chair and a camera inside it, a camera behind it, a chair at the very
-  // front and a table across its right wall.
+  // front, and across its right wall a table and an object that stands one under its lid.
   const box = space(1, { name: '박스', x: 300, y: 200, width: 300, height: 200 }), front = space(2, { name: '앞의 방', x: 300, y: 460, width: 300, height: 160 });
   const inChair = symbol(12, 'chair', { name: '안의 의자', x: 340, y: 240 }), inLens = camera(20, { name: '안의 카메라', x: 520, y: 300 });
   const behind = camera(21, { name: '뒤의 카메라', x: 450, y: 150 }), frontChair = symbol(13, 'chair', { name: '앞의 의자', x: 320, y: 520 });
   const table = symbol(14, 'table', { name: '걸친 탁자', x: 560, y: 260, width: 100, height: 80 });
-  const map = mapOf([box, front, inChair, inLens, behind, frontChair, table]), scene = new Map3DScene(), solidIds = new Set([box.id]);
-  /** A ray straight down on a plan spot, cut at the first closed face as the viewport cuts it. */
-  const down = (x: number, z: number) => visibleMapHits(cast(scene, [x, 900, z], [0, -1, 0]));
+  const tall = symbol(15, 'custom', { name: '걸친 높은 사물', x: 560, y: 340, width: 100, height: 50, volumeHeight: 179 });
+  const map = mapOf([box, front, inChair, inLens, behind, frontChair, table, tall]), scene = new Map3DScene(), solidIds = new Set([box.id]);
   scene.sync(map, null, { solidIds });
   // What the box holds is not drawn and is no target. What stands behind it and what lies across its wall are drawn.
   assert.deepEqual([drawnIn(scene, inChair), drawnIn(scene, inLens), drawnIn(scene, behind), drawnIn(scene, table)], [[false, false], [false, false], [true, true], [true, true]]);
@@ -4136,7 +4138,7 @@ test('S-3: a click stops at the first closed face on its ray, and what a closed 
   assert.equal(pickMapNode(stopped, map), box.id);
   // From above, on the chair inside: the lid of the box and nothing under it. The box is picked, it is the floor there,
   // and the pile there is the box alone.
-  const onChair = down(370, 270);
+  const onChair = castDown(scene, 370, 270);
   assert.equal(pickMapNode(onChair, map), box.id);
   assert.equal(pickMapFloor(onChair, map)?.object.userData.nodeId, box.id);
   assert.deepEqual(mapSpacePile(onChair, map), [box.id]);
@@ -4145,8 +4147,15 @@ test('S-3: a click stops at the first closed face on its ray, and what a closed 
   same(visibleMapHits(atFront), atFront, 'a ray without a closed face is not handed back as it came');
   assert.equal(pickMapNode(atFront, map), frontChair.id);
   // Beside the box the room in front is picked, and on the part of the table outside the box the table.
-  assert.equal(pickMapNode(down(500, 540), map), front.id);
-  assert.equal(pickMapNode(down(640, 300), map), table.id);
+  assert.equal(pickMapNode(castDown(scene, 500, 540), map), front.id);
+  assert.equal(pickMapNode(castDown(scene, 640, 300), map), table.id);
+  // The object that stands one under the lid: over its part inside the box it lies just one further on the ray than the
+  // lid, and uncut the ray picks it. Cut, the lid alone is left there and the box takes the click. Over its part outside
+  // the box, the object.
+  const underLid = cast(scene, [580, 900, 365], [0, -1, 0]);
+  assert.equal(pickMapNode(underLid, map), tall.id);
+  assert.equal(pickMapNode(visibleMapHits(underLid), map), box.id);
+  assert.equal(pickMapNode(castDown(scene, 640, 365), map), tall.id);
   // A box on the floor of a larger room: the pile under the pointer is the box alone, and the same spot again stays on
   // it. Uncut, the same spot again would step down to the room under the box.
   const hall = space(5, { name: '큰 방', x: 100, y: 100, width: 800, height: 560 }), halls = mapOf([hall, box]);
@@ -4160,13 +4169,11 @@ test('S-3: a click stops at the first closed face on its ray, and what a closed 
 });
 
 test('S-4: what lies flush on a face of a closed room is not drawn, so it neither shows through nor takes the click', () => {
-  /** A ray straight down on a plan spot, cut at the first closed face as the viewport cuts it. */
-  const down = (scene: Map3DScene, x: number, z: number) => visibleMapHits(cast(scene, [x, 900, z], [0, -1, 0]));
   // Stairs of the default height in a room of the default height, their top step level with the lid, and a room of the
   // same height in a corner of it: both come before the room in the map.
   const room = space(1, { name: '방', x: 300, y: 200, width: 300, height: 200 }), stairs = symbol(10, 'stairs', { name: '계단', x: 320, y: 220, width: 80, height: 120 });
   const nook = space(3, { name: '구석 방', x: 480, y: 300, width: 120, height: 100 });
-  const map = mapOf([stairs, nook, room]), scene = new Map3DScene(), onTop = () => down(scene, 360, 226);
+  const map = mapOf([stairs, nook, room]), scene = new Map3DScene(), onTop = () => castDown(scene, 360, 226);
   // See-through, a ray down on the top step picks the stairs.
   scene.sync(map, null);
   assert.equal(pickMapNode(onTop(), map), stairs.id);
@@ -4191,7 +4198,7 @@ test('S-4: what lies flush on a face of a closed room is not drawn, so it neithe
   // The room in the corner a box as well: what is inside is still not drawn, and the box around it is picked there.
   scene.sync(map, null, { solidIds: new Set([room.id, nook.id]) });
   assert.deepEqual([drawnIn(scene, stairs), drawnIn(scene, nook)], [[false, false], [false, false]]);
-  assert.equal(pickMapNode(down(scene, 540, 350), map), room.id);
+  assert.equal(pickMapNode(castDown(scene, 540, 350), map), room.id);
   scene.dispose();
   // Two boxes of one height that overlap, in either order of the map: both are drawn, both lids are left on the ray where
   // they overlap, and the smaller one is picked there, as the plan stacks them. From straight above the two lids lie at one
@@ -4202,7 +4209,7 @@ test('S-4: what lies flush on a face of a closed room is not drawn, so it neithe
     boxes.sync(pair, null, { solidIds: new Set([wide.id, small.id]) });
     assert.deepEqual([drawnIn(boxes, wide), drawnIn(boxes, small)], [[true, true], [true, true]], order);
     for (const [x, z] of [[350, 250], [320, 210], [390, 290]]) {
-      const rays = { 'from above': down(boxes, x, z), 'from the fitted view': visibleMapHits(cast(boxes, [ex, ey, ez], [x - ex, 180 - ey, z - ez])) };
+      const rays = { 'from above': castDown(boxes, x, z), 'from the fitted view': visibleMapHits(cast(boxes, [ex, ey, ez], [x - ex, 180 - ey, z - ez])) };
       for (const [ray, lids] of Object.entries(rays)) {
         assert.deepEqual(new Set(lids.filter(hit => hit.object.userData.pickPart === 'shell').map(hit => hit.object.userData.nodeId)), new Set([wide.id, small.id]), `${order}, ${ray} on ${x},${z}: the two lids`);
         assert.equal(pickMapNode(lids, pair), small.id, `${order}, ${ray} on ${x},${z}`);
@@ -4221,7 +4228,7 @@ test('S-4: what lies flush on a face of a closed room is not drawn, so it neithe
   // A see-through loft over a box: the loft is picked there, and the pile is the loft, then the box.
   const loft = space(9, { name: '다락', x: 300, y: 200, width: 300, height: 200, elevation: 200 }), stacked = mapOf([room, loft]), tower = new Map3DScene();
   tower.sync(stacked, null, { solidIds: new Set([room.id]) });
-  const underLoft = down(tower, 450, 300);
+  const underLoft = castDown(tower, 450, 300);
   assert.equal(pickMapNode(underLoft, stacked), loft.id);
   assert.deepEqual(mapSpacePile(underLoft, stacked), [loft.id, room.id]);
   tower.dispose();
