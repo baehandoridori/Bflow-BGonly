@@ -126,7 +126,8 @@ function CameraReadout({ map, camera, canEdit, scrub }: { map: BackgroundMap; ca
  * Companion plan next to the 3D viewport. Fully controlled: it draws the draft it is given, the
  * preview of a gizmo drag included, and keeps no map, camera or selection of its own. `canEdit`
  * and `scrub` are handed on as they come to the side view of the picked camera, where its lens
- * is dragged.
+ * is dragged. What the eye of the object list hides (`hiddenIds`) is not drawn, not clicked and
+ * not stepped through; the view box, the readout and the side view read the whole draft.
  */
 export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub, hiddenIds }: MapPlanPreviewProps) {
   const [collapsed, setCollapsed] = useState(false);

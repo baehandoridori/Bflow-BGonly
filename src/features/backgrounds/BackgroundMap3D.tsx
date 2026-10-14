@@ -430,7 +430,7 @@ class Map3DViewport {
     this.scene3d.sync(map, selectedId, { holdId, hiddenId, hiddenIds, solidIds });
     this.shown = { map, selectedId, holdId, hiddenId, hiddenIds, solidIds };
   }
-  /** A gizmo is offered only for an unlocked selection, while editing, with the select tool, outside look-through and placing. */
+  /** A gizmo is offered only for an unlocked selection, while editing, with the select tool, outside look-through and placing, and never for a node the eye of the object list hides. */
   private gizmoAllowed(props: Map3DProps, id: string | null): boolean {
     if (!id || props.selectedId !== id || !props.canEdit || props.tool !== 'select' || props.placing || props.lookThroughId !== null || props.hiddenIds?.has(id)) return false;
     const node = props.map.nodes.find(item => item.id === id);
