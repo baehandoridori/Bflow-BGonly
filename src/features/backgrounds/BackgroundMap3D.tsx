@@ -18,6 +18,8 @@ const RADIANS = Math.PI / 180;
 const PLAN_LIMIT = 100000;
 const CLICK_SLOP = 4;
 const DOUBLE_CLICK_GUARD = 450;
+/** Nothing hidden, no closed room: one set for both, so the scene is not synced again for a new empty one. */
+const NO_IDS: ReadonlySet<string> = new Set();
 
 type ViewRect = { x: number; y: number; width: number; height: number };
 type Press = { pointerId: number; x: number; y: number; moved: boolean; gizmo: boolean; /** The second click of a double click, and on. */ repeat: boolean };
@@ -83,7 +85,7 @@ class Map3DViewport {
   private devHandle: Map3DDevHandle | null = null;
   private props: Map3DProps;
   private palette: Map3DPalette;
-  private shown: { map: BackgroundMap; selectedId: string | null; holdId: string | null; hiddenId: string | null } | null = null;
+  private shown: { map: BackgroundMap; selectedId: string | null; holdId: string | null; hiddenId: string | null; hiddenIds: ReadonlySet<string>; solidIds: ReadonlySet<string> } | null = null;
   private look: { id: string; saved: Map3DViewState } | null = null;
   private lookMissing: string | null = null;
   private reported: Map3DViewState | null = null;
@@ -422,13 +424,15 @@ class Map3DViewport {
 
   private syncScene(map: BackgroundMap): void {
     const selectedId = this.props.selectedId, holdId = this.gizmo.draggedId, hiddenId = this.look?.id ?? null, shown = this.shown;
-    if (shown && shown.map === map && shown.selectedId === selectedId && shown.holdId === holdId && shown.hiddenId === hiddenId) return;
-    this.scene3d.sync(map, selectedId, { holdId, hiddenId });
-    this.shown = { map, selectedId, holdId, hiddenId };
+    // View settings of this PC, handed on as they come: when the rooms are see-through is the editor's to say.
+    const hiddenIds = this.props.hiddenIds ?? NO_IDS, solidIds = this.props.solidIds ?? NO_IDS;
+    if (shown && shown.map === map && shown.selectedId === selectedId && shown.holdId === holdId && shown.hiddenId === hiddenId && shown.hiddenIds === hiddenIds && shown.solidIds === solidIds) return;
+    this.scene3d.sync(map, selectedId, { holdId, hiddenId, hiddenIds, solidIds });
+    this.shown = { map, selectedId, holdId, hiddenId, hiddenIds, solidIds };
   }
   /** A gizmo is offered only for an unlocked selection, while editing, with the select tool, outside look-through and placing. */
   private gizmoAllowed(props: Map3DProps, id: string | null): boolean {
-    if (!id || props.selectedId !== id || !props.canEdit || props.tool !== 'select' || props.placing || props.lookThroughId !== null) return false;
+    if (!id || props.selectedId !== id || !props.canEdit || props.tool !== 'select' || props.placing || props.lookThroughId !== null || props.hiddenIds?.has(id)) return false;
     const node = props.map.nodes.find(item => item.id === id);
     return !!node && !node.locked && mapGizmoSetup(node.type, props.gizmoMode) !== null;
   }

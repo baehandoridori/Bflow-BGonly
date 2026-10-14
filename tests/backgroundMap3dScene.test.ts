@@ -2003,7 +2003,7 @@ const viewLockedTable = symbol(13, 'table', { x: 700, y: 450, width: 180, height
 const viewLens = camera(20, { x: 600, y: 200, angle: 135 });
 const viewMap = mapOf([viewRoom, viewChair, viewLockedTable, viewLens]);
 
-type EditorState = Pick<Map3DProps, 'map' | 'selectedId' | 'canEdit' | 'tool' | 'gizmoMode' | 'placing' | 'focusRequest' | 'initialView' | 'lookThroughId'>;
+type EditorState = Pick<Map3DProps, 'map' | 'selectedId' | 'canEdit' | 'tool' | 'gizmoMode' | 'placing' | 'focusRequest' | 'initialView' | 'lookThroughId'> & { hiddenIds?: ReadonlySet<string>; solidIds?: ReadonlySet<string> };
 type EditorWiring = (state: EditorState, changed: () => void) => Partial<Map3DProps>;
 /**
  * A stand-in for the editor: it owns the draft, runs the shared gesture primitives and re-renders the viewport.
@@ -3799,4 +3799,109 @@ test('the gizmo restyle is all or nothing, happens once, and releases what it re
   for (const fake of [{}, { _gizmo: {} }, { _gizmo: { gizmo: groups() } }, { _gizmo: { gizmo: groups(), picker: groups() } }, { _gizmo: { gizmo: groups(), picker: groups(), materialLib: {} } }]) {
     assert.doesNotThrow(() => styleMapGizmo(fake as Any));
   }
+});
+
+test('S-2: a hidden node is not drawn and takes no click, and a hidden room leaves its members drawn', () => {
+  const room = space(1), chair = symbol(12, 'chair', { spaceId: room.id }), lens = camera(20, { spaceId: room.id });
+  const map = mapOf([room, chair, lens]), scene = new Map3DScene();
+  /** Whether the root of a node is drawn, and what follows the root (its name, the drop line of a camera), listed like the roots. */
+  const drawn = (node: BackgroundNode): boolean[] => {
+    const root = rootOf(scene, node), companion = named(scene.scene, 'map-companions').children[named(scene.scene, 'map-nodes').children.indexOf(root)];
+    return [root.visible, companion.visible];
+  };
+  const onChair = () => pickMapNode(cast(scene, [160, 600, 230], [0, -1, 0]), map);
+  // The eye hides one node: a hidden room leaves what belongs to it drawn, and that is clicked where it stands. The bare
+  // floor of the room takes no click.
+  scene.sync(map, null, { hiddenIds: new Set([room.id]) });
+  assert.deepEqual([drawn(room), drawn(chair), drawn(lens)], [[false, false], [true, true], [true, true]]);
+  assert.equal(onChair(), chair.id);
+  assert.equal(pickMapNode(cast(scene, [350, 600, 250], [0, -1, 0]), map), null);
+  // Its members hidden instead: the spot of the chair and the camera behind the wall are clicks on the room.
+  const members = new Set([chair.id, lens.id]);
+  scene.sync(map, null, { hiddenIds: members });
+  assert.deepEqual([drawn(room), drawn(chair), drawn(lens)], [[true, true], [false, false], [false, false]]);
+  assert.equal(onChair(), room.id);
+  assert.equal(pickMapNode(cast(scene, [250, 120, 700], [0, 0, -1]), map), room.id);
+  // A change of theme syncs again with what was hidden: still not drawn, and no target of a click.
+  scene.setPalette({ ...MAP3D_DARK_PALETTE, light: true, accent: 0x123456 });
+  assert.deepEqual([drawn(chair), drawn(lens)], [[false, false], [false, false]]);
+  assert.ok(scene.pickTargets().every(target => !members.has(String(target.userData.nodeId))), 'a hidden node is a target after a change of theme');
+  assert.equal(onChair(), room.id);
+  // The camera that is looked through is still hidden beside what the eye hides, and on its own.
+  scene.sync(map, null, { hiddenId: lens.id, hiddenIds: new Set([chair.id]) });
+  assert.deepEqual([drawn(room), drawn(chair), drawn(lens)], [[true, true], [false, false], [false, false]]);
+  scene.sync(map, null, { hiddenId: lens.id });
+  assert.deepEqual([drawn(chair), drawn(lens)], [[true, true], [false, false]]);
+  // Synced without the options: everything is drawn and clicked again.
+  scene.sync(map, null);
+  assert.deepEqual([drawn(room), drawn(chair), drawn(lens)], [[true, true], [true, true], [true, true]]);
+  assert.equal(onChair(), chair.id);
+  assert.equal(pickMapNode(cast(scene, [250, 120, 700], [0, 0, -1]), map), lens.id);
+  scene.dispose();
+});
+
+test('W-1: viewport — a hidden node is not drawn, takes no click and gets no gizmo, and a hidden room leaves its members', async () => {
+  const editor = await mountViewport({ canEdit: false, hiddenIds: new Set([viewChair.id, viewLens.id]) });
+  const seat = editor.at(160, 35, 230), lens = editor.screen(viewLens.id);
+  assert.deepEqual([editor.root(viewChair.id).visible, editor.root(viewLens.id).visible, editor.root(viewRoom.id).visible], [false, false, true]);
+  // On the seat of the hidden chair the floor of its room is under the pointer. Where the hidden camera stands there is
+  // nothing at all.
+  editor.click(seat);
+  assert.deepEqual(editor.log, [['select', viewRoom.id]]);
+  editor.clear();
+  editor.click(lens);
+  assert.deepEqual(editor.log, [['select', null]]);
+  // No gizmo for what is not drawn, even while it is the selection. Shown again, it is drawn and gets one.
+  editor.render({ canEdit: true, selectedId: viewChair.id });
+  same(editor.dev().transform.object, undefined, 'a gizmo on the hidden chair');
+  editor.render({ hiddenIds: new Set([viewLens.id]) });
+  assert.equal(editor.root(viewChair.id).visible, true);
+  same(editor.dev().transform.object, editor.root(viewChair.id), 'no gizmo on the chair once it is shown');
+  // The room alone hidden: its chair is drawn, and clicked where it stands.
+  editor.render({ canEdit: false, selectedId: null, hiddenIds: new Set([viewRoom.id]) });
+  assert.deepEqual([editor.root(viewRoom.id).visible, editor.root(viewChair.id).visible, editor.root(viewLens.id).visible], [false, true, true]);
+  editor.clear();
+  editor.click(seat);
+  assert.deepEqual(editor.log, [['select', viewChair.id]]);
+  editor.viewport.dispose();
+});
+
+test('W-2: viewport — the scene is synced again for a new set alone, and never for placing', async () => {
+  /** From here on, the syncs of the scene of a viewport: how many since the last look, and the options of the last one. */
+  const watch = (mounted: MountedViewport) => {
+    const scene = (mounted.viewport as Any).scene3d, sync = scene.sync.bind(scene);
+    let calls = 0, options: Any = null;
+    scene.sync = (map: BackgroundMap, selectedId: string | null, given: Any) => { calls++; options = given; return sync(map, selectedId, given); };
+    return { count: () => { const seen = calls; calls = 0; return seen; }, options: () => options };
+  };
+  const hidden = new Set([viewChair.id]), solid = new Set([viewRoom.id]);
+  const editor = await mountViewport({ hiddenIds: hidden, solidIds: solid }), syncs = watch(editor);
+  // The same map and the same two sets: drawn again, synced never.
+  editor.render(); editor.render({ hiddenIds: hidden, solidIds: solid });
+  assert.equal(syncs.count(), 0, 'synced again for the same sets');
+  // A new set of either kind is one sync, and it is handed on as it came.
+  const another = new Set([viewLens.id]);
+  editor.render({ hiddenIds: another });
+  assert.equal(syncs.count(), 1, 'a new set of hidden nodes');
+  same(syncs.options().hiddenIds, another, 'the hidden nodes as they came'); same(syncs.options().solidIds, solid, 'the closed rooms as they came');
+  const open = new Set<string>();
+  editor.render({ solidIds: open });
+  assert.equal(syncs.count(), 1, 'a new set of closed rooms');
+  same(syncs.options().solidIds, open, 'the new closed rooms as they came');
+  // The same empty set handed again: nothing.
+  const none = new Set<string>();
+  editor.render({ hiddenIds: none, solidIds: none });
+  assert.equal(syncs.count(), 1);
+  editor.render({ hiddenIds: none, solidIds: none });
+  assert.equal(syncs.count(), 0, 'synced again for the same empty set');
+  // Placing switched on and off: when the rooms are see-through is the editor's to say, the viewport changes nothing for it.
+  editor.render({ placing: true }); editor.render({ placing: false });
+  assert.equal(syncs.count(), 0, 'synced again for placing');
+  editor.viewport.dispose();
+  // Handed neither set: after the sync it opened with, placing switched on and off syncs nothing.
+  const bare = await mountViewport(), bareSyncs = watch(bare);
+  assert.ok(bare.root(viewRoom.id), 'the scene was synced as the viewport opened');
+  bare.render({ placing: true }); bare.render({ placing: false }); bare.render();
+  assert.equal(bareSyncs.count(), 0, 'a viewport handed no set syncs again');
+  bare.viewport.dispose();
 });

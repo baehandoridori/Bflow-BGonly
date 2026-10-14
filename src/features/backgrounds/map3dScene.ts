@@ -44,6 +44,10 @@ export type Map3DSyncOptions = {
   holdId?: string | null;
   /** Node hidden while the viewer looks through it. */
   hiddenId?: string | null;
+  /** Nodes the eye of the object list hides: they are not drawn and cannot be clicked. Absent: none. */
+  hiddenIds?: ReadonlySet<string>;
+  /** Rooms drawn as closed boxes. Absent: none. */
+  solidIds?: ReadonlySet<string>;
 };
 export type Map3DResourceCount = { geometries: number; materials: number; textures: number };
 
@@ -68,6 +72,8 @@ const RADIANS = Math.PI / 180;
 const ELLIPSE_SEGMENTS = 48;
 const LABEL_LIMIT = 28;
 const finite = (...values: number[]) => values.every(Number.isFinite);
+/** Nothing hidden, no closed room: the one set an option that is absent reads as. */
+const NO_IDS: ReadonlySet<string> = new Set();
 
 class ResourceBag {
   readonly items = new Set<Disposable>();
@@ -177,8 +183,8 @@ export class Map3DScene {
   /** Diff by node id and object identity: an unchanged node keeps its objects, a moved one only gets a new pose. */
   sync(map: BackgroundMap, selectedId: string | null, options: Map3DSyncOptions = {}): void {
     if (this.disposed) return;
-    const holdId = options.holdId ?? null, hiddenId = options.hiddenId ?? null;
-    this.last = { map, selectedId, options: { holdId, hiddenId } };
+    const holdId = options.holdId ?? null, hiddenId = options.hiddenId ?? null, hiddenIds = options.hiddenIds ?? NO_IDS, solidIds = options.solidIds ?? NO_IDS;
+    this.last = { map, selectedId, options: { holdId, hiddenId, hiddenIds, solidIds } };
     const seen = new Set<string>();
     for (const node of map.nodes) {
       if (seen.has(node.id)) continue;
@@ -194,7 +200,7 @@ export class Map3DScene {
         this.redraw(entry, entry.node, entry.selected);
         entry.dirty = false;
       }
-      const visible = entry.valid && node.id !== hiddenId;
+      const visible = entry.valid && node.id !== hiddenId && !hiddenIds.has(node.id);
       if (entry.root.visible !== visible) { entry.root.visible = visible; entry.aux.visible = visible; this.picks = null; }
       this.place(entry);
     }

@@ -10,6 +10,7 @@ import {
 } from './mapPlanPreview';
 import type { PlanCameraGlyph, PlanReadout, PlanSize } from './mapPlanPreview';
 import { stackedSpaces } from './mapStack';
+import { shownMap } from './mapViewPrefs';
 import { BackgroundMapPlanSide } from './BackgroundMapPlanSide';
 import './backgrounds-map-plan.css';
 
@@ -127,7 +128,7 @@ function CameraReadout({ map, camera, canEdit, scrub }: { map: BackgroundMap; ca
  * and `scrub` are handed on as they come to the side view of the picked camera, where its lens
  * is dragged.
  */
-export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub }: MapPlanPreviewProps) {
+export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub, hiddenIds }: MapPlanPreviewProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [size, setSize] = useState<PlanSize>(PLAN_FALLBACK_SIZE);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -155,9 +156,11 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, s
   const selected = planSelectedNode(map, selectedId);
   const viewBox = useMemo(() => collapsed ? null : planViewBox(map, size), [collapsed, map, size]);
   const scale = viewBox ? planUnitsPerPixel(viewBox, size) : 1;
+  // What a click can land on: the map without what the eye of the object list hides. Read by the click alone: the plan is framed and read out from the whole map.
+  const pointed = useMemo(() => shownMap(map, hiddenIds), [map, hiddenIds]);
   // Latest props for the one stable click handler. Overwritten on every render and never drawn from.
-  const latest = useRef({ map, selectedId, onSelect, scale });
-  latest.current = { map, selectedId, onSelect, scale };
+  const latest = useRef({ map: pointed, selectedId, onSelect, scale });
+  latest.current = { map: pointed, selectedId, onSelect, scale };
   /** What the last click landed on and what it left selected: the same spot clicked again is told from it. */
   const turn = useRef<{ hitId: string; pickedId: string } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -213,9 +216,9 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, s
             <svg className="bmap-plan-svg" ref={svgRef} viewBox={`${fixed(viewBox.x)} ${fixed(viewBox.y)} ${fixed(viewBox.width)} ${fixed(viewBox.height)}`} role="group" aria-label={`${map.name} 평면 보기`} onClick={() => onSelect(null)}>
               <rect className="bmap-plan-extent" x="0" y="0" width={MAP_PLAN_EXTENT.width} height={MAP_PLAN_EXTENT.height} />
               {map.imageUrl && <image className="bmap-plan-underlay" href={map.imageUrl} x="0" y="0" width={MAP_PLAN_EXTENT.width} height={MAP_PLAN_EXTENT.height} preserveAspectRatio="xMidYMid meet" />}
-              {stackedSpaces(map).map(node => <PlanShape key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
-              {map.nodes.map(node => node.type === 'symbol' && <PlanShape key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
-              {map.nodes.map(node => node.type === 'camera' && <PlanCamera key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
+              {stackedSpaces(map).map(node => !hiddenIds?.has(node.id) && <PlanShape key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
+              {map.nodes.map(node => node.type === 'symbol' && !hiddenIds?.has(node.id) && <PlanShape key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
+              {map.nodes.map(node => node.type === 'camera' && !hiddenIds?.has(node.id) && <PlanCamera key={node.id} node={node} scale={scale} selected={node.id === selectedId} onActivate={activate} />)}
               {/* The selection is redrawn on top without moving the buttons, so keyboard order and focus stay put. */}
               {selectedOutline && <g className="bmap-plan-selected" aria-hidden="true"><polygon className="bmap-plan-halo" points={selectedOutline} /><polygon className="bmap-plan-outline" points={selectedOutline} /></g>}
               {selectedGlyph && <g className="bmap-plan-selected bmap-plan-camera" data-camera-color={selectedColor} aria-hidden="true"><CameraMark glyph={selectedGlyph} scale={scale} emphasis /></g>}

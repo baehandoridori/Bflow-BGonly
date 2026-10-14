@@ -2068,11 +2068,12 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // to be dragged through. The plan takes the two and hands them to the readout of the picked camera, and that hands
   // them to the side view, as they came: handed a right to edit made up on the way, the side view of a camera in view
   // mode would show a handle. The readout is keyed by its camera: as another camera is picked, a scale still held and
-  // a pointer still pressed go with the readout of the old one. And the contract of the plan names the two.
-  assert.ok(editor.includes('<BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} />'), 'the companion plan is not given the right to edit and the scrub object');
+  // a pointer still pressed go with the readout of the old one. And the contract of the plan names the two. Behind them
+  // the plan is handed what the eye of the object list hides (anchor 67 reads what it does with it).
+  assert.ok(editor.includes('<BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} hiddenIds={hiddenIds} />'), 'the companion plan is not given the right to edit and the scrub object');
   assert.equal(count(editor, /<BackgroundMapPlanPreview\b/g), 1, 'the companion plan is drawn once');
   const preview = read('BackgroundMapPlanPreview.tsx'), keyed = '<CameraReadout key={selected.id} ';
-  for (const text of ['export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub }: MapPlanPreviewProps) {', `${keyed}map={map} camera={selected} canEdit={canEdit} scrub={scrub} />`,
+  for (const text of ['export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub, hiddenIds }: MapPlanPreviewProps) {', `${keyed}map={map} camera={selected} canEdit={canEdit} scrub={scrub} />`,
     'function CameraReadout({ map, camera, canEdit, scrub }: { map: BackgroundMap; camera: BackgroundCamera; canEdit: boolean; scrub: MapFieldScrub }) {',
     '<BackgroundMapPlanSide map={map} camera={camera} canEdit={canEdit} scrub={scrub} label={`옆에서 본 방향: ${pitchText}, ${heightText}`} />']) assert.ok(preview.includes(text), `not found: ${text}`);
   assert.equal(count(preview, /<CameraReadout\b/g), 1, 'the readout of a camera is drawn in one place');
@@ -2087,7 +2088,7 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // argument in front of the parenthesis, the call through the namespace of React.
   const wrappers = preview.match(/\bmemo\b(?:\(function \w+)?/g) ?? [];
   assert.deepEqual(wrappers, ['memo', 'memo(function PlanShape', 'memo(function PlanCamera'], `the plan, the readout of a camera or the side view is wrapped in memo, or a wrapper of the plan is gone: ${wrappers.join(' | ')}`);
-  assert.ok(read('mapCanvas.ts').includes("export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub };"), 'the contract of the companion plan');
+  assert.ok(read('mapCanvas.ts').includes("export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub; hiddenIds?: ReadonlySet<string> };"), 'the contract of the companion plan');
   // The plan itself has no code for the drag: a press is followed by the hook, on the window. The listeners the plan
   // has are those of its picks, and anchors 34 and 39 find them by their place in that file. Nor does it draw a side
   // view of its own any more: left there, a second picture would stand beside the one with the handle.
@@ -2535,6 +2536,26 @@ test('anchor 67: the eye filters what is drawn and what a pointer is asked about
   // Whether one node is hidden is asked in these six places and no other: the row of the object list, its eye and its
   // name (toggleHidden, selectFromList), the pass over the spaces and the two filters. A seventh is a filter of its own.
   assert.equal(count(editor, /hiddenIds\.has\(/g), 6, 'the row of the list, toggleHidden, selectFromList, the pass over the spaces and the two filters');
+  // The 3D view and the companion plan are handed the whole draft, and what is hidden beside it. A gizmo drag starts from
+  // that map and writes it back: handed the shown map, the 3D view would delete every hidden node at the next drag.
+  for (const tag of ['<Map3D map={current} ', '<BackgroundMapPlanPreview map={current} ']) assert.ok(editor.includes(tag), `not handed the whole draft: ${tag}`);
+  // The 3D view is handed what is hidden behind the attributes it always had (the companion plan is, by anchor 64). Not
+  // handed it, the 3D view would draw every hidden node and take its clicks.
+  assert.ok(piece(editor, '<Map3D map={current}', '/>').includes(' onUnavailable={leave3D} hiddenIds={hiddenIds} '), 'the 3D view is not handed what is hidden');
+  // The companion plan makes the map without the hidden nodes once, for what a click lands on and steps through alone: it
+  // is framed from the whole map (a view box made from the shown one would jump at every eye pressed), and each of its
+  // three passes leaves a hidden node out.
+  const preview = read('BackgroundMapPlanPreview.tsx');
+  assert.equal(count(preview, /\bshownMap\(/g), 1, 'the companion plan makes the shown map elsewhere');
+  for (const text of ['const pointed = useMemo(() => shownMap(map, hiddenIds), [map, hiddenIds]);', 'latest.current = { map: pointed, selectedId, onSelect, scale };', 'planViewBox(map, size)'])
+    assert.ok(preview.includes(text), `not in the companion plan: ${text}`);
+  for (const pass of ['{stackedSpaces(map).map(node => !hiddenIds?.has(node.id) && <PlanShape key={node.id} ', "{map.nodes.map(node => node.type === 'symbol' && !hiddenIds?.has(node.id) && <PlanShape key={node.id} ",
+    "{map.nodes.map(node => node.type === 'camera' && !hiddenIds?.has(node.id) && <PlanCamera key={node.id} "]) assert.ok(preview.includes(pass), `the companion plan draws a hidden node: ${pass}`);
+  assert.equal(count(preview, /!hiddenIds\?\.has\(node\.id\) &&/g), 3, 'the three passes of the companion plan, and no other');
+  // The 3D files are handed sets of ids and never a map without the hidden nodes: they know neither that map nor the
+  // module of the view settings. Read as written, with their comments.
+  for (const name of ['BackgroundMap3D.tsx', 'map3dScene.ts', 'BackgroundMapCameraGizmo.ts'])
+    assert.doesNotMatch(readFileSync(new URL(name, directory), 'utf8'), /shownMap|mapViewPrefs/, `${name} knows the view settings`);
 });
 
 test('anchor 68: what is hidden is never selected, and a view setting writes no map', () => {
@@ -2646,6 +2667,35 @@ test('anchor 69: a row of the object list is a name and an eye beside it, and th
   // and as the title of the chip in the footer.
   assert.equal(editor.split("const HIDDEN_NOTE = '숨긴 것은 이 PC의 내 화면에서만 안 보여요. 도면에는 그대로 있어서, 저장해도 지워지지 않아요.';").length - 1, 1, 'the words of the eye');
   assert.equal(count(editor, /\bHIDDEN_NOTE\b/g), 4, 'made, the heading, under the list, the chip');
+});
+
+test('anchor 70: in 3D a hidden node and what a closed room holds are not drawn, and a click stops at the first closed face', () => {
+  const scene = read('map3dScene.ts');
+  // The scene keeps every option of the last sync, the two sets of the view settings too: a change of theme syncs again
+  // with them, and without one of them what it holds would come back on screen while the viewport sees nothing new.
+  const sync = piece(scene, 'sync(map: BackgroundMap, selectedId: string | null, options: Map3DSyncOptions = {}): void {', 'root(id: string): Object3D | null {');
+  assert.ok(sync.includes('this.last = { map, selectedId, options: { holdId, hiddenId, hiddenIds, solidIds } };'), 'the scene forgets a set of the view settings');
+  // One line says what is drawn: the root of a node the eye hides is not, and with it all that follows the root (its
+  // name, the drop line of a camera). Hidden roots take no click: they are no target (pickTargets). The label is never
+  // switched off on its own.
+  assert.match(sync, /const visible = entry\.valid && node\.id !== hiddenId && !hiddenIds\.has\(node\.id\)/);
+  assert.ok(!scene.includes('.label.visible') && !scene.includes('label.visible ='), 'a label is switched off on its own');
+  // An option that is absent reads as the one empty set of the scene, made there: never one of the viewport or of the module
+  // of the view settings, which the scene does not import.
+  assert.equal(scene.split('const NO_IDS: ReadonlySet<string> = new Set();').length - 1, 1, 'the empty set of the scene');
+  // The viewport hands the sets on as they come, and syncs again only when one of them is another object. When the rooms
+  // are see-through is the editor's to say: read for placing here, every save with the symbol tool in hand would close
+  // and open the boxes.
+  const syncScene = piece(view3d, 'private syncScene(', 'private gizmoAllowed(');
+  for (const text of ['const hiddenIds = this.props.hiddenIds ?? NO_IDS, solidIds = this.props.solidIds ?? NO_IDS;', 'shown.hiddenIds === hiddenIds && shown.solidIds === solidIds'])
+    assert.ok(syncScene.includes(text), `not in syncScene: ${text}`);
+  assert.ok(!syncScene.includes('placing'), 'the viewport changes the sets while placing');
+  // Nothing that is not drawn gets a gizmo.
+  assert.ok(piece(view3d, 'private gizmoAllowed(', 'private applyGizmo(').includes('props.hiddenIds?.has(id)'), 'a hidden node gets a gizmo');
+  // Both are optional: a viewport handed neither runs as before. No typecheck reads the stand-in of the viewport tests,
+  // which builds its props without them: these letters are what holds it.
+  const props3d = piece(read('mapCanvas.ts'), 'export type Map3DProps = MapCanvasProps & {', 'export type MapScrubOrigin');
+  for (const field of ['hiddenIds?: ReadonlySet<string>;', 'solidIds?: ReadonlySet<string>;']) assert.ok(props3d.includes(field), `not an optional prop of the 3D view: ${field}`);
 });
 
 test('anchor 71: the chip takes no room in the footer, and the new classes are written in their own lines alone', () => {
