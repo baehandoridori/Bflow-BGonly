@@ -158,6 +158,11 @@
 .bmap-snap-toggle { margin-right:6px; }
 /* On looks like an active toolbar button. The selector has to outweigh the shared zoom button rule above, which sets a transparent background. */
 .bg-library .bmap-zoom .bmap-snap-toggle[aria-pressed="true"] { color:rgb(var(--color-accent-sub)); background:rgb(var(--color-accent) / .18); }
+/* How many nodes the eye hides, and the way back. The anchor takes no room at all: no width, no height, and its right margin gives back the one gap it adds (keep it equal to the gap of the footer). So the hint beside it wraps exactly as without it, and the footer keeps its height. The chip floats on the anchor, over the free end of the footer. */
+.bmap-hidden-slot { position:relative; flex:0 0 0; width:0; height:0; margin:0 -10px 0 auto; }
+.bg-library .bmap-hidden-chip { position:absolute; right:10px; top:-13px; height:26px; min-height:26px; padding:0 10px; border-color:rgb(var(--color-accent) / .45); border-radius:13px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:11px; white-space:nowrap; box-shadow:0 0 0 3px color-mix(in srgb, rgb(var(--color-bg-card)) 40%, rgb(var(--color-bg-primary))); }
+/* Opaque under the pointer too: the shared hover is a see-through wash, and the hint may lie under the chip. */
+.bg-library .bmap-hidden-chip:hover:not(:disabled) { border-color:rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-card)); }
 .bmap-polygon-actions { position:absolute; display:flex; align-items:center; gap:8px; bottom:56px; left:50%; transform:translateX(-50%); padding:8px; background:rgb(var(--color-bg-card)); border:1px solid rgb(var(--color-bg-border)); border-radius:8px; font-size:11px; }
 /* The name box floats over its node; left and top are set from script. The selector has to outweigh the shared input rule of the library (full width, 36px high). */
 .bg-library input.bmap-name-box:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) { position:absolute; z-index:3; width:168px; min-height:30px; padding:4px 8px; transform:translate(-50%,-50%); text-align:center; font-size:13px; border-color:rgb(var(--color-accent)); background:rgb(var(--color-bg-card)); box-shadow:0 3px 12px rgb(var(--color-shadow) / .12); }
@@ -213,6 +218,25 @@
 .bmap-node-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .bmap-node-lock { flex-shrink:0; font-size:10px; }
 .bmap-node-type { flex-shrink:0; font-size:10px; opacity:.75; }
+/* A row is two buttons side by side: the name picks, the eye hides. Their sizes are spelled out: a button is a flex item whose default stretch differs between engines. */
+.bmap-node-list li { display:flex; align-items:center; gap:2px; }
+.bg-library .bmap-node-list li>button:not(.bmap-node-eye) { flex:1 1 0; width:auto; min-width:0; }
+.bg-library .bmap-node-list .bmap-node-eye { flex:0 0 28px; width:28px; min-width:28px; padding:0; gap:0; justify-content:center; }
+/* Hidden: the name is dimmed, by opacity alone, and stays readable (it is pressed to bring the node back). The fade is the shared one of the library's buttons, and reduced motion takes it away there. The eye keeps its full strength. */
+.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye) { opacity:.7; }
+/* Its focus ring is drawn inside it and would fade with it: under the keys the name is at full strength again (the eye beside it still shows it is hidden). */
+.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye):focus-visible { opacity:1; }
+/* The word for the kind is dimmed once, with its row: its own dimming on top of that would leave it unreadable. */
+.bg-library .bmap-node-list li.is-hidden .bmap-node-type { opacity:1; }
+/* 모두 보이기 beside the count: never taller than the badge, so the heading keeps its height as it comes and goes. */
+.bg-library .bmap-objects .bmap-show-all { position:relative; flex-shrink:0; min-height:0; margin-left:auto; padding:0 2px; font-size:11px; line-height:1.4; white-space:nowrap; }
+/* It is pressed on a taller area than its words: 5px more above and below, and no layout changes for it. */
+.bg-library .bmap-objects .bmap-show-all::after { content:""; position:absolute; inset:-5px 0; }
+/* The heading never wraps: its word and the button keep their width, and in a narrow panel the count gives way with an ellipsis. */
+.bmap-objects .bmap-section-heading>strong { flex-shrink:0; }
+.bmap-objects .bmap-badge { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+/* What hiding does, under the rows at all times: an eye that is pressed moves nothing. */
+.bmap-objects>.bmap-node-list+.bmap-hint { margin-top:8px; }
 .bmap-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:24px; }
 .bmap-confirm-text { font-size:13px; line-height:1.8; color:rgb(var(--color-text-secondary)); }
 @media(max-width:1200px) { .bmap-tree { flex-basis:155px; } .bmap-inspector { flex-basis:220px; padding:14px 12px; } .bmap-toolbar button>span:nth-child(2) { display:none; } .bmap-canvas-footer>span { max-width:180px; } .bmap-canvas-wrap.is-3d .bmap-canvas-footer>span { max-width:none; } }
@@ -237,6 +261,10 @@
 .bg-library .bmap-text-button { border:0; background:transparent; min-height:36px; padding:5px 0; color:rgb(var(--color-text-secondary)); font-size:12px; }
 .bg-library .bmap-text-button:hover { color:rgb(var(--color-accent-sub)); background:transparent; }
 .bmap-shape-actions { margin:10px 0 4px; }
+/* A view setting of this PC under the properties of a room, in 3D. */
+.bmap-solid { margin:14px 0 8px; }
+.bmap-solid .bmap-check { margin:0 0 6px; }
+.bmap-solid .bmap-hint { margin-bottom:2px; }
 .bmap-disclosure { margin:12px 0; border-top:1px solid rgb(var(--color-bg-border) / .65); }
 .bmap-disclosure>summary { cursor:pointer; padding:14px 0; color:rgb(var(--color-text-secondary)); font-size:12px; }
 .bmap-disclosure>summary>span { float:right; max-width:95px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:10px; opacity:.8; }

@@ -49,6 +49,10 @@ export type Map3DProps = MapCanvasProps & {
   onOpenSpace(id: string): void;
   /** WebGL could not start or was lost: the editor returns to the plan and keeps the draft. */
   onUnavailable(reason: string): void;
+  /** View settings of this PC, never part of the map (mapViewPrefs.ts). Nodes that are not drawn and cannot be clicked. Absent: none. */
+  hiddenIds?: ReadonlySet<string>;
+  /** Rooms drawn as closed boxes. Absent: none. */
+  solidIds?: ReadonlySet<string>;
 };
 
 /** Where a drag of one number starts: its value, and the map every preview of that drag is computed from. */
@@ -66,5 +70,5 @@ export type MapFieldScrub = {
   /** A drag is still running. False once the editor has cancelled it (Escape, a save starting, another map). */
   alive(): boolean;
 };
-/** Companion plan shown next to the 3D viewport. It reads the same in-progress draft. */
-export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub };
+/** Companion plan shown next to the 3D viewport. It reads the same in-progress draft. `hiddenIds`: what the eye of the object list hides — not drawn, not clicked. Absent: none. */
+export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub; hiddenIds?: ReadonlySet<string> };

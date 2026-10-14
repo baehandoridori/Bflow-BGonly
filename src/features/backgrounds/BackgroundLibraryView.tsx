@@ -155,6 +155,7 @@ export default function BackgroundLibraryView() {
                   snapshot={snapshot}
                   pending={pending}
                   execute={execute}
+                  viewerId={user?.id ?? ''}
                   onOpenView={(id, variantId) => setMapAsset({ id, variantId })}
                   onOpenCatalog={() => setTab('assets')}
                 />

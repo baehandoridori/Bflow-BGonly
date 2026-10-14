@@ -96,6 +96,8 @@ const handler = {
   openSpace: () => piece(editor, 'function openSpace(', 'function beginRename('),
   fitView: () => piece(editor, 'function fitView(', 'function keyboard('),
   keyboard: () => piece(editor, 'function keyboard(', 'const selectNode = useEvent('),
+  /** The five handlers of the view settings of this PC (the eye of the object list, the closed box of a room in 3D), up to the stable callback that follows them. */
+  viewPrefs: () => piece(editor, 'const setNodesHidden = useEvent(', 'const openView = useEvent('),
   /** No handler of a key or a press: the begin and the preview of a slide and the scrub object made of them, up to the stable callback that follows. */
   fieldScrub: () => piece(editor, 'const beginFieldScrub = useEvent(', 'const placeAt = useEvent('),
   /** No handler: the one tag with which the editor draws the edit band, up to the `/>` that closes it. */
@@ -357,8 +359,8 @@ test('anchor 21: overlapping spaces are stacked in one place, mapStack.ts, and n
   const floor = piece(read('map3dScene.ts'), 'export function pickMapFloor(', 'export function pickMapNode(');
   assert.match(floor, /spaceStackRanks\(map\)/);
   assert.doesNotMatch(floor, /map\.nodes\.findIndex\(/);
-  // A new symbol belongs to the topmost space that holds its spot.
-  assert.match(handler.placeSymbol(), /spacesAt\(base, point\)\[0\]/);
+  // A new symbol belongs to the topmost space that holds its spot among those on show: a room the eye hides takes none.
+  assert.match(handler.placeSymbol(), /spacesAt\(shownMap\(base, hiddenIds\), point\)\[0\]/);
   assert.doesNotMatch(editor, /reverse\(\)\.find\(/);
 });
 
@@ -382,8 +384,9 @@ test('anchor 23: the 3D view and its companion plan are given one node, and a pi
   assert.doesNotMatch(editor, /pick-one/);
   assert.match(editor, /const selectNode = useEvent\(\(id: string \| null\) => select\(id\)\);/);
   assert.equal(count(editor, /\bdoc\.dispatch\(/g), 1, 'the editor dispatches nowhere else');
-  // The list is written in three more places, all of them on the plan: a box, a Shift+click and a group delete.
-  assert.equal(count(editor, /\bdoc\.selectMany\(/g), 3);
+  // The list is written in four more places: on the plan a box, a Shift+click and a group delete, and in either mode
+  // hiding a node, which takes it out of what is selected (setNodesHidden).
+  assert.equal(count(editor, /\bdoc\.selectMany\(/g), 4);
   // Deleting one node still ends with an empty pick: in 3D that empties the node in hand and keeps the rest of the group.
   assert.match(block(handler.confirmAction(), "if (confirmation === 'delete-node' && selected && canEdit) {"), /select\(null\); setConfirmation\(null\); return;\s*\}$/);
   // The contract of the views that show one node knows one selected id, and so do they.
@@ -407,7 +410,7 @@ test('anchor 25: what a press of the select tool does is decided by resolvePlanP
   // It is handed the map and the selection as they are at this very moment, and the pile of what the plan draws under the pointer.
   assert.ok(editor.includes('function liveSelection(mapId: string, map: BackgroundMap): MapSelection { return mapSelection(map, mapViewport(doc.getState(), mapId).selectedIds); }'));
   assert.ok(down.includes('const held = liveSelection(current.id, live);'));
-  assert.match(down, /resolvePlanPress\(\{ canEdit, shift: event\.shiftKey, hit: hit \?\? null,\s*pile: hit \? planPileAt\(live, hit\.id, point, undefined, item => planMarkCovers\(item, point\)\) : \[\],\s*selection: held, again, node: id => live\.nodes\.find\(item => item\.id === id\) \}\);/);
+  assert.match(down, /resolvePlanPress\(\{ canEdit, shift: event\.shiftKey, hit: hit \?\? null,\s*pile: hit \? planPileAt\(shownMap\(live, hiddenIds\), hit\.id, point, undefined, item => planMarkCovers\(item, point\)\) : \[\],\s*selection: held, again, node: id => live\.nodes\.find\(item => item\.id === id\) \}\);/);
   // Nothing is decided beside it from the selection of the last render.
   assert.doesNotMatch(down, /view\.selectedId/);
   // What it said is carried out as it is: the node a drag takes, the nodes that travel along, what a release without movement does.
@@ -461,9 +464,9 @@ test('anchor 27: the selection box is no gesture of the document: it leaves no u
   assert.equal(count(editor, /shownIds\.has\(node\.id\)/g), 3, 'spaces, symbols and cameras');
   // The box itself is drawn whenever there is one, over the snap guides and under the handles.
   inOrder(editor, '<MapSnapGuides guides={guides} scale={screenScale} />', '{marquee && <MapMarquee rect={marquee} />}', '{selected && canEdit && !selected.locked && <MapNodeHandles ');
-  // The release selects what the box touches, unless it was cancelled, and writes nothing to the map.
+  // The release selects what the box touches of what is drawn (nothing the eye hides), unless it was cancelled, and writes nothing to the map.
   const up = handler.pointerUp(), box = block(up, "if (session.mode === 'marquee') {");
-  inOrder(box, 'setMarquee(null);', 'if (!cancel && session.moved && canEdit) {', 'doc.selectMany(session.mapId, planMarqueeIds(live, planRect(session.start, point)));');
+  inOrder(box, 'setMarquee(null);', 'if (!cancel && session.moved && canEdit) {', 'doc.selectMany(session.mapId, planMarqueeIds(shownMap(live, hiddenIds), planRect(session.start, point)));');
   assert.doesNotMatch(box, /doc\.(?:finishGesture|update)\(|updateMap\(/);
   assert.ok(up.includes("} else if (session.mode !== 'pan') {"), 'the gestures are finished in the other branch');
   assert.match(handler.abortGesture(), /setMarquee\(null\);/);
@@ -646,7 +649,9 @@ test('anchor 36: the image grid, the look-through, the picked point and the obje
     "if (mode === 'plan') return group;", 'const id = singleViewId(settledCurrent, group, view.selectedId);',
     'return id === null ? mapSelection(undefined, group.ids) : { ids: [id], primaryId: id };',
     '}, [settledCurrent, view.selectedIds, view.selectedId, mode]);');
-  assert.match(editor, /<ObjectList nodes=\{settledCurrent\?\.nodes \?\? current\.nodes\} selectedIds=\{listSelection\.ids\} primaryId=\{listSelection\.primaryId\} onSelect=\{selectNode\} \/>/);
+  // It is told what the eye hides and how many of those the editor counted, and a row is picked through selectFromList,
+  // which shows a hidden node first: nothing hidden is ever selected.
+  assert.match(editor, /<ObjectList nodes=\{settledCurrent\?\.nodes \?\? current\.nodes\} selectedIds=\{listSelection\.ids\} primaryId=\{listSelection\.primaryId\} hiddenIds=\{hiddenIds\} hiddenCount=\{hiddenCount\} onSelect=\{selectFromList\} onToggleHidden=\{toggleHidden\} onShowAll=\{showAll\} \/>/);
   // Every selected row is marked; the primary alone is the current one.
   assert.match(piece(editor, 'const ObjectList = memo(function ObjectList(', 'export function BackgroundMapEditor('),
     /className=\{selectedIds\.includes\(node\.id\) \? 'is-selected' : ''\} aria-current=\{node\.id === primaryId \? 'true' : undefined\}/);
@@ -1039,9 +1044,10 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
   // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
   inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
-  // The word stands four times: the function, this call, and the delete dialog of a map as it comes up and as a run of
-  // it stops (anchor 66 holds those two where they are).
-  assert.equal(count(editor, /\bswallowSecondClick\b/g), 4, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops');
+  // The word stands five times: the function, this call, the delete dialog of a map as it comes up and as a run of it
+  // stops (anchor 66 holds those two where they are), and hiding a node when what the properties show changes
+  // (setNodesHidden).
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 5, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, and hiding that changes what the properties show');
   assert.deepEqual(piece(editor, 'function swallowSecondClick() {', 'function navigate(').split('\n').map(line => line.trim()).filter(Boolean), [
     'function swallowSecondClick() {',
     'const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };',
@@ -1446,7 +1452,7 @@ test('anchor 59: the new test files run in the build', () => {
   // The build runs every test file a pattern of names finds. A file that is deleted, or renamed out of that pattern, takes
   // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the new ones by name.
   const tests = new URL('./', import.meta.url), names = readdirSync(tests);
-  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts', 'backgroundMapDelete.test.ts']) {
+  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts', 'backgroundMapDelete.test.ts', 'backgroundMapViewPrefs.test.ts']) {
     assert.ok(names.includes(name), `not in the tests folder: ${name}`);
     const source = readFileSync(new URL(name, tests), 'utf8');
     // And each tests something: a file whose tests are all skipped is green as well.
@@ -2062,11 +2068,12 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // to be dragged through. The plan takes the two and hands them to the readout of the picked camera, and that hands
   // them to the side view, as they came: handed a right to edit made up on the way, the side view of a camera in view
   // mode would show a handle. The readout is keyed by its camera: as another camera is picked, a scale still held and
-  // a pointer still pressed go with the readout of the old one. And the contract of the plan names the two.
-  assert.ok(editor.includes('<BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} />'), 'the companion plan is not given the right to edit and the scrub object');
+  // a pointer still pressed go with the readout of the old one. And the contract of the plan names the two. Behind them
+  // the plan is handed what the eye of the object list hides (anchor 67 reads what it does with it).
+  assert.ok(editor.includes('<BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} hiddenIds={hiddenIds} />'), 'the companion plan is not given the right to edit and the scrub object');
   assert.equal(count(editor, /<BackgroundMapPlanPreview\b/g), 1, 'the companion plan is drawn once');
   const preview = read('BackgroundMapPlanPreview.tsx'), keyed = '<CameraReadout key={selected.id} ';
-  for (const text of ['export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub }: MapPlanPreviewProps) {', `${keyed}map={map} camera={selected} canEdit={canEdit} scrub={scrub} />`,
+  for (const text of ['export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub, hiddenIds }: MapPlanPreviewProps) {', `${keyed}map={map} camera={selected} canEdit={canEdit} scrub={scrub} />`,
     'function CameraReadout({ map, camera, canEdit, scrub }: { map: BackgroundMap; camera: BackgroundCamera; canEdit: boolean; scrub: MapFieldScrub }) {',
     '<BackgroundMapPlanSide map={map} camera={camera} canEdit={canEdit} scrub={scrub} label={`옆에서 본 방향: ${pitchText}, ${heightText}`} />']) assert.ok(preview.includes(text), `not found: ${text}`);
   assert.equal(count(preview, /<CameraReadout\b/g), 1, 'the readout of a camera is drawn in one place');
@@ -2081,7 +2088,7 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // argument in front of the parenthesis, the call through the namespace of React.
   const wrappers = preview.match(/\bmemo\b(?:\(function \w+)?/g) ?? [];
   assert.deepEqual(wrappers, ['memo', 'memo(function PlanShape', 'memo(function PlanCamera'], `the plan, the readout of a camera or the side view is wrapped in memo, or a wrapper of the plan is gone: ${wrappers.join(' | ')}`);
-  assert.ok(read('mapCanvas.ts').includes("export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub };"), 'the contract of the companion plan');
+  assert.ok(read('mapCanvas.ts').includes("export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub; hiddenIds?: ReadonlySet<string> };"), 'the contract of the companion plan');
   // The plan itself has no code for the drag: a press is followed by the hook, on the window. The listeners the plan
   // has are those of its picks, and anchors 34 and 39 find them by their place in that file. Nor does it draw a side
   // view of its own any more: left there, a second picture would stand beside the one with the handle.
@@ -2481,4 +2488,385 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
     assert.doesNotMatch(line, /#|\b(?:rgb|hsl)a?\((?!var\()/);
   }
   for (const column of ['.bmap-delete-lead {', '.bmap-delete-choices {']) has(baseRule(sheet, column), 'display:flex', 'flex-direction:column');
+});
+
+test('anchor 67: the eye filters what is drawn and what a pointer is asked about, and every writer is handed the whole draft', () => {
+  // The one rule of the eye: what is drawn and what a pointer is asked about leave out what it hides, and what is
+  // written never does. The map without the hidden nodes is made in four places of the editor and in no other, each an
+  // argument of a pure question about what lies under the pointer, never a map that is written: the pile of a press,
+  // the snap candidates of a drag, what a selection box takes, and the space a new symbol stands in.
+  assert.equal(count(editor, /\bshownMap\(/g), 4, 'the pile, the snap candidates, the box and the space of a new symbol');
+  const down = handler.pointerDown(), move = handler.pointerMove(), up = handler.pointerUp(), place = handler.placeSymbol();
+  // The press. Its pile is what the plan draws under the pointer: a hidden space in the middle of a pile is stepped over,
+  // never picked. The session is opened on the whole draft as it is at this very moment: a drag previews that map and
+  // writes it back, so a session opened on the shown map would delete every hidden node at the next drag.
+  for (const text of ['planPileAt(shownMap(live, hiddenIds), hit.id,', 'const live = mapDraft(doc.getState(), current.id)?.value ?? current;', 'initial: live,'])
+    assert.ok(down.includes(text), `not in pointerDown: ${text}`);
+  // The move. The snap guides are gathered from what is shown (nothing snaps to what cannot be seen), and the drag is
+  // previewed on the whole map of the press: a hidden member follows its space, and the preview is what is saved.
+  for (const text of ['planGestureCandidates(gesture, shownMap(session.initial, hiddenIds))', 'previewPlanGesture(gesture, session.initial, session.start, point, snap)'])
+    assert.ok(move.includes(text), `not in pointerMove: ${text}`);
+  // The release of a box picks what it touches of what is shown: nothing hidden is ever selected.
+  assert.ok(up.includes('doc.selectMany(session.mapId, planMarqueeIds(shownMap(live, hiddenIds), planRect(session.start, point)));'), 'the box picks from the whole map');
+  // A new symbol stands in the topmost space shown at its spot: a hidden room takes none, on the plan and in 3D alike
+  // (asked of the whole map, a symbol put on the floor seen under a hidden upper storey would be saved in that storey, at
+  // its height). The symbol is added to the whole map: added to the shown one, every hidden node would go with it.
+  for (const text of ['const containingSpace = spacesAt(shownMap(base, hiddenIds), point)[0];', 'updateMap({ ...base, nodes: [...base.nodes, symbol] });'])
+    assert.ok(place.includes(text), `not in placeSymbol: ${text}`);
+  assert.equal(count(place, /\bshownMap\(/g), 1, 'the shown map is made once in placeSymbol, for the space and nothing else');
+  // The floor the symbol stands on and the space it belongs to are both that one answer. The space is asked once: a second
+  // question of the whole map, for the height or for the membership alone, would save a symbol put under a hidden upper
+  // storey at that storey's height, or as one of its members, with the line above untouched.
+  assert.equal(count(place, /\bspacesAt\(/g), 1, 'the space under a new symbol is asked once, of the shown map');
+  for (const text of ['const level = containingSpace ? nodeElevation(containingSpace) : MAP_SPATIAL_DEFAULTS.symbolElevation;', 'spaceId: containingSpace?.id ?? null,'])
+    assert.ok(place.includes(text), `the new symbol does not take this from the space shown at its spot: ${text}`);
+  // In each of the four the hidden nodes are named once, in that call: a second use (a filter of its own, the line that
+  // makes the map of the press) would filter what is written as well.
+  for (const [name, body] of Object.entries({ pointerDown: down, pointerMove: move, pointerUp: up, placeSymbol: place }))
+    assert.equal(count(body, /\bhiddenIds\b/g), 1, `${name} names the hidden nodes elsewhere`);
+  // The plan draws no hidden node. The one pass over the stack leaves a hidden space out before anything of it is made,
+  // and the passes over the symbols and the cameras leave a hidden one out in their filter.
+  const spaces = piece(editor, '{stackedSpaces(current).map(node => {', '{current.nodes.filter((node): node is BackgroundSymbol');
+  const [opener, first, second] = spaces.split('\n').map(line => line.trim()).filter(Boolean);
+  assert.deepEqual([opener, first], ['{stackedSpaces(current).map(node => {', 'if (hiddenIds.has(node.id)) return null;'], 'a hidden space is drawn');
+  assert.ok(second?.startsWith('const isSelected = shownIds.has(node.id)'), `the space is not drawn by its own lines: ${second}`);
+  for (const pass of ["{current.nodes.filter((node): node is BackgroundSymbol => node.type === 'symbol' && !hiddenIds.has(node.id)).map(node => {",
+    "{current.nodes.filter((node): node is BackgroundCamera => node.type === 'camera' && !hiddenIds.has(node.id)).map(node => {"])
+    assert.ok(editor.includes(pass), `a hidden node is drawn: ${pass}`);
+  // Whether one node is hidden is asked in these six places and no other: the row of the object list, its eye and its
+  // name (toggleHidden, selectFromList), the pass over the spaces and the two filters. A seventh is a filter of its own.
+  assert.equal(count(editor, /hiddenIds\.has\(/g), 6, 'the row of the list, toggleHidden, selectFromList, the pass over the spaces and the two filters');
+  // The 3D view and the companion plan are handed the whole draft, and what is hidden beside it. A gizmo drag starts from
+  // that map and writes it back: handed the shown map, the 3D view would delete every hidden node at the next drag.
+  for (const tag of ['<Map3D map={current} ', '<BackgroundMapPlanPreview map={current} ']) assert.ok(editor.includes(tag), `not handed the whole draft: ${tag}`);
+  // The 3D view is handed what is hidden behind the attributes it always had (the companion plan is, by anchor 64). Not
+  // handed it, the 3D view would draw every hidden node and take its clicks.
+  assert.ok(piece(editor, '<Map3D map={current}', '/>').includes(' onUnavailable={leave3D} hiddenIds={hiddenIds} '), 'the 3D view is not handed what is hidden');
+  // And last, the rooms it draws as closed boxes: while the symbol tool is in hand in edit mode, the one empty set of the
+  // view settings instead, the same object at every render, so every room is see-through where a floor is aimed at and
+  // the scene is synced once as the tool is taken up. Without that choice the boxes stay closed under the symbol tool.
+  assert.ok(`${piece(editor, '<Map3D map={current}', '/>')}/>`.endsWith('onUnavailable={leave3D} hiddenIds={hiddenIds} solidIds={roomsOpen ? NO_MAP_VIEW_PREFS.solid : solidIds} />'), 'the 3D view is not handed the closed rooms as the editor says');
+  // The companion plan makes the map without the hidden nodes once, for what a click lands on and steps through alone: it
+  // is framed from the whole map (a view box made from the shown one would jump at every eye pressed), and each of its
+  // three passes leaves a hidden node out.
+  const preview = read('BackgroundMapPlanPreview.tsx');
+  assert.equal(count(preview, /\bshownMap\(/g), 1, 'the companion plan makes the shown map elsewhere');
+  for (const text of ['const pointed = useMemo(() => shownMap(map, hiddenIds), [map, hiddenIds]);', 'latest.current = { map: pointed, selectedId, onSelect, scale };', 'planViewBox(map, size)'])
+    assert.ok(preview.includes(text), `not in the companion plan: ${text}`);
+  for (const pass of ['{stackedSpaces(map).map(node => !hiddenIds?.has(node.id) && <PlanShape key={node.id} ', "{map.nodes.map(node => node.type === 'symbol' && !hiddenIds?.has(node.id) && <PlanShape key={node.id} ",
+    "{map.nodes.map(node => node.type === 'camera' && !hiddenIds?.has(node.id) && <PlanCamera key={node.id} "]) assert.ok(preview.includes(pass), `the companion plan draws a hidden node: ${pass}`);
+  assert.equal(count(preview, /!hiddenIds\?\.has\(node\.id\) &&/g), 3, 'the three passes of the companion plan, and no other');
+  // The 3D files are handed sets of ids and never a map without the hidden nodes: they know neither that map nor the
+  // module of the view settings. Read as written, with their comments.
+  for (const name of ['BackgroundMap3D.tsx', 'map3dScene.ts', 'BackgroundMapCameraGizmo.ts'])
+    assert.doesNotMatch(readFileSync(new URL(name, directory), 'utf8'), /shownMap|mapViewPrefs/, `${name} knows the view settings`);
+});
+
+test('anchor 68: what is hidden is never selected, and a view setting writes no map', () => {
+  // The view settings of this PC are five handlers that stand together right behind the stable pick of the empty
+  // selection, in no handler another anchor cuts out: the eye of a row, 모두 보이기, a row of the object list, and the
+  // closed box of a room in 3D. They are these lines and what joins them, in this order. Neither the eye nor the box
+  // is heard during a drag: its session works on what was drawn and stacked at the press. A change that changes
+  // nothing writes nothing, and a change is written to this PC at once, by the handler itself. Showing a node again
+  // leaves the selection alone. Hiding one takes it out of what is selected, read from the store as it is at this
+  // moment (a handler may run before the next render): the group of the plan, the node in hand in 3D, and the pick
+  // that view stored while it is not in hand. The list is written first. In 3D, while two or more stay selected, the
+  // node in hand is a pick of its own, kept or let go; with one or none left there is nothing to pick, the one selected
+  // is the one in hand. For the length of a double-click no press reaches the page, and only when what the properties
+  // show changes: the eyes of a group can be pressed one after the other. A row of the list shows a hidden node first,
+  // and picks it only once that went through. 모두 보이기 sends the keyboard to the canvas: its button goes with its own press.
+  const handlers = handler.viewPrefs();
+  assert.deepEqual(handlers.split('\n').map(line => line.trim()).filter(Boolean), [
+    'const setNodesHidden = useEvent((ids: readonly string[], hidden: boolean): boolean => {',
+    'if (!current || pointerRef.current || doc.isGestureActive()) return false;',
+    'const next = withHiddenNodes(viewPrefs, current, ids, hidden);',
+    'if (next !== viewPrefs) { setViewPrefs(next); storeMapViewPrefs(viewerId, next); }',
+    'if (!hidden) return true;',
+    'const live = mapDraft(doc.getState(), current.id)?.value ?? current;',
+    "const left = selectionWithout(live, liveSelection(current.id, live), mapViewport(doc.getState(), current.id).selectedId, ids, mode === 'plan');",
+    'if (!left.changed) return true;',
+    'doc.selectMany(current.id, left.ids);',
+    "if (mode === '3d' && left.ids.length > 1) select(left.inHand);",
+    'if (left.moved) swallowSecondClick();',
+    'return true;',
+    '});',
+    'const toggleHidden = useEvent((id: string) => { setNodesHidden([id], !hiddenIds.has(id)); });',
+    'const showAll = useEvent(() => { if (setNodesHidden([...hiddenIds], false)) focusCanvas(); });',
+    'const selectFromList = useEvent((id: string) => { if (!hiddenIds.has(id) || setNodesHidden([id], false)) select(id); });',
+    'const setSpacesSolid = useEvent((ids: readonly string[], solid: boolean) => {',
+    'if (!current || pointerRef.current || doc.isGestureActive()) return;',
+    'const next = withSolidSpaces(viewPrefs, current, ids, solid);',
+    'if (next !== viewPrefs) { setViewPrefs(next); storeMapViewPrefs(viewerId, next); }',
+    '});']);
+  // A view setting is no edit: none of the five writes the map, previews it or opens a gesture of the document. So it
+  // leaves no undo step, the band counts nothing for it, and there is nothing to save.
+  for (const writer of ['updateMap(', 'doc.update(', 'doc.previewGesture(', 'patchNode(', 'doc.beginGesture(']) assert.ok(!handlers.includes(writer), `a view setting writes the map: ${writer}`);
+  // This PC is written in those two places alone, as a setting is changed: never by an effect, at every render.
+  assert.equal(count(editor, /\bstoreMapViewPrefs\(/g), 2, 'the eye and the box, and nowhere else');
+  assert.equal(count(handlers, /\bstoreMapViewPrefs\(/g), 2, 'this PC is written outside the five handlers');
+  // Read once, as the editor comes up, for the account on show: the library draws the editor anew for another account
+  // (the key of its body). And the settings in hand are set in those two places alone.
+  assert.ok(editor.includes('const [viewPrefs, setViewPrefs] = useState(() => readMapViewPrefs(viewerId));'), 'the settings are not read once, for the account on show');
+  assert.equal(count(editor, /\breadMapViewPrefs\(/g), 1, 'the settings are read in another place');
+  assert.equal(count(editor, /\bsetViewPrefs\(/g), 2, 'the eye and the box, and nowhere else');
+  // The account on show is the library's: it hands the editor the one signed in, and keys the body that holds the
+  // editor by it, so another account draws the editor anew. Handed no account, the editor neither reads nor writes this
+  // PC, and no setting outlives the screen; with no key on that body, it keeps the settings of the account before and
+  // writes them under the next one's name at its first eye or box.
+  const library = read('BackgroundLibraryView.tsx');
+  assert.ok(library.includes("viewerId={user?.id ?? ''}"), 'the editor is not handed the account signed in');
+  assert.ok(library.includes('key={user?.id || "signed-out"}'), 'the editor is not drawn anew for another account');
+  // What the map on show is shown with is read in one line, for the map on show. Read for `currentId`, the first map
+  // opened would show nothing hidden and no box: no map has been chosen yet, and that id is null.
+  const shown = 'const { hidden: hiddenIds, solid: solidIds } = mapViewPrefsOf(viewPrefs, current?.id);';
+  assert.equal(editor.split(shown).length - 1, 1, `not once: ${shown}`);
+  assert.equal(count(editor, /\bmapViewPrefsOf\(/g), 1, 'the settings of a map are read in another place');
+  // What is left selected is asked of the pure module (the V tests run it), with its five arguments as they are at the
+  // press: the pick the 3D view stored as well, not only the node in hand, so a group that grows again (a redo) puts
+  // nothing hidden in hand.
+  assert.ok(editor.includes("selectionWithout(live, liveSelection(current.id, live), mapViewport(doc.getState(), current.id).selectedId, ids, mode === 'plan')"), 'what is left selected is asked of other values');
+});
+
+test('anchor 69: a row of the object list is a name and an eye beside it, and the heading puts the hidden count first', () => {
+  const list = piece(editor, 'const ObjectList = memo(function ObjectList(', 'export function BackgroundMapEditor(');
+  // Three buttons: 모두 보이기 in the heading, and in each row the name and the eye. A button holds no button, so the eye is
+  // the sibling right behind the name, the last thing in its row.
+  assert.equal(count(list, /<button\b/g), 3, 'the heading, the name and the eye');
+  assert.match(list, /<\/button>\s*<button type="button" className="bmap-node-eye"[^\n]*<\/button>\s*<\/li>/, 'the eye is not the sibling behind the name');
+  // The eye, its whole tag: named by what a press does, with a short title that says this PC alone, the closed eye drawn on
+  // a hidden row and the open one on a row on show. It hides and shows, and never picks.
+  assert.equal(count(list, /className="bmap-node-eye"/g), 1, 'one eye in a row');
+  assert.ok(list.includes(`<button type="button" className="bmap-node-eye" aria-label={\`\${name} \${hidden ? '다시 보이기' : '숨기기'}\`} title={hidden ? '다시 보이기' : '숨기기 · 이 PC에서만 안 보여요'} onClick={() => onToggleHidden(node.id)}>{hidden ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}</button>`), 'the eye is not as written');
+  // Its state is in its name, which changes: with aria-pressed as well a reader would say 숨기기, pressed. The one press that
+  // picks is the name's.
+  assert.ok(!list.includes('aria-pressed'), 'the eye says its state twice');
+  assert.equal(count(list, /\bonSelect\(node\.id\)/g), 1, 'the eye picks');
+  // A hidden row is marked on the row, so the name button keeps its classes as anchor 36 reads them, and its name says it.
+  assert.ok(list.includes("<li key={node.id} className={hidden ? 'is-hidden' : undefined}>"), 'a hidden row is not marked on the row');
+  assert.ok(list.includes("aria-label={`${name}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}${hidden ? ', 숨김' : ''}`}"), 'the name of a hidden row does not say so');
+  // The row asks once, as written, and its mark, its name and its eye all read that: a row is hidden when its node is in
+  // the set (asked the other way round, every row on show is dimmed, drawn with the closed eye and named as hidden), and it
+  // is named by the node's name, as the row shows it, not by its id.
+  assert.ok(list.includes("const hidden = hiddenIds.has(node.id), name = node.name || '이름 없음';"), 'the row is not as written');
+  // The heading: the hidden count comes first, so a narrow panel cuts the count of all and keeps it. 모두 보이기 stands beside
+  // it while anything is hidden, and its title says what hiding does.
+  assert.ok(list.includes("<span className=\"bmap-badge\">{hiddenCount > 0 ? `숨김 ${hiddenCount} · ` : ''}{ordered.length}개</span>"), 'the count of the heading');
+  assert.ok(list.includes('title={HIDDEN_NOTE} onClick={onShowAll}>모두 보이기</button>'), '모두 보이기 of the heading');
+  // And the whole heading, as written: 모두 보이기 is there only while anything is hidden, it stands to the left of the
+  // count, and it wears its own class, which keeps it lower than the badge. As a plain text button it is 36px tall, and the
+  // heading would grow under the pointer at the first eye pressed.
+  assert.ok(list.includes('<div className="bmap-section-heading"><strong>오브젝트</strong>{hiddenCount > 0 && <button type="button" className="bmap-text-button bmap-show-all" title={HIDDEN_NOTE} onClick={onShowAll}>모두 보이기</button>}<span className="bmap-badge">{hiddenCount > 0 ? `숨김 ${hiddenCount} · ` : \'\'}{ordered.length}개</span></div>'), 'the heading is not as written');
+  // What hiding does is said under the rows at all times, hidden or not: a line that came with the first eye would move the
+  // list under the pointer. And a reader is told the count as it changes.
+  assert.ok(list.includes('</ul><p className="bmap-hint">{HIDDEN_NOTE}</p></>'), 'the line under the list');
+  assert.ok(list.includes("<span className=\"sr-only\" role=\"status\">{hiddenCount > 0 ? `숨긴 것 ${hiddenCount}개` : '숨긴 것이 없어요'}</span>"), 'what a reader is told');
+  // The list counts nothing: it is handed the count, and asks about the hidden nodes once, for the row it draws. The editor
+  // counts in one line, from the map the list is drawn from. The size of the set counts the id of a node that is gone too.
+  assert.equal(count(list, /hiddenIds\.has\(/g), 1, 'the list asks about the hidden nodes elsewhere');
+  assert.doesNotMatch(list, /\bfilter\((?:[^()]|\([^()]*\))*\bhiddenIds\b/, 'the list counts the hidden nodes');
+  const counted = 'const hiddenCount = useMemo(() => hiddenNodeCount(settledCurrent, hiddenIds), [settledCurrent, hiddenIds]);';
+  assert.equal(editor.split(counted).length - 1, 1, `not once: ${counted}`);
+  assert.ok(!editor.includes('hiddenIds.size'), 'the hidden nodes are counted by the size of the set');
+  // The words: a hidden node never reads as a deleted one. Made once, and said under the list, as the title of 모두 보이기
+  // and as the title of the chip in the footer.
+  assert.equal(editor.split("const HIDDEN_NOTE = '숨긴 것은 이 PC의 내 화면에서만 안 보여요. 도면에는 그대로 있어서, 저장해도 지워지지 않아요.';").length - 1, 1, 'the words of the eye');
+  assert.equal(count(editor, /\bHIDDEN_NOTE\b/g), 4, 'made, the heading, under the list, the chip');
+});
+
+test('anchor 70: in 3D a hidden node and what a closed room holds are not drawn, and a click stops at the first closed face', () => {
+  const scene = read('map3dScene.ts');
+  // The scene keeps every option of the last sync, the two sets of the view settings too: a change of theme syncs again
+  // with them, and without one of them what it holds would come back on screen while the viewport sees nothing new.
+  const sync = piece(scene, 'sync(map: BackgroundMap, selectedId: string | null, options: Map3DSyncOptions = {}): void {', 'root(id: string): Object3D | null {');
+  assert.ok(sync.includes('this.last = { map, selectedId, options: { holdId, hiddenId, hiddenIds, solidIds } };'), 'the scene forgets a set of the view settings');
+  // One line says what is drawn: the root of a node the eye hides is not, and with it all that follows the root (its
+  // name, the drop line of a camera). Hidden roots take no click: they are no target (pickTargets). The label is never
+  // switched off on its own.
+  assert.match(sync, /const visible = entry\.valid && node\.id !== hiddenId && !hiddenIds\.has\(node\.id\)/);
+  assert.ok(!scene.includes('.label.visible') && !scene.includes('label.visible ='), 'a label is switched off on its own');
+  // An option that is absent reads as the one empty set of the scene, made there: never one of the viewport or of the module
+  // of the view settings, which the scene does not import.
+  assert.equal(scene.split('const NO_IDS: ReadonlySet<string> = new Set();').length - 1, 1, 'the empty set of the scene');
+  // The rooms drawn closed and what they hold are read from the map before any entry is touched: a node that comes before
+  // its box in the map is hidden at the first sync as well. A road is never closed, the room a looked-through camera
+  // stands in opens, a box the eye hides holds nothing, and the selected node is drawn though it is held.
+  for (const text of ["const boxes = solidIds.size ? map.nodes.filter((node): node is BackgroundSpace => node.type === 'space' && solidIds.has(node.id) && !isRoadSpace(node) && !(lens && spaceHoldsNode(node, lens))) : [];",
+    'const held = nodesHeldBy(map, boxes.filter(space => !hiddenIds.has(space.id)));', 'solid = boxIds.has(node.id)', 'entry.solid !== solid',
+    'const visible = entry.valid && node.id !== hiddenId && !hiddenIds.has(node.id) && (selected || !held.has(node.id));'])
+    assert.ok(sync.includes(text), `not in sync: ${text}`);
+  inOrder(sync, 'const boxes = ', 'const held = ', 'for (const node of map.nodes) {');
+  // Held is whole: every corner, from the floor up to the top, both included. A camera is asked a hair away on eight
+  // sides, so one on a wall line or at the level of the lid is inside, whatever the shape of the room. Of two boxes that
+  // hold each other the earlier in the map holds the later.
+  const stack = read('mapStack.ts');
+  for (const text of ['nodePlanOutline(node).every(', 'level + height <= top + HOLD_SLACK',
+    "if (node.type === 'camera') return AROUND.some(([dx, dy]) => containsPoint(space, { x: node.x + dx * HOLD_SLACK, y: node.y + dy * HOLD_SLACK }));",
+    'const AROUND: readonly (readonly [number, number])[] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];',
+    'boxes.includes(node) && at(node.id) < at(box.id) && spaceHoldsNode(node, box)'])
+    assert.ok(stack.includes(text), `not in mapStack.ts: ${text}`);
+  const holds = piece(stack, 'export function spaceHoldsNode(', 'export function nodesHeldBy(');
+  assert.ok(!holds.includes('containsPoint(space, node)'), 'a camera is asked at its own point: on a wall line of a polygon room it reads outside');
+  assert.ok(!holds.includes('level < top'), 'a camera at the level of the lid reads outside');
+  // A closed room is one opaque material on its floor, its walls and a lid that is the floor geometry once more, and every
+  // face of it is a click on the room. Its key builds it anew when the box is switched; that of a camera is as it was (anchor 45).
+  const build = piece(scene, 'private buildSpace(', 'private buildSymbol(');
+  for (const text of ['const shell = solid && !road ?', "lid.position.y = height; lid.name = 'space-lid';", 'new Mesh(floor.geometry, shell)', "shell ? 'shell' : mesh === floor ? 'floor' : 'wall'"])
+    assert.ok(build.includes(text), `not in buildSpace: ${text}`);
+  const paint = piece(scene, 'private material(', 'private geometry(');
+  for (const text of ['closed(0.35)', 'closed(0.6)', 'polygonOffset: true']) assert.ok(paint.includes(text), `not among the materials: ${text}`);
+  const key = piece(scene, 'function shapeKey(', 'function labelSpec(');
+  assert.ok(key.includes("${isRoadSpace(node) ? 'road' : ''}${solid ? '|solid' : ''}`;"), 'the key of a space does not end with whether it is closed');
+  assert.equal(count(key, /\$\{solid \? '\|solid' : ''\}/g), 1, 'the key of a space alone tells whether it is closed');
+  // A click stops at the first closed face on its ray: what lies behind a box is never reached. It stands before
+  // pickMapFloor, out of every piece that anchors 21 and 49 cut. A closed face is a floor to a click, so a see-through
+  // wall in front of a box does not take it: the floors of a click and of its pile are read alike.
+  inOrder(scene, 'export function visibleMapHits<T extends MapPickHit>(hits: T[]): T[] {', 'export function pickMapFloor(');
+  for (const [name, body] of Object.entries({ pickMapFloor: piece(scene, 'export function pickMapFloor(', 'function roadsUnderRooms('),
+    mapFloorPile: piece(scene, 'export function mapFloorPile(', 'export function mapSpacePile(') }))
+    assert.equal(count(body, /hits\.filter\(landsOnSpace\)/g), 1, `${name} does not stand on a closed face`);
+  // The viewport casts every ray in one place, and cuts it there: a click, a double click and a symbol put down.
+  assert.match(piece(view3d, 'private cast(', 'private floorPoint('), /return visibleMapHits\(this\.raycaster\.intersectObjects\(this\.scene3d\.pickTargets\(\), false\)\);\s*\}\s*$/,
+    'the ray of the viewport is not cut at the first closed face');
+  // The viewport hands the sets on as they come, and syncs again only when one of them is another object. When the rooms
+  // are see-through is the editor's to say: read for placing here, every save with the symbol tool in hand would close
+  // and open the boxes.
+  const syncScene = piece(view3d, 'private syncScene(', 'private gizmoAllowed(');
+  for (const text of ['const hiddenIds = this.props.hiddenIds ?? NO_IDS, solidIds = this.props.solidIds ?? NO_IDS;', 'shown.hiddenIds === hiddenIds && shown.solidIds === solidIds'])
+    assert.ok(syncScene.includes(text), `not in syncScene: ${text}`);
+  assert.ok(!syncScene.includes('placing'), 'the viewport changes the sets while placing');
+  // Nothing that is not drawn gets a gizmo.
+  assert.ok(piece(view3d, 'private gizmoAllowed(', 'private applyGizmo(').includes('props.hiddenIds?.has(id)'), 'a hidden node gets a gizmo');
+  // Both are optional: a viewport handed neither runs as before. No typecheck reads the stand-in of the viewport tests,
+  // which builds its props without them: these letters are what holds it.
+  const props3d = piece(read('mapCanvas.ts'), 'export type Map3DProps = MapCanvasProps & {', 'export type MapScrubOrigin');
+  for (const field of ['hiddenIds?: ReadonlySet<string>;', 'solidIds?: ReadonlySet<string>;']) assert.ok(props3d.includes(field), `not an optional prop of the 3D view: ${field}`);
+});
+
+test('anchor 71: the chip takes no room in the footer, and the new classes are written in their own lines alone', () => {
+  const lines = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  // The rules of a row and its eye, the hidden row, the heading, the line under the list, the chip and the section of the
+  // closed box under the properties of a room in 3D, as written, each once.
+  const rules = [
+    '.bmap-node-list li { display:flex; align-items:center; gap:2px; }',
+    '.bg-library .bmap-node-list li>button:not(.bmap-node-eye) { flex:1 1 0; width:auto; min-width:0; }',
+    '.bg-library .bmap-node-list .bmap-node-eye { flex:0 0 28px; width:28px; min-width:28px; padding:0; gap:0; justify-content:center; }',
+    '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye) { opacity:.7; }',
+    '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye):focus-visible { opacity:1; }',
+    '.bg-library .bmap-node-list li.is-hidden .bmap-node-type { opacity:1; }',
+    '.bg-library .bmap-objects .bmap-show-all { position:relative; flex-shrink:0; min-height:0; margin-left:auto; padding:0 2px; font-size:11px; line-height:1.4; white-space:nowrap; }',
+    '.bg-library .bmap-objects .bmap-show-all::after { content:""; position:absolute; inset:-5px 0; }',
+    '.bmap-objects .bmap-section-heading>strong { flex-shrink:0; }',
+    '.bmap-objects .bmap-badge { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; }',
+    '.bmap-objects>.bmap-node-list+.bmap-hint { margin-top:8px; }',
+    '.bmap-hidden-slot { position:relative; flex:0 0 0; width:0; height:0; margin:0 -10px 0 auto; }',
+    '.bg-library .bmap-hidden-chip { position:absolute; right:10px; top:-13px; height:26px; min-height:26px; padding:0 10px; border-color:rgb(var(--color-accent) / .45); border-radius:13px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:11px; white-space:nowrap; box-shadow:0 0 0 3px color-mix(in srgb, rgb(var(--color-bg-card)) 40%, rgb(var(--color-bg-primary))); }',
+    '.bg-library .bmap-hidden-chip:hover:not(:disabled) { border-color:rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-card)); }',
+    '.bmap-solid { margin:14px 0 8px; }',
+    '.bmap-solid .bmap-check { margin:0 0 6px; }',
+    '.bmap-solid .bmap-hint { margin-bottom:2px; }',
+  ];
+  for (const rule of rules) assert.equal(lines.filter(line => line === rule).length, 1, `not once, as a line of its own: ${rule}`);
+  // No other line names a new class: not a comment, not an override in a media block. One that hid the eye in a narrow
+  // window would leave every line above as it is.
+  for (const [name, times] of Object.entries({ 'bmap-node-eye': 4, 'bmap-hidden-chip': 2, 'bmap-hidden-slot': 1, 'bmap-show-all': 2, 'is-hidden': 3, 'bmap-solid': 3 }))
+    assert.equal(lines.filter(line => line.includes(name)).length, times, `lines that name ${name}`);
+  // Nothing of them moves by itself, and a hidden row is not slanted: it is dimmed by its opacity alone.
+  const named = lines.filter(line => /bmap-node-eye|bmap-hidden-chip|bmap-hidden-slot|bmap-show-all|is-hidden|bmap-solid/.test(line));
+  for (const line of new Set([...rules, ...named])) assert.doesNotMatch(line, /transition|animation|font-style|backdrop-filter/, line);
+  // The anchor of the chip takes no room: no width, no height, and its right margin gives back the one gap it adds to the
+  // footer (the two numbers are one). So the hint beside it wraps as without it, and the footer and the map keep their size.
+  has(baseRule(lines, '.bmap-hidden-slot {'), 'flex:0 0 0', 'width:0', 'height:0', 'margin:0 -10px 0 auto');
+  has(baseRule(lines, '.bmap-canvas-footer {'), 'gap:10px');
+  // The chip floats on it, over the free end of the footer, in the text colour: the lighter accent is 2.4:1 on a white card.
+  // A ring of the colour between the card and the page keeps a letter of the hint it half covers apart from its edge, where
+  // the footer is narrow (gate A, at 1280 and 740: without it the letter ran into the border as if broken).
+  const chip = baseRule(lines, '.bg-library .bmap-hidden-chip {');
+  has(chip, 'position:absolute', 'white-space:nowrap', 'box-shadow:0 0 0 3px color-mix(in srgb, rgb(var(--color-bg-card)) 40%, rgb(var(--color-bg-primary)))');
+  assert.deepEqual(chip.filter(item => item.startsWith('color:')), ['color:rgb(var(--color-text-primary))'], 'the colour of the chip');
+  // A hidden row is dimmed to .7, still read and pressed to bring the node back. Its word for the kind gives up its own
+  // dimming there, or the two would multiply to .525.
+  has(baseRule(lines, '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye) {'), 'opacity:.7');
+  has(baseRule(lines, '.bg-library .bmap-node-list li.is-hidden .bmap-node-type {'), 'opacity:1');
+  // Its focus ring is drawn inside the dimmed name and would fade with it (2.5:1 on the dark card): under the keys the name
+  // that brings the node back is at full strength again (final review).
+  has(baseRule(lines, '.bg-library .bmap-node-list li.is-hidden>button:not(.bmap-node-eye):focus-visible {'), 'opacity:1');
+  // The heading never wraps: its word and 모두 보이기 keep their width, and the count gives way with an ellipsis. The button
+  // is pressed on 5px more above and below, by a layer that takes no room in the heading.
+  has(baseRule(lines, '.bmap-objects .bmap-section-heading>strong {'), 'flex-shrink:0');
+  has(baseRule(lines, '.bg-library .bmap-objects .bmap-show-all {'), 'position:relative', 'flex-shrink:0', 'white-space:nowrap');
+  has(baseRule(lines, '.bmap-objects .bmap-badge {'), 'min-width:0', 'overflow:hidden', 'text-overflow:ellipsis');
+  has(baseRule(lines, '.bg-library .bmap-objects .bmap-show-all::after {'), 'position:absolute', 'inset:-5px 0');
+  // The line under the rows takes its room above alone: the list ends the section.
+  has(baseRule(lines, '.bmap-objects>.bmap-node-list+.bmap-hint {'), 'margin-top:8px');
+  // The chip stands in the footer of both modes, outside the properties that fold away, between the hint and the zoom of the
+  // plan: in no branch of a mode, and nothing else stands there.
+  const chipTag = '{hiddenCount > 0 && <div className="bmap-hidden-slot"><button type="button" className="bmap-hidden-chip" title={HIDDEN_NOTE} onClick={showAll}>숨김 {hiddenCount}개 · 모두 보이기</button></div>}';
+  assert.equal(editor.split(chipTag).length - 1, 1, 'the chip is not drawn once, as written');
+  assert.equal(piece(editor, '{footerHint}</span>', '{mode === \'plan\' && <div className="bmap-zoom">'), `{footerHint}</span>${chipTag}`, 'the chip is not between the hint and the zoom');
+  // The chip may lie over the end of the hint: while it is there the whole hint is in its title, in 3D as well.
+  assert.ok(editor.includes("<span className=\"bmap-footer-hint\" title={mode === 'plan' || hiddenCount > 0 ? footerHint : undefined}>{footerHint}</span>"), 'the title of the hint');
+});
+
+test('anchor 72: the closed box is a view setting of a room in 3D, below the kind of the space, and nothing of it is saved', () => {
+  // The switch of the closed box is one section of the inspector, drawn while a room is in hand in 3D: not on the plan,
+  // where it would change nothing on screen, and not for a road, a camera or a symbol.
+  const opener = `{mode === '3d' && selected.type === 'space' && !selectedRoad && <section className="bmap-solid"`;
+  assert.equal(editor.split(opener).length - 1, 1, 'the section of the closed box is not drawn once, on this condition');
+  assert.equal(count(editor, /\bbmap-solid\b/g), 1, 'the class of the closed box is drawn in another place');
+  // Nor is it drawn a second time under another class, and the line of the composition that points to it (below) is not
+  // drawn on the plan as well: the words they share are in the editor twice, the check of this section and that line.
+  assert.equal(count(editor, /속이 안 보이는 박스로/g), 2, 'the switch and the line of the composition, once each');
+  // It stands right behind the section of the kind of the space, out of its branch: there while viewing too, and below its
+  // select, so switching a room to a road takes the section away under nothing that was just pressed. Nothing else stands
+  // between the two: the `</>}` that closes the kind, and this section as written (spaces do not count, and its comment
+  // leaves a `{}`).
+  const squeeze = (text: string) => text.replace(/\s+/g, '');
+  const written = [
+    `{mode === '3d' && selected.type === 'space' && !selectedRoad && <section className="bmap-solid" aria-label="3D에서 보는 방식">`,
+    `<label className="bmap-check"><input type="checkbox" checked={solidIds.has(selected.id)} onChange={event => setSpacesSolid([selected.id], event.target.checked)} />속이 안 보이는 박스로 보기</label>`,
+    `<p className="bmap-hint">이 PC에서 3D를 보는 방식만 바뀌어요. 도면에는 저장되지 않아요. 박스 안에 든 것은 3D에서 안 보여요. 오브젝트 목록에서 고를 수 있어요.{roomsOpen ? ' 기호를 놓는 동안에는 모든 공간이 비쳐 보여요.' : ''}</p>`,
+    `<div className="bmap-link-actions"><button type="button" className="bmap-text-button" onClick={() => setSpacesSolid(mapRoomIds(current), true)}>모든 공간을 박스로</button><button type="button" className="bmap-text-button" onClick={() => setSpacesSolid([...solidIds], false)}>모두 비치게</button></div>`,
+    '</section>}'].join('');
+  assert.equal(squeeze(piece(editor, 'ROAD_HINT_ROUND : ROAD_HINT_NO_STRIP}</p>}', "{selected.type === 'camera' && (() => {")).replace(/\{\}/g, ''),
+    `ROAD_HINT_ROUND:ROAD_HINT_NO_STRIP}</p>}</>}${squeeze(written)}`, 'the section of the closed box is not as written, right behind the kind of the space');
+  // A view setting of this PC writes no map: neither viewing, a lock, a read-only account nor a save switches it off. Only a
+  // drag holds it back, in its handler (anchor 68).
+  const box = piece(editor, opener, '</section>}');
+  assert.ok(!box.includes(' disabled='), 'the closed box is switched off');
+  // The words of the section and what its buttons do: the check, what it changes and where what a box holds is reached, the
+  // sentence while the symbol tool is in hand, every room of the map closed (no road), every box of the map opened.
+  for (const text of ['/>속이 안 보이는 박스로 보기</label>', '이 PC에서 3D를 보는 방식만 바뀌어요. 도면에는 저장되지 않아요. 박스 안에 든 것은 3D에서 안 보여요. 오브젝트 목록에서 고를 수 있어요.',
+    "{roomsOpen ? ' 기호를 놓는 동안에는 모든 공간이 비쳐 보여요.' : ''}", 'onClick={() => setSpacesSolid(mapRoomIds(current), true)}>모든 공간을 박스로</button>',
+    'onClick={() => setSpacesSolid([...solidIds], false)}>모두 비치게</button>'])
+    assert.ok(box.includes(text), `not in the section of the closed box: ${text}`);
+  // That a setting is not saved in the map is said of the way 3D is seen, there alone: said of the eye, it would read as if
+  // a hidden node were not saved.
+  assert.equal(count(editor, /도면에는 저장되지 않아요/g), 1, 'not saved in the map is said in another place');
+  // The rooms are see-through while the symbol tool is in hand in edit mode, through a save as well: one value, read by the
+  // 3D view (anchor 67) and by the sentence of the section. Hung on canEdit, a save with the tool in hand would close and
+  // open every box, and take the sentence away and back.
+  assert.equal(editor.split("const roomsOpen = tool === 'symbol' && editing;").length - 1, 1, 'when the rooms are see-through');
+  assert.equal(count(editor, /\broomsOpen\b/g), 3, 'made, the sentence of the section, the 3D view');
+  // With nothing in hand in 3D, the composition of the map says where the switch is, right under its first hint.
+  const where = `{mode === '3d' && <p className="bmap-hint">공간을 고르면 속이 안 보이는 박스로 볼 수 있어요.</p>}`;
+  assert.equal(editor.split(where).length - 1, 1, 'the line of the composition is not drawn once, in 3D alone');
+  assert.match(editor, /공간을 선택하면 내부 도면을 만들거나 연결할 수 있습니다\.<\/p>\s*\{mode === '3d' && <p className="bmap-hint">공간을 고르면 속이 안 보이는 박스로 볼 수 있어요\.<\/p>\}/,
+    'the line of the composition is not right under its first hint');
+  // The settings are of this PC: their module draws nothing and reaches no page by itself, and its key names its shape.
+  const prefs = read('mapViewPrefs.ts');
+  assert.doesNotMatch(prefs, /from\s+['"]three/, 'the view settings import three.js');
+  for (const global of ['document.', 'window.']) assert.ok(!prefs.includes(global), `the view settings reach the page: ${global}`);
+  assert.ok(prefs.includes("MAP_VIEW_PREFS_KEY = 'bflow.background-map.view.v1'"), 'the key of the view settings');
+  // Kept by this PC past a closed app, read and written there unless a test hands another storage. Node has no such
+  // storage, so the pure tests never reach this default (V-5 reads without it, and writes none): these lines hold it (final review).
+  assert.ok(prefs.includes('try { return localStorage; } catch { return null; }'), 'the view settings are not kept in the storage of this PC');
+  assert.ok(!prefs.includes('sessionStorage'), 'the view settings last for the session only');
+  assert.equal(prefs.split('storage: MapViewStorage | null = deviceStorage())').length - 1, 2, 'reading and writing do not both default to the storage of this PC');
+  // And never of the map: what is saved knows neither word. A node with such a key is refused whole by the save.
+  for (const name of ['types.ts', 'domain.ts', 'mapWorkflow.ts', 'mapDocument.ts'])
+    assert.doesNotMatch(read(name), /\b(?:hidden|solid)(?:Ids)?\b/, `${name} knows a view setting`);
+  // Each account its own: the library hands the editor the one signed in, and draws the editor anew for another.
+  const library = read('BackgroundLibraryView.tsx');
+  assert.ok(library.includes("viewerId={user?.id ?? ''}"), 'the editor is not handed the account signed in');
+  assert.ok(library.includes('key={user?.id || "signed-out"}'), 'the editor is not drawn anew for another account');
 });

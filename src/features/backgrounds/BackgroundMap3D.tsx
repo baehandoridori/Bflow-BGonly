@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Map3DProps, Map3DViewState } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView } from './map3dScene';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView, visibleMapHits } from './map3dScene';
 import type { Map3DPalette, MapPickHit } from './map3dScene';
 import { MapNodeGizmo, mapGizmoSetup } from './BackgroundMapCameraGizmo';
 import { stackedMapNodeIds } from './mapGeometry';
@@ -18,6 +18,8 @@ const RADIANS = Math.PI / 180;
 const PLAN_LIMIT = 100000;
 const CLICK_SLOP = 4;
 const DOUBLE_CLICK_GUARD = 450;
+/** Nothing hidden, no closed room: one set for both, so the scene is not synced again for a new empty one. */
+const NO_IDS: ReadonlySet<string> = new Set();
 
 type ViewRect = { x: number; y: number; width: number; height: number };
 type Press = { pointerId: number; x: number; y: number; moved: boolean; gizmo: boolean; /** The second click of a double click, and on. */ repeat: boolean };
@@ -83,7 +85,7 @@ class Map3DViewport {
   private devHandle: Map3DDevHandle | null = null;
   private props: Map3DProps;
   private palette: Map3DPalette;
-  private shown: { map: BackgroundMap; selectedId: string | null; holdId: string | null; hiddenId: string | null } | null = null;
+  private shown: { map: BackgroundMap; selectedId: string | null; holdId: string | null; hiddenId: string | null; hiddenIds: ReadonlySet<string>; solidIds: ReadonlySet<string> } | null = null;
   private look: { id: string; saved: Map3DViewState } | null = null;
   private lookMissing: string | null = null;
   private reported: Map3DViewState | null = null;
@@ -422,13 +424,15 @@ class Map3DViewport {
 
   private syncScene(map: BackgroundMap): void {
     const selectedId = this.props.selectedId, holdId = this.gizmo.draggedId, hiddenId = this.look?.id ?? null, shown = this.shown;
-    if (shown && shown.map === map && shown.selectedId === selectedId && shown.holdId === holdId && shown.hiddenId === hiddenId) return;
-    this.scene3d.sync(map, selectedId, { holdId, hiddenId });
-    this.shown = { map, selectedId, holdId, hiddenId };
+    // View settings of this PC, handed on as they come: when the rooms are see-through is the editor's to say.
+    const hiddenIds = this.props.hiddenIds ?? NO_IDS, solidIds = this.props.solidIds ?? NO_IDS;
+    if (shown && shown.map === map && shown.selectedId === selectedId && shown.holdId === holdId && shown.hiddenId === hiddenId && shown.hiddenIds === hiddenIds && shown.solidIds === solidIds) return;
+    this.scene3d.sync(map, selectedId, { holdId, hiddenId, hiddenIds, solidIds });
+    this.shown = { map, selectedId, holdId, hiddenId, hiddenIds, solidIds };
   }
-  /** A gizmo is offered only for an unlocked selection, while editing, with the select tool, outside look-through and placing. */
+  /** A gizmo is offered only for an unlocked selection, while editing, with the select tool, outside look-through and placing, and never for a node the eye of the object list hides. */
   private gizmoAllowed(props: Map3DProps, id: string | null): boolean {
-    if (!id || props.selectedId !== id || !props.canEdit || props.tool !== 'select' || props.placing || props.lookThroughId !== null) return false;
+    if (!id || props.selectedId !== id || !props.canEdit || props.tool !== 'select' || props.placing || props.lookThroughId !== null || props.hiddenIds?.has(id)) return false;
     const node = props.map.nodes.find(item => item.id === id);
     return !!node && !node.locked && mapGizmoSetup(node.type, props.gizmoMode) !== null;
   }
@@ -507,7 +511,7 @@ class Map3DViewport {
   private cast(clientX: number, clientY: number): MapPickHit[] {
     if (!this.aim(clientX, clientY)) return [];
     this.scene3d.scene.updateMatrixWorld();
-    return this.raycaster.intersectObjects(this.scene3d.pickTargets(), false);
+    return visibleMapHits(this.raycaster.intersectObjects(this.scene3d.pickTargets(), false));
   }
   /**
    * Plan point under the pointer: on the floor of a space when one is there, whatever its level, otherwise on the
