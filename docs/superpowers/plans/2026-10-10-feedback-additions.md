@@ -298,7 +298,7 @@ R = C:/Bflow-BGonly/.claude/worktrees/background-library-2d-3d-editor-a0ed8c. TO
 | 다. 편집 상태와 저장 지키기 (G2) | 1차: docs/superpowers/specs/2026-10-12-background-map-edit-state-strip-design.md, 아래 7.3 · 2차: - | 1차(보이는 상태) v1.135.0 배포 완료(2026-10-13 00:43 KST, PR #324 → main 6a5ab887) · 2차(보관)는 설계부터 한솔 확인 |
 | 라. 끌어다 놓아 이미지 추가 (G1) | - | 대기 (결정 필요) |
 | 마. 3D 조작 다듬기 (G3·G4·G5·G6) | - | G3(숫자 끌기)와 G6의 첫 조각(옆 그림의 높이)은 v1.136.0 — 아래 7.4 · G4·G5와 G6의 나머지는 대기 |
-| 바. 2026-10-13 추가 요청 여섯 가지 | 1차: docs/superpowers/specs/2026-10-13-background-map-scrub-height-delete-design.md, 아래 7.4 · 2차·3차: - | 1차 2026-10-14 구현·수동 검증 완료(v1.136.0) · 배포 대기 · 2차(눈·박스) · 3차(그림 끌어다 놓기) 대기 |
+| 바. 2026-10-13 추가 요청 여섯 가지 | 1차: docs/superpowers/specs/2026-10-13-background-map-scrub-height-delete-design.md, 아래 7.4 · 2차·3차: - | 1차 v1.136.0 배포 완료(PR #328, G드라이브 2026-10-14 14:09 KST) · 2차(눈·박스) 진행 중 · 3차(그림 끌어다 놓기) 대기 |
 
 ### 7.1 가. 캐릭터 카드 휠 — 만든 것과 확인한 것 (v1.132.1, 2026-10-10)
 
