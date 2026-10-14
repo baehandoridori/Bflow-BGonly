@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPlace, BackgroundSnapshot, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
 import { validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
 import { spacesAt } from '../src/features/backgrounds/mapStack.ts';
-import { mapImagePlaceWords, mapImageTargetWords, resolveMapImageTarget } from '../src/features/backgrounds/mapImageDrop.ts';
+import { MAP_IMAGE_REFUSAL_TEXT, mapImageBaseName, mapImageDragRefused, mapImagePathFacts, mapImagePlaceWords, mapImageRefusedList, mapImageSourceFacts, mapImageTargetWords,
+  resolveMapImageTarget, sortMapImageFiles, uniqueMapImageName } from '../src/features/backgrounds/mapImageDrop.ts';
 import type { MapImageTarget } from '../src/features/backgrounds/mapImageDrop.ts';
 
 // Pictures added to a map by a drop, a paste or the picker: the rules and the words of the pure module, asked of the real
@@ -347,4 +348,135 @@ test('M-2: the words of the overlay and of the place prompt, letter for letter',
   // Not one of these sentences speaks of edit mode by its words.
   assert.ok(said.length > 40);
   for (const line of said) assert.doesNotMatch(line, /편집 중|편집 시작/, line);
+});
+
+/** When a file of the page was last changed, unless a test says otherwise. */
+const CHANGED = 1_700_000_000_000;
+/** A file as the rules read it, made the way the editor makes it: a file of the page (of a File the four fields are all that is
+ *  read), with the path of the disk ('' for none) and whether it came in a paste. */
+const pageFile = (name: string, type: string, more: { size?: number; lastModified?: number; path?: string; pasted?: boolean } = {}) =>
+  mapImageSourceFacts({ kind: 'file', file: { name, type, size: more.size ?? 1000, lastModified: more.lastModified ?? CHANGED }, path: more.path ?? '', pasted: more.pasted ?? false });
+/** A file copied in Explorer that the paste did not carry: known by the path the main process reads. */
+const copied = (path: string) => mapImageSourceFacts({ kind: 'path', path });
+
+test('M-3: which files are taken, refused or over the count, and whether a drag says so before the drop', () => {
+  // A file of the page is its own four fields and what it came with; a path is what the path says, read by the main process.
+  assert.deepEqual(pageFile('교실.png', 'image/png', { size: 2048, path: 'C:\\art\\교실.png' }),
+    { name: '교실.png', type: 'image/png', size: 2048, path: 'C:\\art\\교실.png', lastModified: CHANGED, byPath: false, pasted: false });
+  assert.deepEqual(pageFile('image.png', 'image/png', { pasted: true }), { name: 'image.png', type: 'image/png', size: 1000, path: '', lastModified: CHANGED, byPath: false, pasted: true });
+  // A real File reads the same: its four fields are getters of its own kind, which a copy of the object would not carry.
+  assert.deepEqual(mapImageSourceFacts({ kind: 'file', file: new File(['picture'], '복도.jpg', { type: 'image/jpeg', lastModified: CHANGED }), path: '', pasted: false }),
+    { name: '복도.jpg', type: 'image/jpeg', size: 7, path: '', lastModified: CHANGED, byPath: false, pasted: false });
+  assert.deepEqual(copied('  C:\\art\\사진.PNG  '), { name: '사진.PNG', type: 'image/png', size: 0, path: 'C:\\art\\사진.PNG', lastModified: 0, byPath: true, pasted: true });
+  assert.deepEqual(copied('C:/art/사진.PNG'), mapImagePathFacts('C:/art/사진.PNG'));
+  assert.equal(copied('C:/art/사진.PNG').name, '사진.PNG');
+  // The type of a path is that of its last extension, in any case: 사진.PNG is a PNG. Anything else has none.
+  const typed: [string, string][] = [['C:\\x\\사진.PNG', 'image/png'], ['C:\\x\\그림.WEBP', 'image/webp'], ['C:\\x\\a.jpg', 'image/jpeg'], ['C:\\x\\a.JPEG', 'image/jpeg'],
+    ['C:\\x\\a.gif', 'image/gif'], ['C:\\x\\a.bmp', 'image/bmp'], ['C:\\x\\a.png.psd', ''], ['C:\\x\\README', ''], ['C:/x/교실.png', 'image/png']];
+  for (const [path, type] of typed) assert.equal(mapImagePathFacts(path).type, type, path);
+
+  // One file given twice is taken once. By the path where both have one: its spaces aside, either slash, any case.
+  assert.deepEqual(sortMapImageFiles([pageFile('e.JPG', 'image/jpeg', { path: 'C:\\x\\e.JPG' }), pageFile('E.jpg', 'image/jpeg', { path: 'c:/x/E.jpg' })]), { accepted: [0], refused: [], over: 0 });
+  assert.deepEqual(sortMapImageFiles([pageFile('e.JPG', 'image/jpeg', { path: 'C:\\x\\e.JPG' }), pageFile('E.jpg', 'image/jpeg', { path: ' c:/x/E.jpg ' })]), { accepted: [0], refused: [], over: 0 });
+  assert.deepEqual(sortMapImageFiles([pageFile('e.JPG', 'image/jpeg', { path: 'C:\\x\\e.JPG' }), copied(' c:/x/E.jpg ')]), { accepted: [0], refused: [], over: 0 });
+  // Where neither has one: by name, size and time of change together. The same name alone is not the same file.
+  assert.deepEqual(sortMapImageFiles([pageFile('a.png', 'image/png'), pageFile('a.png', 'image/png')]), { accepted: [0], refused: [], over: 0 });
+  assert.deepEqual(sortMapImageFiles([pageFile('a.png', 'image/png', { size: 100 }), pageFile('a.png', 'image/png', { size: 200 })]).accepted, [0, 1]);
+  assert.deepEqual(sortMapImageFiles([pageFile('a.png', 'image/png', { lastModified: 1 }), pageFile('a.png', 'image/png', { lastModified: 2 })]).accepted, [0, 1]);
+  // A path on one side alone: two files.
+  assert.deepEqual(sortMapImageFiles([pageFile('a.png', 'image/png', { path: 'C:\\x\\a.png' }), pageFile('a.png', 'image/png')]).accepted, [0, 1]);
+  // Pasted data is never the same as another: two pictures pasted alike in all are two, and so is one pasted beside one dropped.
+  assert.deepEqual(sortMapImageFiles([pageFile('image.png', 'image/png', { pasted: true }), pageFile('image.png', 'image/png', { pasted: true })]).accepted, [0, 1]);
+  assert.deepEqual(sortMapImageFiles([pageFile('image.png', 'image/png'), pageFile('image.png', 'image/png', { pasted: true })]).accepted, [0, 1]);
+  // A file refused, given twice, is in the list once.
+  const twice = [pageFile('스케치.psd', ''), pageFile('교실.png', 'image/png'), pageFile('스케치.psd', '')];
+  assert.deepEqual(sortMapImageFiles(twice), { accepted: [1], refused: [{ index: 0, reason: 'type' }], over: 0 });
+  assert.deepEqual(mapImageRefusedList(twice, sortMapImageFiles(twice).refused), [{ name: '스케치.psd', reason: 'PNG·JPG·WebP 그림만 넣을 수 있어요.' }]);
+
+  // 20MB exactly is taken, a byte more is not.
+  const MB = 1024 * 1024;
+  assert.deepEqual(sortMapImageFiles([pageFile('a.png', 'image/png', { size: 20 * MB }), pageFile('b.png', 'image/png', { size: 20 * MB + 1 })]),
+    { accepted: [0], refused: [{ index: 1, reason: 'size' }], over: 0 });
+  // PNG, JPEG and WebP go in. No type (.psd), GIF and BMP do not, nor a WebP the main process would read by its path.
+  const kinds = [pageFile('a.png', 'image/png'), pageFile('b.jpg', 'image/jpeg'), pageFile('c.webp', 'image/webp'), pageFile('d.psd', ''), pageFile('e.gif', 'image/gif'),
+    copied('C:\\x\\그림.WEBP'), copied('C:\\x\\사진.PNG'), copied('C:\\x\\f.bmp'), copied('C:\\x\\g.jpeg')];
+  assert.deepEqual(sortMapImageFiles(kinds), { accepted: [0, 1, 2, 6, 8],
+    refused: [{ index: 3, reason: 'type' }, { index: 4, reason: 'type' }, { index: 5, reason: 'webp-path' }, { index: 7, reason: 'type' }], over: 0 });
+
+  // Ten at a time. What is over is counted, named nowhere, and counted once however often it is given.
+  const ten = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const photos = (count: number, from = 0) => Array.from({ length: count }, (_, n) => pageFile(`사진 ${from + n}.png`, 'image/png'));
+  assert.deepEqual(sortMapImageFiles(photos(12)), { accepted: ten, refused: [], over: 2 });
+  assert.deepEqual(sortMapImageFiles([...photos(12), pageFile('사진 11.png', 'image/png')]), { accepted: ten, refused: [], over: 2 });
+  // Asked last: a .psd after ten good ones is refused for its type, not over.
+  assert.deepEqual(sortMapImageFiles([...photos(10), pageFile('스케치.psd', '')]), { accepted: ten, refused: [{ index: 10, reason: 'type' }], over: 0 });
+  // Eleven photos with a .psd among them, twelve in all: ten taken, one refused, one over, each by its place in the list handed in.
+  assert.deepEqual(sortMapImageFiles([...photos(5), pageFile('스케치.psd', ''), ...photos(6, 5)]), { accepted: [0, 1, 2, 3, 4, 6, 7, 8, 9, 10], refused: [{ index: 5, reason: 'type' }], over: 1 });
+
+  // The three reasons, letter for letter, and the list of what was refused: each file by its name, in the order it came.
+  assert.deepEqual(MAP_IMAGE_REFUSAL_TEXT, {
+    'webp-path': "WebP 파일은 복사해서 붙여 넣을 수 없어요. 끌어다 놓거나 '＋ 이미지 추가'로 넣어 주세요.",
+    type: 'PNG·JPG·WebP 그림만 넣을 수 있어요.',
+    size: '20MB보다 큰 그림은 넣을 수 없어요.',
+  });
+  const refusals = [pageFile('b.gif', 'image/gif'), pageFile('교실.png', 'image/png'), pageFile('a.png', 'image/png', { size: 30 * MB }), copied('C:\\x\\c.webp')];
+  assert.deepEqual(mapImageRefusedList(refusals, sortMapImageFiles(refusals).refused), [
+    { name: 'b.gif', reason: 'PNG·JPG·WebP 그림만 넣을 수 있어요.' },
+    { name: 'a.png', reason: '20MB보다 큰 그림은 넣을 수 없어요.' },
+    { name: 'c.webp', reason: "WebP 파일은 복사해서 붙여 넣을 수 없어요. 끌어다 놓거나 '＋ 이미지 추가'로 넣어 주세요." },
+  ]);
+
+  // While it is dragged: refused only when there is a file, every file says its type, and none of them can go in. What is not
+  // a file is not counted, so text alone says nothing; one file that can go in, or one that does not say, lets it be dropped.
+  const item = (kind: string, type: string) => ({ kind, type });
+  assert.equal(mapImageDragRefused([item('file', 'image/gif'), item('file', 'image/bmp')]), true);
+  assert.equal(mapImageDragRefused([item('string', 'text/uri-list'), item('file', 'image/gif')]), true);
+  assert.equal(mapImageDragRefused([item('file', 'image/png'), item('file', 'image/gif')]), false);
+  assert.equal(mapImageDragRefused([item('file', 'image/gif'), item('file', '')]), false);
+  assert.equal(mapImageDragRefused([item('string', 'text/plain'), item('string', 'text/html')]), false);
+  assert.equal(mapImageDragRefused([]), false);
+  for (const type of ['image/png', 'image/jpeg', 'image/webp']) assert.equal(mapImageDragRefused([item('file', type)]), false, type);
+});
+
+test('M-4: the name of a background made from a file', () => {
+  const at = new Date(2026, 9, 13, 14, 5), early = new Date(2026, 9, 13, 9, 7);
+  const named = (name: string, more: { path?: string; pasted?: boolean } = {}, when = at) => mapImageBaseName(pageFile(name, 'image/png', more), when);
+  // Pasted data, named by the engine: by the time on this PC, two digits each.
+  assert.equal(named('image.png', { pasted: true }), '붙여 넣은 그림 14:05');
+  assert.equal(named('image.png', { pasted: true }, early), '붙여 넣은 그림 09:07');
+  for (const name of ['image.jpg', 'image.jpeg', 'image.webp']) assert.equal(named(name, { pasted: true }), '붙여 넣은 그림 14:05', name);
+  // Dropped, it is a file like any other.
+  assert.equal(named('image.png'), 'image');
+  // Pasted with a name of its own, or with a path: the name of the file. The engine's names are lower case as they are.
+  assert.equal(named('교실.png', { pasted: true }), '교실');
+  assert.equal(named('IMAGE.PNG', { pasted: true }), 'IMAGE');
+  assert.equal(named('image.png', { pasted: true, path: 'C:\\shots\\image.png' }), 'image');
+  assert.equal(mapImageBaseName(copied('C:\\shots\\image.png'), at), 'image');
+  // The last dot and what follows go, then the spaces around what is left. With no dot the name stays; with nothing left, a name all the same.
+  assert.equal(named('교실_낮.v2.png'), '교실_낮.v2');
+  assert.equal(named(' 교실 .png'), '교실');
+  assert.equal(named('교실'), '교실');
+  assert.equal(named('화면 14.05.33'), '화면 14.05');
+  assert.equal(named('.png'), '이름 없는 그림');
+  // A file with no name is named by the last part of its path.
+  assert.equal(named('', { path: 'C:\\art\\복도.jpg' }), '복도');
+  // 160 units at most, never half a character, and no space left at the end.
+  assert.equal(named(`${'가'.repeat(159)}🏫.png`), '가'.repeat(159));
+  assert.equal(named(`${'가'.repeat(170)}.png`), '가'.repeat(160));
+  assert.equal(named(`${'가'.repeat(159)} 나다.png`), '가'.repeat(159));
+
+  // A name taken already gets a number, from 2 on.
+  assert.equal(uniqueMapImageName('교실', new Set()), '교실');
+  assert.equal(uniqueMapImageName('교실', new Set(['교실'])), '교실 (2)');
+  assert.equal(uniqueMapImageName('교실', new Set(['교실', '교실 (2)'])), '교실 (3)');
+  assert.equal(uniqueMapImageName('교실', new Set(['교실 (2)'])), '교실');
+  // Within 160 units still: room is made by cutting the name, never through a character, and with no space left before the number.
+  const full = '가'.repeat(160), numbered = uniqueMapImageName(full, new Set([full]));
+  assert.equal(numbered, `${'가'.repeat(156)} (2)`);
+  assert.equal(numbered.length, 160);
+  const parted = `${'가'.repeat(155)}🏫${'가'.repeat(3)}`;
+  assert.equal(parted.length, 160);
+  assert.equal(uniqueMapImageName(parted, new Set([parted])), `${'가'.repeat(155)} (2)`);
+  const spaced = `${'가'.repeat(155)} 나다`;
+  assert.equal(uniqueMapImageName(spaced, new Set([spaced])), `${'가'.repeat(155)} (2)`);
 });

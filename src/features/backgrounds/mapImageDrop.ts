@@ -114,6 +114,71 @@ export function mapImagePlaceWords(target: Extract<MapImageTarget, { status: 'ne
 export type MapImageFileFacts = { name: string; type: string; size: number; path: string; lastModified: number; byPath: boolean; pasted: boolean }; export type MapImageRefusal = 'type' | 'size' | 'webp-path';
 /** A picture on its way in, as far as the rules read it: a file of the page (four fields of a `File`: a real one fits), or a path the main process reads. */
 export type MapImageSourceLike = { kind: 'file'; file: { readonly name: string; readonly type: string; readonly size: number; readonly lastModified: number }; path: string; pasted: boolean } | { kind: 'path'; path: string };
+/** The type of a path by its last extension, read in lower case: the six of a picture file the clipboard may name. */
+const PATH_TYPES = new Map([['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['webp', 'image/webp'], ['gif', 'image/gif'], ['bmp', 'image/bmp']]);
+/** What follows the last slash of either kind. */
+const lastPart = (path: string) => path.slice(Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')) + 1);
+/** A path as two of them are compared (4.6): its spaces aside, either slash, any case. '' for none. */
+const pathKey = (path: string) => path.trim().replace(/\\/g, '/').toLowerCase();
+export function mapImageSourceFacts(source: MapImageSourceLike): MapImageFileFacts {
+  if (source.kind === 'path') return mapImagePathFacts(source.path);
+  // The four fields alone: a File has more, none of it read here.
+  const { name, type, size, lastModified } = source.file;
+  return { name, type, size, path: source.path, lastModified, byPath: false, pasted: source.pasted };
+}
+/** A file known by its path alone: named by its last part, typed by its last extension (사진.PNG is a PNG). How big it is the main process sees. */
+export function mapImagePathFacts(path: string): MapImageFileFacts {
+  const trimmed = path.trim(), name = lastPart(trimmed), dot = name.lastIndexOf('.');
+  return { name, type: dot < 0 ? '' : PATH_TYPES.get(name.slice(dot + 1).toLowerCase()) ?? '', size: 0, path: trimmed, lastModified: 0, byPath: true, pasted: true };
+}
+/** The files in the order handed in, each by the rows of 4.6: `accepted` and `index` are places in that list. */
+export function sortMapImageFiles(files: readonly MapImageFileFacts[]): { accepted: number[]; refused: { index: number; reason: MapImageRefusal }[]; over: number } {
+  const accepted: number[] = [], refused: { index: number; reason: MapImageRefusal }[] = [], seen = new Set<string>();
+  let over = 0;
+  files.forEach((file, index) => {
+    // The same file as one before it, whatever became of that one, is counted once and said nothing of: by the path where it
+    // has one, else by name, size and time of change. Pasted data is never the same as another.
+    const path = pathKey(file.path), same = path ? `path ${path}` : file.pasted ? null : `file ${JSON.stringify([file.name, file.size, file.lastModified])}`;
+    if (same !== null) { if (seen.has(same)) return; seen.add(same); }
+    const reason: MapImageRefusal | null = file.byPath && file.type === 'image/webp' ? 'webp-path'
+      : !MAP_IMAGE_ADD.types.includes(file.type) ? 'type' : file.size > MAP_IMAGE_ADD.maxBytes ? 'size' : null;
+    if (reason) refused.push({ index, reason });
+    // Asked last: a file that is refused anyway is said as such, not counted over.
+    else if (accepted.length >= MAP_IMAGE_ADD.maxFiles) over += 1;
+    else accepted.push(index);
+  });
+  return { accepted, refused, over };
+}
+export const MAP_IMAGE_REFUSAL_TEXT: Record<MapImageRefusal, string> = {
+  'webp-path': "WebP 파일은 복사해서 붙여 넣을 수 없어요. 끌어다 놓거나 '＋ 이미지 추가'로 넣어 주세요.", type: 'PNG·JPG·WebP 그림만 넣을 수 있어요.', size: '20MB보다 큰 그림은 넣을 수 없어요.',
+};
+/** What was refused, in the order it came: each file by its name, with why. */
+export function mapImageRefusedList(files: readonly MapImageFileFacts[], refused: readonly { index: number; reason: MapImageRefusal }[]): { name: string; reason: string }[] {
+  return refused.map(({ index, reason }) => ({ name: files[index].name, reason: MAP_IMAGE_REFUSAL_TEXT[reason] }));
+}
+/** True only when at least one file item is dragged, every file item names its type (not ''), and none of them is PNG, JPEG or WebP. Items that are not files are not counted: text alone is false. */
+export function mapImageDragRefused(items: readonly { kind: string; type: string }[]): boolean {
+  const files = items.filter(item => item.kind === 'file');
+  return files.length > 0 && files.every(item => item.type !== '' && !MAP_IMAGE_ADD.types.includes(item.type));
+}
+/** The names the engine gives a pasted picture, lower case as they are: IMAGE.PNG is a name of its own. */
+const PASTED_NAMES: readonly string[] = ['image.png', 'image.jpg', 'image.jpeg', 'image.webp'];
+/** The name a background made of a file starts from: pasted data by the time on this PC, any other file by its name (the last part of its path
+ *  when it has none) less the last dot and what follows. 160 units at most, never half a character. */
+export function mapImageBaseName(file: Pick<MapImageFileFacts, 'name' | 'path' | 'pasted'>, at: Date): string {
+  if (file.pasted && !file.path.trim() && PASTED_NAMES.includes(file.name))
+    return `붙여 넣은 그림 ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+  const whole = file.name || lastPart(file.path.trim()), dot = whole.lastIndexOf('.');
+  return cut((dot < 0 ? whole : whole.slice(0, dot)).trim(), MAP_IMAGE_ADD.nameLimit).trimEnd() || '이름 없는 그림';
+}
+/** The name, or with ` (2)`, ` (3)`… where it is taken: within 160 units still, cut never through a character and with no space left before the number. */
+export function uniqueMapImageName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  for (let count = 2; ; count += 1) {
+    const suffix = ` (${count})`, name = `${cut(base, MAP_IMAGE_ADD.nameLimit - suffix.length).trimEnd()}${suffix}`;
+    if (!taken.has(name)) return name;
+  }
+}
 export type MapImagePlaceChoice = { kind: 'existing'; placeId: string } | { kind: 'new'; name: string };
 /** `newPlace` is saved first when it is not null. `place`: the tie the pictures stand on, the node that holds or is given the place (`nodeId` a space id, or null for the map)
  *  and what it held when the target was read (`was`: the place itself for a target that had one, else null or the id of a place that is gone).
