@@ -745,7 +745,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       setError(mapDeleteCauseText(cause));
       setMapDelete(previous => previous && { ...previous, progress: null, stopped: plan });
       // The dialog arms itself again under the pointer, and two more paragraphs push its buttons down: a click still on its way lands nowhere.
-      swallowSecondClick();
+      // Only while the editor is up: a link from outside or another window can change the screen during a run, and the presses of that screen are none of this dialog's.
+      if (rootRef.current) swallowSecondClick();
     } finally { deleting.current = false; setBusy(false); }
   }
   /** 돌아가기, Esc, the close button and 닫기. Not while a run is in progress. */

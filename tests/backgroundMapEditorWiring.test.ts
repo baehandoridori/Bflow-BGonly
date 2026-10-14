@@ -2113,6 +2113,10 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // plan keeps its strokes unscaled, and no rule of the handle undoes that: drawn in the units of the picture, the halo
   // could not be told from the edge of the lens in the smallest picture, and the area would shrink with the picture.
   has(baseRule(plan, '.bmap-plan-side-grab {'), 'fill:transparent', 'stroke:transparent', 'stroke-width:24px', 'pointer-events:all', 'cursor:ns-resize', 'touch-action:none');
+  // The engine reads touch-action from boxes only: on a shape inside a picture it is dropped, and the lens inherits the
+  // scrolling of the page, so a touch or a pen that starts there turns into a scroll after a few pixels and the drag is
+  // cancelled. While the lens can be dragged the picture as a whole takes it; in view mode the picture is as before.
+  has(baseRule(plan, '.bmap-plan-side.is-draggable>svg {'), 'touch-action:none');
   has(baseRule(plan, '.bmap-plan-side-ring {'), 'fill:none', 'stroke-width:6px');
   has(baseRule(plan, '.bmap-plan-preview :is(rect,polygon,circle,line,path) {'), 'vector-effect:non-scaling-stroke');
   for (const line of rules) assert.doesNotMatch(line, /vector-effect/);
@@ -2214,7 +2218,9 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
   // where the map hung. A run that stops says why in the words of the dialog (by `message` the wrapper Electron puts
   // round what the main process throws would be shown), keeps the plan of that press for what the dialog says was done,
   // and for the length of a double-click no press reaches the page: the dialog arms itself again under the pointer, and a
-  // click still on its way would send a plan nobody has read. However it ends, the ref and `busy` are cleared.
+  // click still on its way would send a plan nobody has read. That only while the editor is up (its root is there): a link
+  // from outside or another window can change the screen during a run, which takes the editor down, and the presses of
+  // that screen are none of the dialog's. However it ends, the ref and `busy` are cleared.
   inOrder(run, 'if (!mapDelete || disabled || deleting.current) return;', 'dropGoneDrafts();', 'planMapDelete(snapshot, settle().drafts, mapDelete.mapId, mapDelete.mode)',
     'if (!plan.target || plan.refusal) return;', 'deleteAimed.current = [...new Set([...deleteAimed.current, ...plan.removed])];', 'deleting.current = true; setBusy(true);',
     "if (step.type === 'save-maps') await persistMaps(step);", 'else { await execute(step); doc.discard(step.id); done += 1; }', 'setCurrentId(parentId);',
@@ -2249,7 +2255,7 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
     'setMapDelete(previous => previous && { ...previous, progress: { done, total } });', '}',
     "setCurrentId(parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);",
     'setCollapsed(previous => new Set([...previous].filter(id => !opened.includes(id))));', 'setMapDelete(null);', '} catch (cause) {', 'setError(mapDeleteCauseText(cause));',
-    'setMapDelete(previous => previous && { ...previous, progress: null, stopped: plan });', 'swallowSecondClick();', '} finally { deleting.current = false; setBusy(false); }', '}']);
+    'setMapDelete(previous => previous && { ...previous, progress: null, stopped: plan });', 'if (rootRef.current) swallowSecondClick();', '} finally { deleting.current = false; setBusy(false); }', '}']);
   // 돌아가기, Esc, the close button and 닫기. Not while a run is in progress: the editor is busy then. The drafts of maps
   // deleted without an answer go. The draft of the map the dialog holds goes, and the screen moves to where that map
   // hung, only when the library no longer has that map (deleted here without an answer, or elsewhere): outside that

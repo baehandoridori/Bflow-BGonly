@@ -108,6 +108,8 @@
 }
 /* The lens of the side view while its camera can be edited: a wider area takes the press, and a halo with a small up-down mark says it can be dragged. The halo is in screen pixels, so it shows at any size of the picture. Painted from the camera variables of this plan. Nothing here moves by itself. */
 .bmap-plan-side-grab { fill:transparent; stroke:transparent; stroke-width:24px; pointer-events:all; cursor:ns-resize; touch-action:none; }
+/* The engine reads touch-action from boxes only, never from a shape inside a picture: while the lens can be dragged the picture as a whole takes it, so a touch or a pen that starts on the lens is not taken for a scroll halfway. */
+.bmap-plan-side.is-draggable>svg { touch-action:none; }
 .bmap-plan-side-ring { fill:none; stroke:var(--bmap-plan-cam-line); stroke-opacity:.35; stroke-width:6px; pointer-events:none; }
 .bmap-plan-side-marks { fill:none; stroke:var(--bmap-plan-cam-line); stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
 .bmap-plan-side.is-lifting .bmap-plan-side-ring { stroke-opacity:.7; }
