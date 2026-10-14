@@ -8,7 +8,7 @@ import { build } from 'esbuild';
 import { DoubleSide, Object3D, PerspectiveCamera, Raycaster, Texture, TextureLoader, Vector2, Vector3 } from 'three';
 import type { BufferGeometry, Material, Mesh } from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView, visibleMapHits } from '../src/features/backgrounds/map3dScene.ts';
 import type { MapPickHit } from '../src/features/backgrounds/map3dScene.ts';
 import { MAP_GIZMO_COLORS, MAP_GIZMO_SHAPE, mapGizmoSize, MapNodeGizmo, mapGizmoSetup, previewMapFromRoot, rootWorldPose, styleMapGizmo } from '../src/features/backgrounds/BackgroundMapCameraGizmo.ts';
 import type { Map3DProps, Map3DViewState } from '../src/features/backgrounds/mapCanvas.ts';
@@ -3867,16 +3867,17 @@ test('W-1: viewport — a hidden node is not drawn, takes no click and gets no g
   editor.viewport.dispose();
 });
 
+/** From here on, the syncs of the scene of a viewport: how many since the last look, and the options of the last one. */
+const watchSyncs = (mounted: MountedViewport) => {
+  const scene = (mounted.viewport as Any).scene3d, sync = scene.sync.bind(scene);
+  let calls = 0, options: Any = null;
+  scene.sync = (map: BackgroundMap, selectedId: string | null, given: Any) => { calls++; options = given; return sync(map, selectedId, given); };
+  return { count: () => { const seen = calls; calls = 0; return seen; }, options: () => options };
+};
+
 test('W-2: viewport — the scene is synced again for a new set alone, and never for placing', async () => {
-  /** From here on, the syncs of the scene of a viewport: how many since the last look, and the options of the last one. */
-  const watch = (mounted: MountedViewport) => {
-    const scene = (mounted.viewport as Any).scene3d, sync = scene.sync.bind(scene);
-    let calls = 0, options: Any = null;
-    scene.sync = (map: BackgroundMap, selectedId: string | null, given: Any) => { calls++; options = given; return sync(map, selectedId, given); };
-    return { count: () => { const seen = calls; calls = 0; return seen; }, options: () => options };
-  };
   const hidden = new Set([viewChair.id]), solid = new Set([viewRoom.id]);
-  const editor = await mountViewport({ hiddenIds: hidden, solidIds: solid }), syncs = watch(editor);
+  const editor = await mountViewport({ hiddenIds: hidden, solidIds: solid }), syncs = watchSyncs(editor);
   // The same map and the same two sets: drawn again, synced never.
   editor.render(); editor.render({ hiddenIds: hidden, solidIds: solid });
   assert.equal(syncs.count(), 0, 'synced again for the same sets');
@@ -3900,7 +3901,7 @@ test('W-2: viewport — the scene is synced again for a new set alone, and never
   assert.equal(syncs.count(), 0, 'synced again for placing');
   editor.viewport.dispose();
   // Handed neither set: after the sync it opened with, placing switched on and off syncs nothing.
-  const bare = await mountViewport(), bareSyncs = watch(bare);
+  const bare = await mountViewport(), bareSyncs = watchSyncs(bare);
   assert.ok(bare.root(viewRoom.id), 'the scene was synced as the viewport opened');
   bare.render({ placing: true }); bare.render({ placing: false }); bare.render();
   assert.equal(bareSyncs.count(), 0, 'a viewport handed no set syncs again');
@@ -4108,5 +4109,168 @@ test('W-5: viewport — a closed room dragged by the gizmo stays closed and keep
   assert.ok(Math.abs(moved.x - viewRoom.x) > 1, 'the room moved');
   near(carried.x - viewChair.x, moved.x - viewRoom.x, 'the chair went with the room');
   assert.deepEqual(seen(), [CLOSED_ROOM, false], 'after the drag');
+  editor.viewport.dispose();
+});
+
+test('S-3: a click stops at the first closed face on its ray, and what a closed room holds is neither drawn nor clicked', () => {
+  // A box with a see-through room in front of it, a chair and a camera inside it, a camera behind it, a chair at the very
+  // front and a table across its right wall.
+  const box = space(1, { name: '박스', x: 300, y: 200, width: 300, height: 200 }), front = space(2, { name: '앞의 방', x: 300, y: 460, width: 300, height: 160 });
+  const inChair = symbol(12, 'chair', { name: '안의 의자', x: 340, y: 240 }), inLens = camera(20, { name: '안의 카메라', x: 520, y: 300 });
+  const behind = camera(21, { name: '뒤의 카메라', x: 450, y: 150 }), frontChair = symbol(13, 'chair', { name: '앞의 의자', x: 320, y: 520 });
+  const table = symbol(14, 'table', { name: '걸친 탁자', x: 560, y: 260, width: 100, height: 80 });
+  const map = mapOf([box, front, inChair, inLens, behind, frontChair, table]), scene = new Map3DScene(), solidIds = new Set([box.id]);
+  /** A ray straight down on a plan spot, cut at the first closed face as the viewport cuts it. */
+  const down = (x: number, z: number) => visibleMapHits(cast(scene, [x, 900, z], [0, -1, 0]));
+  scene.sync(map, null, { solidIds });
+  // What the box holds is not drawn and is no target. What stands behind it and what lies across its wall are drawn.
+  assert.deepEqual([drawnIn(scene, inChair), drawnIn(scene, inLens), drawnIn(scene, behind), drawnIn(scene, table)], [[false, false], [false, false], [true, true], [true, true]]);
+  assert.ok(scene.pickTargets().every(target => target.userData.nodeId !== inChair.id && target.userData.nodeId !== inLens.id), 'what the box holds is a target');
+  // Straight at the front, through the see-through walls of the room in front, the box and the camera behind it. Uncut,
+  // the ray picks that camera. Cut, it ends on the front wall of the box, and the box takes the click: a closed face is a
+  // floor to a click, so the see-through walls before it do not.
+  const ahead = cast(scene, [450, 120, 900], [0, 0, -1]), stopped = visibleMapHits(ahead);
+  assert.equal(pickMapNode(ahead, map), behind.id);
+  assert.ok(stopped.some(hit => hit.object.userData.nodeId === front.id), 'the walls in front of the box are not on the ray');
+  assert.equal(stopped[stopped.length - 1].object.userData.pickPart, 'shell');
+  assert.equal(pickMapNode(stopped, map), box.id);
+  // From above, on the chair inside: the lid of the box and nothing under it. The box is picked, it is the floor there,
+  // and the pile there is the box alone.
+  const onChair = down(370, 270);
+  assert.equal(pickMapNode(onChair, map), box.id);
+  assert.equal(pickMapFloor(onChair, map)?.object.userData.nodeId, box.id);
+  assert.deepEqual(mapSpacePile(onChair, map), [box.id]);
+  // The chair at the very front: a ray that meets no closed face is handed back as it came, and it picks the chair.
+  const atFront = cast(scene, [350, 900, 550], [0, -1, 0]);
+  same(visibleMapHits(atFront), atFront, 'a ray without a closed face is not handed back as it came');
+  assert.equal(pickMapNode(atFront, map), frontChair.id);
+  // Beside the box the room in front is picked, and on the part of the table outside the box the table.
+  assert.equal(pickMapNode(down(500, 540), map), front.id);
+  assert.equal(pickMapNode(down(640, 300), map), table.id);
+  // A box on the floor of a larger room: the pile under the pointer is the box alone, and the same spot again stays on
+  // it. Uncut, the same spot again would step down to the room under the box.
+  const hall = space(5, { name: '큰 방', x: 100, y: 100, width: 800, height: 560 }), halls = mapOf([hall, box]);
+  scene.sync(halls, null, { solidIds });
+  const over = cast(scene, [450, 900, 300], [0, -1, 0]), onBox = visibleMapHits(over);
+  assert.deepEqual(mapSpacePile(onBox, halls), [box.id]);
+  assert.equal(resolveMapClick(halls, box.id, onBox, true), box.id);
+  assert.deepEqual(mapSpacePile(over, halls), [box.id, hall.id]);
+  assert.equal(resolveMapClick(halls, box.id, over, true), hall.id);
+  scene.dispose();
+});
+
+test('S-4: what lies flush on a face of a closed room is not drawn, so it neither shows through nor takes the click', () => {
+  /** A ray straight down on a plan spot, cut at the first closed face as the viewport cuts it. */
+  const down = (scene: Map3DScene, x: number, z: number) => visibleMapHits(cast(scene, [x, 900, z], [0, -1, 0]));
+  // Stairs of the default height in a room of the default height, their top step level with the lid, and a room of the
+  // same height in a corner of it: both come before the room in the map.
+  const room = space(1, { name: '방', x: 300, y: 200, width: 300, height: 200 }), stairs = symbol(10, 'stairs', { name: '계단', x: 320, y: 220, width: 80, height: 120 });
+  const nook = space(3, { name: '구석 방', x: 480, y: 300, width: 120, height: 100 });
+  const map = mapOf([stairs, nook, room]), scene = new Map3DScene(), onTop = () => down(scene, 360, 226);
+  // See-through, a ray down on the top step picks the stairs.
+  scene.sync(map, null);
+  assert.equal(pickMapNode(onTop(), map), stairs.id);
+  // Closed: from that very sync the two are not drawn and are no target, and on the top step the ray holds the room alone.
+  scene.sync(map, null, { solidIds: new Set([room.id]) });
+  assert.deepEqual([drawnIn(scene, stairs), drawnIn(scene, nook)], [[false, false], [false, false]]);
+  assert.ok(scene.pickTargets().every(target => target.userData.nodeId === room.id), 'what the room holds is a target');
+  const top = onTop();
+  assert.ok(top.length > 0 && top.every(hit => hit.object.userData.nodeId === room.id), 'the ray on the top step holds more than the room');
+  assert.equal(pickMapNode(top, map), room.id);
+  // That is what not drawing them is for: were the steps a target, the top one would lie at the very distance of the lid,
+  // stay on the cut ray and take the click.
+  const forced = [...scene.pickTargets()];
+  rootOf(scene, stairs).traverse(object => { if (object.userData.pickPart) forced.push(object); });
+  scene.scene.updateMatrixWorld(true);
+  const through = new Raycaster(new Vector3(360, 900, 226), new Vector3(0, -1, 0)).intersectObjects(forced, false);
+  assert.equal(pickMapNode(visibleMapHits(through), map), stairs.id);
+  // Selected, the stairs are drawn, and picked on their top step.
+  scene.sync(map, stairs.id, { solidIds: new Set([room.id]) });
+  assert.deepEqual(drawnIn(scene, stairs), [true, true]);
+  assert.equal(pickMapNode(onTop(), map), stairs.id);
+  // The room in the corner a box as well: what is inside is still not drawn, and the box around it is picked there.
+  scene.sync(map, null, { solidIds: new Set([room.id, nook.id]) });
+  assert.deepEqual([drawnIn(scene, stairs), drawnIn(scene, nook)], [[false, false], [false, false]]);
+  assert.equal(pickMapNode(down(scene, 540, 350), map), room.id);
+  scene.dispose();
+  // Two boxes of one height that overlap, in either order of the map: both are drawn, both lids are left on the ray where
+  // they overlap, and the smaller one is picked there, as the plan stacks them. From straight above the two lids lie at one
+  // distance. On a ray from the fitted view they differ in the last digits, either way round, and both still stay.
+  const wide = space(5, { name: '넓은 박스', x: 100, y: 100, width: 300, height: 200 }), small = space(6, { name: '작은 박스', x: 300, y: 200, width: 150, height: 150 });
+  for (const nodes of [[wide, small], [small, wide]]) {
+    const pair = mapOf(nodes), boxes = new Map3DScene(), order = nodes.map(node => node.name).join(' · '), [ex, ey, ez] = fitMapView(pair, 1.6).position;
+    boxes.sync(pair, null, { solidIds: new Set([wide.id, small.id]) });
+    assert.deepEqual([drawnIn(boxes, wide), drawnIn(boxes, small)], [[true, true], [true, true]], order);
+    for (const [x, z] of [[350, 250], [320, 210], [390, 290]]) {
+      const rays = { 'from above': down(boxes, x, z), 'from the fitted view': visibleMapHits(cast(boxes, [ex, ey, ez], [x - ex, 180 - ey, z - ez])) };
+      for (const [ray, lids] of Object.entries(rays)) {
+        assert.deepEqual(new Set(lids.filter(hit => hit.object.userData.pickPart === 'shell').map(hit => hit.object.userData.nodeId)), new Set([wide.id, small.id]), `${order}, ${ray} on ${x},${z}: the two lids`);
+        assert.equal(pickMapNode(lids, pair), small.id, `${order}, ${ray} on ${x},${z}`);
+      }
+    }
+    boxes.dispose();
+  }
+  // Two boxes of one outline and one height, in either order: the earlier in the map is drawn, and holds the later.
+  const twinA = space(7, { name: '쌍둥이 가', x: 600, y: 420, width: 200, height: 150 }), twinB = space(8, { name: '쌍둥이 나', x: 600, y: 420, width: 200, height: 150 });
+  for (const [first, second] of [[twinA, twinB], [twinB, twinA]]) {
+    const twins = new Map3DScene();
+    twins.sync(mapOf([first, second]), null, { solidIds: new Set([twinA.id, twinB.id]) });
+    assert.deepEqual([drawnIn(twins, first), drawnIn(twins, second)], [[true, true], [false, false]], `${first.name} first`);
+    twins.dispose();
+  }
+  // A see-through loft over a box: the loft is picked there, and the pile is the loft, then the box.
+  const loft = space(9, { name: '다락', x: 300, y: 200, width: 300, height: 200, elevation: 200 }), stacked = mapOf([room, loft]), tower = new Map3DScene();
+  tower.sync(stacked, null, { solidIds: new Set([room.id]) });
+  const underLoft = down(tower, 450, 300);
+  assert.equal(pickMapNode(underLoft, stacked), loft.id);
+  assert.deepEqual(mapSpacePile(underLoft, stacked), [loft.id, room.id]);
+  tower.dispose();
+});
+
+test('W-3: viewport — a closed room hides what it holds and stops clicks, and the empty set of the symbol tool opens it', async () => {
+  // The room closed, its chair in it, and a camera just behind it: from the fitted view the ray to that camera crosses the
+  // room. The empty set stands for the one the editor hands while the symbol tool is in hand: one object for every render.
+  const behind = camera(21, { name: '뒤의 카메라', x: 250, y: 40 }), solid = new Set([viewRoom.id]), open = new Set<string>();
+  const editor = await mountViewport({ map: mapOf([viewRoom, viewChair, behind]), canEdit: false, solidIds: solid });
+  const seen = () => [editor.root(viewRoom.id).children.map((child: Any) => child.name), editor.root(viewChair.id).visible];
+  const seat = editor.screen(viewChair.id), lens = editor.screen(behind.id);
+  assert.deepEqual(seen(), [CLOSED_ROOM, false], 'closed');
+  assert.equal(editor.root(behind.id).visible, true, 'the camera behind the room is not drawn');
+  // On the spot of the chair the room is clicked.
+  editor.click(seat);
+  assert.deepEqual(editor.log, [['select', viewRoom.id]]);
+  // On the spot of the camera behind it too: the camera is drawn and on that ray, but the ray stops at the box.
+  assert.ok(partsUnder(editor, lens, behind.id).size > 0, 'the camera is not on the ray of its own spot');
+  editor.render({ selectedId: null });
+  editor.clear();
+  editor.click(lens);
+  assert.deepEqual(editor.log, [['select', viewRoom.id]]);
+  // A double click on the box enters the detail map of the room.
+  editor.clear();
+  editor.fire('dblclick', seat);
+  assert.deepEqual(opened(editor), [viewRoom.id]);
+  // Placing alone changes nothing: when the rooms are see-through is the editor's to say.
+  editor.render({ placing: true });
+  assert.deepEqual(seen(), [CLOSED_ROOM, false], 'placing alone');
+  // Handed the empty set with it, as with the symbol tool in hand: the room opens, its chair is drawn, and a click reports
+  // the point on the floor of the room.
+  editor.render({ placing: true, canEdit: true, solidIds: open });
+  assert.deepEqual(seen(), [OPEN_ROOM, true], 'the empty set');
+  editor.clear();
+  editor.click(editor.at(250, 0, 180));
+  assert.deepEqual(editor.names(), ['place']);
+  const point = editor.log[0][1] as BackgroundPoint;
+  near(point.x, 250, 'floor x', 0.02); near(point.y, 180, 'floor y', 0.02);
+  // A save turns placing and editing off and on again, the empty set as it was: the room stays open, and the scene is not
+  // synced again.
+  const syncs = watchSyncs(editor);
+  editor.render({ placing: false, canEdit: false });
+  assert.deepEqual(seen(), [OPEN_ROOM, true], 'while a save runs');
+  editor.render({ placing: true, canEdit: true });
+  assert.deepEqual(seen(), [OPEN_ROOM, true], 'after the save');
+  assert.equal(syncs.count(), 0, 'synced again for a save');
+  // The set handed back: closed again.
+  editor.render({ solidIds: solid });
+  assert.deepEqual(seen(), [CLOSED_ROOM, false], 'the set handed back');
   editor.viewport.dispose();
 });

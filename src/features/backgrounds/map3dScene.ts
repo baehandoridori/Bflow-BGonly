@@ -657,12 +657,25 @@ function hitNode(hit: MapPickHit): { id: string; kind: NodeKind; part: unknown }
   return nodeKind === 'space' || nodeKind === 'symbol' || nodeKind === 'camera' ? { id: nodeId, kind: nodeKind, part: pickPart } : null;
 }
 /**
+ * What a ray can reach: nothing behind the first room on it that is drawn closed. What lies on that very face stays, so
+ * two lids on one level are still told apart as the plan stacks them. The same list back when the ray meets no such room.
+ */
+export function visibleMapHits<T extends MapPickHit>(hits: T[]): T[] {
+  let face = Infinity;
+  for (const hit of hits) if (hit.object.userData.pickPart === 'shell' && hit.distance < face) face = hit.distance;
+  if (face === Infinity) return hits;
+  const reach = face + 1e-6 * Math.max(1, face);
+  return hits.filter(hit => hit.distance <= reach);
+}
+/** A hit a space is stood on for a click: its floor, or any face of a room that is drawn closed. */
+const landsOnSpace = (hit: MapPickHit) => { const node = hitNode(hit); return node?.kind === 'space' && (node.part === 'floor' || node.part === 'shell'); };
+/**
  * The space floor a ray lands on: the nearest one. Floors on one level (a room drawn inside another)
  * are told apart as the plan stacks them: the smaller space is on top.
  */
 export function pickMapFloor(hits: readonly MapPickHit[], map?: BackgroundMap): MapPickHit | null {
   let nearest: MapPickHit | null = null;
-  const floors = hits.filter(hit => { const node = hitNode(hit); return node?.kind === 'space' && node.part === 'floor'; });
+  const floors = hits.filter(landsOnSpace);
   for (const hit of floors) if (!nearest || hit.distance < nearest.distance) nearest = hit;
   if (!nearest || !map) return nearest;
   const ranks = spaceStackRanks(map);
@@ -710,7 +723,7 @@ export function pickMapNode(hits: readonly MapPickHit[], map?: BackgroundMap): s
 /** The spaces whose floor a ray lands on, in the order a click picks them: the nearest level first, and floors on one level as the plan stacks them, the smaller first. */
 export function mapFloorPile(hits: readonly MapPickHit[], map: BackgroundMap): string[] {
   const ranks = spaceStackRanks(map), order = (hit: MapPickHit) => ranks.get(String(hit.object.userData.nodeId)) ?? -1;
-  const floors = hits.filter(hit => { const node = hitNode(hit); return node?.kind === 'space' && node.part === 'floor'; }).sort((a, b) => a.distance - b.distance);
+  const floors = hits.filter(landsOnSpace).sort((a, b) => a.distance - b.distance);
   const pile: string[] = [];
   for (let from = 0, to = 0; from < floors.length; from = to) {
     // One level is what pickMapFloor takes for one: every floor within the same margin of the nearest of them.

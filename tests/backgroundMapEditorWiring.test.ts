@@ -2713,6 +2713,16 @@ test('anchor 70: in 3D a hidden node and what a closed room holds are not drawn,
   const key = piece(scene, 'function shapeKey(', 'function labelSpec(');
   assert.ok(key.includes("${isRoadSpace(node) ? 'road' : ''}${solid ? '|solid' : ''}`;"), 'the key of a space does not end with whether it is closed');
   assert.equal(count(key, /\$\{solid \? '\|solid' : ''\}/g), 1, 'the key of a space alone tells whether it is closed');
+  // A click stops at the first closed face on its ray: what lies behind a box is never reached. It stands before
+  // pickMapFloor, out of every piece that anchors 21 and 49 cut. A closed face is a floor to a click, so a see-through
+  // wall in front of a box does not take it: the floors of a click and of its pile are read alike.
+  inOrder(scene, 'export function visibleMapHits<T extends MapPickHit>(hits: T[]): T[] {', 'export function pickMapFloor(');
+  for (const [name, body] of Object.entries({ pickMapFloor: piece(scene, 'export function pickMapFloor(', 'function roadsUnderRooms('),
+    mapFloorPile: piece(scene, 'export function mapFloorPile(', 'export function mapSpacePile(') }))
+    assert.equal(count(body, /hits\.filter\(landsOnSpace\)/g), 1, `${name} does not stand on a closed face`);
+  // The viewport casts every ray in one place, and cuts it there: a click, a double click and a symbol put down.
+  assert.match(piece(view3d, 'private cast(', 'private floorPoint('), /return visibleMapHits\(this\.raycaster\.intersectObjects\(this\.scene3d\.pickTargets\(\), false\)\);\s*\}\s*$/,
+    'the ray of the viewport is not cut at the first closed face');
   // The viewport hands the sets on as they come, and syncs again only when one of them is another object. When the rooms
   // are see-through is the editor's to say: read for placing here, every save with the symbol tool in hand would close
   // and open the boxes.

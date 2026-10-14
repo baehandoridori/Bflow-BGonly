@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Map3DProps, Map3DViewState } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';
-import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView } from './map3dScene';
+import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView, visibleMapHits } from './map3dScene';
 import type { Map3DPalette, MapPickHit } from './map3dScene';
 import { MapNodeGizmo, mapGizmoSetup } from './BackgroundMapCameraGizmo';
 import { stackedMapNodeIds } from './mapGeometry';
@@ -511,7 +511,7 @@ class Map3DViewport {
   private cast(clientX: number, clientY: number): MapPickHit[] {
     if (!this.aim(clientX, clientY)) return [];
     this.scene3d.scene.updateMatrixWorld();
-    return this.raycaster.intersectObjects(this.scene3d.pickTargets(), false);
+    return visibleMapHits(this.raycaster.intersectObjects(this.scene3d.pickTargets(), false));
   }
   /**
    * Plan point under the pointer: on the floor of a space when one is there, whatever its level, otherwise on the
