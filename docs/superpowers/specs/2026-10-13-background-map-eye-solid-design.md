@@ -640,16 +640,16 @@ const NO_IDS: ReadonlySet<string> = new Set();
 **`spaceHoldsNode` · `nodesHeldBy`** — `mapStack.ts`에 더한다(순수 — 앵커 32. `nodeElevation`·`nodeVolumeHeight`·`spaceWallHeight`를 `mapSpatial.ts`에서, `BackgroundNode` 타입을 더 가져온다. 돌려 본 구현 그대로다):
 
 ```ts
-/** Slack of the hold test: a share of the way to the middle of a space or a symbol, plan units around a camera, and level units. What stands flush against a wall, on the floor or up to the top is inside. */
+/** Slack of the hold test: a share of the way from a corner towards the middle of its two neighbours, plan units around a camera or a corner, and level units. What stands flush against a wall, on the floor or up to the top is inside. */
 const HOLD_SLACK = 1e-6;
 /** The eight directions around a plan point. */
 const AROUND: readonly (readonly [number, number])[] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
 /** No node is held: one set for every time, so nothing that reads it by identity is woken. */
 const NONE_HELD: ReadonlySet<string> = new Set();
 /**
- * Whether a room holds a node whole: its plan outline (the middle and every corner of a space or a symbol, the position
- * of a camera) lies inside the outline of the room or on it, and it stands between the floor and the top of the walls,
- * both included. A road has no volume, and a room does not hold itself.
+ * Whether a room holds a node whole: its plan outline (every corner of a space or a symbol, and the middle of its box
+ * where that middle is a point of the node; the position of a camera) lies inside the outline of the room or on it, and
+ * it stands between the floor and the top of the walls, both included. A road has no volume, and a room does not hold itself.
  */
 export function spaceHoldsNode(space: BackgroundSpace, node: BackgroundNode): boolean {
   if (node.id === space.id || isRoadSpace(space)) return false;
@@ -660,8 +660,18 @@ export function spaceHoldsNode(space: BackgroundSpace, node: BackgroundNode): bo
   // A camera on a wall line is inside, whatever the shape of the room: containsPoint reads the edges of a polygon half open, so the point is asked a hair away on every side.
   if (node.type === 'camera') return AROUND.some(([dx, dy]) => containsPoint(space, { x: node.x + dx * HOLD_SLACK, y: node.y + dy * HOLD_SLACK }));
   const middle = { x: node.x + node.width / 2, y: node.y + node.height / 2 };
-  // Each corner is asked a hair towards the middle: a wall the node stands flush against does not put it outside.
-  return containsPoint(space, middle) && nodePlanOutline(node).every(point => containsPoint(space, { x: point.x + (middle.x - point.x) * HOLD_SLACK, y: point.y + (middle.y - point.y) * HOLD_SLACK }));
+  // Inside an outline or on it: a hair away on one side or another is inside, as a camera is asked.
+  const near = (area: BackgroundSpace, point: BackgroundPoint) => AROUND.some(([dx, dy]) => containsPoint(area, { x: point.x + dx * HOLD_SLACK, y: point.y + dy * HOLD_SLACK }));
+  // The middle of the box is asked where it is a point of the node. A space may not hold it: it lies outside an L or a U
+  // (not asked) and on the long side of a right triangle (asked, and then it may lie on a wall of the room).
+  if (!containsPoint(space, middle) && (node.type !== 'space' || (near(node, middle) && !near(space, middle)))) return false;
+  // Each corner is asked a hair towards the middle of its two neighbours (for a rectangle, its middle), or on the outline:
+  // a wall the node stands flush against does not put it outside, whatever its shape. The first finds the inside at a
+  // sharp corner, the second at a corner that turns inwards or lies on a straight stretch of outline.
+  return nodePlanOutline(node).every((point, index, outline) => {
+    const before = outline[(index + outline.length - 1) % outline.length], after = outline[(index + 1) % outline.length];
+    return containsPoint(space, { x: point.x + ((before.x + after.x) / 2 - point.x) * HOLD_SLACK, y: point.y + ((before.y + after.y) / 2 - point.y) * HOLD_SLACK }) || near(space, point);
+  });
 }
 /**
  * The nodes that rooms drawn closed in 3D hold whole: what is not drawn there. `boxes`: those rooms. Two of them that
@@ -680,11 +690,13 @@ export function nodesHeldBy(map: BackgroundMap, boxes: readonly BackgroundSpace[
 
 | 묻는 것 | 답 |
 |---|---|
-| **온전히 안** | 공간·기호: 평면 윤곽(`nodePlanOutline` — 기울인 사물은 드리운 윤곽)의 가운데와 **모든 꼭짓점**이 방의 윤곽 안이고, 바닥이 방의 바닥 이상, 꼭대기(바닥 + 벽 높이 / 사물의 키)가 방의 꼭대기 이하다. **같으면 안이다** — 벽에 딱 붙은 방, 뚜껑 높이까지 오는 계단이 바로 가려야 하는 것이다(꼭짓점은 가운데 쪽으로 백만분의 일 당겨 묻는다: `containsPoint`의 다각형 가지는 경계 위의 점을 밖으로 읽기도 한다 — 사각형을 다각형으로 바꾼 방의 모서리가 그렇다) |
+| **온전히 안** | 공간·기호: 평면 윤곽(`nodePlanOutline` — 기울인 사물은 드리운 윤곽)의 **모든 꼭짓점**과, 노드 상자의 가운데가 **그 노드의 점일 때** 그 가운데가 방의 윤곽 안이고, 바닥이 방의 바닥 이상, 꼭대기(바닥 + 벽 높이 / 사물의 키)가 방의 꼭대기 이하다. **같으면 안이다** — 벽에 딱 붙은 방, 뚜껑 높이까지 오는 계단이 바로 가려야 하는 것이다(꼭짓점은 **이웃한 두 꼭짓점의 가운데 쪽으로** 백만분의 일 당긴 자리나, 여덟 방향으로 백만분의 일 떨어진 자리 가운데 하나가 안이면 안이다: `containsPoint`의 다각형 가지는 경계 위의 점을 밖으로 읽기도 한다 — 사각형을 다각형으로 바꾼 방의 모서리가 그렇다) |
 | 카메라 | 지금 서 있는 점과 높이: 윤곽 안이거나 **윤곽 위**이고, 바닥 이상·꼭대기 이하다 — **카메라도 같으면 안이다.** 벽 선 위에 딱 선 카메라(스냅이 그렇게 놓는다 — 2.8)와 뚜껑 높이에 선 카메라는 품긴다: 방이 사각형이든 그것을 다각형으로 바꾼 것이든, 네 벽과 모서리 어디서든 답이 같다. 윤곽 위인지는 여덟 방향으로 백만분의 일 떨어진 자리 가운데 하나라도 윤곽 안인지로 묻는다(가운데 쪽으로 당기는 방법은 ㄱ자 방의 파인 벽에서 밖을 가리킨다. 가로세로 넷만으로는 돌리지 않은 다각형 방의 모서리를 놓친다. 대각선 넷만으로는 45° 돌린 다각형 방의 모서리에서 안을 가리키는 방향이 없어 — 두 대각선이 벽 위에 정확히 놓인다 — 답이 반올림에 달리고, 방이 놓인 자리에 따라 자주 놓친다(K-1이 놓치는 자리를 정해 둔다) — 돌려 봤다). **이 답이 '이 카메라 시점으로 보기'에서 열리는 방도 정한다**(5.4): 밖으로 읽히면 방이 닫힌 채 안의 것이 그려지지 않아, 렌즈가 붙은 면만 잘려 나간 빈 방이 보인다. 벽 가까이에서 밖으로 뻗는 시야 선도 함께 그리지 않는다 |
 | 둘러싼 방 · 걸친 것 | 품기지 않는다: 큰 방 한가운데의 작은 박스는 큰 방을 품지 않고, 벽을 가로지른 사물·박스보다 키가 큰 안쪽 방·서로 걸쳐 겹친 두 방은 어느 쪽도 품지 않는다(그대로 그려진다) |
 | 윤곽과 높이가 같은 두 박스 | 서로를 품는다 → **도면에서 앞에 있는 것(평면에서 아래에 깔리는 것)이 뒤의 것을 품는다.** 하나는 그려진다. 박스와 꼭 같은 자리의 비치는 방은 순서와 무관하게 박스에 품긴다 |
 | 도로 | 품지 않는다(부피가 없다). 박스 바닥에 깔린 도로는 품긴다 |
+
+**구현 때 고친 것(작업 3의 검토, 2026-10-14)**: 처음의 규칙은 노드 상자의 가운데를 늘 묻고 꼭짓점을 그 가운데 쪽으로 당겼다. ㄱ자·ㄷ자 공간은 상자의 가운데가 자기 파인 곳(밖)에 있고, 직각삼각형은 빗변 위에 있어, 벽을 따라 붙은 ㄱ자 복도가 ㄱ자 건물에 품기지 않았고(꼭짓점이 파인 곳 쪽으로 당겨져 밖이 된다), 꼭 같은 ㄱ자·T자·직각삼각형 박스 둘이 서로를 품지 못해 둘 다 그려졌다(겹친 면이 일렁인다). 그래서 가운데는 그 노드의 점일 때만 묻고, 꼭짓점은 이웃한 두 꼭짓점의 가운데 쪽(사각형이면 상자의 가운데와 같다)으로 당기거나 여덟 방향 가운데 하나가 안이면 안이다. 사각형·타원·기호의 답은 처음 규칙과 같다(무작위 14만 가지로 견줬다 — 달라진 것은 모두 다각형 공간이 새로 품기는 쪽이다). K-1·K-2에 그 경우들을 더했다(ㄱ자 건물 안의 ㄱ자 복도 둘, 파인 곳의 벽에 붙은 방, 파인 곳을 건너는 막대와 탁자, 여섯 모양을 다섯 각도로 돌린 꼭 같은 박스 둘 — 두 순서). 11.2의 첫 대체안(`HOLD_SLACK`을 `1e-4`로)을 쓰면 K-1에서 백만분의 일을 고정한 단언 넷도 함께 고친다.
 
 ### 5.2 누르기
 
