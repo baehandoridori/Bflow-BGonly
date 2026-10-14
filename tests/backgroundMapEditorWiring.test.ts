@@ -2878,9 +2878,9 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   assert.doesNotMatch(drop, /from\s+['"]three/, 'the module of adding pictures imports three.js');
   for (const word of ['document.', 'window.', '@/', 'react']) assert.ok(!drop.includes(word), `the module of adding pictures reaches past itself: ${word}`);
   // What is saved and its checks, the drafts, the stack of the plan, the store and who sees the menu stay as they are: not a
-  // line of them knows the feature, not a comment either (they are read as written).
+  // line of them knows the feature, not a comment either (they are read as written), however it is written: mapImage, MapImage, MAP_IMAGE.
   const raw = (url: URL) => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
   for (const name of ['types.ts', 'domain.ts', 'mapWorkflow.ts', 'mapDocument.ts', 'mapStack.ts', 'useBackgroundStore.ts'])
-    assert.ok(!raw(new URL(name, directory)).includes('mapImage'), `${name} knows the feature`);
-  assert.ok(!raw(new URL('../src/features/playground/featureFlag.ts', import.meta.url)).includes('mapImage'), 'featureFlag.ts knows the feature');
+    assert.doesNotMatch(raw(new URL(name, directory)), /map_?image/i, `${name} knows the feature`);
+  assert.doesNotMatch(raw(new URL('../src/features/playground/featureFlag.ts', import.meta.url)), /map_?image/i, 'featureFlag.ts knows the feature');
 });

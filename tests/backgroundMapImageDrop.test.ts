@@ -122,6 +122,9 @@ test('M-1a: the target is what the image list names — no map, a read-only acco
   assert.deepEqual(resolve(annex, CHAIR), resolve(annex, STORE));
   assert.deepEqual(resolve(floor, CHAIR_2), resolve(floor));
   assert.deepEqual(resolve(annex, CHAIR_2), resolve(annex));
+  // A locked one as well, and by what it belongs to, not by where it is drawn: this chair stands in 창고 and belongs to 잠긴 창고.
+  const lockedChair = withNode(floor, CHAIR, { spaceId: LOCKED_STORE });
+  assert.deepEqual(resolve(lockedChair, CHAIR, library, over(library.maps, lockedChair)), { status: 'blocked', reason: 'locked-space', name: '잠긴 창고' });
 });
 
 test('M-1b: a camera stands in the topmost space that holds its point, and only a camera standing nowhere goes by its property', () => {
@@ -285,8 +288,13 @@ test('M-2: the words of the overlay and of the place prompt, letter for letter',
   // The three titles say what the pictures go in as: the map's own as well, whether it has a place or is asked for one.
   assert.deepEqual(words(resolve(floor)), { title: '‘2층’ 도면의 배경으로 추가', detail: '놓으면 바로 저장돼요.', blocked: false });
   assert.deepEqual(words(resolve(annex)), { title: '‘별관’ 도면의 배경으로 추가', detail: '놓으면 배경 장소부터 정해요.', blocked: false });
+  // Its own place tied in the draft alone, a map says so as a space does.
+  const tiedAnnex: BackgroundMap = { ...annex, placeId: SCHOOL };
+  assert.deepEqual(words(resolve(tiedAnnex, undefined, library, over(library.maps, tiedAnnex))), { title: '‘별관’ 도면의 배경으로 추가', detail: "그림은 바로 저장되고, 배경 장소를 이어 둔 것은 '도면 저장' 때 저장돼요.", blocked: false });
   // A camera names the place its pictures go to, that of the map where it stands in a room without one.
   assert.deepEqual(words(named(floor, STORE_CAMERA, '카메라 2')), { title: '‘카메라 2’의 시점으로 추가', detail: '놓으면 ‘학교’ 장소에 바로 저장돼요.', blocked: false });
+  // Its rows come before those of placeKept: standing in a room whose place the draft alone ties, it still names that place.
+  assert.deepEqual(words(named(tied, STORE_CAMERA, '카메라 2'), { editing: true }), wordsOf('ready, a camera, editing'));
   // Editing changes the words of a camera alone.
   assert.deepEqual(words(resolve(floor, CLASSROOM), { editing: true }), wordsOf('ready, placeKept'));
   assert.deepEqual(words(resolve(tied, STORE, library, over(library.maps, tied)), { editing: true }), wordsOf('ready, tied in the draft alone'));
