@@ -581,7 +581,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function placeSymbol(point: BackgroundPoint, base = current) {
     if (!base || !canEdit || tool !== 'symbol' || doc.isGestureActive() || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
     const preset = getSymbolPreset(symbolKind);
-    const containingSpace = spacesAt(base, point)[0];
+    // The topmost space shown at that spot: a room the eye hides takes no symbol, from the plan or from 3D. Only that is
+    // asked of the shown map: the symbol is added to the whole one.
+    const containingSpace = spacesAt(shownMap(base, hiddenIds), point)[0];
     // It stands on the floor of its space. A floor on the ground writes no key, so older maps stay as they are.
     const level = containingSpace ? nodeElevation(containingSpace) : MAP_SPATIAL_DEFAULTS.symbolElevation;
     const symbol: BackgroundSymbol = { id: uuid(), type: 'symbol', name: preset.label, symbol: preset.id, x: point.x - preset.width / 2, y: point.y - preset.height / 2, width: preset.width, height: preset.height, rotation: 0, spaceId: containingSpace?.id ?? null, locked: false, hinge: 'left', swing: 'inward',
@@ -852,7 +854,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const again = sameSpotAgain(spot, current.id, hit?.id ?? null, held);
     // The select tool (while viewing: any tool but the hand): what this press does is decided in one pure place.
     const plan = panning || drawing || handle ? null : resolvePlanPress({ canEdit, shift: event.shiftKey, hit: hit ?? null,
-      pile: hit ? planPileAt(live, hit.id, point, undefined, item => planMarkCovers(item, point)) : [],
+      pile: hit ? planPileAt(shownMap(live, hiddenIds), hit.id, point, undefined, item => planMarkCovers(item, point)) : [],
       selection: held, again, node: id => live.nodes.find(item => item.id === id) });
     if (plan?.selectAtPress !== undefined) select(plan.selectAtPress);
     // A press with Space held, and one the plan does not log (Shift), is no half of a double-click.
@@ -899,8 +901,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const gesture = planGestureOf(session);
     // Alt is read at every move: held it frees the drag, released the drag sticks again. The distances are
     // screen pixels at the zoom of the press.
+    // The guides come from what is shown; the drag is computed on the whole map of the press, so a hidden member follows its space.
     const snap = snapEnabled && !event.altKey
-      ? { candidates: session.candidates ??= planGestureCandidates(gesture, session.initial),
+      ? { candidates: session.candidates ??= planGestureCandidates(gesture, shownMap(session.initial, hiddenIds)),
           tolerance: MAP_SNAP.tolerancePx * session.scale, reach: MAP_SNAP.reachPx * session.scale }
       : null;
     const preview = previewPlanGesture(gesture, session.initial, session.start, point, snap);
@@ -923,7 +926,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       setMarquee(null);
       if (!cancel && session.moved && canEdit) {
         const live = mapDraft(doc.getState(), session.mapId)?.value, point = pointFrom(event, session.matrix);
-        if (live && point) doc.selectMany(session.mapId, planMarqueeIds(live, planRect(session.start, point)));
+        if (live && point) doc.selectMany(session.mapId, planMarqueeIds(shownMap(live, hiddenIds), planRect(session.start, point)));
       }
     } else if (session.mode !== 'pan') {
       if (cancel || !canEdit || !session.moved) doc.cancelGesture();
@@ -1203,6 +1206,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
           }} onDoubleClick={canvasDoubleClick}>
             {current.imageUrl && <image href={current.imageUrl} x="0" y="0" width="1000" height="680" preserveAspectRatio="xMidYMid meet" opacity="0.65" pointerEvents="none" />}
             {stackedSpaces(current).map(node => {
+              if (hiddenIds.has(node.id)) return null;
               const isSelected = shownIds.has(node.id), road = isRoadSpace(node), centre = roadCentreLine(node);
               return <g key={node.id} className={`bmap-space ${road ? 'is-road ' : ''}${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${road ? ', 도로' : ''}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                 {node.shape === 'ellipse' ? <ellipse cx={node.width / 2} cy={node.height / 2} rx={node.width / 2} ry={node.height / 2} /> : node.shape === 'polygon' ? <polygon points={node.points.map(point => `${point.x * node.width},${point.y * node.height}`).join(' ')} /> : <rect width={node.width} height={node.height} rx={road ? 0 : 4} />}
@@ -1212,7 +1216,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                 {node.childMapId && <text className="bmap-space-detail" x={node.width / 2} y={node.height / 2 + 21} textAnchor="middle" pointerEvents="none">상세 도면 ↗</text>}
               </g>;
             })}
-            {current.nodes.filter((node): node is BackgroundSymbol => node.type === 'symbol').map(node => {
+            {current.nodes.filter((node): node is BackgroundSymbol => node.type === 'symbol' && !hiddenIds.has(node.id)).map(node => {
               const isSelected = shownIds.has(node.id), tilt = nodeAngles(node);
               return <Fragment key={node.id}>
                 {/* A tilted object casts the outline of its whole box; its own plan size is untouched. */}
@@ -1225,7 +1229,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                 </g>
               </Fragment>;
             })}
-            {current.nodes.filter((node): node is BackgroundCamera => node.type === 'camera').map(node => {
+            {current.nodes.filter((node): node is BackgroundCamera => node.type === 'camera' && !hiddenIds.has(node.id)).map(node => {
               // The fan and the line follow the horizontal part of the line of sight (cos pitch). Looking straight
               // up or down has no horizontal part, so a vertical mark replaces them. The fan is a direction reference.
               const plan = projectCameraToPlan(node), reach = Math.hypot(plan.direction.x, plan.direction.y);

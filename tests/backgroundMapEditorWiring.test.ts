@@ -359,8 +359,8 @@ test('anchor 21: overlapping spaces are stacked in one place, mapStack.ts, and n
   const floor = piece(read('map3dScene.ts'), 'export function pickMapFloor(', 'export function pickMapNode(');
   assert.match(floor, /spaceStackRanks\(map\)/);
   assert.doesNotMatch(floor, /map\.nodes\.findIndex\(/);
-  // A new symbol belongs to the topmost space that holds its spot.
-  assert.match(handler.placeSymbol(), /spacesAt\(base, point\)\[0\]/);
+  // A new symbol belongs to the topmost space that holds its spot among those on show: a room the eye hides takes none.
+  assert.match(handler.placeSymbol(), /spacesAt\(shownMap\(base, hiddenIds\), point\)\[0\]/);
   assert.doesNotMatch(editor, /reverse\(\)\.find\(/);
 });
 
@@ -410,7 +410,7 @@ test('anchor 25: what a press of the select tool does is decided by resolvePlanP
   // It is handed the map and the selection as they are at this very moment, and the pile of what the plan draws under the pointer.
   assert.ok(editor.includes('function liveSelection(mapId: string, map: BackgroundMap): MapSelection { return mapSelection(map, mapViewport(doc.getState(), mapId).selectedIds); }'));
   assert.ok(down.includes('const held = liveSelection(current.id, live);'));
-  assert.match(down, /resolvePlanPress\(\{ canEdit, shift: event\.shiftKey, hit: hit \?\? null,\s*pile: hit \? planPileAt\(live, hit\.id, point, undefined, item => planMarkCovers\(item, point\)\) : \[\],\s*selection: held, again, node: id => live\.nodes\.find\(item => item\.id === id\) \}\);/);
+  assert.match(down, /resolvePlanPress\(\{ canEdit, shift: event\.shiftKey, hit: hit \?\? null,\s*pile: hit \? planPileAt\(shownMap\(live, hiddenIds\), hit\.id, point, undefined, item => planMarkCovers\(item, point\)\) : \[\],\s*selection: held, again, node: id => live\.nodes\.find\(item => item\.id === id\) \}\);/);
   // Nothing is decided beside it from the selection of the last render.
   assert.doesNotMatch(down, /view\.selectedId/);
   // What it said is carried out as it is: the node a drag takes, the nodes that travel along, what a release without movement does.
@@ -464,9 +464,9 @@ test('anchor 27: the selection box is no gesture of the document: it leaves no u
   assert.equal(count(editor, /shownIds\.has\(node\.id\)/g), 3, 'spaces, symbols and cameras');
   // The box itself is drawn whenever there is one, over the snap guides and under the handles.
   inOrder(editor, '<MapSnapGuides guides={guides} scale={screenScale} />', '{marquee && <MapMarquee rect={marquee} />}', '{selected && canEdit && !selected.locked && <MapNodeHandles ');
-  // The release selects what the box touches, unless it was cancelled, and writes nothing to the map.
+  // The release selects what the box touches of what is drawn (nothing the eye hides), unless it was cancelled, and writes nothing to the map.
   const up = handler.pointerUp(), box = block(up, "if (session.mode === 'marquee') {");
-  inOrder(box, 'setMarquee(null);', 'if (!cancel && session.moved && canEdit) {', 'doc.selectMany(session.mapId, planMarqueeIds(live, planRect(session.start, point)));');
+  inOrder(box, 'setMarquee(null);', 'if (!cancel && session.moved && canEdit) {', 'doc.selectMany(session.mapId, planMarqueeIds(shownMap(live, hiddenIds), planRect(session.start, point)));');
   assert.doesNotMatch(box, /doc\.(?:finishGesture|update)\(|updateMap\(/);
   assert.ok(up.includes("} else if (session.mode !== 'pan') {"), 'the gestures are finished in the other branch');
   assert.match(handler.abortGesture(), /setMarquee\(null\);/);
@@ -2485,6 +2485,45 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
     assert.doesNotMatch(line, /#|\b(?:rgb|hsl)a?\((?!var\()/);
   }
   for (const column of ['.bmap-delete-lead {', '.bmap-delete-choices {']) has(baseRule(sheet, column), 'display:flex', 'flex-direction:column');
+});
+
+test('anchor 67: the eye filters what is drawn and what a pointer is asked about, and every writer is handed the whole draft', () => {
+  // The one rule of the eye: what is drawn and what a pointer is asked about leave out what it hides, and what is
+  // written never does. The map without the hidden nodes is made in four places of the editor and in no other, each an
+  // argument of a pure question about what lies under the pointer, never a map that is written: the pile of a press,
+  // the snap candidates of a drag, what a selection box takes, and the space a new symbol stands in.
+  assert.equal(count(editor, /\bshownMap\(/g), 4, 'the pile, the snap candidates, the box and the space of a new symbol');
+  const down = handler.pointerDown(), move = handler.pointerMove(), up = handler.pointerUp(), place = handler.placeSymbol();
+  // The press. Its pile is what the plan draws under the pointer: a hidden space in the middle of a pile is stepped over,
+  // never picked. The session is opened on the whole draft as it is at this very moment: a drag previews that map and
+  // writes it back, so a session opened on the shown map would delete every hidden node at the next drag.
+  for (const text of ['planPileAt(shownMap(live, hiddenIds), hit.id,', 'const live = mapDraft(doc.getState(), current.id)?.value ?? current;', 'initial: live,'])
+    assert.ok(down.includes(text), `not in pointerDown: ${text}`);
+  // The move. The snap guides are gathered from what is shown (nothing snaps to what cannot be seen), and the drag is
+  // previewed on the whole map of the press: a hidden member follows its space, and the preview is what is saved.
+  for (const text of ['planGestureCandidates(gesture, shownMap(session.initial, hiddenIds))', 'previewPlanGesture(gesture, session.initial, session.start, point, snap)'])
+    assert.ok(move.includes(text), `not in pointerMove: ${text}`);
+  // The release of a box picks what it touches of what is shown: nothing hidden is ever selected.
+  assert.ok(up.includes('doc.selectMany(session.mapId, planMarqueeIds(shownMap(live, hiddenIds), planRect(session.start, point)));'), 'the box picks from the whole map');
+  // A new symbol stands in the topmost space shown at its spot: a hidden room takes none, on the plan and in 3D alike
+  // (asked of the whole map, a symbol put on the floor seen under a hidden upper storey would be saved in that storey, at
+  // its height). The symbol is added to the whole map: added to the shown one, every hidden node would go with it.
+  for (const text of ['const containingSpace = spacesAt(shownMap(base, hiddenIds), point)[0];', 'updateMap({ ...base, nodes: [...base.nodes, symbol] });'])
+    assert.ok(place.includes(text), `not in placeSymbol: ${text}`);
+  assert.equal(count(place, /\bshownMap\(/g), 1, 'the shown map is made once in placeSymbol, for the space and nothing else');
+  // In each of the four the hidden nodes are named once, in that call: a second use (a filter of its own, the line that
+  // makes the map of the press) would filter what is written as well.
+  for (const [name, body] of Object.entries({ pointerDown: down, pointerMove: move, pointerUp: up, placeSymbol: place }))
+    assert.equal(count(body, /\bhiddenIds\b/g), 1, `${name} names the hidden nodes elsewhere`);
+  // The plan draws no hidden node. The one pass over the stack leaves a hidden space out before anything of it is made,
+  // and the passes over the symbols and the cameras leave a hidden one out in their filter.
+  const spaces = piece(editor, '{stackedSpaces(current).map(node => {', '{current.nodes.filter((node): node is BackgroundSymbol');
+  const [opener, first, second] = spaces.split('\n').map(line => line.trim()).filter(Boolean);
+  assert.deepEqual([opener, first], ['{stackedSpaces(current).map(node => {', 'if (hiddenIds.has(node.id)) return null;'], 'a hidden space is drawn');
+  assert.ok(second?.startsWith('const isSelected = shownIds.has(node.id)'), `the space is not drawn by its own lines: ${second}`);
+  for (const pass of ["{current.nodes.filter((node): node is BackgroundSymbol => node.type === 'symbol' && !hiddenIds.has(node.id)).map(node => {",
+    "{current.nodes.filter((node): node is BackgroundCamera => node.type === 'camera' && !hiddenIds.has(node.id)).map(node => {"])
+    assert.ok(editor.includes(pass), `a hidden node is drawn: ${pass}`);
 });
 
 test('anchor 68: what is hidden is never selected, and a view setting writes no map', () => {
