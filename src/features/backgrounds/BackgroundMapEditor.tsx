@@ -581,8 +581,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function placeSymbol(point: BackgroundPoint, base = current) {
     if (!base || !canEdit || tool !== 'symbol' || doc.isGestureActive() || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
     const preset = getSymbolPreset(symbolKind);
-    // The topmost space shown at that spot: a room the eye hides takes no symbol, from the plan or from 3D. Only that is
-    // asked of the shown map: the symbol is added to the whole one.
     const containingSpace = spacesAt(shownMap(base, hiddenIds), point)[0];
     // It stands on the floor of its space. A floor on the ground writes no key, so older maps stay as they are.
     const level = containingSpace ? nodeElevation(containingSpace) : MAP_SPATIAL_DEFAULTS.symbolElevation;

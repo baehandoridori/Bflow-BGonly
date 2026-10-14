@@ -2511,6 +2511,12 @@ test('anchor 67: the eye filters what is drawn and what a pointer is asked about
   for (const text of ['const containingSpace = spacesAt(shownMap(base, hiddenIds), point)[0];', 'updateMap({ ...base, nodes: [...base.nodes, symbol] });'])
     assert.ok(place.includes(text), `not in placeSymbol: ${text}`);
   assert.equal(count(place, /\bshownMap\(/g), 1, 'the shown map is made once in placeSymbol, for the space and nothing else');
+  // The floor the symbol stands on and the space it belongs to are both that one answer. The space is asked once: a second
+  // question of the whole map, for the height or for the membership alone, would save a symbol put under a hidden upper
+  // storey at that storey's height, or as one of its members, with the line above untouched.
+  assert.equal(count(place, /\bspacesAt\(/g), 1, 'the space under a new symbol is asked once, of the shown map');
+  for (const text of ['const level = containingSpace ? nodeElevation(containingSpace) : MAP_SPATIAL_DEFAULTS.symbolElevation;', 'spaceId: containingSpace?.id ?? null,'])
+    assert.ok(place.includes(text), `the new symbol does not take this from the space shown at its spot: ${text}`);
   // In each of the four the hidden nodes are named once, in that call: a second use (a filter of its own, the line that
   // makes the map of the press) would filter what is written as well.
   for (const [name, body] of Object.entries({ pointerDown: down, pointerMove: move, pointerUp: up, placeSymbol: place }))
