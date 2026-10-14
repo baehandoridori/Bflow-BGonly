@@ -359,11 +359,9 @@ test('V-12: what is hidden is never selected, on the plan and in 3D, and moved t
       assert.notEqual(view.selectedId, id, `${label}: a hidden node is the stored pick`);
     }
     assert.equal(left.moved, shows(before, map, plan) !== shows(after, map, plan), `${label}: moved is not what the properties show`);
-    // Nothing to write: the very array of the group comes back, and the document is as it was.
-    if (!left.changed) {
-      assert.equal(left.ids, selection.ids, `${label}: the same array`);
-      assert.equal(after, before, `${label}: nothing written`);
-    }
+    // Nothing to write: the very array of the group comes back. Nothing is written then, so the checks above saw the document
+    // as it was: nothing hidden was selected, in hand or the stored pick already.
+    if (!left.changed) assert.equal(left.ids, selection.ids, `${label}: the same array`);
     return { before, after };
   };
 
@@ -416,6 +414,12 @@ test('V-12: what is hidden is never selected, on the plan and in 3D, and moved t
   assert.deepEqual(written.selectedIds, [A]);
   assert.equal(singleViewId(room, mapSelection(room, written.selectedIds), written.selectedId), A);
   assert.equal(cases, 24, 'every case of the table');
+
+  // Beyond the table, two states where the node in hand is not the stored pick: the stored pick names a node that is gone (an
+  // undo took it away), so the primary is in hand; and the group that grows again, read as A alone, so A is in hand while D is
+  // the stored pick. What is let go is the node in hand once it is hidden: asked about the stored pick, it would stay in hand.
+  check('3D: C of three in hand, the stored pick gone', false, [A, B, C], uid(59), [C], { ids: [A, B], inHand: null, changed: true, moved: true });
+  check('3D: A alone in hand, D the stored pick, B gone', false, [A, B], D, [A], { ids: [], inHand: null, changed: true, moved: true }, withoutB);
 });
 
 test('V-13: the plan asks what is under the pointer on the shown map, and what is written keeps every node', () => {
