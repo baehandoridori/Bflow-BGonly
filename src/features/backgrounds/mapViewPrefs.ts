@@ -94,3 +94,20 @@ export function withHiddenNodes(prefs: MapViewPrefsByMap, map: BackgroundMap, id
 export function withSolidSpaces(prefs: MapViewPrefsByMap, map: BackgroundMap, ids: readonly string[], solid: boolean): MapViewPrefsByMap { return withIds(prefs, map, 'solid', ids, solid); }
 export function hiddenNodeCount(map: BackgroundMap | undefined, hidden: ReadonlySet<string>): number { return map && hidden.size ? map.nodes.filter(node => hidden.has(node.id)).length : 0; }
 export function mapRoomIds(map: BackgroundMap): string[] { return map.nodes.filter(node => node.type === 'space' && !isRoadSpace(node)).map(node => node.id); }
+/**
+ * The selection once `gone` are hidden: what is hidden is never selected. `picked` is the stored pick of the views that
+ * show one node (MapViewport.selectedId). It counts while it is not in hand too (one node or none selected): the group
+ * can grow again, and it would be in hand. `ids`: the selection to write: the group without the hidden ones (the same
+ * array when none was in it). One case apart, in the 3D view (`plan` false): the group shrinks to one node or none while
+ * a node outside it is in hand. That node stays in hand, as the selection, and the last node of the group is let go.
+ * `inHand`: the node in hand, kept while two or more stay selected (null: let go). `changed`: something has to be
+ * written. `moved`: what the properties show changes (`plan`: a group is shown as one there), so the list under them moves.
+ */
+export function selectionWithout(map: BackgroundMap, selection: MapSelection, picked: string | null, gone: readonly string[], plan: boolean): { ids: readonly string[]; inHand: string | null; changed: boolean; moved: boolean } {
+  const left = selection.ids.filter(id => !gone.includes(id)), kept = left.length === selection.ids.length;
+  const before = singleViewId(map, selection, picked), inHand = before !== null && gone.includes(before) ? null : before;
+  const ids = kept ? selection.ids : !plan && left.length <= 1 && inHand !== null && !left.includes(inHand) ? [inHand] : left;
+  const shown = (count: number, node: string | null) => count > 1 ? (plan ? 'group' : `group:${node}`) : `one:${node}`;
+  return { ids, inHand, changed: !kept || (picked !== null && gone.includes(picked)),
+    moved: shown(selection.ids.length, before) !== shown(ids.length, ids.length > 1 ? inHand : ids[0] ?? null) };
+}

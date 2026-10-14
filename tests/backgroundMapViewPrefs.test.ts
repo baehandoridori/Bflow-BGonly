@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MAP_VIEW_PREFS_KEY, MAP_VIEW_PREFS_LIMITS, NO_MAP_VIEW_PREFS, hiddenNodeCount, mapRoomIds, mapViewPrefsKey, mapViewPrefsOf, parseMapViewPrefs,
-  readMapViewPrefs, serializeMapViewPrefs, shownMap, storeMapViewPrefs, withHiddenNodes, withSolidSpaces,
+  readMapViewPrefs, selectionWithout, serializeMapViewPrefs, shownMap, storeMapViewPrefs, withHiddenNodes, withSolidSpaces,
 } from '../src/features/backgrounds/mapViewPrefs.ts';
 import type { MapViewPrefsByMap, MapViewStorage } from '../src/features/backgrounds/mapViewPrefs.ts';
 import { validateBackgroundEntity } from '../src/features/backgrounds/domain.ts';
+import { createMapDocumentStore, mapSelection, mapViewport, pickAction, singleViewId } from '../src/features/backgrounds/mapDocument.ts';
+import type { MapDocumentState, MapDocumentStore } from '../src/features/backgrounds/mapDocument.ts';
 import { planGestureCandidates, previewPlanGesture } from '../src/features/backgrounds/mapPlanGesture.ts';
 import type { PlanGesture, PlanGestureSnap } from '../src/features/backgrounds/mapPlanGesture.ts';
 import { nextPlanSelection, planPileAt } from '../src/features/backgrounds/mapPlanPreview.ts';
@@ -308,6 +310,112 @@ test('V-11: hiddenNodeCount counts the hidden nodes that are there, and mapRoomI
   assert.deepEqual(mapRoomIds(CLASS), [ROOM.id, HALL.id]);
   assert.deepEqual(mapRoomIds(mapOf(uid(101), [HALL, ROAD, ROOM])), [HALL.id, ROOM.id], 'in the order of the map');
   assert.deepEqual(mapRoomIds(mapOf(uid(102), [DOOR, LENS, ROAD])), []);
+});
+
+test('V-12: what is hidden is never selected, on the plan and in 3D, and moved tells when the properties change', () => {
+  const [A, B, C, D] = [51, 52, 53, 54].map(uid);
+  const room = freeze(mapOf(uid(120), [symbol(A, 100, 100), symbol(B, 200, 100), symbol(C, 300, 100), symbol(D, 400, 100)]));
+  /** What the properties show, worked out from a state of the document alone: the plan shows a group as one, 3D the node in hand and a line for the group. */
+  const shows = (state: MapDocumentState, map: BackgroundMap, plan: boolean) => {
+    const view = mapViewport(state, map.id), selection = mapSelection(map, view.selectedIds), group = selection.ids.length > 1;
+    if (plan) return group ? 'a group' : `node ${selection.primaryId}`;
+    return `node ${singleViewId(map, selection, view.selectedId)}${group ? ' and the line of the group' : ''}`;
+  };
+  /**
+   * The editor's way (4.5), with the selection as it was at the press: the selection without the hidden ones is written, and in
+   * 3D, with two or more left, the node in hand is put back or let go, as the editor's select() picks one there.
+   */
+  const hide = (store: MapDocumentStore, map: BackgroundMap, ids: readonly string[], plan: boolean) => {
+    const view = mapViewport(store.getState(), map.id), selection = mapSelection(map, view.selectedIds);
+    const left = selectionWithout(map, selection, view.selectedId, ids, plan);
+    if (left.changed) {
+      store.dispatch({ type: 'select-many', mapId: map.id, ids: left.ids });
+      if (!plan && left.ids.length > 1) store.dispatch(pickAction(map.id, left.inHand, true, selection));
+    }
+    return { left, selection };
+  };
+  let cases = 0;
+  /**
+   * One case: `group` is selected, then `hand` is picked in 3D (undefined: nothing is, so the primary is in hand), then `gone` are
+   * hidden on the plan (`plan`) or in 3D, on the map as it is (`map`). Four things are checked: the group left, the node in hand,
+   * changed and moved. And in every case: nothing hidden is selected, in hand or stored as the pick of the 3D view, and moved is
+   * whether the properties show something else after than before.
+   */
+  const check = (label: string, plan: boolean, group: string[], hand: string | null | undefined, gone: string[],
+    expected: { ids: string[]; inHand: string | null; changed: boolean; moved: boolean }, map: BackgroundMap = room) => {
+    cases += 1;
+    const store = createMapDocumentStore();
+    if (group.length) store.dispatch({ type: 'select-many', mapId: map.id, ids: group });
+    if (hand !== undefined) store.dispatch({ type: 'pick-one', mapId: map.id, id: hand });
+    const before = store.getState(), { left, selection } = hide(store, map, gone, plan), after = store.getState();
+    const view = mapViewport(after, map.id), now = mapSelection(map, view.selectedIds), inHand = singleViewId(map, now, view.selectedId);
+    assert.deepEqual(now.ids, expected.ids, `${label}: the group left`);
+    assert.equal(inHand, expected.inHand, `${label}: the node in hand`);
+    assert.equal(left.changed, expected.changed, `${label}: changed`);
+    assert.equal(left.moved, expected.moved, `${label}: moved`);
+    for (const id of gone) {
+      assert.equal(view.selectedIds.includes(id), false, `${label}: a hidden node is selected`);
+      assert.notEqual(inHand, id, `${label}: a hidden node is in hand`);
+      assert.notEqual(view.selectedId, id, `${label}: a hidden node is the stored pick`);
+    }
+    assert.equal(left.moved, shows(before, map, plan) !== shows(after, map, plan), `${label}: moved is not what the properties show`);
+    // Nothing to write: the very array of the group comes back, and the document is as it was.
+    if (!left.changed) {
+      assert.equal(left.ids, selection.ids, `${label}: the same array`);
+      assert.equal(after, before, `${label}: nothing written`);
+    }
+    return { before, after };
+  };
+
+  // On the plan.
+  check('plan: the one selected', true, [A], undefined, [A], { ids: [], inHand: null, changed: true, moved: true });
+  check('plan: one of three', true, [A, B, C], undefined, [B], { ids: [A, C], inHand: C, changed: true, moved: false });
+  check('plan: the primary of three', true, [A, B, C], undefined, [C], { ids: [A, B], inHand: B, changed: true, moved: false });
+  // D was picked in 3D, outside the group: the group stays and the node in hand goes back to its primary. That is written,
+  // and nothing the plan shows changes.
+  check('plan: D, picked in 3D', true, [A, B, C], D, [D], { ids: [A, B, C], inHand: C, changed: true, moved: false });
+  check('plan: one of two', true, [A, B], undefined, [A], { ids: [B], inHand: B, changed: true, moved: true });
+  // The plan keeps its group: what was in hand in 3D has no say here.
+  check('plan: one of two, D picked in 3D', true, [A, B], D, [A], { ids: [B], inHand: B, changed: true, moved: true });
+  check('plan: nothing selected', true, [], undefined, [A], { ids: [], inHand: null, changed: false, moved: false });
+  check('plan: a node not selected', true, [A, B], undefined, [C], { ids: [A, B], inHand: B, changed: false, moved: false });
+
+  // In 3D.
+  check('3D: the one selected', false, [A], undefined, [A], { ids: [], inHand: null, changed: true, moved: true });
+  check('3D: C of three, in hand', false, [A, B, C], C, [C], { ids: [A, B], inHand: null, changed: true, moved: true });
+  check('3D: B of three, A in hand', false, [A, B, C], A, [B], { ids: [A, C], inHand: A, changed: true, moved: false });
+  check('3D: D in hand, outside three', false, [A, B, C], D, [D], { ids: [A, B, C], inHand: null, changed: true, moved: true });
+  check('3D: B of three, D in hand', false, [A, B, C], D, [B], { ids: [A, C], inHand: D, changed: true, moved: false });
+  check('3D: B of three, nothing in hand', false, [A, B, C], null, [B], { ids: [A, C], inHand: null, changed: true, moved: false });
+  check('3D: B of two, in hand', false, [A, B], B, [B], { ids: [A], inHand: A, changed: true, moved: true });
+  // The one left is in hand already, but the line of the group goes.
+  check('3D: B of two, A in hand', false, [A, B], A, [B], { ids: [A], inHand: A, changed: true, moved: true });
+  // J13: the group shrinks to one while D, outside it, is in hand. D stays in hand and is the selection, and the stored pick as
+  // well; the last of the group is let go. The same when the primary is hidden.
+  for (const [name, one] of [['A', A], ['B', B]] as const) {
+    const { after } = check(`3D: ${name} of two, D in hand`, false, [A, B], D, [one], { ids: [D], inHand: D, changed: true, moved: true });
+    assert.equal(mapViewport(after, room.id).selectedId, D, `3D: ${name} of two, D in hand: the stored pick`);
+  }
+  check('3D: D itself, in hand outside two', false, [A, B], D, [D], { ids: [A, B], inHand: null, changed: true, moved: true });
+  check('3D: A of two, nothing in hand', false, [A, B], null, [A], { ids: [B], inHand: B, changed: true, moved: true });
+  check('3D: three at once', false, [A, B, C], undefined, [A, B, C], { ids: [], inHand: null, changed: true, moved: true });
+  check('3D: two of three at once, D in hand', false, [A, B, C], D, [A, B], { ids: [D], inHand: D, changed: true, moved: true });
+  check('3D: three at once, D in hand', false, [A, B, C], D, [A, B, C], { ids: [D], inHand: D, changed: true, moved: true });
+
+  // A group that grows again. D was picked in 3D while A and B were selected, and an undo has taken B off the map since: the
+  // group reads as A alone, A is in hand, and D is still the stored pick. Hiding D shows nothing else, and yet it is written.
+  const withoutB = freeze(mapOf(room.id, room.nodes.filter(node => node.id !== B)));
+  const { before, after } = check('3D: D, the stored pick, while B is gone', false, [A, B], D, [D], { ids: [A], inHand: A, changed: true, moved: false }, withoutB);
+  // Asked the old way, about the node in hand alone, there is nothing to write here: the group loses none and A is in hand.
+  // Then the redo that brings B back would put D in hand again, hidden.
+  const stored = mapViewport(before, room.id), shrunk = mapSelection(withoutB, stored.selectedIds);
+  assert.equal(shrunk.ids.includes(D) || singleViewId(withoutB, shrunk, stored.selectedId) === D, false);
+  assert.equal(singleViewId(room, mapSelection(room, stored.selectedIds), stored.selectedId), D);
+  // Written instead: the stored pick goes, and with it the id of B, which was not on the map. With B back, A is in hand, alone.
+  const written = mapViewport(after, room.id);
+  assert.deepEqual(written.selectedIds, [A]);
+  assert.equal(singleViewId(room, mapSelection(room, written.selectedIds), written.selectedId), A);
+  assert.equal(cases, 24, 'every case of the table');
 });
 
 test('V-13: the plan asks what is under the pointer on the shown map, and what is written keeps every node', () => {
