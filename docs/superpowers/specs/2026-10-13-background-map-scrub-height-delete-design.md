@@ -993,7 +993,12 @@ CSS — `backgrounds-map.css`, `.bmap-modal-actions>.bmap-text-button:first-chil
 .bmap-delete-choice strong { display:block; font-size:13px; font-weight:550; color:rgb(var(--color-text-primary)); }
 .bmap-delete-choice input { flex-shrink:0; margin-top:5px; accent-color:rgb(var(--color-accent)); }
 .bmap-delete-choices:disabled .bmap-delete-choice { cursor:default; opacity:.6; }
+/* The paragraph reset of the library takes the margins of the stopped note and of the notes away: these keep them clear of the lead. */
+.bmap-move-note + .bmap-delete-lead { margin-top:12px; }
+.bmap-delete-lead ~ .bmap-hint { margin:10px 0 0; font-size:12px; }
 ```
+
+끝의 두 줄은 **게이트 D에서 더했다**: 창 안의 문단은 라이브러리의 `.bg-library p { margin:0 }`에 눌려 `.bmap-move-note`와 `.bmap-hint`의 제 여백을 잃는다 — 멈춘 문장의 상자가 첫 문단에 붙고, 선택이 없는 창에서는 `notes`가 마지막 문단 바로 밑에 작은 글씨로 붙어 보였다(앱 엔진에서 본 것). 두 줄이 그 사이를 띄우고 `notes`를 12px로 올린다(선택자가 그 초기화보다 무겁다). 앵커 66의 규칙 목록에 두 줄이 더해졌다.
 
 `lead`의 문단들은 `<div className="bmap-delete-lead" ref={body}>` 안에 둔다(없어짐 모습에서도 그 한 문단을 같은 div에 둔다 — `body` ref가 늘 있다). 창의 폭은 `BackgroundModal`의 것이다(`min(580px, 창 폭 − 32px)` — 앱 창이 가장 좁은 800px일 때도 580px이라, `돌아가기`와 가장 긴 `도면 N개 모두 삭제`가 한 줄에 선다).
 

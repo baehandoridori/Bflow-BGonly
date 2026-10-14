@@ -1296,7 +1296,7 @@ test('anchor 55: the colours of the band come from the two accents of the theme 
 test('anchor 56: only a draft with nothing unsaved follows the library, never during a save or under an open dialog, and a map that went away is left as on a move to another map', () => {
   // The guard comes first. While a save runs the store shows maps that are not confirmed (a draft that followed would keep
   // the values of a save that failed, and a map that is only being deleted would read as gone). A dialog of the editor asks
-  // about the map on show: with that map gone under it, a second press on its delete would go to the first map of the list.
+  // about a map it holds, with what it read of the drafts: they must not change under it (the delete dialog plans from them).
   // Then the draft of the map on show is read before and after. Replaced, the picked point goes: it is a number, and may
   // now name another point. Gone, what `navigate` clears is cleared, and only then: on a mere newer revision the points
   // that are being drawn and the tool stay. `dialogOpen` is a dependency, so what was skipped is done as the dialog closes.
@@ -2397,7 +2397,10 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
   const bare = sheet.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
   const rules = bare.filter(line => line.includes('.bmap-delete'));
   assert.deepEqual(rules.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-delete-lead {', '.bmap-delete-choices {', '.bmap-delete-choice {', '.bmap-delete-choice:has(input:checked) {',
-    '.bmap-delete-choice strong {', '.bmap-delete-choice input {', '.bmap-delete-choices:disabled .bmap-delete-choice {']);
+    '.bmap-delete-choice strong {', '.bmap-delete-choice input {', '.bmap-delete-choices:disabled .bmap-delete-choice {',
+    // Gate D: the paragraph reset of the library (`.bg-library p { margin:0 }`) took the margins of the stopped note and of
+    // the notes away, and they sat on the lead. These two keep them clear of it, by a selector that outweighs the reset.
+    '.bmap-move-note + .bmap-delete-lead {', '.bmap-delete-lead ~ .bmap-hint {']);
   for (const line of rules) {
     assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
     assert.doesNotMatch(line, /transition|animation|backdrop-filter/);

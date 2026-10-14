@@ -334,7 +334,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   // when its map is saved elsewhere, and goes when its map is deleted there.
   const followSaved = useEvent(() => {
     // Never while a save runs: the store then shows maps that are not confirmed yet. Never during a drag. And never under an
-    // open dialog of the editor: it asks about the map on show, and that must still be the same map when it is answered.
+    // open dialog of the editor: it asks about a map it holds, and the drafts under it must still be the ones it read when it is answered.
     if (disabled || doc.isGestureActive() || dialogOpen) return;
     const before = mapDraft(doc.getState(), current?.id);
     doc.followSaved(snapshot.maps);

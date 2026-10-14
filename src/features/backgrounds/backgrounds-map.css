@@ -262,6 +262,9 @@
 .bmap-delete-choice strong { display:block; font-size:13px; font-weight:550; color:rgb(var(--color-text-primary)); }
 .bmap-delete-choice input { flex-shrink:0; margin-top:5px; accent-color:rgb(var(--color-accent)); }
 .bmap-delete-choices:disabled .bmap-delete-choice { cursor:default; opacity:.6; }
+/* The paragraph reset of the library takes the margins of the stopped note and of the notes away: these keep them clear of the lead. */
+.bmap-move-note + .bmap-delete-lead { margin-top:12px; }
+.bmap-delete-lead ~ .bmap-hint { margin:10px 0 0; font-size:12px; }
 .bmap-underlay-setting { display:flex; gap:16px; align-items:center; }
 .bmap-underlay-setting img { max-width:220px; }
 .bmap-canvas.tool-symbol { cursor:crosshair; }
