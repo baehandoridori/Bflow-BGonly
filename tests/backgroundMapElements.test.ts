@@ -6,7 +6,9 @@ import { isRoadSpace, nodeVolumeHeight, roadCentreLine, roadCentrePlanLine, spac
 import { containsPoint } from '../src/features/backgrounds/mapGeometry.ts';
 import { MAP3D_DARK_PALETTE } from '../src/features/backgrounds/map3dScene.ts';
 import { MAP_CAMERA_COLORS, cameraColorHex } from '../src/features/backgrounds/mapCameraColor.ts';
+import { colorContrast, colorTriple } from '../src/features/backgrounds/mapEditColor.ts';
 import { BACKGROUND_CAMERA_COLORS } from '../src/features/backgrounds/domain.ts';
+import { THEME_PRESETS, deriveThemeFromAccent, getLightColors, hslToRgb, rgbToHex } from '../src/themes.ts';
 import type { BackgroundCameraColor, BackgroundPoint, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbolKind } from '../src/features/backgrounds/types.ts';
 
 test('the symbol list has stairs before the generic object, and a kind that is not listed reads as the generic object', () => {
@@ -343,6 +345,51 @@ test('in the object list the colour of a camera wins over the amber of the light
   // The two are as specific as each other: the later one wins.
   assert.ok(own > light, 'the rule of a coloured camera comes after the light theme rule');
   assert.ok(rule('backgrounds-map.css', '.bmap-node-kind.is-camera[data-camera-color] {').includes('color:rgb(var(--bmap-cam))'));
+});
+
+/** "r g b" as three numbers: the colours of a theme are written so. */
+function rgbOf(text: string): [number, number, number] {
+  const found = colorTriple(text);
+  if (!found) assert.fail(`not a colour: "${text}"`);
+  return found;
+}
+
+test('the buttons that delete keep their pink on the dark theme, and on the light one are a red whose words read on every light page and card', () => {
+  const lines = sheet('backgrounds-map.css');
+  // Every button of the editor that deletes wears this class: 도면 삭제 in the settings and in its own dialog, 이 배치 삭제,
+  // 선택한 n개 삭제 and the 삭제 of a confirmation. On the dark theme it keeps the pink it always had, letter for letter.
+  const dark = lines.indexOf('.bmap-danger { color:#ec8c8c!important; border-color:#ec8c8c4d!important; }');
+  assert.ok(dark > -1, 'the rule of the dark theme');
+  // On the white of a light dialog that pink read at 2.41 to 1. The light theme has a rule of its own, on the line right
+  // under it, and no other line names the class: a third could take the red away under another selector.
+  assert.deepEqual(lines.flatMap((line, at) => line.includes('.bmap-danger') ? [at] : []), [dark, dark + 1], 'the two rules of the class');
+  // Both its declarations are important, as those of the dark rule are: those would win otherwise, whatever the selector.
+  // The attribute of the light theme in front outweighs the one class of the dark rule. The edge is the red of the words, see-through.
+  const light = /^\[data-color-mode="light"\] \.bmap-danger \{ color:#([0-9a-f]{6})!important; border-color:#\1[0-9a-f]{2}!important; \}$/.exec(lines[dark + 1]);
+  assert.ok(light, `the line under the dark rule: ${lines[dark + 1]}`);
+  const value = parseInt(light[1], 16), red = [value >> 16, (value >> 8) & 255, value & 255];
+  // The words read at 4.5 to 1 at least wherever they are painted: on the card (the dialogs, and the button that deletes
+  // a map is a card itself) and on the page (the inspector is a faint film over it). Under the pointer a button of the
+  // library is washed with the accent, by the hover rule of every button of the library: as see-through as that rule says.
+  const library = sheet('backgrounds.css').join('\n');
+  const hover = /\.bg-library button:hover:not\(:disabled\) \{\s*background: rgb\(var\(--color-accent\) \/ ([\d.]+)\);/.exec(library);
+  assert.ok(hover, 'the wash of a library button under the pointer');
+  const wash = Number(hover[1]), washed = (accent: number[], under: number[]) => under.map((channel, index) => channel * (1 - wash) + accent[index] * wash);
+  const reads = (surface: number[], where: string) => { const ratio = colorContrast(red, surface); assert.ok(ratio >= 4.5, `#${light[1]} on ${where}: ${ratio.toFixed(2)} to 1`); };
+  // The light theme of each preset, plain and under the pointer with the accent of that preset.
+  for (const item of THEME_PRESETS) {
+    const colors = getLightColors(item.id), accent = rgbOf(colors.accent);
+    for (const [name, surface] of [['card', rgbOf(colors.bgCard)], ['page', rgbOf(colors.bgPrimary)]] as const) {
+      reads(surface, `the light ${name} of ${item.id}`);
+      reads(washed(accent, surface), `the light ${name} of ${item.id} under the pointer`);
+    }
+  }
+  // And the light theme made from an accent of any hue: its page is the darkest one the words meet.
+  for (let h = 0; h < 360; h++) {
+    const hex = rgbToHex(hslToRgb(h, 60, 50)), theme = deriveThemeFromAccent(hex, hex, 'light');
+    reads(rgbOf(theme.bgCard), `the light card made from the hue ${h}`);
+    reads(rgbOf(theme.bgPrimary), `the light page made from the hue ${h}`);
+  }
 });
 
 test('a colour circle is painted with its own colour, marks the current colour with a ring, and keeps its focus ring outside that ring', () => {
