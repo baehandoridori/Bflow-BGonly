@@ -11,9 +11,13 @@ import { BackgroundMapNameBox } from './BackgroundMapNameBox';
 import { BackgroundMapSelectionSummary } from './BackgroundMapSelectionSummary';
 import { BackgroundMapCameraColor } from './BackgroundMapCameraColor';
 import { BackgroundMapEditStrip } from './BackgroundMapEditStrip';
+import { BackgroundMapNumberField as NumberField } from './BackgroundMapNumberField';
+import { BackgroundMapDeleteDialog } from './BackgroundMapDeleteDialog';
 import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
-import { MAP_SPATIAL_DEFAULTS, MAP_SPATIAL_LIMITS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
+import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
+import { mapNodeNumber, setMapNodeNumber } from './mapNumberField';
+import type { MapNumberKey } from './mapNumberField';
 import { MAP_LABEL_SCALE_LIMITS, fieldEditStartMap, fitMapViewport, gestureStartMap, mapDraft, mapDraftChanged, mapScreenScale, mapSelection, mapViewport, pickAction, revealPlanPoint, singleViewId, wheelZoomFactor, zoomMapViewport, zoomMapViewportAt } from './mapDocument';
 import { MAP_EDIT_MARK, POLYGON_POINT_LIMIT, doubleClickNodeId, planDoubleClickAction, planVertexHandles, readSnapPreference, storeSnapPreference } from './mapPlanEdit';
 import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
@@ -27,9 +31,11 @@ import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument'
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
 import { MAP_SAVED_NOTICE_MS, mapEditStatus } from './mapEditStatus';
 import { useMapEditColors } from './useMapEditColors';
-import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode } from './mapCanvas';
+import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode, MapFieldScrub } from './mapCanvas';
 import { backgroundMapPath } from './domain';
 import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
+import { mapDeleteCauseText, mapDeleteStopText, planMapDelete } from './mapDelete';
+import type { MapDeleteMode, MapDeletePlan } from './mapDelete';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
@@ -103,8 +109,6 @@ const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hin
 ];
 const ASPECT_PRESETS = [{ label: '16:9', value: 16 / 9 }, { label: '4:3', value: 4 / 3 }, { label: '1:1', value: 1 }, { label: '2.39:1', value: 2.39 }, { label: '9:16', value: 9 / 16 }];
 const PITCH_PRESETS = [{ label: '수평', pitch: 0 }, { label: '수직 위', pitch: 90 }, { label: '수직 아래', pitch: -90 }];
-/** Saved bounds of plan positions and sizes. */
-const PLAN_LIMIT = 100000, MIN_PLAN_SIZE = 10;
 /** The longest a double-click takes (the system's default interval). */
 const SECOND_CLICK_MS = 500;
 const pressEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick'];
@@ -131,28 +135,6 @@ function useEvent<A extends unknown[], R>(handler: (...args: A) => R): (...args:
   const latest = useRef(handler);
   latest.current = handler;
   return useCallback((...args: A) => latest.current(...args), []);
-}
-
-/**
- * Number input that keeps what is being typed. A value inside the limits applies at once; an
- * unfinished or out-of-range entry ("-", or "1" on the way to "150") waits until the field is left.
- */
-function NumberField({ label, value, onChange, onDone, min = -Infinity, max = Infinity, disabled = false }: { label: string; value: number; onChange: (value: number) => void; onDone?: () => void; min?: number; max?: number; disabled?: boolean }) {
-  const [text, setText] = useState<string | null>(null);
-  const parse = (raw: string) => { const next = raw.trim() === '' ? Number.NaN : Number(raw); return Number.isFinite(next) ? next : null; };
-  return <Field label={label}><input type="number" step="any" value={text ?? round(value)} min={Number.isFinite(min) ? min : undefined} max={Number.isFinite(max) ? max : undefined} disabled={disabled}
-    onChange={event => {
-      const raw = event.target.value, next = parse(raw);
-      setText(raw);
-      if (next !== null && next >= min && next <= max && next !== value) onChange(next);
-    }}
-    onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-    onBlur={() => {
-      const next = text === null ? null : parse(text), clamped = next === null ? value : Math.min(max, Math.max(min, next));
-      // An entry outside the limits lands on the nearest limit; when that is the value it already has, nothing is edited.
-      if (clamped !== next && clamped !== value) onChange(clamped);
-      setText(null); onDone?.();
-    }} /></Field>;
 }
 
 const load3D = () => import('./BackgroundMap3D');
@@ -235,7 +217,15 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [settingsForm, setSettingsForm] = useState<BackgroundMap | null>(null);
   const settingsRevision = useRef<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [confirmation, setConfirmation] = useState<'discard' | 'delete-map' | 'delete-node' | 'delete-group' | null>(null);
+  const [confirmation, setConfirmation] = useState<'discard' | 'delete-node' | 'delete-group' | null>(null);
+  /** The delete dialog of a map. It holds the id of the map it was opened for, and acts on that map alone. */
+  const [mapDelete, setMapDelete] = useState<{ mapId: string; name: string; parentId: string | null; mode: MapDeleteMode;
+    progress: { done: number; total: number } | null;
+    /** The plan of the press that stopped part-way. */
+    stopped: MapDeletePlan | null } | null>(null);
+  const deleting = useRef(false);                            // a run is in progress. A ref: a second press can come before `busy` is drawn
+  /** Every map this dialog has set out to delete, over all its presses. */
+  const deleteAimed = useRef<string[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 680 });
@@ -279,6 +269,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const editing = !!draft && snapshot.canManage;
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
+  /** A dialog of the editor is open. Each asks about a map it holds: nothing may change the maps under it, and the editor's own message is shown inside it. */
+  const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete);
   // The name box is drawn only while its node can still be renamed here; otherwise it goes without a commit.
   const renamingNode = renaming && mode === 'plan' && canEdit && renaming.mapId === current?.id
     ? current.nodes.find(node => node.id === renaming.nodeId && !node.locked) : undefined;
@@ -342,8 +334,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   // when its map is saved elsewhere, and goes when its map is deleted there.
   const followSaved = useEvent(() => {
     // Never while a save runs: the store then shows maps that are not confirmed yet. Never during a drag. And never under an
-    // open dialog of the editor: it asks about the map on show, and that must still be the same map when it is answered.
-    if (disabled || doc.isGestureActive() || confirmation || createForm || linkForm || settingsForm) return;
+    // open dialog of the editor: it asks about a map it holds, and the drafts under it must still be the ones it read when it is answered.
+    if (disabled || doc.isGestureActive() || dialogOpen) return;
     const before = mapDraft(doc.getState(), current?.id);
     doc.followSaved(snapshot.maps);
     // The map on show was replaced under the picked point: its index may now name another point (as after an undo).
@@ -351,8 +343,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     // The map on show went with its draft: the screen moves on to another map without `navigate`, so what `navigate` clears is cleared here.
     if (before && !mapDraft(doc.getState(), current?.id)) { setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); }
   });
-  // The four dialogs are in the list so that this runs again as one of them closes.
-  useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);
+  // An open dialog is in the list so that this runs again as it closes.
+  useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);
   // "Saved" leaves the band by itself. Timed here, not in CSS: with reduced motion a CSS timer ends on its first frame.
   useEffect(() => {
     if (!savedNotice) return;
@@ -429,7 +421,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     // The key is the editor's only while it is on show and editing. While viewing, for a read-only account and in another tab of the library it is left alone.
     if (!root || root.offsetParent === null || !editing) return;
     // An open dialog keeps the key. Asked from the state and from the document, never from the target: once Tab has run past the last button of a modal, the focus (and so the target) is the body.
-    if (createForm || linkForm || settingsForm || confirmation || document.querySelector(openDialogs)) return;
+    if (dialogOpen || document.querySelector(openDialogs)) return;
     // The key is the editor's while the focus is in the library, or on nothing at all. Elsewhere it belongs to what has the focus:
     // a window of the app that is neither a dialog element nor marked modal (changing the password, managing users), a button of the app's own frame.
     if (element && element !== document.body && !element.closest('.bg-library')) return;
@@ -663,18 +655,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       leaveEditing();
       focusAfterConfirm.current = true; setConfirmation(null); return;
     }
-    if (confirmation === 'delete-map' && snapshot.canManage) {
-      if (draft?.baseRevision === null) {
-        doc.discard(current.id);
-        setCurrentId(current.parentId); setConfirmation(null); return;
-      }
-      setBusy(true); setError('');
-      try {
-        await execute({ type: 'delete', kind: 'map', id: current.id, expectedRevision: draft?.baseRevision ?? current.revision });
-        doc.discard(current.id);
-        setCurrentId(current.parentId); setConfirmation(null);
-      } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
-    }
   }
   async function createMap() {
     if (!createForm?.name.trim() || !snapshot.canManage || disabled) return;
@@ -724,6 +704,61 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       const imageUrl = await uploadBackgroundImage(file);
       setSettingsForm(previous => previous?.id === id ? { ...previous, imageUrl } : previous);
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  /** The drafts of maps this dialog deleted without getting an answer: the library no longer has them. Only asked while nothing is being saved. */
+  function dropGoneDrafts() { for (const id of deleteAimed.current) if (!snapshot.maps.some(map => map.id === id)) doc.discard(id); }
+  /** 도면 삭제 of the settings dialog. The dialog is bound to the map those settings were opened for, never to the map on show. */
+  function openMapDelete() {
+    if (!settingsForm || disabled || !snapshot.canManage) return;
+    const map = maps.find(item => item.id === settingsForm.id);
+    deleteAimed.current = [];
+    setMapDelete({ mapId: settingsForm.id, name: map?.name ?? settingsForm.name, parentId: map?.parentId ?? null, mode: 'keep-children', progress: null, stopped: null });
+    setSettingsForm(null); setError('');
+    // This dialog comes up where the settings dialog was: the second click of a double-click would land on a choice or a button of it.
+    swallowSecondClick();
+  }
+  async function runMapDelete() {
+    if (!mapDelete || disabled || deleting.current) return;
+    dropGoneDrafts();
+    // The whole plan, the revisions it expects and where the screen goes are settled here, before the first wait.
+    const plan = planMapDelete(snapshot, settle().drafts, mapDelete.mapId, mapDelete.mode);
+    if (!plan.target || plan.refusal) return;                // the dialog is drawn from the same plan and says why
+    const steps = plan.steps, total = plan.removed.length, parentId = plan.target.parentId, opened = parentId ? mapPath(maps, parentId).map(map => map.id) : [];
+    deleteAimed.current = [...new Set([...deleteAimed.current, ...plan.removed])];
+    deleting.current = true; setBusy(true); setError('');
+    // What is counted is maps deleted, the number the button named: the save that comes first counts for none.
+    setMapDelete(previous => previous && { ...previous, progress: { done: 0, total }, stopped: null });
+    let done = 0;
+    try {
+      for (const step of steps) {
+        // The save comes first and goes the way every save of maps goes: the drafts of the maps it wrote are put back.
+        if (step.type === 'save-maps') await persistMaps(step);
+        // What was being edited on a map is let go only once that map itself is gone.
+        else { await execute(step); doc.discard(step.id); done += 1; }
+        setMapDelete(previous => previous && { ...previous, progress: { done, total } });
+      }
+      setCurrentId(parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);
+      setCollapsed(previous => new Set([...previous].filter(id => !opened.includes(id))));
+      setMapDelete(null);
+    } catch (cause) {
+      // Said in the dialog, in plain words: never the wrapper Electron puts round what the main process throws.
+      setError(mapDeleteCauseText(cause));
+      setMapDelete(previous => previous && { ...previous, progress: null, stopped: plan });
+      // The dialog arms itself again under the pointer, and two more paragraphs push its buttons down: a click still on its way lands nowhere.
+      // Only while the editor is up: a link from outside or another window can change the screen during a run, and the presses of that screen are none of this dialog's.
+      if (rootRef.current) swallowSecondClick();
+    } finally { deleting.current = false; setBusy(false); }
+  }
+  /** 돌아가기, Esc, the close button and 닫기. Not while a run is in progress. */
+  function closeMapDelete() {
+    if (!mapDelete || disabled) return;
+    dropGoneDrafts();
+    // The map is gone (deleted here without an answer, or elsewhere): its draft goes with it and the screen moves to where it hung.
+    if (!snapshot.maps.some(map => map.id === mapDelete.mapId)) {
+      doc.discard(mapDelete.mapId);
+      setCurrentId(mapDelete.parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);
+    }
+    setMapDelete(null); setError('');
   }
   function newSpace(shape: BackgroundSpace['shape'], origin: BackgroundPoint, road = false): BackgroundSpace {
     return { id: uuid(), type: 'space', name: road ? '새 도로' : '새 공간', placeId: null, childMapId: null, x: origin.x, y: origin.y, width: 10, height: 10, rotation: 0, shape, points: [], locked: false,
@@ -1017,6 +1052,24 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const previewCanvasGesture = useEvent((map: BackgroundMap) => { if (canEdit) doc.previewGesture(map); });
   const finishCanvasGesture = useEvent(() => { if (canEdit) doc.finishGesture(); else doc.cancelGesture(); });
   const cancelCanvasGesture = useEvent(() => doc.cancelGesture());
+  /** A number of the node in hand slid from outside the canvas (a field of the inspector, the lens of the side view): one drag, one undo step. */
+  const beginFieldScrub = useEvent((field: MapNumberKey) => {
+    if (!current || !selected || selected.locked || !canEdit || pointerRef.current || doc.isGestureActive()) return null;
+    // Leaving a field commits what was being typed in it, as an undo step of its own. The drag starts from the map after that,
+    // read from the store: this handler still holds the map of the last render.
+    focusCanvas();
+    const map = mapDraft(doc.getState(), current.id)?.value, node = map?.nodes.find(item => item.id === selected.id);
+    const start = node && !node.locked ? mapNodeNumber(node, field) : null;
+    if (!map || start === null || !doc.beginGesture(current.id)) return null;
+    return { start, map };
+  });
+  const previewFieldScrub = useEvent((field: MapNumberKey, value: number) => {
+    const start = current && gestureStartMap(doc.getState(), current.id);
+    // From the map of the start, never from the preview before: the members of a space are carried once.
+    if (start && selected && canEdit) doc.previewGesture(setMapNodeNumber(start, selected.id, field, value));
+  });
+  const fieldScrub = useMemo((): MapFieldScrub => ({ begin: beginFieldScrub, preview: previewFieldScrub, finish: finishCanvasGesture, cancel: cancelCanvasGesture, alive: doc.isGestureActive }),
+    [beginFieldScrub, previewFieldScrub, finishCanvasGesture, cancelCanvasGesture, doc.isGestureActive]);
   const placeAt = useEvent((point: BackgroundPoint) => placeSymbol(point));
   const storeView = useEvent((next: Map3DViewState) => { if (current) viewStates.current[current.id] = next; });
   const changeLookThrough = useEvent((id: string | null) => {
@@ -1040,6 +1093,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const linkTarget = maps.find(map => map.id === linkForm?.mapId);
   const movedLink = linkTarget && current && linkTarget.parentId !== current.id;
   const draftChanged = mapDraftChanged(draft);
+  const deletePlan = useMemo(() => mapDelete ? planMapDelete(snapshot, drafts, mapDelete.mapId, mapDelete.mode) : null, [snapshot, drafts, mapDelete?.mapId, mapDelete?.mode]);
   const fieldLocked = !canEdit || !!selected?.locked;
   /** The node in hand is a road: it has a floor height and no walls. */
   const selectedRoad = selected?.type === 'space' && isRoadSpace(selected);
@@ -1079,7 +1133,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2></div></div>
         <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button><button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button></>}</div>
       </header>
-      {error && !confirmation && !createForm && !linkForm && !settingsForm && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
+      {error && !dialogOpen && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
       {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
@@ -1176,7 +1230,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                   lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} />
               </Suspense></Map3DBoundary>
             </div>
-            <BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} />
+            <BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} />
           </div>}
           {/* An HTML input beside the SVG, placed over its node. Keyed by the node, so each opening starts with that node's name. */}
           {renamingNode && <BackgroundMapNameBox key={renamingNode.id} svgRef={svgRef} anchor={nodeNameAnchor(renamingNode)}
@@ -1221,11 +1275,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               return <>
                 {editing && <BackgroundMapCameraColor color={selected.color} disabled={fieldLocked} onChange={changeCameraColor} />}
                 {editing ? <section className="bmap-camera-properties" key={`camera-${selected.id}`} aria-label="카메라 설정">
-                  <div className="bmap-field-pair"><NumberField label="카메라 높이" value={nodeElevation(selected)} min={MAP_SPATIAL_LIMITS.elevation.min} max={MAP_SPATIAL_LIMITS.elevation.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} /><NumberField label="방향 (°)" value={selected.angle} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={angleValue => patchNode({ angle: normalizeAngle(angleValue) }, 'angle')} /></div>
-                  <div className="bmap-field-pair"><NumberField label="위아래 각도 (°)" value={angles.pitch} min={MAP_SPATIAL_LIMITS.pitch.min} max={MAP_SPATIAL_LIMITS.pitch.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="기울기 (°)" value={angles.roll} min={MAP_SPATIAL_LIMITS.roll.min} max={MAP_SPATIAL_LIMITS.roll.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>
+                  <div className="bmap-field-pair"><NumberField label="카메라 높이" field="elevation" value={nodeElevation(selected)} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} /><NumberField label="방향 (°)" field="angle" value={selected.angle} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={angleValue => patchNode({ angle: normalizeAngle(angleValue) }, 'angle')} /></div>
+                  <div className="bmap-field-pair"><NumberField label="위아래 각도 (°)" field="pitch" value={angles.pitch} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="기울기 (°)" field="roll" value={angles.roll} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>
                   <div className="bmap-pitch-presets" role="group" aria-label="위아래 방향 바로 맞추기">{PITCH_PRESETS.map(item => <button type="button" key={item.label} className="bg-button" aria-pressed={angles.pitch === item.pitch} disabled={fieldLocked} onClick={() => { if (angles.pitch !== item.pitch) patchNode({ pitch: item.pitch }); }}>{item.label}</button>)}</div>
                   <p className="bmap-hint">위를 보면 +, 아래를 보면 − 값이에요. 지금은 <strong>{cameraPitchLabel(angles.pitch)}</strong>. 위아래만 바꿔도 좌우 방향은 그대로예요.</p>
-                  <div className="bmap-field-pair"><NumberField label="화각 (°)" value={selected.fov} min={10} max={170} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={fov => patchNode({ fov }, 'fov')} />
+                  <div className="bmap-field-pair"><NumberField label="화각 (°)" field="fov" value={selected.fov} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={fov => patchNode({ fov }, 'fov')} />
                     <Field label="화면 비율"><select value={preset ? preset.label : 'stored'} disabled={fieldLocked} onChange={event => { const next = ASPECT_PRESETS.find(item => item.label === event.target.value); if (next && next !== preset) patchNode({ aspect: next.value }); }}>{ASPECT_PRESETS.map(item => <option key={item.label} value={item.label}>{item.label}</option>)}{!preset && <option value="stored">{round(aspect)}:1</option>}</select></Field></div>
                   <p className="bmap-hint">평면의 부채꼴은 카메라가 향한 쪽을 알려주는 표시예요. 실제로 화면에 담기는 범위와는 다를 수 있어요.</p>
                 </section> : <p className="bmap-hint">{spaceName(selected.spaceId)} · 방향 {Math.round(selected.angle)}° · {cameraPitchLabel(angles.pitch)} · 높이 {Math.round(nodeElevation(selected))} · 화각 {Math.round(selected.fov)}°</p>}
@@ -1245,14 +1299,14 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             {editing && <>
               {selected.type === 'space' ? <details className="bmap-disclosure" key={`place-${selected.id}`}><summary>배경 장소 연결<span>{snapshot.places.find(place => place.id === selected.placeId)?.name ?? '선택 안 함'}</span></summary><Field label="배경 장소"><select value={selected.placeId ?? ''} disabled={fieldLocked} onChange={event => patchNode({ placeId: event.target.value || null })}><option value="">나중에 연결</option>{snapshot.places.map(place => <option key={place.id} value={place.id}>{place.name}</option>)}</select></Field><p className="bmap-hint">장소를 연결하면 해당 배경 이미지들을 여기서 볼 수 있습니다.</p></details> : selected.type === 'camera' ? <details className="bmap-disclosure" key={`views-${selected.id}`}><summary>시점 연결<span>{selected.viewIds.length}개</span></summary><Field label="카메라가 있는 공간"><select value={selected.spaceId ?? ''} disabled={fieldLocked} onChange={event => patchNode({ spaceId: event.target.value || null })}><option value="">공간 밖 / 미지정</option>{current.nodes.filter(node => node.type === 'space').map(node => <option key={node.id} value={node.id}>{node.name}</option>)}</select></Field><fieldset className="bmap-view-select" disabled={fieldLocked}><legend>연결할 배경 시점</legend>{snapshot.views.map(item => <label key={item.id} className="bmap-check"><input type="checkbox" checked={selected.viewIds.includes(item.id)} onChange={event => patchNode({ viewIds: event.target.checked ? [...selected.viewIds, item.id] : selected.viewIds.filter(id => id !== item.id) })} />{item.name}</label>)}{!snapshot.views.length && <p className="bmap-hint">배경 목록에서 시점을 먼저 등록해 주세요.</p>}</fieldset></details> : null}
               {selected.type !== 'camera' && <details className="bmap-disclosure" open key={`vertical-${selected.id}`}><summary>{selected.type === 'space' ? '높이' : '높이·기울기'}<span>{selectedRoad ? `바닥 ${Math.round(nodeElevation(selected))}` : `입체 ${Math.round(nodeVolumeHeight(selected))}`}</span></summary>
-                <div className="bmap-field-pair"><NumberField label="바닥 높이" value={nodeElevation(selected)} min={MAP_SPATIAL_LIMITS.elevation.min} max={MAP_SPATIAL_LIMITS.elevation.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} />{!selectedRoad && <NumberField label="입체 높이" value={nodeVolumeHeight(selected)} min={MAP_SPATIAL_LIMITS.volumeHeight.min} max={MAP_SPATIAL_LIMITS.volumeHeight.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={volumeHeight => patchNode({ volumeHeight }, 'volumeHeight')} />}</div>
-                {selected.type === 'symbol' && <div className="bmap-field-pair"><NumberField label="앞뒤 기울기 (°)" value={nodeAngles(selected).pitch} min={MAP_SPATIAL_LIMITS.pitch.min} max={MAP_SPATIAL_LIMITS.pitch.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="좌우 기울기 (°)" value={nodeAngles(selected).roll} min={MAP_SPATIAL_LIMITS.roll.min} max={MAP_SPATIAL_LIMITS.roll.max} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>}
+                <div className="bmap-field-pair"><NumberField label="바닥 높이" field="elevation" value={nodeElevation(selected)} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={elevation => patchNode({ elevation }, 'elevation')} />{!selectedRoad && <NumberField label="입체 높이" field="volumeHeight" value={nodeVolumeHeight(selected)} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={volumeHeight => patchNode({ volumeHeight }, 'volumeHeight')} />}</div>
+                {selected.type === 'symbol' && <div className="bmap-field-pair"><NumberField label="앞뒤 기울기 (°)" field="pitch" value={nodeAngles(selected).pitch} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={pitch => patchNode({ pitch }, 'pitch')} /><NumberField label="좌우 기울기 (°)" field="roll" value={nodeAngles(selected).roll} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={roll => patchNode({ roll }, 'roll')} /></div>}
                 <p className="bmap-hint">{selectedRoad ? '바닥 높이를 바꾸면 이 도로에 속한 카메라와 사물도 같은 만큼 함께 오르내려요. 도로에는 벽이 없어서 입체 높이가 없어요.' : selected.type === 'space' ? '바닥 높이를 바꾸면 이 공간에 속한 카메라와 사물도 같은 만큼 함께 오르내려요. 입체 높이는 3D에서 보이는 벽 높이예요.' : '입체 높이는 3D에서 보이는 사물의 키예요. 기울여도 가로·세로 길이는 그대로예요.'}</p>
               </details>}
               <details className="bmap-disclosure" key={`geometry-${selected.id}`}><summary>위치·크기·잠금</summary>
                 <label className="bmap-check"><input type="checkbox" checked={selected.locked} disabled={!canEdit} onChange={event => patchNode({ locked: event.target.checked })} />위치와 속성 잠금</label>
-                <div className="bmap-field-pair"><NumberField label="가로 위치" value={selected.x} min={-PLAN_LIMIT} max={PLAN_LIMIT} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={x => moveSelected({ x: x - selected.x, y: 0 }, 'x')} /><NumberField label="세로 위치" value={selected.y} min={-PLAN_LIMIT} max={PLAN_LIMIT} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={y => moveSelected({ x: 0, y: y - selected.y }, 'y')} /></div>
-                {selected.type !== 'camera' && <><div className="bmap-field-pair"><NumberField label="가로 길이" value={selected.width} min={MIN_PLAN_SIZE} max={PLAN_LIMIT} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={width => patchNode({ width }, 'width')} /><NumberField label="세로 길이" value={selected.height} min={MIN_PLAN_SIZE} max={PLAN_LIMIT} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={height => patchNode({ height }, 'height')} /></div><NumberField label="회전 (°)" value={selected.rotation} disabled={fieldLocked} onDone={doc.endCoalescing} onChange={rotation => patchNode({ rotation: normalizeAngle(rotation) }, 'rotation')} /></>}
+                <div className="bmap-field-pair"><NumberField label="가로 위치" field="x" value={selected.x} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={x => moveSelected({ x: x - selected.x, y: 0 }, 'x')} /><NumberField label="세로 위치" field="y" value={selected.y} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={y => moveSelected({ x: 0, y: y - selected.y }, 'y')} /></div>
+                {selected.type !== 'camera' && <><div className="bmap-field-pair"><NumberField label="가로 길이" field="width" value={selected.width} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={width => patchNode({ width }, 'width')} /><NumberField label="세로 길이" field="height" value={selected.height} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={height => patchNode({ height }, 'height')} /></div><NumberField label="회전 (°)" field="rotation" value={selected.rotation} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={rotation => patchNode({ rotation: normalizeAngle(rotation) }, 'rotation')} /></>}
                 <button type="button" className="bmap-text-button bmap-danger" disabled={fieldLocked} onClick={() => { setError(''); setConfirmation('delete-node'); }}>이 배치 삭제</button>
               </details>
             </>}
@@ -1299,8 +1353,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <details className="bmap-disclosure"><summary>도면 위치와 배경 장소</summary><Field label="도면 위치"><select value={settingsForm.parentId ?? ''} disabled={disabled} onChange={event => setSettingsForm({ ...settingsForm, parentId: event.target.value || null })}><option value="">최상위</option>{parentOptions.map(map => <option key={map.id} value={map.id}>{mapPath(maps, map.id).map(item => item.name).join(' / ')}</option>)}</select></Field><Field label="대표 장소"><select value={settingsForm.placeId ?? ''} disabled={disabled} onChange={event => setSettingsForm({ ...settingsForm, placeId: event.target.value || null })}><option value="">나중에 연결</option>{snapshot.places.map(place => <option key={place.id} value={place.id}>{place.name}</option>)}</select></Field>{settingsForm.parentId !== current?.parentId && <p className="bmap-move-note">하위 도면도 함께 옮깁니다. 이전 공간에서 이 도면을 열던 연결은 해제됩니다.</p>}</details>
       {draftChanged && <p className="bmap-hint">현재 공간의 편집 내용도 함께 저장됩니다.</p>}
       {error && <p className="bg-error" role="alert">{error}</p>}
-      <div className="bmap-modal-actions"><button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); setConfirmation('delete-map'); }}>도면 삭제</button><button type="button" className="bg-button" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); }}>취소</button><button type="submit" className="bg-button bg-primary" disabled={disabled || !settingsForm.name.trim()}>{busy ? '저장 중…' : '설정 저장'}</button></div>
+      <div className="bmap-modal-actions"><button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={openMapDelete}>도면 삭제</button><button type="button" className="bg-button" disabled={disabled} onClick={() => { setSettingsForm(null); setError(''); }}>취소</button><button type="submit" className="bg-button bg-primary" disabled={disabled || !settingsForm.name.trim()}>{busy ? '저장 중…' : '설정 저장'}</button></div>
     </form></BackgroundModal>}
-    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?') : confirmation === 'delete-map' ? '도면을 삭제할까요?' : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.') : confirmation === 'delete-map' ? '도면 배치만 삭제합니다. 장소와 배경 원본은 유지됩니다. 하위 도면이나 연결이 남아 있으면 먼저 해제해 주세요.' : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}
+    {mapDelete && deletePlan && <BackgroundMapDeleteDialog name={mapDelete.name} plan={deletePlan} mode={mapDelete.mode} progress={mapDelete.progress}
+      stopped={mapDelete.stopped && mapDeleteStopText(mapDelete.stopped, snapshot)} error={error} disabled={disabled}
+      onMode={mode => setMapDelete(previous => previous && { ...previous, mode })} onClose={closeMapDelete} onConfirm={() => void runMapDelete()} />}
+    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?') : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.') : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}
   </div>;
 }

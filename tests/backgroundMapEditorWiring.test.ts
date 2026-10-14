@@ -80,6 +80,11 @@ const handler = {
   saveMap: () => piece(editor, 'async function saveMap(', 'function requestSave('),
   requestSave: () => piece(editor, 'function requestSave(', 'async function confirmAction('),
   confirmAction: () => piece(editor, 'async function confirmAction(', 'async function createMap('),
+  /** The four of the delete dialog of a map, as they stand in the file: each up to the next, the last up to the function behind them. */
+  dropGoneDrafts: () => piece(editor, 'function dropGoneDrafts(', 'function openMapDelete('),
+  openMapDelete: () => piece(editor, 'function openMapDelete(', 'async function runMapDelete('),
+  runMapDelete: () => piece(editor, 'async function runMapDelete(', 'function closeMapDelete('),
+  closeMapDelete: () => piece(editor, 'function closeMapDelete(', 'function newSpace('),
   followSaved: () => piece(editor, 'const followSaved = useEvent(() => {', 'const abortGesture = useEvent('),
   abortGesture: () => piece(editor, 'const abortGesture = useEvent(', 'useLayoutEffect(() => { abortGesture(); }'),
   commitName: () => piece(editor, 'const commitName = useEvent(', 'const cancelName = useEvent('),
@@ -91,6 +96,8 @@ const handler = {
   openSpace: () => piece(editor, 'function openSpace(', 'function beginRename('),
   fitView: () => piece(editor, 'function fitView(', 'function keyboard('),
   keyboard: () => piece(editor, 'function keyboard(', 'const selectNode = useEvent('),
+  /** No handler of a key or a press: the begin and the preview of a slide and the scrub object made of them, up to the stable callback that follows. */
+  fieldScrub: () => piece(editor, 'const beginFieldScrub = useEvent(', 'const placeAt = useEvent('),
   /** No handler: the one tag with which the editor draws the edit band, up to the `/>` that closes it. */
   strip: () => piece(editor, '<BackgroundMapEditStrip ', '/>'),
 };
@@ -102,6 +109,8 @@ function canvasTag(): string {
   assert.ok(end > start, 'the end of the plan SVG tag was not found');
   return editor.slice(start, end + 2);
 }
+/** The number fields of the inspector: of each tag what stands between its name and the ` />` that closes it, its attributes as they are written. */
+const numberTags = () => editor.split('<NumberField ').slice(1).map(part => part.slice(0, part.indexOf(' />')));
 const view3d = read('BackgroundMap3D.tsx');
 /** A method of the 3D viewport, cut the same way as a handler of the editor. */
 const viewport = {
@@ -957,9 +966,9 @@ test('anchor 50: a save never ends edit mode: every saved map that was being edi
   // revision before that save, and the next save would be refused. Nothing after the wait reads that render or opens a draft.
   const after = persist.slice(positions(persist, waited)[0] + waited.length);
   for (const stale of [/\bsnapshot\b/, /\bcurrent\b/, /\bdraft\b/, /doc\.beginEditing/, /doc\.enterNewMap/]) assert.doesNotMatch(after, stale);
-  // No save drops a draft any more, and the four saves all go through that function.
+  // No save drops a draft any more, and the five saves all go through that function.
   assert.doesNotMatch(editor, /dropDrafts/);
-  assert.equal(count(editor, /await persistMaps\(/g), 4, 'the map, a new map, a link, the settings');
+  assert.equal(count(editor, /await persistMaps\(/g), 5, 'the map, a new map, a link, the settings, the save step of a map delete');
   const binding = read('useBackgroundMapDocument.ts');
   assert.doesNotMatch(binding, /dropDrafts/);
   // The calls of the editor reach the reducer through these two lines, and each sends its own action. Swapped, a save would
@@ -1030,7 +1039,9 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
   // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
   inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
-  assert.equal(count(editor, /\bswallowSecondClick\b/g), 2);
+  // The word stands four times: the function, this call, and the delete dialog of a map as it comes up and as a run of
+  // it stops (anchor 66 holds those two where they are).
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 4, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops');
   assert.deepEqual(piece(editor, 'function swallowSecondClick() {', 'function navigate(').split('\n').map(line => line.trim()).filter(Boolean), [
     'function swallowSecondClick() {',
     'const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };',
@@ -1091,7 +1102,7 @@ test('anchor 53: Ctrl+S is heard on the window, passes its guards, commits the f
   const key = handler.onSaveKey(), steps = [
     "if (event.code !== 'KeyS' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;",
     'if (!root || root.offsetParent === null || !editing) return;',
-    'if (createForm || linkForm || settingsForm || confirmation || document.querySelector(openDialogs)) return;',
+    'if (dialogOpen || document.querySelector(openDialogs)) return;',
     "if (element && element !== document.body && !element.closest('.bg-library')) return;",
     'if (element?.closest(textFields) && !root.contains(element)) return;',
     'event.preventDefault(); event.stopPropagation();',
@@ -1285,17 +1296,17 @@ test('anchor 55: the colours of the band come from the two accents of the theme 
 test('anchor 56: only a draft with nothing unsaved follows the library, never during a save or under an open dialog, and a map that went away is left as on a move to another map', () => {
   // The guard comes first. While a save runs the store shows maps that are not confirmed (a draft that followed would keep
   // the values of a save that failed, and a map that is only being deleted would read as gone). A dialog of the editor asks
-  // about the map on show: with that map gone under it, a second press on its delete would go to the first map of the list.
+  // about a map it holds, with what it read of the drafts: they must not change under it (the delete dialog plans from them).
   // Then the draft of the map on show is read before and after. Replaced, the picked point goes: it is a number, and may
   // now name another point. Gone, what `navigate` clears is cleared, and only then: on a mere newer revision the points
-  // that are being drawn and the tool stay. The four dialogs are dependencies, so what was skipped is done as one closes.
+  // that are being drawn and the tool stay. `dialogOpen` is a dependency, so what was skipped is done as the dialog closes.
   const follow = handler.followSaved(), steps = [
-    'if (disabled || doc.isGestureActive() || confirmation || createForm || linkForm || settingsForm) return;',
+    'if (disabled || doc.isGestureActive() || dialogOpen) return;',
     'const before = mapDraft(doc.getState(), current?.id);',
     'doc.followSaved(snapshot.maps);',
     'if (mapDraft(doc.getState(), current?.id) !== before) setActiveVertex(null);',
     "if (before && !mapDraft(doc.getState(), current?.id)) { setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setError(''); }",
-    'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, confirmation, createForm, linkForm, settingsForm]);',
+    'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);',
   ];
   inOrder(follow, ...steps);
   // Each is a line of its own: nothing stands in front of one (a condition before the call, say).
@@ -1431,17 +1442,17 @@ test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the wo
   assert.ok(editor.includes('<div className="bmap-3d-main" ref={stageRef} tabIndex={-1} '));
 });
 
-test('anchor 59: the two new test files run in the build', () => {
+test('anchor 59: the new test files run in the build', () => {
   // The build runs every test file a pattern of names finds. A file that is deleted, or renamed out of that pattern, takes
-  // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the two by name.
+  // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the new ones by name.
   const tests = new URL('./', import.meta.url), names = readdirSync(tests);
-  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts']) {
+  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts', 'backgroundMapDelete.test.ts']) {
     assert.ok(names.includes(name), `not in the tests folder: ${name}`);
     const source = readFileSync(new URL(name, tests), 'utf8');
     // And each tests something: a file whose tests are all skipped is green as well.
     assert.ok(count(source, /^test\(/gm) >= 3, `fewer than three tests: ${name}`);
     // Whatever the spelling: `test.skip(`, `describe.skip(`, `t.skip()`, an option `skip:` or `todo:` in any place among
-    // the options, `import { skip as test }`. Neither word has any business in these two files, so neither is there at
+    // the options, `import { skip as test }`. Neither word has any business in these files, so neither is there at
     // all (`skipped`, a count in the colour tests, is another word), and `test` is the runner's own.
     assert.doesNotMatch(source, /\b(?:skip|todo)\b/, `${name} skips a test`);
     assert.ok(source.startsWith("import test from 'node:test';"), `${name} does not take test from node:test`);
@@ -1450,4 +1461,1024 @@ test('anchor 59: the two new test files run in the build', () => {
   const { scripts } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { scripts: Record<string, string> };
   assert.equal(scripts['test:background'], 'node --test ./tests/background*.test.ts');
   for (const build of ['build', 'build:vite']) assert.ok(scripts[build].includes('npm run test:background'), `${build} does not run the background tests`);
+});
+
+test('anchor 60: every number of the inspector is one component, on one table and one scrub object', () => {
+  // The component comes into the editor under the name its fields always had there, so a tag still reads `<NumberField `
+  // (anchor 44 holds one by its letters). The field the editor had of its own is gone, and no number input is left in
+  // this file: a field left on one would have no grip and no bar, and could only be typed in. Gone with it are the two
+  // limits the editor kept for the plan: what a field accepts is written in one place, the table the component reads.
+  assert.ok(editor.includes("import { BackgroundMapNumberField as NumberField } from './BackgroundMapNumberField';"), 'the number fields of the editor are not the component');
+  for (const old of ['function NumberField(', 'type="number"', 'PLAN_LIMIT', 'MIN_PLAN_SIZE']) assert.ok(!editor.includes(old), `still there: ${old}`);
+  assert.doesNotMatch(editor, /\btype=\{?['"`]number\b/, 'a number input of the editor\'s own, in whatever quotes');
+  // It is drawn by that one import and under that one name, fourteen times. A field drawn under another spelling of its
+  // tag (a line break after the name, the name of the component itself) would be read by nothing below.
+  assert.equal(count(editor, /\bNumberField\b/g), 15, 'the import and the fourteen tags');
+  assert.equal(count(editor, /BackgroundMapNumberField/g), 2, 'the one import: the name and the file');
+  // The fourteen fields: the name on show, the number of the node it is, the value it shows, and what a typed value
+  // does. The second is the key of its row in the table (its limits, its steps, its bar) and the key a slide of it
+  // writes. Two names share a key where two kinds of node have the same number: the height of a camera and the floor of
+  // a space or an object, the two tilts of a camera and of an object.
+  const fields = [
+    ['카메라 높이', 'elevation', 'nodeElevation(selected)', "elevation => patchNode({ elevation }, 'elevation')"],
+    ['방향 (°)', 'angle', 'selected.angle', "angleValue => patchNode({ angle: normalizeAngle(angleValue) }, 'angle')"],
+    ['위아래 각도 (°)', 'pitch', 'angles.pitch', "pitch => patchNode({ pitch }, 'pitch')"],
+    ['기울기 (°)', 'roll', 'angles.roll', "roll => patchNode({ roll }, 'roll')"],
+    ['화각 (°)', 'fov', 'selected.fov', "fov => patchNode({ fov }, 'fov')"],
+    ['바닥 높이', 'elevation', 'nodeElevation(selected)', "elevation => patchNode({ elevation }, 'elevation')"],
+    ['입체 높이', 'volumeHeight', 'nodeVolumeHeight(selected)', "volumeHeight => patchNode({ volumeHeight }, 'volumeHeight')"],
+    ['앞뒤 기울기 (°)', 'pitch', 'nodeAngles(selected).pitch', "pitch => patchNode({ pitch }, 'pitch')"],
+    ['좌우 기울기 (°)', 'roll', 'nodeAngles(selected).roll', "roll => patchNode({ roll }, 'roll')"],
+    ['가로 위치', 'x', 'selected.x', "x => moveSelected({ x: x - selected.x, y: 0 }, 'x')"],
+    ['세로 위치', 'y', 'selected.y', "y => moveSelected({ x: 0, y: y - selected.y }, 'y')"],
+    ['가로 길이', 'width', 'selected.width', "width => patchNode({ width }, 'width')"],
+    ['세로 길이', 'height', 'selected.height', "height => patchNode({ height }, 'height')"],
+    ['회전 (°)', 'rotation', 'selected.rotation', "rotation => patchNode({ rotation: normalizeAngle(rotation) }, 'rotation')"],
+  ];
+  const tags = numberTags(), listed = (rows: string[][]) => rows.map(row => row.join(' | ')).sort();
+  assert.equal(tags.length, 14, 'the number fields of the inspector');
+  // Every tag opens with its name, its key and its value, in that order, and the three are those of one row: compared as
+  // whole lists and in no order, so each field is there once, with its own three. A name on another key ('세로 길이' on
+  // `width`) would slide one number while what is typed in it changes another. Two values swapped ('가로 위치' showing
+  // `selected.y`) would show one number while the slide starts from another.
+  const opening = (tag: string) => /^label="([^"]*)" field="([^"]*)" value=\{([^{}]*)\} /.exec(tag)?.slice(1) ?? [];
+  for (const tag of tags) assert.equal(opening(tag).length, 3, `a number field does not open with its name, its key and its value: ${tag}`);
+  assert.deepEqual(listed(tags.map(tag => opening(tag))), listed(fields.map(row => row.slice(0, 3))));
+  // Every field is off while its node is locked or a save runs, slides through the one scrub object of the editor, and
+  // ends the undo step of what was typed in it as it is left. None is given a limit: its limits are those of its row in
+  // the table, and given here again there would be two sets of them.
+  for (const tag of tags) {
+    for (const given of ['disabled={fieldLocked}', 'scrub={fieldScrub}', 'onDone={doc.endCoalescing}']) assert.ok(tag.includes(` ${given}`), `not given ${given}: ${tag}`);
+    for (const limit of [' min=', ' max=']) assert.ok(!tag.includes(limit), `given a limit of its own (${limit.trim()}): ${tag}`);
+  }
+  // And that name means what it says, in one line: no right to edit (nothing is being edited, or a save runs), or a
+  // locked node in hand. Cut to its first half, the name, the grip and the bar of a locked node would look live, and
+  // its boxes would take what is typed: `patchNode` turns away a locked space and no other node, so a height, an angle
+  // or a size typed into a locked camera or object would be written. And the name is given that meaning nowhere else:
+  // a second one, in the block of the camera say, would be the one the five fields there read.
+  assert.ok(editor.includes('const fieldLocked = !canEdit || !!selected?.locked;'), 'a field is not off for a locked node, or not while a save runs');
+  assert.equal(count(editor, /\bfieldLocked\s*=(?!=)/g), 1, 'the name is given its meaning once');
+  // A typed value goes the way it always went, the one of its row: into the edit of its field, which joins the keys of
+  // one stay in the field into one undo step (patchNode, and moveSelected for the two positions, each with the key of
+  // the field). Sent through the scrub object instead, every key typed would be a gesture, and an undo step of its own.
+  for (const [label, , , typed] of fields) {
+    const tag = tags.find(item => item.startsWith(`label="${label}" `)) ?? '';
+    assert.ok(tag.endsWith(` onChange={${typed}}`), `what is typed into ${label} does not go the way of its row: ${tag}`);
+  }
+  // And a tag holds nothing else: those seven attributes, in this order.
+  assert.deepEqual([...tags].sort(), fields.map(([label, field, value, typed]) => `label="${label}" field="${field}" value={${value}} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={${typed}}`).sort());
+  // And that way is the one it always was, line for line: the function every edit of the map goes through, the edit
+  // of a field and the move of a position. `patchNode` lays each key typed on the map as it was when the stay in that
+  // field began (the members of a space are carried once, whatever was typed on the way) and sends it as an update
+  // that joins the others of that stay by the key of the field; `moveSelected` sends a position the same way. Sent
+  // through the scrub object in one of the three, or as a gesture of the document, every key typed would be an undo
+  // step of its own; so it would be with that key left out, or with the options dropped on the way to the document.
+  // (The comments of the editor are not read here: every line of the list is a line of code.)
+  assert.deepEqual(piece(editor, 'function updateMap(', 'function changeSpaceSurface(').split('\n').map(line => line.trim()).filter(Boolean), [
+    'function updateMap(next: BackgroundMap, options?: MapUpdateOptions) {', 'if (snapshot.canManage) doc.update(next, options);', '}',
+    'function patchNode(changes: Partial<BackgroundNode>, field?: string) {', 'if (!current || !selected || !canEdit) return;',
+    'const key = field ? `${selected.id}:${field}` : undefined;', 'const base = (key && fieldEditStartMap(doc.getState(), current.id, key)) || current;',
+    'const next = { ...(base.nodes.find(node => node.id === selected.id) ?? selected), ...changes } as BackgroundNode;',
+    "updateMap(next.type === 'space' ? transformMapSpace(base, next) : { ...base, nodes: base.nodes.map(node => node.id === next.id ? next : node) },",
+    'key ? { coalesceKey: key } : undefined);', '}',
+    'function moveSelected(delta: BackgroundPoint, field: string) {', 'if (!current || !selected || !canEdit) return;',
+    'updateMap(moveMapNode(current, selected.id, delta), { coalesceKey: `${selected.id}:${field}` });', '}']);
+  // Every field is taken down as another node comes into hand: each stands in an element whose key holds the id of that
+  // node, the five of a camera, the four heights and tilts, the five of the place, the size and the turn. A pick is no
+  // release and no cancel: a pointer pressed on a field is let go then only as the field is taken down (anchor 62),
+  // and the begin and the preview of a slide write to the node in hand at the latest render (anchor 61). In an element
+  // without that key the fields would stay up across a pick, with the press of the node before: the next move would
+  // start the drag on the node just picked, and a drag already running would write its value into that node.
+  const keyed = [piece(editor, '<section className="bmap-camera-properties" key={`camera-${selected.id}`} ', '</section>'),
+    piece(editor, '<details className="bmap-disclosure" open key={`vertical-${selected.id}`}>', '</details>'),
+    piece(editor, '<details className="bmap-disclosure" key={`geometry-${selected.id}`}>', '</details>')];
+  assert.deepEqual(keyed.map(part => count(part, /<NumberField /g)), [5, 4, 5], 'a number field stands outside the elements keyed by the node in hand');
+  // And those elements are drawn only while the map is being edited: someone who views, or an account that may not
+  // edit, has no field and no grip (of a camera there is a line of words instead). The five of a camera stand in the
+  // first half of a choice asked of `editing`. The others stand in the one element drawn under `editing &&`, which
+  // opens right in front of the section that ties a space to a place and holds the two sections with the nine fields.
+  // Asked of anything else, or closed before those sections, the fields would be drawn in view mode: off, and there.
+  assert.ok(editor.includes('{editing ? <section className="bmap-camera-properties" key={`camera-${selected.id}`} '), 'the fields of a camera are drawn while the map is only viewed');
+  const tied = '{selected.type === \'space\' ? <details className="bmap-disclosure" key={`place-${selected.id}`}>', gate = '{editing && <>';
+  const tiedAt = positions(editor, tied)[0], gateAt = editor.lastIndexOf(gate, tiedAt);
+  assert.ok(gateAt > -1 && !editor.slice(gateAt + gate.length, tiedAt).trim(), 'the sections of the node in hand do not open under `editing &&`');
+  const whileEditing = block(editor.slice(gateAt), '{');
+  assert.deepEqual([keyed[1], keyed[2]].map(part => whileEditing.includes(part)), [true, true], 'the heights or the place of a node are drawn while the map is only viewed');
+});
+
+test('anchor 61: a slide is a gesture of the document, previewed from the map it started on', () => {
+  // A number slid from outside the canvas (a field of the inspector, the lens of the side view) goes through the scrub
+  // object of the editor: a begin and a preview of its own, and the object the controls are given, which is made of
+  // them. `lines` are the lines of the three, without their indent.
+  const scrub = handler.fieldScrub(), lines = scrub.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // The begin. It is refused where there is nothing to slide: no map or no node in hand, a locked node, no right to
+  // edit or a save running, a pointer pressed on the plan, another drag. Then the focus goes to the canvas, before
+  // anything else: leaving a field commits what was being typed in it (an entry out of range lands on its limit, as an
+  // undo step of its own), and an open name box commits its name. Once the gesture has begun that update would be
+  // dropped without a word: a gesture is the only writer of its map. Only after that is the value the drag starts from
+  // read, from the draft in the store and off the node as it is there (a node locked there has no value to start
+  // from). Read off the node of the render (`mapNodeNumber(selected, field)`) it would be the value from before that
+  // commit: a box height of 0 typed a moment ago is 1 once its field is left, and the slide of that very field would
+  // start from the 180 that was still drawn. Then the gesture begins, and what the control gets back is that value,
+  // with that very map.
+  const refused = 'if (!current || !selected || selected.locked || !canEdit || pointerRef.current || doc.isGestureActive()) return null;';
+  const live = 'const map = mapDraft(doc.getState(), current.id)?.value, node = map?.nodes.find(item => item.id === selected.id);';
+  const first = 'const start = node && !node.locked ? mapNodeNumber(node, field) : null;';
+  const begun = 'if (!map || start === null || !doc.beginGesture(current.id)) return null;';
+  own(refused, 'focusCanvas();', live, first, begun, 'return { start, map };');
+  // The preview. It is made from the map the gesture started on, never from the map on show, which is the preview
+  // before it: a space carries its cameras and objects along once, from where they stood. Made from the preview before,
+  // they would be carried further at every step. And it is a preview of the gesture: an update of the map is dropped
+  // while a gesture runs, and nothing would move at all.
+  const origin = 'const start = current && gestureStartMap(doc.getState(), current.id);';
+  const shown = 'if (start && selected && canEdit) doc.previewGesture(setMapNodeNumber(start, selected.id, field, value));';
+  own(origin, shown);
+  // The object. A drag ends through the two callbacks the 3D viewport ends its own with: a release finishes it only
+  // while the map can still be edited, and is a cancel once a save has started. Handed `doc.finishGesture` itself, that
+  // release would make an undo step. And `alive` is the document's own answer: by it the hook and the controls learn
+  // that the editor has cancelled a drag (Escape, a save starting, another map).
+  const ends = 'finish: finishCanvasGesture, cancel: cancelCanvasGesture, alive: doc.isGestureActive';
+  assert.ok(scrub.includes(ends), 'a slide does not end through the callbacks of the editor');
+  inOrder(scrub, refused, 'focusCanvas();', 'mapDraft(doc.getState(), current.id)', first, 'doc.beginGesture(current.id)', 'return { start, map };',
+    origin, 'doc.previewGesture(setMapNodeNumber(start, selected.id, field, value));', ends);
+  // A slide is never an edit that joins others. Joined by the key of its field, as what is typed is, two slides of one
+  // field would be one undo step, and its update would be dropped while a gesture runs. And nothing here finishes a
+  // gesture by itself.
+  for (const none of ['updateMap(', 'doc.update(', 'coalesceKey', 'doc.finishGesture(']) assert.ok(!scrub.includes(none), `still there: ${none}`);
+  // And the three hold nothing else: they are the lines above and what joins them, in this order. What joins them. The
+  // begin and the preview are stable callbacks that run the handler of the latest render (useEvent): kept from the
+  // render that made them, they would go on reading the node that was in hand then. A begin is refused as well where
+  // the store has no draft of the map, where the node has no such number, and where the document starts no gesture. A
+  // preview comes to something only while a gesture runs on the map on show, with a node in hand and the right to edit.
+  // And the object is made once, of callbacks that never change: every control is given the same one at every render.
+  assert.deepEqual(lines, ['const beginFieldScrub = useEvent((field: MapNumberKey) => {', refused, 'focusCanvas();', live, first, begun, 'return { start, map };', '});',
+    'const previewFieldScrub = useEvent((field: MapNumberKey, value: number) => {', origin, shown, '});',
+    `const fieldScrub = useMemo((): MapFieldScrub => ({ begin: beginFieldScrub, preview: previewFieldScrub, ${ends} }),`,
+    '[beginFieldScrub, previewFieldScrub, finishCanvasGesture, cancelCanvasGesture, doc.isGestureActive]);']);
+  // The four callbacks of the 3D viewport are as they were, letter for letter. Its begin answers nothing and moves no
+  // focus: a slide has the begin above, which does both. And the three of the slide stand right behind those four, in
+  // no handler another anchor cuts out: placed before them, the object would be made of two callbacks that are not
+  // there yet, and the editor could not be drawn.
+  const canvas = ['const beginCanvasGesture = useEvent(() => { if (current && canEdit && !pointerRef.current) doc.beginGesture(current.id); });',
+    'const previewCanvasGesture = useEvent((map: BackgroundMap) => { if (canEdit) doc.previewGesture(map); });',
+    'const finishCanvasGesture = useEvent(() => { if (canEdit) doc.finishGesture(); else doc.cancelGesture(); });', 'const cancelCanvasGesture = useEvent(() => doc.cancelGesture());'];
+  assert.ok(editor.includes(canvas[0]), 'the begin of the 3D viewport is not as it was');
+  const all = editor.split('\n').map(line => line.trim()).filter(Boolean), at = all.indexOf(lines[0]);
+  assert.ok(at >= canvas.length, 'the begin of a slide is a line of its own, behind the callbacks of the 3D viewport');
+  assert.deepEqual(all.slice(at - canvas.length, at), canvas);
+  // The write is the pure module's, and the N tests run it. Three things of it are held here as well. A value that is
+  // the one already there is turned away before it is settled, and the same map object comes back: a drag that comes
+  // back to where it started ends without an undo step and invents no key, and a number stored outside its limits (a
+  // field of view of 175) is still what it was. Asked of the settled value alone, that drag would leave the 175 at 170.
+  // A position is placed at the value: moved there by a difference it can land a last digit off, which the values of
+  // the N tests do not show. And a space is written through the function that carries its cameras and objects along,
+  // as when its number is typed, while any other node is replaced alone.
+  const write = piece(read('mapNumberField.ts'), 'export function setMapNodeNumber(', 'export function scrubSteps(');
+  const same = 'if (!node || current === null || !Number.isFinite(value) || value === current) return map;';
+  assert.ok(write.includes(same), 'a value that is already there is not turned away');
+  inOrder(write, 'value === current', 'settleNumber(');
+  for (const writer of ['transformMapSpace(', 'replaceMapNode(', 'placeMapNode(']) assert.ok(write.includes(writer), `nothing is written through ${writer}`);
+  // And the function is those lines and what joins them. A locked node is never written, nor a node that has no such
+  // number. A value that settles on the one already there (171 on a field of view of 170) is turned away as well.
+  assert.deepEqual(write.split('\n').map(line => line.trim()).filter(Boolean), ['export function setMapNodeNumber(map: BackgroundMap, id: string, key: MapNumberKey, value: number): BackgroundMap {',
+    'const node = map.nodes.find(item => item.id === id), current = node && !node.locked ? mapNodeNumber(node, key) : null;', same,
+    'const next = settleNumber(value, key);', 'if (next === current) return map;',
+    "if (key === 'x' || key === 'y') return placeMapNode(map, id, key === 'x' ? { x: next, y: node.y } : { x: node.x, y: next });",
+    'const changed = { ...node, [key]: next } as BackgroundNode;', "return changed.type === 'space' ? transformMapSpace(map, changed) : replaceMapNode(map, changed);", '}']);
+});
+
+test('anchor 62: the pointer of a slide is heard on the window, its capture is only tried, and no listener stays however it ends', () => {
+  // The hook is read as this anchor runs: without its file this anchor fails, not every anchor of this file. No test of
+  // Node reaches a React hook, so its lines are held by their letters. `lines` are those lines without their indent.
+  const hook = read('useMapScrubPointer.ts'), lines = hook.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // The listeners. The moves and the release are heard on the window, in the capture phase: with a capture the events of
+  // the pressed element pass there, and without one (the inspection window has none) those of whatever is under the
+  // pointer do. Heard on the element alone, a drag would hang on its capture, and would follow no pointer where there is
+  // none. The blur is not heard in the capture phase: the blur of the field the drag takes the focus from would be heard
+  // too, and would cancel the drag as it starts. And the same five are taken away, under the same flags: one that stays
+  // goes on reading every move of the window.
+  const added = ["window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', cancel, true);",
+    "window.addEventListener('blur', cancel); target.addEventListener('lostpointercapture', cancel);"];
+  const removed = ["window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', cancel, true);",
+    "window.removeEventListener('blur', cancel); target.removeEventListener('lostpointercapture', cancel);"];
+  own(...added, ...removed);
+  // The capture is only tried: where there is none the call may throw, and the window listeners follow the pointer anyway.
+  const captured = 'try { target.setPointerCapture(pointerId); } catch';
+  assert.ok(hook.includes(captured), 'the capture is tried');
+  // The press, in this order. A pointer that is not the primary one, another button or a control that is off: nothing
+  // happens, and the default of that press is left alone. The same while a session of another pointer runs. A session of
+  // this very pointer that is still here never heard its release (the pressed element went away, and the button came up
+  // outside the window): it is given up first. Turned away instead, the control would take no press until it is drawn
+  // anew. Only then is the default prevented, which keeps the focus in a field that is being typed in until the drag
+  // starts and moves it.
+  const press = ['if (!event.isPrimary || event.button !== 0 || latest.current.disabled) return;',
+    'if (session.current) { if (session.current.pointerId !== event.pointerId) return; session.current.giveUp(); }', 'event.preventDefault();'];
+  own(...press);
+  inOrder(hook, ...press);
+  // The guard: what another pointer does is none of this session's business. Three, one in each of the three listeners:
+  // without the one of `up`, the release of a second pointer would end the drag of the first.
+  const inMove = piece(hook, 'function move(', 'function up('), inUp = piece(hook, 'function up(', 'function cancel('), inCancel = piece(hook, 'function cancel(', 'session.current = active;');
+  assert.equal(count(hook, /event\.pointerId !== active\.pointerId/g), 3, 'the guards of move, up and cancel');
+  for (const listener of [inMove, inUp, inCancel]) assert.equal(count(listener, /event\.pointerId !== active\.pointerId/g), 1, 'one guard in each');
+  // The move. With the left button up it is the release, read where the pointer is: letting go of the left button while
+  // another one is held arrives as a move, and so does a pointer that comes back after its button came up outside the
+  // window. Without that line the value would go on following a pointer that nothing holds. The slop is measured along
+  // the axis of the control alone: measured as a distance, a grip moved up or a lens moved sideways would start a drag.
+  // And it is asked at all: without it a mere press on the name of a field would start a gesture.
+  const move = ['if ((event.buttons & 1) === 0) { up(event); return; }',
+    "const along = drive.axis === 'x' ? event.clientX - active.press.clientX : event.clientY - active.press.clientY;",
+    'if (Math.abs(along) >= MAP_NUMBER_SCRUB.slopPx) begin(event, along);'];
+  own(...move);
+  // The start. Beginning moves the focus, and what that commits is drawn at once: a control that was taken down meanwhile
+  // cancels the gesture it has just opened, which nobody else would end. A start that is refused ends the session. And the
+  // drag opens where it starts, the press moved by the slop along the axis and towards the pointer, never where the
+  // pointer is by then: a fast start would lose that much of its way, and measured from the press itself the first value
+  // of the lens would jump. That place is held as the whole line, down to the Shift of the move that started the drag.
+  const start = ['if (session.current !== active) { if (origin && latest.current.scrub.alive()) latest.current.scrub.cancel(); return; }',
+    'if (!origin) { end(); return; }', 'const slop = Math.sign(along) * MAP_NUMBER_SCRUB.slopPx;',
+    "const from = drive.immediate ? active.press : { clientX: active.press.clientX + (drive.axis === 'x' ? slop : 0), clientY: active.press.clientY + (drive.axis === 'y' ? slop : 0), shiftKey: at.shiftKey };",
+    "drag = drive.open(origin, from); active.last = origin.start; active.phase = 'dragging';"];
+  own(...start);
+  assert.ok(!hook.includes('.open(origin, at)'));
+  // The reading. Once the editor has cancelled the drag (Escape, a save starting) nothing more comes of this press. And a
+  // value is shown only when it is another one: previewed at every pixel, the editor would be drawn again at every pixel.
+  const reading = ["if (!latest.current.scrub.alive()) { active.phase = 'dead'; drive.close?.(); return; }",
+    'if (Number.isFinite(value) && value !== active.last) { active.last = value; latest.current.scrub.preview(drive.field, value); }'];
+  own(...reading);
+  assert.equal(count(hook, /scrub\.preview\(/g), 1, 'one preview, in the reading');
+  // The release, read inside `up`: a move reads the pointer too. A press that never became a drag is a tap, and the control
+  // is told so (a field takes the focus): untold, a press on a grip would do nothing at all. A drag reads the place of the
+  // release, and is finished only if it is still a drag after that: finished unasked, the release that follows an Escape
+  // would end a gesture that is not this one. Then the click that follows a drag is swallowed (on the name of a field it
+  // would put the caret in the box), and the swallowing is taken away again: left there, the window would hear no click.
+  const tap = "if (active.phase === 'pressed') { end(); drive.tap?.(); return; }", finish = "if (active.phase === 'dragging') { latest.current.scrub.finish(); drive.close?.(); }";
+  const swallow = ["window.addEventListener('click', swallow, true);", "window.setTimeout(() => window.removeEventListener('click', swallow, true), 0);"];
+  own(tap, finish, ...swallow);
+  inOrder(inUp, tap, 'read(event);', finish, ...swallow);
+  assert.equal(count(hook, /drive\.tap\?\.\(\)/g), 1, 'one tap, of a press that is released');
+  assert.equal(count(hook, /scrub\.finish\(\)/g), 1, 'one finish, of a drag that is released');
+  // Given up (the pointer is cancelled, the window loses the focus, the capture is lost, the same pointer presses again):
+  // a drag that still runs is cancelled, never finished.
+  const gaveUp = "if (active.phase === 'dragging') { if (latest.current.scrub.alive()) latest.current.scrub.cancel(); drive.close?.(); }";
+  own(gaveUp);
+  // Taken down with a press still on it: a drag that runs is cancelled, and the listeners go on the very next line, under
+  // no condition. Kept for a press that had not become a drag yet, the next move would start the drag on the node that
+  // was picked meanwhile.
+  const down = "if (active.phase === 'dragging' && latest.current.scrub.alive()) latest.current.scrub.cancel();", downAt = lines.indexOf(down);
+  assert.ok(downAt > -1, 'taken down, a drag that runs is cancelled');
+  assert.equal(lines[downAt + 1], 'active.end();');
+  // A drag is cancelled in those three places (given up, taken down, taken down while it started) and nowhere else, each
+  // time after asking whether one still runs: the editor may have cancelled it already (Escape, a save starting).
+  assert.equal(count(hook, /scrub\.cancel\(\)/g), 3, 'given up, taken down, taken down while it started');
+  assert.equal(count(hook, /scrub\.alive\(\)\) latest\.current\.scrub\.cancel\(\)/g), 3, 'each cancel asks first');
+  // Shift is the one modifier that is read, off the pointer events themselves: no key is listened for, and Alt means
+  // nothing here (on the plan it is kept from the window menu, anchor 17; a drag that starts outside the canvas is not).
+  for (const none of ['altKey', 'ctrlKey', 'metaKey', "addEventListener('keydown'"]) assert.ok(!hook.includes(none), `still there: ${none}`);
+  // And the hook holds nothing else: from its first line through the brace that closes it, it is the lines above and what
+  // joins them, in this order. What joins them, and what goes wrong without it. `latest` is brought up to date at every
+  // render: a control that was off when it was first drawn (view mode, a locked node) would stay deaf once it is on. The
+  // cleanup is what an effect that runs once returns, and all that stands in front of its two lines is the return for no
+  // session: with a return for a session that is no drag yet the listeners of a mere press would stay, and run after
+  // every render it would cancel a drag at its first step. The element is the one that was given the handler, not what
+  // was pressed inside it (the picture of a grip). `end` lets the capture go only after the listeners (the
+  // lostpointercapture that raises is no cancel) and empties the ref of this session alone. Giving up ends the session,
+  // and a cancel gives up: left out, the listeners of a drag that was cancelled from outside would stay. A start reads the
+  // pointer at once: a fast start shows the way it has already gone, and a press on the bar shows its value at the press.
+  // A drag reads every move, and one the editor cancelled stays dead until the release: without that line the next move
+  // would start it again from the press, and Escape would not hold while the hand still moves. A release ends the session
+  // after a drag as after a tap. The click that follows is stopped and its default is prevented: stopped alone, the name
+  // of a field would still put the caret in its box, and prevented alone, what the pointer was released over would still
+  // hear a click. The session is recorded before the press may start a drag: recorded after, a press on the bar would
+  // cancel what it has just begun. And a press starts at once only where the control says so (on the bar, away from its
+  // dot): started at once everywhere, a press on a name would be no tap, and would open a gesture.
+  const signature = 'export function useMapScrubPointer(scrub: MapFieldScrub, disabled: boolean): <S>(event: ReactPointerEvent<Element>, drive: MapScrubDrive<S>) => void {';
+  // Read as above, with one blank where a comment was taken out of a pair of braces.
+  assert.deepEqual(block(hook, signature).split('\n').map(line => line.trim().replace(/\{\s+\}/, '{ }')).filter(Boolean), [signature,
+    'const latest = useRef({ scrub, disabled }), session = useRef<Session | null>(null);', 'latest.current = { scrub, disabled };',
+    'useEffect(() => () => {', 'const active = session.current;', 'if (!active) return;', down, 'active.end();', '}, []);',
+    'return useCallback(<S>(event: ReactPointerEvent<Element>, drive: MapScrubDrive<S>) => {', ...press,
+    'const target = event.currentTarget, pointerId = event.pointerId;', 'let drag: S;',
+    "const active: Session = { pointerId, press: { clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey }, phase: 'pressed', last: Number.NaN, end, giveUp };",
+    'function end() {', ...removed, 'try { if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId); } catch { }', 'if (session.current === active) session.current = null;', '}',
+    'function giveUp() {', gaveUp, 'end();', '}',
+    'function read(at: MapScrubPoint) {', reading[0], 'const value = drive.read(drag, at);', reading[1], '}',
+    'function begin(at: MapScrubPoint, along: number) {', 'const origin = latest.current.scrub.begin(drive.field);', ...start, 'read(at);', '}',
+    'function move(event: PointerEvent) {', 'if (event.pointerId !== active.pointerId) return;', move[0], "if (active.phase === 'dragging') { read(event); return; }", "if (active.phase === 'dead') return;", move[1], move[2], '}',
+    'function up(event: PointerEvent) {', 'if (event.pointerId !== active.pointerId) return;', tap, "if (active.phase === 'dragging') {", 'read(event);', finish, '}', 'end();',
+    'const swallow = (click: Event) => { click.stopPropagation(); click.preventDefault(); };', ...swallow, '}',
+    'function cancel(event: Event) {', "if ('pointerId' in event && event.pointerId !== active.pointerId) return;", 'giveUp();', '}',
+    'session.current = active;', ...added, `${captured} { }`, 'if (drive.immediate) begin(active.press, 0);', '}, []);', '}']);
+  // What is left is where the slop of those lines comes from: the table of the number fields, by this import. A number
+  // of the hook's own in its place (`const MAP_NUMBER_SCRUB = { slopPx: 0 };`) leaves every line above as it is, and
+  // then a press that slips by one pixel, across the axis as well, starts a gesture, is no tap, and has its click
+  // swallowed. Three places name the table: the import, the move and the start. A fourth would be another source of
+  // it, or the table itself rewritten from the hook's file.
+  own("import { MAP_NUMBER_SCRUB } from './mapNumberField.ts';");
+  assert.equal(count(hook, /\bMAP_NUMBER_SCRUB\b/g), 3, 'the import, the slop of the move and the slop of the start');
+});
+
+test('anchor 63: typing and the identity of a field are as they were, and the arithmetic of a slide is the pure module\'s', () => {
+  // The component is read as this anchor runs: without its file this anchor fails, not every anchor of this file. No test
+  // of Node reaches a React component, so its lines are held by their letters. `lines` are they, without their indent.
+  const part = read('BackgroundMapNumberField.tsx'), lines = part.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // What the field is. Its name is a label tied to the box by an id, where it used to be a label round the box: the box
+  // keeps its name and its role, and a press on the name still puts the focus in it. Without the `htmlFor` the box has no
+  // name at all. The box is the number input it always was, the whole line: it shows what is being typed, or the value
+  // to two decimals (rounded to a whole number, 244.65 would read 245); the engine is told the limits, which its arrow
+  // keys stop at; and a field that is off takes no typing.
+  const name = '<label className="bmap-num-label" htmlFor={id}';
+  const box = '<input ref={box} id={id} type="number" step="any" value={text ?? round(value)} min={Number.isFinite(min) ? min : undefined} max={Number.isFinite(max) ? max : undefined} disabled={disabled}';
+  const round = 'const round = (value: number) => Math.round(value * 100) / 100;';
+  assert.ok(part.includes(name), 'the name of a field is not tied to its box');
+  own(box, round);
+  // Typing: the nine lines the field of the editor had, letter for letter and in this order. What is typed is kept as
+  // text (dropped, an unfinished entry would vanish from the box at every key), and an empty box is no number (read as
+  // zero, a field would be set to 0 the moment it is cleared). A value inside the limits applies at once, and only when
+  // it is another one. Enter leaves the field. Leaving it brings an entry outside the limits to the nearest limit, then
+  // drops the text and ends the undo step of the field.
+  const typing = ['const [text, setText] = useState<string | null>(null);',
+    "const parse = (raw: string) => { const next = raw.trim() === '' ? Number.NaN : Number(raw); return Number.isFinite(next) ? next : null; };",
+    'const raw = event.target.value, next = parse(raw);', 'setText(raw);', 'if (next !== null && next >= min && next <= max && next !== value) onChange(next);',
+    "onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}",
+    'const next = text === null ? null : parse(text), clamped = next === null ? value : Math.min(max, Math.max(min, next));',
+    'if (clamped !== next && clamped !== value) onChange(clamped);', 'setText(null); onDone?.();'];
+  own(...typing);
+  inOrder(part, ...typing);
+  // The limits typing is held to are those of the one table, by the key of the field. Given as props again, there would
+  // be two sets of them: the one a value is typed against and the one it is slid against.
+  const table = 'const id = useId(), box = useRef<HTMLInputElement>(null), { min, max, track } = MAP_NUMBER_FIELDS[field];';
+  own(table);
+  // The slide. The pointer is the one hook's, and it is off while the field is off. The look of a drag goes as soon as
+  // the editor ends the drag by itself (Escape, a save starting): asked of `dragging` alone, the field would stay lit
+  // until the next pointer event. A drag of the name or of the grip opens where the hook says it starts, on the value the
+  // editor gave it and never on the value of this render: the field that was being typed in is committed as the drag
+  // takes the focus away, and this render knows nothing of that. Where the pointer is then becomes a value in the pure
+  // module (slideNumber), and a press that is released without a drag puts the focus in the box. A press on the bar is
+  // read by the pure module as well (pressNumberTrack): it starts a drag at once only away from the dot (started at once
+  // on the dot too, a mere press there would open a gesture), and the value under the pointer is trackNumber's.
+  const pointer = 'const press = useMapScrubPointer(scrub, disabled);', lit = 'const lit = dragging && scrub.alive();';
+  const opened = 'open: (origin, from): MapNumberSlide => { setDragging(true); return { anchorX: from.clientX, anchorValue: origin.start, big: from.shiftKey, value: origin.start }; },';
+  const slid = 'read: (drag, at) => slideNumber(drag, at.clientX, at.shiftKey, field),', tap = 'tap: () => box.current?.focus()';
+  const onBar = 'pressNumberTrack(value, field, event.clientX, rect.left, rect.width)', immediate = 'immediate: bar.immediate';
+  const barRead = 'read: (start, at) => trackNumber(bar.fraction(at.clientX), field, at.shiftKey, start),';
+  own(pointer, lit, opened, slid, barRead);
+  for (const text of [tap, onBar, immediate]) assert.ok(part.includes(text), `not found: ${text}`);
+  // Three controls take a press: the name and the grip slide, and the bar is pressed or dragged.
+  assert.equal(count(part, /onPointerDown=\{slide\}/g), 2, 'the name and the grip');
+  assert.equal(count(part, /onPointerDown=\{slideBar\}/g), 1, 'the bar');
+  // The sums that turn a place into a value are not written again here: the pure tests run them where they are (N-6,
+  // N-7), and no test would reach them in a component. Counted here, steps would be added at every event.
+  for (const none of ['stepNumber(', 'scrubSteps(']) assert.ok(!part.includes(none), `still there: ${none}`);
+  // Nothing joins the Tab order. The grip and the bar are for the pointer and are kept from readers: the keyboard and a
+  // screen reader have the box, which holds the same value.
+  for (const hidden of ['className="bmap-num-grip" aria-hidden="true"', 'className="bmap-num-track" aria-hidden="true"']) assert.ok(part.includes(hidden), `not found: ${hidden}`);
+  assert.ok(!part.includes('tabIndex'), 'a control of the pointer is in the Tab order');
+  // And the file holds nothing else: it is the lines above and what joins them, in this order. What joins them, and what
+  // goes wrong without it. The table, the sums and the place of the dot come from the pure module and the pointer from
+  // the one hook, by these imports: a function of the same name written in this file would pass every line above, and
+  // no test would reach it. The picture of the grip is the arrow with a shaft, as it was announced (↔); how large it is
+  // drawn is tuned by eye in the app, so its two numbers are read as any number. The two tooltips are the words of the
+  // design, and a control that is off has none. The component is a plain function: wrapped in `memo` it would not be
+  // drawn again as the editor ends a drag by itself, and `lit` would not be asked again. `dragging` is on from the start
+  // of a drag to its end, however it ends: left on, the field would be lit by any gesture of the document that runs
+  // later (a handle dragged in 3D). A slide runs sideways and starts past the slop: started at the press, a press on
+  // the name would be no tap. The bar is measured where it stands on screen, and one too narrow for its dot takes no
+  // press; its drag starts on the value the editor gave as well, and lights the field as a slide does. The root carries
+  // the two states the stylesheet draws, a drag and a field that is off, and it is still a field of the library
+  // (`bg-field`). Only a number with fixed ends has a bar, and its dot stands where the pure module says: at the
+  // fraction pressNumberTrack counts with.
+  assert.deepEqual(lines.map(line => line.replace(/(<MoveHorizontal size=\{)[\d.]+(\} strokeWidth=\{)[\d.]+(\} \/>)/, '$1n$2n$3')), [
+    "import { useId, useRef, useState } from 'react';", "import type { CSSProperties, JSX, PointerEvent as ReactPointerEvent } from 'react';", "import { MoveHorizontal } from 'lucide-react';",
+    "import type { MapFieldScrub } from './mapCanvas';", "import { MAP_NUMBER_FIELDS, pressNumberTrack, slideNumber, trackFraction, trackNumber } from './mapNumberField';",
+    "import type { MapNumberKey, MapNumberSlide } from './mapNumberField';", "import { useMapScrubPointer } from './useMapScrubPointer';",
+    "const SLIDE_TITLE = '좌우로 끌어 값 바꾸기 · Shift를 누르면 큰 걸음 · 끄는 도중 Esc는 취소';", "const BAR_TITLE = '눌러서 바로 맞추거나 점을 끌어요 · Shift를 누르면 큰 걸음';", round,
+    'export function BackgroundMapNumberField({ label, field, value, disabled = false, onChange, onDone, scrub }: {',
+    'label: string; field: MapNumberKey; value: number; disabled?: boolean;', 'onChange(value: number): void; onDone?(): void; scrub: MapFieldScrub }): JSX.Element {',
+    typing[0], typing[1], table, pointer, 'const [dragging, setDragging] = useState(false);', lit,
+    'const slide = (event: ReactPointerEvent<Element>) => press(event, {', "field, axis: 'x', immediate: false,", opened, slid, `${tap},`, 'close: () => setDragging(false),', '});',
+    'const slideBar = (event: ReactPointerEvent<HTMLDivElement>) => {', `const rect = event.currentTarget.getBoundingClientRect(), bar = ${onBar};`, 'if (!bar) return;',
+    `press(event, { field, axis: 'x', ${immediate},`, 'open: origin => { setDragging(true); return origin.start; },', barRead, 'close: () => setDragging(false) });', '};',
+    "return <div className={`bg-field bmap-num${lit ? ' is-dragging' : ''}`} data-disabled={disabled || undefined}>",
+    `${name} title={disabled ? undefined : SLIDE_TITLE} onPointerDown={slide}>{label}</label>`, '<div className="bmap-num-row">', box,
+    'onChange={event => {', typing[2], typing[3], typing[4], '}}', typing[5], 'onBlur={() => {', typing[6], typing[7], typing[8], '}} />',
+    '<span className="bmap-num-grip" aria-hidden="true" title={disabled ? undefined : SLIDE_TITLE} onPointerDown={slide}><MoveHorizontal size={n} strokeWidth={n} /></span>', '</div>',
+    '{track && <div className="bmap-num-track" aria-hidden="true" title={disabled ? undefined : BAR_TITLE} onPointerDown={slideBar}>',
+    `<span className="bmap-num-thumb" style={{ '--bmap-num-at': trackFraction(value, field) } as CSSProperties} />`, '</div>}', '</div>;', '}']);
+  // And in what the field draws, `read` took nothing away that is more than a comment. Between the tags of JSX a `//`
+  // is no comment: it is text that is drawn, and an expression written behind it still runs, while `read` drops the
+  // line and the list above never sees it. One comment does stand inside what the field returns, in the handler of
+  // its blur, where it is one: a line that is a comment from its first letter and holds no brace.
+  const rawField = readFileSync(new URL('BackgroundMapNumberField.tsx', directory), 'utf8').replace(/\r\n/g, '\n'), root = 'return <div className={`bg-field bmap-num';
+  const returned = (source: string) => source.slice(positions(source, root)[0]).split('\n').map(line => line.trim()).filter(Boolean);
+  assert.deepEqual(returned(rawField).filter(line => !/^\/\/[^{}]*$/.test(line)), returned(part), 'a comment mark inside what the field draws: there it is text on screen, and the anchor does not see its line');
+  // The stylesheet, line by line and as written. A number field is drawn by these twelve rules and by no other: each is
+  // a base rule, one line that starts so, in this order. No line of a media block names a number field (its width looks
+  // after itself): a second rule under another selector could undo any line read below, put the grip at the right end in
+  // a narrow window or lay a motion on the dot. What the rules paint with is tuned by eye in the app, and is not held.
+  const sheet = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  const arrows = '.bmap-num-row input::-webkit-inner-spin-button,.bmap-num-row input::-webkit-outer-spin-button { -webkit-appearance:none; appearance:none; margin:0; }';
+  const room = '.bg-library .bmap-num-row input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) {', off = '.bmap-num[data-disabled] :is(.bmap-num-label,.bmap-num-grip,.bmap-num-track) {';
+  // The rules are looked for in what is left of the sheet without its comments, wherever a comment stands and however
+  // many lines it runs over. Were a line dropped whole because it starts with a comment, a rule written behind that
+  // comment would be read by nothing below: it could hold the grip to the right end, or lay a motion on the dot, unseen.
+  const bare = sheet.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
+  const num = bare.map(line => line.trim()).filter(line => line.includes('.bmap-num'));
+  assert.deepEqual(num.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-num-label {', '.bmap-num-row {', room, arrows.slice(0, arrows.indexOf('{') + 1), '.bmap-num-grip {',
+    '.bmap-num-grip:hover,.bmap-num.is-dragging .bmap-num-grip {', '.bmap-num.is-dragging .bmap-num-label {', '.bmap-num-track {', '.bmap-num-track::before {', '.bmap-num-thumb {',
+    off, '.bmap-num[data-disabled] .bmap-num-grip:hover {']);
+  // And each of those lines is one rule: a second one written behind the first would be read by nothing below either.
+  for (const line of num) assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
+  // Nothing of a number field moves by itself: a drag is the hand moving it. And nothing of one blurs what is behind it:
+  // the inspector shows several at once, and the dot is drawn anew at every step of the pointer (the motion rules of the
+  // app: no backdrop-filter on what repeats or moves).
+  for (const line of num) assert.doesNotMatch(line, /transition|animation|backdrop-filter/);
+  // No letter of a field is slanted, by `font-style` or through the `font` shorthand: the screens of this app are set
+  // without italics. And no colour is written out, as a hex or as numbers: a field is painted with the colours of the
+  // theme, and the light screen and the dark one each have their own. Which of them a rule paints with is tuned by eye
+  // in the app, and is not held.
+  for (const line of num) { assert.doesNotMatch(line, /font-style|italic|oblique/); assert.doesNotMatch(line, /#|\b(?:rgb|hsl)a?\((?!var\()/); }
+  // The two small arrows of the engine are not drawn, by that one line as it is written. The element stays, so the arrow
+  // keys and the wheel over a focused field step the value as before. And no other line of the sheet names the arrows.
+  assert.ok(sheet.includes(arrows), 'the small arrows of the engine are drawn');
+  assert.equal(sheet.filter(line => line.includes('spin-button')).length, 1, 'one line of the sheet names the small arrows');
+  // A sideways drag belongs to the control, and a touch or a pen that goes up or down scrolls the inspector: on each of
+  // the three that take a press.
+  const gripAt = lineOf(sheet, '.bmap-num-grip {'), grip = declarations(sheet[gripAt]), track = baseRule(sheet, '.bmap-num-track {'), thumb = baseRule(sheet, '.bmap-num-thumb {');
+  for (const rule of [baseRule(sheet, '.bmap-num-label {'), grip, track]) has(rule, 'touch-action:pan-y');
+  // The dot takes no press of its own: the bar under it does, and tells a press on the dot from one beside it. It is
+  // placed inside the bar, and travels from half a dot inside one end to half a dot inside the other, the way
+  // pressNumberTrack counts. Over the whole width it would leave the bar at the right end, and be drawn up to 10px from
+  // the place a press is counted at.
+  has(track, 'position:relative');
+  has(thumb, 'position:absolute', 'pointer-events:none', 'left:calc(var(--bmap-num-at,0) * (100% - 10px))');
+  // The dot is as wide in the sheet as in the table of the slide (`thumbPx`): one number in two files, changed together.
+  const pure = read('mapNumberField.ts'), thumbPx = /\bthumbPx: (\d+)\b/.exec(pure)?.[1];
+  assert.ok(thumbPx, 'the width of the dot in the table of the slide');
+  has(thumb, `width:${thumbPx}px`, `left:calc(var(--bmap-num-at,0) * (100% - ${thumbPx}px))`);
+  // The line of the bar is a box the sheet makes up: without `content` there is none. Its colour is tuned in the app.
+  has(baseRule(sheet, '.bmap-num-track::before {'), 'content:""', 'position:absolute');
+  // The grip is laid over the left end of the box, and the box keeps its number clear of it. The inspector hugs the right
+  // edge of the screen: with the grip at the right end there would be no room to drag towards more. The room is made
+  // under a selector that outweighs the shared input rule of the library, which sets the padding: under a lighter one
+  // the number would stand beneath the grip.
+  has(baseRule(sheet, '.bmap-num-row {'), 'position:relative');
+  has(grip, 'position:absolute', 'left:1px');
+  assert.ok(!sheet[gripAt].includes(' right:') && !grip.some(item => item.startsWith('right:')), 'the grip is held to the right end as well');
+  has(baseRule(sheet, room), 'padding-left:24px');
+  // And the grip ends inside that room: its inset and its width are together no more than the padding of the box. How
+  // wide it is drawn is tuned by eye in the app and is not held, only that it fits. Wider than the room it lies over the
+  // number, and with no width of its own it ends where its picture does, which is tuned in the app as well. The two
+  // numbers are changed together (a narrower grip in a narrower room, should a long number be cut off), and this needs
+  // no change then. A length is read as the engine reads it: of a property written twice in a rule, the last counts.
+  const px = (rule: string[], property: string) => Number(/^(\d+(?:\.\d+)?)px$/.exec(rule.filter(item => item.startsWith(`${property}:`)).pop()?.slice(property.length + 1) ?? '')?.[1]);
+  const inset = px(grip, 'left'), wide = px(grip, 'width'), cleared = px(baseRule(sheet, room), 'padding-left');
+  assert.ok(inset + wide <= cleared, `the grip does not end inside the room of the box: left ${inset} + width ${wide} against padding-left ${cleared} (px; NaN is a length not written in px)`);
+  // The two states the component marks are among those rules: a drag tints the grip and darkens the name, and a field
+  // that is off dims its three controls. Off, they take no press (the hook turns it away) and say so by the plain cursor.
+  // How much they are dimmed is not held: that is tuned by eye, in the app.
+  const dimmed = baseRule(sheet, off);
+  has(dimmed, 'cursor:default');
+  assert.ok(dimmed.some(item => /^opacity:0?\.\d+$/.test(item)), `the controls of a field that is off are not dimmed (${dimmed.join('; ')})`);
+  // A drag changes how the grip and the name are painted, and nothing else. With a size, a weight or a padding of its
+  // own in one of those two rules, the rows of the inspector would jump as a drag starts and again as it ends.
+  for (const rule of [baseRule(sheet, '.bmap-num-grip:hover,.bmap-num.is-dragging .bmap-num-grip {'), baseRule(sheet, '.bmap-num.is-dragging .bmap-num-label {')])
+    for (const item of rule) assert.match(item, /^(?:color|background(?:-color)?|border-color):/, `a drag changes more than a colour: ${item}`);
+  // The sums of a slide are in a module that Node runs as it is: no three.js, no DOM.
+  assert.doesNotMatch(pure, /from\s+['"]three/, 'mapNumberField.ts imports three.js');
+  assert.doesNotMatch(pure, /\b(?:document|window)\.\w/, 'mapNumberField.ts touches the DOM');
+});
+
+test('anchor 64: the lens of the side view is a handle only while its camera can be edited, for a pointer alone, on a scale held for the drag', () => {
+  // The side view is read as this anchor runs: without its file this anchor fails, not every anchor of this file. No test
+  // of Node reaches a React component, so its lines are held by their letters. `lines` are they, without their indent.
+  const part = read('BackgroundMapPlanSide.tsx'), lines = part.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // When the lens is a handle: while the map can be edited right now, and the camera is not locked. Asked of the lock
+  // alone, the lens would be dragged in view mode and while a save runs; asked of the right to edit alone, a locked
+  // camera would be lifted. The pointer is the one hook's (anchor 62), and it is off whenever the lens is no handle.
+  const handle = 'const draggable = canEdit && !camera.locked', pointer = 'useMapScrubPointer(scrub, !draggable)';
+  own(`${handle}, box = PLAN_SIDE_VIEW;`, `const press = ${pointer};`);
+  // The scale. The picture is drawn on the scale of the map as it is, and while a drag of the lens runs, on the scale
+  // that drag started on. Fitted to the map at every step instead (`planSideView(map, camera)`), the picture would be
+  // drawn anew as the lens leaves its range, and the lens would run away from the pointer. And a held scale counts only
+  // while its drag still runs: asked of `frozen.current` alone, the darker halo and the held scale would stay behind an
+  // Escape until the pointer moves or is let go. It is held in a ref and not in state (gate S): the first step of a
+  // drag is drawn at once, a state set in the same pointer event arrives one commit later, and for that one frame the
+  // room and the floor line were drawn on a scale fitted anew.
+  const live = 'const live = frozen.current && scrub.alive() ? frozen.current : null;', drawn = 'const scale = live ?? planSideScale(map, camera), side = planSideView(map, camera, scale);';
+  own(live, drawn);
+  // The drag. It is the height of the camera, it runs up and down, and it starts past the slop: a press alone, or a move
+  // sideways, changes nothing. The scale is taken as the drag starts, from the map the editor hands over and never from
+  // the map of this render: the field that was being typed in is committed as the drag takes the focus away, and that
+  // may have been a height. It is kept for the sums and given to the picture as well: without `frozen.current = held;` the
+  // sums would run on the held scale and the picture on a fitted one. A place on screen becomes a place in the picture
+  // through the matrix of the SVG: counted in screen pixels (`clientY - rect.top`), the lens would not keep to the
+  // pointer (in a small picture it falls behind, the more the smaller the picture is), while the height still came in
+  // steps of ten. And the lens keeps the offset it has where the drag starts, which is the press moved by the slop:
+  // with none (`grab: 0`) it would jump to the pointer, and measured from the press itself the first value would skip
+  // two or three steps. What the pointer then stands at is a height in the pure module (planSideDragLevel, which the S
+  // tests run). And however the drag ends, the scale is let go: still held, it would be the scale of the picture again,
+  // under the darker halo, during any gesture of the document that runs later (a slide of the height field, a handle
+  // dragged in 3D).
+  const drive = "field: 'elevation', axis: 'y', immediate: false", taken = 'planSideScale(origin.map,', kept = 'frozen.current = held; redraw(turn => turn + 1);';
+  const toY = 'const toY = (clientY: number) => inverse ? new DOMPoint(0, clientY).matrixTransform(inverse).y : Number.NaN;';
+  const grab = 'grab: planSideY(held, origin.start) - toY(from.clientY)', level = 'planSideDragLevel(drag.scale, drag.toY(at.clientY) + drag.grab, drag.start)';
+  const closed = 'close: () => { frozen.current = null; redraw(turn => turn + 1); }';
+  const held = `const node = origin.map.nodes.find(item => item.id === camera.id), held = ${taken} node?.type === 'camera' ? node : camera);`;
+  const opened = `return { scale: held, start: origin.start, toY, ${grab} };`, lifted = `read: (drag, at) => ${level},`;
+  own(`${drive},`, held, toY, kept, opened, lifted, `${closed},`);
+  // What the handle adds is drawn only while the lens is one: the halo, the small up-down mark and the area that takes
+  // the press each stand once, on a line of their own that opens with that condition. Drawn without it, a camera that
+  // cannot be edited would be shown a handle that does nothing: a halo, the cursor of a drag, a tooltip.
+  const ring = '{draggable && <circle className="bmap-plan-side-ring" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />}';
+  const marks = '{draggable && <path className="bmap-plan-side-marks" d={`M ${x0 - 3} ${fixed(y - 4)} L ${x0} ${fixed(y - 8)} L ${x0 + 3} ${fixed(y - 4)} M ${x0 - 3} ${fixed(y + 4)} L ${x0} ${fixed(y + 8)} L ${x0 + 3} ${fixed(y + 4)}`} />}';
+  const area = '{draggable && <circle className="bmap-plan-side-grab" onPointerDown={lift} cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot}><title>위아래로 끌어 카메라 높이 바꾸기 · 끄는 도중 Esc는 취소</title></circle>}';
+  for (const added of ['bmap-plan-side-ring', 'bmap-plan-side-marks', 'bmap-plan-side-grab']) {
+    const found = lines.filter(line => line.includes(added));
+    assert.equal(found.length, 1, `one line draws ${added}`);
+    assert.ok(found[0].startsWith('{draggable && '), `drawn for a camera that cannot be edited: ${found[0]}`);
+  }
+  // The caption tells those who can drag the lens that they can, in a span of its own: the stylesheet hides that span
+  // where the picture is too narrow for the longer words (below). Written as one text, the caption would always be cut
+  // off there. To everyone else it reads as it always did.
+  const caption = '<figcaption>옆에서 본 방향{draggable && <span className="bmap-plan-side-tip"> · 점을 끌어 높이 조절</span>}</figcaption>';
+  own(caption);
+  // The handle is for the pointer alone: no stop for Tab, no slider, no key. The keyboard has the height field of the
+  // inspector, which holds the same number: a second stop would be a second rule for joining the undo steps of one
+  // value, and an SVG element that takes the focus is drawn a ring by the engine when it is pressed. The SVG stays the
+  // picture it was, with its words for a reader. No line marks a ceiling: the height is said by the readout. And the
+  // colour of the camera is not told here again: the readout that holds the picture carries it (anchor 45).
+  for (const none of ['bmap-plan-side-ceiling', 'tabIndex', 'role="slider"', 'onKeyDown', 'data-camera-color=']) assert.ok(!part.includes(none), `still there: ${none}`);
+  assert.ok(part.includes('role="img"'), 'the side view is no picture for a reader');
+  // And the file holds nothing else: it is the lines above and what joins them, in this order. What joins them, and what
+  // goes wrong without it. The sums and the box of the picture come from the pure module and the pointer from the one
+  // hook, by these imports: a function of the same name written in this file would pass every line above, and no test
+  // would reach it. The two small helpers are those of the companion plan, a second copy of each: the picture is
+  // written with the rounding it always had. The component is a plain function: wrapped in `memo` it would not be drawn
+  // again as the editor ends a drag by itself, and `live` would not be asked again. The matrix is read once, as the
+  // drag starts, off the SVG, which is found by its ref: without the ref no place on screen becomes a place in the
+  // picture, and a drag changes nothing. How far left of the lens the up-down mark stands
+  // is tuned by eye in the app, so that number is read as any number. The root carries the two states the stylesheet
+  // draws: a lens that can be dragged, and one that is being dragged, asked of the held scale that still counts. Then
+  // the figure as it always was, element for element and in its order: for a camera that cannot be edited (view mode,
+  // a locked camera, a save running) the lines that open with `draggable` draw nothing, and what is left is the room,
+  // the floor line and its six hatches, the pole, the level line, the line of sight with its head, and the lens. The
+  // halo and the mark come before the lens, which is drawn over the inner half of the halo. The area that takes the
+  // press comes last, over everything, and it is the one element with a handler: under the lens, a press on the very
+  // centre of the lens would land on the lens and start nothing.
+  assert.deepEqual(lines.map(line => line.replace(/^(const x0 = box\.cameraX - )[\d.]+(, y = side\.camera\.y;)$/, '$1n$2')), [
+    "import { useRef, useState } from 'react';", "import type { JSX, PointerEvent as ReactPointerEvent } from 'react';", "import type { MapFieldScrub } from './mapCanvas';",
+    "import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';",
+    "import { PLAN_SIDE_VIEW, planSideDragLevel, planSideScale, planSideView, planSideY } from './mapPlanPreview';", "import type { PlanSideScale } from './mapPlanPreview';",
+    "import { useMapScrubPointer } from './useMapScrubPointer';",
+    'const fixed = (value: number) => Math.round(value * 100) / 100 + 0;', "const pointList = (points: BackgroundPoint[]) => points.map(point => `${fixed(point.x)},${fixed(point.y)}`).join(' ');",
+    'export function BackgroundMapPlanSide({ map, camera, canEdit, scrub, label }: {', 'map: BackgroundMap; camera: BackgroundCamera;', 'canEdit: boolean; scrub: MapFieldScrub;', 'label: string }): JSX.Element {',
+    `${handle}, box = PLAN_SIDE_VIEW;`, 'const frozen = useRef<PlanSideScale | null>(null), [, redraw] = useState(0);', 'const svgRef = useRef<SVGSVGElement>(null);', `const press = ${pointer};`, live, drawn,
+    'const lift = (event: ReactPointerEvent<SVGCircleElement>) => press(event, {', `${drive},`, 'open: (origin, from) => {', held, 'const inverse = svgRef.current?.getScreenCTM()?.inverse();', toY, kept, opened, '},',
+    lifted, `${closed},`, '});', 'const x0 = box.cameraX - n, y = side.camera.y;',
+    "return <figure className={`bmap-plan-side${draggable ? ' is-draggable' : ''}${live ? ' is-lifting' : ''}`}>",
+    '<svg ref={svgRef} viewBox={`0 0 ${box.width} ${box.height}`} role="img" aria-label={label}>',
+    '{side.room && <rect className="bmap-plan-side-room" x={box.left} y={fixed(side.room.top)} width={box.right - box.left} height={fixed(Math.max(1, side.room.bottom - side.room.top))} />}',
+    '<line className="bmap-plan-side-floor" x1={box.left} x2={box.right} y1={fixed(side.floorY)} y2={fixed(side.floorY)} />',
+    '{[0, 1, 2, 3, 4, 5].map(index => <line key={index} className="bmap-plan-side-hatch" x1={box.left + 12 + index * 20} x2={box.left + 6 + index * 20} y1={fixed(side.floorY)} y2={fixed(side.floorY + 6)} />)}',
+    '<line className="bmap-plan-side-pole" x1={side.camera.x} x2={side.camera.x} y1={fixed(side.floorY)} y2={fixed(side.camera.y)} />',
+    '<line className="bmap-plan-side-level" x1={side.camera.x} x2={side.camera.x + box.arrow + box.head} y1={fixed(side.camera.y)} y2={fixed(side.camera.y)} />',
+    '<line className="bmap-plan-sight" x1={side.camera.x} y1={fixed(side.camera.y)} x2={fixed(side.tip.x)} y2={fixed(side.tip.y)} />',
+    '<polygon className="bmap-plan-sight-head" points={pointList(side.head)} />', ring, marks,
+    '<circle className="bmap-plan-dot" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />', area, '</svg>', caption, '</figure>;', '}']);
+  // And in what the side view draws, `read` took nothing away: from its `return` to the end the file is the same
+  // letters with and without what `read` drops (anchor 63 says why that is asked).
+  const rawSide = readFileSync(new URL('BackgroundMapPlanSide.tsx', directory), 'utf8').replace(/\r\n/g, '\n'), figure = 'return <figure className=';
+  assert.equal(part.slice(positions(part, figure)[0]), rawSide.slice(positions(rawSide, figure)[0]), 'a comment mark inside what the side view draws: there it is text on screen, and the anchor does not see its line');
+  // The hand-over. The editor gives the companion plan the right to edit as it is right now and its one scrub object,
+  // behind the three attributes it always gave (anchor 23 reads those): without the scrub object the lens has nothing
+  // to be dragged through. The plan takes the two and hands them to the readout of the picked camera, and that hands
+  // them to the side view, as they came: handed a right to edit made up on the way, the side view of a camera in view
+  // mode would show a handle. The readout is keyed by its camera: as another camera is picked, a scale still held and
+  // a pointer still pressed go with the readout of the old one. And the contract of the plan names the two.
+  assert.ok(editor.includes('<BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} />'), 'the companion plan is not given the right to edit and the scrub object');
+  assert.equal(count(editor, /<BackgroundMapPlanPreview\b/g), 1, 'the companion plan is drawn once');
+  const preview = read('BackgroundMapPlanPreview.tsx'), keyed = '<CameraReadout key={selected.id} ';
+  for (const text of ['export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub }: MapPlanPreviewProps) {', `${keyed}map={map} camera={selected} canEdit={canEdit} scrub={scrub} />`,
+    'function CameraReadout({ map, camera, canEdit, scrub }: { map: BackgroundMap; camera: BackgroundCamera; canEdit: boolean; scrub: MapFieldScrub }) {',
+    '<BackgroundMapPlanSide map={map} camera={camera} canEdit={canEdit} scrub={scrub} label={`옆에서 본 방향: ${pitchText}, ${heightText}`} />']) assert.ok(preview.includes(text), `not found: ${text}`);
+  assert.equal(count(preview, /<CameraReadout\b/g), 1, 'the readout of a camera is drawn in one place');
+  assert.equal(count(preview, /<BackgroundMapPlanSide\b/g), 1, 'the side view is drawn in one place');
+  // In the file of the plan nothing on that way is wrapped in `memo`: not the plan, not the readout of a camera, not the
+  // side view where it is brought in (in its own file it is a plain function, by the list above). As the editor ends a
+  // drag by itself before a value has changed (Escape), what is handed down that way is what was handed down before:
+  // behind a wrapper the side view would not be drawn again, `live` would not be asked again, and the darker halo and
+  // the coloured height would stay until the pointer moves or is let go. So every place the word stands in that file
+  // is read: its import, and the two wrappers the plan always had, around the shapes and the cameras it draws. A
+  // wrapper under any other spelling is one place more: a function handed over by its name, an arrow function, a type
+  // argument in front of the parenthesis, the call through the namespace of React.
+  const wrappers = preview.match(/\bmemo\b(?:\(function \w+)?/g) ?? [];
+  assert.deepEqual(wrappers, ['memo', 'memo(function PlanShape', 'memo(function PlanCamera'], `the plan, the readout of a camera or the side view is wrapped in memo, or a wrapper of the plan is gone: ${wrappers.join(' | ')}`);
+  assert.ok(read('mapCanvas.ts').includes("export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub };"), 'the contract of the companion plan');
+  // The plan itself has no code for the drag: a press is followed by the hook, on the window. The listeners the plan
+  // has are those of its picks, and anchors 34 and 39 find them by their place in that file. Nor does it draw a side
+  // view of its own any more: left there, a second picture would stand beside the one with the handle.
+  for (const none of ['setPointerCapture', "addEventListener('pointermove'", 'bmap-plan-side', 'planSideView(']) assert.ok(!preview.includes(none), `still in the companion plan: ${none}`);
+  // The stylesheet of the companion plan, line by line and as written: a rule is one line there, and the comments stay.
+  // The handle is drawn by these seven rules and by no other, each one line, in this order: two inside the blocks of
+  // the short and wide plan, then five base rules. They are looked for in what is left of the sheet without its
+  // comments: a rule written behind a comment, or under another selector, could undo any line read below.
+  const plan = readFileSync(new URL('backgrounds-map-plan.css', directory), 'utf8').replace(/\r\n/g, '\n').split('\n');
+  const has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  const bare = plan.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
+  const rules = bare.map(line => line.trim()).filter(line => /bmap-plan-side-(?:grab|ring|marks|tip)|is-lifting/.test(line));
+  assert.deepEqual(rules.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-plan-side-tip {', '.bmap-plan-side-marks {', '.bmap-plan-side-grab {', '.bmap-plan-side-ring {', '.bmap-plan-side-marks {',
+    '.bmap-plan-side.is-lifting .bmap-plan-side-ring {', '.bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong {']);
+  for (const line of rules) assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
+  // Nothing of the handle moves by itself: a drag is the hand moving it. Nothing of it blurs what is behind it. And no
+  // colour is written out: the handle is painted from the camera variables of this plan, or not at all, so the handle
+  // of a camera with a colour of its own is in that colour (the last rule of the sheet sets the variables from it).
+  for (const line of rules) {
+    assert.doesNotMatch(line, /#|transition|animation|backdrop-filter/);
+    for (const paint of declarations(line).filter(item => /^(?:fill|stroke|color):/.test(item)))
+      assert.match(paint, /:(?:none|transparent|var\(--bmap-plan-cam(?:-line|-edge|-soft)?\))$/, `not painted from a camera variable of the plan: ${paint}`);
+  }
+  // The area that takes the press is a circle the size of the lens that paints nothing (it lies over the lens), with a
+  // stroke 24 pixels wide that takes a press like the rest of it: at least 28 pixels across, however small the picture
+  // is drawn. Without that width it is the lens alone, 4 pixels across in the smallest picture. Over it the pointer
+  // says which way a drag goes, and a touch or a pen that starts there scrolls nothing. The halo is a stroke as well,
+  // 6 pixels wide and unfilled: the lens covers its inner half. Both are widths on screen because every shape of this
+  // plan keeps its strokes unscaled, and no rule of the handle undoes that: drawn in the units of the picture, the halo
+  // could not be told from the edge of the lens in the smallest picture, and the area would shrink with the picture.
+  has(baseRule(plan, '.bmap-plan-side-grab {'), 'fill:transparent', 'stroke:transparent', 'stroke-width:24px', 'pointer-events:all', 'cursor:ns-resize', 'touch-action:none');
+  // The engine reads touch-action from boxes only: on a shape inside a picture it is dropped, and the lens inherits the
+  // scrolling of the page, so a touch or a pen that starts there turns into a scroll after a few pixels and the drag is
+  // cancelled. While the lens can be dragged the picture as a whole takes it; in view mode the picture is as before.
+  has(baseRule(plan, '.bmap-plan-side.is-draggable>svg {'), 'touch-action:none');
+  has(baseRule(plan, '.bmap-plan-side-ring {'), 'fill:none', 'stroke-width:6px');
+  has(baseRule(plan, '.bmap-plan-preview :is(rect,polygon,circle,line,path) {'), 'vector-effect:non-scaling-stroke');
+  for (const line of rules) assert.doesNotMatch(line, /vector-effect/);
+  // Nor does any other rule of this sheet move something by itself. The one motion the companion plan has is the turn
+  // of the arrow on its fold button, with its twin for reduced motion. A motion under another selector (one that makes
+  // the lens of a camera that can be dragged pulse, say) would be read by none of the lines above.
+  assert.deepEqual(bare.map(line => line.trim()).filter(line => /transition|animation/.test(line)).map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-plan-toggle>svg {', '.bmap-plan-toggle>svg {'],
+    'something of the companion plan moves by itself');
+  // While the lens is lifted its halo is stronger, and the height in the readout takes the colour of the camera: paint,
+  // and nothing that has a size. A larger or a heavier number there would make the readout jump as a drag starts.
+  for (const lifted of ['.bmap-plan-side.is-lifting .bmap-plan-side-ring {', '.bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong {'])
+    for (const item of baseRule(plan, lifted)) assert.match(item, /^(?:color|stroke-opacity):/, `a drag changes more than a colour: ${item}`);
+  // The up-down mark is two open lines, and unfilled like the halo. What a shape is filled with has to be written: the
+  // check of the colours above reads only what a rule declares, and a shape with no fill declared is filled in black
+  // by the engine, the colour of no camera. Each of the two lines would be closed into a small black wedge.
+  has(baseRule(plan, '.bmap-plan-side-marks {'), 'fill:none');
+  // Where the plan is short and wide the picture stands beside the text and is narrow: the words added to the caption
+  // are hidden there, or the caption would always be cut off. Where that plan is lower still the caption is hidden
+  // whole and the picture is at its smallest: the up-down mark is not drawn there, where it would run into the halo.
+  const wide = '@container bmap-plan (min-aspect-ratio: 3/2) and (min-width: 300px) {', low = '@container bmap-plan (min-aspect-ratio: 3/2) and (min-width: 300px) and (max-height: 159px) {';
+  assert.ok(mediaBlock(plan, wide).includes('.bmap-plan-side-tip { display:none; }'), 'the words added to the caption are shown beside the text');
+  assert.ok(mediaBlock(plan, low).includes('.bmap-plan-side-marks { display:none; }'), 'the up-down mark is drawn in the smallest picture');
+  // The rule that gives a camera with a colour of its own its four variables is still the last rule of the sheet.
+  assert.ok(plan.filter(line => line.trim()).pop()?.startsWith('.bmap-plan-preview [data-camera-color] {'), 'the last rule of the sheet is another one');
+  // The picture is drawn on a scale handed in, and without one on the scale of the map: that is the pure module's, and
+  // the S tests run it. With the third argument dropped there, the line that hands the held scale over would mean nothing.
+  assert.ok(read('mapPlanPreview.ts').includes('scale: PlanSideScale = planSideScale(map, camera)'), 'planSideView takes no scale');
+});
+
+test('anchor 65: an open dialog of the editor is one line, and three places read it', () => {
+  // That a dialog of the editor is open is said in one line, of all five: the question (discard, delete), the three
+  // forms (a new map, a link, the settings) and the delete dialog of a map. Each asks about a map it holds: nothing may
+  // change the maps under it, and what the editor has to say is shown inside it. One of the five left out of that line
+  // is a dialog under which the drafts follow the library and the message is drawn a second time, behind it. Without
+  // `mapDelete` that dialog is the delete dialog of a map.
+  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete);';
+  const lines = editor.split('\n').map(line => line.trim());
+  assert.ok(lines.includes(made), `not a line of its own: ${made}`);
+  // The word stands five times, on five lines: the one that makes it and, in this order, the three places that read it.
+  // The drafts follow the library only while no dialog is open, and the effect that asks them to waits for the value:
+  // it asks again as the dialog closes, and without the value there a draft would stay behind the library after the
+  // dialog is closed (anchor 56 holds both lines in their place). Ctrl+S is left to an open dialog (anchor 53). And the
+  // editor's own message, the block above the band, is not drawn while a dialog is open: the sentence is inside the
+  // dialog then. A sixth place would be a reader no anchor knows, and with a place less one of the three asks something else.
+  const guard = 'if (disabled || doc.isGestureActive() || dialogOpen) return;', waited = 'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);';
+  const key = 'if (dialogOpen || document.querySelector(openDialogs)) return;', band = '{error && !dialogOpen && <div className="bg-error" role="alert" ref={errorRef}>';
+  assert.equal(count(editor, /\bdialogOpen\b/g), 5, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the message');
+  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, `${band}{error}</div>}`]);
+  // The dialogs are listed in that one line and nowhere else: in neither order the three places used to write four of
+  // them in, nor denied one by one as the message did. A place with a list of its own would not know the next dialog
+  // the editor is given.
+  assert.equal(count(editor, /confirmation \|\| createForm/g), 1, 'the dialogs are listed once, where dialogOpen is made');
+  for (const old of ['!confirmation && !createForm', 'createForm || linkForm || settingsForm || confirmation']) assert.ok(!editor.includes(old), `still there: ${old}`);
+});
+
+test('anchor 66: the delete dialog acts on the map it was opened for, sends the plan in its order, and lets a draft go only once its own map is gone', () => {
+  // The editor first. What it does with the delete dialog of a map is four functions, each read from its own first line
+  // up to the next (the last up to the function behind them): they stand together, in this order, in no handler another
+  // anchor cuts out. `lined` is a piece as its lines, without their indent, and `all` is the editor so. A value of the
+  // render is looked for by its name alone: `current`, never the `.current` of a ref, and no part of a longer name.
+  const drop = handler.dropGoneDrafts(), open = handler.openMapDelete(), run = handler.runMapDelete(), close = handler.closeMapDelete();
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean), all = lined(editor);
+  // 도면 삭제 of the settings dialog opens it, for the map those settings were opened for: the dialog holds that id, and
+  // every plan, command and word comes of it. Held from the map on show (`current.id`) it could be another map: while
+  // viewing, the map on show changes under the open settings as soon as it is deleted elsewhere, to the first map of
+  // the list and without a word. Nothing for a read-only account, and nothing while a save or a run is in progress. The
+  // dialog opens on 하위 도면은 남기기, every time: the choice that deletes less. And it comes up where the settings dialog
+  // was, so for the length of a double-click no press reaches the page: the second click of a double-click on 도면 삭제
+  // would land on a choice or on a button of it.
+  for (const text of ['if (!settingsForm || disabled || !snapshot.canManage) return;', 'mapId: settingsForm.id', "mode: 'keep-children'", 'swallowSecondClick();'])
+    assert.ok(open.includes(text), `not in openMapDelete: ${text}`);
+  assert.doesNotMatch(open, /(?<![.\w])(?:current)\b/, 'the delete dialog is opened for the map on show');
+  // And the function holds nothing else. The name and the place of that map as the editor has them now, for the sentence
+  // of a map that is gone and for the way back from it; where the map is gone already, the name the settings were opened
+  // with. The list of the maps this dialog has set out to delete starts empty: left over from the dialog before, it
+  // would let go of the draft of a map that one aimed at and that has gone since. The settings dialog goes, with what
+  // was typed in it, and so does the message of the editor: under this dialog it would be drawn inside it.
+  assert.deepEqual(lined(open), ['function openMapDelete() {', 'if (!settingsForm || disabled || !snapshot.canManage) return;', 'const map = maps.find(item => item.id === settingsForm.id);',
+    'deleteAimed.current = [];',
+    "setMapDelete({ mapId: settingsForm.id, name: map?.name ?? settingsForm.name, parentId: map?.parentId ?? null, mode: 'keep-children', progress: null, stopped: null });",
+    "setSettingsForm(null); setError('');", 'swallowSecondClick();', '}']);
+  // A delete that went through without an answer never reaches the line that lets its draft go, and the draft of a map
+  // the library no longer has would stay in the tree, as a map that is being edited and can never be saved. So the
+  // dialog lets go of the drafts of the maps it set out to delete, once the library no longer has them: of those alone,
+  // and of none the library still has. That one line and no other. Without its condition, going back after a run that
+  // stopped would drop the unsaved edits of the maps it aimed at that are still there; turned round, it would drop
+  // those alone, and keep the drafts of the ones that are gone.
+  assert.deepEqual(lined(drop), ['function dropGoneDrafts() { for (const id of deleteAimed.current) if (!snapshot.maps.some(map => map.id === id)) doc.discard(id); }']);
+  // The run, in this order. Nothing without the dialog, while the editor is busy (the snapshot then shows maps that are
+  // not confirmed), or while a run is in progress: asked of the ref, because a second press can come before `busy` is
+  // drawn. The drafts of maps deleted without an answer go first. Then the plan: for the map the dialog holds, never the
+  // map on show, and from the drafts as the store has them at this moment. A map that is gone or a plan that is refused
+  // ends it there, and the dialog, drawn from the same plan, says why. Every map the plan deletes is noted as aimed at,
+  // over all presses. Only then is the ref set: set before the checks that return early, one refused press would leave it set
+  // for good. The save that comes first goes the way every save of maps goes, which puts the drafts of the maps it wrote
+  // back: sent by `execute` they would stay on the revision before it, and their next save would be refused. Each delete
+  // is sent by itself, and the draft of its map goes on that very line, once that map is gone: let go all at once before
+  // the loop, a run that stops would have taken the unsaved edits of maps that are still there. Then the screen goes to
+  // where the map hung. A run that stops says why in the words of the dialog (by `message` the wrapper Electron puts
+  // round what the main process throws would be shown), keeps the plan of that press for what the dialog says was done,
+  // and for the length of a double-click no press reaches the page: the dialog arms itself again under the pointer, and a
+  // click still on its way would send a plan nobody has read. That only while the editor is up (its root is there): a link
+  // from outside or another window can change the screen during a run, which takes the editor down, and the presses of
+  // that screen are none of the dialog's. However it ends, the ref and `busy` are cleared.
+  inOrder(run, 'if (!mapDelete || disabled || deleting.current) return;', 'dropGoneDrafts();', 'planMapDelete(snapshot, settle().drafts, mapDelete.mapId, mapDelete.mode)',
+    'if (!plan.target || plan.refusal) return;', 'deleteAimed.current = [...new Set([...deleteAimed.current, ...plan.removed])];', 'deleting.current = true; setBusy(true);',
+    "if (step.type === 'save-maps') await persistMaps(step);", 'else { await execute(step); doc.discard(step.id); done += 1; }', 'setCurrentId(parentId);',
+    'setError(mapDeleteCauseText(cause));', 'stopped: plan', 'swallowSecondClick();', 'finally { deleting.current = false; setBusy(false); }');
+  assert.ok(!run.includes('message(cause)'), 'why a run stopped is said with the wrapper of Electron round it');
+  assert.doesNotMatch(run, /(?<![.\w])(?:current)\b/, 'the run reads the map on show');
+  // After the first wait this handler still holds the render that started the run: its library, its map on show, its
+  // draft and its maps are those from before the commands. So the steps, the place the screen goes to and the branch
+  // that is unfolded there are values settled before that wait, and the state of the dialog is written by functions of
+  // the state before. Read after it, they would pass for the library and the screen as the commands left them, which
+  // this handler never sees.
+  const waited = run.slice(positions(run, 'await ')[0]);
+  assert.doesNotMatch(waited, /(?<![.\w])(?:snapshot|current|draft|maps)\b/, 'the run reads its render after the first wait');
+  // A draft is let go in that one line, the ref is set in that one place, and the lost drafts are asked for once.
+  assert.equal(count(run, /doc\.discard\(/g), 1, 'the draft of a map goes in one place, behind its own delete');
+  assert.equal(count(run, /deleting\.current = true/g), 1, 'the ref is set once, behind the checks that return early');
+  assert.equal(count(run, /dropGoneDrafts\(\);/g), 1);
+  // The ref starts clear, and the list of the maps aimed at starts empty: with the ref set from the start no run would
+  // ever begin. Both are refs of the editor, read and written at once: as state they would be a render behind.
+  for (const made of ['const deleting = useRef(false);', 'const deleteAimed = useRef<string[]>([]);']) assert.ok(all.includes(made), `not a line of its own: ${made}`);
+  // And the run holds nothing else: the lines above and what joins them. What is counted for the button is maps
+  // deleted, of the number the button named: the save that comes first counts for none. The message of the press before
+  // is cleared, and with it what the dialog said that press had done. At its end the screen is left as on a move to
+  // another map (the points being drawn, the tool, the palette, the focus request), and the branch down to where the
+  // map hung is unfolded, so the maps that moved up can be seen.
+  assert.deepEqual(lined(run), ['async function runMapDelete() {', 'if (!mapDelete || disabled || deleting.current) return;', 'dropGoneDrafts();',
+    'const plan = planMapDelete(snapshot, settle().drafts, mapDelete.mapId, mapDelete.mode);', 'if (!plan.target || plan.refusal) return;',
+    'const steps = plan.steps, total = plan.removed.length, parentId = plan.target.parentId, opened = parentId ? mapPath(maps, parentId).map(map => map.id) : [];',
+    'deleteAimed.current = [...new Set([...deleteAimed.current, ...plan.removed])];', "deleting.current = true; setBusy(true); setError('');",
+    'setMapDelete(previous => previous && { ...previous, progress: { done: 0, total }, stopped: null });', 'let done = 0;', 'try {', 'for (const step of steps) {',
+    "if (step.type === 'save-maps') await persistMaps(step);", 'else { await execute(step); doc.discard(step.id); done += 1; }',
+    'setMapDelete(previous => previous && { ...previous, progress: { done, total } });', '}',
+    "setCurrentId(parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);",
+    'setCollapsed(previous => new Set([...previous].filter(id => !opened.includes(id))));', 'setMapDelete(null);', '} catch (cause) {', 'setError(mapDeleteCauseText(cause));',
+    'setMapDelete(previous => previous && { ...previous, progress: null, stopped: plan });', 'if (rootRef.current) swallowSecondClick();', '} finally { deleting.current = false; setBusy(false); }', '}']);
+  // 돌아가기, Esc, the close button and 닫기. Not while a run is in progress: the editor is busy then. The drafts of maps
+  // deleted without an answer go. The draft of the map the dialog holds goes, and the screen moves to where that map
+  // hung, only when the library no longer has that map (deleted here without an answer, or elsewhere): outside that
+  // branch, going back would drop the unsaved edits of a map that is still there without a word, and leave it for the
+  // map above. Nothing is sent as the dialog closes, and nothing of it is read from the map on show.
+  inOrder(close, 'if (!mapDelete || disabled) return;', 'dropGoneDrafts();');
+  const gone = block(close, 'if (!snapshot.maps.some(map => map.id === mapDelete.mapId)) {');
+  for (const text of ['doc.discard(mapDelete.mapId);', 'setCurrentId(mapDelete.parentId);']) assert.ok(gone.includes(text), `not in the branch of a map that is gone: ${text}`);
+  assert.equal(count(close, /doc\.discard\(/g), 1, 'a draft is let go as the dialog closes, outside the branch of a map that is gone');
+  assert.equal(count(close, /setCurrentId\(/g), 1, 'the screen moves as the dialog closes, outside the branch of a map that is gone');
+  assert.doesNotMatch(close, /(?<![.\w])(?:current)\b/, 'the close reads the map on show');
+  assert.ok(!close.includes('execute('), 'the close sends a command');
+  assert.deepEqual(lined(close), ['function closeMapDelete() {', 'if (!mapDelete || disabled) return;', 'dropGoneDrafts();', 'if (!snapshot.maps.some(map => map.id === mapDelete.mapId)) {',
+    'doc.discard(mapDelete.mapId);', "setCurrentId(mapDelete.parentId); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null);", '}',
+    "setMapDelete(null); setError('');", '}']);
+  // The old way is gone from the editor: the question that asked about the map on show, its title, and the sentence
+  // that told to take the links off first. Nothing is sent from that question any more (it deletes placements and ends
+  // edit mode), and the editor writes no delete of its own: a command goes out in two places, the function every save
+  // of maps goes through and the line of the run, and what is deleted is what the plan says.
+  for (const old of ['delete-map', '먼저 해제해 주세요', '도면을 삭제할까요']) assert.ok(!editor.includes(old), `still there: ${old}`);
+  assert.doesNotMatch(handler.confirmAction(), /\bexecute\(|\bawait\b/, 'the question of the editor sends a command');
+  assert.equal(count(editor, /\bexecute\(/g), 2, 'every save of maps, and the deletes of a plan');
+  assert.ok(!editor.includes("type: 'delete'"), 'the editor writes a delete of its own');
+  // The dialog is drawn while the editor holds one, from the plan of the map it holds: by these three lines, once, with
+  // nothing in front of them. Hung on the map on show as well (`current &&`), there would be no dialog to say that the
+  // map is gone once the last map of the library is. And they stand where the editor draws its dialogs, right behind the
+  // settings dialog and before the question: inside what is drawn only for a map on show, the same would be lost.
+  // What it is given: the name it was opened with, the plan, the choice and the run as the editor holds them, what a run
+  // that stopped has done, read from the library as it is now, the message of the editor, and what it hands back: the
+  // choice, the close, and the press that deletes.
+  const drawn = ['{mapDelete && deletePlan && <BackgroundMapDeleteDialog name={mapDelete.name} plan={deletePlan} mode={mapDelete.mode} progress={mapDelete.progress}',
+    'stopped={mapDelete.stopped && mapDeleteStopText(mapDelete.stopped, snapshot)} error={error} disabled={disabled}',
+    'onMode={mode => setMapDelete(previous => previous && { ...previous, mode })} onClose={closeMapDelete} onConfirm={() => void runMapDelete()} />}'];
+  assert.ok(editor.includes('{mapDelete && deletePlan && <BackgroundMapDeleteDialog '), 'the delete dialog is not drawn, or hangs on something else');
+  assert.equal(count(editor, /<BackgroundMapDeleteDialog\b/g), 1, 'the delete dialog is drawn once');
+  const at = all.indexOf(drawn[0]);
+  assert.ok(at > 0, `not a line of its own: ${drawn[0]}`);
+  assert.deepEqual(all.slice(at - 1, at + drawn.length), ['</form></BackgroundModal>}', ...drawn]);
+  assert.ok(all[at + drawn.length].startsWith('{confirmation && current && <BackgroundModal '), 'the delete dialog is not drawn right before the question of the editor');
+  // And nothing is wrapped round those lines. The question ends its line as it always did, and the line behind it
+  // closes the root of the editor: a wrapper that hangs the dialogs on the map on show (`{current && <>`, or the same
+  // asked the other way round), opened in front of the settings dialog or of all five, has to close behind the
+  // question, at the end of that line or on a line of its own.
+  assert.ok(all[at + drawn.length].endsWith("{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}"), 'something closes behind the question of the editor, on its line');
+  assert.equal(all[at + drawn.length + 1], '</div>;', 'something is wrapped round the dialogs of the editor');
+  const settings = piece(editor, '{settingsForm && <BackgroundModal title="도면 설정"', drawn[0]);
+  assert.equal(count(settings, /<\/form><\/BackgroundModal>\}/g), 1, 'the delete dialog is not drawn right behind the settings dialog');
+  // And among the dialogs the editor draws, `read` took nothing away: from the first of them to the end of the file
+  // the letters are the same with and without what `read` drops. Between the tags of JSX a `//` is no comment: it is
+  // text on screen, and an expression written behind it still runs (a run of the delete, say, at every drawing).
+  const rawEditor = readFileSync(new URL('BackgroundMapEditor.tsx', directory), 'utf8').replace(/\r\n/g, '\n'), firstDialog = '{createForm && <BackgroundModal title=';
+  assert.equal(editor.slice(positions(editor, firstDialog)[0]), rawEditor.slice(positions(rawEditor, firstDialog)[0]), 'a comment mark among the dialogs of the editor: there it is text on screen, and the anchor does not see its line');
+  // The plan on show is made by the function the run makes its own with, for the same map and the same choice, from the
+  // library and the drafts of the render: read anew after a run that stopped, it is what is left to do, and without a
+  // target once the map is gone. It hangs on the library: without that the dialog would go on showing a map that is gone.
+  assert.ok(all.includes('const deletePlan = useMemo(() => mapDelete ? planMapDelete(snapshot, drafts, mapDelete.mapId, mapDelete.mode) : null, [snapshot, drafts, mapDelete?.mapId, mapDelete?.mode]);'),
+    'the plan the delete dialog is drawn from');
+  assert.equal(count(editor, /\bplanMapDelete\(/g), 2, 'the plan on show and the plan of the press');
+  // The button of the settings dialog is that function, the whole tag, and the dialog is given its map in that one
+  // place. Each of the four is named where it is made and where it is handed over, and nowhere else: a second way in
+  // would open the dialog for another map, and a second way to run would be a delete nobody pressed.
+  assert.ok(settings.includes('<button type="button" className="bmap-text-button bmap-danger" disabled={disabled} onClick={openMapDelete}>도면 삭제</button>'), 'the button of the settings dialog does not open the delete dialog');
+  assert.ok(editor.includes('onClick={openMapDelete}>도면 삭제</button>'));
+  assert.equal(count(editor, />도면 삭제<\/button>/g), 1, 'one button reads: 도면 삭제');
+  assert.equal(count(editor, /\bsetMapDelete\(\{/g), 1, 'the delete dialog is given its map in one place');
+  for (const [name, times] of Object.entries({ openMapDelete: 2, runMapDelete: 2, closeMapDelete: 2, dropGoneDrafts: 3 }))
+    assert.equal(count(editor, new RegExp(`\\b${name}\\b`, 'g')), times, `${name} is named in another place`);
+  // And the state of the dialog is written in the places held above and in no other: the open, the four of the run,
+  // the close, and the choice the dialog hands back. Closed by an effect of the editor's own (as the map on show
+  // changes, say), it would go while a run is in progress, and what a run that stopped has to say could be read nowhere.
+  assert.equal(count(editor, /\bsetMapDelete\(/g), 7, 'the open, the run (four), the close, the choice');
+  // So are the two refs. Each is named on the line that makes it and in the lines of the functions held above, and in
+  // no other place. The list of the maps aimed at: made, read as the lost drafts are let go, emptied as the dialog
+  // opens, and read and written by the one line of the run that adds the maps of a press. Emptied in a place of its
+  // own as well (a line of the render, or an effect that tidies up as the dialog changes), it is empty by the time it
+  // is read, and the draft of a map deleted without an answer stays in the tree after all. The ref of a run: made,
+  // asked by the guard of the run, set behind its checks, cleared as the run ends. Cleared in a place of its own as
+  // well, it says that no run is in progress while one is: the guard is left with `busy`, and a second press can
+  // come before that is drawn.
+  assert.equal(count(editor, /\bdeleteAimed\b/g), 5, 'made, the lost drafts, the open, and twice in the line of the run that adds to it');
+  assert.equal(count(editor, /\bdeleting\b/g), 4, 'made, the guard of the run, set, cleared');
+  // The dialog, the plan and the two sentences come in by their imports. The plan and the sentences are the pure
+  // module's, which the D tests run: one of the same name written in the editor would be reached by no test.
+  for (const text of ["import { BackgroundMapDeleteDialog } from './BackgroundMapDeleteDialog';", "import { mapDeleteCauseText, mapDeleteStopText, planMapDelete } from './mapDelete';"])
+    assert.ok(all.includes(text), `not imported: ${text}`);
+  // The plan of a delete and the words the dialog says of it are a module of their own, read as this anchor runs: without
+  // its file this anchor fails, not every anchor of this file. Node runs that module as it is, so what a plan holds and
+  // what is said of it are tested by running them (the D tests). Held here, by its letters, is what those tests cannot
+  // tell apart: whose definitions the module goes by.
+  const plan = read('mapDelete.ts');
+  // A draft has something unsaved by the one definition the edit band and 도면 저장 go by. The value of a draft that the
+  // save would write is checked, before anything is sent, by the check the library itself runs on a map. And the wrapper
+  // Electron puts round what the main process throws is taken off by the one function the app has for that. Each comes in
+  // by its import and is called: a function of the same name written in this module would pass every D test today, and
+  // part from the real one unseen.
+  for (const text of ["import { mapDraftChanged } from './mapDocument.ts';", "import { validateBackgroundEntity } from './domain.ts';", "import { cleanIpcErrorMessage } from '../../utils/ipcErrorMessage.ts';",
+    'mapDraftChanged(', "validateBackgroundEntity('map',", 'cleanIpcErrorMessage(']) assert.ok(plan.includes(text), `not in mapDelete.ts: ${text}`);
+  // A map is deleted on the revision the library has for it, and on the one after it where the save that comes first
+  // wrote that map: one expression, the revision plus one or plus nothing. (The revision the save itself expects is not
+  // held here: its line begins with the same letters. D-9 runs it.)
+  for (const text of ['map.revision + (', '? 1 : 0)']) assert.ok(plan.includes(text), `not in mapDelete.ts: ${text}`);
+  assert.match(plan, /map\.revision \+ \(.+ \? 1 : 0\)/, 'the revision a delete expects is not written as the revision of the library, plus one for a map the save wrote');
+  // And the module stays one that Node runs as it is: no three.js, no DOM.
+  assert.doesNotMatch(plan, /from\s+['"]three/, 'mapDelete.ts imports three.js');
+  assert.doesNotMatch(plan, /\b(?:document|window)\.\w/, 'mapDelete.ts touches the DOM');
+  // The dialog itself, read as this anchor runs, as the module above is. No test of Node reaches a React component, so
+  // its lines are held by their letters. `lines` are they, without their indent.
+  const part = read('BackgroundMapDeleteDialog.tsx'), lines = part.split('\n').map(line => line.trim()).filter(Boolean);
+  /** Each is a line of its own, as written: nothing stands in front of one, and none is the head of a longer line. */
+  const own = (...texts: string[]) => { for (const text of texts) assert.ok(lines.includes(text), `not a line of its own: ${text}`); };
+  // While the dialog is drawn it is meant to be open. A run in progress does not hear Esc: the editor turns the close
+  // away. But two presses of Esc in a row close a native dialog whatever its cancel handler says, and the editor would
+  // then hold a dialog that is nowhere on screen: what a run that stopped has to say could be read nowhere. So the
+  // dialog hears the `close` of its own element and opens it again, as long as that element is still in the page.
+  const reopen = 'const reopen = () => { if (dialog.isConnected && !dialog.open) dialog.showModal(); };';
+  own(reopen);
+  // And no key pressed while it is up is for the page behind it. Every keydown is stopped on the window, in the capture
+  // phase: the shortcuts of the app listen there as a key bubbles, and hear any key that does not come from a text
+  // field. Once Tab has run past the last button the keys come from the body, and during a run the buttons are off:
+  // Ctrl and a digit would change the screen, the library would be taken down with it, and the rest of the run would
+  // end without a word. An empty handler lets every key through. Two keys are swallowed whole, default and all, because
+  // a key that is stopped no longer reaches the handler that used to swallow it: Ctrl+R, which then falls to the menu
+  // of the window and loads the whole page anew (the run is cut off, and the unsaved edits of every map are gone), and
+  // Ctrl+Z and Ctrl+Y, which the engine turns into an undo of the text last typed in a field of the page behind. Each
+  // by its place on the keyboard, whatever the Korean input state. The handler is those two lines and no other: a third
+  // that leaves early for some key would hand that key back to the page behind.
+  const opener = 'const hold = (event: KeyboardEvent) => {';
+  const held = ['event.stopPropagation();', "if ((event.ctrlKey || event.metaKey) && ['KeyR', 'KeyZ', 'KeyY'].includes(event.code)) event.preventDefault();"];
+  assert.deepEqual(block(part, opener).split('\n').map(line => line.trim()).filter(Boolean), [opener, ...held, '}'], 'what the dialog does with a key pressed while it is up');
+  // Both are heard from the first drawing of the dialog until it is taken down, by one effect that runs once: it finds
+  // the dialog element from the paragraphs it draws, adds the two and returns the cleanup that removes them, the key
+  // with the same flag. A listener that is never added does nothing, and one that is never removed would go on
+  // stopping every key of the app after the dialog has gone. Each name stands three times: made, added, removed.
+  const added = "dialog.addEventListener('close', reopen); window.addEventListener('keydown', hold, true);";
+  const removed = "return () => { dialog.removeEventListener('close', reopen); window.removeEventListener('keydown', hold, true); };";
+  const once = ['useEffect(() => {', "const dialog = body.current?.closest('dialog');", 'if (!dialog) return;', reopen, opener, ...held, '};', added, removed, '}, []);'];
+  own(added, removed);
+  for (const name of [/\breopen\b/g, /\bhold\b/g]) assert.equal(count(part, name), 3, `made, added and removed: ${name.source}`);
+  // The focus is brought back to the button that only closes whenever it has dropped out of the dialog: as a run stops
+  // short (its buttons were off while it ran), and as the map goes and 돌아가기 goes with it. Left outside, the next
+  // key would be pressed on nothing at all.
+  const refocus = 'useEffect(() => { if (!progress) back.current?.focus(); }, [progress, plan.target === null]);';
+  own(refocus);
+  // That button is where the dialog opens: 돌아가기, and 닫기 once the map is gone. Each carries the mark the modal looks
+  // for as it comes up, and the ref the effect above sends the focus to. So Enter, pressed at once, goes back. And the
+  // dialog is no form: the button that deletes is a plain button, pressed on purpose. Inside a form, or as its submit
+  // button, Enter anywhere in the dialog would delete.
+  const goBack = '<button type="button" className="bg-button" data-autofocus ref={back} disabled={!!progress} onClick={onClose}>돌아가기</button>';
+  const shut = '<button type="button" className="bg-button" data-autofocus ref={back} onClick={onClose}>닫기</button>';
+  const deletes = '<button type="button" className="bg-button bmap-danger" disabled={!!progress || disabled || !!text.refusal} onClick={onConfirm}>';
+  own(goBack);
+  for (const text of [shut, deletes]) assert.ok(part.includes(text), `not found: ${text}`);
+  assert.equal(count(part, /data-autofocus/g), 2, '돌아가기 and 닫기, and no other');
+  assert.equal(count(part, /<button\b/g), 3, 'the three buttons of the dialog');
+  assert.equal(count(part, /<button type="button" /g), 3, 'a button of the dialog is not a plain button');
+  for (const none of ['<form', 'type="submit"', 'onSubmit']) assert.ok(!part.includes(none), `still there: ${none}`);
+  // And the file holds nothing else: it is the lines above and what joins them, in this order. What joins them, and what
+  // goes wrong without it. The words are the pure module's, by that import (the D tests run them): a sentence made up
+  // here would be reached by no test. During a run they are the words of the press, kept from the last drawing in which
+  // no run was in progress: the plan is made anew from the optimistic snapshot at every command, and drawn from that
+  // the counts and the two choices would change and go while the run goes on. A map that is gone has no words. The
+  // dialog then says so by the name it was opened with, over one button that closes, and shows neither the message
+  // of the editor nor a button that deletes: nothing can be sent, so nothing can go to another map. In both looks the
+  // paragraphs stand in the element the effect finds the dialog from: without that ref in one of them, a dialog first
+  // drawn in that look would hear neither its `close` nor a key. Otherwise the question, from the top: why a run
+  // stopped and what it has done, when one has; what goes; the two choices when maps hang under this one, radios of
+  // one group that hand the pick to the editor, off during a run and while the editor is busy; what else is saved or
+  // lost; why the plan is refused. Then the two buttons. 돌아가기 is off during a run only. The button that deletes is
+  // off during a run, while the editor is busy, and when the plan is refused: left on then, it would read as a way
+  // past the refusal. During a run it counts the maps deleted, of the number it named when it was pressed, and says
+  // only that it is deleting when that number is one.
+  const modal = '<BackgroundModal title="도면 삭제" onClose={onClose}>', lead = '<div className="bmap-delete-lead" ref={body}>';
+  const choice = (mode: string, words: string) => `<label className="bmap-delete-choice"><input type="radio" name={group} checked={mode === '${mode}'} onChange={() => onMode('${mode}')} /><span><strong>{text.${words}[0]}</strong>{text.${words}[1]}</span></label>`;
+  const running = "{progress ? (progress.total === 1 ? '삭제 중…' : `삭제 중… ${progress.done}/${progress.total}`) : text.confirm}";
+  assert.deepEqual(lines, [
+    "import { useEffect, useId, useRef } from 'react';", "import type { JSX } from 'react';", "import { BackgroundModal } from './BackgroundUI';",
+    "import { mapDeleteText } from './mapDelete';", "import type { MapDeleteMode, MapDeletePlan, MapDeleteText } from './mapDelete';",
+    'export function BackgroundMapDeleteDialog({ name, plan, mode, progress, stopped, error, disabled, onMode, onClose, onConfirm }: {',
+    'name: string; plan: MapDeletePlan; mode: MapDeleteMode; progress: { done: number; total: number } | null;', 'stopped: string | null; error: string; disabled: boolean;',
+    'onMode(mode: MapDeleteMode): void; onClose(): void; onConfirm(): void }): JSX.Element {',
+    'const group = useId();', 'const live = mapDeleteText(plan, mode), kept = useRef<MapDeleteText | null>(null);', 'if (live && !progress) kept.current = live;', 'const text = progress ? kept.current : live;',
+    'const body = useRef<HTMLDivElement>(null), back = useRef<HTMLButtonElement>(null);', ...once, refocus,
+    `if (!text) return ${modal}`, `${lead}<p className="bmap-confirm-text">‘{name}’ 도면은 이미 삭제됐어요.</p></div>`, `<div className="bmap-modal-actions">${shut}</div>`, '</BackgroundModal>;',
+    `return ${modal}`, '{error && <p className="bg-error" role="alert">{error}</p>}', '{stopped && <p className="bmap-move-note" role="status">{stopped}</p>}',
+    `${lead}{text.lead.map((line, index) => <p key={index} className="bmap-confirm-text">{line}</p>)}</div>`,
+    '{text.keep && text.all && <fieldset className="bmap-delete-choices" disabled={!!progress || disabled}>', '<legend className="sr-only">하위 도면을 어떻게 할까요</legend>',
+    choice('keep-children', 'keep'), choice('with-children', 'all'), '</fieldset>}',
+    '{text.notes.map((note, index) => <p key={index} className="bmap-hint">{note}</p>)}', '{text.refusal && <p className="bg-error" role="alert">{text.refusal}</p>}',
+    '<div className="bmap-modal-actions">', goBack, `${deletes}${running}</button>`, '</div>', '</BackgroundModal>;', '}']);
+  // And in what the dialog draws, `read` took nothing away. Between the tags of JSX a `//` or a `/*` is no comment: it
+  // is text that is drawn, and an expression written behind it still runs. `read` drops it all the same, and the list
+  // above never sees that line. So each of the two looks is the same letters with and without what `read` drops: a
+  // comment of this file stands above a `return`, never inside one.
+  const raw = readFileSync(new URL('BackgroundMapDeleteDialog.tsx', directory), 'utf8').replace(/\r\n/g, '\n');
+  const looks = (source: string) => source.split(`return ${modal}`).slice(1).map(tail => tail.slice(0, tail.indexOf('</BackgroundModal>;')));
+  assert.equal(looks(raw).length, 2, 'the two looks the dialog returns');
+  assert.deepEqual(looks(part), looks(raw), 'a comment mark inside what the dialog draws: there it is text on screen, and the anchor does not see its line');
+  // The stylesheet, line by line and as written. The dialog is drawn by these nine rules and by no other, each a base
+  // rule on a line of its own, in this order; they are looked for in what is left of the sheet without its comments, so
+  // that a rule written behind a comment or under another selector is seen. Each is listed as its line begins, indent
+  // and all, and each begins its line. A rule of the dialog inside a media block is not one of the nine: there it
+  // stands behind the head of the block or indented under it, as the lines of a block do in this sheet, and it would
+  // hold only where the condition of the block does. Its paragraphs and its two choices stand one above the other: the
+  // library takes the margin off every paragraph, so the room between them is the gap of that column. Nothing of the
+  // dialog moves by itself, and nothing of it blurs what is behind it: the design adds no motion, so none of these
+  // rules needs a twin for reduced motion. No letter of it is slanted, by `font-style` or through the `font`
+  // shorthand: the screens of this app are set without italics. And no colour is written out, as a hex or as numbers:
+  // the dialog is painted with the colours of the theme, and the light screen and the dark one each have their own.
+  // The near-white of the dark screen, written out for the title of a choice, could not be read on the light one.
+  // Which colour of the theme a rule paints with is tuned by eye in the app, and is not held.
+  const sheet = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  const bare = sheet.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
+  const rules = bare.filter(line => line.includes('.bmap-delete'));
+  assert.deepEqual(rules.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-delete-lead {', '.bmap-delete-choices {', '.bmap-delete-choice {', '.bmap-delete-choice:has(input:checked) {',
+    '.bmap-delete-choice strong {', '.bmap-delete-choice input {', '.bmap-delete-choices:disabled .bmap-delete-choice {',
+    // Gate D: the paragraph reset of the library (`.bg-library p { margin:0 }`) took the margins of the stopped note and of
+    // the notes away, and they sat on the lead. These two keep them clear of it, by a selector that outweighs the reset.
+    '.bmap-move-note + .bmap-delete-lead {', '.bmap-delete-lead ~ .bmap-hint {']);
+  for (const line of rules) {
+    assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
+    assert.doesNotMatch(line, /transition|animation|backdrop-filter/);
+    assert.doesNotMatch(line, /font-style|italic|oblique/);
+    assert.doesNotMatch(line, /#|\b(?:rgb|hsl)a?\((?!var\()/);
+  }
+  for (const column of ['.bmap-delete-lead {', '.bmap-delete-choices {']) has(baseRule(sheet, column), 'display:flex', 'flex-direction:column');
 });

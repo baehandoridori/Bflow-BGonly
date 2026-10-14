@@ -1,4 +1,5 @@
 import type { BackgroundMap, BackgroundPoint } from './types.ts';
+import type { MapNumberKey } from './mapNumberField.ts';
 
 /**
  * Contract between the map editor and every surface that shows its one editable draft
@@ -50,5 +51,20 @@ export type Map3DProps = MapCanvasProps & {
   onUnavailable(reason: string): void;
 };
 
+/** Where a drag of one number starts: its value, and the map every preview of that drag is computed from. */
+export type MapScrubOrigin = { start: number; map: BackgroundMap };
+/**
+ * One number of the node in hand, dragged from outside the canvas: a field of the inspector, the lens of the side view.
+ * One drag is one gesture of the document: any number of previews, at most one undo step.
+ */
+export type MapFieldScrub = {
+  /** Starts the drag. Null: refused (nothing to edit, a locked node, a save or another drag running). */
+  begin(field: MapNumberKey): MapScrubOrigin | null;
+  /** Shows `value` in every view. */
+  preview(field: MapNumberKey, value: number): void;
+  finish(): void; cancel(): void;
+  /** A drag is still running. False once the editor has cancelled it (Escape, a save starting, another map). */
+  alive(): boolean;
+};
 /** Companion plan shown next to the 3D viewport. It reads the same in-progress draft. */
-export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'onSelect'>;
+export type MapPlanPreviewProps = Pick<MapCanvasProps, 'map' | 'selectedId' | 'canEdit' | 'onSelect'> & { scrub: MapFieldScrub };

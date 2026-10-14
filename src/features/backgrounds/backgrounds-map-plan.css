@@ -95,14 +95,25 @@
   .bmap-plan-values>.is-fov { display:block; }
   .bmap-plan-side { display:flex; flex:0 1 44%; align-self:stretch; justify-content:center; max-width:160px; }
   .bmap-plan-side>svg { flex:1 1 0; height:auto; min-height:0; max-height:110px; }
+  .bmap-plan-side-tip { display:none; }
 }
 @container bmap-plan (min-aspect-ratio: 3/2) and (min-width: 300px) and (max-height: 159px) {
   .bmap-plan-readout { padding:4px 8px; }
   .bmap-plan-name>strong { font-size:11px; }
   .bmap-plan-side>figcaption { display:none; }
+  .bmap-plan-side-marks { display:none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bmap-plan-toggle>svg { transition:none; }
 }
+/* The lens of the side view while its camera can be edited: a wider area takes the press, and a halo with a small up-down mark says it can be dragged. The halo is in screen pixels, so it shows at any size of the picture. Painted from the camera variables of this plan. Nothing here moves by itself. */
+.bmap-plan-side-grab { fill:transparent; stroke:transparent; stroke-width:24px; pointer-events:all; cursor:ns-resize; touch-action:none; }
+/* The engine reads touch-action from boxes only, never from a shape inside a picture: while the lens can be dragged the picture as a whole takes it, so a touch or a pen that starts on the lens is not taken for a scroll halfway. */
+.bmap-plan-side.is-draggable>svg { touch-action:none; }
+.bmap-plan-side-ring { fill:none; stroke:var(--bmap-plan-cam-line); stroke-opacity:.35; stroke-width:6px; pointer-events:none; }
+.bmap-plan-side-marks { fill:none; stroke:var(--bmap-plan-cam-line); stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+.bmap-plan-side.is-lifting .bmap-plan-side-ring { stroke-opacity:.7; }
+/* The height in the summary is the number being dragged: its colour says so. Same size, same weight. */
+.bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong { color:var(--bmap-plan-cam-line); }
 /* A camera with a colour of its own: the four camera variables of this plan follow it, on both themes. */
 .bmap-plan-preview [data-camera-color] { --bmap-plan-cam:rgb(var(--bmap-cam)); --bmap-plan-cam-line:rgb(var(--bmap-cam)); --bmap-plan-cam-edge:rgb(var(--color-bg-primary)); --bmap-plan-cam-soft:rgb(var(--bmap-cam) / .18); }

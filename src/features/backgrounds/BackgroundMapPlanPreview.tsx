@@ -1,15 +1,16 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
-import type { MapPlanPreviewProps } from './mapCanvas';
+import type { MapFieldScrub, MapPlanPreviewProps } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from './types';
 import { MAP_PLAN_EXTENT, cameraAngles, cameraPitchLabel, isRoadSpace, roadCentrePlanLine } from './mapSpatial';
 import {
-  PLAN_FALLBACK_SIZE, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_VIEW,
+  PLAN_FALLBACK_SIZE, PLAN_MARK, PLAN_PREVIEW_HINT,
   nextPlanSelection, planCameraGlyph, planCameraReadout, planNodeCovers, planNodeLabel, planNodeSummary, planOutlinePoints, planReadoutText,
-  planSelectedNode, planSideView, planUnitsPerPixel, planViewBox, planVolumeReadout,
+  planSelectedNode, planUnitsPerPixel, planViewBox, planVolumeReadout,
 } from './mapPlanPreview';
 import type { PlanCameraGlyph, PlanReadout, PlanSize } from './mapPlanPreview';
 import { stackedSpaces } from './mapStack';
+import { BackgroundMapPlanSide } from './BackgroundMapPlanSide';
 import './backgrounds-map-plan.css';
 
 /**
@@ -111,32 +112,22 @@ function ReadoutText({ readout, pitch }: { readout: PlanReadout; pitch?: number 
   </div>;
 }
 
-function CameraReadout({ map, camera }: { map: BackgroundMap; camera: BackgroundCamera }) {
-  const readout = planCameraReadout(camera), side = planSideView(map, camera), box = PLAN_SIDE_VIEW;
+function CameraReadout({ map, camera, canEdit, scrub }: { map: BackgroundMap; camera: BackgroundCamera; canEdit: boolean; scrub: MapFieldScrub }) {
+  const readout = planCameraReadout(camera);
   const [, pitchText, heightText] = readout.items.map(planReadoutText);
   return <div className="bmap-plan-readout is-camera" data-camera-color={camera.color} role="group" aria-label="선택한 카메라">
     <ReadoutText readout={readout} pitch={readout.vertical ? (readout.vertical === 'up' ? 90 : -90) : cameraAngles(camera).pitch} />
-    <figure className="bmap-plan-side">
-      <svg viewBox={`0 0 ${box.width} ${box.height}`} role="img" aria-label={`옆에서 본 방향: ${pitchText}, ${heightText}`}>
-        {side.room && <rect className="bmap-plan-side-room" x={box.left} y={fixed(side.room.top)} width={box.right - box.left} height={fixed(Math.max(1, side.room.bottom - side.room.top))} />}
-        <line className="bmap-plan-side-floor" x1={box.left} x2={box.right} y1={fixed(side.floorY)} y2={fixed(side.floorY)} />
-        {[0, 1, 2, 3, 4, 5].map(index => <line key={index} className="bmap-plan-side-hatch" x1={box.left + 12 + index * 20} x2={box.left + 6 + index * 20} y1={fixed(side.floorY)} y2={fixed(side.floorY + 6)} />)}
-        <line className="bmap-plan-side-pole" x1={side.camera.x} x2={side.camera.x} y1={fixed(side.floorY)} y2={fixed(side.camera.y)} />
-        <line className="bmap-plan-side-level" x1={side.camera.x} x2={side.camera.x + box.arrow + box.head} y1={fixed(side.camera.y)} y2={fixed(side.camera.y)} />
-        <line className="bmap-plan-sight" x1={side.camera.x} y1={fixed(side.camera.y)} x2={fixed(side.tip.x)} y2={fixed(side.tip.y)} />
-        <polygon className="bmap-plan-sight-head" points={pointList(side.head)} />
-        <circle className="bmap-plan-dot" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />
-      </svg>
-      <figcaption>옆에서 본 방향</figcaption>
-    </figure>
+    <BackgroundMapPlanSide map={map} camera={camera} canEdit={canEdit} scrub={scrub} label={`옆에서 본 방향: ${pitchText}, ${heightText}`} />
   </div>;
 }
 
 /**
  * Companion plan next to the 3D viewport. Fully controlled: it draws the draft it is given, the
- * preview of a gizmo drag included, and keeps no map, camera or selection of its own.
+ * preview of a gizmo drag included, and keeps no map, camera or selection of its own. `canEdit`
+ * and `scrub` are handed on as they come to the side view of the picked camera, where its lens
+ * is dragged.
  */
-export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanPreviewProps) {
+export function BackgroundMapPlanPreview({ map, selectedId, onSelect, canEdit, scrub }: MapPlanPreviewProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [size, setSize] = useState<PlanSize>(PLAN_FALLBACK_SIZE);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -232,7 +223,7 @@ export function BackgroundMapPlanPreview({ map, selectedId, onSelect }: MapPlanP
             {selectedGlyph?.vertical && <p className="bmap-plan-note" data-camera-color={selectedColor}><VerticalIcon vertical={selectedGlyph.vertical} />{cameraPitchLabel(selectedGlyph.vertical === 'up' ? 90 : -90)} · 점선: 기울일 때 방향</p>}
             {selectedGlyph?.fan && <p className="bmap-plan-note" data-camera-color={selectedColor}><svg className="bmap-plan-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path className="bmap-plan-fan" d="M 2 8 L 13 3 A 12 12 0 0 1 13 13 Z" /></svg>부채꼴: 방향 참고</p>}
           </div>
-          {selected?.type === 'camera' ? <CameraReadout map={map} camera={selected} />
+          {selected?.type === 'camera' ? <CameraReadout key={selected.id} map={map} camera={selected} canEdit={canEdit} scrub={scrub} />
             : readout ? <div className="bmap-plan-readout is-volume" role="group" aria-label={selected?.type === 'space' ? (isRoadSpace(selected) ? '선택한 도로' : '선택한 공간') : '선택한 기호'}><ReadoutText readout={readout} /></div>
               : <div className="bmap-plan-readout is-empty"><p className="bmap-plan-hint">{PLAN_PREVIEW_HINT}</p></div>}
         </>}

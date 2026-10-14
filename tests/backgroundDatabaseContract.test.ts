@@ -7,6 +7,7 @@ import { BACKGROUND_CAMERA_COLORS, BACKGROUND_SPACE_SURFACES, BACKGROUND_SPATIAL
 import { mapSaveWasApplied } from '../src/features/backgrounds/mapWorkflow.ts';
 import { addMapCamera, applyNodeWorldPose } from '../src/features/backgrounds/mapGeometry.ts';
 import { SYMBOL_VOLUME_HEIGHTS, cameraOrientation, nodeOrientation } from '../src/features/backgrounds/mapSpatial.ts';
+import { planMapDelete } from '../src/features/backgrounds/mapDelete.ts';
 
 const migration=(name:string)=>readFileSync(new URL(`../DEVLOG/migrations/${name}`,import.meta.url),'utf8');
 // The 3D file replaces one function of the base file and the elements file replaces it again, so every run applies them in this order.
@@ -511,6 +512,23 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       for(const type of ['camera','symbol'] as const)await refuse(type,{surface:'road'},/도면 배치 항목/);
       for(const type of ['space','symbol'] as const)await refuse(type,{color:'red'},/도면 배치 항목/);
       await refuse('symbol',{symbol:'elevator'},/사물 기호/);
+    });
+    await t.test('a map is deleted in the order planMapDelete gives, keeping its children or with them, and never without the save that comes first',async()=>{
+      for(const mode of ['keep-children','with-children'] as const){
+        // Three maps, one under the other, each opened by a space of the map above it: both rules that stand in the way of a delete.
+        const top=map(),middle=map(null,top.id),bottom=map(null,middle.id);top.nodes=[{...space(),childMapId:middle.id}];middle.nodes=[{...space(),childMapId:bottom.id}];
+        await run({type:'save-maps',maps:[top,middle,bottom].map(entity=>({entity,expectedRevision:null}))});
+        // Deleted by itself, the middle one is refused: the map above still opens it and a map still hangs under it.
+        await assert.rejects(remove('map',middle,1),{code:'22023'});
+        // The plan is made of what the database holds, and each of its commands passes the real checks, in the order of the plan.
+        const plan=planMapDelete(await read(),{},middle.id,mode);
+        assert.equal(plan.refusal,null);assert.deepEqual(plan.steps.map(step=>step.type),mode==='keep-children'?['save-maps','delete']:['save-maps','delete','delete']);
+        let after:any;for(const step of plan.steps)after=await run(step);
+        const find=(entity:any)=>after.maps.find((item:any)=>item.id===entity.id);
+        assert.equal(find(middle),undefined);assert.deepEqual(find(top).nodes.map((node:any)=>node.childMapId),[null]);
+        // Kept, the lowest map hangs under the top one. Deleted along with the middle one, it went first.
+        if(mode==='keep-children')assert.deepEqual([find(bottom).parentId,find(bottom).revision],[top.id,2]);else assert.equal(find(bottom),undefined);
+      }
     });
     await t.test('role changes apply immediately and realtime never broadcasts entity content',async()=>{
       await db.exec('RESET ROLE');await db.exec("UPDATE users SET role='user' WHERE id='admin'");await db.exec('SET ROLE anon');
