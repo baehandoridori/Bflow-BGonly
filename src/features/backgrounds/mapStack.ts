@@ -1,6 +1,6 @@
 import { containsPoint } from './mapGeometry.ts';
-import { isRoadSpace, nodePlanOutline } from './mapSpatial.ts';
-import type { BackgroundMap, BackgroundPoint, BackgroundSpace } from './types.ts';
+import { isRoadSpace, nodeElevation, nodePlanOutline, nodeVolumeHeight, spaceWallHeight } from './mapSpatial.ts';
+import type { BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace } from './types.ts';
 
 /** Plan area of a space as the plan draws it: what "smaller" means for stacking. */
 export function spacePlanArea(space: BackgroundSpace): number {
@@ -68,4 +68,41 @@ export function spacesOverlap(a: BackgroundSpace, b: BackgroundSpace): boolean {
       if (Math.min(ya[m + 1], yb[n + 1]) - Math.max(ya[m], yb[n]) > OVERLAP_SLACK) return true;
   }
   return false;
+}
+
+/** Slack of the hold test: a share of the way to the middle of a space or a symbol, plan units around a camera, and level units. What stands flush against a wall, on the floor or up to the top is inside. */
+const HOLD_SLACK = 1e-6;
+/** The eight directions around a plan point. */
+const AROUND: readonly (readonly [number, number])[] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+/** No node is held: one set for every time, so nothing that reads it by identity is woken. */
+const NONE_HELD: ReadonlySet<string> = new Set();
+/**
+ * Whether a room holds a node whole: its plan outline (the middle and every corner of a space or a symbol, the position
+ * of a camera) lies inside the outline of the room or on it, and it stands between the floor and the top of the walls,
+ * both included. A road has no volume, and a room does not hold itself.
+ */
+export function spaceHoldsNode(space: BackgroundSpace, node: BackgroundNode): boolean {
+  if (node.id === space.id || isRoadSpace(space)) return false;
+  const floor = nodeElevation(space), top = floor + spaceWallHeight(space), level = nodeElevation(node);
+  // A camera is a point: it has no height of its own.
+  const height = node.type === 'camera' ? 0 : node.type === 'space' ? spaceWallHeight(node) : nodeVolumeHeight(node);
+  if (!(level >= floor - HOLD_SLACK && level + height <= top + HOLD_SLACK)) return false;
+  // A camera on a wall line is inside, whatever the shape of the room: containsPoint reads the edges of a polygon half open, so the point is asked a hair away on every side.
+  if (node.type === 'camera') return AROUND.some(([dx, dy]) => containsPoint(space, { x: node.x + dx * HOLD_SLACK, y: node.y + dy * HOLD_SLACK }));
+  const middle = { x: node.x + node.width / 2, y: node.y + node.height / 2 };
+  // Each corner is asked a hair towards the middle: a wall the node stands flush against does not put it outside.
+  return containsPoint(space, middle) && nodePlanOutline(node).every(point => containsPoint(space, { x: point.x + (middle.x - point.x) * HOLD_SLACK, y: point.y + (middle.y - point.y) * HOLD_SLACK }));
+}
+/**
+ * The nodes that rooms drawn closed in 3D hold whole: what is not drawn there. `boxes`: those rooms. Two of them that
+ * hold each other (the same outline on the same levels) are told apart by the map: the earlier one, which lies below on
+ * the plan, holds the later one. The one empty set when there is no such room.
+ */
+export function nodesHeldBy(map: BackgroundMap, boxes: readonly BackgroundSpace[]): ReadonlySet<string> {
+  if (!boxes.length) return NONE_HELD;
+  const order = new Map(map.nodes.map((node, index) => [node.id, index])), at = (id: string) => order.get(id) ?? -1;
+  const held = new Set<string>();
+  for (const node of map.nodes)
+    if (boxes.some(box => spaceHoldsNode(box, node) && !(node.type === 'space' && boxes.includes(node) && at(node.id) < at(box.id) && spaceHoldsNode(node, box)))) held.add(node.id);
+  return held.size ? held : NONE_HELD;
 }
