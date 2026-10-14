@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { Object3D, PerspectiveCamera, Raycaster, Texture, TextureLoader, Vector2, Vector3 } from 'three';
+import { DoubleSide, Object3D, PerspectiveCamera, Raycaster, Texture, TextureLoader, Vector2, Vector3 } from 'three';
 import type { BufferGeometry, Material, Mesh } from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView } from '../src/features/backgrounds/map3dScene.ts';
@@ -15,7 +15,7 @@ import type { Map3DProps, Map3DViewState } from '../src/features/backgrounds/map
 import { createMapDocumentStore, mapDraft, mapSelection, mapViewport, pickAction, singleViewId } from '../src/features/backgrounds/mapDocument.ts';
 import { beginMapGesture, finishMapGesture, previewMapGesture } from '../src/features/backgrounds/mapEditSession.ts';
 import type { MapGesture } from '../src/features/backgrounds/mapEditSession.ts';
-import { addMapCamera } from '../src/features/backgrounds/mapGeometry.ts';
+import { addMapCamera, rectToPolygon } from '../src/features/backgrounds/mapGeometry.ts';
 import { planCameraGlyph, planCameraReadout, planReadoutText } from '../src/features/backgrounds/mapPlanPreview.ts';
 import { DEFAULT_MAP_CAMERA_POSE, SYMBOL_VOLUME_HEIGHTS, cameraOrientation, cameraPitchLabel, nodePlanOutline, nodeWorldPose, roadCentrePlanLine, verticalFov } from '../src/features/backgrounds/mapSpatial.ts';
 import type { BackgroundCamera, BackgroundCameraColor, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
@@ -3904,4 +3904,213 @@ test('W-2: viewport — the scene is synced again for a new set alone, and never
   bare.render({ placing: true }); bare.render({ placing: false }); bare.render();
   assert.equal(bareSyncs.count(), 0, 'a viewport handed no set syncs again');
   bare.viewport.dispose();
+});
+
+/** Whether the root of a node is drawn, and what follows the root (its name, the drop line of a camera), listed like the roots. */
+const drawnIn = (scene: Map3DScene, node: BackgroundNode): boolean[] => {
+  const root = rootOf(scene, node), companion = named(scene.scene, 'map-companions').children[named(scene.scene, 'map-nodes').children.indexOf(root)];
+  return [root.visible, companion.visible];
+};
+/** The parts of a room drawn closed, and of one drawn see-through, in the order they are added to its root. */
+const CLOSED_ROOM = ['space-floor', 'space-walls', 'space-lid', 'space-outline'], OPEN_ROOM = ['space-floor', 'space-walls', 'space-outline'];
+
+test('S-1: a closed room is one opaque material on its floor, its walls and a lid that shares the floor geometry', () => {
+  const room = space(1), beside = space(2, { x: 500, y: 300 }), lane = road(3, { x: 0, y: 560, width: 1000, height: 80 });
+  const map = mapOf([room, beside, lane]), scene = new Map3DScene(), solidIds = new Set([room.id, lane.id]), faces = ['space-floor', 'space-walls', 'space-lid'];
+  const parts = (node: BackgroundNode) => rootOf(scene, node).children.map(child => child.name);
+  const targets = () => scene.pickTargets().filter(target => target.userData.nodeId === room.id).map(target => [target.name, target.userData.pickPart]);
+  scene.sync(map, null);
+  const root = rootOf(scene, room), besideParts = [...rootOf(scene, beside).children], laneParts = [...rootOf(scene, lane).children];
+  // Closed: the same root, with a lid between its walls and its outline. The room beside it is not drawn again, and a road
+  // is never closed, though it is listed.
+  scene.sync(map, null, { solidIds });
+  same(rootOf(scene, room), root, 'the room keeps its root');
+  assert.deepEqual(parts(room), CLOSED_ROOM);
+  assert.ok(sameList(rootOf(scene, beside).children, besideParts), 'the room beside it is not drawn again');
+  assert.ok(sameList(rootOf(scene, lane).children, laneParts), 'a road is never closed');
+  // One opaque material on the three faces: it writes depth, it is seen from inside as well, and it is pushed back a little
+  // behind the outline on its edges. Its colour is the card of the theme with 35 percent of the accent in it.
+  const shell = paintOf(scene, room, 'space-floor');
+  for (const name of faces) same(paintOf(scene, room, name), shell, `${name}: the one material of the faces`);
+  assert.deepEqual([shell.transparent, shell.opacity, shell.depthWrite, shell.side, shell.polygonOffset, shell.polygonOffsetFactor, shell.polygonOffsetUnits],
+    [false, 1, true, DoubleSide, true, 1, 1]);
+  assert.equal(shell.color.getHex(), 0x37336a);
+  // The lid is the floor once more, at the top of the walls. Every face is a click on the room, and the floor keeps its
+  // place under the floors of the other rooms.
+  same((named(root, 'space-lid') as Mesh).geometry, (named(root, 'space-floor') as Mesh).geometry, 'the lid is the floor geometry');
+  assert.equal(named(root, 'space-lid').position.y, 180);
+  assert.deepEqual(targets(), [['space-floor', 'shell'], ['space-walls', 'shell'], ['space-lid', 'shell']]);
+  assert.equal(named(root, 'space-floor').renderOrder, -1);
+  const quietLine = paintOf(scene, room, 'space-outline');
+  assert.deepEqual([quietLine.opacity, !!quietLine.isLineDashedMaterial], [0.55, false], 'the outline of a room');
+  // Selected: a deeper colour and the whole outline. Locked: dashed. Closed either way.
+  scene.sync(map, room.id, { solidIds });
+  assert.deepEqual(parts(room), CLOSED_ROOM, 'selected');
+  const lit = paintOf(scene, room, 'space-floor'), litLine = paintOf(scene, room, 'space-outline');
+  for (const name of faces) same(paintOf(scene, room, name), lit, `${name}: the one material of the faces, selected`);
+  assert.deepEqual([lit.transparent, lit.opacity, lit.depthWrite, lit.color.getHex()], [false, 1, true, 0x4b439a]);
+  assert.deepEqual([litLine.opacity, !!litLine.isLineDashedMaterial], [1, false], 'the outline of a selected room');
+  const locked = { ...room, locked: true };
+  scene.sync(mapOf([locked, beside, lane]), null, { solidIds });
+  assert.deepEqual(parts(locked), CLOSED_ROOM, 'locked');
+  assert.equal(paintOf(scene, locked, 'space-outline').isLineDashedMaterial, true);
+  assert.ok(dashesOf(scene, locked, 'space-outline'), 'dashes need line distances');
+  same(paintOf(scene, locked, 'space-lid'), shell, 'a lock changes the outline only');
+  // Switched off: the three parts of a see-through room again, in the same root, its floor and its walls clicked as before.
+  scene.sync(map, null, { solidIds: new Set() });
+  same(rootOf(scene, room), root, 'the room keeps its root');
+  assert.deepEqual(parts(room), OPEN_ROOM);
+  const wall = paintOf(scene, room, 'space-walls');
+  assert.deepEqual([wall.transparent, wall.opacity, wall.depthWrite], [true, 0.12, false], 'the see-through wall');
+  assert.deepEqual(targets(), [['space-floor', 'floor'], ['space-walls', 'wall']]);
+  // Another theme keeps the box, in the colours of that theme: the white card of the light screen, the same accent.
+  scene.sync(map, null, { solidIds });
+  scene.setPalette({ ...MAP3D_DARK_PALETTE, light: true, card: 0xffffff });
+  assert.deepEqual(parts(room), CLOSED_ROOM, 'closed after a change of theme');
+  const light = paintOf(scene, room, 'space-floor');
+  for (const name of faces) same(paintOf(scene, room, name), light, `${name}: the one material of the faces on the light screen`);
+  assert.deepEqual([light.transparent, light.color.getHex()], [false, 0xccc6f7]);
+  scene.sync(map, room.id, { solidIds });
+  assert.equal(paintOf(scene, room, 'space-lid').color.getHex(), 0xa79df1, 'selected on the light screen');
+  // A change of theme in the middle of a drag repaints the room the gizmo holds as it was when the drag began: closed.
+  scene.sync(map, room.id, { solidIds, holdId: room.id });
+  scene.setPalette(MAP3D_DARK_PALETTE);
+  assert.deepEqual(parts(room), CLOSED_ROOM, 'closed after a change of theme in the middle of a drag');
+  assert.equal(paintOf(scene, room, 'space-lid').color.getHex(), 0x4b439a, 'selected on the dark screen again');
+  // Released once when the scene goes, the geometry the floor and the lid share too.
+  const { geometries, materials } = resources(scene), released = new Map<object, number>();
+  assert.ok(geometries.has((named(root, 'space-lid') as Mesh).geometry), 'the lid is drawn');
+  for (const item of [...geometries, ...materials]) item.addEventListener('dispose', () => { released.set(item, (released.get(item) ?? 0) + 1); });
+  scene.dispose();
+  for (const item of [...geometries, ...materials]) assert.equal(released.get(item), 1, `${(item as { type?: string }).type} was not released exactly once`);
+  assert.deepEqual(scene.resourceCount(), { geometries: 0, materials: 0, textures: 0 });
+});
+
+test('S-5: looking through a camera opens the room it stands in, on a wall line and at the level of the lid too', () => {
+  const other = space(2, { name: '창고', x: 600, y: 0, width: 300, height: 200 });
+  const seat = symbol(12, 'chair', { name: '의자', x: 170, y: 120 }), stool = symbol(13, 'chair', { name: '창고 의자', x: 720, y: 70 });
+  const plain = space(1, { name: '교실', x: 0, y: 0, width: 400, height: 300 });
+  for (const room of [plain, rectToPolygon(plain)!]) {
+    // Where a camera stands in the room: inside it, on the middle of each wall and on each corner of the outline the 3D view
+    // draws, and over its middle at the level of its lid, looking down. Twenty off the outline, or one over the lid, it is outside.
+    const corners = nodePlanOutline(room), middles = corners.map((point, index) => {
+      const next = corners[(index + 1) % corners.length];
+      return { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 };
+    });
+    const inside = camera(20, { name: '안', x: 200, y: 150 }), atLid = camera(21, { name: '뚜껑 높이', x: 200, y: 150, elevation: 180, pitch: -90 });
+    const onLine = [...middles, ...corners].map((spot, index) => camera(30 + index, { name: `벽 선 ${index}`, x: spot.x, y: spot.y }));
+    const offLine = camera(40, { name: '벽 밖', x: -20, y: 150 }), overLid = camera(41, { name: '뚜껑 위', x: 200, y: 150, elevation: 181, pitch: -90 });
+    const held = [inside, ...onLine, atLid], outside = [offLine, overLid];
+    const map = mapOf([room, other, seat, stool, ...held, ...outside]), scene = new Map3DScene(), solidIds = new Set([room.id, other.id]);
+    const parts = (node: BackgroundNode) => rootOf(scene, node).children.map(child => child.name), shape = room.shape;
+    assert.equal(corners.length, 4, `${shape}: the corners of the room`);
+    // Looked through from where it stands in the room, on its wall line and at the level of its lid as well: that room
+    // opens and the chair it held is drawn. The other box stays closed, and so does what it holds.
+    for (const lens of held) {
+      scene.sync(map, null, { hiddenId: lens.id, solidIds });
+      assert.deepEqual([parts(room), parts(other), drawnIn(scene, seat), drawnIn(scene, stool)], [OPEN_ROOM, CLOSED_ROOM, [true, true], [false, false]],
+        `${shape}: looking through ${lens.name}`);
+    }
+    // From outside the room it is a box like any other.
+    for (const lens of outside) {
+      scene.sync(map, null, { hiddenId: lens.id, solidIds });
+      assert.deepEqual([parts(room), drawnIn(scene, seat)], [CLOSED_ROOM, [false, false]], `${shape}: looking through ${lens.name}`);
+    }
+    // Looked through by none: closed. A camera it holds is drawn while it is the selected node, and not otherwise; one
+    // outside it is drawn.
+    for (const lens of held) {
+      scene.sync(map, lens.id, { solidIds });
+      assert.deepEqual([parts(room), drawnIn(scene, lens), drawnIn(scene, seat)], [CLOSED_ROOM, [true, true], [false, false]], `${shape}: ${lens.name} selected`);
+    }
+    scene.sync(map, null, { solidIds });
+    assert.deepEqual(parts(room), CLOSED_ROOM, shape);
+    for (const lens of held) assert.deepEqual(drawnIn(scene, lens), [false, false], `${shape}: ${lens.name} is held`);
+    for (const lens of outside) assert.deepEqual(drawnIn(scene, lens), [true, true], `${shape}: ${lens.name} is outside`);
+    scene.dispose();
+  }
+});
+
+test('S-6: only what a closed room holds whole goes, the room around it stays, and the order of the map makes no difference', () => {
+  // A hall, a box in the middle of it with a small room and a camera inside, a camera elsewhere in the hall, and a table
+  // standing on the lid of the box: over the lid of the hall as well.
+  const hall = space(1, { name: '홀', x: 0, y: 0, width: 900, height: 600 }), box = space(2, { name: '방', x: 300, y: 200, width: 300, height: 200 });
+  const nook = space(3, { name: '작은 방', x: 340, y: 240, width: 100, height: 80 }), inner = camera(20, { name: '안의 카메라', x: 500, y: 300 });
+  const outer = camera(21, { name: '홀의 카메라', x: 120, y: 120 }), roof = symbol(10, 'table', { name: '뚜껑 위의 탁자', x: 420, y: 270, elevation: 180 });
+  const all = [nook, inner, hall, box, outer, roof];
+  // The camera and the small room come before the box in the map, and after it once the map is turned round.
+  for (const nodes of [[hall, nook, inner, box, outer, roof], [roof, outer, box, inner, nook, hall]]) {
+    const map = mapOf(nodes), scene = new Map3DScene(), order = nodes.map(node => node.name).join(' · ');
+    /** What is drawn, in the order of `all`: the root and what follows it are drawn alike. */
+    const drawn = () => all.map(node => {
+      const [root, companion] = drawnIn(scene, node);
+      assert.equal(root, companion, `${order}: ${node.name}, the root and what follows it`);
+      return root;
+    });
+    // Right after the first sync with the box on: what it holds is not drawn. The hall around it is, and so is what stands on its lid.
+    scene.sync(map, null, { solidIds: new Set([box.id]) });
+    assert.deepEqual(drawn(), [false, false, true, true, true, true], `${order}: the box`);
+    // The selected node is drawn, though it is held.
+    scene.sync(map, inner.id, { solidIds: new Set([box.id]) });
+    assert.deepEqual(drawn(), [false, true, true, true, true, true], `${order}: the camera inside selected`);
+    // A box the eye hides holds nothing.
+    scene.sync(map, null, { solidIds: new Set([box.id]), hiddenIds: new Set([box.id]) });
+    assert.deepEqual(drawn(), [true, true, true, false, true, true], `${order}: the box hidden`);
+    // Looked through from the camera inside: the box opens, and the room in it is drawn.
+    scene.sync(map, null, { solidIds: new Set([box.id]), hiddenId: inner.id });
+    assert.deepEqual(drawn(), [true, false, true, true, true, true], `${order}: looking through the camera inside`);
+    assert.equal(rootOf(scene, box).children.length, 3, `${order}: the box opens`);
+    // Every room a box: the outermost alone, with what stands on the lid.
+    scene.sync(map, null, { solidIds: new Set([hall.id, box.id, nook.id]) });
+    assert.deepEqual(drawn(), [false, false, true, false, false, true], `${order}: every room a box`);
+    // No box: everything.
+    scene.sync(map, null);
+    assert.deepEqual(drawn(), [true, true, true, true, true, true], `${order}: no box`);
+    scene.dispose();
+  }
+});
+
+test('W-4: viewport — looking through a camera opens the room it stands in, and the box closes again on the way back', async () => {
+  const room = space(1, { name: '교실' }), other = space(2, { name: '창고', x: 520, y: 300, width: 240, height: 160 });
+  const seat = symbol(12, 'chair', { spaceId: room.id }), lens = camera(20, { spaceId: room.id });
+  const editor = await mountViewport({ map: mapOf([room, other, seat, lens]), solidIds: new Set([room.id, other.id]) });
+  const parts = (node: BackgroundNode) => editor.root(node.id).children.map((child: Any) => child.name);
+  const seen = () => [parts(room), parts(other), editor.root(seat.id).visible];
+  assert.deepEqual(seen(), [CLOSED_ROOM, CLOSED_ROOM, false], 'two boxes, and the chair one of them holds');
+  // Looking through the camera that stands in the room: that room opens, the other stays a box.
+  editor.render({ lookThroughId: lens.id });
+  editor.frame();
+  assert.deepEqual(seen(), [OPEN_ROOM, CLOSED_ROOM, true], 'looking through the camera in the room');
+  // Back to looking around: closed again, with what it holds.
+  editor.render({ lookThroughId: null });
+  editor.frame();
+  assert.deepEqual(seen(), [CLOSED_ROOM, CLOSED_ROOM, false], 'back from the camera');
+  assert.equal(editor.root(lens.id).visible, false, 'the camera the room holds is not drawn');
+  editor.viewport.dispose();
+});
+
+test('W-5: viewport — a closed room dragged by the gizmo stays closed and keeps hiding what goes with it', async () => {
+  const editor = await mountViewport({ selectedId: viewRoom.id, solidIds: new Set([viewRoom.id]) });
+  const { dev } = editor;
+  const seen = () => [editor.root(viewRoom.id).children.map((child: Any) => child.name), editor.root(viewChair.id).visible];
+  // The selected room is drawn closed. Its chair stands whole in it: not drawn.
+  assert.deepEqual(seen(), [CLOSED_ROOM, false]);
+  editor.frame();
+  const handle = editor.handle(viewRoom.id, 'X');
+  editor.move(handle);
+  assert.equal(dev().transform.axis, 'X', 'the pointer is over the X arrow of the room');
+  editor.press(handle);
+  editor.move({ x: handle.x + 30, y: handle.y }); editor.frame();
+  editor.move({ x: handle.x + 60, y: handle.y }); editor.frame();
+  // While it is dragged the room stays closed, and the chair that goes with it stays hidden.
+  assert.ok(editor.count('preview') >= 1, 'the drag is previewed');
+  assert.deepEqual(seen(), [CLOSED_ROOM, false], 'while it is dragged');
+  editor.release({ x: handle.x + 60, y: handle.y });
+  editor.frame();
+  // One drag, begun and finished once.
+  assert.deepEqual([editor.count('begin'), editor.count('finish'), editor.count('cancel'), editor.undo.length], [1, 1, 0, 1]);
+  const moved = editor.node(viewRoom.id) as BackgroundSpace, carried = editor.node(viewChair.id) as BackgroundSymbol;
+  assert.ok(Math.abs(moved.x - viewRoom.x) > 1, 'the room moved');
+  near(carried.x - viewChair.x, moved.x - viewRoom.x, 'the chair went with the room');
+  assert.deepEqual(seen(), [CLOSED_ROOM, false], 'after the drag');
+  editor.viewport.dispose();
 });

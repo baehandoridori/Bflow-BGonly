@@ -2683,6 +2683,36 @@ test('anchor 70: in 3D a hidden node and what a closed room holds are not drawn,
   // An option that is absent reads as the one empty set of the scene, made there: never one of the viewport or of the module
   // of the view settings, which the scene does not import.
   assert.equal(scene.split('const NO_IDS: ReadonlySet<string> = new Set();').length - 1, 1, 'the empty set of the scene');
+  // The rooms drawn closed and what they hold are read from the map before any entry is touched: a node that comes before
+  // its box in the map is hidden at the first sync as well. A road is never closed, the room a looked-through camera
+  // stands in opens, a box the eye hides holds nothing, and the selected node is drawn though it is held.
+  for (const text of ["const boxes = solidIds.size ? map.nodes.filter((node): node is BackgroundSpace => node.type === 'space' && solidIds.has(node.id) && !isRoadSpace(node) && !(lens && spaceHoldsNode(node, lens))) : [];",
+    'const held = nodesHeldBy(map, boxes.filter(space => !hiddenIds.has(space.id)));', 'solid = boxIds.has(node.id)', 'entry.solid !== solid',
+    'const visible = entry.valid && node.id !== hiddenId && !hiddenIds.has(node.id) && (selected || !held.has(node.id));'])
+    assert.ok(sync.includes(text), `not in sync: ${text}`);
+  inOrder(sync, 'const boxes = ', 'const held = ', 'for (const node of map.nodes) {');
+  // Held is whole: every corner, from the floor up to the top, both included. A camera is asked a hair away on eight
+  // sides, so one on a wall line or at the level of the lid is inside, whatever the shape of the room. Of two boxes that
+  // hold each other the earlier in the map holds the later.
+  const stack = read('mapStack.ts');
+  for (const text of ['nodePlanOutline(node).every(', 'level + height <= top + HOLD_SLACK',
+    "if (node.type === 'camera') return AROUND.some(([dx, dy]) => containsPoint(space, { x: node.x + dx * HOLD_SLACK, y: node.y + dy * HOLD_SLACK }));",
+    'const AROUND: readonly (readonly [number, number])[] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];',
+    'boxes.includes(node) && at(node.id) < at(box.id) && spaceHoldsNode(node, box)'])
+    assert.ok(stack.includes(text), `not in mapStack.ts: ${text}`);
+  const holds = piece(stack, 'export function spaceHoldsNode(', 'export function nodesHeldBy(');
+  assert.ok(!holds.includes('containsPoint(space, node)'), 'a camera is asked at its own point: on a wall line of a polygon room it reads outside');
+  assert.ok(!holds.includes('level < top'), 'a camera at the level of the lid reads outside');
+  // A closed room is one opaque material on its floor, its walls and a lid that is the floor geometry once more, and every
+  // face of it is a click on the room. Its key builds it anew when the box is switched; that of a camera is as it was (anchor 45).
+  const build = piece(scene, 'private buildSpace(', 'private buildSymbol(');
+  for (const text of ['const shell = solid && !road ?', "lid.position.y = height; lid.name = 'space-lid';", 'new Mesh(floor.geometry, shell)', "shell ? 'shell' : mesh === floor ? 'floor' : 'wall'"])
+    assert.ok(build.includes(text), `not in buildSpace: ${text}`);
+  const paint = piece(scene, 'private material(', 'private geometry(');
+  for (const text of ['closed(0.35)', 'closed(0.6)', 'polygonOffset: true']) assert.ok(paint.includes(text), `not among the materials: ${text}`);
+  const key = piece(scene, 'function shapeKey(', 'function labelSpec(');
+  assert.ok(key.includes("${isRoadSpace(node) ? 'road' : ''}${solid ? '|solid' : ''}`;"), 'the key of a space does not end with whether it is closed');
+  assert.equal(count(key, /\$\{solid \? '\|solid' : ''\}/g), 1, 'the key of a space alone tells whether it is closed');
   // The viewport hands the sets on as they come, and syncs again only when one of them is another object. When the rooms
   // are see-through is the editor's to say: read for placing here, every save with the symbol tool in hand would close
   // and open the boxes.

@@ -11,7 +11,7 @@ import { MAP_PLAN_EXTENT, MAP_SPATIAL_DEFAULTS, cameraAspect, isRoadSpace, mapPl
   spaceWallHeight, verticalFov } from './mapSpatial.ts';
 import type { Vec3 } from './mapSpatial.ts';
 import { stackedMapNodeIds } from './mapGeometry.ts';
-import { spaceStackRanks, spacesOverlap } from './mapStack.ts';
+import { nodesHeldBy, spaceHoldsNode, spaceStackRanks, spacesOverlap } from './mapStack.ts';
 import { getSymbolPreset } from './symbolCatalog.ts';
 
 /**
@@ -53,13 +53,13 @@ export type Map3DResourceCount = { geometries: number; materials: number; textur
 
 type NodeKind = BackgroundNode['type'];
 type Disposable = { dispose(): void };
-type MaterialKey = 'floor' | 'floorLine' | 'spaceFloor' | 'spaceFloorOn' | 'spaceWall' | 'spaceWallOn' | 'spaceLine' | 'spaceLineOn' | 'spaceDash' | 'spaceDashOn'
+type MaterialKey = 'floor' | 'floorLine' | 'spaceFloor' | 'spaceFloorOn' | 'spaceWall' | 'spaceWallOn' | 'spaceSolid' | 'spaceSolidOn' | 'spaceLine' | 'spaceLineOn' | 'spaceDash' | 'spaceDashOn'
   | 'roadFloor' | 'roadFloorOn' | 'roadLine' | 'roadLineLocked' | 'roadCentre'
   | 'symbol' | 'symbolOn' | 'symbolLine' | 'symbolLineOn' | 'symbolArc' | 'symbolArcOn' | 'symbolDash' | 'symbolDashOn' | 'symbolFill' | 'symbolFillOn' | 'symbolBound'
   | 'camera' | 'cameraLens' | 'cameraLine' | 'cameraLineOn' | 'cameraFar' | 'cameraFarOn' | 'cameraRing' | 'proxy';
 type GeometryKey = 'box' | 'lens' | 'cameraProxy' | 'ring' | 'drop' | 'floor' | 'floorLine';
 type Entry = {
-  id: string; type: NodeKind; node: BackgroundNode | null; selected: boolean; shape: string; dirty: boolean; valid: boolean;
+  id: string; type: NodeKind; node: BackgroundNode | null; selected: boolean; solid: boolean; shape: string; dirty: boolean; valid: boolean;
   /** Placed from nodeWorldPose; the gizmo attaches here. */
   root: Group;
   /** Unrotated companions that follow the root: the name label and a camera's drop line. */
@@ -72,6 +72,9 @@ const RADIANS = Math.PI / 180;
 const ELLIPSE_SEGMENTS = 48;
 const LABEL_LIMIT = 28;
 const finite = (...values: number[]) => values.every(Number.isFinite);
+/** The colour `share` of the way from one colour to another, channel by channel. */
+const mixHex = (from: number, to: number, share: number) =>
+  [16, 8, 0].reduce((hex, shift) => hex | (Math.round(((from >> shift) & 255) + (((to >> shift) & 255) - ((from >> shift) & 255)) * share) << shift), 0);
 /** Nothing hidden, no closed room: the one set an option that is absent reads as. */
 const NO_IDS: ReadonlySet<string> = new Set();
 
@@ -89,20 +92,20 @@ function segments(positions: number[]): BufferGeometry {
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
   return geometry;
 }
-/** What a click target is to its node: the floor or a wall of a space, a solid part of an object, or the see-through box around it. */
-type PickPart = 'floor' | 'wall' | 'solid' | 'box';
+/** What a click target is to its node: the floor or a wall of a space, any face of a room drawn closed, a solid part of an object, or the see-through box around it. */
+type PickPart = 'floor' | 'wall' | 'solid' | 'box' | 'shell';
 function tag(object: Object3D, id: string, kind: NodeKind, part?: PickPart): void {
   object.userData.nodeId = id;
   object.userData.nodeKind = kind;
   if (part) object.userData.pickPart = part;
 }
 /** Everything that changes a node's meshes. Position, level and turn are applied to the root instead. */
-function shapeKey(node: BackgroundNode, selected: boolean): string {
+function shapeKey(node: BackgroundNode, selected: boolean, solid = false): string {
   const flags = `${selected ? 1 : 0}${node.locked ? 1 : 0}`;
   if (node.type === 'camera') return `camera|${flags}|${node.fov}|${cameraAspect(node)}|${node.color ?? ''}`;
   if (node.type === 'symbol') return `symbol|${flags}|${getSymbolPreset(node.symbol).id}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${node.hinge}|${node.swing}`;
   const points = node.shape === 'polygon' ? node.points.map(point => `${point.x},${point.y}`).join(';') : '';
-  return `space|${flags}|${node.shape}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${points}|${isRoadSpace(node) ? 'road' : ''}`;
+  return `space|${flags}|${node.shape}|${node.width}|${node.height}|${nodeVolumeHeight(node)}|${points}|${isRoadSpace(node) ? 'road' : ''}${solid ? '|solid' : ''}`;
 }
 function labelSpec(node: BackgroundNode, selected: boolean): { text: string; sub: string; size: number } | null {
   const name = node.name.length > LABEL_LIMIT ? `${node.name.slice(0, LABEL_LIMIT - 1)}…` : node.name;
@@ -185,6 +188,13 @@ export class Map3DScene {
     if (this.disposed) return;
     const holdId = options.holdId ?? null, hiddenId = options.hiddenId ?? null, hiddenIds = options.hiddenIds ?? NO_IDS, solidIds = options.solidIds ?? NO_IDS;
     this.last = { map, selectedId, options: { holdId, hiddenId, hiddenIds, solidIds } };
+    // The camera that is looked through: the room it stands in opens, or the preview would show the inside of a box.
+    const lens = hiddenId !== null && solidIds.size ? map.nodes.find(node => node.id === hiddenId) : undefined;
+    // The rooms drawn closed, read from the map before any entry is touched: what they hide does not depend on the order of the nodes. A road is never closed.
+    const boxes = solidIds.size ? map.nodes.filter((node): node is BackgroundSpace => node.type === 'space' && solidIds.has(node.id) && !isRoadSpace(node) && !(lens && spaceHoldsNode(node, lens))) : [];
+    const boxIds = new Set(boxes.map(space => space.id));
+    // What stands whole inside a closed room that is on show is not drawn: lying on a face of the box it would show on it, and take the click. The selected node is drawn.
+    const held = nodesHeldBy(map, boxes.filter(space => !hiddenIds.has(space.id)));
     const seen = new Set<string>();
     for (const node of map.nodes) {
       if (seen.has(node.id)) continue;
@@ -192,15 +202,15 @@ export class Map3DScene {
       let entry = this.entries.get(node.id);
       if (entry && entry.type !== node.type) { this.remove(entry); entry = undefined; }
       if (!entry) entry = this.create(node);
-      const selected = node.id === selectedId;
+      const selected = node.id === selectedId, solid = boxIds.has(node.id);
       if (node.id !== holdId) {
-        if (entry.dirty || entry.node !== node || entry.selected !== selected) this.refresh(entry, node, selected);
+        if (entry.dirty || entry.node !== node || entry.selected !== selected || entry.solid !== solid) this.refresh(entry, node, selected, solid);
       } else if (entry.dirty && entry.node) {
         // A theme change in the middle of a drag: repaint the held node as it was when the drag began, under the gizmo's transform.
-        this.redraw(entry, entry.node, entry.selected);
+        this.redraw(entry, entry.node, entry.selected, entry.solid);
         entry.dirty = false;
       }
-      const visible = entry.valid && node.id !== hiddenId && !hiddenIds.has(node.id);
+      const visible = entry.valid && node.id !== hiddenId && !hiddenIds.has(node.id) && (selected || !held.has(node.id));
       if (entry.root.visible !== visible) { entry.root.visible = visible; entry.aux.visible = visible; this.picks = null; }
       this.place(entry);
     }
@@ -300,7 +310,7 @@ export class Map3DScene {
     tag(root, node.id, node.type);
     aux.add(parts);
     this.nodes.add(root); this.companions.add(aux);
-    const entry: Entry = { id: node.id, type: node.type, node: null, selected: false, shape: '', dirty: true, valid: true, root, aux, parts,
+    const entry: Entry = { id: node.id, type: node.type, node: null, selected: false, solid: false, shape: '', dirty: true, valid: true, root, aux, parts,
       own: new ResourceBag(), picks: [], label: null, labelKey: '', labelBag: new ResourceBag(), lift: 0, drop: null };
     this.entries.set(node.id, entry);
     return entry;
@@ -323,11 +333,11 @@ export class Map3DScene {
     entry.label = null; entry.labelKey = '';
   }
   /** Meshes and label of a node. The root's own transform is not touched here. */
-  private redraw(entry: Entry, node: BackgroundNode, selected: boolean): void {
-    const shape = shapeKey(node, selected);
+  private redraw(entry: Entry, node: BackgroundNode, selected: boolean, solid: boolean): void {
+    const shape = shapeKey(node, selected, solid);
     if (entry.dirty || shape !== entry.shape) {
       this.clear(entry);
-      if (node.type === 'space') this.buildSpace(entry, node, selected);
+      if (node.type === 'space') this.buildSpace(entry, node, selected, solid);
       else if (node.type === 'symbol') this.buildSymbol(entry, node, selected);
       else this.buildCamera(entry, node, selected);
       entry.shape = shape;
@@ -343,8 +353,8 @@ export class Map3DScene {
       entry.labelKey = key;
     }
   }
-  private refresh(entry: Entry, node: BackgroundNode, selected: boolean): void {
-    this.redraw(entry, node, selected);
+  private refresh(entry: Entry, node: BackgroundNode, selected: boolean, solid: boolean): void {
+    this.redraw(entry, node, selected, solid);
     const pose = nodeWorldPose(node), valid = finite(pose.position.x, pose.position.y, pose.position.z, pose.quaternion.x, pose.quaternion.y, pose.quaternion.z, pose.quaternion.w);
     if (valid) {
       entry.root.position.set(pose.position.x, pose.position.y, pose.position.z);
@@ -352,7 +362,7 @@ export class Map3DScene {
     }
     entry.root.scale.set(1, 1, 1);
     if (valid !== entry.valid) this.picks = null;
-    entry.valid = valid; entry.node = node; entry.selected = selected; entry.dirty = false;
+    entry.valid = valid; entry.node = node; entry.selected = selected; entry.solid = solid; entry.dirty = false;
   }
   private place(entry: Entry): void {
     const { root, aux, label } = entry, position = root.position;
@@ -387,6 +397,8 @@ export class Map3DScene {
     // Lines are drawn with the see-through surfaces, after the floor, so a line lying on the floor is not dimmed by it.
     const line = (hex: number, opacity: number) => new LineBasicMaterial({ color: hex, transparent: true, opacity });
     const dash = (hex: number, opacity: number, dashSize: number, gapSize: number) => new LineDashedMaterial({ color: hex, transparent: true, opacity, dashSize, gapSize });
+    // Every face of a room that is drawn closed: opaque, so it hides what is inside and behind. Pushed back a little, so the outline on its edges is not fought over.
+    const closed = (share: number) => new MeshLambertMaterial({ color: mixHex(palette.card, palette.accent, share), side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
     const make = (): Material => {
       switch (key) {
         case 'floor': return flat(palette.card, palette.light ? 0.9 : 0.72);
@@ -395,6 +407,8 @@ export class Map3DScene {
         case 'spaceFloorOn': return flat(palette.accent, 0.2);
         case 'spaceWall': return wall(0.12);
         case 'spaceWallOn': return wall(0.27);
+        case 'spaceSolid': return closed(0.35);
+        case 'spaceSolidOn': return closed(0.6);
         case 'spaceLine': return line(palette.accentSub, 0.55);
         case 'spaceLineOn': return line(palette.accentSub, 1);
         case 'spaceDash': return dash(palette.accentSub, 0.55, 12, 7);
@@ -462,14 +476,16 @@ export class Map3DScene {
     this.floor.add(fill, outline);
   }
 
-  /** Open-top box along the real outline: floor fill, translucent walls, outline at the bottom and the top. A road is its floor alone. */
-  private buildSpace(entry: Entry, node: BackgroundSpace, selected: boolean): void {
+  /** Open-top box along the real outline: floor fill, translucent walls, outline at the bottom and the top. Drawn closed it has a lid, and the floor, the walls and the lid are one opaque material. A road is its floor alone. */
+  private buildSpace(entry: Entry, node: BackgroundSpace, selected: boolean, solid: boolean): void {
     const outline = spaceOutline(node, ELLIPSE_SEGMENTS).filter(point => finite(point.x, point.y)), count = outline.length;
     const road = isRoadSpace(node), height = spaceWallHeight(node); // 0 for a road
     entry.lift = (Number.isFinite(height) ? height : 0) + 4;
     if (count < 3 || !Number.isFinite(height)) return;
+    // Drawn closed: one opaque material on the floor, the walls and a lid. A road is never closed.
+    const shell = solid && !road ? this.material(selected ? 'spaceSolidOn' : 'spaceSolid') : null;
     const floor = new Mesh(entry.own.track(new ShapeGeometry(new Shape(outline.map(point => new Vector2(point.x, point.y)))).rotateX(Math.PI / 2)),
-      this.material(road ? (selected ? 'roadFloorOn' : 'roadFloor') : (selected ? 'spaceFloorOn' : 'spaceFloor')));
+      shell ?? this.material(road ? (selected ? 'roadFloorOn' : 'roadFloor') : (selected ? 'spaceFloorOn' : 'spaceFloor')));
     // Under the floors of the rooms, over the underlay: where a road and a room overlap the order never depends on the view.
     floor.renderOrder = road ? -1.5 : -1;
     if (road) {
@@ -499,13 +515,20 @@ export class Map3DScene {
     });
     const wallGeometry = entry.own.track(segments(wallPositions));
     wallGeometry.computeVertexNormals();
-    const walls = new Mesh(wallGeometry, this.material(selected ? 'spaceWallOn' : 'spaceWall'));
+    const walls = new Mesh(wallGeometry, shell ?? this.material(selected ? 'spaceWallOn' : 'spaceWall'));
     const edges = new LineSegments(entry.own.track(segments(linePositions)),
       this.material(node.locked ? (selected ? 'spaceDashOn' : 'spaceDash') : (selected ? 'spaceLineOn' : 'spaceLine')));
     if (node.locked) edges.computeLineDistances();
     floor.name = 'space-floor'; walls.name = 'space-walls'; edges.name = 'space-outline';
-    for (const mesh of [floor, walls]) { tag(mesh, node.id, 'space', mesh === floor ? 'floor' : 'wall'); entry.picks.push(mesh); }
-    entry.root.add(floor, walls, edges);
+    const faces = [floor, walls];
+    if (shell) {
+      // The lid is the floor once more, at the top of the walls: the same geometry, not a second one.
+      const lid = new Mesh(floor.geometry, shell);
+      lid.position.y = height; lid.name = 'space-lid';
+      faces.push(lid);
+    }
+    for (const mesh of faces) { tag(mesh, node.id, 'space', shell ? 'shell' : mesh === floor ? 'floor' : 'wall'); entry.picks.push(mesh); }
+    entry.root.add(...faces, edges);
   }
 
   /** Simple solids inside a unit box scaled to (width, volumeHeight, height). Plan top is -Z. */
