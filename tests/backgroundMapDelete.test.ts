@@ -160,6 +160,9 @@ test('D-4: a top map, keeping the children', () => {
 });
 
 test('D-5: a map with nothing under it and no link is one command', () => {
+  /** The library with a second link on 2층: beside the space that opens 2-1 교실, one that opens 2-2 교실. */
+  const wing = withMap({ ...floor, nodes: [...floor.nodes, space('2-2 교실', ROOM_2)] });
+  validateBackgroundSnapshot(wing);
   for (const mode of MODES) {
     const plain = planMapDelete(library, {}, CELLAR, mode);
     assert.equal(plain.save, null, mode); assert.equal(plain.links, 0, mode);
@@ -169,6 +172,10 @@ test('D-5: a map with nothing under it and no link is one command', () => {
     assert.deepEqual(opened.steps, [{ type: 'save-maps', maps: [{ entity: unlinked(floor), expectedRevision: 1 }] }, remove(ROOM_1, 1)], mode);
     assert.equal(opened.links, 1, mode);
     assert.deepEqual(tree(runAll(library, opened.steps)), ['학교', '본관<학교', '2층<본관', '2-2 교실<2층', '지하<본관', '별관', '창고<별관'], mode);
+    // The map above lets go of that map alone: a space of it that opens another map, one that stays, is written as it is.
+    const spared = planMapDelete(wing, {}, ROOM_1, mode);
+    assert.deepEqual(links(spared.save!.maps[0].entity), [null, ROOM_2], mode);
+    assert.deepEqual(links(at(runAll(wing, spared.steps), FLOOR)), [null, ROOM_2], mode);
   }
 });
 
@@ -262,6 +269,21 @@ test('D-9: the save step takes the value of a draft with unsaved edits, and the 
     assert.deepEqual(swapped.save?.maps[0], { entity: { ...school, nodes: [{ ...door, childMapId: null }] }, expectedRevision: 1 }, mode);
     assert.deepEqual(at(runAll(library, swapped.steps), SCHOOL).nodes.map(node => node.name), ['뒷문'], mode);
   }
+  // Nor does the `parentId` of a draft decide anything. A draft with nothing unsaved in it counts for nothing, whatever
+  // it holds: here every map has one that names another map above it and has no space left, and no plan is another for
+  // it. (Under an open dialog a draft does not follow the library: a map moved elsewhere meanwhile leaves a draft that
+  // still names the map it hung under.) Read from them, the eight maps would hang in one ring, and no space would open
+  // any of them.
+  const elsewhere = (map: BackgroundMap, index: number): BackgroundMap => ({ ...map, parentId: library.maps[(index + 3) % library.maps.length].id, nodes: [] });
+  const opened = draftsOf(...library.maps.map((map, index) => [elsewhere(map, index)] as const));
+  for (const [map, mode] of COMBOS) assert.deepEqual(planMapDelete(library, opened, map.id, mode), planMapDelete(library, {}, map.id, mode), `${map.name} ${mode}`);
+  // Unsaved edits change what is written of a map, never who is written, moved or deleted. With every map edited that
+  // same way, each plan names the same maps, counts the same links (what a run that stopped says of them is read against
+  // that count), moves the children it keeps to the same place and deletes on the same revisions as without a draft.
+  const reworked = draftsOf(...library.maps.map((map, index) => [map, elsewhere(map, index)] as const));
+  const frame = (plan: MapDeletePlan, mode: MapDeleteMode) => [plan.target, plan.parent, plan.entrances, plan.children, plan.nested, plan.descendants, plan.links, plan.removed, written(plan),
+    plan.steps.filter(step => step.type === 'delete'), mode === 'keep-children' ? plan.children.map(child => plan.save?.maps.find(item => item.entity.id === child.id)?.entity.parentId) : []];
+  for (const [map, mode] of COMBOS) assert.deepEqual(frame(planMapDelete(library, reworked, map.id, mode), mode), frame(planMapDelete(library, {}, map.id, mode), mode), `${map.name} ${mode}`);
   // A map above that no space of which opens the map is not written: its unsaved edits are neither saved nor named.
   for (const mode of MODES) assert.deepEqual(planMapDelete(library, edited(main), CELLAR, mode), planMapDelete(library, {}, CELLAR, mode), mode);
 });
@@ -425,6 +447,15 @@ test('D-14: the words of the dialog', () => {
   // Its child hangs there without a link: the sentence ends, and no link that never was is said to go.
   assert.deepEqual(words(library, ANNEX, 'keep-children').keep, [KEEP, '하위 도면 1개가 최상위 도면이 돼요.']);
   assert.deepEqual(words(library, ANNEX, 'keep-children').lead, ['‘별관’ 도면을 지워요. 지운 도면은 되돌릴 수 없어요.', GOES, '이 도면 아래에 하위 도면이 1개 있어요.']);
+  // A child counts as one with maps under it by the maps that hang there, linked or not: here 지하 has one that hangs
+  // there without a link (＋ 하위 도면 만들기 twice), as 2층 has two. Counted by links, the dialog would speak of one.
+  const deep: BackgroundSnapshot = { ...library, maps: [...library.maps, newMap(uid(0x33), '보일러실', CELLAR)] };
+  validateBackgroundSnapshot(deep);
+  assert.equal(planMapDelete(deep, {}, MAIN, 'keep-children').nested, 2);
+  assert.equal(words(deep, MAIN, 'keep-children').lead[3], '이 도면 아래에 하위 도면이 2개 있어요. 그중 2개는 그 아래에 도면이 더 있어서, 아래 도면은 모두 5개예요.');
+  // And a map that hangs under another without a space that opens it: its child goes under that map all the same, not
+  // to the top. (Nor does a space of it open the child, so the sentence ends there.)
+  assert.deepEqual(words(deep, CELLAR, 'keep-children').keep, [KEEP, '하위 도면 1개가 ‘본관’ 바로 아래로 올라가요.']);
   // Two spaces of the map above open the map: both names, in one sentence.
   const backDoor = withMap({ ...school, nodes: [...school.nodes, space('뒷문', MAIN)] });
   validateBackgroundSnapshot(backDoor);

@@ -194,6 +194,13 @@ test('N-5: the members of a space are carried once', () => {
 });
 
 test('N-6: steps, settling and a slide are a matter of where the pointer is', () => {
+  // The pixels of a slide are tuned by eye in the app and not held here, only what makes the control work at all (gate M):
+  // a slop of at least one pixel (at 0 the first move of a press starts a drag, so a press on a name or a grip is never a
+  // tap), a big step that needs more travel than a step (else Shift would run faster than a plain drag), and a dot that
+  // can be caught anywhere on itself (a catch radius under half its width would leave its rim to the bar beneath).
+  assert.ok(MAP_NUMBER_SCRUB.slopPx >= 1, `slopPx ${MAP_NUMBER_SCRUB.slopPx}`);
+  assert.ok(bigStepPx > stepPx && stepPx > 0, `stepPx ${stepPx}, bigStepPx ${bigStepPx}`);
+  assert.ok(grabPx >= thumbPx / 2, `grabPx ${grabPx}, thumbPx ${thumbPx}`);
   // No step: the value itself, decimals and all.
   assert.equal(stepNumber(244.65, 0, 'x', false), 244.65);
   assert.equal(stepNumber(244.65, 0, 'x', true), 244.65);

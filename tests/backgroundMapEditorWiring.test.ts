@@ -1527,6 +1527,22 @@ test('anchor 60: every number of the inspector is one component, on one table an
   }
   // And a tag holds nothing else: those seven attributes, in this order.
   assert.deepEqual([...tags].sort(), fields.map(([label, field, value, typed]) => `label="${label}" field="${field}" value={${value}} disabled={fieldLocked} scrub={fieldScrub} onDone={doc.endCoalescing} onChange={${typed}}`).sort());
+  // And that way is the one it always was, line for line: the function every edit of the map goes through, the edit
+  // of a field and the move of a position. `patchNode` lays each key typed on the map as it was when the stay in that
+  // field began (the members of a space are carried once, whatever was typed on the way) and sends it as an update
+  // that joins the others of that stay by the key of the field; `moveSelected` sends a position the same way. Sent
+  // through the scrub object in one of the three, or as a gesture of the document, every key typed would be an undo
+  // step of its own; so it would be with that key left out, or with the options dropped on the way to the document.
+  // (The comments of the editor are not read here: every line of the list is a line of code.)
+  assert.deepEqual(piece(editor, 'function updateMap(', 'function changeSpaceSurface(').split('\n').map(line => line.trim()).filter(Boolean), [
+    'function updateMap(next: BackgroundMap, options?: MapUpdateOptions) {', 'if (snapshot.canManage) doc.update(next, options);', '}',
+    'function patchNode(changes: Partial<BackgroundNode>, field?: string) {', 'if (!current || !selected || !canEdit) return;',
+    'const key = field ? `${selected.id}:${field}` : undefined;', 'const base = (key && fieldEditStartMap(doc.getState(), current.id, key)) || current;',
+    'const next = { ...(base.nodes.find(node => node.id === selected.id) ?? selected), ...changes } as BackgroundNode;',
+    "updateMap(next.type === 'space' ? transformMapSpace(base, next) : { ...base, nodes: base.nodes.map(node => node.id === next.id ? next : node) },",
+    'key ? { coalesceKey: key } : undefined);', '}',
+    'function moveSelected(delta: BackgroundPoint, field: string) {', 'if (!current || !selected || !canEdit) return;',
+    'updateMap(moveMapNode(current, selected.id, delta), { coalesceKey: `${selected.id}:${field}` });', '}']);
   // Every field is taken down as another node comes into hand: each stands in an element whose key holds the id of that
   // node, the five of a camera, the four heights and tilts, the five of the place, the size and the turn. A pick is no
   // release and no cancel: a pointer pressed on a field is let go then only as the field is taken down (anchor 62),
@@ -1537,6 +1553,17 @@ test('anchor 60: every number of the inspector is one component, on one table an
     piece(editor, '<details className="bmap-disclosure" open key={`vertical-${selected.id}`}>', '</details>'),
     piece(editor, '<details className="bmap-disclosure" key={`geometry-${selected.id}`}>', '</details>')];
   assert.deepEqual(keyed.map(part => count(part, /<NumberField /g)), [5, 4, 5], 'a number field stands outside the elements keyed by the node in hand');
+  // And those elements are drawn only while the map is being edited: someone who views, or an account that may not
+  // edit, has no field and no grip (of a camera there is a line of words instead). The five of a camera stand in the
+  // first half of a choice asked of `editing`. The others stand in the one element drawn under `editing &&`, which
+  // opens right in front of the section that ties a space to a place and holds the two sections with the nine fields.
+  // Asked of anything else, or closed before those sections, the fields would be drawn in view mode: off, and there.
+  assert.ok(editor.includes('{editing ? <section className="bmap-camera-properties" key={`camera-${selected.id}`} '), 'the fields of a camera are drawn while the map is only viewed');
+  const tied = '{selected.type === \'space\' ? <details className="bmap-disclosure" key={`place-${selected.id}`}>', gate = '{editing && <>';
+  const tiedAt = positions(editor, tied)[0], gateAt = editor.lastIndexOf(gate, tiedAt);
+  assert.ok(gateAt > -1 && !editor.slice(gateAt + gate.length, tiedAt).trim(), 'the sections of the node in hand do not open under `editing &&`');
+  const whileEditing = block(editor.slice(gateAt), '{');
+  assert.deepEqual([keyed[1], keyed[2]].map(part => whileEditing.includes(part)), [true, true], 'the heights or the place of a node are drawn while the map is only viewed');
 });
 
 test('anchor 61: a slide is a gesture of the document, previewed from the map it started on', () => {
@@ -1843,6 +1870,13 @@ test('anchor 63: typing and the identity of a field are as they were, and the ar
     '<span className="bmap-num-grip" aria-hidden="true" title={disabled ? undefined : SLIDE_TITLE} onPointerDown={slide}><MoveHorizontal size={n} strokeWidth={n} /></span>', '</div>',
     '{track && <div className="bmap-num-track" aria-hidden="true" title={disabled ? undefined : BAR_TITLE} onPointerDown={slideBar}>',
     `<span className="bmap-num-thumb" style={{ '--bmap-num-at': trackFraction(value, field) } as CSSProperties} />`, '</div>}', '</div>;', '}']);
+  // And in what the field draws, `read` took nothing away that is more than a comment. Between the tags of JSX a `//`
+  // is no comment: it is text that is drawn, and an expression written behind it still runs, while `read` drops the
+  // line and the list above never sees it. One comment does stand inside what the field returns, in the handler of
+  // its blur, where it is one: a line that is a comment from its first letter and holds no brace.
+  const rawField = readFileSync(new URL('BackgroundMapNumberField.tsx', directory), 'utf8').replace(/\r\n/g, '\n'), root = 'return <div className={`bg-field bmap-num';
+  const returned = (source: string) => source.slice(positions(source, root)[0]).split('\n').map(line => line.trim()).filter(Boolean);
+  assert.deepEqual(returned(rawField).filter(line => !/^\/\/[^{}]*$/.test(line)), returned(part), 'a comment mark inside what the field draws: there it is text on screen, and the anchor does not see its line');
   // The stylesheet, line by line and as written. A number field is drawn by these twelve rules and by no other: each is
   // a base rule, one line that starts so, in this order. No line of a media block names a number field (its width looks
   // after itself): a second rule under another selector could undo any line read below, put the grip at the right end in
@@ -1864,6 +1898,11 @@ test('anchor 63: typing and the identity of a field are as they were, and the ar
   // the inspector shows several at once, and the dot is drawn anew at every step of the pointer (the motion rules of the
   // app: no backdrop-filter on what repeats or moves).
   for (const line of num) assert.doesNotMatch(line, /transition|animation|backdrop-filter/);
+  // No letter of a field is slanted, by `font-style` or through the `font` shorthand: the screens of this app are set
+  // without italics. And no colour is written out, as a hex or as numbers: a field is painted with the colours of the
+  // theme, and the light screen and the dark one each have their own. Which of them a rule paints with is tuned by eye
+  // in the app, and is not held.
+  for (const line of num) { assert.doesNotMatch(line, /font-style|italic|oblique/); assert.doesNotMatch(line, /#|\b(?:rgb|hsl)a?\((?!var\()/); }
   // The two small arrows of the engine are not drawn, by that one line as it is written. The element stays, so the arrow
   // keys and the wheel over a focused field step the value as before. And no other line of the sheet names the arrows.
   assert.ok(sheet.includes(arrows), 'the small arrows of the engine are drawn');
@@ -1906,6 +1945,10 @@ test('anchor 63: typing and the identity of a field are as they were, and the ar
   const dimmed = baseRule(sheet, off);
   has(dimmed, 'cursor:default');
   assert.ok(dimmed.some(item => /^opacity:0?\.\d+$/.test(item)), `the controls of a field that is off are not dimmed (${dimmed.join('; ')})`);
+  // A drag changes how the grip and the name are painted, and nothing else. With a size, a weight or a padding of its
+  // own in one of those two rules, the rows of the inspector would jump as a drag starts and again as it ends.
+  for (const rule of [baseRule(sheet, '.bmap-num-grip:hover,.bmap-num.is-dragging .bmap-num-grip {'), baseRule(sheet, '.bmap-num.is-dragging .bmap-num-label {')])
+    for (const item of rule) assert.match(item, /^(?:color|background(?:-color)?|border-color):/, `a drag changes more than a colour: ${item}`);
   // The sums of a slide are in a module that Node runs as it is: no three.js, no DOM.
   assert.doesNotMatch(pure, /from\s+['"]three/, 'mapNumberField.ts imports three.js');
   assert.doesNotMatch(pure, /\b(?:document|window)\.\w/, 'mapNumberField.ts touches the DOM');
@@ -2010,6 +2053,10 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
     '<line className="bmap-plan-sight" x1={side.camera.x} y1={fixed(side.camera.y)} x2={fixed(side.tip.x)} y2={fixed(side.tip.y)} />',
     '<polygon className="bmap-plan-sight-head" points={pointList(side.head)} />', ring, marks,
     '<circle className="bmap-plan-dot" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />', area, '</svg>', caption, '</figure>;', '}']);
+  // And in what the side view draws, `read` took nothing away: from its `return` to the end the file is the same
+  // letters with and without what `read` drops (anchor 63 says why that is asked).
+  const rawSide = readFileSync(new URL('BackgroundMapPlanSide.tsx', directory), 'utf8').replace(/\r\n/g, '\n'), figure = 'return <figure className=';
+  assert.equal(part.slice(positions(part, figure)[0]), rawSide.slice(positions(rawSide, figure)[0]), 'a comment mark inside what the side view draws: there it is text on screen, and the anchor does not see its line');
   // The hand-over. The editor gives the companion plan the right to edit as it is right now and its one scrub object,
   // behind the three attributes it always gave (anchor 23 reads those): without the scrub object the lens has nothing
   // to be dragged through. The plan takes the two and hands them to the readout of the picked camera, and that hands
@@ -2069,6 +2116,15 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   has(baseRule(plan, '.bmap-plan-side-ring {'), 'fill:none', 'stroke-width:6px');
   has(baseRule(plan, '.bmap-plan-preview :is(rect,polygon,circle,line,path) {'), 'vector-effect:non-scaling-stroke');
   for (const line of rules) assert.doesNotMatch(line, /vector-effect/);
+  // Nor does any other rule of this sheet move something by itself. The one motion the companion plan has is the turn
+  // of the arrow on its fold button, with its twin for reduced motion. A motion under another selector (one that makes
+  // the lens of a camera that can be dragged pulse, say) would be read by none of the lines above.
+  assert.deepEqual(bare.map(line => line.trim()).filter(line => /transition|animation/.test(line)).map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-plan-toggle>svg {', '.bmap-plan-toggle>svg {'],
+    'something of the companion plan moves by itself');
+  // While the lens is lifted its halo is stronger, and the height in the readout takes the colour of the camera: paint,
+  // and nothing that has a size. A larger or a heavier number there would make the readout jump as a drag starts.
+  for (const lifted of ['.bmap-plan-side.is-lifting .bmap-plan-side-ring {', '.bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong {'])
+    for (const item of baseRule(plan, lifted)) assert.match(item, /^(?:color|stroke-opacity):/, `a drag changes more than a colour: ${item}`);
   // The up-down mark is two open lines, and unfilled like the halo. What a shape is filled with has to be written: the
   // check of the colours above reads only what a rule declares, and a shape with no fill declared is filled in black
   // by the engine, the colour of no camera. Each of the two lines would be closed into a small black wedge.
@@ -2233,8 +2289,19 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
   assert.ok(at > 0, `not a line of its own: ${drawn[0]}`);
   assert.deepEqual(all.slice(at - 1, at + drawn.length), ['</form></BackgroundModal>}', ...drawn]);
   assert.ok(all[at + drawn.length].startsWith('{confirmation && current && <BackgroundModal '), 'the delete dialog is not drawn right before the question of the editor');
+  // And nothing is wrapped round those lines. The question ends its line as it always did, and the line behind it
+  // closes the root of the editor: a wrapper that hangs the dialogs on the map on show (`{current && <>`, or the same
+  // asked the other way round), opened in front of the settings dialog or of all five, has to close behind the
+  // question, at the end of that line or on a line of its own.
+  assert.ok(all[at + drawn.length].endsWith("{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}"), 'something closes behind the question of the editor, on its line');
+  assert.equal(all[at + drawn.length + 1], '</div>;', 'something is wrapped round the dialogs of the editor');
   const settings = piece(editor, '{settingsForm && <BackgroundModal title="도면 설정"', drawn[0]);
   assert.equal(count(settings, /<\/form><\/BackgroundModal>\}/g), 1, 'the delete dialog is not drawn right behind the settings dialog');
+  // And among the dialogs the editor draws, `read` took nothing away: from the first of them to the end of the file
+  // the letters are the same with and without what `read` drops. Between the tags of JSX a `//` is no comment: it is
+  // text on screen, and an expression written behind it still runs (a run of the delete, say, at every drawing).
+  const rawEditor = readFileSync(new URL('BackgroundMapEditor.tsx', directory), 'utf8').replace(/\r\n/g, '\n'), firstDialog = '{createForm && <BackgroundModal title=';
+  assert.equal(editor.slice(positions(editor, firstDialog)[0]), rawEditor.slice(positions(rawEditor, firstDialog)[0]), 'a comment mark among the dialogs of the editor: there it is text on screen, and the anchor does not see its line');
   // The plan on show is made by the function the run makes its own with, for the same map and the same choice, from the
   // library and the drafts of the render: read anew after a run that stopped, it is what is left to do, and without a
   // target once the map is gone. It hangs on the library: without that the dialog would go on showing a map that is gone.
@@ -2380,10 +2447,10 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
   const looks = (source: string) => source.split(`return ${modal}`).slice(1).map(tail => tail.slice(0, tail.indexOf('</BackgroundModal>;')));
   assert.equal(looks(raw).length, 2, 'the two looks the dialog returns');
   assert.deepEqual(looks(part), looks(raw), 'a comment mark inside what the dialog draws: there it is text on screen, and the anchor does not see its line');
-  // The stylesheet, line by line and as written. The dialog is drawn by these seven rules and by no other, each a base
+  // The stylesheet, line by line and as written. The dialog is drawn by these nine rules and by no other, each a base
   // rule on a line of its own, in this order; they are looked for in what is left of the sheet without its comments, so
   // that a rule written behind a comment or under another selector is seen. Each is listed as its line begins, indent
-  // and all, and each begins its line. A rule of the dialog inside a media block is not one of the seven: there it
+  // and all, and each begins its line. A rule of the dialog inside a media block is not one of the nine: there it
   // stands behind the head of the block or indented under it, as the lines of a block do in this sheet, and it would
   // hold only where the condition of the block does. Its paragraphs and its two choices stand one above the other: the
   // library takes the margin off every paragraph, so the room between them is the gap of that column. Nothing of the
