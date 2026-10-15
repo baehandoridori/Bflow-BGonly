@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { BackgroundCamera, BackgroundMap, BackgroundSnapshot, BackgroundSpace } from '../src/features/backgrounds/types.ts';
 import { applyBackgroundCommand, validateBackgroundEntity, validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
@@ -9,6 +10,8 @@ import type { MapEditStatus } from '../src/features/backgrounds/mapEditStatus.ts
 import { MAP_KEEP_DELAY_MS, MAP_KEEP_TEXT, MAP_STALE_TEXT, keptEntryOf, mapDraftSavedAlready, mapDraftStanding, planKeptRestore, rescueMapCopy, rescueMapName } from '../src/features/backgrounds/mapDraftKeep.ts';
 import { keptEntryProblem } from '../src/shared/backgroundKeptEdits.ts';
 import type { KeptMapEdit } from '../src/shared/backgroundKeptEdits.ts';
+import { KEPT_DOT_TEXT, KEPT_LIST_TIMEOUT_MS, flushKeptMapEditsBeforeLogout, keptMapEditCount, keptMapEditsStored, primeKeptMapEdits, releaseKeptMapEdits, setKeptMapFlush, useKeptMapEdits } from '../src/features/backgrounds/mapKeptSignal.ts';
+import type { KeptSignal } from '../src/features/backgrounds/mapKeptSignal.ts';
 
 // The unsaved map edits this PC keeps, as the page sees them. Every verdict comes from the real modules of the library
 // (domain.ts, mapDocument.ts, mapWorkflow.ts) on one library that is whole in itself: the places 학교 > 교실, one view V,
@@ -312,4 +315,164 @@ test('KP-9: the words of mapDraftKeep.ts, letter for letter', () => {
   assert.equal(MAP_STALE_TEXT.unkept, '이 PC에 보관하지 못한 편집이에요. 고르기 전에 앱을 끄면 사라질 수 있어요.');
   assert.equal(MAP_STALE_TEXT.copy('2층 (내 편집)'), '새 도면은 ‘2층 (내 편집)’이라는 이름으로 생기고, 하위 도면으로 들어가는 연결과 다른 도면에서 들어오는 입구는 따라오지 않아요.');
   assert.equal(MAP_STALE_TEXT.save, '내 편집을 새 도면으로 저장');
+});
+
+// The signal (mapKeptSignal.ts): what the parts of the app that are always loaded know of the edits this PC keeps. Driven
+// through a fake bridge on `window` whose answers each test settles, and the fake setTimeout of node.
+
+/** Promises settle, and one turn of the loop goes by (setImmediate is not one of the fake timers). */
+const settle = () => new Promise(done => setImmediate(done));
+/** The signal as it is before any login. */
+const IDLE_SIGNAL: KeptSignal = { userId: null, status: 'idle', listed: {}, kept: [], changed: [], failed: [] };
+/** A list as main hands it over: 2층 kept with other words. */
+const LISTED: Record<string, KeptMapEdit> = { [FLOOR]: { baseRevision: 5, steps: 2, keptAt: 1700000000000, value: KEPT_FLOOR } };
+/** One read of the list the signal sent, held until the test answers it. */
+type ListCall = { resolve(entries: Record<string, KeptMapEdit>): void; reject(error: Error): void };
+/** For one test: the fake setTimeout, a bridge on `window` that logs each read, and a silent console.warn. All of it, the signal and what hangs on it go back as the test ends. */
+function bridge(t: TestContext) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const calls: ListCall[] = [];
+  const backgroundKeptList = () => new Promise<Record<string, KeptMapEdit>>((resolve, reject) => { calls.push({ resolve, reject }); });
+  const host = globalThis as { window?: unknown };
+  const attach = () => { host.window = { electronAPI: { backgroundKeptList } }; };
+  attach();
+  const warn = t.mock.method(console, 'warn', () => {});
+  t.after(() => { delete host.window; useKeptMapEdits.setState({ userId: null, status: 'idle', listed: {}, kept: [], changed: [], failed: [] }); setKeptMapFlush(null); });
+  return { calls, warn, host, attach };
+}
+
+test('KS-a: a login reads its list once — loading, ready, a refusal, no bridge, and five seconds without an answer', async t => {
+  const { calls, warn, host, attach } = bridge(t);
+  // The first prime of a login reads: loading until the answer, then the entries as listed and their ids as kept.
+  primeKeptMapEdits('1');
+  assert.deepEqual(useKeptMapEdits.getState(), { ...IDLE_SIGNAL, userId: '1', status: 'loading' });
+  assert.equal(calls.length, 1);
+  // While that account reads, and once it has read, another prime of it reads nothing.
+  primeKeptMapEdits('1');
+  assert.equal(calls.length, 1);
+  calls[0].resolve(LISTED);
+  await settle();
+  assert.deepEqual(useKeptMapEdits.getState(), { ...IDLE_SIGNAL, userId: '1', status: 'ready', listed: LISTED, kept: [FLOOR] });
+  primeKeptMapEdits('1');
+  assert.equal(calls.length, 1);
+  // A read refused: unavailable, and one line in the console.
+  releaseKeptMapEdits('1');
+  primeKeptMapEdits('1');
+  assert.equal(calls.length, 2);
+  calls[1].reject(new Error('잠김'));
+  await settle();
+  assert.equal(useKeptMapEdits.getState().status, 'unavailable');
+  assert.equal(warn.mock.callCount(), 1);
+  assert.equal(warn.mock.calls[0].arguments[0], '[background] kept map edits not read:');
+  // No bridge to ask, or no such function on it: unavailable at once, and nothing is read.
+  for (const bare of [{}, { electronAPI: {} }]) {
+    host.window = bare;
+    releaseKeptMapEdits('1');
+    primeKeptMapEdits('1');
+    assert.deepEqual(useKeptMapEdits.getState(), { ...IDLE_SIGNAL, userId: '1', status: 'unavailable' });
+  }
+  assert.equal(calls.length, 2);
+  attach();
+  // No answer within five seconds: unavailable, so that 편집 시작 does not wait for ever. The answer of that very read, coming later, is taken.
+  assert.equal(KEPT_LIST_TIMEOUT_MS, 5000);
+  releaseKeptMapEdits('1');
+  primeKeptMapEdits('1');
+  t.mock.timers.tick(4999);
+  assert.equal(useKeptMapEdits.getState().status, 'loading');
+  t.mock.timers.tick(1);
+  assert.equal(useKeptMapEdits.getState().status, 'unavailable');
+  calls[2].resolve(LISTED);
+  await settle();
+  assert.deepEqual(useKeptMapEdits.getState(), { ...IDLE_SIGNAL, userId: '1', status: 'ready', listed: LISTED, kept: [FLOOR] });
+  // From unavailable a prime of that account reads again: loading, and the marks the session holds in the signal stay.
+  releaseKeptMapEdits('1');
+  primeKeptMapEdits('1');
+  calls[3].reject(new Error('잠김'));
+  await settle();
+  assert.equal(useKeptMapEdits.getState().status, 'unavailable');
+  useKeptMapEdits.setState({ kept: [FLOOR], changed: [MAIN], failed: [FLOOR] });
+  primeKeptMapEdits('1');
+  assert.equal(calls.length, 5);
+  assert.deepEqual(useKeptMapEdits.getState(), { ...IDLE_SIGNAL, userId: '1', status: 'loading', kept: [FLOOR], changed: [MAIN], failed: [FLOOR] });
+});
+
+test('KS-b: an earlier read changes nothing, and a release empties only its own account', async t => {
+  const { calls } = bridge(t);
+  // A login, a logout three seconds on and the same account again: the timer of the first read does not cut the second short.
+  primeKeptMapEdits('1');
+  t.mock.timers.tick(3000);
+  releaseKeptMapEdits('1');
+  assert.deepEqual(useKeptMapEdits.getState(), IDLE_SIGNAL);
+  primeKeptMapEdits('1');
+  t.mock.timers.tick(2100);
+  assert.equal(useKeptMapEdits.getState().status, 'loading');
+  t.mock.timers.tick(2899);
+  assert.equal(useKeptMapEdits.getState().status, 'loading');
+  t.mock.timers.tick(1);
+  assert.equal(useKeptMapEdits.getState().status, 'unavailable');
+  // Read, released and read again: the refusal of the first read, coming after the second was read, leaves the second as it is.
+  releaseKeptMapEdits('1');
+  primeKeptMapEdits('1');
+  releaseKeptMapEdits('1');
+  primeKeptMapEdits('1');
+  assert.equal(calls.length, 4);
+  calls[3].resolve(LISTED);
+  await settle();
+  calls[2].reject(new Error('늦은 거절'));
+  await settle();
+  assert.deepEqual(useKeptMapEdits.getState(), { ...IDLE_SIGNAL, userId: '1', status: 'ready', listed: LISTED, kept: [FLOOR] });
+  // Another account read meanwhile: the late list of '1' is dropped.
+  releaseKeptMapEdits('1');
+  primeKeptMapEdits('1');
+  primeKeptMapEdits('2');
+  assert.equal(calls.length, 6);
+  calls[4].resolve(LISTED);
+  await settle();
+  assert.deepEqual(useKeptMapEdits.getState(), { ...IDLE_SIGNAL, userId: '2', status: 'loading' });
+  // A release is for its own account: with the signal on '1', that of '2' changes nothing, and that of '1' empties it.
+  releaseKeptMapEdits('2');
+  primeKeptMapEdits('1');
+  calls[6].resolve(LISTED);
+  await settle();
+  const before = useKeptMapEdits.getState();
+  assert.deepEqual(before, { ...IDLE_SIGNAL, userId: '1', status: 'ready', listed: LISTED, kept: [FLOOR] });
+  releaseKeptMapEdits('2');
+  assert.equal(useKeptMapEdits.getState(), before);
+  releaseKeptMapEdits('1');
+  assert.deepEqual(useKeptMapEdits.getState(), IDLE_SIGNAL);
+});
+
+test('KS-c: the flush before logout never throws, and the two counts', async t => {
+  bridge(t);
+  /** Where a promise stands once the promises settled and a turn of the loop went by: the fake clock does not move by itself. */
+  const where = async (promise: Promise<unknown>) => {
+    let at = 'pending';
+    promise.then(() => { at = 'resolved'; }, () => { at = 'rejected'; });
+    await settle();
+    return at;
+  };
+  // Nothing hung on it: done at once.
+  assert.equal(await where(flushKeptMapEditsBeforeLogout(3000)), 'resolved');
+  // What the session hung on it is called, and waited for three seconds, no longer, when it never ends.
+  let flushes = 0;
+  setKeptMapFlush(() => { flushes++; return new Promise<void>(() => {}); });
+  const endless = flushKeptMapEditsBeforeLogout(3000);
+  assert.equal(flushes, 1);
+  assert.equal(await where(endless), 'pending');
+  t.mock.timers.tick(2999);
+  assert.equal(await where(endless), 'pending');
+  t.mock.timers.tick(1);
+  assert.equal(await where(endless), 'resolved');
+  // One that refuses, or throws as it is called: done at once, and nothing is thrown.
+  setKeptMapFlush(() => Promise.reject(new Error('보관하지 못함')));
+  assert.equal(await where(flushKeptMapEditsBeforeLogout(3000)), 'resolved');
+  setKeptMapFlush(() => { throw new Error('던짐'); });
+  assert.equal(await where(flushKeptMapEditsBeforeLogout(3000)), 'resolved');
+  // Taken off again: nothing to wait for.
+  setKeptMapFlush(null);
+  assert.equal(await where(flushKeptMapEditsBeforeLogout(3000)), 'resolved');
+  // The dot counts each map once, kept or changed in this run. The update notice counts the kept ones whose last write was not refused.
+  assert.equal(keptMapEditCount({ ...IDLE_SIGNAL, kept: ['a', 'b'], changed: ['b', 'c'] }), 3);
+  assert.equal(keptMapEditsStored({ ...IDLE_SIGNAL, kept: ['a', 'b'], failed: ['b', 'c'] }), 1);
+  assert.equal(KEPT_DOT_TEXT, '저장 안 한 도면 편집이 있어요');
 });
