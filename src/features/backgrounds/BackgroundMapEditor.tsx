@@ -730,7 +730,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const saved = library.maps.find(map => map.id === mapId), held = mapDraft(doc.getState(), mapId);
     // A draft with nothing unsaved in it goes on from the library first. While this save run held the lock it could not follow, and a link put on the revision before would have the map refused at its next save.
     if (held && saved && !mapDraftChanged(held) && saved.revision > (held.baseRevision ?? Infinity)) doc.rebaseDrafts([saved]);
-    const draftNow = mapDraft(doc.getState(), mapId), base = draftNow?.value ?? saved;
+    // A map the library no longer has (deleted on another PC meanwhile) gets no tie: put into its draft, that draft could never be saved.
+    const draftNow = mapDraft(doc.getState(), mapId), base = saved && (draftNow?.value ?? saved);
     if (!base) return { how: 'none', complete: false };
     const next = linkMapImages(base, link, library);
     // Nothing to change. What the pictures stand on may still be the draft's alone (a place tied since the last save): then it is kept by 도면 저장, like any edit.
@@ -1082,7 +1083,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
 
   // Stable callbacks: the 3D viewport, the companion plan and the image grid must not re-subscribe on every preview.
   const selectNode = useEvent((id: string | null) => select(id));
-  const clearSelection = useEvent(() => select(null));
+  // Two buttons of the image list go away as they are pressed, and what slides under the pointer ('＋ 이미지 추가', a card) takes no second click of a double-click.
+  const clearSelection = useEvent(() => { select(null); swallowSecondClick(); });
+  const dismissNotice = useEvent(() => { imageAdd.dismiss(); swallowSecondClick(); });
   // View settings of this PC: the eye of the object list and the closed box of a room in 3D. They write no map: no undo step, nothing to save.
   const setNodesHidden = useEvent((ids: readonly string[], hidden: boolean): boolean => {
     // Not during a drag: its session works on what was drawn and stacked at the press.
@@ -1188,19 +1191,21 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const root = rootRef.current, element = event.target instanceof Element ? event.target : null;
     const facts = { shown: !!root && root.offsetParent !== null, canManage: snapshot.canManage, hasMap: !!current,
       dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };
-    const files = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((file): file is File => !!file);
-    const pictures = files.some(file => file.type.startsWith('image/'));
+    // The items name their types. A picture is taken out only once the paste is the editor's: taking it makes the page wait while the engine reads it, and encodes a captured screen as PNG first.
+    const fileItems = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file');
+    const pictures = fileItems.some(item => item.type.startsWith('image/'));
     if (!mapImagePasteWanted(facts)) {
       // Nothing but the cursor in a field of the editor is in the way, and the clipboard holds no text. A picture in the event is said at once; with no file in it at all the main process is asked whether a picture file was copied.
       if (root?.contains(element) && mapImagePasteWanted({ ...facts, text: false }) && !Array.from(event.clipboardData?.types ?? []).includes('text/plain')) {
-        if (pictures) noteFieldPaste(); else if (!files.length) void pasteClipboardFile(true);
+        if (pictures) noteFieldPaste(); else if (!fileItems.length) void pasteClipboardFile(true);
       }
       return;
     }
     if (pictures) {
       event.preventDefault();
+      const files = fileItems.map(item => item.getAsFile()).filter((file): file is File => !!file);
       pasteImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: true })));
-    } else if (!files.length) void pasteClipboardFile(false);
+    } else if (!fileItems.length) void pasteClipboardFile(false);
   });
   useEffect(() => {
     window.addEventListener('paste', onImagePaste);
@@ -1256,8 +1261,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       if (next !== item.value) doc.update(next, { history: false });
     }
   }, [knownViews, drafts, disabled, snapshot.canManage, gestureActive]);
-  const gallery = useMemo(() => settledCurrent ? <BackgroundMapGallery key={settledCurrent.id} snapshot={snapshot} maps={settledMaps} current={settledCurrent} selected={settledSelected} onClearSelection={clearSelection} onOpenView={openView} onOpenCatalog={openCatalog} adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={imageAdd.dismiss} /> : null,
-    [snapshot, settledMaps, settledCurrent, settledSelected, clearSelection, openView, openCatalog, imageAdd.view, pending, addPickedImages, imageAdd.dismiss]);
+  const gallery = useMemo(() => settledCurrent ? <BackgroundMapGallery key={settledCurrent.id} snapshot={snapshot} maps={settledMaps} current={settledCurrent} selected={settledSelected} onClearSelection={clearSelection} onOpenView={openView} onOpenCatalog={openCatalog} adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={dismissNotice} /> : null,
+    [snapshot, settledMaps, settledCurrent, settledSelected, clearSelection, openView, openCatalog, imageAdd.view, pending, addPickedImages, dismissNotice]);
 
   const treeRows: { map: BackgroundMap; depth: number }[] = [];
   const visited = new Set<string>();

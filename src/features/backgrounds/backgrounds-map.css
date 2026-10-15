@@ -388,7 +388,7 @@
 .bmap-gallery-mark { position:absolute; top:9px; left:6px; z-index:1; padding:1px 7px; border:1px solid rgb(var(--color-accent-sub)); border-radius:999px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:10px; font-weight:600; }
 /* Files dragged over the editor: one sheet over the map column. It takes no room and no press, and its words stay in the part of the tab that is on screen. */
 .bmap-drop { position:absolute; inset:0; z-index:6; display:flex; justify-content:center; align-items:flex-start; border:2px dashed rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-primary) / .55); pointer-events:none; }
-.bmap-drop-label { position:sticky; top:35%; display:flex; flex-direction:column; align-items:center; gap:4px; max-width:min(520px,calc(100% - 32px)); margin:0; padding:12px 18px; border:1px solid rgb(var(--color-accent-sub) / .6); border-radius:10px; background:rgb(var(--color-bg-card)); font-size:12px; text-align:center; }
+.bmap-drop-label { position:sticky; top:35%; display:flex; flex-direction:column; align-items:center; gap:4px; max-width:min(520px,calc(100% - 32px)); margin:0; padding:12px 18px; border:1px solid rgb(var(--color-accent-sub) / .6); border-radius:10px; background:rgb(var(--color-bg-card)); font-size:12px; text-align:center; overflow-wrap:anywhere; }
 .bmap-drop-label>strong { max-width:100%; overflow-wrap:anywhere; font-size:14px; font-weight:650; }
 .bmap-drop[data-blocked] { border-color:rgb(237 126 121 / .7); }
 .bmap-drop[data-blocked] .bmap-drop-label { border-color:rgb(237 126 121 / .6); }

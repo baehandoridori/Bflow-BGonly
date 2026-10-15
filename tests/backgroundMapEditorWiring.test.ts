@@ -1047,7 +1047,11 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // The word stands five times: the function, this call, the delete dialog of a map as it comes up and as a run of it
   // stops (anchor 66 holds those two where they are), and hiding a node when what the properties show changes
   // (setNodesHidden).
-  assert.equal(count(editor, /\bswallowSecondClick\b/g), 5, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, and hiding that changes what the properties show');
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 7, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, hiding that changes what the properties show, and the two buttons of the image list that go away as they are pressed');
+  // '도면 전체' and the line's ×: pressed, each goes away and '＋ 이미지 추가' or a card slides under the pointer — the second click of a
+  // double-click would open the file dialog or a card.
+  for (const line of ['const clearSelection = useEvent(() => { select(null); swallowSecondClick(); });', 'const dismissNotice = useEvent(() => { imageAdd.dismiss(); swallowSecondClick(); });'])
+    assert.ok(editor.includes(line), `a button of the image list that goes away lets the second click through: ${line}`);
   assert.deepEqual(piece(editor, 'function swallowSecondClick() {', 'function navigate(').split('\n').map(line => line.trim()).filter(Boolean), [
     'function swallowSecondClick() {',
     'const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };',
@@ -3040,14 +3044,18 @@ test('anchor 74: the drop and the paste — their guards, what they read, and th
   assert.equal(count(imageBlock, /document\.activeElement/g), 1, 'the focus is read past the lock');
   assert.ok((lined(imageBlock).find(line => line.includes('document.activeElement')) ?? '').startsWith('lock: on => {'), 'the focus is read past the lock');
   // What is pasted: the files among the items, and of them the pictures.
-  assert.ok(pasteLines.includes("const files = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((file): file is File => !!file);"),
+  assert.ok(pasteLines.includes("const fileItems = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file');"),
     'the files of a paste are not read from its items');
+  // A picture is taken out of the clipboard once, in the branch of a pasted picture: before the checks, every paste anywhere in the app with a
+  // picture on the clipboard (a captured screen, encoded as PNG first) would make the page wait for nothing.
+  assert.equal(count(paste, /getAsFile\(/g), 1, 'a picture of the clipboard is taken out in another place');
+  assert.ok(block(paste, 'if (pictures) {').includes('getAsFile('), 'a picture of the clipboard is taken out before the paste is known to be the editor\'s');
   // When nothing but the cursor in a field of the editor is in the way and the clipboard holds no text, a picture is told at once, and with
   // no file in the event at all the main process is asked whether a picture file was copied: one line, and the field keeps its paste.
   // Without the text check every name pasted into a field would bring the line up; outside the editor nothing is said.
   const fieldAt = pasteLines.indexOf("if (root?.contains(element) && mapImagePasteWanted({ ...facts, text: false }) && !Array.from(event.clipboardData?.types ?? []).includes('text/plain')) {");
   assert.ok(fieldAt > -1, 'the branch of a field of the editor is not as written');
-  assert.deepEqual(pasteLines.slice(fieldAt + 1, fieldAt + 4), ['if (pictures) noteFieldPaste(); else if (!files.length) void pasteClipboardFile(true);', '}', 'return;']);
+  assert.deepEqual(pasteLines.slice(fieldAt + 1, fieldAt + 4), ['if (pictures) noteFieldPaste(); else if (!fileItems.length) void pasteClipboardFile(true);', '}', 'return;']);
   assert.ok(blockLines.includes('const noteFieldPaste = useEvent(() => { if (current) imageAdd.say(current.id, MAP_IMAGE_FIELD_NOTE); });'), 'a picture pasted into a field is told otherwise');
   // Swallowed twice in the block: the drag, and a paste inside its branch of a picture, which goes the paste's way in. Swallowed with no
   // picture, or in the branch of a field, a paste of words would be lost. A paste with no file in it asks the main process, and a paste of
@@ -3057,24 +3065,25 @@ test('anchor 74: the drop and the paste — their guards, what they read, and th
   assert.equal(count(paste, /event\.preventDefault\(\);/g), 1, 'a paste is swallowed in another place');
   const pictureBranch = block(paste, 'if (pictures) {');
   for (const text of ['event.preventDefault();', 'pasteImages(']) assert.ok(pictureBranch.includes(text), `the branch of a pasted picture does not hold: ${text}`);
-  assert.equal(pasteLines[pasteLines.length - 2], '} else if (!files.length) void pasteClipboardFile(false);', 'a paste with no file in it does not ask the main process');
+  assert.equal(pasteLines[pasteLines.length - 2], '} else if (!fileItems.length) void pasteClipboardFile(false);', 'a paste with no file in it does not ask the main process');
   // And the paste holds nothing else, as the design writes it.
   assert.deepEqual(pasteLines, [pasteOpener,
     'const root = rootRef.current, element = event.target instanceof Element ? event.target : null;',
     'const facts = { shown: !!root && root.offsetParent !== null, canManage: snapshot.canManage, hasMap: !!current,',
     'dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };',
-    "const files = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((file): file is File => !!file);",
-    "const pictures = files.some(file => file.type.startsWith('image/'));",
+    "const fileItems = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file');",
+    "const pictures = fileItems.some(item => item.type.startsWith('image/'));",
     'if (!mapImagePasteWanted(facts)) {',
     "if (root?.contains(element) && mapImagePasteWanted({ ...facts, text: false }) && !Array.from(event.clipboardData?.types ?? []).includes('text/plain')) {",
-    'if (pictures) noteFieldPaste(); else if (!files.length) void pasteClipboardFile(true);',
+    'if (pictures) noteFieldPaste(); else if (!fileItems.length) void pasteClipboardFile(true);',
     '}',
     'return;',
     '}',
     'if (pictures) {',
     'event.preventDefault();',
+    'const files = fileItems.map(item => item.getAsFile()).filter((file): file is File => !!file);',
     "pasteImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: true })));",
-    '} else if (!files.length) void pasteClipboardFile(false);',
+    '} else if (!fileItems.length) void pasteClipboardFile(false);',
     '}']);
   // Heard on the window as it bubbles, where it arrives at the body too, and let go with the same function.
   const pasteAt = blockLines.indexOf("window.addEventListener('paste', onImagePaste);");
@@ -3225,7 +3234,7 @@ test('anchor 76: the tie is a change of the map — one undo step in a draft, el
     'async function linkAddedImages(mapId: string, link: MapImageLink, library: BackgroundSnapshot): Promise<MapImageLinked> {',
     'const saved = library.maps.find(map => map.id === mapId), held = mapDraft(doc.getState(), mapId);',
     'if (held && saved && !mapDraftChanged(held) && saved.revision > (held.baseRevision ?? Infinity)) doc.rebaseDrafts([saved]);',
-    'const draftNow = mapDraft(doc.getState(), mapId), base = draftNow?.value ?? saved;',
+    'const draftNow = mapDraft(doc.getState(), mapId), base = saved && (draftNow?.value ?? saved);',
     "if (!base) return { how: 'none', complete: false };",
     'const next = linkMapImages(base, link, library);',
     "if (next.map === base) return { how: draftNow && next.complete && mapImageLinkNow(saved, base, link, library) === 'draft' ? 'draft' : 'none', complete: next.complete };",
@@ -3401,7 +3410,7 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
     '.bg-library .bmap-gallery-card.is-added { position:relative; border-color:rgb(var(--color-accent-sub) / .8); }',
     '.bmap-gallery-mark { position:absolute; top:9px; left:6px; z-index:1; padding:1px 7px; border:1px solid rgb(var(--color-accent-sub)); border-radius:999px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:10px; font-weight:600; }',
     '.bmap-drop { position:absolute; inset:0; z-index:6; display:flex; justify-content:center; align-items:flex-start; border:2px dashed rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-primary) / .55); pointer-events:none; }',
-    '.bmap-drop-label { position:sticky; top:35%; display:flex; flex-direction:column; align-items:center; gap:4px; max-width:min(520px,calc(100% - 32px)); margin:0; padding:12px 18px; border:1px solid rgb(var(--color-accent-sub) / .6); border-radius:10px; background:rgb(var(--color-bg-card)); font-size:12px; text-align:center; }',
+    '.bmap-drop-label { position:sticky; top:35%; display:flex; flex-direction:column; align-items:center; gap:4px; max-width:min(520px,calc(100% - 32px)); margin:0; padding:12px 18px; border:1px solid rgb(var(--color-accent-sub) / .6); border-radius:10px; background:rgb(var(--color-bg-card)); font-size:12px; text-align:center; overflow-wrap:anywhere; }',
     '.bmap-drop-label>strong { max-width:100%; overflow-wrap:anywhere; font-size:14px; font-weight:650; }',
     '.bmap-drop[data-blocked] { border-color:rgb(237 126 121 / .7); }',
     '.bmap-drop[data-blocked] .bmap-drop-label { border-color:rgb(237 126 121 / .6); }',
@@ -3549,8 +3558,8 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   // as it was drawn, with no ghost and no line.
   const editorLines = lined(editor), memoAt = editorLines.findIndex(line => line.startsWith('const gallery = useMemo('));
   assert.ok(memoAt > -1, 'the memo of the image list was not found');
-  assert.ok(editorLines[memoAt].endsWith(' adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={imageAdd.dismiss} /> : null,'), 'the image list is not handed the batch, the save, the way in or the close');
-  assert.ok(editorLines[memoAt + 1].endsWith(' imageAdd.view, pending, addPickedImages, imageAdd.dismiss]);'), 'the memo of the image list does not wait for the batch');
+  assert.ok(editorLines[memoAt].endsWith(' adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={dismissNotice} /> : null,'), 'the image list is not handed the batch, the save, the way in or the close');
+  assert.ok(editorLines[memoAt + 1].endsWith(' imageAdd.view, pending, addPickedImages, dismissNotice]);'), 'the memo of the image list does not wait for the batch');
   // The sheet of a drag is the last child of the column of the map, right behind the panels: laid over the header, the band, the map, the
   // inspector and the image list as one, in the flow of nothing (the column is the box it is laid on). What it says is made as it is drawn,
   // from what the image list names. The panels are handed the image list as they always were (anchor 54).
