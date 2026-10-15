@@ -3021,6 +3021,18 @@ test('anchor 77: the place prompt is a dialog of the editor, acts on what it was
   // pure test's (M-1).
   for (const text of ["target.sameNamePlaceId ? 'existing' : 'new'", "target.sameNamePlaceId ?? places[0]?.id ?? ''"])
     assert.ok(prompt.includes(text), `not what the prompt opens on: ${text}`);
+  // The name it offers for a new place is the owner's as the pure module made it, trimmed and cut: for a camera, the room it stands in or
+  // the map, never the camera. Its words name the parent place by its name, never by its id, and say whether it opened over a draft. An
+  // answer it cannot take is told inside the prompt, which stays open: an empty name or a place gone never leaves the button silent.
+  for (const line of ['const [name, setName] = useState(target.suggestedName);',
+    'const words = mapImagePlaceWords(target, count, drafted, places.find(place => place.id === target.parentPlaceId)?.name ?? null);',
+    '{error && <p className="bg-error" role="alert">{error}</p>}'])
+    assert.ok(lines.includes(line), `not a line of the place prompt: ${line}`);
+  // The list of places shows the choice the prompt holds. A choice the library no longer has (deleted elsewhere while the prompt was up, or
+  // none at all when the library had no place as it opened) shows as no place: left to React, the list would show its first place while the
+  // prompt still holds the old choice, and picking the place shown sends no change, so with one place left it could never be the answer.
+  assert.ok(lines.includes(`{mode === 'existing' && <Field label="장소"><select value={places.some(place => place.id === placeId) ? placeId : ''} onChange={event => setPlaceId(event.target.value)}>{!places.some(place => place.id === placeId) && <option value="" disabled hidden />}<PlaceOptions places={places} /></select></Field>}`),
+    'the list of places shows a place the prompt does not hold');
   // It holds no key of the window (it runs nothing yet: closing it loses nothing), tells nothing past itself, and reads nothing of the map
   // on show: it acts on the target it was opened with alone.
   for (const text of ["addEventListener('keydown'", 'sonner']) assert.ok(!prompt.includes(text), `in the place prompt: ${text}`);
@@ -3116,6 +3128,11 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   const titleRule = lines[lineOf(lines, '.bmap-drop-label>strong {')];
   has(declarations(titleRule), 'overflow-wrap:anywhere');
   for (const word of ['text-overflow', 'nowrap']) assert.ok(!titleRule.includes(word), `the title of the sheet is cut: ${word}`);
+  // The sheet as the editor draws it (7.1): its title over what it says of the target, hidden from readers (the tooltip of the button and the
+  // line say the same), and marked blocked only when it is: React writes a false data attribute out as "false", and the rules above match
+  // the attribute by its presence, so every sheet would be ringed as blocked.
+  assert.ok(lined(read('BackgroundMapImageAdd.tsx')).includes('return <div className="bmap-drop" data-blocked={words.blocked || undefined} aria-hidden="true"><p className="bmap-drop-label"><strong>{words.title}</strong><span>{words.detail}</span></p></div>;'),
+    'the sheet of a drag is not as written');
   // The line keeps one height whether its button is there or not, gives way down to that height where the list is low (its words scroll
   // inside), and breaks a long file name anywhere rather than scroll sideways.
   const noticeRule = lines[lineOf(lines, '.bmap-gallery-notice {')];

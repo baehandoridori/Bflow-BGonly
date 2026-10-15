@@ -43,7 +43,7 @@ export function MapImagePlacePrompt({ target, count, drafted, places, onCancel, 
       <label className="bmap-place-choice"><input type="radio" name={group} checked={mode === 'new'} onChange={() => { setMode('new'); setError(''); }} /><span><strong>새 장소 만들기</strong>{words.parent}</span></label>
       {mode === 'new' && <Field label="장소 이름"><input maxLength={160} value={name} onChange={event => setName(event.target.value)} /></Field>}
       <label className="bmap-place-choice"><input type="radio" name={group} checked={mode === 'existing'} disabled={!places.length} onChange={() => { setMode('existing'); setError(''); }} /><span><strong>기존 장소에서 고르기</strong>{places.length ? '배경 목록에 있는 장소 가운데 골라요.' : '아직 등록된 장소가 없어요.'}</span></label>
-      {mode === 'existing' && <Field label="장소"><select value={placeId} onChange={event => setPlaceId(event.target.value)}><PlaceOptions places={places} /></select></Field>}
+      {mode === 'existing' && <Field label="장소"><select value={places.some(place => place.id === placeId) ? placeId : ''} onChange={event => setPlaceId(event.target.value)}>{!places.some(place => place.id === placeId) && <option value="" disabled hidden />}<PlaceOptions places={places} /></select></Field>}
     </fieldset>
     <p className="bmap-hint">{words.note}</p>
     {error && <p className="bg-error" role="alert">{error}</p>}
