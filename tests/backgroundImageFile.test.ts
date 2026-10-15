@@ -160,21 +160,29 @@ test('clipboardImageFilePath reads the first path of FileNameW and nothing else,
 test('background clipboard and picker preview: a path only from the hook, and no file dialog in the app engine', async () => {
   const bundle = await build({ entryPoints: ['src/mocks/devElectronAPI.ts'], bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', write: false });
   type Hook = { filePath?: (file: File) => string; clipboardFile?: string; pick?: () => File[] };
-  /** One page of the preview, under the navigator given: a browser tab, or the check window of the app engine. */
-  function preview(navigator: { userAgent?: string }) {
-    const values = new Map<string, string>();
+  /** One page of the preview, under the navigator given: a browser tab, or the check window of the app engine. `Image` is the picture element of the page (none: the page cannot draw), and each canvas the page encodes is written down with its size and what it was asked for. */
+  function preview(navigator: { userAgent?: string }, Image?: unknown) {
+    const values = new Map<string, string>(), encoded: { width: number; height: number; args: unknown[] }[] = [];
     const window = { electronAPI: undefined as ElectronAPI | undefined, __bflowMockBackgroundAdd: undefined as Hook | undefined, location: { protocol: 'http:' }, localStorage: {
       getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); },
     } };
-    const document = { documentElement: { dataset: {} }, createElement: () => ({ width: 0, height: 0, getContext: () => ({ fillStyle: '', font: '', fillRect() {}, fillText() {} }), toDataURL: () => `data:image/png;base64,${png.toString('base64')}` }) };
+    const document = { documentElement: { dataset: {} }, createElement: () => ({ width: 0, height: 0, getContext: () => ({ fillStyle: '', font: '', fillRect() {}, fillText() {}, drawImage() {} }),
+      toDataURL(...args: unknown[]) { encoded.push({ width: this.width, height: this.height, args }); return 'data:image/webp;base64,UklGRg=='; } }) };
     const module = { exports: {} as { installDevElectronAPI(): void } };
-    new Function('module', 'exports', 'window', 'document', 'navigator', 'BroadcastChannel', 'fetch', bundle.outputFiles[0].text)(
-      module, module.exports, window, document, navigator, undefined, () => { throw new Error('No external requests in preview'); },
+    new Function('module', 'exports', 'window', 'document', 'navigator', 'Image', 'BroadcastChannel', 'fetch', bundle.outputFiles[0].text)(
+      module, module.exports, window, document, navigator, Image, undefined, () => { throw new Error('No external requests in preview'); },
     );
     module.exports.installDevElectronAPI();
-    return { window, api: window.electronAPI! };
+    return { window, api: window.electronAPI!, encoded };
+  }
+  /** The picture element of the app engine: it decodes when the test says so, at the size the test gives, and until then its natural size is 0, as in the engine. */
+  let size = [0, 0], decode = () => {};
+  class Picture {
+    naturalWidth = 0; naturalHeight = 0; onload = () => {}; onerror = () => {};
+    set src(_url: string) { decode = () => { [this.naturalWidth, this.naturalHeight] = size; this.onload(); }; }
   }
   const picked = [{ name: '교실.png' } as File, { name: '복도.jpg' } as File];
+  const sent = `data:image/png;base64,${png.toString('base64')}`;
   const tab = preview({});
   await assert.rejects(tab.api.backgroundReadClipboardFile(), /로그인/);
   await tab.api.loginCanonicalSession({ name: '배한솔', password: '1234', rememberMe: false });
@@ -191,11 +199,24 @@ test('background clipboard and picker preview: a path only from the hook, and no
   assert.equal(await tab.api.backgroundPickImages!(), undefined);
   tab.window.__bflowMockBackgroundAdd = { pick: () => picked };
   assert.deepEqual(await tab.api.backgroundPickImages!(), picked);
+  // A page that cannot draw (this stand-in has no picture element) gets back what it sent, as it came.
+  assert.deepEqual(await tab.api.backgroundUploadImage(sent), { ok: true, url: sent });
   // The check window of the app engine: an empty list, hook or no hook, so no native file dialog is ever opened there.
-  const engine = preview({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.191 Electron/33.0.0 Safari/537.36' });
+  const engine = preview({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.191 Electron/33.0.0 Safari/537.36' }, Picture);
   assert.deepEqual(await engine.api.backgroundPickImages!(), []);
   engine.window.__bflowMockBackgroundAdd = {};
   assert.deepEqual(await engine.api.backgroundPickImages!(), []);
   engine.window.__bflowMockBackgroundAdd = { pick: () => picked };
   assert.deepEqual(await engine.api.backgroundPickImages!(), picked);
+  // An upload of the preview comes back small (the preview store keeps every picture twice in one value): drawn again once it has decoded, as a WebP of 480px on its long side at most, never larger than it came.
+  await engine.api.loginCanonicalSession({ name: '배한솔', password: '1234', rememberMe: false });
+  for (const [natural, shrunk] of [[[960, 480], [480, 240]], [[600, 1200], [240, 480]], [[320, 200], [320, 200]]]) {
+    size = natural; const upload = engine.api.backgroundUploadImage(sent); decode();
+    assert.deepEqual(await upload, { ok: true, url: 'data:image/webp;base64,UklGRg==' });
+    assert.deepEqual(engine.encoded.at(-1), { width: shrunk[0], height: shrunk[1], args: ['image/webp', 0.8] });
+  }
+  // The session is asked once the drawing is done: a login that changed meanwhile gets nothing back.
+  const late = engine.api.backgroundUploadImage(sent);
+  await engine.api.loginCanonicalSession({ name: '장삐쭈', password: '1234', rememberMe: false });
+  decode(); await assert.rejects(late, /세션/);
 });
