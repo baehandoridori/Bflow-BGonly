@@ -2904,6 +2904,14 @@ test('anchor 73: the three ways in are one function that reads its target at tha
   const answer = piece(editor, 'const answerPlacePrompt = useEvent(', 'const addPickedImages = useEvent(');
   for (const text of ['placePrompt.target', 'placePrompt.sources']) assert.ok(answer.includes(text), `the answer of the place prompt does not act on what it was opened for: ${text}`);
   assert.ok(!answer.includes('resolveMapImageTarget('), 'the answer of the place prompt reads the target anew');
+  // The answer and the picker, as the design writes them, letter for letter. The answer closes the prompt before the batch starts: left
+  // open, the prompt keeps the editor from being at rest, and the batch waits for its save until the prompt is cancelled. It hands on the
+  // choice it was given: with none, the plan refuses every answer after the prompt has gone, and nothing is added. The picker hands each
+  // file on with its path on this PC: without it, a picture picked again is made a second time, never found as the background of its source.
+  for (const line of [
+    'const answerPlacePrompt = useEvent((choice: MapImagePlaceChoice) => { if (!placePrompt) return; setPlacePrompt(null); imageAdd.start(planMapImageAdd(snapshot, placePrompt.target, choice, placePrompt.sources.map(mapImageSourceFacts), new Date(), uuid), placePrompt.sources); });',
+    "const addPickedImages = useEvent((files: File[]) => addImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: false }))));"])
+    assert.ok(lined(imageBlock).includes(line), `not a line of its own: ${line}`);
   // The controller is made first, with the one call of the editor that sends a command and the tie of the editor. It locks the editor as a
   // save of the map does, and right before that a text field of the inspector that holds the cursor is left, as 도면 저장 leaves it: what is
   // being typed is settled while the fields still take it. A button or a row of the object list keeps its focus, and with it the keys of the
