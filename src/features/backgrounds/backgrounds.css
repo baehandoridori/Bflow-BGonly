@@ -179,11 +179,24 @@
   min-height: 45px;
   padding: 11px 15px;
   color: var(--bg-muted);
+  position: relative;
 }
 .bg-library-tabs button.selected {
   color: var(--bg-accent);
   border-bottom-color: var(--bg-accent);
   font-weight: 650;
+}
+/* Unsaved map edits are kept on this PC: a dot over the end of the tab, so the tab keeps its width. The ring keeps it 3:1 on the page in every theme. It does not move. */
+.bg-tab-dot {
+  position: absolute;
+  top: 7px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--color-accent));
+  box-shadow: 0 0 0 1px rgb(var(--color-text-secondary));
+  pointer-events: none;
 }
 .bg-library-body {
   min-height: 0;

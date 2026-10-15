@@ -19,6 +19,7 @@ import { BackgroundGroupPanel } from "./BackgroundGroupPanel";
 import { BackgroundEpisodePanel } from "./BackgroundEpisodePanel";
 import { mapDraftSessionOf } from "./useBackgroundMapDocument";
 import { MAP_KEEP_TEXT } from "./mapDraftKeep";
+import { KEPT_DOT_TEXT, keptMapEditCount, keptMapEditsStored, useKeptMapEdits } from "./mapKeptSignal";
 import "./backgrounds.css";
 
 const tabs = [
@@ -43,6 +44,8 @@ export default function BackgroundLibraryView() {
   const user = useAuthStore((state) => state.currentUser),
     allEpisodes = useDataStore((state) => state.episodes);
   const { snapshot, loading, pending, error, updateRequired, execute, actorId } = useBackgroundStore();
+  const keptCount = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditCount(signal) : 0);
+  const keptStored = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditsStored(signal) : 0);
   const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("maps"),
     [selectedViewId, setSelectedViewId] = useState<string | null>(null),
     [refreshing, setRefreshing] = useState(false);
@@ -135,6 +138,7 @@ export default function BackgroundLibraryView() {
           <RefreshCw size={28} strokeWidth={1.4} aria-hidden="true" />
           <h3>업데이트가 필요해요</h3>
           <p>이 PC의 B flow보다 새 버전에서 만든 도면 자료가 저장돼 있어서, 지금 버전으로는 배경 화면을 열 수 없어요. 화면 왼쪽 아래의 버전 버튼을 눌러 업데이트한 뒤 다시 열어 주세요. 저장된 자료는 그대로 안전하고, 업데이트하기 전까지 이 PC에서는 보거나 고칠 수 없어요.</p>
+          {keptStored > 0 && <p>{MAP_KEEP_TEXT.update(keptStored)}</p>}
           <button type="button" className="bg-button bg-primary" disabled={loading || refreshing} onClick={() => void refresh()}>다시 확인</button>
         </div>
       ) : (
@@ -150,6 +154,7 @@ export default function BackgroundLibraryView() {
               >
                 <Icon size={17} />
                 {label}
+                {id === "maps" && keptCount > 0 && <span className="bg-tab-dot"><span className="sr-only">{KEPT_DOT_TEXT}</span></span>}
               </button>
             ))}
           </nav>

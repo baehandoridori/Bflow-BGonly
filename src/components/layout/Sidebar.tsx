@@ -8,6 +8,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { isNavItemHiddenForUser } from './navVisibility';
 import { canAccessBackgroundLibrary, canAccessPlayground } from '@/features/playground/featureFlag';
+import { BackgroundKeptDot } from '@/features/backgrounds/BackgroundKeptDot';
 import { originFromActivation } from '@/features/playground/transition/dotWipeMath';
 import { usePlaygroundEntryStore } from '@/features/playground/transition/usePlaygroundEntryStore';
 import { cn } from '@/utils/cn';
@@ -472,6 +473,7 @@ export function Sidebar() {
                 </span>
               )}
               {/* 숫자 배지: 늘면 '톡', 0 이 되면 작게 줄며 사라진다(움직임 폴리싱 7번). */}
+              {item.id === 'background-library' && <BackgroundKeptDot userId={currentUser?.id ?? null} />}
               {item.id === 'compositing-revisions' && (
                 <CountBadge
                   count={totalOpenRevisions}
