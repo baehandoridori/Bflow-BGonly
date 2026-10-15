@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPlace, BackgroundSnapshot, BackgroundSpace, BackgroundSymbol } from '../src/features/backgrounds/types.ts';
-import { validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
+import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPlace, BackgroundSnapshot, BackgroundSpace, BackgroundSymbol, BackgroundView } from '../src/features/backgrounds/types.ts';
+import { validateBackgroundEntity, validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
 import { spacesAt } from '../src/features/backgrounds/mapStack.ts';
-import { MAP_IMAGE_REFUSAL_TEXT, mapImageBaseName, mapImageDragRefused, mapImagePathFacts, mapImagePlaceWords, mapImageRefusedList, mapImageSourceFacts, mapImageTargetWords,
-  resolveMapImageTarget, sortMapImageFiles, uniqueMapImageName } from '../src/features/backgrounds/mapImageDrop.ts';
-import type { MapImageTarget } from '../src/features/backgrounds/mapImageDrop.ts';
+import { MAP_IMAGE_REFUSAL_TEXT, dropMissingViews, linkMapImages, mapImageBaseName, mapImageDragRefused, mapImageLinkNow, mapImageLinkWanted, mapImageOutcomeNow, mapImagePasteWanted,
+  mapImagePathFacts, mapImagePlaceWords, mapImageRefusedList, mapImageSourceFacts, mapImageTargetWords, mapLinksAdded, resolveMapImageTarget, sortMapImageFiles, uniqueMapImageName } from '../src/features/backgrounds/mapImageDrop.ts';
+import type { MapImageLink, MapImageOutcome, MapImageTarget } from '../src/features/backgrounds/mapImageDrop.ts';
 
 // Pictures added to a map by a drop, a paste or the picker: the rules and the words of the pure module, asked of the real
 // modules of the library. One base library: the places 학교 > 2-1 교실, and two maps with the same objects, 2층 with a place of
@@ -488,4 +488,228 @@ test('M-4: the name of a background made from a file', () => {
   assert.equal(uniqueMapImageName(parted, new Set([parted])), `${'가'.repeat(155)} (2)`);
   const spaced = `${'가'.repeat(155)} 나다`;
   assert.equal(uniqueMapImageName(spaced, new Set([spaced])), `${'가'.repeat(155)} (2)`);
+});
+
+/** Backgrounds a batch put in under 2-1 교실, whole: a library that holds them checks as the library checks itself. */
+const [SHOT_A, SHOT_B, SHOT_C] = [0x81, 0x82, 0x83].map(uid);
+const background = (id: string, n: number): BackgroundView => ({ id, revision: 1, name: `교실 전경 ${n + 1}`, placeId: CLASS, cameraPlaceId: null, visiblePlaceIds: [], relatedPlaceIds: [],
+  shot: 'wide', tags: [], memo: '', variants: [{ id: uid(0x1000 + n), name: '낮', time: 'day', activeRevisionId: uid(0x2000 + n),
+    revisions: [{ id: uid(0x2000 + n), imageUrl: '', filePath: '', createdAt: '2026-10-13T05:05:00.000Z' }] }] });
+/** The library with the three in it. The base library has none of them: there they have all been deleted. */
+const shots = lib({ views: [SHOT_A, SHOT_B, SHOT_C].map(background) });
+/** A background no library has: deleted while the batch went on. */
+const MISSING = uid(0x8f);
+/** What a batch asks to tie, as the controller hands it on: by default the place 2-1 교실, which the room 2-1 교실 held when the
+ *  target was read (a camera standing there), and two of the backgrounds for 교실 카메라. */
+const tie = (patch: Partial<MapImageLink> = {}): MapImageLink => ({ place: { nodeId: CLASSROOM, was: CLASS }, placeId: CLASS, cameraId: CLASS_CAMERA, viewIds: [SHOT_A, SHOT_B], ...patch });
+const viewsOf = (map: BackgroundMap, id: string) => (nodeOf(map, id) as BackgroundCamera).viewIds;
+/** The ids of the nodes of `after` that are not the very objects of `before`. */
+const touched = (before: BackgroundMap, after: BackgroundMap) => after.nodes.filter((node, index) => node !== before.nodes[index]).map(node => node.id);
+/** Nothing changed: the very map handed in, done or not. */
+const unchanged = (result: { map: BackgroundMap; complete: boolean }, map: BackgroundMap, complete: boolean, message?: string) => {
+  assert.equal(result.map, map, message);
+  assert.equal(result.complete, complete, message);
+};
+
+test('M-7a: linkMapImages ties what is asked for and is there, and nothing else', () => {
+  // A camera that is not there, or is locked: nothing changes, and it is not done.
+  unchanged(linkMapImages(floor, tie({ cameraId: uid(0x8e) }), shots), floor, false);
+  unchanged(linkMapImages(floor, tie({ cameraId: LOCKED_CAMERA }), shots), floor, false);
+  // Tied: the views of the batch, every other node and key as it was, a map the library takes as it is. Asked again: the same
+  // map, done.
+  const once = linkMapImages(floor, tie(), shots);
+  assert.equal(once.complete, true);
+  assert.deepEqual(touched(floor, once.map), [CLASS_CAMERA]);
+  assert.deepEqual(nodeOf(once.map, CLASS_CAMERA), { ...nodeOf(floor, CLASS_CAMERA), viewIds: [SHOT_A, SHOT_B] });
+  assert.deepEqual({ ...once.map, nodes: [] }, { ...floor, nodes: [] });
+  lib({ views: shots.views, maps: [once.map, annex] });
+  unchanged(linkMapImages(once.map, tie(), shots), once.map, true);
+  // Locked with all of it there already: done. With one more to tie: not, and nothing changes.
+  const locked = freeze(withNode(once.map, CLASS_CAMERA, { locked: true }));
+  unchanged(linkMapImages(locked, tie(), shots), locked, true);
+  unchanged(linkMapImages(locked, tie({ viewIds: [SHOT_A, SHOT_C] }), shots), locked, false);
+  // After the views it has, in the order given, each once: one it has already, or one given twice, is not added again.
+  const holding = freeze(withNode(floor, CLASS_CAMERA, { viewIds: [SHOT_C] }));
+  assert.deepEqual(linkMapImages(holding, tie({ viewIds: [SHOT_B, SHOT_A] }), shots), { map: withNode(holding, CLASS_CAMERA, { viewIds: [SHOT_C, SHOT_B, SHOT_A] }), complete: true });
+  assert.deepEqual(linkMapImages(holding, tie({ viewIds: [SHOT_A, SHOT_C, SHOT_A, SHOT_B] }), shots), { map: withNode(holding, CLASS_CAMERA, { viewIds: [SHOT_C, SHOT_A, SHOT_B] }), complete: true });
+  // A camera holds 1000 views at most, as the library takes no more: of two, one goes on to a camera that holds 999, and it is
+  // not done; to one that holds 1000, none.
+  const many = Array.from({ length: 999 }, (_, n) => uid(0x10000 + n));
+  const brim = linkMapImages(freeze(withNode(floor, CLASS_CAMERA, { viewIds: many })), tie(), shots);
+  assert.equal(brim.complete, false);
+  assert.deepEqual(viewsOf(brim.map, CLASS_CAMERA), [...many, SHOT_A]);
+  validateBackgroundEntity('map', brim.map);
+  assert.throws(() => validateBackgroundEntity('map', withNode(brim.map, CLASS_CAMERA, { viewIds: [...many, SHOT_A, SHOT_B] })));
+  const full = freeze(withNode(floor, CLASS_CAMERA, { viewIds: [...many, SHOT_C] }));
+  unchanged(linkMapImages(full, tie(), shots), full, false);
+  // With no camera asked for the views are not read, nor is the camera with no view to tie.
+  unchanged(linkMapImages(floor, tie({ cameraId: null, viewIds: [MISSING] }), shots), floor, true);
+  unchanged(linkMapImages(floor, tie({ cameraId: uid(0x8e), viewIds: [] }), shots), floor, true);
+
+  // The place of a space: set where the space holds what it held when the target was read (none), that node alone new.
+  const intoStore = (was: string | null, patch: Partial<MapImageLink> = {}) => tie({ place: { nodeId: STORE, was }, cameraId: null, ...patch });
+  const placed = linkMapImages(floor, intoStore(null), shots);
+  assert.equal(placed.complete, true);
+  assert.deepEqual(touched(floor, placed.map), [STORE]);
+  assert.deepEqual(nodeOf(placed.map, STORE), { ...nodeOf(floor, STORE), placeId: CLASS });
+  assert.deepEqual({ ...placed.map, nodes: [] }, { ...floor, nodes: [] });
+  // Not over another place tied there since, and not to a locked space. A locked one that holds it already is done.
+  const retied = freeze(withNode(floor, STORE, { placeId: SCHOOL }));
+  unchanged(linkMapImages(retied, intoStore(null), shots), retied, false);
+  unchanged(linkMapImages(floor, tie({ place: { nodeId: LOCKED_STORE, was: null }, cameraId: null }), shots), floor, false);
+  for (const was of [CLASS, null]) unchanged(linkMapImages(floor, tie({ place: { nodeId: LOCKED_ROOM, was }, cameraId: null }), shots), floor, true, String(was));
+  // The place of the map: set where it has none, never over the one it has.
+  const ownPlace = (was: string | null, placeId: string) => tie({ place: { nodeId: null, was }, placeId, cameraId: null });
+  const named = linkMapImages(annex, ownPlace(null, SCHOOL), shots);
+  assert.deepEqual(named, { map: { ...annex, placeId: SCHOOL }, complete: true });
+  assert.equal(named.map.nodes, annex.nodes);
+  unchanged(linkMapImages(floor, ownPlace(null, CLASS), shots), floor, false);
+  // `was`: an owner that holds the id of a place gone since, as it did when the target was read, is set. Asked of one that held
+  // none, it is not.
+  const goneStore = freeze(withNode(floor, STORE, { placeId: GONE }));
+  assert.deepEqual(linkMapImages(goneStore, intoStore(GONE), shots), { map: withNode(floor, STORE, { placeId: CLASS }), complete: true });
+  unchanged(linkMapImages(goneStore, intoStore(null), shots), goneStore, false);
+  const goneAnnex: BackgroundMap = freeze({ ...annex, placeId: GONE });
+  assert.deepEqual(linkMapImages(goneAnnex, ownPlace(GONE, SCHOOL), shots), { map: { ...annex, placeId: SCHOOL }, complete: true });
+  unchanged(linkMapImages(goneAnnex, ownPlace(null, SCHOOL), shots), goneAnnex, false);
+  // A target that had its place carries that tie too (`was`: the place itself). Held still: the same map, done. Another place
+  // tied there since, or none, or the owner gone: the same map, not done.
+  unchanged(linkMapImages(floor, tie({ cameraId: null }), shots), floor, true);
+  unchanged(linkMapImages(floor, ownPlace(SCHOOL, SCHOOL), shots), floor, true);
+  for (const changed of [withNode(floor, CLASSROOM, { placeId: SCHOOL }), withNode(floor, CLASSROOM, { placeId: null }), { ...floor, nodes: floor.nodes.filter(node => node.id !== CLASSROOM) }])
+    unchanged(linkMapImages(freeze(changed), tie({ cameraId: null }), shots), changed, false);
+  const otherOwn: BackgroundMap = freeze({ ...floor, placeId: CLASS });
+  unchanged(linkMapImages(otherOwn, ownPlace(SCHOOL, SCHOOL), shots), otherOwn, false);
+  // The place not set, the views tied all the same: the map changed, and it is not done.
+  const viewsAlone = linkMapImages(retied, intoStore(null, { cameraId: STORE_CAMERA }), shots);
+  assert.equal(viewsAlone.complete, false);
+  assert.deepEqual(touched(retied, viewsAlone.map), [STORE_CAMERA]);
+  assert.deepEqual(viewsOf(viewsAlone.map, STORE_CAMERA), [SHOT_A, SHOT_B]);
+  // What the library does not have is not tied: a background deleted meanwhile is left out and the rest go on; a place that is
+  // gone is not set, and is not taken for tied where the owner holds its id.
+  const some = linkMapImages(floor, tie({ viewIds: [SHOT_A, MISSING, SHOT_B] }), shots);
+  assert.equal(some.complete, false);
+  assert.deepEqual(viewsOf(some.map, CLASS_CAMERA), [SHOT_A, SHOT_B]);
+  unchanged(linkMapImages(floor, tie({ viewIds: [MISSING] }), shots), floor, false);
+  unchanged(linkMapImages(floor, intoStore(null, { placeId: GONE }), shots), floor, false);
+  unchanged(linkMapImages(annex, ownPlace(null, GONE), shots), annex, false);
+  unchanged(linkMapImages(goneStore, intoStore(GONE, { placeId: GONE }), shots), goneStore, false);
+});
+
+test('M-7b: where a link stands now, whether anything is to be tied, and how an ended batch reads now', () => {
+  // Three backgrounds put in for 교실 카메라 and tied in a draft of 2층; the library once that draft is saved.
+  const link = tie({ viewIds: [SHOT_A, SHOT_B, SHOT_C] }), drafted = linkMapImages(floor, link, shots).map;
+  const saved = lib({ views: shots.views, maps: [drafted, annex] }), savedFloor = saved.maps[0];
+  // Held by the map on show alone: the draft's. By the saved map: kept, whatever is on show. By neither (taken back, the draft
+  // discarded, another map on show), or with no map at all: undone.
+  assert.equal(mapImageLinkNow(floor, drafted, link, shots), 'draft');
+  assert.equal(mapImageLinkNow(savedFloor, savedFloor, link, saved), 'kept');
+  assert.equal(mapImageLinkNow(savedFloor, undefined, link, saved), 'kept');
+  assert.equal(mapImageLinkNow(floor, floor, link, shots), 'undone');
+  assert.equal(mapImageLinkNow(floor, undefined, link, shots), 'undone');
+  assert.equal(mapImageLinkNow(undefined, undefined, link, shots), 'undone');
+  // A picture deleted since is not counted: one of the three deleted, the draft holds the other two, whether it has let go of
+  // the third yet or not.
+  const two = lib({ views: shots.views.filter(item => item.id !== SHOT_C) });
+  assert.equal(mapImageLinkNow(floor, drafted, link, two), 'draft');
+  assert.equal(mapImageLinkNow(floor, dropMissingViews(drafted, new Set([SHOT_A, SHOT_B])), link, two), 'draft');
+  // Put into a space whose place the saved map ties: kept. All three deleted: gone, wherever the link is — saved, in the
+  // draft, taken back.
+  const intoRoom = tie({ cameraId: null, viewIds: [SHOT_A, SHOT_B, SHOT_C] });
+  assert.equal(mapImageLinkNow(floor, floor, intoRoom, shots), 'kept');
+  assert.equal(mapImageLinkNow(floor, floor, intoRoom, library), 'gone');
+  assert.equal(mapImageLinkNow(floor, drafted, link, library), 'gone');
+  assert.equal(mapImageLinkNow(floor, floor, link, library), 'gone');
+  // A link with no picture in it from the start, a place alone, is never gone.
+  const placeOnly = tie({ place: { nodeId: STORE, was: null }, cameraId: null, viewIds: [] }), placed = linkMapImages(floor, placeOnly, library).map;
+  assert.equal(mapImageLinkNow(floor, placed, placeOnly, library), 'draft');
+  assert.equal(mapImageLinkNow(floor, floor, placeOnly, library), 'undone');
+  // Put into a space whose place the draft alone ties, since the last save: the draft's. That draft saved: kept. Discarded:
+  // undone.
+  const tiedStore = withNode(floor, STORE, { placeId: CLASS }), intoStore = tie({ place: { nodeId: STORE, was: CLASS }, cameraId: null });
+  assert.equal(mapImageLinkNow(floor, tiedStore, intoStore, shots), 'draft');
+  const storeSaved = lib({ views: shots.views, maps: [tiedStore, annex] });
+  assert.equal(mapImageLinkNow(storeSaved.maps[0], storeSaved.maps[0], intoStore, storeSaved), 'kept');
+  assert.equal(mapImageLinkNow(floor, floor, intoStore, shots), 'undone');
+
+  // Something to tie: a picture of the batch, or a place asked for that the library has. Not a new place that could not be
+  // saved, nor a place that was there with no picture put in.
+  assert.equal(mapImageLinkWanted(intoStore, library), true);
+  assert.equal(mapImageLinkWanted(placeOnly, library), true);
+  assert.equal(mapImageLinkWanted(tie({ place: { nodeId: STORE, was: GONE }, cameraId: null, viewIds: [] }), library), true);
+  assert.equal(mapImageLinkWanted({ ...placeOnly, placeId: uid(0x8d) }, library), false);
+  assert.equal(mapImageLinkWanted(tie({ cameraId: null, viewIds: [] }), library), false);
+  assert.equal(mapImageLinkWanted(tie({ viewIds: [] }), library), false);
+
+  // How a batch that ended reads now. Its link the draft's, whole: followed, to the draft, kept or undone.
+  const ended = (how: MapImageOutcome['link'], more: Partial<MapImageOutcome> = {}): MapImageOutcome =>
+    freeze({ scope: 'camera', targetName: '교실 카메라', placeName: '2-1 교실', added: 3, reused: 0, failed: 0, over: 0, link: how, ...more });
+  const whole = ended('draft');
+  assert.deepEqual(mapImageOutcomeNow(whole, link, floor, drafted, shots), whole);
+  assert.deepEqual(mapImageOutcomeNow(whole, link, savedFloor, savedFloor, saved), { ...whole, link: 'kept' });
+  assert.deepEqual(mapImageOutcomeNow(whole, link, floor, floor, shots), { ...whole, link: 'undone' });
+  // Any other reads as it ended, the very object, wherever its link is now: tied to the draft in part, saved at once whole or
+  // in part, nothing to tie, missed, failed.
+  const others = [ended('draft', { partial: true }), ended('saved'), ended('saved', { partial: true }), ended('none'), ended('missed'),
+    ended('failed', { linkCause: '서버에서 답을 받지 못했어요. 인터넷 연결을 확인해 주세요.' })];
+  for (const outcome of others) for (const [before, shown, now] of [[floor, drafted, shots], [savedFloor, savedFloor, saved], [floor, floor, shots]] as const)
+    assert.equal(mapImageOutcomeNow(outcome, link, before, shown, now), outcome, `${outcome.link}${outcome.partial ? ', partial' : ''}`);
+  // Its pictures all deleted since: gone, whatever it was.
+  for (const outcome of [whole, ...others]) assert.deepEqual(mapImageOutcomeNow(outcome, link, floor, drafted, library), { ...outcome, link: 'gone' }, outcome.link);
+  // A place tied alone in the draft, no picture put in: followed as well.
+  const placeAlone = ended('draft', { scope: 'space', targetName: '창고', added: 0, failed: 3 }), placeSaved = lib({ maps: [placed, annex] });
+  assert.deepEqual(mapImageOutcomeNow(placeAlone, placeOnly, floor, placed, library), placeAlone);
+  assert.deepEqual(mapImageOutcomeNow(placeAlone, placeOnly, placeSaved.maps[0], placeSaved.maps[0], placeSaved), { ...placeAlone, link: 'kept' });
+  assert.deepEqual(mapImageOutcomeNow(placeAlone, placeOnly, floor, floor, library), { ...placeAlone, link: 'undone' });
+});
+
+test('M-9: mapLinksAdded, dropMissingViews and the six facts of a paste', () => {
+  // The saved map: 2층 as it is, with two views of 교실 카메라.
+  const before = freeze(withNode(floor, CLASS_CAMERA, { viewIds: [SHOT_A, SHOT_B] }));
+  // Nothing added: the same map, a copy of it, or ties undone alone (the place of the map and of a room taken off, a view taken off).
+  assert.equal(mapLinksAdded(before, before), false);
+  assert.equal(mapLinksAdded(before, { ...before, nodes: before.nodes.map(node => ({ ...node })) }), false);
+  assert.equal(mapLinksAdded(before, withNode(withNode({ ...before, placeId: null }, CLASSROOM, { placeId: null }), CLASS_CAMERA, { viewIds: [SHOT_B] })), false);
+  // A view more, a place for a space, a place for the map: added. Another place than the saved one as well, and a view added
+  // where another is taken off.
+  assert.equal(mapLinksAdded(before, withNode(before, CLASS_CAMERA, { viewIds: [SHOT_A, SHOT_B, SHOT_C] })), true);
+  assert.equal(mapLinksAdded(before, withNode(before, STORE, { placeId: CLASS })), true);
+  assert.equal(mapLinksAdded(annex, { ...annex, placeId: SCHOOL }), true);
+  assert.equal(mapLinksAdded(before, withNode(before, CLASSROOM, { placeId: SCHOOL })), true);
+  assert.equal(mapLinksAdded(before, { ...before, placeId: CLASS }), true);
+  assert.equal(mapLinksAdded(before, withNode(before, CLASS_CAMERA, { viewIds: [SHOT_C] })), true);
+  // A space drawn since with a place, a camera placed since with a view: added, and so with no saved map. Drawn with none: not.
+  const [NEW_ROOM, NEW_LENS] = [0x8a, 0x8b].map(uid);
+  const drawn = (...added: BackgroundNode[]): BackgroundMap => ({ ...annex, nodes: [...annex.nodes, ...added] });
+  for (const node of [room(NEW_ROOM, '새 공간', 1500, 0, 200, 200, { placeId: CLASS }), lens(NEW_LENS, '카메라 9', 1600, 100, { viewIds: [SHOT_A] })]) {
+    assert.equal(mapLinksAdded(annex, drawn(node)), true, node.name);
+    assert.equal(mapLinksAdded(undefined, { ...annex, nodes: [node] }), true, node.name);
+  }
+  const bare = [room(NEW_ROOM, '새 공간', 1500, 0, 200, 200), lens(NEW_LENS, '카메라 9', 1600, 100)];
+  assert.equal(mapLinksAdded(annex, drawn(...bare)), false);
+  assert.equal(mapLinksAdded(undefined, { ...annex, nodes: bare }), false);
+  // With no saved map every tie the draft holds is added: the place of the map, the place of a room.
+  assert.equal(mapLinksAdded(undefined, floor), true);
+  assert.equal(mapLinksAdded(undefined, annex), true);
+
+  // A draft lets go of a background that is gone: that id alone comes off, the rest stay in their order, every other node as
+  // it was. With nothing to take off: the map itself.
+  const loose = freeze(withNode(withNode(floor, CLASS_CAMERA, { viewIds: [SHOT_A, MISSING, SHOT_B] }), STORE_CAMERA, { viewIds: [MISSING] }));
+  const there = new Set([SHOT_A, SHOT_B, SHOT_C]), dropped = dropMissingViews(loose, there);
+  assert.deepEqual(dropped, withNode(withNode(floor, CLASS_CAMERA, { viewIds: [SHOT_A, SHOT_B] }), STORE_CAMERA, { viewIds: [] }));
+  assert.deepEqual(touched(loose, dropped), [CLASS_CAMERA, STORE_CAMERA]);
+  assert.equal(dropMissingViews(dropped, there), dropped);
+  assert.equal(dropMissingViews(floor, new Set()), floor);
+
+  // A paste goes to the pictures only when all six hold: the editor on show, an account that may change it, a map, no dialog,
+  // the cursor in no field, nothing dragged. Any one turned, it does not.
+  const wanted = { shown: true, canManage: true, hasMap: true, dialog: false, text: false, dragging: false };
+  assert.equal(mapImagePasteWanted(wanted), true);
+  for (const key of Object.keys(wanted) as (keyof typeof wanted)[]) assert.equal(mapImagePasteWanted({ ...wanted, [key]: !wanted[key] }), false, key);
+  // The cursor in a field alone is in the way: asked again without it, it would go (the line of K18 tells why it did not).
+  // With a dialog open, or another tab on show, as well: not even then.
+  const inField = { ...wanted, text: true };
+  assert.equal(mapImagePasteWanted(inField), false);
+  assert.equal(mapImagePasteWanted({ ...inField, text: false }), true);
+  for (const also of [{ dialog: true }, { shown: false }]) assert.equal(mapImagePasteWanted({ ...inField, ...also, text: false }), false, Object.keys(also)[0]);
 });

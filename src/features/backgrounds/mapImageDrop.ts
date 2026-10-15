@@ -18,6 +18,7 @@ export type MapImageTarget =
 export type MapImageOpenTarget = Exclude<MapImageTarget, { status: 'blocked' }>;
 
 type Space = Extract<BackgroundNode, { type: 'space' }>;
+type Camera = Extract<BackgroundNode, { type: 'camera' }>;
 /** The first `limit` UTF-16 units of a text, never half a character: a character of two units that the cut would part is left out whole. */
 function cut(text: string, limit: number): string {
   if (text.length <= limit) return text;
@@ -190,8 +191,74 @@ export type MapImagePlan = { mapId: string; scope: MapImageScope; targetName: st
   items: { index: number; viewId: string; name: string }[]; reused: string[]; reusedNames: string[]; refused: { index: number; name: string; reason: MapImageRefusal }[]; over: number };
 /** What a batch ties to the map, and stands on: the place of its owner (`place`, `placeId`: set when the owner still holds `was`, and done already for a target that had its place), and for a camera the views. `viewIds`: the backgrounds of the batch that are in the library, reused and added. */
 export type MapImageLink = { place: { nodeId: string | null; was: string | null }; placeId: string; cameraId: string | null; viewIds: readonly string[] };
+/** `library`: what is there to be tied. A background that is gone is left out and a place that is gone is not set: `complete` is false then. */
+export function linkMapImages(map: BackgroundMap, link: MapImageLink, library: Pick<BackgroundSnapshot, 'places' | 'views'>): { map: BackgroundMap; complete: boolean } {
+  let next = map, complete = true;
+  // The place first, of the map itself or of the space that holds it. Held already, it is done (a locked space too). Else it is set
+  // only where the owner holds what it held when the target was read, and a space is not locked: a place tied there since, to a
+  // space or to the map, is not written over.
+  const owner = link.place.nodeId === null ? null : map.nodes.find((node): node is Space => node.type === 'space' && node.id === link.place.nodeId);
+  const holds = owner === null ? map.placeId : owner?.placeId;
+  if (owner === undefined || !library.places.some(place => place.id === link.placeId)) complete = false;
+  else if (holds !== link.placeId) {
+    if (holds !== link.place.was || owner?.locked) complete = false;
+    else next = owner ? { ...map, nodes: map.nodes.map(node => node === owner ? { ...owner, placeId: link.placeId } : node) } : { ...map, placeId: link.placeId };
+  }
+  // Then the views of a camera, on what that made: those the library has, once each, after the ones it holds, in the order given,
+  // up to the 1000 a camera may hold. With none to add it is done, locked or not.
+  if (link.cameraId !== null && link.viewIds.length) {
+    const asked = [...new Set(link.viewIds)], known = asked.filter(id => library.views.some(view => view.id === id));
+    const camera = next.nodes.find((node): node is Camera => node.type === 'camera' && node.id === link.cameraId);
+    const add = camera ? known.filter(id => !camera.viewIds.includes(id)) : [];
+    const put = camera && !camera.locked ? add.slice(0, Math.max(0, MAP_IMAGE_ADD.viewLimit - camera.viewIds.length)) : [];
+    if (known.length < asked.length || !camera || put.length < add.length) complete = false;
+    if (camera && put.length) next = { ...next, nodes: next.nodes.map(node => node === camera ? { ...camera, viewIds: [...camera.viewIds, ...put] } : node) };
+  }
+  return { map: next, complete };
+}
+/** Where a link stands now. 'gone': every background it named has been deleted since. Else the saved map holds it ('kept'), only the map on show does ('draft'), or neither ('undone': taken back, discarded, changed since). */
+export function mapImageLinkNow(saved: BackgroundMap | undefined, shown: BackgroundMap | undefined, link: MapImageLink, library: Pick<BackgroundSnapshot, 'places' | 'views'>): 'kept' | 'draft' | 'undone' | 'gone' {
+  const left = link.viewIds.filter(id => library.views.some(view => view.id === id));
+  if (link.viewIds.length && !left.length) return 'gone';
+  // A picture deleted since is not counted: a draft lets go of it (8.5). Held: tying the rest again would change nothing, and all of it is there.
+  const rest = { ...link, viewIds: left }, holds = (map: BackgroundMap | undefined) => {
+    const tied = map && linkMapImages(map, rest, library);
+    return !!tied && tied.map === map && tied.complete;
+  };
+  return holds(saved) ? 'kept' : holds(shown) ? 'draft' : 'undone';
+}
+/** There is something to tie: a background of the batch is in the library, or a place was asked for and is there. */
+export function mapImageLinkWanted(link: MapImageLink, library: Pick<BackgroundSnapshot, 'places'>): boolean {
+  return link.viewIds.length > 0 || (link.place.was !== link.placeId && library.places.some(place => place.id === link.placeId));
+}
+/** The draft ties what the saved map does not: a place of the map or of a space other than the saved one, a view a camera does not
+ *  hold there (a space or a camera drawn since, with what it holds; with no saved map, every tie). Ties undone alone add nothing. */
+export function mapLinksAdded(saved: BackgroundMap | undefined, draft: BackgroundMap): boolean {
+  if (draft.placeId !== null && draft.placeId !== saved?.placeId) return true;
+  const was = new Map(saved?.nodes.map(node => [node.id, node] as const));
+  return draft.nodes.some(node => {
+    const before = was.get(node.id);
+    return node.type === 'space' ? node.placeId !== null && (before?.type !== 'space' || before.placeId !== node.placeId)
+      : node.type === 'camera' && node.viewIds.some(id => before?.type !== 'camera' || !before.viewIds.includes(id));
+  });
+}
+/** A camera lets go of the views `views` does not have (a background deleted since); the others stay in their order. Nothing to take off: the map itself. */
+export function dropMissingViews(map: BackgroundMap, views: ReadonlySet<string>): BackgroundMap {
+  const loose = (node: BackgroundNode) => node.type === 'camera' && node.viewIds.some(id => !views.has(id));
+  return map.nodes.some(loose) ? { ...map, nodes: map.nodes.map(node => node.type === 'camera' && loose(node) ? { ...node, viewIds: node.viewIds.filter(id => views.has(id)) } : node) } : map;
+}
+/** A paste is for the pictures (4.3) only when all six hold: the editor on show, to an account that may change it, with a map, no dialog open, the cursor in no field, nothing dragged. */
+export function mapImagePasteWanted(facts: { shown: boolean; canManage: boolean; hasMap: boolean; dialog: boolean; text: boolean; dragging: boolean }): boolean {
+  return facts.shown && facts.canManage && facts.hasMap && !facts.dialog && !facts.text && !facts.dragging;
+}
 /** `link`: how what was to be tied to the map went. 'none': nothing was to be tied, or it is there and saved already. 'draft' | 'saved': it is the draft's (put there now, or since the last save), or was saved at once (`partial`: only some of it could be).
  *  'kept' | 'undone' | 'gone': it was the draft's and was saved with it since, or is there no longer; or the pictures themselves were deleted (only mapImageOutcomeNow says these). 'missed': none of it could be tied. 'failed': the save of the map was refused (`linkCause`).
  *  `reusedName`: the name of the first background that was there already. `failed`: how many pictures are in the list of those that did not go in. `byPath`: the batch came from a file copied in Explorer. */
 export type MapImageOutcome = { scope: MapImageScope; targetName: string; placeName: string; added: number; reused: number; reusedName?: string; failed: number; over: number; byPath?: boolean;
   link: 'none' | 'draft' | 'saved' | 'kept' | 'undone' | 'gone' | 'missed' | 'failed'; partial?: boolean; linkCause?: string };
+/** A batch that ended, as it stands now. Every background it put in has been deleted since: 'gone', whatever its link was. Its link was the draft's, whole ('draft' and not `partial`): where that link is now (mapImageLinkNow). Anything else: the outcome itself, as it ended. */
+export function mapImageOutcomeNow(outcome: MapImageOutcome, link: MapImageLink, saved: BackgroundMap | undefined, shown: BackgroundMap | undefined, library: Pick<BackgroundSnapshot, 'places' | 'views'>): MapImageOutcome {
+  const now = mapImageLinkNow(saved, shown, link, library);
+  if (now === 'gone') return { ...outcome, link: 'gone' };
+  return outcome.link === 'draft' && !outcome.partial ? { ...outcome, link: now } : outcome;
+}
