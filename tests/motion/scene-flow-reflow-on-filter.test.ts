@@ -407,7 +407,13 @@ test('캐릭터 카드: 놓는 순간(순서 바꾸기 직전)에만 미끄러�
   assert.ok(drop.indexOf('cardFlipArmedUntilRef.current =') < drop.indexOf('void reorderCharacters('));
   assert.match(board, /disabled: reduceMotion \|\| Date\.now\(\) > cardFlipArmedUntilRef\.current,\n {4}maxItems: CARD_DROP_FLIP\.maxItems,/);
   const groups = read('src/components/characters/CharacterTabGroupsView.tsx');
-  assert.equal((groups.match(/cardFlipArmedUntilRef\.current = Date\.now\(\) \+ CARD_DROP_FLIP\.armMs;/g) ?? []).length, 2, '그룹에 놓기·카드에 놓기');
+  // v1.138.0: 그룹에 놓기·카드에 놓기가 applyCardDrop 한 곳으로 모였다 — 바뀔 게 있을 때만, 바꾸기 직전에 켠다.
+  assert.equal((groups.match(/cardFlipArmedUntilRef\.current = Date\.now\(\) \+ CARD_DROP_FLIP\.armMs;/g) ?? []).length, 1, '놓기 처리 한 곳');
+  const apply = groups.slice(groups.indexOf('const applyCardDrop = '), groups.indexOf('const dropOnGroup = '));
+  assert.ok(apply.indexOf('if (!next) return;') >= 0 && apply.indexOf('if (!next) return;') < apply.indexOf('cardFlipArmedUntilRef.current ='), '무변경 놓기는 켜지 않는다');
+  assert.ok(apply.indexOf('cardFlipArmedUntilRef.current =') < apply.indexOf('onUpdateGroups(next)'), '바꾸기 직전에 켠다');
+  assert.match(groups, /const dropOnGroup = \(groupId: string \| null\) => applyCardDrop\(groupId, null\);/);
+  assert.match(groups, /const dropOnCard = \(groupId: string \| null, targetId: string\) => applyCardDrop\(groupId, targetId\);/);
   assert.match(read('src/components/characters/CharacterCard.tsx'), /data-flip-id=\{character\.id\}/);
 });
 
