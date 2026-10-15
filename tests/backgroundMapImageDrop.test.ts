@@ -638,6 +638,9 @@ test('M-5b: the plan — the tie it stands on, the index of each picture, its na
   const sorted = planMapImageAdd(library, openTarget(floor, CLASSROOM), null, mixed, AT, counter());
   assert.deepEqual(sorted.items.map(item => [item.index, item.name]), [[1, 'a'], [3, 'b']]);
   assert.deepEqual([sorted.refused, sorted.over], [[{ index: 0, name: '스케치.psd', reason: 'type' }], 0]);
+  // Refused after a picture that is taken: still its place in that list, not its place among the refused.
+  assert.deepEqual(planMapImageAdd(library, openTarget(floor, CLASSROOM), null, [pageFile('a.png', 'image/png'), pageFile('스케치.psd', ''), pageFile('b.png', 'image/png')], AT, counter()).refused,
+    [{ index: 1, name: '스케치.psd', reason: 'type' }]);
   const twelve = planMapImageAdd(library, openTarget(floor, CLASSROOM), null, Array.from({ length: 12 }, (_, n) => pageFile(`사진 ${n}.png`, 'image/png')), AT, counter());
   assert.deepEqual([twelve.items.length, twelve.refused, twelve.over], [10, [], 2]);
   // One name each within a batch: the second 교실, from another folder, and the second picture pasted in that minute are numbered.
@@ -909,19 +912,32 @@ test('M-8: the same source is reused, not made again', () => {
     id: uid(0xb0 + n), revision: 1, name, placeId, cameraPlaceId: null, visiblePlaceIds: [], relatedPlaceIds: [], shot: 'wide', tags: [], memo: '',
     variants: [{ id: uid(0xb100 + n), name: '낮', time: 'day', activeRevisionId: uid(0xb200 + n * 0x10), revisions: pictures.map((picture, k) => ({ id: uid(0xb200 + n * 0x10 + k), imageUrl: '',
       filePath: picture.filePath ?? '', ...(picture.source === undefined ? {} : { sourceImagePath: picture.source }), createdAt: CREATED })) }] });
-  // The first background of that place with the path for the source of one of its pictures, in any revision, compared as two paths
-  // are (their spaces aside, either slash, any case). Not by the old work file, not in another place, and never for no path.
+  /** As `there`, of one picture from `day`, with a second variant, 밤, of one picture from `night`: put in by day and by night, as 배경 등록 may. */
+  const dayAndNight = (n: number, placeId: string, name: string, day: string, night: string): BackgroundView => {
+    const view = there(n, placeId, name, { source: day });
+    return { ...view, variants: [...view.variants, { id: uid(0xb180 + n), name: '밤', time: 'night', activeRevisionId: uid(0xb300 + n),
+      revisions: [{ id: uid(0xb300 + n), imageUrl: '', filePath: '', sourceImagePath: night, createdAt: CREATED }] }] };
+  };
+  /** A background of 학교 shot from 2-1 교실, which it shows and is related to: tied to 2-1 교실 every way but by its own place. */
+  const aside: BackgroundView = { ...there(7, SCHOOL, 'b', { source: 'C:\\old\\b.png' }), cameraPlaceId: CLASS, visiblePlaceIds: [CLASS], relatedPlaceIds: [CLASS] };
+  // The first background of that place with the path for the source of one of its pictures, in any revision of any variant,
+  // compared as two paths are (their spaces aside, either slash, any case). Not by the old work file, not in another place (a
+  // background is of its own place alone, whatever else it is tied to), and never for no path.
   const sources = lib({ views: [
     there(1, SCHOOL, '교실', { source: 'C:\\art\\교실.png' }),
     there(2, CLASS, '옛 교실', { filePath: 'C:\\art\\교실.png' }),
     there(3, CLASS, '빈 경로', { source: '' }),
     there(4, CLASS, '교실 전경', { source: 'C:\\art\\교실_v1.png' }, { source: ' c:/ART/교실.PNG ' }),
     there(5, CLASS, '교실 전경 2', { source: 'C:\\art\\교실.png' }),
+    aside,
+    dayAndNight(8, CLASS, '낮밤', 'C:\\art\\낮.png', 'C:\\art\\밤.png'),
   ] });
   const found = (placeId: string, path: string) => findSameSourceView(sources, placeId, path)?.name;
   assert.equal(found(CLASS, 'C:\\art\\교실.png'), '교실 전경');
   assert.equal(found(CLASS, 'c:/art/교실_V1.png'), '교실 전경');
   assert.equal(found(SCHOOL, 'C:\\art\\교실.png'), '교실');
+  assert.deepEqual([found(CLASS, 'C:\\art\\낮.png'), found(CLASS, 'c:/ART/밤.PNG')], ['낮밤', '낮밤']);
+  assert.deepEqual([found(SCHOOL, 'C:\\old\\b.png'), found(CLASS, 'C:\\old\\b.png')], ['b', undefined]);
   for (const path of ['', '   ', 'C:\\art\\복도.jpg']) assert.equal(found(CLASS, path), undefined, JSON.stringify(path));
   // Two files of one background, two of its revisions: it is used again once, and nothing is made.
   const revised = planMapImageAdd(sources, openTarget(floor, CLASSROOM, sources), null,
@@ -946,8 +962,9 @@ test('M-8: the same source is reused, not made again', () => {
   const legacy = lib({ views: [there(2, CLASS, '교실', { filePath: 'C:\\art\\교실.png' })] });
   const anew = planMapImageAdd(legacy, openTarget(floor, CLASSROOM, legacy), null, [PICTURES[0]], AT, newId);
   assert.deepEqual([anew.reused, anew.items.map(item => item.name)], [[], ['교실 (2)']]);
-  // A name taken in that place is numbered, and the next one by the picture before it as well; one of another place is not.
-  const takenNames = lib({ views: [there(6, CLASS, 'a', { source: 'C:\\old\\a.png' }), there(7, SCHOOL, 'b', { source: 'C:\\old\\b.png' })] });
+  // A name taken in that place is numbered, and the next one by the picture before it as well; one of another place is not,
+  // however that background is tied to this place.
+  const takenNames = lib({ views: [there(6, CLASS, 'a', { source: 'C:\\old\\a.png' }), aside] });
   const files = [pageFile('a.png', 'image/png', { path: 'C:\\x\\a.png' }), pageFile('a.png', 'image/png', { path: 'C:\\y\\a.png' }), pageFile('b.png', 'image/png', { path: 'C:\\x\\b.png' })];
   assert.deepEqual(planMapImageAdd(takenNames, openTarget(floor, CLASSROOM, takenNames), null, files, AT, newId).items.map(item => item.name), ['a (2)', 'a (3)', 'b']);
 
@@ -958,8 +975,11 @@ test('M-8: the same source is reused, not made again', () => {
   assert.deepEqual(resolve(floor, STORE, stored), { ...toSpace(FLOOR, STORE, '창고'), status: 'needs-place', placeNodeId: STORE, placeWas: null, ownerKind: 'space', ownerName: '창고',
     suggestedName: '창고', parentPlaceId: SCHOOL, sameNamePlaceId: placeId });
   const refilled = planMapImageAdd(stored, openTarget(floor, STORE, stored), { kind: 'existing', placeId }, PICTURES, AT, newId);
-  assert.deepEqual([refilled.newPlace, refilled.placeId, refilled.reused, refilled.items.map(item => [item.index, item.name])],
-    [null, placeId, store.items.slice(0, 2).map(item => item.viewId), [[2, '붙여 넣은 그림 14:05 (2)']]]);
+  assert.deepEqual([refilled.newPlace, refilled.placeId, refilled.reused, refilled.reusedNames, refilled.items.map(item => [item.index, item.name])],
+    [null, placeId, store.items.slice(0, 2).map(item => item.viewId), ['교실', '복도'], [[2, '붙여 넣은 그림 14:05 (2)']]]);
+  // In the order of the files, not of the library, and the names in the order of the backgrounds: the line names the first of them.
+  const reversed = planMapImageAdd(stored, openTarget(floor, STORE, stored), { kind: 'existing', placeId }, [PICTURES[1], PICTURES[0]], AT, newId);
+  assert.deepEqual([reversed.reused, reversed.reusedNames, reversed.items], [[store.items[1].viewId, store.items[0].viewId], ['복도', '교실'], []]);
 });
 
 test('M-9: mapLinksAdded, dropMissingViews and the six facts of a paste', () => {
