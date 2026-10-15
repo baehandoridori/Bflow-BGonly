@@ -1,3 +1,4 @@
+import { mapDeleteCauseText } from './mapDelete.ts';
 import { spacesAt } from './mapStack.ts';
 import type { BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPlace, BackgroundSnapshot, BackgroundView } from './types.ts';
 
@@ -316,3 +317,62 @@ export function mapImageOutcomeNow(outcome: MapImageOutcome, link: MapImageLink,
   if (now === 'gone') return { ...outcome, link: 'gone' };
   return outcome.link === 'draft' && !outcome.partial ? { ...outcome, link: now } : outcome;
 }
+/** What the pictures go in as, the target by the name the image list gives it: ‘2-1 교실’의 배경으로, ‘카메라 2’의 시점으로, ‘2층’ 도면의 배경으로. */
+const into = (scope: MapImageScope, name: string) => scope === 'camera' ? `${quoted(name)}의 시점으로` : scope === 'space' ? `${quoted(name)}의 배경으로` : `${quoted(name)} 도면의 배경으로`;
+/** Why a tie could not be made, whole or at all: said alike in every line that says so. */
+const MEANWHILE = '그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, 다르게 이어졌어요.';
+/** Where pictures left untied are tied by hand, by what they went to: the fields by the names the screen gives them. */
+const BY_HAND: Record<MapImageScope, string> = {
+  camera: '도면을 편집하면서 속성의 ‘시점 연결’에서 이어 줄 수 있어요.', space: '도면을 편집하면서 속성의 ‘배경 장소 연결’에서 이어 줄 수 있어요.', map: '‘도면 설정’의 ‘대표 장소’에서 이어 줄 수 있어요.',
+};
+/** The line of a batch that ended (7.4): the pieces it has, in the order of the table, a space between. Pictures all deleted since are said in
+ *  place of what was put in, what was there already and the tie. */
+export function mapImageSummary(outcome: MapImageOutcome): string {
+  const { scope, added, reused, link } = outcome, pictures = added + reused > 0, made = added ? '그림은 바로 저장됐고, ' : '';
+  const lying = `그림은 배경 목록의 ${quoted(outcome.placeName)} 장소에`, cause = `까닭: ${outcome.linkCause ?? ''}`, place = `${quoted(outcome.placeName)} 장소를 도면에 이어`;
+  // The tie. With pictures, a line that leaves one untied (none of it tied, or a part) ends on where to tie it by hand. With none, the place was
+  // tied alone (a new place saved, every picture failed): it is named, and no picture is said to be anywhere.
+  const tie: Record<MapImageOutcome['link'], string> = pictures ? {
+    draft: outcome.partial ? `다만 도면에 다 이어 주지는 못했어요. ${MEANWHILE} 이어 준 만큼은 다른 편집처럼 '도면 저장' 때 함께 저장돼요. ${lying} 있어요. ${BY_HAND[scope]}`
+      : `${made}도면에 이어 준 것은 '도면 저장'을 눌러야 남아요.`,
+    saved: outcome.partial ? `다만 도면에 다 이어 주지는 못했어요. ${MEANWHILE} 이어 준 만큼은 바로 저장됐어요. ${lying} 있어요. ${BY_HAND[scope]}` : '도면에 이어 준 것까지 바로 저장됐어요.',
+    kept: `${made}도면에 이어 준 것도 '도면 저장'으로 저장됐어요.`, undone: `도면에 이어 준 것은 그 뒤에 되돌리거나 버려서 지금은 남아 있지 않아요. ${lying} 그대로 있어요.`,
+    missed: `다만 도면에 이어 주지는 못했어요. ${MEANWHILE} ${lying} 있어요. ${BY_HAND[scope]}`, failed: `다만 도면에 이어 주지는 못했어요. ${cause} ${lying} 있어요. ${BY_HAND[scope]}`,
+    none: added ? '바로 저장됐어요.' : '', gone: '',
+  } : {
+    draft: `${place} 준 것은 '도면 저장'을 눌러야 남아요.`, saved: `${place} 준 것은 바로 저장됐어요.`, kept: `${place} 준 것은 '도면 저장'으로 저장됐어요.`,
+    undone: `${place} 준 것은 그 뒤에 되돌리거나 버려서 지금은 남아 있지 않아요.`, missed: `${place} 주지도 못했어요. ${MEANWHILE}`, failed: `${place} 주지도 못했어요. ${cause}`, none: '', gone: '',
+  };
+  return [
+    ...(link === 'gone' ? [`${into(scope, outcome.targetName)} 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요.`] : [
+      // A camera names the place its pictures went to: nothing else on screen does.
+      added ? `${into(scope, outcome.targetName)} 그림 ${added}장을 ${scope === 'camera' ? `${quoted(outcome.placeName)} 장소에 ` : ''}넣었어요.` : '',
+      // By its name in the library, which may not be that of the file: the card is found by it.
+      reused ? `이미 있는 그림 ${reused}장(${quoted(outcome.reusedName ?? '')}${reused > 1 ? ` 외 ${reused - 1}장` : ''})은 새로 만들지 않았어요. 그림을 고쳤다면 그 카드를 열어 '이미지파일 연결'로 새 수정본을 넣어 주세요.` : '',
+      pictures ? '' : '넣은 그림이 없어요.',
+    ]),
+    outcome.failed ? `${outcome.failed}장은 넣지 못했어요(아래 목록).` : '', tie[link],
+    outcome.over ? `한 번에 ${MAP_IMAGE_ADD.maxFiles}장까지예요. 나머지 ${outcome.over}장은 넣지 않았어요.` : '',
+    // The clipboard names one file alone: whether more were copied cannot be told.
+    outcome.byPath ? '탐색기에서 복사한 파일은 한 번에 한 장만 들어와요. 여러 장은 끌어다 놓아 주세요.' : '',
+  ].filter(Boolean).join(' ');
+}
+/** The line while a batch runs: what the pictures go in as and how many (made and used again), and that leaving before the end puts none of them in (13.2). */
+export const mapImageBusyText: (scope: MapImageScope, targetName: string, count: number) => string = (scope, targetName, count) =>
+  `${into(scope, targetName)} 그림 ${count}장을 넣는 중이에요. 끝나기 전에 다른 메뉴로 가면 그림이 들어가지 않아요.`;
+/** Why a picture or a tie did not go, as the delete dialog says it: never the wrapper Electron puts round what the main process throws, never English. */
+export const mapImageCauseText: (cause: unknown) => string = mapDeleteCauseText;
+/** The steps of a ghost card (7.3): the word of its mark and how far its bar is. */
+export const MAP_IMAGE_STEPS: { readonly [step in 'ready' | 'uploading' | 'waiting' | 'saving' | 'failed']: { readonly label: string; readonly part: number } } = {
+  ready: { label: '준비 중', part: 0.08 }, uploading: { label: '올리는 중', part: 0.4 }, waiting: { label: '저장 기다리는 중', part: 0.7 }, saving: { label: '저장하는 중', part: 0.9 },
+  failed: { label: '넣지 못했어요', part: 1 },
+};
+export type MapImageStep = keyof typeof MAP_IMAGE_STEPS;
+/** Under the empty list of a target, to an account that may add pictures (7.2). */
+export const MAP_IMAGE_HINT: string = '그림 파일을 이 화면에 끌어다 놓거나, 복사한 그림을 Ctrl+V로 붙여 넣어도 돼요.';
+/** A second paragraph in the question of 편집 끝내기 when the draft added ties (8.1): all three it may have added, by a batch or in the properties. */
+export const MAP_LINKS_LOST_NOTE: string = '이 도면에서 이어 둔 배경(도면의 대표 장소, 공간의 배경 장소, 카메라의 시점)도 함께 풀려요. 배경 목록의 그림은 그대로 남아요.';
+/** Ctrl+V with the cursor in a field of the editor and a picture alone on the clipboard: the field keeps its paste (K18). */
+export const MAP_IMAGE_FIELD_NOTE: string = '글자 칸에 커서가 있어서 그림을 넣지 않았어요. 넣을 공간이나 카메라를 한 번 누른 뒤(도면 전체에 넣으려면 빈 곳을 누른 뒤) 다시 붙여 넣어 주세요.';
+/** The first paste after a press on the plan that a running save did not take: it adds nothing, once (K20). */
+export const MAP_IMAGE_PRESS_NOTE: string = '저장하는 동안 도면을 누른 것은 골라지지 않았어요. 넣을 곳을 다시 누른 뒤 붙여 넣어 주세요.';

@@ -7,9 +7,10 @@ import type { MapDocumentState } from '../src/features/backgrounds/mapDocument.t
 import { selectMapBackgroundViews } from '../src/features/backgrounds/mapGallery.ts';
 import { spacesAt } from '../src/features/backgrounds/mapStack.ts';
 import { saveMapChanges } from '../src/features/backgrounds/mapWorkflow.ts';
-import { MAP_IMAGE_REFUSAL_TEXT, buildMapImageView, dropMissingViews, findSameSourceView, linkMapImages, mapImageBaseName, mapImageDragRefused, mapImageLinkNow, mapImageLinkWanted, mapImageOutcomeNow,
-  mapImagePasteWanted, mapImagePathFacts, mapImagePlaceWords, mapImageRefusedList, mapImageSaves, mapImageSourceFacts, mapImageTargetWords, mapLinksAdded, planMapImageAdd, resolveMapImageTarget,
-  sortMapImageFiles, uniqueMapImageName } from '../src/features/backgrounds/mapImageDrop.ts';
+import { MAP_IMAGE_ADD, MAP_IMAGE_DEFAULTS, MAP_IMAGE_FIELD_NOTE, MAP_IMAGE_HINT, MAP_IMAGE_PRESS_NOTE, MAP_IMAGE_REFUSAL_TEXT, MAP_IMAGE_STEPS, MAP_LINKS_LOST_NOTE, buildMapImageView,
+  dropMissingViews, findSameSourceView, linkMapImages, mapImageBaseName, mapImageBusyText, mapImageCauseText, mapImageDragRefused, mapImageLinkNow, mapImageLinkWanted, mapImageOutcomeNow,
+  mapImagePasteWanted, mapImagePathFacts, mapImagePlaceWords, mapImageRefusedList, mapImageSaves, mapImageSourceFacts, mapImageSummary, mapImageTargetWords, mapLinksAdded, planMapImageAdd,
+  resolveMapImageTarget, sortMapImageFiles, uniqueMapImageName } from '../src/features/backgrounds/mapImageDrop.ts';
 import type { MapImageFileFacts, MapImageLink, MapImageOpenTarget, MapImageOutcome, MapImagePlaceChoice, MapImagePlan, MapImageTarget } from '../src/features/backgrounds/mapImageDrop.ts';
 
 // Pictures added to a map by a drop, a paste or the picker: the rules and the words of the pure module, asked of the real
@@ -1038,4 +1039,155 @@ test('M-9: mapLinksAdded, dropMissingViews and the six facts of a paste', () => 
   assert.equal(mapImagePasteWanted(inField), false);
   assert.equal(mapImagePasteWanted({ ...inField, text: false }), true);
   for (const also of [{ dialog: true }, { shown: false }]) assert.equal(mapImagePasteWanted({ ...inField, ...also, text: false }), false, Object.keys(also)[0]);
+});
+
+/** Every line the two tests below made, the busy lines too: M-10b reads them all for the words of edit mode. */
+const lines: string[] = [];
+/** A batch that ended, as its line reads it: by default three pictures put in for 카메라 2 at the place 2-1 교실, saved, nothing to tie and
+ *  nothing else to say. The names are those of the table of 7.4. */
+const batch = (more: Partial<MapImageOutcome> = {}): MapImageOutcome =>
+  freeze({ scope: 'camera', targetName: '카메라 2', placeName: '2-1 교실', added: 3, reused: 0, failed: 0, over: 0, link: 'none', ...more });
+/** The line of that batch, kept for M-10b. */
+const lineOf = (more: Partial<MapImageOutcome> = {}) => {
+  const line = mapImageSummary(batch(more));
+  lines.push(line);
+  return line;
+};
+/** The reason a refused tie comes with, in plain words already. */
+const CAUSE = '서버에서 답을 받지 못했어요. 인터넷 연결을 확인해 주세요.';
+/** The three targets of the table: the camera, the space 2-1 교실 and the map 2층. The place stays 2-1 교실. */
+const AIMS = { camera: { scope: 'camera', targetName: '카메라 2' }, space: { scope: 'space', targetName: '2-1 교실' }, map: { scope: 'map', targetName: '2층' } } as const;
+
+test('M-10a: every piece of the line of a batch, in the order of the table', () => {
+  // 넣음: what the pictures went in as and how many; for a camera the place they went to as well, as nothing else on screen says it.
+  assert.equal(lineOf(AIMS.space), '‘2-1 교실’의 배경으로 그림 3장을 넣었어요. 바로 저장됐어요.');
+  assert.equal(lineOf(AIMS.camera), '‘카메라 2’의 시점으로 그림 3장을 ‘2-1 교실’ 장소에 넣었어요. 바로 저장됐어요.');
+  assert.equal(lineOf(AIMS.map), '‘2층’ 도면의 배경으로 그림 3장을 넣었어요. 바로 저장됐어요.');
+  // 이미 있음: one there already by its name in the library, several by the first and how many more; then where a picture changed since goes.
+  const reusedOne = "이미 있는 그림 1장(‘교실 전경’)은 새로 만들지 않았어요. 그림을 고쳤다면 그 카드를 열어 '이미지파일 연결'로 새 수정본을 넣어 주세요.";
+  assert.equal(lineOf({ added: 0, reused: 1, reusedName: '교실 전경' }), reusedOne);
+  assert.equal(lineOf({ added: 0, reused: 3, reusedName: '교실 전경' }), "이미 있는 그림 3장(‘교실 전경’ 외 2장)은 새로 만들지 않았어요. 그림을 고쳤다면 그 카드를 열어 '이미지파일 연결'로 새 수정본을 넣어 주세요.");
+  // 없음: none put in and none there already.
+  assert.equal(lineOf({ added: 0 }), '넣은 그림이 없어요.');
+  // 지워짐: every picture deleted since. Said in place of what was put in, what was there already and the tie; what did not go in, what was
+  // over and the copied file are said still, each in its place.
+  const gone = { added: 2, reused: 1, reusedName: '교실 전경', link: 'gone' } as const;
+  assert.equal(lineOf({ ...gone, ...AIMS.space }), '‘2-1 교실’의 배경으로 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요.');
+  assert.equal(lineOf(gone), '‘카메라 2’의 시점으로 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요.');
+  assert.equal(lineOf({ ...gone, ...AIMS.map }), '‘2층’ 도면의 배경으로 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요.');
+  assert.equal(lineOf({ ...gone, failed: 1, over: 2, byPath: true }), '‘카메라 2’의 시점으로 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요. 1장은 넣지 못했어요(아래 목록). '
+    + '한 번에 10장까지예요. 나머지 2장은 넣지 않았어요. 탐색기에서 복사한 파일은 한 번에 한 장만 들어와요. 여러 장은 끌어다 놓아 주세요.');
+  // 넣지 못함: how many are in the list below, said in the line too (that list may have to be scrolled to).
+  const put = '‘카메라 2’의 시점으로 그림 3장을 ‘2-1 교실’ 장소에 넣었어요.';
+  assert.equal(lineOf({ failed: 2 }), `${put} 2장은 넣지 못했어요(아래 목록). 바로 저장됐어요.`);
+
+  // 이어 주기, with pictures: how the tie went. Where it could not be made, all of it or a part, the line ends on where to tie them by hand.
+  const byCamera = '도면을 편집하면서 속성의 ‘시점 연결’에서 이어 줄 수 있어요.';
+  const tied: [string, Partial<MapImageOutcome>, string][] = [
+    ['draft', { link: 'draft' }, `${put} 그림은 바로 저장됐고, 도면에 이어 준 것은 '도면 저장'을 눌러야 남아요.`],
+    ['draft, one used again alone', { added: 0, reused: 1, reusedName: '교실 전경', link: 'draft' }, `${reusedOne} 도면에 이어 준 것은 '도면 저장'을 눌러야 남아요.`],
+    ['draft, partial', { link: 'draft', partial: true }, `${put} 다만 도면에 다 이어 주지는 못했어요. 그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, 다르게 이어졌어요. `
+      + `이어 준 만큼은 다른 편집처럼 '도면 저장' 때 함께 저장돼요. 그림은 배경 목록의 ‘2-1 교실’ 장소에 있어요. ${byCamera}`],
+    ['saved', { link: 'saved' }, `${put} 도면에 이어 준 것까지 바로 저장됐어요.`],
+    ['saved, partial', { link: 'saved', partial: true }, `${put} 다만 도면에 다 이어 주지는 못했어요. 그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, 다르게 이어졌어요. `
+      + `이어 준 만큼은 바로 저장됐어요. 그림은 배경 목록의 ‘2-1 교실’ 장소에 있어요. ${byCamera}`],
+    ['kept', { link: 'kept' }, `${put} 그림은 바로 저장됐고, 도면에 이어 준 것도 '도면 저장'으로 저장됐어요.`],
+    ['kept, one used again alone', { added: 0, reused: 1, reusedName: '교실 전경', link: 'kept' }, `${reusedOne} 도면에 이어 준 것도 '도면 저장'으로 저장됐어요.`],
+    ['undone', { link: 'undone' }, `${put} 도면에 이어 준 것은 그 뒤에 되돌리거나 버려서 지금은 남아 있지 않아요. 그림은 배경 목록의 ‘2-1 교실’ 장소에 그대로 있어요.`],
+    ['missed', { link: 'missed' }, `${put} 다만 도면에 이어 주지는 못했어요. 그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, 다르게 이어졌어요. `
+      + `그림은 배경 목록의 ‘2-1 교실’ 장소에 있어요. ${byCamera}`],
+    // The reason after 까닭:, a whole sentence as it comes, in no brackets.
+    ['failed', { link: 'failed', linkCause: CAUSE }, `${put} 다만 도면에 이어 주지는 못했어요. 까닭: 서버에서 답을 받지 못했어요. 인터넷 연결을 확인해 주세요. `
+      + `그림은 배경 목록의 ‘2-1 교실’ 장소에 있어요. ${byCamera}`],
+    // Nothing to tie, or all of it tied and saved before: saved at once, said only where pictures were made now.
+    ['none', { link: 'none' }, `${put} 바로 저장됐어요.`],
+    ['none, one used again alone', { added: 0, reused: 1, reusedName: '교실 전경', link: 'none' }, reusedOne],
+  ];
+  for (const [row, more, expected] of tied) assert.equal(lineOf(more), expected, row);
+  // One used again alone, the tie in the draft: no picture was made now, so none is said to be saved at once.
+  assert.doesNotMatch(lineOf({ added: 0, reused: 1, reusedName: '교실 전경', link: 'draft' }), /그림은 바로 저장됐고/);
+  // The way to tie by hand is by what the pictures went to, by the names the screen gives the fields: at the end of the four lines that leave a
+  // picture untied, and of no other.
+  const byHand = { camera: byCamera, space: '도면을 편집하면서 속성의 ‘배경 장소 연결’에서 이어 줄 수 있어요.', map: '‘도면 설정’의 ‘대표 장소’에서 이어 줄 수 있어요.' } as const;
+  assert.equal(lineOf({ ...AIMS.space, link: 'missed' }), '‘2-1 교실’의 배경으로 그림 3장을 넣었어요. 다만 도면에 이어 주지는 못했어요. 그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, '
+    + '다르게 이어졌어요. 그림은 배경 목록의 ‘2-1 교실’ 장소에 있어요. 도면을 편집하면서 속성의 ‘배경 장소 연결’에서 이어 줄 수 있어요.');
+  assert.equal(lineOf({ ...AIMS.map, link: 'missed' }), '‘2층’ 도면의 배경으로 그림 3장을 넣었어요. 다만 도면에 이어 주지는 못했어요. 그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, '
+    + '다르게 이어졌어요. 그림은 배경 목록의 ‘2-1 교실’ 장소에 있어요. ‘도면 설정’의 ‘대표 장소’에서 이어 줄 수 있어요.');
+  for (const aim of Object.keys(AIMS) as (keyof typeof AIMS)[]) {
+    for (const untied of [{ link: 'missed' }, { link: 'failed', linkCause: CAUSE }, { link: 'draft', partial: true }, { link: 'saved', partial: true }] as const) {
+      const line = lineOf({ ...AIMS[aim], ...untied });
+      assert.ok(line.endsWith(` ${byHand[aim]}`), `${aim}, ${untied.link}: ${line}`);
+      assert.equal(line.split('이어 줄 수 있어요').length, 2, `${aim}, ${untied.link}: ${line}`);
+    }
+    for (const link of ['none', 'draft', 'saved', 'kept', 'undone', 'gone'] as const) assert.doesNotMatch(lineOf({ ...AIMS[aim], link }), /이어 줄 수 있어요/, `${aim}, ${link}`);
+  }
+
+  // 이어 주기, no picture put in: a new place was saved and every picture failed, so the place alone was tied. The line names that place, never
+  // says the pictures are anywhere, and has no way to tie by hand (the table gives these rows none). A camera standing in 창고 says the same.
+  const placeAlone = { ...AIMS.space, targetName: '창고', placeName: '창고', added: 0, failed: 3, linkCause: CAUSE } as const, lead = '넣은 그림이 없어요. 3장은 넣지 못했어요(아래 목록).';
+  const placed: [MapImageOutcome['link'], string][] = [
+    ['draft', `${lead} ‘창고’ 장소를 도면에 이어 준 것은 '도면 저장'을 눌러야 남아요.`],
+    ['saved', `${lead} ‘창고’ 장소를 도면에 이어 준 것은 바로 저장됐어요.`],
+    ['kept', `${lead} ‘창고’ 장소를 도면에 이어 준 것은 '도면 저장'으로 저장됐어요.`],
+    ['undone', `${lead} ‘창고’ 장소를 도면에 이어 준 것은 그 뒤에 되돌리거나 버려서 지금은 남아 있지 않아요.`],
+    ['missed', `${lead} ‘창고’ 장소를 도면에 이어 주지도 못했어요. 그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, 다르게 이어졌어요.`],
+    ['failed', `${lead} ‘창고’ 장소를 도면에 이어 주지도 못했어요. 까닭: 서버에서 답을 받지 못했어요. 인터넷 연결을 확인해 주세요.`],
+  ];
+  for (const [link, expected] of placed) {
+    assert.equal(lineOf({ ...placeAlone, link }), expected, link);
+    assert.equal(lineOf({ ...placeAlone, ...AIMS.camera, link }), expected, `${link}, a camera`);
+  }
+  // Nothing tied: the new place itself could not be saved.
+  assert.equal(lineOf({ ...placeAlone, link: 'none' }), lead);
+
+  // 넘침: ten at a time, and how many more were not put in. 복사한 파일: one at a time from a file copied in Explorer, as far as can be told.
+  assert.equal(lineOf({ over: 2 }), `${put} 바로 저장됐어요. 한 번에 10장까지예요. 나머지 2장은 넣지 않았어요.`);
+  assert.equal(lineOf({ added: 1, byPath: true }), '‘카메라 2’의 시점으로 그림 1장을 ‘2-1 교실’ 장소에 넣었어요. 바로 저장됐어요. 탐색기에서 복사한 파일은 한 번에 한 장만 들어와요. 여러 장은 끌어다 놓아 주세요.');
+  // Every piece in one line, in the order of the table.
+  assert.equal(lineOf({ added: 2, reused: 1, reusedName: '교실 전경', failed: 1, over: 2, link: 'draft' }),
+    "‘카메라 2’의 시점으로 그림 2장을 ‘2-1 교실’ 장소에 넣었어요. 이미 있는 그림 1장(‘교실 전경’)은 새로 만들지 않았어요. 그림을 고쳤다면 그 카드를 열어 '이미지파일 연결'로 새 수정본을 넣어 주세요. "
+    + "1장은 넣지 못했어요(아래 목록). 그림은 바로 저장됐고, 도면에 이어 준 것은 '도면 저장'을 눌러야 남아요. 한 번에 10장까지예요. 나머지 2장은 넣지 않았어요.");
+  // With pictures, a tie that failed, was missed or undone since, or whose pictures are gone reads as nothing saved at once: never as if all of it were.
+  for (const link of ['failed', 'missed', 'undone', 'gone'] as const) for (const more of [{}, { added: 0, reused: 1, reusedName: '교실 전경' }])
+    assert.doesNotMatch(lineOf({ ...more, link, linkCause: CAUSE }), /바로 저장/, link);
+});
+
+test('M-10b: the busy line, the reason of a failure, the fixed sentences and the constants', () => {
+  // While a batch runs: what the pictures go in as and how many (made and used again), then that they go in only if the menu is not left first.
+  const busy = [mapImageBusyText('space', '2-1 교실', 3), mapImageBusyText('camera', '카메라 2', 3), mapImageBusyText('map', '2층', 3)];
+  assert.deepEqual(busy, [
+    '‘2-1 교실’의 배경으로 그림 3장을 넣는 중이에요. 끝나기 전에 다른 메뉴로 가면 그림이 들어가지 않아요.',
+    '‘카메라 2’의 시점으로 그림 3장을 넣는 중이에요. 끝나기 전에 다른 메뉴로 가면 그림이 들어가지 않아요.',
+    '‘2층’ 도면의 배경으로 그림 3장을 넣는 중이에요. 끝나기 전에 다른 메뉴로 가면 그림이 들어가지 않아요.',
+  ]);
+  lines.push(...busy);
+  // Why a picture or a tie failed: what the main process wrote, out of the wrapper Electron puts round it. Anything with no Korean in it is a
+  // connection that was lost.
+  assert.equal(mapImageCauseText(new Error("Error invoking remote method 'background:upload-image': Error: 배경 이미지 업로드는 관리자만 할 수 있습니다.")), '배경 이미지 업로드는 관리자만 할 수 있습니다.');
+  assert.equal(mapImageCauseText(new TypeError('Failed to fetch')), CAUSE);
+  // The sentences said as they are: the cursor in a field, a press a running save did not take, the ties a discarded draft lets go of (all three
+  // it may have added, made by a batch or in the properties: not the pictures put in), and the hint under an empty list.
+  assert.equal(MAP_IMAGE_FIELD_NOTE, '글자 칸에 커서가 있어서 그림을 넣지 않았어요. 넣을 공간이나 카메라를 한 번 누른 뒤(도면 전체에 넣으려면 빈 곳을 누른 뒤) 다시 붙여 넣어 주세요.');
+  assert.equal(MAP_IMAGE_PRESS_NOTE, '저장하는 동안 도면을 누른 것은 골라지지 않았어요. 넣을 곳을 다시 누른 뒤 붙여 넣어 주세요.');
+  assert.equal(MAP_LINKS_LOST_NOTE, '이 도면에서 이어 둔 배경(도면의 대표 장소, 공간의 배경 장소, 카메라의 시점)도 함께 풀려요. 배경 목록의 그림은 그대로 남아요.');
+  assert.match(MAP_LINKS_LOST_NOTE, /도면의 대표 장소/);
+  assert.doesNotMatch(MAP_LINKS_LOST_NOTE, /넣은 그림/);
+  assert.equal(MAP_IMAGE_HINT, '그림 파일을 이 화면에 끌어다 놓거나, 복사한 그림을 Ctrl+V로 붙여 넣어도 돼요.');
+  // The five steps of a ghost card: the word of its mark and how far its bar is.
+  assert.deepEqual(MAP_IMAGE_STEPS, { ready: { label: '준비 중', part: 0.08 }, uploading: { label: '올리는 중', part: 0.4 }, waiting: { label: '저장 기다리는 중', part: 0.7 },
+    saving: { label: '저장하는 중', part: 0.9 }, failed: { label: '넣지 못했어요', part: 1 } });
+  // What a background made here starts as, and the limits: ten at a time, 20MB each, 추가됨 for six seconds, the place prompt deaf for its first 0.4 s.
+  assert.deepEqual(MAP_IMAGE_DEFAULTS, { shot: 'wide', time: 'day', variantName: '낮' });
+  assert.deepEqual(MAP_IMAGE_ADD, { maxFiles: 10, maxBytes: 20 * 1024 * 1024, types: ['image/png', 'image/jpeg', 'image/webp'], nameLimit: 160, pathLimit: 4096, viewLimit: 1000,
+    addedMarkMs: 6000, promptGraceMs: 400 });
+
+  // Not a word of this module speaks of edit mode: its constants, every line the tests of the line made, and every line it can make — each target,
+  // each way a tie went, whole or in part, with pictures made, used again, both or none.
+  const links: MapImageOutcome['link'][] = ['none', 'draft', 'saved', 'kept', 'undone', 'gone', 'missed', 'failed'];
+  for (const aim of Object.values(AIMS)) for (const link of links) for (const partial of [false, true]) for (const [added, reused] of [[3, 0], [0, 2], [2, 1], [0, 0]])
+    lines.push(mapImageSummary(batch({ ...aim, link, partial, added, reused, reusedName: '교실 전경', failed: 1, over: 1, byPath: true, linkCause: CAUSE })));
+  const fixed = [MAP_IMAGE_HINT, MAP_LINKS_LOST_NOTE, MAP_IMAGE_FIELD_NOTE, MAP_IMAGE_PRESS_NOTE, MAP_IMAGE_DEFAULTS.variantName, ...Object.values(MAP_IMAGE_REFUSAL_TEXT),
+    ...Object.values(MAP_IMAGE_STEPS).map(step => step.label)];
+  assert.ok(lines.length > 190);
+  for (const line of [...fixed, ...lines]) assert.doesNotMatch(line, /편집 중|편집 시작/, line);
 });
