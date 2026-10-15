@@ -1077,6 +1077,8 @@ test('M-10a: every piece of the line of a batch, in the order of the table', () 
   assert.equal(lineOf({ ...gone, ...AIMS.map }), '‘2층’ 도면의 배경으로 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요.');
   assert.equal(lineOf({ ...gone, failed: 1, over: 2, byPath: true }), '‘카메라 2’의 시점으로 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요. 1장은 넣지 못했어요(아래 목록). '
     + '한 번에 10장까지예요. 나머지 2장은 넣지 않았어요. 탐색기에서 복사한 파일은 한 번에 한 장만 들어와요. 여러 장은 끌어다 놓아 주세요.');
+  // One used again alone and deleted since is gone as well: its line never sends to a card that is not there.
+  assert.equal(lineOf({ added: 0, reused: 1, reusedName: '교실 전경', link: 'gone' }), '‘카메라 2’의 시점으로 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요.');
   // 넣지 못함: how many are in the list below, said in the line too (that list may have to be scrolled to).
   const put = '‘카메라 2’의 시점으로 그림 3장을 ‘2-1 교실’ 장소에 넣었어요.';
   assert.equal(lineOf({ failed: 2 }), `${put} 2장은 넣지 못했어요(아래 목록). 바로 저장됐어요.`);
@@ -1143,6 +1145,9 @@ test('M-10a: every piece of the line of a batch, in the order of the table', () 
   // 넘침: ten at a time, and how many more were not put in. 복사한 파일: one at a time from a file copied in Explorer, as far as can be told.
   assert.equal(lineOf({ over: 2 }), `${put} 바로 저장됐어요. 한 번에 10장까지예요. 나머지 2장은 넣지 않았어요.`);
   assert.equal(lineOf({ added: 1, byPath: true }), '‘카메라 2’의 시점으로 그림 1장을 ‘2-1 교실’ 장소에 넣었어요. 바로 저장됐어요. 탐색기에서 복사한 파일은 한 번에 한 장만 들어와요. 여러 장은 끌어다 놓아 주세요.');
+  // Both are said with no picture put in too: a copied file the main process could not read, ten that all failed with two more over.
+  assert.equal(lineOf({ added: 0, failed: 1, byPath: true }), '넣은 그림이 없어요. 1장은 넣지 못했어요(아래 목록). 탐색기에서 복사한 파일은 한 번에 한 장만 들어와요. 여러 장은 끌어다 놓아 주세요.');
+  assert.equal(lineOf({ added: 0, failed: 10, over: 2 }), '넣은 그림이 없어요. 10장은 넣지 못했어요(아래 목록). 한 번에 10장까지예요. 나머지 2장은 넣지 않았어요.');
   // Every piece in one line, in the order of the table.
   assert.equal(lineOf({ added: 2, reused: 1, reusedName: '교실 전경', failed: 1, over: 2, link: 'draft' }),
     "‘카메라 2’의 시점으로 그림 2장을 ‘2-1 교실’ 장소에 넣었어요. 이미 있는 그림 1장(‘교실 전경’)은 새로 만들지 않았어요. 그림을 고쳤다면 그 카드를 열어 '이미지파일 연결'로 새 수정본을 넣어 주세요. "

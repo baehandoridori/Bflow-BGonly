@@ -28,6 +28,8 @@ function cut(text: string, limit: number): string {
 }
 /** A name inside a sentence, as the dialogs of the editor put it: between ‘ and ’, and 이름 없음 for an empty one. */
 const quoted = (name: string) => `‘${name || '이름 없음'}’`;
+/** What the pictures go in as, the target by the name the image list gives it: ‘2-1 교실’의 배경으로, ‘카메라 2’의 시점으로, ‘2층’ 도면의 배경으로. */
+const into = (scope: MapImageScope, name: string) => scope === 'camera' ? `${quoted(name)}의 시점으로` : scope === 'space' ? `${quoted(name)}의 배경으로` : `${quoted(name)} 도면의 배경으로`;
 
 /** The target is what the image list names: the selected camera, the selected space (or that of a selected symbol), else the map. The pointer never decides.
  *  `maps`: the maps as the editor shows them, a draft standing in for its saved map. Read for one thing only: which places are in use (3.2). */
@@ -95,7 +97,7 @@ export function mapImageTargetWords(target: MapImageTarget, facts: { editing: bo
   if (target.status === 'blocked') return { title: `${quoted(target.name)}에는 넣을 수 없어요`,
     detail: target.reason === 'locked-camera' ? `잠긴 카메라예요. ${UNLOCK}` : `잠겨 있어서 배경 장소를 이어 줄 수 없어요. ${UNLOCK}`, blocked: true };
   // What the pictures go in as. 도면에 추가 alone would read as the picture under the map.
-  const title = target.scope === 'camera' ? `${quoted(target.name)}의 시점으로 추가` : target.scope === 'space' ? `${quoted(target.name)}의 배경으로 추가` : `${quoted(target.name)} 도면의 배경으로 추가`;
+  const title = `${into(target.scope, target.name)} 추가`;
   if (target.status === 'needs-place') return { title, detail: '놓으면 배경 장소부터 정해요.', blocked: false };
   // A camera names the place its pictures go to: nothing else on screen does.
   if (target.scope === 'camera') return { title, blocked: false,
@@ -317,8 +319,6 @@ export function mapImageOutcomeNow(outcome: MapImageOutcome, link: MapImageLink,
   if (now === 'gone') return { ...outcome, link: 'gone' };
   return outcome.link === 'draft' && !outcome.partial ? { ...outcome, link: now } : outcome;
 }
-/** What the pictures go in as, the target by the name the image list gives it: ‘2-1 교실’의 배경으로, ‘카메라 2’의 시점으로, ‘2층’ 도면의 배경으로. */
-const into = (scope: MapImageScope, name: string) => scope === 'camera' ? `${quoted(name)}의 시점으로` : scope === 'space' ? `${quoted(name)}의 배경으로` : `${quoted(name)} 도면의 배경으로`;
 /** Why a tie could not be made, whole or at all: said alike in every line that says so. */
 const MEANWHILE = '그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, 다르게 이어졌어요.';
 /** Where pictures left untied are tied by hand, by what they went to: the fields by the names the screen gives them. */
