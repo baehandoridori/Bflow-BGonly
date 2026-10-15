@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Archive, ChevronDown, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, UserRound, X } from 'lucide-react';
+import { Archive, ArrowUpDown, ChevronDown, Plus, Image as ImageIcon, Search, Ruler, LayoutGrid, Grid3x3, List, ExternalLink, UserRound, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCharacterBoardStore } from '@/stores/useCharacterBoardStore';
 import { moveCostumeInOrder, dropEdgeFor } from '@/stores/characterBoardStoreHelpers';
@@ -23,7 +23,8 @@ import { TagPill } from '@/components/characters/TagChips';
 import { CharacterCard, EMPTY_COSTUMES } from '@/components/characters/CharacterCard';
 import { CharacterDetailModal } from '@/components/characters/CharacterDetailModal';
 import { AddCharacterModal } from '@/components/characters/AddCharacterModal';
-import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, loadPersistedTagsFolded, savePersistedTagsFolded, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
+import { loadPersistedCharacterViewMode, savePersistedCharacterViewMode, loadPersistedTagsFolded, savePersistedTagsFolded, loadPersistedCharacterSort, savePersistedCharacterSort, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
+import { sortCharactersForBoard, characterSortDirectionLabel, CHARACTER_SORT_MODE_LABELS, DEFAULT_CHARACTER_SORT, type CharacterSortMode, type CharacterSortState } from '@/utils/characterBoardSort';
 import { CharacterListRow } from '@/components/characters/CharacterListRow';
 import { IsPopupContext } from '@/components/widgets/Widget';
 import { CharacterTabGroupsView } from '@/components/characters/CharacterTabGroupsView';
@@ -52,6 +53,15 @@ const CHARACTER_STATUS_FILTER_TONES: Record<CharacterStatusFilterValue, string> 
   'in-progress': 'bg-yellow-500/20',
   done: 'bg-green-500/20',
 };
+
+/** 정렬 기준 메뉴 — 직접 정한 순서(카드 끌어 옮긴 순서)가 기본. 카드 끌어 옮기기는 이 순서에서만 된다. */
+const SORT_MODE_SUBLABELS: Record<CharacterSortMode, string> = {
+  manual: '카드를 끌어 바꿀 수 있어요',
+  created: '처음 추가한 때 기준',
+  modified: '마지막으로 고친 때 기준',
+};
+const SORT_MODE_OPTIONS: { value: CharacterSortMode; label: string; sublabel: string }[] = (['manual', 'created', 'modified'] as CharacterSortMode[])
+  .map((mode) => ({ value: mode, label: CHARACTER_SORT_MODE_LABELS[mode], sublabel: SORT_MODE_SUBLABELS[mode] }));
 
 /** 보기 방식 토글 옵션 (피드백 40). */
 const VIEW_MODE_OPTIONS: { mode: CharacterBoardViewMode; label: string; Icon: typeof LayoutGrid }[] = [
@@ -196,6 +206,7 @@ function BoardTabStrip({ tabs, activeTabId, onSelect, onAdd, onRename, onDelete 
 function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpenCostumeVersionNo, onConsumeOpen }: { onAdd: () => void; pendingOpenId?: string | null; pendingOpenCostumeId?: string; pendingOpenCostumeVersionNo?: number; onConsumeOpen?: () => void }) {
   const characters = useCharacterBoardStore((s) => s.characters);
   const byCharacter = useCharacterBoardStore((s) => s.byCharacter);
+  const imagesByCostume = useCharacterBoardStore((s) => s.imagesByCostume);
   const loaded = useCharacterBoardStore((s) => s.loaded);
   const loadError = useCharacterBoardStore((s) => s.loadError);
   const reload = useCharacterBoardStore((s) => s.load);
@@ -219,6 +230,12 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
   const changeViewMode = (mode: CharacterBoardViewMode) => {
     setViewMode(mode);
     savePersistedCharacterViewMode(mode);
+  };
+  // 정렬 기준 + 뒤집기 — 보기 방식처럼 PC 마다 마지막 선택을 기억한다.
+  const [sort, setSort] = useState<CharacterSortState>(() => loadPersistedCharacterSort() ?? DEFAULT_CHARACTER_SORT);
+  const changeSort = (next: CharacterSortState) => {
+    setSort(next);
+    savePersistedCharacterSort(next);
   };
   // 태그 필터 행 접기 — 마지막 상태를 localStorage 에 영속화.
   const [tagsFolded, setTagsFolded] = useState<boolean>(() => loadPersistedTagsFolded() ?? false);
@@ -327,10 +344,16 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
     return m;
   }, [displayHeightById]);
 
-  // 키 비교 모드에서는 실제 키 라인업이 되도록 기준 키 오름차순 정렬(미설정은 뒤로). 일반 모드는 기존 순서.
+  // 고른 정렬(직접 정한 순서면 스토어 순서 그대로). 같은 시각끼리는 직접 정한 순서를 지킨다.
+  const sortedCharacters = useMemo(
+    () => sortCharactersForBoard(filtered, sort.mode, sort.reversed, byCharacter, imagesByCostume),
+    [filtered, sort.mode, sort.reversed, byCharacter, imagesByCostume],
+  );
+
+  // 키 비교 모드에서는 실제 키 라인업이 되도록 기준 키 오름차순 정렬(미설정은 뒤로) — 같은 키·미설정끼리는 고른 정렬 순서.
   const displayCharacters = useMemo(() => {
-    if (!heightCompareMode) return filtered;
-    return filtered.slice().sort((a, b) => {
+    if (!heightCompareMode) return sortedCharacters;
+    return sortedCharacters.slice().sort((a, b) => {
       const ha = displayHeightById.get(a.id) ?? null;
       const hb = displayHeightById.get(b.id) ?? null;
       if (ha == null && hb == null) return 0;
@@ -338,10 +361,17 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
       if (hb == null) return -1;
       return ha - hb;
     });
-  }, [filtered, heightCompareMode, displayHeightById]);
+  }, [sortedCharacters, heightCompareMode, displayHeightById]);
 
-  // 삽입선 방향 계산용 순서(id 배열). 드래그 가능 화면에선 필터가 없어 displayCharacters 가 실제 재배치 순서와 상대 순서가 같다.
+  // 삽입선 방향 계산용 순서(id 배열). 드래그 가능 화면에선 필터·정렬이 없어 displayCharacters 가 실제 재배치 순서와 상대 순서가 같다.
   const cardOrderIds = useMemo(() => displayCharacters.map((c) => c.id), [displayCharacters]);
+  // 상세 창 왼쪽 목록 순서(정렬 중에만) — 필터 밖 캐릭터까지 정렬해 둔다: 창에서 '전체 보기'를 눌러도 같은 정렬로 이어진다.
+  const modalOrderIds = useMemo(
+    () => (sort.mode === 'manual'
+      ? undefined
+      : sortCharactersForBoard(visibleCharacters, sort.mode, sort.reversed, byCharacter, imagesByCostume).map((c) => c.id)),
+    [visibleCharacters, sort.mode, sort.reversed, byCharacter, imagesByCostume],
+  );
 
   const cardMenuCharacter = cardMenu ? characters.find((c) => c.id === cardMenu.characterId) ?? null : null;
   const cardMenuCostumes = cardMenuCharacter ? byCharacter.get(cardMenuCharacter.id) ?? [] : [];
@@ -390,8 +420,10 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
 
   // ─── 카드 드래그 재배치(F29) ───
   const reorderCharacters = useCharacterBoardStore((s) => s.reorderCharacters);
-  // 검색/태그 필터·키 비교·보관 목록에서는 비활성 (파생 정렬/부분 목록 위 재배치는 비직관적).
-  const cardDragEnabled = viewMode !== 'list' && !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0 && !assigneeFilter && statusFilter === 'all';
+  // 검색/태그 필터·키 비교·보관 목록·정렬 중에는 비활성 (파생 정렬/부분 목록 위 재배치는 비직관적).
+  const cardDragEnabled = sort.mode === 'manual' && viewMode !== 'list' && !showArchived && !heightCompareMode && !query.trim() && activeTags.length === 0 && !assigneeFilter && statusFilter === 'all';
+  // 사용자 탭은 정렬 중에도 그룹 사이 옮기기를 허용한다(그룹 안 순서만 정렬대로 보인다) — 필터 조건만 본다.
+  const tabDragEnabled = viewMode !== 'list' && !query.trim() && activeTags.length === 0 && !assigneeFilter && statusFilter === 'all';
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const draggingCardIdRef = useRef<string | null>(null); // drop 시 stale closure 회피 — 복장 드래그와 동일 ref 병행 패턴.
@@ -578,6 +610,36 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
               {CHARACTER_STATUS_FILTER_LABELS[f]}
             </button>
           ))}
+          {/* 정렬 — 씬 화면 정렬 메뉴와 같은 구성(메뉴 + 뒤집기). 키 비교 중에는 키 순서가 우선이라 흐리게. */}
+          <div className={cn('ml-auto flex items-center gap-1.5', heightCompareMode && 'opacity-45')}>
+            <GlassDropdown
+              options={SORT_MODE_OPTIONS}
+              value={sort.mode}
+              // 기준을 바꾸면 뒤집기는 풀린다. 이미 고른 기준을 다시 누른 건 그대로 둔다.
+              onChange={(v) => { if (v !== sort.mode) changeSort({ mode: v as CharacterSortMode, reversed: false }); }}
+              label="정렬 기준"
+              icon={<ArrowUpDown size={14} className="text-text-secondary" />}
+              minWidth={300}
+              disabled={heightCompareMode}
+              // 줄 오른쪽 끝에 있어 기본(왼쪽 맞춤) 메뉴는 창 밖으로 잘린다 — 창 안으로 맞춰 펼친다.
+              portal
+            />
+            <button
+              type="button"
+              aria-label="정렬 순서 뒤집기"
+              title={heightCompareMode
+                ? '키 비교 보기 중에는 키 순서로 나열돼요'
+                : sort.mode === 'manual'
+                  ? '직접 정한 순서는 뒤집을 수 없어요'
+                  : `${characterSortDirectionLabel(sort.mode, sort.reversed)} — 눌러서 뒤집기`}
+              disabled={heightCompareMode || sort.mode === 'manual'}
+              onClick={() => changeSort({ mode: sort.mode, reversed: !sort.reversed })}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-sm text-text-secondary transition-colors hover:bg-bg-border/50 hover:text-text-primary cursor-pointer disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
+            >
+              {/* 씬 화면과 같은 기호: ↑ 오래된 것부터 · ↓ 최근 것부터. 직접 정한 순서는 방향이 없어 ↕ 로 둔다. */}
+              {sort.mode === 'manual' ? '↕' : (sort.mode === 'created') === sort.reversed ? '↓' : '↑'}
+            </button>
+          </div>
         </div>
         {allTags.length > 0 && (
           <div>
@@ -613,11 +675,12 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
       {activeTab && !heightCompareMode && !showArchived ? (
         <CharacterTabGroupsView
           tab={activeTab}
-          characters={filtered}
+          characters={sortedCharacters}
+          sorted={sort.mode !== 'manual'}
           byCharacter={byCharacter}
           viewMode={viewMode}
           searching={Boolean(query.trim()) || activeTags.length > 0 || !!assigneeFilter || statusFilter !== 'all'}
-          dragEnabled={cardDragEnabled}
+          dragEnabled={tabDragEnabled}
           onOpen={openCharacterDetail}
           onContextMenu={openCardContextMenu}
           onUpdateGroups={(groups) => void updateTabGroups(activeTab.id, groups)}
@@ -719,6 +782,7 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
           initialCostumeId={detailRequest.costumeId}
           archivedMode={showArchived}
           filteredIds={query.trim() || activeTags.length > 0 || assigneeFilter || statusFilter !== 'all' ? filtered.map((c) => c.id) : undefined}
+          orderIds={modalOrderIds}
           onClose={() => setDetailRequest(null)}
         />
       )}

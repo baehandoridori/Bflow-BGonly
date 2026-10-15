@@ -199,6 +199,7 @@
 .bmap-view-select legend { padding:0 4px; font-size:11px; color:rgb(var(--color-text-secondary)); }
 .bmap-view-select .bmap-check { margin:4px 0 8px; }
 .bmap-danger { color:#ec8c8c!important; border-color:#ec8c8c4d!important; }
+[data-color-mode="light"] .bmap-danger { color:#ae3428!important; border-color:#ae34284d!important; }
 .bmap-selected-name { font-size:17px; font-weight:600; margin-bottom:9px; }
 .bmap-underlay-preview { width:100%; max-height:120px; object-fit:contain; border:1px solid rgb(var(--color-bg-border)); border-radius:5px; margin-bottom:8px; }
 .bmap-objects { margin-top:26px; padding-top:16px; border-top:1px solid rgb(var(--color-bg-border) / .65); }

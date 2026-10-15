@@ -2258,6 +2258,10 @@ function seedMockCharacterData(): void {
   if (localStore.__characters !== undefined) return; // 이미 시드/조작됨
 
   const now = '2026-06-10T00:00:00.000Z';
+  // 정렬(추가한 순서 / 최근 수정순) 미리보기용 — 직접 정한 순서(한솔·삐쭈·혜원)와 다르게 보이도록 시각을 엇갈리게 둔다.
+  //   추가한 순서 = 한솔(06-01)·혜원(06-03)·삐쭈(06-05) / 최근 수정순 = 삐쭈(06-09)·혜원(06-06)·한솔(06-04).
+  const charCreatedAt = ['2026-06-01T00:00:00.000Z', '2026-06-05T00:00:00.000Z', '2026-06-03T00:00:00.000Z'];
+  const costumeUpdatedAt = ['2026-06-02T00:00:00.000Z', '2026-06-04T00:00:00.000Z', '2026-06-09T00:00:00.000Z', '2026-06-06T00:00:00.000Z'];
   const chars = [
     { id: 'mock-char-1', name: '한솔', memo: '주인공' },
     { id: 'mock-char-2', name: '삐쭈', memo: null },
@@ -2266,8 +2270,9 @@ function seedMockCharacterData(): void {
     id: c.id, name: c.name, status: 'active', memo: c.memo,
     work_folder_path: 'G:\\공유 드라이브\\사우스 코리안 파크\\[]사코팍 캐릭터 세팅\\한솔',
     reference_height_px: [500, 600, 650][i] ?? null, // T2-3: 키 비교 보기 샘플
-    sort_order: i, created_at: now, updated_at: now, created_by: '1',
+    sort_order: i, created_at: charCreatedAt[i] ?? now, updated_at: charCreatedAt[i] ?? now, created_by: '1',
   }));
+  const createdAtOfChar = (characterId: string) => chars.find((c) => c.id === characterId)?.created_at ?? now;
 
   const costumes = [
     // 한솔: 교복(핸드폰 보유), 사복
@@ -2305,7 +2310,7 @@ function seedMockCharacterData(): void {
     memo: null,
     due_date: [null, '2026-07-10', null, '2026-07-06'][i] ?? null, // T2-4: 마감 배지 샘플
     height_px: i === 1 ? 700 : null, // 피드백 47: 복장 키 오버라이드 샘플(나머지는 대표 키를 따름)
-    sort_order: i, created_at: now, updated_at: now, created_by: '1',
+    sort_order: i, created_at: createdAtOfChar(c.character_id), updated_at: costumeUpdatedAt[i] ?? now, created_by: '1',
   }));
 
   // 한솔·삐쭈를 EP05 에 연결 (혜원은 미연결 → '등장 캐릭터 추가' 후보로 남김).
@@ -2331,8 +2336,8 @@ function seedMockCharacterData(): void {
     image_fit: c.image_fit,
     is_primary: true,
     sort_order: 0,
-    created_at: now,
-    updated_at: now,
+    created_at: c.created_at,
+    updated_at: c.created_at,
     created_by: '1',
   }));
 
@@ -4114,7 +4119,13 @@ export function installDevElectronAPI(): void {
     supabaseUpdateCharacter: async (id, updates) => {
       const store = (localStore.__characters as Record<string, unknown>[] | undefined) ?? [];
       const row = store.find((r) => r.id === id);
-      if (row) Object.assign(row, updates, { updated_at: new Date().toISOString() });
+      if (row) {
+        // 운영 DB 트리거(set_characters_updated_at)와 같게 — 카드 순서만 바뀌면 수정 시각을 그대로 둔다('최근 수정순' 정렬).
+        const patch = updates as Record<string, unknown>;
+        const sortOnly = patch.sort_order !== undefined && patch.sort_order !== row.sort_order
+          && Object.entries(patch).every(([key, value]) => key === 'sort_order' || key === 'updated_at' || row[key] === value);
+        Object.assign(row, updates, { updated_at: sortOnly ? row.updated_at : new Date().toISOString() });
+      }
       return row ?? { id };
     },
     supabaseDeleteCharacter: async (id) => {

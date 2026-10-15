@@ -82,6 +82,29 @@ export function moveGroupBefore(groups: TabGroupLike[], groupId: string, beforeG
   return [...rest.slice(0, idx), src, ...rest.slice(idx)];
 }
 
+/**
+ * 카드 끌어 놓기 결과 — 바뀐 groups, 바뀔 게 없으면 null.
+ * targetCharacterId 가 있으면 그 카드 위에 놓은 것(같은 그룹이면 그 카드 앞으로), null 이면 섹션 빈 곳(그룹 맨 뒤로).
+ * sorted(현황판이 추가한 순서·최근 수정순으로 정렬 중)면 그룹 안 순서가 정렬대로 보이므로 그룹 사이 옮기기만 하고,
+ * 지금 그룹에 다시 놓은 건 무시한다 — 보이는 자리는 그대로인데 숨은 직접 정한 순서만 바뀌지 않게.
+ */
+export function groupsAfterCardDrop(
+  groups: TabGroupLike[],
+  characterId: string,
+  targetGroupId: string | null,
+  targetCharacterId: string | null,
+  sorted: boolean,
+): TabGroupLike[] | null {
+  if (characterId === targetCharacterId) return null;
+  if (sorted) {
+    const currentGroupId = groups.find((g) => g.characterIds.includes(characterId))?.id ?? null;
+    return currentGroupId === targetGroupId ? null : moveCharacterToGroup(groups, characterId, targetGroupId);
+  }
+  const moved = moveCharacterToGroup(groups, characterId, targetGroupId);
+  if (targetGroupId === null || targetCharacterId === null) return moved;
+  return reorderWithinGroup(moved, targetGroupId, characterId, targetCharacterId);
+}
+
 /** 그룹에 배치된 캐릭터 id 전체 집합 — 미분류 섹션 계산용. */
 export function groupedCharacterIdSet(groups: TabGroupLike[]): Set<string> {
   const set = new Set<string>();

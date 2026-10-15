@@ -5,6 +5,8 @@
  * 주의: node --test 가 직접 import 한다 — '@/' alias import 금지.
  */
 
+import type { CharacterSortState } from './characterBoardSort.ts';
+
 const KEY = 'bflow_character_board_view_mode';
 
 export type CharacterBoardViewMode = 'card' | 'compact' | 'list';
@@ -70,4 +72,28 @@ export function loadPersistedGroupFolded(): string[] {
 
 export function savePersistedGroupFolded(keys: string[]): void {
   try { localStorage.setItem(GROUP_FOLDED_KEY, JSON.stringify(keys)); } catch { /* ignore */ }
+}
+
+const SORT_KEY = 'bflow_character_board_sort';
+
+/**
+ * 현황판 정렬 기준 + 뒤집기. 값: 'manual' | 'created' | 'modified' (뒤집으면 '-reversed' 접미).
+ * 직접 정한 순서에는 뒤집기가 없다 — 'manual-reversed' 는 알 수 없는 값으로 버린다.
+ */
+export function loadPersistedCharacterSort(): CharacterSortState | null {
+  try {
+    const v = localStorage.getItem(SORT_KEY);
+    if (v === 'manual') return { mode: 'manual', reversed: false };
+    if (v === 'created' || v === 'modified') return { mode: v, reversed: false };
+    if (v === 'created-reversed') return { mode: 'created', reversed: true };
+    if (v === 'modified-reversed') return { mode: 'modified', reversed: true };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePersistedCharacterSort(sort: CharacterSortState): void {
+  const value = sort.mode !== 'manual' && sort.reversed ? `${sort.mode}-reversed` : sort.mode;
+  try { localStorage.setItem(SORT_KEY, value); } catch { /* ignore */ }
 }
