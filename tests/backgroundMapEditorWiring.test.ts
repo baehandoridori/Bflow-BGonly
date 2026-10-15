@@ -971,9 +971,9 @@ test('anchor 50: a save never ends edit mode: every saved map that was being edi
   // revision before that save, and the next save would be refused. Nothing after the wait reads that render or opens a draft.
   const after = persist.slice(positions(persist, waited)[0] + waited.length);
   for (const stale of [/\bsnapshot\b/, /\bcurrent\b/, /\bdraft\b/, /doc\.beginEditing/, /doc\.enterNewMap/]) assert.doesNotMatch(after, stale);
-  // No save drops a draft any more, and the five saves all go through that function.
+  // No save drops a draft any more, and the six saves all go through that function.
   assert.doesNotMatch(editor, /dropDrafts/);
-  assert.equal(count(editor, /await persistMaps\(/g), 5, 'the map, a new map, a link, the settings, the save step of a map delete');
+  assert.equal(count(editor, /await persistMaps\(/g), 6, 'the map, a new map, a link, the settings, the save step of a map delete, the tie of pictures added while viewing');
   const binding = read('useBackgroundMapDocument.ts');
   assert.doesNotMatch(binding, /dropDrafts/);
   // The calls of the editor reach the reducer through these two lines, and each sends its own action. Swapped, a save would
@@ -2159,7 +2159,7 @@ test('anchor 65: an open dialog of the editor is one line, and three places read
   // change the maps under it, and what the editor has to say is shown inside it. One of the five left out of that line
   // is a dialog under which the drafts follow the library and the message is drawn a second time, behind it. Without
   // `mapDelete` that dialog is the delete dialog of a map.
-  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete);';
+  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt);';
   const lines = editor.split('\n').map(line => line.trim());
   assert.ok(lines.includes(made), `not a line of its own: ${made}`);
   // The word stands five times, on five lines: the one that makes it and, in this order, the three places that read it.
@@ -2169,9 +2169,13 @@ test('anchor 65: an open dialog of the editor is one line, and three places read
   // editor's own message, the block above the band, is not drawn while a dialog is open: the sentence is inside the
   // dialog then. A sixth place would be a reader no anchor knows, and with a place less one of the three asks something else.
   const guard = 'if (disabled || doc.isGestureActive() || dialogOpen) return;', waited = 'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);';
-  const key = 'if (dialogOpen || document.querySelector(openDialogs)) return;', band = '{error && !dialogOpen && <div className="bg-error" role="alert" ref={errorRef}>';
-  assert.equal(count(editor, /\bdialogOpen\b/g), 5, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the message');
-  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, `${band}{error}</div>}`]);
+  const key = 'if (dialogOpen || document.querySelector(openDialogs)) return;', band = '{error && !(dialogOpen && !placePrompt) && <div className="bg-error" role="alert" ref={errorRef}>';
+  const idle = 'idle: () => !pointerRef.current && !doc.isGestureActive() && !renamingRef.current && !polygon.length && !busy && !dialogOpen && !document.querySelector(openDialogs) });';
+  const add = 'if (!sources.length || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;';
+  assert.equal(count(editor, /\bdialogOpen\b/g), 7, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the save run of added pictures, the way pictures come in, the message');
+  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, idle, add, `${band}{error}</div>}`]);
+  // The place prompt draws no message of the editor and clears none: under it the message stays drawn, as before it came up.
+  assert.ok(!editor.includes('{error && !dialogOpen && '), 'the message of the editor goes as the place prompt comes up');
   // The dialogs are listed in that one line and nowhere else: in neither order the three places used to write four of
   // them in, nor denied one by one as the message did. A place with a list of its own would not know the next dialog
   // the editor is given.
@@ -2871,6 +2875,44 @@ test('anchor 72: the closed box is a view setting of a room in 3D, below the kin
   assert.ok(library.includes('key={user?.id || "signed-out"}'), 'the editor is not drawn anew for another account');
 });
 
+test('anchor 73: the three ways in are one function that reads its target at that moment, a paste asks first for a missed press, and the lock settles what is being typed', () => {
+  // The block of adding pictures in the editor, from the controller it makes up to the memo of the image list: it stands right behind
+  // openSpaceFrom3D, in no piece another anchor cuts out. `lined` is a piece as its lines, without their indent.
+  const imageBlock = piece(editor, 'const imageAdd = useMapImageAdd(', 'const gallery = useMemo(');
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean);
+  // A drop, a paste and the picker come in by one function, and what the pictures go to is read there, at that moment, as the image list
+  // names it: from the maps as the editor shows them (with the library's alone, a place that a draft of another map uses would be offered
+  // as free), the map on show and the node in hand. Nothing while a dialog is open. A blocked target and a batch that runs are said at once
+  // and never queued; a list with nothing that can go in is said too, and asks for no place; a target with no place asks for one before
+  // anything goes up. As the design writes it, line by line.
+  assert.deepEqual(lined(block(imageBlock, 'const addImages = useEvent((sources: readonly MapImageSource[]) => {')), [
+    'const addImages = useEvent((sources: readonly MapImageSource[]) => {',
+    'if (!sources.length || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;',
+    'const target = resolveMapImageTarget(snapshot, maps, current, selected), files = sources.map(mapImageSourceFacts);',
+    'const words = mapImageTargetWords(target, { editing, running: imageAdd.view.running, wrongType: false });',
+    "if (target.status === 'blocked' || words.blocked) { imageAdd.say(current.id, `${words.title}. ${words.detail}`); return; }",
+    'const sorted = sortMapImageFiles(files);',
+    "if (!sorted.accepted.length) { imageAdd.say(current.id, mapImageSummary({ scope: target.scope, targetName: target.name, placeName: '', added: 0, reused: 0, failed: sorted.refused.length, over: sorted.over, link: 'none' }), mapImageRefusedList(files, sorted.refused)); return; }",
+    "if (target.status === 'needs-place') { setPlacePrompt({ target, sources, count: sorted.accepted.length, drafted: !!mapDraft(doc.getState(), current.id) }); return; }",
+    'imageAdd.start(planMapImageAdd(snapshot, target, null, files, new Date(), uuid), sources);',
+    '}']);
+  // A batch is planned and started in two places, that function and the answer of the place prompt: no way in starts one past the checks above.
+  assert.equal(count(editor, /planMapImageAdd\(/g), 2, 'a batch is planned past addImages and the answer of the place prompt');
+  assert.equal(count(editor, /imageAdd\.start\(/g), 2, 'a batch is started past addImages and the answer of the place prompt');
+  // The answer acts on what the prompt was opened for, the target and the pictures it holds: read anew, it would put them into a selection
+  // that changed while the prompt was up.
+  const answer = piece(editor, 'const answerPlacePrompt = useEvent(', 'const addPickedImages = useEvent(');
+  for (const text of ['placePrompt.target', 'placePrompt.sources']) assert.ok(answer.includes(text), `the answer of the place prompt does not act on what it was opened for: ${text}`);
+  assert.ok(!answer.includes('resolveMapImageTarget('), 'the answer of the place prompt reads the target anew');
+  // The controller is made first, with the one call of the editor that sends a command and the tie of the editor. It locks the editor as a
+  // save of the map does, and right before that a text field of the inspector that holds the cursor is left, as 도면 저장 leaves it: what is
+  // being typed is settled while the fields still take it. A button or a row of the object list keeps its focus, and with it the keys of the
+  // editor. The editor is at rest when nothing is pressed, dragged, named or drawn, it runs nothing of its own and no dialog is open.
+  assert.deepEqual(lined(imageBlock).slice(0, 3), ['const imageAdd = useMapImageAdd({ execute, link: linkAddedImages,',
+    "lock: on => { if (on) { const active = document.activeElement; if (active instanceof HTMLElement && active.matches(textFields) && active.closest('.bmap-inspector')) active.blur(); } setBusy(on); },",
+    'idle: () => !pointerRef.current && !doc.isGestureActive() && !renamingRef.current && !polygon.length && !busy && !dialogOpen && !document.querySelector(openDialogs) });']);
+});
+
 test('anchor 75: a batch uploads, then saves one command at a time under the lock, ties last, and sends nothing more after a save failed', () => {
   // The controller of adding pictures, read when this anchor asks for it: without the file this anchor fails, not every anchor of this
   // file. `lined` is a piece as its lines, without their indent, and `run` is one batch, from its first line to the brace that closes it.
@@ -2988,6 +3030,63 @@ test('anchor 75: a batch uploads, then saves one command at a time under the loc
   ]);
 });
 
+test('anchor 76: the tie is a change of the map — one undo step in a draft, else a save of that map alone, and a clean draft goes on from the library first', () => {
+  // The tie of the pictures of a batch to the map: one function, right behind uploadUnderlay and in front of the four of the delete dialog
+  // of a map, in no piece another anchor cuts out. `lined` is a piece as its lines, without their indent, and `all` is the editor so.
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean), all = lined(editor);
+  const linkAdded = piece(editor, 'async function linkAddedImages(', 'function dropGoneDrafts(');
+  // As the design writes it, line by line. A draft with nothing unsaved goes on from the library first, and only onto a later revision:
+  // the lock held it back from following, and a tie put on the revision before would have its next save refused. The draft is read after
+  // that. Nothing to change ties nothing, and says the draft's when the draft alone holds what the pictures stand on. With a draft the tie
+  // is one step of it; with none, a save of that map alone. A step the draft did not take is no tie.
+  assert.deepEqual(lined(linkAdded), [
+    'async function linkAddedImages(mapId: string, link: MapImageLink, library: BackgroundSnapshot): Promise<MapImageLinked> {',
+    'const saved = library.maps.find(map => map.id === mapId), held = mapDraft(doc.getState(), mapId);',
+    'if (held && saved && !mapDraftChanged(held) && saved.revision > (held.baseRevision ?? Infinity)) doc.rebaseDrafts([saved]);',
+    'const draftNow = mapDraft(doc.getState(), mapId), base = draftNow?.value ?? saved;',
+    "if (!base) return { how: 'none', complete: false };",
+    'const next = linkMapImages(base, link, library);',
+    "if (next.map === base) return { how: draftNow && next.complete && mapImageLinkNow(saved, base, link, library) === 'draft' ? 'draft' : 'none', complete: next.complete };",
+    "if (!draftNow) { await persistMaps(saveMapChanges(library, doc.getState().drafts, [next.map])); return { how: 'saved', complete: next.complete }; }",
+    'updateMap(next.map);',
+    "return mapDraft(doc.getState(), mapId)?.value === next.map ? { how: 'draft', complete: next.complete } : { how: 'none', complete: false };",
+    '}']);
+  // One step for the whole tie, the place and the views together, and the save of a map goes the one way every save of maps goes, only on
+  // the line of a map with no draft: saved there, a draft would be saved with all its other edits, and lose its undo history.
+  assert.equal(count(linkAdded, /updateMap\(/g), 1, 'the tie is more than one step of the draft');
+  assert.equal(count(linkAdded, /persistMaps\(/g), 1, 'the tie saves the map more than once');
+  assert.ok((lined(linkAdded).find(line => line.includes('persistMaps(')) ?? '').startsWith('if (!draftNow) {'), 'the tie saves a map that has a draft');
+  // The draft is put back from the library by the call the save of maps uses, for that map alone: following the library would let go of
+  // the drafts of every map that is gone, from a second place (anchor 56 holds the one).
+  assert.equal(count(linkAdded, /doc\.rebaseDrafts\(/g), 1, 'the draft is put back in more than one place');
+  assert.ok(!linkAdded.includes('doc.followSaved('), 'the tie follows the library');
+  assert.equal(count(editor, /doc\.followSaved\(/g), 1, 'the library is followed in a second place');
+  // After the wait of the batch this is the function of a later render, but the values of the render are not read: the library is the one
+  // handed in (it holds the backgrounds just saved), the document is asked of the store, four times, and the words `'draft'` are no value.
+  assert.equal(count(linkAdded, /doc\.getState\(\)/g), 4, 'the document is read in another way');
+  assert.doesNotMatch(linkAdded, /(?<![.\w'])(?:snapshot|current|draft|maps)\b/, 'the tie reads a value of the render');
+  // It sends no command of its own, says nothing on the editor (the line of the image list says how it went), and opens no edit mode.
+  for (const text of ['execute(', 'setError(', 'setNotice(', 'doc.beginEditing']) assert.ok(!linkAdded.includes(text), `in the tie: ${text}`);
+  // A background a draft still ties to a camera was deleted from its card: the draft lets go of it, as the design writes it. Not while a
+  // save runs (the library is not confirmed then), not against a library that was not read for an editor (an empty one would empty every
+  // camera) and not during a drag. No step of the history: the user did not do it. It runs again as the drafts change (an undo brings it
+  // back) and as the save ends.
+  const known = 'const knownViews = useMemo(() => new Set(snapshot.views.map(item => item.id)), [snapshot.views]);', knownAt = all.indexOf(known);
+  assert.ok(knownAt > -1, `not a line of its own: ${known}`);
+  assert.deepEqual(all.slice(knownAt, knownAt + 8), [known, 'useEffect(() => {', 'if (disabled || !snapshot.canManage || doc.isGestureActive()) return;',
+    'for (const item of Object.values(doc.getState().drafts)) {', 'const next = dropMissingViews(item.value, knownViews);', 'if (next !== item.value) doc.update(next, { history: false });', '}',
+    '}, [knownViews, drafts, disabled, snapshot.canManage, gestureActive]);']);
+  assert.equal(count(editor, /doc\.update\(next, \{ history: false \}\)/g), 1, 'a draft is changed past the history in another place');
+  // 편집 끝내기 says one sentence more when the draft added a tie the saved map does not have, whatever added it: inside the one line of the
+  // question (anchor 66 holds where it starts and ends), right behind the paragraph it adds to. Its condition takes the saved map first.
+  const question = all.find(line => line.startsWith('{confirmation && current && <BackgroundModal ')) ?? '';
+  assert.ok(question.includes('</p>'), 'the question of the editor is not one line');
+  assert.ok(question.slice(question.indexOf('</p>') + 4).startsWith(`{confirmation === 'discard' && linksAdded && <p className="bmap-confirm-text">{MAP_LINKS_LOST_NOTE}</p>}`),
+    'the sentence of the ties a discard lets go is not right behind the first paragraph of the question');
+  assert.ok(all.includes('const linksAdded = useMemo(() => !!draft && !!current && mapLinksAdded(snapshot.maps.find(map => map.id === current.id), draft.value), [snapshot.maps, draft, current?.id]);'),
+    'the ties a discard lets go are not read from the saved map and the draft, in that order');
+});
+
 test('anchor 77: the place prompt is a dialog of the editor, acts on what it was opened for, and answers only a new press after 0.4 seconds', () => {
   // The place prompt, read when this anchor asks for it: without the file this anchor fails, not every anchor of this file. `lined` is a
   // piece as its lines, without their indent.
@@ -3037,6 +3136,18 @@ test('anchor 77: the place prompt is a dialog of the editor, acts on what it was
   // on show: it acts on the target it was opened with alone.
   for (const text of ["addEventListener('keydown'", 'sonner']) assert.ok(!prompt.includes(text), `in the place prompt: ${text}`);
   assert.doesNotMatch(prompt, /(?<![.\w])current\b/, 'the place prompt reads the map on show');
+  // In the editor the prompt is a state of its own, holding what it was opened for (anchor 65 holds it in the line of the open dialogs). It
+  // is drawn once, right behind the column of the map and so outside it, in front of the other dialogs of the editor: a map on show that
+  // goes while it is up does not take it along, and the lines anchor 66 holds together stay together.
+  const editorLines = lined(editor);
+  assert.ok(editorLines.includes("const [placePrompt, setPlacePrompt] = useState<{ target: Extract<MapImageTarget, { status: 'needs-place' }>; sources: readonly MapImageSource[]; count: number; drafted: boolean } | null>(null);"),
+    'the place prompt holds something else than what it was opened for');
+  const drawn = '{placePrompt && <MapImagePlacePrompt target={placePrompt.target} count={placePrompt.count} drafted={placePrompt.drafted} places={snapshot.places} onCancel={() => setPlacePrompt(null)} onConfirm={answerPlacePrompt} />}';
+  assert.equal(count(editor, /<MapImagePlacePrompt\b/g), 1, 'the place prompt is drawn in another place as well');
+  const drawnAt = editorLines.indexOf(drawn);
+  assert.ok(drawnAt > 0, `not a line of its own: ${drawn}`);
+  assert.equal(editorLines[drawnAt - 1], '</main>}', 'the place prompt is not drawn right behind the column of the map');
+  assert.ok(editorLines[drawnAt + 1].startsWith('{createForm && <BackgroundModal title='), 'the place prompt is not drawn in front of the other dialogs of the editor');
 });
 
 test('anchor 78: what is shown stays in the image list, motion stays in its block, the file dialog is one function, the new channel is four places, and the pure module is pure', () => {
@@ -3247,4 +3358,11 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   // A card just added says so by its class and in its name, for as long as the mark lasts.
   for (const text of ["className={added ? 'bmap-gallery-card is-added' : 'bmap-gallery-card'}", "aria-label={`${view.name} · ${variant.name} 상세 보기${added ? ', 방금 추가됨' : ''}`}"])
     assert.ok(gallery.includes(text), `a card just added does not say so: ${text}`);
+  // The editor hands the list the batch as the controller draws it, whether the store is saving, the way in of the button and the close of
+  // the line, at the end of the tag of its memo and at the end of what that memo waits for: not waiting for the batch, the list would stay
+  // as it was drawn, with no ghost and no line.
+  const editorLines = lined(editor), memoAt = editorLines.findIndex(line => line.startsWith('const gallery = useMemo('));
+  assert.ok(memoAt > -1, 'the memo of the image list was not found');
+  assert.ok(editorLines[memoAt].endsWith(' adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={imageAdd.dismiss} /> : null,'), 'the image list is not handed the batch, the save, the way in or the close');
+  assert.ok(editorLines[memoAt + 1].endsWith(' imageAdd.view, pending, addPickedImages, imageAdd.dismiss]);'), 'the memo of the image list does not wait for the batch');
 });
