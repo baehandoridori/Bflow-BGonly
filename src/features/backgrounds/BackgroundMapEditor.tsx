@@ -185,9 +185,9 @@ const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, hid
 });
 
 export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, onOpenCatalog, viewerId }: Props) {
-  const doc = useBackgroundMapDocument();
-  const { state } = doc, drafts = state.drafts;
-  const [currentId, setCurrentId] = useState<string | null>(null);
+  const doc = useBackgroundMapDocument(viewerId);
+  const { state, session } = doc, drafts = state.drafts;
+  const [currentId, setCurrentId] = useState<string | null>(() => session.shownMapId);   // the map picked when this screen was last up in this run
   const [mode, setMode] = useState<MapDisplayMode>('plan');
   const [tool, setTool] = useState<Tool>('select');
   const [gizmoMode, setGizmoMode] = useState<Map3DGizmoMode>('translate');
@@ -1264,6 +1264,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const gallery = useMemo(() => settledCurrent ? <BackgroundMapGallery key={settledCurrent.id} snapshot={snapshot} maps={settledMaps} current={settledCurrent} selected={settledSelected} onClearSelection={clearSelection} onOpenView={openView} onOpenCatalog={openCatalog} adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={dismissNotice} /> : null,
     [snapshot, settledMaps, settledCurrent, settledSelected, clearSelection, openView, openCatalog, imageAdd.view, pending, addPickedImages, dismissNotice]);
 
+  useEffect(() => { session.shownMapId = currentId; }, [session, currentId]);
   const treeRows: { map: BackgroundMap; depth: number }[] = [];
   const visited = new Set<string>();
   function tree(parentId: string | null, depth: number) {

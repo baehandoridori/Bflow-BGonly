@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   Film,
   Image as GalleryIcon,
@@ -16,6 +17,8 @@ import { AssetDialog } from "./BackgroundAssetDialog";
 import type { BackgroundView } from './types';
 import { BackgroundGroupPanel } from "./BackgroundGroupPanel";
 import { BackgroundEpisodePanel } from "./BackgroundEpisodePanel";
+import { mapDraftSessionOf } from "./useBackgroundMapDocument";
+import { MAP_KEEP_TEXT } from "./mapDraftKeep";
 import "./backgrounds.css";
 
 const tabs = [
@@ -25,10 +28,21 @@ const tabs = [
   { id: "episodes", label: "에피소드별 배경", icon: Film },
 ] as const;
 
+/** The map editor alone. Drawn again it would fail again on the same drafts: they outlive the screen and come back after a restart. */
+class MapEditorGuard extends Component<{ children: ReactNode; onDiscard(): void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error) { console.error('[background] map editor failed:', error); }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return <div className="bg-empty" role="alert"><p>{MAP_KEEP_TEXT.broken}</p><button type="button" className="bg-button bg-primary" onClick={() => { this.props.onDiscard(); this.setState({ failed: false }); }}>{MAP_KEEP_TEXT.brokenDiscard}</button></div>;
+  }
+}
+
 export default function BackgroundLibraryView() {
   const user = useAuthStore((state) => state.currentUser),
     allEpisodes = useDataStore((state) => state.episodes);
-  const { snapshot, loading, pending, error, updateRequired, execute } = useBackgroundStore();
+  const { snapshot, loading, pending, error, updateRequired, execute, actorId } = useBackgroundStore();
   const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("maps"),
     [selectedViewId, setSelectedViewId] = useState<string | null>(null),
     [refreshing, setRefreshing] = useState(false);
@@ -144,21 +158,23 @@ export default function BackgroundLibraryView() {
               {error}
             </div>
           )}
-          {loading && !snapshot.maps.length && !snapshot.places.length ? (
+          {(loading || actorId !== (user?.id ?? null)) && !snapshot.maps.length && !snapshot.places.length ? (
             <div className="bg-loading" role="status">
               배경 라이브러리를 불러오고 있습니다…
             </div>
           ) : (
             <div className="bg-library-body" key={user?.id || "signed-out"}>
               <div hidden={tab !== "maps"} className="bg-tab-content">
-                <BackgroundMapEditor
-                  snapshot={snapshot}
-                  pending={pending}
-                  execute={execute}
-                  viewerId={user?.id ?? ''}
-                  onOpenView={(id, variantId) => setMapAsset({ id, variantId })}
-                  onOpenCatalog={() => setTab('assets')}
-                />
+                <MapEditorGuard onDiscard={() => { if (user) mapDraftSessionOf(user.id).discardAll(); }}>
+                  <BackgroundMapEditor
+                    snapshot={snapshot}
+                    pending={pending}
+                    execute={execute}
+                    viewerId={user?.id ?? ''}
+                    onOpenView={(id, variantId) => setMapAsset({ id, variantId })}
+                    onOpenCatalog={() => setTab('assets')}
+                  />
+                </MapEditorGuard>
               </div>
               <div hidden={tab !== "assets"} className="bg-tab-content">
                 <BackgroundAssetPanel
