@@ -402,3 +402,81 @@ test('KE-5: before quitting — what main still writes is waited for after the w
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test('KE-4: the mirror of the preview — the login, one key per account, the limit, a full storage and another version', async () => {
+  const bundle = await build({ entryPoints: ['src/mocks/devElectronAPI.ts'], bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', write: false });
+  type Api = {
+    backgroundKeptList(): Promise<unknown>;
+    backgroundKeptPut(mapId: unknown, entry: unknown): Promise<void>;
+    loginCanonicalSession(input: { name: string; password: string; rememberMe: boolean }): Promise<unknown>;
+  };
+  /** One page of the preview in a browser tab: its localStorage is the map `values`, and its `setItem` is whatever the test makes it. */
+  function preview() {
+    const values = new Map<string, string>(), storage = { setItem: (key: string, value: string) => { values.set(key, value); } };
+    const window = { electronAPI: undefined as Api | undefined, location: { protocol: 'http:' }, localStorage: {
+      getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => storage.setItem(key, value), removeItem: (key: string) => { values.delete(key); },
+    } };
+    const document = { documentElement: { dataset: {} }, createElement: () => ({ width: 0, height: 0, getContext: () => ({ fillStyle: '', font: '', fillRect() {}, fillText() {}, drawImage() {} }),
+      toDataURL: () => 'data:image/webp;base64,UklGRg==' }) };
+    const module = { exports: {} as { installDevElectronAPI(): void } };
+    new Function('module', 'exports', 'window', 'document', 'navigator', 'Image', 'BroadcastChannel', 'fetch', bundle.outputFiles[0].text)(
+      module, module.exports, window, document, {}, undefined, undefined, () => { throw new Error('No external requests in preview'); },
+    );
+    module.exports.installDevElectronAPI();
+    return { values, storage, api: window.electronAPI! };
+  }
+  const { values, storage, api } = preview();
+  const KEY = 'bflow:preview:background-map-kept:';
+  const stored = (key: string) => JSON.parse(values.get(key) ?? 'null');
+  const keptKeys = () => [...values.keys()].filter(key => key.startsWith(KEY)).sort();
+  let writes = 0;
+  storage.setItem = (key, value) => { if (key.startsWith(KEY)) writes++; values.set(key, value); };
+  // No login: nothing is read or written.
+  await assert.rejects(api.backgroundKeptList(), /로그인/);
+  await assert.rejects(api.backgroundKeptPut(MAP, entry()), /로그인/);
+  assert.deepEqual(keptKeys(), []);
+  // One value per account, in the shape of main's file.
+  await api.loginCanonicalSession({ name: '배한솔', password: '1234', rememberMe: false });
+  await api.backgroundKeptPut(MAP, entry());
+  assert.deepEqual(JSON.parse(values.get('bflow:preview:background-map-kept:1')!), { version: 1, entries: { [MAP]: entry() } });
+  assert.deepEqual(await api.backgroundKeptList(), { [MAP]: entry() });
+  // Removed, the entries are empty; removing what is not kept writes nothing.
+  await api.backgroundKeptPut(MAP, null);
+  assert.deepEqual(stored(`${KEY}1`), { version: 1, entries: {} });
+  const written = writes;
+  await api.backgroundKeptPut(MAP2, null);
+  assert.equal(writes, written);
+  // Another account writes a value of its own, and the first is left as it was.
+  await api.backgroundKeptPut(MAP, entry());
+  const first = values.get(`${KEY}1`);
+  await api.loginCanonicalSession({ name: '장삐쭈', password: '1234', rememberMe: false });
+  await api.backgroundKeptPut(MAP2, entry(MAP2));
+  const keys = keptKeys();
+  assert.equal(keys.length, 2);
+  assert.ok(keys.includes(`${KEY}1`));
+  assert.deepEqual(stored(keys.find(key => key !== `${KEY}1`)!), { version: 1, entries: { [MAP2]: entry(MAP2) } });
+  assert.equal(values.get(`${KEY}1`), first);
+  assert.deepEqual(await api.backgroundKeptList(), { [MAP2]: entry(MAP2) });
+  // A hundred maps at most, as in main: a new one past them is refused, and one kept already may still change.
+  await api.loginCanonicalSession({ name: '배한솔', password: '1234', rememberMe: false });
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  for (let n = 2; n <= 100; n++) await api.backgroundKeptPut(id(n), entry(id(n)));
+  assert.equal(Object.keys(stored(`${KEY}1`).entries).length, 100);
+  await assert.rejects(api.backgroundKeptPut(id(101), entry(id(101))), /100개/);
+  await api.backgroundKeptPut(id(100), entry(id(100), { steps: 9 }));
+  assert.equal(stored(`${KEY}1`).entries[id(100)].steps, 9);
+  // A full storage (for these values alone): the put is refused, not dropped in silence, and the value stays as it was.
+  const full = values.get(`${KEY}1`);
+  storage.setItem = (key, value) => { if (key.startsWith(KEY)) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); values.set(key, value); };
+  await assert.rejects(api.backgroundKeptPut(id(50), entry(id(50), { steps: 4 })), { name: 'QuotaExceededError' });
+  assert.equal(values.get(`${KEY}1`), full);
+  storage.setItem = (key, value) => { values.set(key, value); };
+  // What is handed out passes the check, as in main.
+  values.set(`${KEY}1`, JSON.stringify({ version: 1, entries: { [MAP]: entry(), [MAP2]: { ...entry(MAP2), token: 'x' } } }));
+  assert.deepEqual(await api.backgroundKeptList(), { [MAP]: entry() });
+  // A value of another version: refused for the list and the put alike, and left as it is.
+  values.set(`${KEY}1`, '{"version":2,"entries":{}}');
+  await assert.rejects(api.backgroundKeptList(), /업데이트/);
+  await assert.rejects(api.backgroundKeptPut(MAP, entry()), /업데이트/);
+  assert.equal(values.get(`${KEY}1`), '{"version":2,"entries":{}}');
+});
