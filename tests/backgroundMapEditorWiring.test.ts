@@ -1044,9 +1044,9 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
   // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
   inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
-  // The word stands five times: the function, this call, the delete dialog of a map as it comes up and as a run of it
-  // stops (anchor 66 holds those two where they are), and hiding a node when what the properties show changes
-  // (setNodesHidden).
+  // The word stands seven times: the function, this call, the delete dialog of a map as it comes up and as a run of it
+  // stops (anchor 66 holds those two where they are), hiding a node when what the properties show changes
+  // (setNodesHidden), and the two buttons of the image list that go away as they are pressed (below).
   assert.equal(count(editor, /\bswallowSecondClick\b/g), 7, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, hiding that changes what the properties show, and the two buttons of the image list that go away as they are pressed');
   // '도면 전체' and the line's ×: pressed, each goes away and '＋ 이미지 추가' or a card slides under the pointer — the second click of a
   // double-click would open the file dialog or a card.
