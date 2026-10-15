@@ -1,0 +1,378 @@
+import { mapDeleteCauseText } from './mapDelete.ts';
+import { spacesAt } from './mapStack.ts';
+import type { BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPlace, BackgroundSnapshot, BackgroundView } from './types.ts';
+
+export const MAP_IMAGE_ADD = { maxFiles: 10, maxBytes: 20 * 1024 * 1024, types: ['image/png', 'image/jpeg', 'image/webp'] as readonly string[],
+  nameLimit: 160, pathLimit: 4096, viewLimit: 1000, addedMarkMs: 6000, promptGraceMs: 400 } as const;
+/** What a background made here starts as (K2). The ghost card shows the same two words. */
+export const MAP_IMAGE_DEFAULTS = { shot: 'wide', time: 'day', variantName: '낮' } as const;
+export type MapImageScope = 'map' | 'space' | 'camera'; export type MapImageBlock = 'read-only' | 'no-map' | 'locked-camera' | 'locked-space';
+/** What the pictures are added to. `nodeId` is null for the map itself; `name` is the name the image list shows. */
+export type MapImageAim = { mapId: string; scope: MapImageScope; nodeId: string | null; name: string; cameraId: string | null };
+export type MapImageTarget =
+  | { status: 'blocked'; reason: MapImageBlock; name: string }
+  /** `placeNodeId`: who holds that place, a space id or null for the map. `placeKept`: the saved map holds it there too (false: only the draft does, tied since the last save). */
+  | (MapImageAim & { status: 'ready'; placeId: string; placeName: string; cameraPlaceId: string | null; placeNodeId: string | null; placeKept: boolean })
+  /** `placeNodeId`: who gets the place, a space id or null for the map. `placeWas`: what that node holds now (null, or the id of a place that is gone). */
+  | (MapImageAim & { status: 'needs-place'; placeNodeId: string | null; placeWas: string | null; ownerKind: 'space' | 'map'; ownerName: string;
+    suggestedName: string; parentPlaceId: string | null; sameNamePlaceId: string | null });
+export type MapImageOpenTarget = Exclude<MapImageTarget, { status: 'blocked' }>;
+
+type Space = Extract<BackgroundNode, { type: 'space' }>;
+type Camera = Extract<BackgroundNode, { type: 'camera' }>;
+/** The first `limit` UTF-16 units of a text, never half a character: a character of two units that the cut would part is left out whole. */
+function cut(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const last = text.charCodeAt(limit - 1);
+  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? limit - 1 : limit);
+}
+/** A name inside a sentence, as the dialogs of the editor put it: between ‘ and ’, and 이름 없음 for an empty one. */
+const quoted = (name: string) => `‘${name || '이름 없음'}’`;
+/** What the pictures go in as, the target by the name the image list gives it: ‘2-1 교실’의 배경으로, ‘카메라 2’의 시점으로, ‘2층’ 도면의 배경으로. */
+const into = (scope: MapImageScope, name: string) => scope === 'camera' ? `${quoted(name)}의 시점으로` : scope === 'space' ? `${quoted(name)}의 배경으로` : `${quoted(name)} 도면의 배경으로`;
+
+/** The target is what the image list names: the selected camera, the selected space (or that of a selected symbol), else the map. The pointer never decides.
+ *  `maps`: the maps as the editor shows them, a draft standing in for its saved map. Read for one thing only: which places are in use (3.2). */
+export function resolveMapImageTarget(snapshot: BackgroundSnapshot, maps: readonly BackgroundMap[], map: BackgroundMap | undefined, selected: BackgroundNode | undefined): MapImageTarget {
+  if (!map) return { status: 'blocked', reason: 'no-map', name: '' };
+  if (!snapshot.canManage) return { status: 'blocked', reason: 'read-only', name: '' };
+  // A place is there when the library has it: the id of a place deleted since, which a draft may still hold, is none.
+  const placeOf = (id: string | null) => snapshot.places.find(place => place.id === id);
+  const spaceOf = (id: string | null) => map.nodes.find((node): node is Space => node.type === 'space' && node.id === id);
+  const saved = snapshot.maps.find(item => item.id === map.id);
+  const aim = (scope: MapImageScope, node: BackgroundNode | null): MapImageAim =>
+    ({ mapId: map.id, scope, nodeId: node ? node.id : null, name: node ? node.name : map.name, cameraId: node?.type === 'camera' ? node.id : null });
+  const ready = (to: MapImageAim, place: BackgroundPlace, cameraPlaceId: string | null, holder: string | null): MapImageTarget => ({
+    ...to, status: 'ready', placeId: place.id, placeName: place.name, cameraPlaceId, placeNodeId: holder,
+    // Kept: the saved map holds that place at that node too. Else the draft alone ties it, since the last save, until 도면 저장.
+    placeKept: !!saved && (holder === null ? saved.placeId === place.id : saved.nodes.some(node => node.type === 'space' && node.id === holder && node.placeId === place.id)),
+  });
+  const needsPlace = (to: MapImageAim, owner: Space | null): MapImageTarget => {
+    const ownerName = owner ? owner.name : map.name, suggestedName = cut(ownerName.trim(), MAP_IMAGE_ADD.nameLimit) || '새 장소';
+    // A new place of a space hangs under the place of the map; one of the map itself, or of a map without a place, at the top.
+    const parentPlaceId = owner ? placeOf(map.placeId)?.id ?? null : null;
+    // In use: the place of a map, or of a space of it, in a saved map, in a map as the editor shows it (a draft of another map
+    // too), or in this one. A place of that name another space uses is not offered: one Enter would put the pictures there.
+    const used = new Set<string | null>();
+    for (const item of [...snapshot.maps, ...maps, map]) {
+      used.add(item.placeId);
+      for (const node of item.nodes) if (node.type === 'space') used.add(node.placeId);
+    }
+    const same = snapshot.places.find(place => place.name.trim() === suggestedName && place.parentId === parentPlaceId && !used.has(place.id));
+    return { ...to, status: 'needs-place', placeNodeId: owner ? owner.id : null, placeWas: owner ? owner.placeId : map.placeId, ownerKind: owner ? 'space' : 'map',
+      ownerName, suggestedName, parentPlaceId, sameNamePlaceId: same ? same.id : null };
+  };
+  if (selected?.type === 'camera') {
+    if (selected.locked) return { status: 'blocked', reason: 'locked-camera', name: selected.name };
+    // The space it stands in: the topmost that holds its point on the whole map (a room hidden by the eye is a room). Its
+    // property is read only where it stands in none: written when it was made, it stays as the camera moves.
+    const home = spacesAt(map, selected)[0] ?? spaceOf(selected.spaceId), own = placeOf(home ? home.placeId : null);
+    if (home && own) return ready(aim('camera', selected), own, own.id, home.id);
+    const shared = placeOf(map.placeId);
+    if (shared) return ready(aim('camera', selected), shared, null, null);
+    // The place asked for goes to the space it stands in, unless that one is locked: to the map then.
+    return needsPlace(aim('camera', selected), home && !home.locked ? home : null);
+  }
+  const space = selected?.type === 'space' ? selected : selected?.type === 'symbol' ? spaceOf(selected.spaceId) : undefined;
+  if (space) {
+    // Its own place alone: the backgrounds of the place of the map are not in the list of a space.
+    const own = placeOf(space.placeId);
+    if (own) return ready(aim('space', space), own, null, space.id);
+    return space.locked ? { status: 'blocked', reason: 'locked-space', name: space.name } : needsPlace(aim('space', space), space);
+  }
+  const shared = placeOf(map.placeId);
+  return shared ? ready(aim('map', null), shared, null, null) : needsPlace(aim('map', null), null);
+}
+export type MapImageWords = { title: string; detail: string; blocked: boolean };
+/** Where a lock is undone: in edit mode alone, folded under 위치·크기·잠금, so the words say it. */
+const UNLOCK = '도면을 편집하면서 속성의 ‘위치·크기·잠금’에서 잠금을 해제하고 다시 넣어 주세요.';
+/** Why a file of another type goes in nowhere, one sentence: the overlay says it while such files are dragged, the list of what was refused after (4.6). */
+const WRONG_TYPE = 'PNG·JPG·WebP 그림만 넣을 수 있어요.';
+/** What the overlay says of a target, and why nothing goes in: the first row of 3.3 that fits. */
+export function mapImageTargetWords(target: MapImageTarget, facts: { editing: boolean; running: boolean; wrongType: boolean }): MapImageWords {
+  if (target.status === 'blocked' && target.reason === 'no-map') return { title: '여기에는 넣을 수 없어요', detail: '도면을 먼저 만들어 주세요.', blocked: true };
+  if (target.status === 'blocked' && target.reason === 'read-only') return { title: '여기에는 넣을 수 없어요', detail: '이 계정으로는 그림을 넣을 수 없어요.', blocked: true };
+  if (facts.running) return { title: '지금은 넣을 수 없어요', detail: '앞에 넣던 그림을 마치는 중이에요. 끝난 뒤에 다시 넣어 주세요.', blocked: true };
+  if (facts.wrongType) return { title: '넣을 수 없는 파일이에요', detail: WRONG_TYPE, blocked: true };
+  if (target.status === 'blocked') return { title: `${quoted(target.name)}에는 넣을 수 없어요`,
+    detail: target.reason === 'locked-camera' ? `잠긴 카메라예요. ${UNLOCK}` : `잠겨 있어서 배경 장소를 이어 줄 수 없어요. ${UNLOCK}`, blocked: true };
+  // What the pictures go in as. 도면에 추가 alone would read as the picture under the map.
+  const title = `${into(target.scope, target.name)} 추가`;
+  if (target.status === 'needs-place') return { title, detail: '놓으면 배경 장소부터 정해요.', blocked: false };
+  // A camera names the place its pictures go to: nothing else on screen does.
+  if (target.scope === 'camera') return { title, blocked: false,
+    detail: facts.editing ? `그림은 ${quoted(target.placeName)} 장소에 바로 저장되고, 카메라에 이어 주는 것은 '도면 저장' 때 저장돼요.` : `놓으면 ${quoted(target.placeName)} 장소에 바로 저장돼요.` };
+  return { title, detail: target.placeKept ? '놓으면 바로 저장돼요.' : "그림은 바로 저장되고, 배경 장소를 이어 둔 것은 '도면 저장' 때 저장돼요.", blocked: false };
+}
+/** The sentences of the place prompt (6.2). `parentName`: the name of the place a new one is made under, null for none. */
+export function mapImagePlaceWords(target: Extract<MapImageTarget, { status: 'needs-place' }>, count: number, drafted: boolean, parentName: string | null): { lead: string; ask: string; parent: string; note: string } {
+  const onMap = target.ownerKind === 'map', owner = quoted(target.ownerName), tied = onMap ? '이 도면' : owner;
+  // A space or a road by its name alone. A camera says first that it stands there: the place goes to where it stands.
+  const lead = `${target.scope === 'camera' ? `${quoted(target.name)} 카메라가 있는 ` : ''}${onMap ? `${owner} 도면에는 아직 대표 장소가 없어요.` : `${owner}에는 아직 배경 장소가 없어요.`}`;
+  return {
+    lead, ask: `그림 ${count}장을 넣을 장소를 정해 주세요. 정한 장소는 ${onMap ? '이 도면의 대표 장소' : `${owner}의 배경 장소`}가 돼요.`,
+    parent: parentName === null ? '맨 위 장소로 만들어져요.' : `${quoted(parentName)} 아래에 만들어져요.`,
+    // A draft open when the prompt came up: the tie waits for 도면 저장 with the other edits.
+    note: drafted ? `장소와 그림은 바로 저장돼요. ${tied}에 이어 주는 것은 다른 편집처럼 '도면 저장' 때 저장돼요.` : `장소와 그림, ${tied}에 이어 주는 것까지 바로 저장돼요.`,
+  };
+}
+/** A file as the rules see it. `byPath`: the main process reads it from `path` (a file copied in Explorer). `pasted`: it came in a paste. */
+export type MapImageFileFacts = { name: string; type: string; size: number; path: string; lastModified: number; byPath: boolean; pasted: boolean }; export type MapImageRefusal = 'type' | 'size' | 'webp-path';
+/** A picture on its way in, as far as the rules read it: a file of the page (four fields of a `File`: a real one fits), or a path the main process reads. */
+export type MapImageSourceLike = { kind: 'file'; file: { readonly name: string; readonly type: string; readonly size: number; readonly lastModified: number }; path: string; pasted: boolean } | { kind: 'path'; path: string };
+/** The type of a path by its last extension, read in lower case: the six of a picture file the clipboard may name. */
+const PATH_TYPES = new Map([['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['webp', 'image/webp'], ['gif', 'image/gif'], ['bmp', 'image/bmp']]);
+/** What follows the last slash of either kind. */
+const lastPart = (path: string) => path.slice(Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')) + 1);
+/** A path as two of them are compared (4.6): its spaces aside, either slash, any case. '' for none. */
+const pathKey = (path: string) => path.trim().replace(/\\/g, '/').toLowerCase();
+export function mapImageSourceFacts(source: MapImageSourceLike): MapImageFileFacts {
+  if (source.kind === 'path') return mapImagePathFacts(source.path);
+  // The four fields alone: a File has more, none of it read here.
+  const { name, type, size, lastModified } = source.file;
+  return { name, type, size, path: source.path, lastModified, byPath: false, pasted: source.pasted };
+}
+/** A file known by its path alone: named by its last part, typed by its last extension (사진.PNG is a PNG). How big it is the main process sees. */
+export function mapImagePathFacts(path: string): MapImageFileFacts {
+  const trimmed = path.trim(), name = lastPart(trimmed), dot = name.lastIndexOf('.');
+  return { name, type: dot < 0 ? '' : PATH_TYPES.get(name.slice(dot + 1).toLowerCase()) ?? '', size: 0, path: trimmed, lastModified: 0, byPath: true, pasted: true };
+}
+/** The files in the order handed in, each by the rows of 4.6: `accepted` and `index` are places in that list. */
+export function sortMapImageFiles(files: readonly MapImageFileFacts[]): { accepted: number[]; refused: { index: number; reason: MapImageRefusal }[]; over: number } {
+  const accepted: number[] = [], refused: { index: number; reason: MapImageRefusal }[] = [], seen = new Set<string>();
+  let over = 0;
+  files.forEach((file, index) => {
+    // The same file as one before it, whatever became of that one, is counted once and said nothing of: by the path where it
+    // has one, else by name, size and time of change. Pasted data is never the same as another.
+    const path = pathKey(file.path), same = path ? `path ${path}` : file.pasted ? null : `file ${JSON.stringify([file.name, file.size, file.lastModified])}`;
+    if (same !== null) { if (seen.has(same)) return; seen.add(same); }
+    const reason: MapImageRefusal | null = file.byPath && file.type === 'image/webp' ? 'webp-path'
+      : !MAP_IMAGE_ADD.types.includes(file.type) ? 'type' : file.size > MAP_IMAGE_ADD.maxBytes ? 'size' : null;
+    if (reason) refused.push({ index, reason });
+    // Asked last: a file that is refused anyway is said as such, not counted over.
+    else if (accepted.length >= MAP_IMAGE_ADD.maxFiles) over += 1;
+    else accepted.push(index);
+  });
+  return { accepted, refused, over };
+}
+export const MAP_IMAGE_REFUSAL_TEXT: Record<MapImageRefusal, string> = {
+  'webp-path': "WebP 파일은 복사해서 붙여 넣을 수 없어요. 끌어다 놓거나 '＋ 이미지 추가'로 넣어 주세요.", type: WRONG_TYPE, size: '20MB보다 큰 그림은 넣을 수 없어요.',
+};
+/** What was refused, in the order it came: each file by its name, with why. */
+export function mapImageRefusedList(files: readonly MapImageFileFacts[], refused: readonly { index: number; reason: MapImageRefusal }[]): { name: string; reason: string }[] {
+  return refused.map(({ index, reason }) => ({ name: files[index].name, reason: MAP_IMAGE_REFUSAL_TEXT[reason] }));
+}
+/** True only when at least one file item is dragged, every file item names its type (not ''), and none of them is PNG, JPEG or WebP. Items that are not files are not counted: text alone is false. */
+export function mapImageDragRefused(items: readonly { kind: string; type: string }[]): boolean {
+  const files = items.filter(item => item.kind === 'file');
+  return files.length > 0 && files.every(item => item.type !== '' && !MAP_IMAGE_ADD.types.includes(item.type));
+}
+/** The names the engine gives a pasted picture, lower case as they are: IMAGE.PNG is a name of its own. */
+const PASTED_NAMES: readonly string[] = ['image.png', 'image.jpg', 'image.jpeg', 'image.webp'];
+/** The name a background made of a file starts from: pasted data by the time on this PC, any other file by its name (the last part of its path
+ *  when it has none) less the last dot and what follows. 160 units at most, never half a character. */
+export function mapImageBaseName(file: Pick<MapImageFileFacts, 'name' | 'path' | 'pasted'>, at: Date): string {
+  if (file.pasted && !file.path.trim() && PASTED_NAMES.includes(file.name))
+    return `붙여 넣은 그림 ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+  const whole = file.name || lastPart(file.path.trim()), dot = whole.lastIndexOf('.');
+  return cut((dot < 0 ? whole : whole.slice(0, dot)).trim(), MAP_IMAGE_ADD.nameLimit).trimEnd() || '이름 없는 그림';
+}
+/** The name, or with ` (2)`, ` (3)`… where it is taken: within 160 units still, cut never through a character and with no space left before the number. */
+export function uniqueMapImageName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  for (let count = 2; ; count += 1) {
+    const suffix = ` (${count})`, name = `${cut(base, MAP_IMAGE_ADD.nameLimit - suffix.length).trimEnd()}${suffix}`;
+    if (!taken.has(name)) return name;
+  }
+}
+/** The first background of the place with `path` for the source of one of its pictures, in any revision, compared as two paths are (4.6).
+ *  The old work file (`filePath`) is another file and is not read. No path: none. */
+export function findSameSourceView(snapshot: BackgroundSnapshot, placeId: string, path: string): BackgroundView | undefined {
+  const key = pathKey(path);
+  return key ? snapshot.views.find(view => view.placeId === placeId && view.variants.some(variant => variant.revisions.some(revision => pathKey(revision.sourceImagePath ?? '') === key))) : undefined;
+}
+export type MapImagePlaceChoice = { kind: 'existing'; placeId: string } | { kind: 'new'; name: string };
+/** `newPlace` is saved first when it is not null. `place`: the tie the pictures stand on, the node that holds or is given the place (`nodeId` a space id, or null for the map)
+ *  and what it held when the target was read (`was`: the place itself for a target that had one, else null or the id of a place that is gone).
+ *  `items`: one for each picture that is uploaded (`index`: its place in the list handed in, not among the accepted ones). `reused`: backgrounds that are there already, to which a camera is tied; `reusedNames`: their names, in that order. */
+export type MapImagePlan = { mapId: string; scope: MapImageScope; targetName: string; placeId: string; placeName: string; newPlace: BackgroundPlace | null;
+  place: { nodeId: string | null; was: string | null }; cameraId: string | null; cameraPlaceId: string | null;
+  items: { index: number; viewId: string; name: string }[]; reused: string[]; reusedNames: string[]; refused: { index: number; name: string; reason: MapImageRefusal }[]; over: number };
+/** One batch, planned on the library of the moment it starts (5.1). Every id is made here, in this order: the new place, then the pictures. */
+export function planMapImageAdd(snapshot: BackgroundSnapshot, target: MapImageOpenTarget, choice: MapImagePlaceChoice | null, files: readonly MapImageFileFacts[], at: Date, newId: () => string): MapImagePlan {
+  // The place: the target's own, or the answer of the place prompt, a place of the library or a new one that is saved first.
+  let newPlace: BackgroundPlace | null = null, place: Pick<BackgroundPlace, 'id' | 'name'> | undefined;
+  if (target.status === 'ready') place = { id: target.placeId, name: target.placeName };
+  else if (choice?.kind === 'new') {
+    newPlace = { id: newId(), revision: 1, name: cut(choice.name.trim(), MAP_IMAGE_ADD.nameLimit) || '새 장소', parentId: target.parentPlaceId, folderPath: '' };
+    place = newPlace;
+  } else if (choice) place = snapshot.places.find(item => item.id === choice.placeId);
+  // Never so from the editor: the prompt checked its answer against the library of the same moment (6.3).
+  if (!place) throw new Error('넣을 장소를 다시 골라 주세요.');
+  const placeId = place.id, sorted = sortMapImageFiles(files), reused: BackgroundView[] = [], items: MapImagePlan['items'] = [];
+  // A name is taken by a background of that place, or by a picture before it in the batch. Of another place it is no matter.
+  const taken = new Set(snapshot.views.filter(view => view.placeId === placeId).map(view => view.name));
+  for (const index of sorted.accepted) {
+    // A picture whose source a background of that place has already is not made again (K4): a camera is tied to that background.
+    const same = findSameSourceView(snapshot, placeId, files[index].path);
+    if (same) { if (!reused.includes(same)) reused.push(same); continue; }
+    const name = uniqueMapImageName(mapImageBaseName(files[index], at), taken);
+    taken.add(name);
+    items.push({ index, viewId: newId(), name });
+  }
+  return { mapId: target.mapId, scope: target.scope, targetName: target.name, placeId, placeName: place.name, newPlace,
+    // What the pictures stand on: for a target that had its place, that place, tied already; else what the node held when it was read.
+    place: { nodeId: target.placeNodeId, was: target.status === 'ready' ? target.placeId : target.placeWas },
+    // The place of a camera is that of the space it stands in, never the map's: the answer, where the place goes to that space.
+    cameraId: target.cameraId, cameraPlaceId: target.status === 'ready' ? target.cameraPlaceId : target.scope === 'camera' && target.ownerKind === 'space' ? placeId : null,
+    items, reused: reused.map(view => view.id), reusedNames: reused.map(view => view.name),
+    refused: sorted.refused.map(({ index, reason }) => ({ index, name: files[index].name, reason })), over: sorted.over };
+}
+/** The background of one uploaded picture, as 5.3 has it: one 낮 variant with one revision, the picture. A source path longer than the
+ *  library takes is left out. Two ids, the variant's first. */
+export function buildMapImageView(plan: Pick<MapImagePlan, 'placeId' | 'cameraPlaceId'>, item: { viewId: string; name: string }, upload: { imageUrl: string; sourceImagePath: string }, createdAt: string, newId: () => string): BackgroundView {
+  const variantId = newId(), revisionId = newId();
+  return { id: item.viewId, revision: 1, name: item.name, placeId: plan.placeId, cameraPlaceId: plan.cameraPlaceId, visiblePlaceIds: [], relatedPlaceIds: [], shot: MAP_IMAGE_DEFAULTS.shot, tags: [], memo: '',
+    variants: [{ id: variantId, name: MAP_IMAGE_DEFAULTS.variantName, time: MAP_IMAGE_DEFAULTS.time, workFilePath: '', activeRevisionId: revisionId,
+      revisions: [{ id: revisionId, imageUrl: upload.imageUrl, filePath: '', sourceImagePath: upload.sourceImagePath.length > MAP_IMAGE_ADD.pathLimit ? '' : upload.sourceImagePath, createdAt }] }] };
+}
+/** The saves of a batch in the order they are sent: the new place first, then one background for each uploaded picture. The link comes after them and is no command of its own. */
+export function mapImageSaves(plan: MapImagePlan, uploads: readonly { viewId: string; imageUrl: string; sourceImagePath: string }[], createdAt: string, newId: () => string): BackgroundCommand[] {
+  const saves: BackgroundCommand[] = plan.newPlace ? [{ type: 'save', kind: 'place', entity: plan.newPlace, expectedRevision: null }] : [];
+  // In the order of the plan, of the pictures that went up alone: one that did not would be saved with no picture.
+  for (const item of plan.items) {
+    const upload = uploads.find(each => each.viewId === item.viewId);
+    if (upload) saves.push({ type: 'save', kind: 'view', entity: buildMapImageView(plan, item, upload, createdAt, newId), expectedRevision: null });
+  }
+  return saves;
+}
+/** What a batch ties to the map, and stands on: the place of its owner (`place`, `placeId`: set when the owner still holds `was`, and done already for a target that had its place), and for a camera the views. `viewIds`: the backgrounds of the batch that are in the library, reused and added. */
+export type MapImageLink = { place: { nodeId: string | null; was: string | null }; placeId: string; cameraId: string | null; viewIds: readonly string[] };
+/** `library`: what is there to be tied. A background that is gone is left out and a place that is gone is not set: `complete` is false then. */
+export function linkMapImages(map: BackgroundMap, link: MapImageLink, library: Pick<BackgroundSnapshot, 'places' | 'views'>): { map: BackgroundMap; complete: boolean } {
+  let next = map, complete = true;
+  // The place first, of the map itself or of the space that holds it. Held already, it is done (a locked space too). Else it is set
+  // only where the owner holds what it held when the target was read, and a space is not locked: a place tied there since, to a
+  // space or to the map, is not written over.
+  const owner = link.place.nodeId === null ? null : map.nodes.find((node): node is Space => node.type === 'space' && node.id === link.place.nodeId);
+  const holds = owner === null ? map.placeId : owner?.placeId;
+  if (owner === undefined || !library.places.some(place => place.id === link.placeId)) complete = false;
+  else if (holds !== link.placeId) {
+    if (holds !== link.place.was || owner?.locked) complete = false;
+    else next = owner ? { ...map, nodes: map.nodes.map(node => node === owner ? { ...owner, placeId: link.placeId } : node) } : { ...map, placeId: link.placeId };
+  }
+  // Then the views of a camera, on what that made: those the library has, once each, after the ones it holds, in the order given,
+  // up to the 1000 a camera may hold. With none to add it is done, locked or not.
+  if (link.cameraId !== null && link.viewIds.length) {
+    const asked = [...new Set(link.viewIds)], known = asked.filter(id => library.views.some(view => view.id === id));
+    const camera = next.nodes.find((node): node is Camera => node.type === 'camera' && node.id === link.cameraId);
+    const add = camera ? known.filter(id => !camera.viewIds.includes(id)) : [];
+    const put = camera && !camera.locked ? add.slice(0, Math.max(0, MAP_IMAGE_ADD.viewLimit - camera.viewIds.length)) : [];
+    if (known.length < asked.length || !camera || put.length < add.length) complete = false;
+    if (camera && put.length) next = { ...next, nodes: next.nodes.map(node => node === camera ? { ...camera, viewIds: [...camera.viewIds, ...put] } : node) };
+  }
+  return { map: next, complete };
+}
+/** Where a link stands now. 'gone': every background it named has been deleted since. Else the saved map holds it ('kept'), only the map on show does ('draft'), or neither ('undone': taken back, discarded, changed since). */
+export function mapImageLinkNow(saved: BackgroundMap | undefined, shown: BackgroundMap | undefined, link: MapImageLink, library: Pick<BackgroundSnapshot, 'places' | 'views'>): 'kept' | 'draft' | 'undone' | 'gone' {
+  const left = link.viewIds.filter(id => library.views.some(view => view.id === id));
+  if (link.viewIds.length && !left.length) return 'gone';
+  // A picture deleted since is not counted: a draft lets go of it (8.5). Held: tying the rest again would change nothing, and all of it is there.
+  const rest = { ...link, viewIds: left }, holds = (map: BackgroundMap | undefined) => {
+    const tied = map && linkMapImages(map, rest, library);
+    return !!tied && tied.map === map && tied.complete;
+  };
+  return holds(saved) ? 'kept' : holds(shown) ? 'draft' : 'undone';
+}
+/** There is something to tie: a background of the batch is in the library, or a place was asked for and is there. */
+export function mapImageLinkWanted(link: MapImageLink, library: Pick<BackgroundSnapshot, 'places'>): boolean {
+  return link.viewIds.length > 0 || (link.place.was !== link.placeId && library.places.some(place => place.id === link.placeId));
+}
+/** The draft ties what the saved map does not: a place of the map or of a space other than the saved one, a view a camera does not
+ *  hold there (a space or a camera drawn since, with what it holds; with no saved map, every tie). Ties undone alone add nothing. */
+export function mapLinksAdded(saved: BackgroundMap | undefined, draft: BackgroundMap): boolean {
+  if (draft.placeId !== null && draft.placeId !== saved?.placeId) return true;
+  const was = new Map(saved?.nodes.map(node => [node.id, node] as const));
+  return draft.nodes.some(node => {
+    const before = was.get(node.id);
+    return node.type === 'space' ? node.placeId !== null && (before?.type !== 'space' || before.placeId !== node.placeId)
+      : node.type === 'camera' && node.viewIds.some(id => before?.type !== 'camera' || !before.viewIds.includes(id));
+  });
+}
+/** A camera lets go of the views `views` does not have (a background deleted since); the others stay in their order. Nothing to take off: the map itself. */
+export function dropMissingViews(map: BackgroundMap, views: ReadonlySet<string>): BackgroundMap {
+  const loose = (node: BackgroundNode) => node.type === 'camera' && node.viewIds.some(id => !views.has(id));
+  return map.nodes.some(loose) ? { ...map, nodes: map.nodes.map(node => node.type === 'camera' && loose(node) ? { ...node, viewIds: node.viewIds.filter(id => views.has(id)) } : node) } : map;
+}
+/** A paste is for the pictures (4.3) only when all six hold: the editor on show, to an account that may change it, with a map, no dialog open, the cursor in no field, nothing dragged. */
+export function mapImagePasteWanted(facts: { shown: boolean; canManage: boolean; hasMap: boolean; dialog: boolean; text: boolean; dragging: boolean }): boolean {
+  return facts.shown && facts.canManage && facts.hasMap && !facts.dialog && !facts.text && !facts.dragging;
+}
+/** `link`: how what was to be tied to the map went. 'none': nothing was to be tied, or it is there and saved already. 'draft' | 'saved': it is the draft's (put there now, or since the last save), or was saved at once (`partial`: only some of it could be).
+ *  'kept' | 'undone' | 'gone': it was the draft's and was saved with it since, or is there no longer; or the pictures themselves were deleted (only mapImageOutcomeNow says these). 'missed': none of it could be tied. 'failed': the save of the map was refused (`linkCause`).
+ *  `reusedName`: the name of the first background that was there already. `failed`: how many pictures are in the list of those that did not go in. `byPath`: the batch came from a file copied in Explorer. */
+export type MapImageOutcome = { scope: MapImageScope; targetName: string; placeName: string; added: number; reused: number; reusedName?: string; failed: number; over: number; byPath?: boolean;
+  link: 'none' | 'draft' | 'saved' | 'kept' | 'undone' | 'gone' | 'missed' | 'failed'; partial?: boolean; linkCause?: string };
+/** A batch that ended, as it stands now. Every background it put in has been deleted since: 'gone', whatever its link was. Its link was the draft's, whole ('draft' and not `partial`): where that link is now (mapImageLinkNow). Anything else: the outcome itself, as it ended. */
+export function mapImageOutcomeNow(outcome: MapImageOutcome, link: MapImageLink, saved: BackgroundMap | undefined, shown: BackgroundMap | undefined, library: Pick<BackgroundSnapshot, 'places' | 'views'>): MapImageOutcome {
+  const now = mapImageLinkNow(saved, shown, link, library);
+  if (now === 'gone') return { ...outcome, link: 'gone' };
+  return outcome.link === 'draft' && !outcome.partial ? { ...outcome, link: now } : outcome;
+}
+/** Why a tie could not be made, whole or at all: said alike in every line that says so. */
+const MEANWHILE = '그 사이 도면이나 배경 목록에서 지워졌거나, 잠겼거나, 다르게 이어졌어요.';
+/** Where pictures left untied are tied by hand, by what they went to: the fields by the names the screen gives them. */
+const BY_HAND: Record<MapImageScope, string> = {
+  camera: '도면을 편집하면서 속성의 ‘시점 연결’에서 이어 줄 수 있어요.', space: '도면을 편집하면서 속성의 ‘배경 장소 연결’에서 이어 줄 수 있어요.', map: '‘도면 설정’의 ‘대표 장소’에서 이어 줄 수 있어요.',
+};
+/** The line of a batch that ended (7.4): the pieces it has, in the order of the table, a space between. Pictures all deleted since are said in
+ *  place of what was put in, what was there already and the tie. */
+export function mapImageSummary(outcome: MapImageOutcome): string {
+  const { scope, added, reused, link } = outcome, pictures = added + reused > 0, made = added ? '그림은 바로 저장됐고, ' : '';
+  const lying = `그림은 배경 목록의 ${quoted(outcome.placeName)} 장소에`, cause = `까닭: ${outcome.linkCause ?? ''}`, place = `${quoted(outcome.placeName)} 장소를 도면에 이어`;
+  // The tie. With pictures, a line that leaves one untied (none of it tied, or a part) ends on where to tie it by hand. With none, the place was
+  // tied alone (a new place saved, every picture failed): it is named, and no picture is said to be anywhere.
+  const tie: Record<MapImageOutcome['link'], string> = pictures ? {
+    draft: outcome.partial ? `다만 도면에 다 이어 주지는 못했어요. ${MEANWHILE} 이어 준 만큼은 다른 편집처럼 '도면 저장' 때 함께 저장돼요. ${lying} 있어요. ${BY_HAND[scope]}`
+      : `${made}도면에 이어 준 것은 '도면 저장'을 눌러야 남아요.`,
+    saved: outcome.partial ? `다만 도면에 다 이어 주지는 못했어요. ${MEANWHILE} 이어 준 만큼은 바로 저장됐어요. ${lying} 있어요. ${BY_HAND[scope]}` : '도면에 이어 준 것까지 바로 저장됐어요.',
+    kept: `${made}도면에 이어 준 것도 '도면 저장'으로 저장됐어요.`, undone: `도면에 이어 준 것은 그 뒤에 되돌리거나 버려서 지금은 남아 있지 않아요. ${lying} 그대로 있어요.`,
+    missed: `다만 도면에 이어 주지는 못했어요. ${MEANWHILE} ${lying} 있어요. ${BY_HAND[scope]}`, failed: `다만 도면에 이어 주지는 못했어요. ${cause} ${lying} 있어요. ${BY_HAND[scope]}`,
+    none: added ? '바로 저장됐어요.' : '', gone: '',
+  } : {
+    draft: `${place} 준 것은 '도면 저장'을 눌러야 남아요.`, saved: `${place} 준 것은 바로 저장됐어요.`, kept: `${place} 준 것은 '도면 저장'으로 저장됐어요.`,
+    undone: `${place} 준 것은 그 뒤에 되돌리거나 버려서 지금은 남아 있지 않아요.`, missed: `${place} 주지도 못했어요. ${MEANWHILE}`, failed: `${place} 주지도 못했어요. ${cause}`, none: '', gone: '',
+  };
+  return [
+    ...(link === 'gone' ? [`${into(scope, outcome.targetName)} 넣은 그림은 그 뒤에 지워서 지금은 배경 목록에 없어요.`] : [
+      // A camera names the place its pictures went to: nothing else on screen does.
+      added ? `${into(scope, outcome.targetName)} 그림 ${added}장을 ${scope === 'camera' ? `${quoted(outcome.placeName)} 장소에 ` : ''}넣었어요.` : '',
+      // By its name in the library, which may not be that of the file: the card is found by it.
+      reused ? `이미 있는 그림 ${reused}장(${quoted(outcome.reusedName ?? '')}${reused > 1 ? ` 외 ${reused - 1}장` : ''})은 새로 만들지 않았어요. 그림을 고쳤다면 그 카드를 열어 '이미지파일 연결'로 새 수정본을 넣어 주세요.` : '',
+      pictures ? '' : '넣은 그림이 없어요.',
+    ]),
+    outcome.failed ? `${outcome.failed}장은 넣지 못했어요(아래 목록).` : '', tie[link],
+    outcome.over ? `한 번에 ${MAP_IMAGE_ADD.maxFiles}장까지예요. 나머지 ${outcome.over}장은 넣지 않았어요.` : '',
+    // The clipboard names one file alone: whether more were copied cannot be told.
+    outcome.byPath ? '탐색기에서 복사한 파일은 한 번에 한 장만 들어와요. 여러 장은 끌어다 놓아 주세요.' : '',
+  ].filter(Boolean).join(' ');
+}
+/** The line while a batch runs: what the pictures go in as and how many (made and used again), and that leaving before the end puts none of them in (13.2). */
+export const mapImageBusyText: (scope: MapImageScope, targetName: string, count: number) => string = (scope, targetName, count) =>
+  `${into(scope, targetName)} 그림 ${count}장을 넣는 중이에요. 끝나기 전에 다른 메뉴로 가면 그림이 들어가지 않아요.`;
+/** Why a picture or a tie did not go, as the delete dialog says it: never the wrapper Electron puts round what the main process throws, never English. */
+export const mapImageCauseText: (cause: unknown) => string = mapDeleteCauseText;
+/** The steps of a ghost card (7.3): the word of its mark and how far its bar is. */
+export const MAP_IMAGE_STEPS: { readonly [step in 'ready' | 'uploading' | 'waiting' | 'saving' | 'failed']: { readonly label: string; readonly part: number } } = {
+  ready: { label: '준비 중', part: 0.08 }, uploading: { label: '올리는 중', part: 0.4 }, waiting: { label: '저장 기다리는 중', part: 0.7 }, saving: { label: '저장하는 중', part: 0.9 },
+  failed: { label: '넣지 못했어요', part: 1 },
+};
+export type MapImageStep = keyof typeof MAP_IMAGE_STEPS;
+/** Under the empty list of a target, to an account that may add pictures (7.2). */
+export const MAP_IMAGE_HINT: string = '그림 파일을 이 화면에 끌어다 놓거나, 복사한 그림을 Ctrl+V로 붙여 넣어도 돼요.';
+/** A second paragraph in the question of 편집 끝내기 when the draft added ties (8.1): all three it may have added, by a batch or in the properties. */
+export const MAP_LINKS_LOST_NOTE: string = '이 도면에서 이어 둔 배경(도면의 대표 장소, 공간의 배경 장소, 카메라의 시점)도 함께 풀려요. 배경 목록의 그림은 그대로 남아요.';
+/** Ctrl+V with the cursor in a field of the editor and a picture alone on the clipboard: the field keeps its paste (K18). */
+export const MAP_IMAGE_FIELD_NOTE: string = '글자 칸에 커서가 있어서 그림을 넣지 않았어요. 넣을 공간이나 카메라를 한 번 누른 뒤(도면 전체에 넣으려면 빈 곳을 누른 뒤) 다시 붙여 넣어 주세요.';
+/** The first paste after a press on the plan that a running save did not take: it adds nothing, once (K20). */
+export const MAP_IMAGE_PRESS_NOTE: string = '저장하는 동안 도면을 누른 것은 골라지지 않았어요. 넣을 곳을 다시 누른 뒤 붙여 넣어 주세요.';

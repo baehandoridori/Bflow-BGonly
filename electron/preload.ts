@@ -496,6 +496,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   backgroundExecute: (request: import('../src/features/backgrounds/types').BackgroundRequest) => ipcRenderer.invoke('background:execute', request, canonicalSessionEpoch),
   backgroundUploadImage: (base64Data: string) => ipcRenderer.invoke('background:upload-image', base64Data, canonicalSessionEpoch),
   backgroundReadImageFile: (filePath: string) => ipcRenderer.invoke('background:read-image-file', filePath, canonicalSessionEpoch),
+  backgroundReadClipboardFile: () => ipcRenderer.invoke('background:read-clipboard-file', canonicalSessionEpoch),
   onBackgroundChanged: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('background:changed', listener);

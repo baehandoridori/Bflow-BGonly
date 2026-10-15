@@ -37,6 +37,11 @@ import { backgroundMapPath } from './domain';
 import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
 import { mapDeleteCauseText, mapDeleteStopText, planMapDelete } from './mapDelete';
 import type { MapDeleteMode, MapDeletePlan } from './mapDelete';
+import { MAP_IMAGE_FIELD_NOTE, MAP_IMAGE_PRESS_NOTE, MAP_LINKS_LOST_NOTE, dropMissingViews, linkMapImages, mapImageDragRefused, mapImageLinkNow, mapImagePasteWanted, mapImageRefusedList, mapImageSourceFacts, mapImageSummary, mapImageTargetWords, mapLinksAdded, planMapImageAdd, resolveMapImageTarget, sortMapImageFiles } from './mapImageDrop';
+import type { MapImageLink, MapImagePlaceChoice, MapImageTarget } from './mapImageDrop';
+import { mapImageFilePath, useMapImageAdd } from './useMapImageAdd';
+import type { MapImageLinked, MapImageSource } from './useMapImageAdd';
+import { MapImageDropOverlay, MapImagePlacePrompt } from './BackgroundMapImageAdd';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
@@ -232,6 +237,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     progress: { done: number; total: number } | null;
     /** The plan of the press that stopped part-way. */
     stopped: MapDeletePlan | null } | null>(null);
+  /** The question that comes first when the pictures need a place. It holds what it was opened for, and acts on that alone. */
+  const [placePrompt, setPlacePrompt] = useState<{ target: Extract<MapImageTarget, { status: 'needs-place' }>; sources: readonly MapImageSource[]; count: number; drafted: boolean } | null>(null);
+  /** Files dragged over the editor, as the overlay tells it: 'type' when none of them can go in. */
+  const [fileDrag, setFileDrag] = useState<'ok' | 'type' | null>(null);
   const deleting = useRef(false);                            // a run is in progress. A ref: a second press can come before `busy` is drawn
   /** Every map this dialog has set out to delete, over all its presses. */
   const deleteAimed = useRef<string[]>([]);
@@ -280,7 +289,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
   /** A dialog of the editor is open. Each asks about a map it holds: nothing may change the maps under it, and the editor's own message is shown inside it. */
-  const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete);
+  const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt);
   // The name box is drawn only while its node can still be renamed here; otherwise it goes without a commit.
   const renamingNode = renaming && mode === 'plan' && canEdit && renaming.mapId === current?.id
     ? current.nodes.find(node => node.id === renaming.nodeId && !node.locked) : undefined;
@@ -716,6 +725,21 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       setSettingsForm(previous => previous?.id === id ? { ...previous, imageUrl } : previous);
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   }
+  /** Added pictures are tied to the map: the place of a space or of the map, the views of a camera. That is a change of the drawing: with a draft open it goes into the draft, as one undo step; with none it is saved at once, as a save of that map alone. */
+  async function linkAddedImages(mapId: string, link: MapImageLink, library: BackgroundSnapshot): Promise<MapImageLinked> {
+    const saved = library.maps.find(map => map.id === mapId), held = mapDraft(doc.getState(), mapId);
+    // A draft with nothing unsaved in it goes on from the library first. While this save run held the lock it could not follow, and a link put on the revision before would have the map refused at its next save.
+    if (held && saved && !mapDraftChanged(held) && saved.revision > (held.baseRevision ?? Infinity)) doc.rebaseDrafts([saved]);
+    // A map the library no longer has (deleted on another PC meanwhile) gets no tie: put into its draft, that draft could never be saved.
+    const draftNow = mapDraft(doc.getState(), mapId), base = saved && (draftNow?.value ?? saved);
+    if (!base) return { how: 'none', complete: false };
+    const next = linkMapImages(base, link, library);
+    // Nothing to change. What the pictures stand on may still be the draft's alone (a place tied since the last save): then it is kept by 도면 저장, like any edit.
+    if (next.map === base) return { how: draftNow && next.complete && mapImageLinkNow(saved, base, link, library) === 'draft' ? 'draft' : 'none', complete: next.complete };
+    if (!draftNow) { await persistMaps(saveMapChanges(library, doc.getState().drafts, [next.map])); return { how: 'saved', complete: next.complete }; }
+    updateMap(next.map);
+    return mapDraft(doc.getState(), mapId)?.value === next.map ? { how: 'draft', complete: next.complete } : { how: 'none', complete: false };
+  }
   /** The drafts of maps this dialog deleted without getting an answer: the library no longer has them. Only asked while nothing is being saved. */
   function dropGoneDrafts() { for (const id of deleteAimed.current) if (!snapshot.maps.some(map => map.id === id)) doc.discard(id); }
   /** 도면 삭제 of the settings dialog. The dialog is bound to the map those settings were opened for, never to the map on show. */
@@ -839,7 +863,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (!point || !matrix) { pressLog.current = NO_PRESSES; return; }
     event.preventDefault(); event.stopPropagation();
     setSymbolPaletteOpen(false);
-    svgRef.current?.focus();
+    // Without a scroll: a plan partly scrolled away (a narrow window, after an add brought its line into view) would jump and leave the pointer off what was pressed.
+    svgRef.current?.focus({ preventScroll: true });
     // A press anywhere but on a point lets go of the picked point. A + is no point: while it is pulled the polygon
     // has one more point, and the old index would name another dot.
     if (typeof handle !== 'object' || handle.insert) setActiveVertex(null);
@@ -1058,7 +1083,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
 
   // Stable callbacks: the 3D viewport, the companion plan and the image grid must not re-subscribe on every preview.
   const selectNode = useEvent((id: string | null) => select(id));
-  const clearSelection = useEvent(() => select(null));
+  // Two buttons of the image list go away as they are pressed, and what slides under the pointer ('＋ 이미지 추가', a card) takes no second click of a double-click.
+  const clearSelection = useEvent(() => { select(null); swallowSecondClick(); });
+  const dismissNotice = useEvent(() => { imageAdd.dismiss(); swallowSecondClick(); });
   // View settings of this PC: the eye of the object list and the closed box of a room in 3D. They write no map: no undo step, nothing to save.
   const setNodesHidden = useEvent((ids: readonly string[], hidden: boolean): boolean => {
     // Not during a drag: its session works on what was drawn and stacked at the press.
@@ -1116,8 +1143,126 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     setLookThrough(id && current ? { mapId: current.id, id } : null);
   });
   const openSpaceFrom3D = useEvent((id: string) => { if (tool !== 'symbol') openSpace(id, tool !== 'hand'); });
-  const gallery = useMemo(() => settledCurrent ? <BackgroundMapGallery key={settledCurrent.id} snapshot={snapshot} maps={settledMaps} current={settledCurrent} selected={settledSelected} onClearSelection={clearSelection} onOpenView={openView} onOpenCatalog={openCatalog} /> : null,
-    [snapshot, settledMaps, settledCurrent, settledSelected, clearSelection, openView, openCatalog]);
+  const imageAdd = useMapImageAdd({ execute, link: linkAddedImages,
+    // As 도면 저장 does: what is being typed in a field of the inspector is settled by leaving it, before the fields go dead. A field that is disabled under the cursor gets no blur of its own.
+    lock: on => { if (on) { const active = document.activeElement; if (active instanceof HTMLElement && active.matches(textFields) && active.closest('.bmap-inspector')) active.blur(); } setBusy(on); },
+    idle: () => !pointerRef.current && !doc.isGestureActive() && !renamingRef.current && !polygon.length && !busy && !dialogOpen && !document.querySelector(openDialogs) });
+  /** The one way in for a drop, a paste and the picker. What the pictures are added to is read here, at this moment: what the image list names. */
+  const addImages = useEvent((sources: readonly MapImageSource[]) => {
+    if (!sources.length || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;
+    const target = resolveMapImageTarget(snapshot, maps, current, selected), files = sources.map(mapImageSourceFacts);
+    const words = mapImageTargetWords(target, { editing, running: imageAdd.view.running, wrongType: false });
+    if (target.status === 'blocked' || words.blocked) { imageAdd.say(current.id, `${words.title}. ${words.detail}`); return; }
+    const sorted = sortMapImageFiles(files);
+    // Nothing of it can be added: said at once, and no place is asked for.
+    if (!sorted.accepted.length) { imageAdd.say(current.id, mapImageSummary({ scope: target.scope, targetName: target.name, placeName: '', added: 0, reused: 0, failed: sorted.refused.length, over: sorted.over, link: 'none' }), mapImageRefusedList(files, sorted.refused)); return; }
+    if (target.status === 'needs-place') { setPlacePrompt({ target, sources, count: sorted.accepted.length, drafted: !!mapDraft(doc.getState(), current.id) }); return; }
+    imageAdd.start(planMapImageAdd(snapshot, target, null, files, new Date(), uuid), sources);
+  });
+  /** The answer of the place prompt: the target it was opened with, planned against the library as it is at the answer. */
+  const answerPlacePrompt = useEvent((choice: MapImagePlaceChoice) => { if (!placePrompt) return; setPlacePrompt(null); imageAdd.start(planMapImageAdd(snapshot, placePrompt.target, choice, placePrompt.sources.map(mapImageSourceFacts), new Date(), uuid), placePrompt.sources); });
+  /** ＋ 이미지 추가: the files picked in the image list come in by the one way in, with their paths on this PC. */
+  const addPickedImages = useEvent((files: File[]) => addImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: false }))));
+  /** A press on the plan that was not taken because a save was running: what was pressed is not selected. A paste shows nothing beforehand of where it goes, so the next one must not land on the selection that press meant to change. */
+  const pressMissed = useRef(false);
+  const notePress = useEvent((event: PointerEvent) => {
+    if (event.isPrimary && event.button === 0 && event.target instanceof Node && svgRef.current?.contains(event.target)) pressMissed.current = disabled;
+  });
+  useEffect(() => {
+    window.addEventListener('pointerdown', notePress, true);
+    return () => window.removeEventListener('pointerdown', notePress, true);
+  }, [notePress]);
+  /** What a paste adds. After a press that was not taken it adds nothing, once, and says so. */
+  const pasteImages = useEvent((sources: readonly MapImageSource[]) => {
+    if (pressMissed.current && current) { pressMissed.current = false; imageAdd.say(current.id, MAP_IMAGE_PRESS_NOTE); return; }
+    addImages(sources);
+  });
+  /** The cursor is in a field of the editor and the clipboard holds a picture and no text: the field keeps its paste (of a picture it takes nothing), and one line says why no picture came in. */
+  const noteFieldPaste = useEvent(() => { if (current) imageAdd.say(current.id, MAP_IMAGE_FIELD_NOTE); });
+  /** A picture file copied in Explorer may not be in the paste event at all: only the main process can read its path from the clipboard. `inField`: the cursor is in a field of the editor. */
+  const pasteClipboardFile = useEvent(async (inField: boolean) => {
+    const found = await window.electronAPI.backgroundReadClipboardFile().catch(() => null), root = rootRef.current;
+    // The answer comes a moment later: not into a tab that was left meanwhile, and not under a drag that began meanwhile.
+    if (!found || !root || root.offsetParent === null || pointerRef.current || doc.isGestureActive()) return;
+    if (inField) noteFieldPaste(); else pasteImages([{ kind: 'path', path: found.filePath }]);
+  });
+  /** Ctrl+V adds the picture on the clipboard. Heard on the window: unless the cursor is in a text field a paste arrives at the body, whatever has the focus. A field keeps its own paste. */
+  const onImagePaste = useEvent((event: ClipboardEvent) => {
+    const root = rootRef.current, element = event.target instanceof Element ? event.target : null;
+    const facts = { shown: !!root && root.offsetParent !== null, canManage: snapshot.canManage, hasMap: !!current,
+      dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };
+    // The items name their types. A picture is taken out only once the paste is the editor's: taking it makes the page wait while the engine reads it, and encodes a captured screen as PNG first.
+    const fileItems = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file');
+    const pictures = fileItems.some(item => item.type.startsWith('image/'));
+    if (!mapImagePasteWanted(facts)) {
+      // Nothing but the cursor in a field of the editor is in the way, and the clipboard holds no text. A picture in the event is said at once; with no file in it at all the main process is asked whether a picture file was copied.
+      if (root?.contains(element) && mapImagePasteWanted({ ...facts, text: false }) && !Array.from(event.clipboardData?.types ?? []).includes('text/plain')) {
+        if (pictures) noteFieldPaste(); else if (!fileItems.length) void pasteClipboardFile(true);
+      }
+      return;
+    }
+    if (pictures) {
+      event.preventDefault();
+      const files = fileItems.map(item => item.getAsFile()).filter((file): file is File => !!file);
+      pasteImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: true })));
+    } else if (!fileItems.length) void pasteClipboardFile(false);
+  });
+  useEffect(() => {
+    window.addEventListener('paste', onImagePaste);
+    return () => window.removeEventListener('paste', onImagePaste);
+  }, [onImagePaste]);
+  /** The element of the editor the drag went into last. */
+  const dragInside = useRef<EventTarget | null>(null);
+  /** Files dragged over the editor, wherever in it: one overlay says what they would be added to, and a drop adds them. Any other drag is none of its business. */
+  const onFileDrag = useEvent((event: DragEvent) => {
+    const data = event.dataTransfer;
+    if (!data || !Array.from(data.types).includes('Files') || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;
+    if (event.type === 'dragleave') {
+      // From one child to another is no leave, and either of two things tells it: the engine names the element gone into, and that element has had its dragenter first.
+      // Out of the editor, out of the window, or let go where nothing is taken: the overlay goes.
+      const within = event.relatedTarget instanceof Node && !!rootRef.current?.contains(event.relatedTarget);
+      if (!within && event.target === dragInside.current) { dragInside.current = null; setFileDrag(null); }
+      return;
+    }
+    dragInside.current = event.type === 'drop' ? null : event.target;
+    event.preventDefault();
+    // A name box left open is settled as a press on the plan settles it: the overlay then names what was typed, and the save run does not wait on the box.
+    if (renamingRef.current) focusCanvas();
+    const refused = mapImageDragRefused(Array.from(data.items, item => ({ kind: item.kind, type: item.type })));
+    // 'none': the pointer shows that nothing is taken here, and the engine then sends no drop at all. Such a drag ends in a dragleave.
+    data.dropEffect = mapImageTargetWords(resolveMapImageTarget(snapshot, maps, current, selected), { editing, running: imageAdd.view.running, wrongType: refused }).blocked ? 'none' : 'copy';
+    if (event.type !== 'drop') { setFileDrag(refused ? 'type' : 'ok'); return; }
+    setFileDrag(null);
+    // A picture dragged out of a browser or a mail window is a file the engine made up for the drag: its path does not last, so none is kept.
+    const disk = Array.from(data.types).every(type => type === 'Files');
+    // Read here, while the event lasts: afterwards the list is empty.
+    addImages(Array.from(data.files, file => ({ kind: 'file' as const, file, path: disk ? mapImageFilePath(file) : '', pasted: false })));
+  });
+  useEffect(() => {
+    const root = rootRef.current, types = ['dragenter', 'dragover', 'dragleave', 'drop'] as const;
+    if (!root) return;
+    for (const type of types) root.addEventListener(type, onFileDrag);
+    return () => { for (const type of types) root.removeEventListener(type, onFileDrag); };
+  }, [onFileDrag]);
+  // The overlay never outlives its drag: while files are dragged the page gets no pointer event at all, so the first one says the drag is over.
+  useEffect(() => {
+    if (!fileDrag) return;
+    const over = () => setFileDrag(null);
+    window.addEventListener('pointermove', over, true); window.addEventListener('pointerdown', over, true);
+    return () => { window.removeEventListener('pointermove', over, true); window.removeEventListener('pointerdown', over, true); };
+  }, [fileDrag]);
+  // A background that a draft still ties to a camera was deleted (from its card): the draft lets go of it. Kept, the map could never be saved, and the list of views has no row left to untick.
+  const knownViews = useMemo(() => new Set(snapshot.views.map(item => item.id)), [snapshot.views]);
+  useEffect(() => {
+    // Not while a save runs: the library is not confirmed then. And not against a library that was not read as an editor's: an empty one would empty every camera.
+    if (disabled || !snapshot.canManage || doc.isGestureActive()) return;
+    for (const item of Object.values(doc.getState().drafts)) {
+      const next = dropMissingViews(item.value, knownViews);
+      if (next !== item.value) doc.update(next, { history: false });
+    }
+  }, [knownViews, drafts, disabled, snapshot.canManage, gestureActive]);
+  const gallery = useMemo(() => settledCurrent ? <BackgroundMapGallery key={settledCurrent.id} snapshot={snapshot} maps={settledMaps} current={settledCurrent} selected={settledSelected} onClearSelection={clearSelection} onOpenView={openView} onOpenCatalog={openCatalog} adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={dismissNotice} /> : null,
+    [snapshot, settledMaps, settledCurrent, settledSelected, clearSelection, openView, openCatalog, imageAdd.view, pending, addPickedImages, dismissNotice]);
 
   const treeRows: { map: BackgroundMap; depth: number }[] = [];
   const visited = new Set<string>();
@@ -1132,6 +1277,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const linkTarget = maps.find(map => map.id === linkForm?.mapId);
   const movedLink = linkTarget && current && linkTarget.parentId !== current.id;
   const draftChanged = mapDraftChanged(draft);
+  const linksAdded = useMemo(() => !!draft && !!current && mapLinksAdded(snapshot.maps.find(map => map.id === current.id), draft.value), [snapshot.maps, draft, current?.id]);
   const deletePlan = useMemo(() => mapDelete ? planMapDelete(snapshot, drafts, mapDelete.mapId, mapDelete.mode) : null, [snapshot, drafts, mapDelete?.mapId, mapDelete?.mode]);
   const fieldLocked = !canEdit || !!selected?.locked;
   /** The node in hand is a road: it has a floor height and no walls. */
@@ -1174,7 +1320,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2></div></div>
         <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button><button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button></>}</div>
       </header>
-      {error && !dialogOpen && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
+      {error && !(dialogOpen && !placePrompt) && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
       {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
@@ -1377,7 +1523,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
           <ObjectList nodes={settledCurrent?.nodes ?? current.nodes} selectedIds={listSelection.ids} primaryId={listSelection.primaryId} hiddenIds={hiddenIds} hiddenCount={hiddenCount} onSelect={selectFromList} onToggleHidden={toggleHidden} onShowAll={showAll} />
         </aside>
       </BackgroundMapPanels>
+      {fileDrag && <MapImageDropOverlay words={mapImageTargetWords(resolveMapImageTarget(snapshot, maps, current, selected), { editing, running: imageAdd.view.running, wrongType: fileDrag === 'type' })} />}
     </main>}
+    {placePrompt && <MapImagePlacePrompt target={placePrompt.target} count={placePrompt.count} drafted={placePrompt.drafted} places={snapshot.places} onCancel={() => setPlacePrompt(null)} onConfirm={answerPlacePrompt} />}
     {createForm && <BackgroundModal title={createForm.spaceId ? '이 공간의 내부 도면 만들기' : '새 도면 만들기'} onClose={() => { if (!busy) { setCreateForm(null); setError(''); } }}><form onSubmit={event => { event.preventDefault(); void createMap(); }}>
       <p className="bmap-dialog-context">{createForm.parentId ? `${mapPath(maps, createForm.parentId).map(map => map.name).join(' / ')} 안에 만듭니다.` : '새로운 최상위 도면으로 시작합니다.'}</p>
       <Field label="도면 이름"><input autoFocus data-autofocus required maxLength={120} disabled={disabled} value={createForm.name} onChange={event => setCreateForm({ ...createForm, name: event.target.value })} placeholder="예: 학교, 본관, 교실" /></Field>
@@ -1407,6 +1555,6 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     {mapDelete && deletePlan && <BackgroundMapDeleteDialog name={mapDelete.name} plan={deletePlan} mode={mapDelete.mode} progress={mapDelete.progress}
       stopped={mapDelete.stopped && mapDeleteStopText(mapDelete.stopped, snapshot)} error={error} disabled={disabled}
       onMode={mode => setMapDelete(previous => previous && { ...previous, mode })} onClose={closeMapDelete} onConfirm={() => void runMapDelete()} />}
-    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?') : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.') : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}
+    {confirmation && current && <BackgroundModal title={confirmation === 'discard' ? (draftChanged ? '저장하지 않고 편집을 끝낼까요?' : '편집을 끝낼까요?') : confirmation === 'delete-group' ? `선택한 ${groupFree}개 삭제` : `${selected?.name ?? '선택한 배치'} 삭제`} onClose={() => { if (!busy) { setConfirmation(null); setError(''); } }}><p className="bmap-confirm-text">{confirmation === 'discard' ? (draftChanged ? '이 도면에서 저장 안 한 변경은 사라져요.' : '그리던 다각형이 사라져요.') : confirmation === 'delete-group' ? `선택한 배치 ${groupFree}개를 지웁니다. 공간을 지우면 함께 고르지 않은 카메라와 사물 기호는 도면에 남고 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.${groupLocked ? ` 잠긴 ${groupLocked}개는 지워지지 않습니다.` : ''}` : '선택한 배치만 지웁니다. 공간에 속한 카메라와 사물 기호는 도면에 남으며 공간 연결만 해제됩니다. 원본 장소와 배경은 유지됩니다.'}</p>{confirmation === 'discard' && linksAdded && <p className="bmap-confirm-text">{MAP_LINKS_LOST_NOTE}</p>}{error && <div className="bg-error" role="alert">{error}</div>}<div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setConfirmation(null); setError(''); }}>돌아가기</button><button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={() => void confirmAction()}>{confirmation === 'discard' ? '버리고 끝내기' : '삭제'}</button></div></BackgroundModal>}
   </div>;
 }

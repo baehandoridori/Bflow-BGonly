@@ -1061,6 +1061,8 @@ export interface ElectronAPI extends CalendarApiInputContract {
   onBackgroundChanged: (callback: () => void) => () => void;
   backgroundUploadImage: (base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
   backgroundReadImageFile: (filePath: string) => Promise<{ dataUrl: string; filePath: string }>;
+  backgroundReadClipboardFile: () => Promise<{ filePath: string } | null>;
+  backgroundPickImages?: () => Promise<File[] | undefined>;
   getPathForFile: (file: File) => string;
   calendarFeedStatus: (calendarId: string) => Promise<import('../shared/calendarSubscription').CalendarFeedStatus>;
   calendarFeedManage: (request: import('../shared/calendarSubscription').CalendarFeedRequest) => Promise<import('../shared/calendarSubscription').CalendarFeedResult>;

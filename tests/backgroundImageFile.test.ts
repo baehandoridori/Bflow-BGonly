@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { build } from 'esbuild';
 import { readBackgroundImageFile, MAX_BACKGROUND_IMAGE_BYTES, MAX_BACKGROUND_IMAGE_DATA_URL } from '../electron/backgroundImageFile.ts';
+import { clipboardImageFilePath } from '../electron/clipboardFiles.ts';
 import type { BackgroundDecodedImage } from '../electron/backgroundImageFile.ts';
 import type { ElectronAPI } from '../src/types/index.ts';
 
@@ -138,4 +139,84 @@ test('browser file-link preview requires canonical admin and only serves the exp
   const result = await api.backgroundReadImageFile(samplePath);
   assert.equal(result.filePath, samplePath); assert.match(result.dataUrl, /^data:image\/png;base64,/); assert.equal(canvases, 1);
   assert.equal(api.getPathForFile({} as File), ''); assert.equal(api.fontGetPathForFile({} as File), '');
+});
+
+test('clipboardImageFilePath reads the first path of FileNameW and nothing else, and only a picture', () => {
+  const formats: string[] = [];
+  /** A clipboard that holds these bytes under any format: each format asked for is written down. */
+  const reader = (bytes: Buffer) => (format: string) => { formats.push(format); return bytes; };
+  const copied = (filePath: string) => reader(Buffer.from(`${filePath}\0`, 'utf16le'));
+  assert.equal(clipboardImageFilePath(reader(Buffer.from('G:\\공유 드라이브\\배경\\교실.png\0', 'utf16le'))), 'G:\\공유 드라이브\\배경\\교실.png');
+  assert.deepEqual(formats, ['FileNameW']);
+  // Every picture extension in any case: for a WebP or a GIF the screen says why it is not added.
+  for (const picture of ['C:\\art\\교실.WEBP', 'C:\\art\\움짤.gif']) assert.equal(clipboardImageFilePath(copied(picture)), picture);
+  for (const other of ['C:\\art\\교실.psd', 'C:\\art\\교실']) assert.equal(clipboardImageFilePath(copied(other)), null);
+  assert.equal(clipboardImageFilePath(reader(Buffer.alloc(0))), null);
+  assert.equal(clipboardImageFilePath(format => { formats.push(format); throw new Error('the clipboard is busy'); }), null);
+  assert.equal(clipboardImageFilePath(reader(Buffer.from('C:\\art\\첫째.png\0C:\\art\\둘째.jpg\0', 'utf16le'))), 'C:\\art\\첫째.png');
+  assert.deepEqual(formats, Array(8).fill('FileNameW'));
+});
+
+test('background clipboard and picker preview: a path only from the hook, and no file dialog in the app engine', async () => {
+  const bundle = await build({ entryPoints: ['src/mocks/devElectronAPI.ts'], bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', write: false });
+  type Hook = { filePath?: (file: File) => string; clipboardFile?: string; pick?: () => File[] };
+  /** One page of the preview, under the navigator given: a browser tab, or the check window of the app engine. `Image` is the picture element of the page (none: the page cannot draw), and each canvas the page encodes is written down with its size and what it was asked for. */
+  function preview(navigator: { userAgent?: string }, Image?: unknown) {
+    const values = new Map<string, string>(), encoded: { width: number; height: number; args: unknown[] }[] = [];
+    const window = { electronAPI: undefined as ElectronAPI | undefined, __bflowMockBackgroundAdd: undefined as Hook | undefined, location: { protocol: 'http:' }, localStorage: {
+      getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); },
+    } };
+    const document = { documentElement: { dataset: {} }, createElement: () => ({ width: 0, height: 0, getContext: () => ({ fillStyle: '', font: '', fillRect() {}, fillText() {}, drawImage() {} }),
+      toDataURL(...args: unknown[]) { encoded.push({ width: this.width, height: this.height, args }); return 'data:image/webp;base64,UklGRg=='; } }) };
+    const module = { exports: {} as { installDevElectronAPI(): void } };
+    new Function('module', 'exports', 'window', 'document', 'navigator', 'Image', 'BroadcastChannel', 'fetch', bundle.outputFiles[0].text)(
+      module, module.exports, window, document, navigator, Image, undefined, () => { throw new Error('No external requests in preview'); },
+    );
+    module.exports.installDevElectronAPI();
+    return { window, api: window.electronAPI!, encoded };
+  }
+  /** The picture element of the app engine: it decodes when the test says so, at the size the test gives, and until then its natural size is 0, as in the engine. */
+  let size = [0, 0], decode = () => {};
+  class Picture {
+    naturalWidth = 0; naturalHeight = 0; onload = () => {}; onerror = () => {};
+    set src(_url: string) { decode = () => { [this.naturalWidth, this.naturalHeight] = size; this.onload(); }; }
+  }
+  const picked = [{ name: '교실.png' } as File, { name: '복도.jpg' } as File];
+  const sent = `data:image/png;base64,${png.toString('base64')}`;
+  const tab = preview({});
+  await assert.rejects(tab.api.backgroundReadClipboardFile(), /로그인/);
+  await tab.api.loginCanonicalSession({ name: '배한솔', password: '1234', rememberMe: false });
+  // The clipboard of the preview holds no file until the hook puts a path there.
+  assert.equal(await tab.api.backgroundReadClipboardFile(), null);
+  tab.window.__bflowMockBackgroundAdd = { clipboardFile: 'C:\\art\\a.png' };
+  assert.deepEqual(await tab.api.backgroundReadClipboardFile(), { filePath: 'C:\\art\\a.png' });
+  tab.window.__bflowMockBackgroundAdd = { filePath: file => file === picked[1] ? 'C:\\art\\복도.jpg' : '' };
+  assert.equal(tab.api.getPathForFile(picked[1]), 'C:\\art\\복도.jpg'); assert.equal(tab.api.getPathForFile(picked[0]), '');
+  // A browser tab: with no files from the hook the answer is nothing at all, and the page opens its own file dialog.
+  tab.window.__bflowMockBackgroundAdd = undefined;
+  assert.equal(await tab.api.backgroundPickImages!(), undefined);
+  tab.window.__bflowMockBackgroundAdd = {};
+  assert.equal(await tab.api.backgroundPickImages!(), undefined);
+  tab.window.__bflowMockBackgroundAdd = { pick: () => picked };
+  assert.deepEqual(await tab.api.backgroundPickImages!(), picked);
+  // A page that cannot draw (this stand-in has no picture element) gets back what it sent, as it came.
+  assert.deepEqual(await tab.api.backgroundUploadImage(sent), { ok: true, url: sent });
+  // The check window of the app engine: an empty list, hook or no hook, so no native file dialog is ever opened there.
+  const engine = preview({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.191 Electron/33.0.0 Safari/537.36' }, Picture);
+  assert.deepEqual(await engine.api.backgroundPickImages!(), []);
+  engine.window.__bflowMockBackgroundAdd = {};
+  assert.deepEqual(await engine.api.backgroundPickImages!(), []);
+  engine.window.__bflowMockBackgroundAdd = { pick: () => picked };
+  assert.deepEqual(await engine.api.backgroundPickImages!(), picked);
+  // An upload of the preview comes back small (the preview store keeps every picture twice in one value): drawn again once it has decoded, as a WebP of 480px on its long side at most, never larger than it came.
+  await engine.api.loginCanonicalSession({ name: '배한솔', password: '1234', rememberMe: false });
+  for (const [natural, shrunk] of [[[960, 480], [480, 240]], [[600, 1200], [240, 480]], [[320, 200], [320, 200]]]) {
+    size = natural; const upload = engine.api.backgroundUploadImage(sent); decode();
+    assert.deepEqual(await upload, { ok: true, url: 'data:image/webp;base64,UklGRg==' });
+    assert.deepEqual(engine.encoded.at(-1), { width: shrunk[0], height: shrunk[1], args: ['image/webp', 0.8] });
+  }
+  // The session is asked once the drawing is done: a login that changed meanwhile gets nothing back.
+  const late = engine.api.backgroundUploadImage(sent);
+  await engine.api.loginCanonicalSession({ name: '장삐쭈', password: '1234', rememberMe: false });
+  decode(); await assert.rejects(late, /세션/);
 });

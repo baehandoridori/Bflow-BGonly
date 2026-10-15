@@ -202,6 +202,7 @@ type MockCalendarSyncEnvelope = {
 type DevPreviewWindow = Window & typeof globalThis & {
   __bflowMockCalendarNotify?: (overrides?: MockCalendarNotificationOverrides) => void;
   __bflowMockSetLoginServerAvailable?: (available: boolean) => void;
+  __bflowMockBackgroundAdd?: { filePath?: (file: File) => string; clipboardFile?: string; pick?: () => File[] };
 };
 const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MOCK_CALENDAR_CHANGE_CHANNEL = 'bflow-dev-calendar-change-v1';
@@ -2563,6 +2564,21 @@ function filterMockActivities(opts: {
   return rows.slice(0, opts.limit ?? rows.length);
 }
 
+/** The preview store keeps every picture twice in one localStorage value (the snapshot and the receipt of the request): an upload hands back a WebP of 480px on its long side at most. What cannot be drawn (the stand-in document of a test) is handed back as it came. */
+async function shrinkPreviewImage(dataUrl: string): Promise<string> {
+  try {
+    const image = new Image();
+    await new Promise<void>((done, fail) => { image.onload = () => done(); image.onerror = () => fail(new Error('decode')); image.src = dataUrl; });
+    const scale = Math.min(1, 480 / Math.max(image.naturalWidth, image.naturalHeight, 1));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) return dataUrl;
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/webp', 0.8);
+  } catch { return dataUrl; }
+}
+
 export function installDevElectronAPI(): void {
   if (window.location?.protocol === 'file:') return; // 설치 앱의 IPC 실패를 mock 로그인으로 우회하지 않음
   if (hasUsableElectronAPI(window.electronAPI)) return; // 이미 Electron 환경이면 무시
@@ -2655,7 +2671,7 @@ export function installDevElectronAPI(): void {
     },
     fontDelete: async () => ({ ok: true }),
     fontGetPathForFile: () => '',
-    getPathForFile: () => '',
+    getPathForFile: (file: File) => (window as DevPreviewWindow).__bflowMockBackgroundAdd?.filePath?.(file) ?? '',
 
     usersRead: async () => ({
       users: getMockUsers().map(u => ({
@@ -3758,7 +3774,7 @@ export function installDevElectronAPI(): void {
       const { actor, assertCurrent } = requireBackgroundPreviewSession();
       if (actor.role !== 'admin') throw new Error('배경 이미지 업로드는 관리자만 할 수 있습니다.');
       if (typeof base64Data !== 'string' || base64Data.length > 2_000_000 || !/^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(base64Data)) return {ok:false,error:'2MB 이하의 PNG, JPEG, WebP 미리보기를 선택해 주세요.'};
-      assertCurrent(); return {ok:true,url:base64Data};
+      const url = await shrinkPreviewImage(base64Data); assertCurrent(); return {ok:true,url};
     },
     backgroundReadImageFile: async (filePath) => {
       const { actor, assertCurrent } = requireBackgroundPreviewSession();
@@ -3782,6 +3798,8 @@ export function installDevElectronAPI(): void {
       const dataUrl = canvas.toDataURL('image/png');
       assertCurrent(); return { dataUrl, filePath: samplePath };
     },
+    backgroundReadClipboardFile: async () => { requireBackgroundPreviewSession(); const filePath = (window as DevPreviewWindow).__bflowMockBackgroundAdd?.clipboardFile; return filePath ? { filePath } : null; },
+    backgroundPickImages: async () => { const hook = (window as DevPreviewWindow).__bflowMockBackgroundAdd; return hook?.pick ? hook.pick() : /\bElectron\//.test(navigator.userAgent) ? [] : undefined; },
     ganttExecute: async (request) => {
       const { gateway, options } = requireGanttPreviewSession();
       const result = await gateway.execute(request); options.assertCurrent?.(); return result;

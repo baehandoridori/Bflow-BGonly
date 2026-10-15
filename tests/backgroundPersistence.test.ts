@@ -171,3 +171,27 @@ test('image file reads discard data if administrator rights are revoked during d
   await assert.rejects(handlers.get('background:read-image-file')!({}, 'C:\\image.png', 1), /관리자/);
   assert.equal(diskReads, 1);
 });
+
+test('clipboard file path: the epoch is checked first, nothing but the clipboard is read, and no file is null', async () => {
+  const { registerBackgroundIpc } = await load('electron/backgroundIpc.ts');
+  let storeReads = 0, clipboardReads = 0, copied: string | null = 'C:\\art\\교실.png';
+  const store = { read: async () => { storeReads++; return empty(true); }, execute: async () => empty() };
+  // One main process that can read the clipboard, and one that was handed no reader.
+  const withReader = new Map<string, Function>(), withoutReader = new Map<string, Function>();
+  registerBackgroundIpc({
+    ipc: { handle: (name: string, handler: Function) => withReader.set(name, handler) },
+    getSessionOriginOrThrow: () => ({ userId: 'admin', epoch: 3 }), onChanged() {}, store,
+    readClipboardFilePath: () => { clipboardReads++; return copied; },
+  });
+  registerBackgroundIpc({
+    ipc: { handle: (name: string, handler: Function) => withoutReader.set(name, handler) },
+    getSessionOriginOrThrow: () => ({ userId: 'admin', epoch: 3 }), onChanged() {}, store,
+  });
+  const handler = withReader.get('background:read-clipboard-file')!;
+  await assert.rejects(handler({}, 2), /세션/); assert.equal(clipboardReads, 0);
+  assert.equal(await withoutReader.get('background:read-clipboard-file')!({}, 3), null);
+  copied = null; assert.equal(await handler({}, 3), null); assert.equal(clipboardReads, 1);
+  copied = 'C:\\art\\교실.png'; assert.deepEqual(await handler({}, 3), { filePath: 'C:\\art\\교실.png' }); assert.equal(clipboardReads, 2);
+  // A path of this PC and nothing more: neither the library nor the rights are asked for. The channel that reads the file asks.
+  assert.equal(storeReads, 0);
+});

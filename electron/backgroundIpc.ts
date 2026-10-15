@@ -8,6 +8,7 @@ export interface BackgroundIpcDependencies {
   store: { read(actorId: string): Promise<BackgroundSnapshot>; execute(actorId: string, request: BackgroundRequest): Promise<BackgroundSnapshot> };
   uploadImage?(base64Data: string): Promise<{ ok: boolean; url?: string; error?: string }>;
   readImageFile?(filePath: string): Promise<{ dataUrl: string; filePath: string }>;
+  readClipboardFilePath?(): string | null;
 }
 
 export function registerBackgroundIpc(deps: BackgroundIpcDependencies): void {
@@ -63,4 +64,6 @@ export function registerBackgroundIpc(deps: BackgroundIpcDependencies): void {
     if (!refreshed.canManage) throw new Error('배경 이미지 파일 연결은 관리자만 할 수 있습니다.');
     return result;
   });
+  // The path of a picture file copied in Explorer, and nothing more: no file is read and no rights are asked for here. The channel that reads that file checks them, before and after.
+  deps.ipc.handle('background:read-clipboard-file', async (_event, requestEpoch) => { originFor(requestEpoch); const filePath = deps.readClipboardFilePath?.() ?? null; return filePath ? { filePath } : null; });
 }
