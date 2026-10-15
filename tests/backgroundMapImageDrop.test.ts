@@ -670,6 +670,9 @@ test('M-9: mapLinksAdded, dropMissingViews and the six facts of a paste', () => 
   assert.equal(mapLinksAdded(before, before), false);
   assert.equal(mapLinksAdded(before, { ...before, nodes: before.nodes.map(node => ({ ...node })) }), false);
   assert.equal(mapLinksAdded(before, withNode(withNode({ ...before, placeId: null }, CLASSROOM, { placeId: null }), CLASS_CAMERA, { viewIds: [SHOT_B] })), false);
+  // A node deleted, those after it moved up a place: each is asked of the saved node of its own id, not of the one that stood
+  // where it stands now (잠긴 방 in the place of 잠긴 창고, 교실 카메라 in that of 도로).
+  assert.equal(mapLinksAdded(before, { ...before, nodes: before.nodes.filter(node => node.id !== CLOSET) }), false);
   // A view more, a place for a space, a place for the map: added. Another place than the saved one as well, and a view added
   // where another is taken off.
   assert.equal(mapLinksAdded(before, withNode(before, CLASS_CAMERA, { viewIds: [SHOT_A, SHOT_B, SHOT_C] })), true);
@@ -688,16 +691,20 @@ test('M-9: mapLinksAdded, dropMissingViews and the six facts of a paste', () => 
   const bare = [room(NEW_ROOM, '새 공간', 1500, 0, 200, 200), lens(NEW_LENS, '카메라 9', 1600, 100)];
   assert.equal(mapLinksAdded(annex, drawn(...bare)), false);
   assert.equal(mapLinksAdded(undefined, { ...annex, nodes: bare }), false);
-  // With no saved map every tie the draft holds is added: the place of the map, the place of a room.
+  // With no saved map every tie the draft holds is added: the place of the map on its own (2층 with no node), the place of a
+  // room (2-1 교실 and 잠긴 방 hold one in both maps; 별관 has no place of its own).
+  assert.equal(mapLinksAdded(undefined, { ...floor, nodes: [] }), true);
   assert.equal(mapLinksAdded(undefined, floor), true);
   assert.equal(mapLinksAdded(undefined, annex), true);
 
   // A draft lets go of a background that is gone: that id alone comes off, the rest stay in their order, every other node as
-  // it was. With nothing to take off: the map itself.
-  const loose = freeze(withNode(withNode(floor, CLASS_CAMERA, { viewIds: [SHOT_A, MISSING, SHOT_B] }), STORE_CAMERA, { viewIds: [MISSING] }));
+  // it was. A locked camera as well: holding the id, the map could not be saved, and its list of views has no row of it to
+  // untick. With nothing to take off: the map itself.
+  const loose = freeze(withNode(withNode(withNode(floor, CLASS_CAMERA, { viewIds: [SHOT_A, MISSING, SHOT_B] }), STORE_CAMERA, { viewIds: [MISSING] }),
+    LOCKED_CAMERA, { viewIds: [SHOT_C, MISSING] }));
   const there = new Set([SHOT_A, SHOT_B, SHOT_C]), dropped = dropMissingViews(loose, there);
-  assert.deepEqual(dropped, withNode(withNode(floor, CLASS_CAMERA, { viewIds: [SHOT_A, SHOT_B] }), STORE_CAMERA, { viewIds: [] }));
-  assert.deepEqual(touched(loose, dropped), [CLASS_CAMERA, STORE_CAMERA]);
+  assert.deepEqual(dropped, withNode(withNode(withNode(floor, CLASS_CAMERA, { viewIds: [SHOT_A, SHOT_B] }), STORE_CAMERA, { viewIds: [] }), LOCKED_CAMERA, { viewIds: [SHOT_C] }));
+  assert.deepEqual(touched(loose, dropped), [CLASS_CAMERA, STORE_CAMERA, LOCKED_CAMERA]);
   assert.equal(dropMissingViews(dropped, there), dropped);
   assert.equal(dropMissingViews(floor, new Set()), floor);
 
