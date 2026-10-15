@@ -971,9 +971,9 @@ test('anchor 50: a save never ends edit mode: every saved map that was being edi
   // revision before that save, and the next save would be refused. Nothing after the wait reads that render or opens a draft.
   const after = persist.slice(positions(persist, waited)[0] + waited.length);
   for (const stale of [/\bsnapshot\b/, /\bcurrent\b/, /\bdraft\b/, /doc\.beginEditing/, /doc\.enterNewMap/]) assert.doesNotMatch(after, stale);
-  // No save drops a draft any more, and the six saves all go through that function.
+  // No save drops a draft any more, and the seven saves all go through that function.
   assert.doesNotMatch(editor, /dropDrafts/);
-  assert.equal(count(editor, /await persistMaps\(/g), 6, 'the map, a new map, a link, the settings, the save step of a map delete, the tie of pictures added while viewing');
+  assert.equal(count(editor, /await persistMaps\(/g), 7, 'the map, a new map, a link, the settings, the save step of a map delete, the tie of pictures added while viewing, the copy of the edits of this PC over a map saved or deleted elsewhere');
   const binding = read('useBackgroundMapDocument.ts');
   assert.doesNotMatch(binding, /dropDrafts/);
   // The calls of the editor reach the reducer through these two lines, and each sends its own action. Swapped, a save would
@@ -2162,12 +2162,13 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
 });
 
 test('anchor 65: an open dialog of the editor is one line, and nine places read it', () => {
-  // That a dialog of the editor is open is said in one line, of all six: the question (discard, delete), the three
-  // forms (a new map, a link, the settings), the delete dialog of a map and the place prompt of added pictures. Each
-  // holds what it was opened for: nothing may change the maps under it, and the first five show what the editor has to
-  // say inside them. One of the six left out of that line is a dialog under which the drafts follow the library, and
-  // pictures come in. Without `mapDelete` that dialog is the delete dialog of a map.
-  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt);';
+  // That a dialog of the editor is open is said in one line, of all seven: the question (discard, delete), the three
+  // forms (a new map, a link, the settings), the delete dialog of a map, the place prompt of added pictures and the
+  // choice about a map saved or deleted elsewhere first. Each holds what it was opened for: nothing may change the maps
+  // under it, and all but the place prompt show what the editor has to say inside them. One of the seven left out of
+  // that line is a dialog under which the drafts follow the library, and pictures come in. Without `mapDelete` that
+  // dialog is the delete dialog of a map.
+  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt || staleChoice);';
   const lines = editor.split('\n').map(line => line.trim());
   assert.ok(lines.includes(made), `not a line of its own: ${made}`);
   // The word stands eleven times, on eleven lines: the one that makes it and, in this order, the nine places that read it.
