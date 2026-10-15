@@ -365,6 +365,13 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
 
   // 삽입선 방향 계산용 순서(id 배열). 드래그 가능 화면에선 필터·정렬이 없어 displayCharacters 가 실제 재배치 순서와 상대 순서가 같다.
   const cardOrderIds = useMemo(() => displayCharacters.map((c) => c.id), [displayCharacters]);
+  // 상세 창 왼쪽 목록 순서(정렬 중에만) — 필터 밖 캐릭터까지 정렬해 둔다: 창에서 '전체 보기'를 눌러도 같은 정렬로 이어진다.
+  const modalOrderIds = useMemo(
+    () => (sort.mode === 'manual'
+      ? undefined
+      : sortCharactersForBoard(visibleCharacters, sort.mode, sort.reversed, byCharacter, imagesByCostume).map((c) => c.id)),
+    [visibleCharacters, sort.mode, sort.reversed, byCharacter, imagesByCostume],
+  );
 
   const cardMenuCharacter = cardMenu ? characters.find((c) => c.id === cardMenu.characterId) ?? null : null;
   const cardMenuCostumes = cardMenuCharacter ? byCharacter.get(cardMenuCharacter.id) ?? [] : [];
@@ -608,7 +615,8 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
             <GlassDropdown
               options={SORT_MODE_OPTIONS}
               value={sort.mode}
-              onChange={(v) => changeSort({ mode: v as CharacterSortMode, reversed: false })}
+              // 기준을 바꾸면 뒤집기는 풀린다. 이미 고른 기준을 다시 누른 건 그대로 둔다.
+              onChange={(v) => { if (v !== sort.mode) changeSort({ mode: v as CharacterSortMode, reversed: false }); }}
               label="정렬 기준"
               icon={<ArrowUpDown size={14} className="text-text-secondary" />}
               minWidth={300}
@@ -774,7 +782,7 @@ function CharacterGrid({ onAdd, pendingOpenId, pendingOpenCostumeId, pendingOpen
           initialCostumeId={detailRequest.costumeId}
           archivedMode={showArchived}
           filteredIds={query.trim() || activeTags.length > 0 || assigneeFilter || statusFilter !== 'all' ? filtered.map((c) => c.id) : undefined}
-          orderIds={sort.mode !== 'manual' ? cardOrderIds : undefined}
+          orderIds={modalOrderIds}
           onClose={() => setDetailRequest(null)}
         />
       )}

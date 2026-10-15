@@ -130,8 +130,8 @@ test('현황판: 정렬 메뉴·뒤집기 버튼·기억', () => {
   assert.match(boardView, /aria-label="정렬 순서 뒤집기"/);
   // 뒤집기는 직접 정한 순서에서 꺼진다.
   assert.match(boardView, /disabled=\{heightCompareMode \|\| sort\.mode === 'manual'\}/);
-  // 기준을 바꾸면 뒤집기는 풀린다.
-  assert.match(boardView, /changeSort\(\{ mode: v as CharacterSortMode, reversed: false \}\)/);
+  // 기준을 바꾸면 뒤집기는 풀린다(이미 고른 기준을 다시 누르면 그대로).
+  assert.match(boardView, /if \(v !== sort\.mode\) changeSort\(\{ mode: v as CharacterSortMode, reversed: false \}\)/);
 });
 
 test('현황판: 정렬 결과가 카드·키 비교·사용자 탭·상세 창에 이어진다', () => {
@@ -147,8 +147,9 @@ test('현황판: 정렬 결과가 카드·키 비교·사용자 탭·상세 창�
   // 사용자 탭에도 정렬된 목록과 정렬 여부를 넘긴다.
   assert.match(boardView, /characters=\{sortedCharacters\}/);
   assert.match(boardView, /sorted=\{sort\.mode !== 'manual'\}/);
-  // 상세 창 왼쪽 목록은 연 순간의 현황판 순서를 쓴다.
-  assert.match(boardView, /orderIds=\{sort\.mode !== 'manual' \? cardOrderIds : undefined\}/);
+  // 상세 창 왼쪽 목록은 같은 정렬 — 필터 밖 캐릭터까지 정렬해 '전체 보기'에서도 이어진다(창은 연 순간을 붙든다).
+  assert.match(boardView, /sortCharactersForBoard\(visibleCharacters, sort\.mode, sort\.reversed, byCharacter, imagesByCostume\)\.map\(\(c\) => c\.id\)/);
+  assert.match(boardView, /orderIds=\{modalOrderIds\}/);
 });
 
 test('상세 창: 왼쪽 목록 순서는 연 순간의 스냅숏', () => {
