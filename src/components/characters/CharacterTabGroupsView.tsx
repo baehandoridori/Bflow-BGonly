@@ -6,7 +6,7 @@ import { CharacterListRow } from '@/components/characters/CharacterListRow';
 import { CharacterGroupRail, type RailEntry } from '@/components/characters/CharacterGroupRail';
 import { bindVerticalDragAutoScroll } from '@/utils/dragAutoScroll';
 import {
-  addGroup, groupedCharacterIdSet, moveCharacterToGroup, moveGroupBefore, removeGroup, renameGroup, reorderWithinGroup,
+  addGroup, groupedCharacterIdSet, groupsAfterCardDrop, moveGroupBefore, removeGroup, renameGroup,
 } from '@/utils/characterTabGroups';
 import { loadPersistedGroupFolded, savePersistedGroupFolded, type CharacterBoardViewMode } from '@/utils/characterViewPersist';
 import { cn } from '@/utils/cn';
@@ -25,18 +25,24 @@ export function CharacterTabGroupsView({
   byCharacter,
   viewMode,
   searching,
+  sorted = false,
   dragEnabled: allowDrag = true,
   onOpen,
   onContextMenu,
   onUpdateGroups,
 }: {
   tab: CharacterBoardTab;
-  /** 검색 필터가 이미 적용된 표시 대상(활성 캐릭터) 목록 — 스토어 정렬 순서 유지. */
+  /** 검색 필터가 이미 적용된 표시 대상(활성 캐릭터) 목록 — 현황판이 고른 정렬 순서(기본은 스토어 순서). */
   characters: Character[];
   byCharacter: Map<string, CharacterCostume[]>;
   viewMode: CharacterBoardViewMode;
   /** 검색어·태그 필터가 걸린 상태 — 빈 섹션 문구를 "필터 때문"으로 구분해 보여준다. */
   searching: boolean;
+  /**
+   * 현황판이 정렬 중(추가한 순서·최근 수정순)인지. 그룹 안 카드도 정렬 순서로 보이고,
+   * 그룹 사이 옮기기는 되지만 같은 그룹 안 끌어 놓기(직접 정한 순서 바꾸기)는 무시한다.
+   */
+  sorted?: boolean;
   /**
    * 카드 드래그(그룹 배치·순서 변경) 허용 여부. 일부 카드만 보이는 필터 상태에서 배치를 바꾸면
    * 숨겨진 카드까지 순서가 뒤엉키므로 보드가 필터 상태를 그대로 넘긴다 (코덱스 1차 P2). 기본 허용.
@@ -129,6 +135,8 @@ export function CharacterTabGroupsView({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const byId = new Map(characters.map((c) => [c.id, c]));
+  // 정렬 중 그룹 안 표시 순서 = 받은 목록(정렬 결과)의 순서.
+  const sortIndex = new Map(characters.map((c, i) => [c.id, i]));
   const grouped = groupedCharacterIdSet(tab.groups);
   // 미분류 = 표시 대상 중 어느 그룹에도 없는 캐릭터. (그룹에 남은 삭제된 캐릭터 id 는 byId 조회에서 자연 제외.)
   const ungrouped = characters.filter((c) => !grouped.has(c.id));
@@ -144,27 +152,18 @@ export function CharacterTabGroupsView({
     { disabled: reduceMotion || Date.now() > cardFlipArmedUntilRef.current, maxItems: CARD_DROP_FLIP.maxItems, enter: false },
   );
 
-  const dropOnGroup = (groupId: string | null) => {
+  // 섹션 빈 곳·레일에 놓기(targetId=null) / 카드 위에 놓기. 정렬 중이면 그룹 사이 옮기기만 한다(groupsAfterCardDrop).
+  const applyCardDrop = (groupId: string | null, targetId: string | null) => {
     const dragId = draggingIdRef.current;
     if (!dragId) return;
     setDragging(null);
+    const next = groupsAfterCardDrop(tab.groups, dragId, groupId, targetId, sorted);
+    if (!next) return;
     cardFlipArmedUntilRef.current = Date.now() + CARD_DROP_FLIP.armMs;
-    onUpdateGroups(moveCharacterToGroup(tab.groups, dragId, groupId));
-  };
-  const dropOnCard = (groupId: string | null, targetId: string) => {
-    const dragId = draggingIdRef.current;
-    if (!dragId) return;
-    setDragging(null);
-    if (dragId === targetId) return;
-    cardFlipArmedUntilRef.current = Date.now() + CARD_DROP_FLIP.armMs;
-    if (groupId === null) {
-      onUpdateGroups(moveCharacterToGroup(tab.groups, dragId, null));
-      return;
-    }
-    let next = moveCharacterToGroup(tab.groups, dragId, groupId);
-    next = reorderWithinGroup(next, groupId, dragId, targetId);
     onUpdateGroups(next);
   };
+  const dropOnGroup = (groupId: string | null) => applyCardDrop(groupId, null);
+  const dropOnCard = (groupId: string | null, targetId: string) => applyCardDrop(groupId, targetId);
 
   const commitRename = () => {
     const name = editDraft.trim();
@@ -206,7 +205,8 @@ export function CharacterTabGroupsView({
   const section = (group: CharacterBoardTabGroup | null) => {
     const members = group
       ? group.characterIds.map((id) => byId.get(id)).filter((c): c is Character => Boolean(c))
-      : ungrouped;
+      : ungrouped; // 미분류는 받은 목록에서 걸러 낸 것이라 정렬 중이면 이미 정렬돼 있다.
+    if (group && sorted) members.sort((a, b) => (sortIndex.get(a.id) ?? 0) - (sortIndex.get(b.id) ?? 0));
     const folded = foldedKeys.has(sectionFoldKey(group?.id ?? null));
     return (
       <section

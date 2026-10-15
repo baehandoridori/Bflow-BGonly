@@ -720,6 +720,7 @@ export function CharacterDetailModal({
   initialCostumeId,
   archivedMode = false,
   filteredIds,
+  orderIds,
   onClose,
 }: {
   initialCharacterId: string;
@@ -728,6 +729,11 @@ export function CharacterDetailModal({
   archivedMode?: boolean;
   /** 그리드의 검색·태그 필터 결과 — 있으면 좌측 목록이 같은 컨텍스트를 유지한다 (UX-6). */
   filteredIds?: string[];
+  /**
+   * 현황판이 정렬 중일 때의 표시 순서 — 좌측 목록도 같은 순서로 보인다.
+   * 연 순간의 순서를 붙들어 둔다: 최근 수정순에서 편집할 때마다 목록이 위로 튀지 않게. 연 뒤에 생긴 캐릭터는 맨 뒤.
+   */
+  orderIds?: string[];
   onClose: () => void;
 }) {
   const characters = useCharacterBoardStore((s) => s.characters);
@@ -742,13 +748,19 @@ export function CharacterDetailModal({
   );
   const [showAllList, setShowAllList] = useState(false);
   const hasGridFilter = !!filteredIds && filteredIds.length > 0;
+  const [orderSnapshot] = useState(() => (orderIds ? new Map(orderIds.map((id, i) => [id, i])) : null));
   const visibleCharacters = useMemo(() => {
-    if (!hasGridFilter || showAllList) return allVisibleCharacters;
-    const order = new Map(filteredIds!.map((id, i) => [id, i]));
-    return allVisibleCharacters
-      .filter((c) => order.has(c.id))
-      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  }, [allVisibleCharacters, filteredIds, hasGridFilter, showAllList]);
+    let list = allVisibleCharacters;
+    if (hasGridFilter && !showAllList) {
+      const order = new Map(filteredIds!.map((id, i) => [id, i]));
+      list = list
+        .filter((c) => order.has(c.id))
+        .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    }
+    if (!orderSnapshot) return list;
+    const last = orderSnapshot.size;
+    return list.slice().sort((a, b) => (orderSnapshot.get(a.id) ?? last) - (orderSnapshot.get(b.id) ?? last));
+  }, [allVisibleCharacters, filteredIds, hasGridFilter, showAllList, orderSnapshot]);
   const [selectedId, setSelectedId] = useState(initialCharacterId);
   const [listQuery, setListQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);

@@ -74,8 +74,10 @@ test('피드백 48 배선: 보드 필터 상태·UI·적용 경로·드래그 �
   assert.match(board, /triggerLabel=\{assigneeFilter \?\? '작업자: 전체'\}/);
   assert.match(board, /&& !assigneeFilter && statusFilter === 'all'/);
   assert.match(board, /setAssigneeFilter\(null\); setStatusFilter\('all'\);/);
-  // 코덱스 1차 P2: 커스텀 탭 그룹 뷰도 같은 드래그 게이트를 쓴다(필터 중 그룹 배치·순서 변경 금지).
-  assert.match(board, /dragEnabled=\{cardDragEnabled\}/);
+  // 코덱스 1차 P2: 커스텀 탭 그룹 뷰도 같은 필터 게이트를 쓴다(필터 중 그룹 배치·순서 변경 금지).
+  //   v1.138.0: 정렬 중에는 그룹 사이 옮기기만 허용하므로 정렬 조건이 빠진 탭 전용 게이트를 넘긴다.
+  assert.match(board, /const tabDragEnabled = viewMode !== 'list' && !query\.trim\(\) && activeTags\.length === 0 && !assigneeFilter && statusFilter === 'all'/);
+  assert.match(board, /dragEnabled=\{tabDragEnabled\}/);
   const tabGroups = readFileSync('src/components/characters/CharacterTabGroupsView.tsx', 'utf8');
   assert.match(tabGroups, /const dragEnabled = viewMode !== 'list' && allowDrag/);
 });

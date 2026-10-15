@@ -85,8 +85,8 @@ test('UI 앵커: 탭 스트립·그룹 뷰·검색 색인', () => {
   assert.match(boardView, /<CharacterTabGroupsView/);
   const groupsView = readFileSync('src/components/characters/CharacterTabGroupsView.tsx', 'utf8');
   assert.match(groupsView, /미분류/);
-  assert.match(groupsView, /moveCharacterToGroup/);
-  assert.match(groupsView, /reorderWithinGroup/);
+  // v1.138.0: 그룹 이동·그룹 안 순서 변경은 groupsAfterCardDrop 한 곳으로 모였다(동작은 characterBoardSort.test.ts 가 직접 시험).
+  assert.match(groupsView, /groupsAfterCardDrop/);
   assert.match(groupsView, /draggingIdRef/);
   assert.match(boardView, /data-board-scroll/);
   assert.match(boardView, /--board-sticky-h/);
