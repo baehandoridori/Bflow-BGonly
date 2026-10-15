@@ -6,6 +6,9 @@ import { canUndoMap, createMapDocument, gestureStartMap, mapDraft, mapDraftChang
 import type { MapDocumentAction, MapDocumentState, MapDraft, MapRestoredDraft } from '../src/features/backgrounds/mapDocument.ts';
 import { mapEditStatus } from '../src/features/backgrounds/mapEditStatus.ts';
 import type { MapEditStatus } from '../src/features/backgrounds/mapEditStatus.ts';
+import { MAP_KEEP_DELAY_MS, MAP_KEEP_TEXT, MAP_STALE_TEXT, keptEntryOf, mapDraftSavedAlready, mapDraftStanding, planKeptRestore, rescueMapCopy, rescueMapName } from '../src/features/backgrounds/mapDraftKeep.ts';
+import { keptEntryProblem } from '../src/shared/backgroundKeptEdits.ts';
+import type { KeptMapEdit } from '../src/shared/backgroundKeptEdits.ts';
 
 // The unsaved map edits this PC keeps, as the page sees them. Every verdict comes from the real modules of the library
 // (domain.ts, mapDocument.ts, mapWorkflow.ts) on one library that is whole in itself: the places 학교 > 교실, one view V,
@@ -45,6 +48,8 @@ const edited = (state: MapDocumentState, mapId: string, name: string) => run(sta
 const restore = (state: MapDocumentState, drafts: MapRestoredDraft[]) => run(state, { type: 'restore-drafts', drafts });
 /** 2층 as this PC left it: another name. */
 const KEPT_FLOOR: BackgroundMap = { ...FLOOR_MAP, name: '2층 (고친 것)' };
+/** The library with one of its maps as given in place of its own. */
+const at = (map: BackgroundMap): BackgroundSnapshot => ({ ...LIBRARY, maps: LIBRARY.maps.map(item => item.id === map.id ? map : item) });
 
 test('KP-1a: restore-drafts brings a kept draft back with the count it had, nothing to undo, and a newer revision does not move it', () => {
   // The library every test of this file stands on is whole: what fails below fails for what it tests, not for the library.
@@ -126,4 +131,185 @@ test('KP-2: the band says when the map was saved or deleted elsewhere first, or 
   assert.deepEqual(mapEditStatus(twice, false, false, 'unkept'), unkept);
   // Just saved, edited again, and saved elsewhere meanwhile: unsaved edits win over the notice, so it is the stale row.
   assert.deepEqual(mapEditStatus(twice, false, true, 'moved'), moved);
+});
+
+test('KP-3: keptEntryOf keeps the value, the count and the revision, and leaves a data: underlay out', () => {
+  // An https underlay is kept as it is: the value whole, and no word of anything left out.
+  const twice = mapDraft(edited(edited(opened(FLOOR_MAP), FLOOR, '가'), FLOOR, '나'), FLOOR)!;
+  const linked = keptEntryOf(twice, twice.value, 1700000000000);
+  assert.deepEqual(linked, { baseRevision: 5, steps: 2, keptAt: 1700000000000, value: twice.value });
+  assert.deepEqual(Object.keys(linked).sort(), ['baseRevision', 'keptAt', 'steps', 'value']);
+  // A data: picture is left out (the draft never changes the underlay): nothing in its place, and the mark that says so.
+  const inline: BackgroundMap = { ...twice.value, imageUrl: 'data:image/png;base64,iVBORw0KGgo=' };
+  const omitted = keptEntryOf(twice, inline, 1700000000001);
+  assert.deepEqual(omitted, { baseRevision: 5, steps: 2, keptAt: 1700000000001, value: { ...inline, imageUrl: '' }, imageOmitted: true });
+  assert.deepEqual(Object.keys(omitted).sort(), ['baseRevision', 'imageOmitted', 'keptAt', 'steps', 'value']);
+  assert.equal(inline.imageUrl, 'data:image/png;base64,iVBORw0KGgo=', 'the value handed over was written into');
+  // The count is the one the band shows: kept with 3, restored and edited once, it is 4 (the history holds one of them).
+  const restoredOnce = mapDraft(edited(restore(createMapDocument(), [{ value: KEPT_FLOOR, baseRevision: 5, steps: 3 }]), FLOOR, '다'), FLOOR)!;
+  assert.deepEqual([restoredOnce.past.length, keptEntryOf(restoredOnce, restoredOnce.value, 1700000000002).steps], [1, 4]);
+  // What it makes may be written: the check of the store lets both through.
+  for (const made of [linked, omitted]) assert.equal(keptEntryProblem(FLOOR, made), null);
+});
+
+test('KP-4: planKeptRestore — restore, equal, drafted or invalid, and the newest', () => {
+  /** An entry as the store lists it: kept on revision 5 with two unsaved edits, unless the patch says otherwise. */
+  const kept = (value: unknown, patch: Partial<KeptMapEdit> = {}): KeptMapEdit => ({ baseRevision: 5, steps: 2, keptAt: 1700000000000, value, ...patch });
+  const planOf = (listed: Record<string, KeptMapEdit>, snapshot: BackgroundSnapshot = LIBRARY, drafts: Record<string, MapDraft> = {}) => planKeptRestore(listed, snapshot, drafts);
+  const left = (mapId: string, reason: 'drafted' | 'invalid') => ({ restore: [], equal: [], skipped: [{ mapId, reason }], newest: null });
+  const back = (mapId: string, value: BackgroundMap, baseRevision: number | null = 5, steps = 2) => ({ restore: [{ value, baseRevision, steps }], equal: [], skipped: [], newest: mapId });
+  const removed = (mapId: string) => ({ restore: [], equal: [mapId], skipped: [], newest: null });
+  // Not a map of this version, or a broken one: left out, and never thrown. A key it does not know, on the map or on a node.
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...KEPT_FLOOR, glow: true }) }), left(FLOOR, 'invalid'));
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...KEPT_FLOOR, nodes: [KEPT_FLOOR.nodes[0], { ...lens, glow: true }] }) }), left(FLOOR, 'invalid'));
+  // A number that is a string.
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...KEPT_FLOOR, nodes: [{ ...KEPT_FLOOR.nodes[0], x: '1' }, lens] }) }), left(FLOOR, 'invalid'));
+  // No list of nodes, and a node that is no object.
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...KEPT_FLOOR, nodes: {} }) }), left(FLOOR, 'invalid'));
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...KEPT_FLOOR, nodes: [null] }) }), left(FLOOR, 'invalid'));
+  // The value of another map under this id.
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...KEPT_FLOOR, id: ROOM }) }), left(FLOOR, 'invalid'));
+  // A name a draft can hold and the library would refuse comes back as it is: an object with none, one longer than 160, a map with none.
+  const unnamed: BackgroundMap = { ...KEPT_FLOOR, nodes: [space(CLASS_SPACE, '', CLASS, ROOM), lens] };
+  assert.deepEqual(planOf({ [FLOOR]: kept(unnamed) }), back(FLOOR, unnamed));
+  assert.equal(planOf({ [FLOOR]: kept(unnamed) }).restore[0].value.nodes[0].name, '');
+  const long: BackgroundMap = { ...KEPT_FLOOR, nodes: [space(CLASS_SPACE, '가'.repeat(161), CLASS, ROOM), lens] };
+  assert.deepEqual(planOf({ [FLOOR]: kept(long) }), back(FLOOR, long));
+  const nameless: BackgroundMap = { ...KEPT_FLOOR, name: '' };
+  assert.deepEqual(planOf({ [FLOOR]: kept(nameless) }), back(FLOOR, nameless));
+  // What the library holds already is removed: on the same revision, or on a later one (saved, and the removal of the entry lost).
+  assert.deepEqual(planOf({ [FLOOR]: kept(FLOOR_MAP) }), removed(FLOOR));
+  assert.deepEqual(planOf({ [FLOOR]: kept(KEPT_FLOOR) }, at({ ...KEPT_FLOOR, revision: 6 })), removed(FLOOR));
+  // An underlay left out is the library's again before anything is compared: then it is the very map, and removed.
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...FLOOR_MAP, imageUrl: '' }, { imageOmitted: true }) }), removed(FLOOR));
+  // Saved elsewhere with other content, or gone from the library: it comes back.
+  assert.deepEqual(planOf({ [FLOOR]: kept(KEPT_FLOOR) }, at({ ...FLOOR_MAP, revision: 6, name: '2층 (다른 곳)' })), back(FLOOR, KEPT_FLOOR));
+  const NEW = uid(4), newMap: BackgroundMap = { id: NEW, revision: 1, name: '별관', parentId: null, placeId: null, imageUrl: '', nodes: [] };
+  assert.deepEqual(planOf({ [NEW]: kept(newMap, { baseRevision: 1 }) }), back(NEW, newMap, 1));
+  // An underlay left out comes back as the library's, or as none when the library has no such map.
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...KEPT_FLOOR, imageUrl: '' }, { imageOmitted: true }) }), back(FLOOR, KEPT_FLOOR));
+  assert.deepEqual(planOf({ [NEW]: kept({ ...newMap, imageUrl: 'https://example.com/old.png' }, { baseRevision: 1, imageOmitted: true }) }), back(NEW, newMap, 1));
+  // A draft with unsaved edits on that map wins (it is written over the entry soon), whatever the entry is. A clean draft is
+  // replaced: on the revision kept, or on a later one this PC saved meanwhile.
+  const changedDrafts = edited(opened(FLOOR_MAP), FLOOR, '이 PC').drafts;
+  assert.deepEqual(planOf({ [FLOOR]: kept(KEPT_FLOOR) }, LIBRARY, changedDrafts), left(FLOOR, 'drafted'));
+  assert.deepEqual(planOf({ [FLOOR]: kept({ ...KEPT_FLOOR, glow: true }) }, LIBRARY, changedDrafts), left(FLOOR, 'drafted'));
+  assert.deepEqual(planOf({ [FLOOR]: kept(KEPT_FLOOR) }, LIBRARY, opened(FLOOR_MAP).drafts), back(FLOOR, KEPT_FLOOR));
+  const savedHere: BackgroundMap = { ...FLOOR_MAP, revision: 6, name: '2층 (이 PC가 저장)' };
+  assert.deepEqual(planOf({ [FLOOR]: kept(KEPT_FLOOR) }, at(savedHere), opened(savedHere).drafts), back(FLOOR, KEPT_FLOOR));
+  // Several at once, each by its row, in the order listed. The newest is the restored one kept last, wherever it stands:
+  // 교실 안 was kept later still, but the library holds it.
+  const keptMain: BackgroundMap = { ...MAIN_MAP, name: '본관 (고친 것)' };
+  const listed = {
+    [MAIN]: kept(keptMain, { baseRevision: 2, steps: 1, keptAt: 100 }),
+    [FLOOR]: kept(KEPT_FLOOR, { steps: 3, keptAt: 300 }),
+    [ROOM]: kept(ROOM_MAP, { baseRevision: 1, keptAt: 400 }),
+    [NEW]: kept(newMap, { baseRevision: 1, steps: 1, keptAt: 200 }),
+  };
+  assert.deepEqual(planOf(listed), {
+    restore: [{ value: keptMain, baseRevision: 2, steps: 1 }, { value: KEPT_FLOOR, baseRevision: 5, steps: 3 }, { value: newMap, baseRevision: 1, steps: 1 }],
+    equal: [ROOM],
+    skipped: [],
+    newest: FLOOR,
+  });
+});
+
+test('KP-5: mapDraftStanding and mapDraftSavedAlready read the library itself, and the same edits on another revision are current', () => {
+  const twice = mapDraft(edited(edited(opened(FLOOR_MAP), FLOOR, '가'), FLOOR, '나'), FLOOR)!, clean = mapDraft(opened(FLOOR_MAP), FLOOR)!;
+  const elsewhere = at({ ...FLOOR_MAP, revision: 6, name: '2층 (다른 곳)' }), gone = { ...LIBRARY, maps: LIBRARY.maps.filter(map => map.id !== FLOOR) };
+  // No draft, a clean one (under a later revision too), one never saved: current.
+  assert.equal(mapDraftStanding(undefined, LIBRARY), 'current');
+  assert.equal(mapDraftStanding(clean, elsewhere), 'current');
+  assert.equal(mapDraftStanding({ ...twice, baseRevision: null }, elsewhere), 'current');
+  // On the revision the library has: current.
+  assert.equal(mapDraftStanding(twice, LIBRARY), 'current');
+  // Another revision with other content: moved. A lower one as well: the revisions are compared for being the same.
+  assert.equal(mapDraftStanding(twice, elsewhere), 'moved');
+  assert.equal(mapDraftStanding(twice, at({ ...FLOOR_MAP, revision: 4, name: '2층 (옛 것)' })), 'moved');
+  // Another revision with the same content (a save of this PC whose answer was lost): current.
+  const sameElsewhere = at({ ...twice.value, revision: 6 });
+  assert.equal(mapDraftStanding(twice, sameElsewhere), 'current');
+  // Gone from the library: gone. A clean draft of a map that is gone: current.
+  assert.equal(mapDraftStanding(twice, gone), 'gone');
+  assert.equal(mapDraftStanding(clean, gone), 'current');
+  // Saved already: the same content on another revision, and nothing else. Not a clean draft, not a map that is gone, not
+  // other content, and not a draft on the very revision with the same content (renamed and named back: two steps, both undone in effect).
+  assert.equal(mapDraftSavedAlready(twice, sameElsewhere), true);
+  assert.equal(mapDraftSavedAlready(clean, at({ ...clean.value, revision: 6 })), false);
+  assert.equal(mapDraftSavedAlready(twice, gone), false);
+  assert.equal(mapDraftSavedAlready(twice, elsewhere), false);
+  const namedBack = mapDraft(edited(edited(opened(FLOOR_MAP), FLOOR, '가'), FLOOR, '2층'), FLOOR)!;
+  assert.deepEqual([namedBack.past.length, mapDraftChanged(namedBack), namedBack.value], [2, true, FLOOR_MAP]);
+  assert.equal(mapDraftSavedAlready(namedBack, LIBRARY), false);
+  assert.equal(mapDraftStanding(namedBack, LIBRARY), 'current');
+});
+
+test('KP-6: rescueMapName cuts by whole characters to the 160 units the library counts', () => {
+  assert.equal(rescueMapName('2층'), '2층 (내 편집)');
+  const full = rescueMapName('가'.repeat(160));
+  assert.equal(full.length, 160);
+  assert.ok(full.endsWith(' (내 편집)'));
+  assert.equal(full, '가'.repeat(153) + ' (내 편집)');
+  // A pair of surrogates at the cut goes whole: no half of a character is left, and the name is a unit short.
+  const pictured = rescueMapName('가'.repeat(152) + '😀😀');
+  assert.equal(pictured, '가'.repeat(152) + ' (내 편집)');
+  assert.equal(pictured.length, 159);
+  // A space the cut leaves at the end goes, and so do the spaces around the name.
+  assert.equal(rescueMapName('가'.repeat(152) + ' 나'), '가'.repeat(152) + ' (내 편집)');
+  assert.equal(rescueMapName('  2층  '), '2층 (내 편집)');
+});
+
+test('KP-7: rescueMapCopy is a map the library takes, over a map moved, deleted, or with its place and view gone', () => {
+  const COPY = uid(0x41);
+  const value = mapDraft(edited(opened(FLOOR_MAP), FLOOR, '2층 (이 PC)'), FLOOR)!.value;
+  /** The copy on that library, saved there as every new map is: the library is checked first, and whatever it throws is thrown. */
+  const take = (base: BackgroundSnapshot, from: BackgroundMap = value) => {
+    validateBackgroundSnapshot(base);
+    const copy = rescueMapCopy(base, from, COPY);
+    return { copy, after: applyBackgroundCommand(base, { type: 'save-maps', maps: [{ entity: copy, expectedRevision: null }] }, { canManage: true }) };
+  };
+  // Whole, once: a new id on revision 0, the name with the words after it, the same underlay, under the same map, on the same
+  // place. Its space opens nothing (the map below hangs from 2층, not from the copy) and keeps its place; the camera keeps its view.
+  const copied = take(LIBRARY);
+  assert.deepEqual(copied.copy, { id: COPY, revision: 0, name: '2층 (이 PC) (내 편집)', imageUrl: 'https://example.com/2f.png', parentId: MAIN, placeId: SCHOOL,
+    nodes: [space(CLASS_SPACE, '교실', CLASS, null), lens] });
+  assert.deepEqual(copied.after.maps.find(map => map.id === COPY), { ...copied.copy, revision: 1 });
+  // ⓐ 2층 was saved elsewhere meanwhile: the copy goes in beside it, and 2층 stays as it was saved there.
+  const movedFloor: BackgroundMap = { ...FLOOR_MAP, revision: 6, name: '2층 (다른 곳)' };
+  const moved = take(at(movedFloor));
+  assert.deepEqual(moved.after.maps.find(map => map.id === FLOOR), movedFloor);
+  assert.deepEqual(moved.copy, copied.copy);
+  // ⓑ Everything under 본관 was deleted elsewhere (본관, 2층 and 교실 안): the copy is a map at the top.
+  const deleted = take({ ...LIBRARY, maps: [] });
+  assert.deepEqual(deleted.copy, { ...copied.copy, parentId: null });
+  // ⓒ 2층 was saved elsewhere without 학교, 교실 and V, which were deleted then: the copy has no place, nor its space, and its camera no view.
+  const detached: BackgroundMap = { ...FLOOR_MAP, revision: 6, placeId: null, nodes: [space(CLASS_SPACE, '교실', null, ROOM), { ...lens, viewIds: [] }] };
+  const bare = take({ ...LIBRARY, places: [], views: [], maps: [MAIN_MAP, detached, ROOM_MAP] });
+  assert.deepEqual(bare.copy, { ...copied.copy, placeId: null, nodes: [space(CLASS_SPACE, '교실', null, null), { ...lens, viewIds: [] }] });
+  // ⓓ A name of 160 with pictures in it: cut so the whole fits, 159.
+  const pictured = '가'.repeat(152) + '😀😀' + '가'.repeat(4);
+  assert.equal(pictured.length, 160);
+  const named = take(LIBRARY, { ...value, name: pictured });
+  assert.deepEqual([named.copy.name, named.copy.name.length], ['가'.repeat(152) + ' (내 편집)', 159]);
+  // An object whose name was emptied goes along as the draft holds it, and the library refuses it as it refuses that draft.
+  assert.throws(() => take(LIBRARY, { ...value, nodes: [space(CLASS_SPACE, '', CLASS, ROOM), lens] }), /오브젝트 이름/);
+});
+
+test('KP-9: the words of mapDraftKeep.ts, letter for letter', () => {
+  assert.equal(MAP_KEEP_DELAY_MS, 300);
+  assert.equal(MAP_KEEP_TEXT.restored(2), "지난번에 저장하지 않은 편집이 있던 도면 2개를 다시 열었어요. 필요 없으면 '편집 끝내기'에서 버릴 수 있어요.");
+  assert.equal(MAP_KEEP_TEXT.update(3), '이 PC에 저장 안 한 편집이 있는 도면 3개가 그대로 보관돼 있어요. 업데이트한 뒤 배경 화면을 열면 이어서 고칠 수 있어요.');
+  assert.equal(MAP_KEEP_TEXT.below, '접어 둔 하위 도면에 저장 안 한 변경이 있어요');
+  assert.equal(MAP_KEEP_TEXT.broken, '도면 화면을 그리지 못했어요. 저장하지 않은 도면 편집 때문일 수 있어요.');
+  assert.equal(MAP_KEEP_TEXT.brokenDiscard, '저장하지 않은 편집을 버리고 다시 열기');
+  assert.equal(MAP_STALE_TEXT.moved.title, '다른 곳에서 이 도면이 먼저 저장됐어요');
+  assert.equal(MAP_STALE_TEXT.moved.lead, '이 PC에서 고친 내용과 다른 곳에서 저장한 내용은 하나로 합칠 수 없어요.');
+  assert.equal(MAP_STALE_TEXT.moved.drop, '내 편집 버리고 최신 내용 받기');
+  assert.equal(MAP_STALE_TEXT.gone.title, '다른 곳에서 이 도면이 지워졌어요');
+  assert.equal(MAP_STALE_TEXT.gone.lead, '지워진 도면에는 이 PC에서 고친 내용을 저장할 수 없어요.');
+  assert.equal(MAP_STALE_TEXT.gone.drop, '내 편집 버리기');
+  assert.equal(MAP_STALE_TEXT.kept, '고르기 전까지 이 PC의 편집은 그대로 보관돼요.');
+  assert.equal(MAP_STALE_TEXT.unkept, '이 PC에 보관하지 못한 편집이에요. 고르기 전에 앱을 끄면 사라질 수 있어요.');
+  assert.equal(MAP_STALE_TEXT.copy('2층 (내 편집)'), '새 도면은 ‘2층 (내 편집)’이라는 이름으로 생기고, 하위 도면으로 들어가는 연결과 다른 도면에서 들어오는 입구는 따라오지 않아요.');
+  assert.equal(MAP_STALE_TEXT.save, '내 편집을 새 도면으로 저장');
 });
