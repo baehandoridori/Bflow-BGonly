@@ -2939,6 +2939,11 @@ test('anchor 73: the three ways in are one function that reads its target at tha
   // phase, and let go with the same flag.
   assert.deepEqual(lined(block(imageBlock, 'const notePress = useEvent((event: PointerEvent) => {')), ['const notePress = useEvent((event: PointerEvent) => {',
     'if (event.isPrimary && event.button === 0 && event.target instanceof Node && svgRef.current?.contains(event.target)) pressMissed.current = disabled;', '}']);
+  // The note is a ref that starts cleared, made once right before the function that writes it. Started set, the first paste after the map
+  // screen opened would be turned away with no press missed. Made anew by every render, the note a press wrote during a save would be gone at
+  // the render the end of that save brings, and the paste after it would go into the selection that press meant to change.
+  const missedAt = lined(imageBlock).indexOf('const pressMissed = useRef(false);');
+  assert.ok(missedAt > -1 && lined(imageBlock)[missedAt + 1] === 'const notePress = useEvent((event: PointerEvent) => {', 'the note of a missed press is not a ref that starts cleared');
   const noteAt = lined(imageBlock).indexOf("window.addEventListener('pointerdown', notePress, true);");
   assert.ok(noteAt > 0, 'a press on the plan is not noted on the window');
   assert.deepEqual(lined(imageBlock).slice(noteAt - 1, noteAt + 3), ['useEffect(() => {', "window.addEventListener('pointerdown', notePress, true);",
@@ -2954,15 +2959,21 @@ test('anchor 73: the three ways in are one function that reads its target at tha
 
 test('anchor 74: the drop and the paste — their guards, what they read, and their listeners', () => {
   // The two ways pictures come in from outside the page, in the block of adding pictures (anchor 73 cuts it the same way): a drag of files
-  // over the editor and a paste. `lined` is a piece as its lines, without their indent, and `all` is the editor so. A function is cut from
-  // its first line to the brace that closes it: its last line is a lone `}`.
+  // over the editor and a paste. `lined` is a piece as its lines, without their indent, `blockLines` is the block so and `all` the editor:
+  // what the block holds is looked for in it, as a function or an effect moved out of the block would break the order the anchors cut by.
+  // A function is cut from its first line to the brace that closes it: its last line is a lone `}`.
   const imageBlock = piece(editor, 'const imageAdd = useMapImageAdd(', 'const gallery = useMemo(');
-  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean), all = lined(editor);
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean), all = lined(editor), blockLines = lined(imageBlock);
   // The drag. Only a drag that carries files is its business, and not for a read-only account, with no map or under an open dialog: back at
   // the first line, with no sheet and nothing swallowed, so a drag of words or of a link goes on as it would.
   const dragOpener = 'const onFileDrag = useEvent((event: DragEvent) => {', drag = block(imageBlock, dragOpener), dragLines = lined(drag);
   assert.equal(dragLines[2], "if (!data || !Array.from(data.types).includes('Files') || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;",
     'the first line of the drag takes a drag without files, or under a dialog');
+  // The sheet is a state that starts down: it comes up with the first event of a drag of files, never as the screen opens. The element the
+  // drag went into last is a ref, made once right before the drag: made anew by every render, it would be forgotten at the render the first
+  // dragenter brings, and a leave from that element would not let the sheet go.
+  assert.ok(all.includes("const [fileDrag, setFileDrag] = useState<'ok' | 'type' | null>(null);"), 'the sheet of a drag does not start down');
+  assert.equal(blockLines[blockLines.indexOf(dragOpener) - 1], 'const dragInside = useRef<EventTarget | null>(null);', 'the element a drag went into last is not a ref');
   // A leave from one child to another is no leave, and either of two things tells it: the engine names the element gone into, inside the
   // editor, or it sent the dragenter of that element first, so the element left is not the one gone into last. Without the first the sheet
   // flickers in an engine that sends the events the other way round, without the second in one that names no element. The element gone into
@@ -3008,9 +3019,9 @@ test('anchor 74: the drop and the paste — their guards, what they read, and th
   // are portals into the body, outside the root, so a drag over one of them never reaches it (a React handler on the root would hear them).
   // And a net that never lets the sheet outlive its drag: while files are dragged the page gets no pointer event at all, so the first one
   // says the drag is over, however it ended. Heard on the window in the capture phase, four times, and let go with the same flag.
-  const rootAt = all.indexOf("const root = rootRef.current, types = ['dragenter', 'dragover', 'dragleave', 'drop'] as const;");
-  assert.ok(rootAt > 0, 'the drag is not heard on the root of the editor');
-  const dragEffects = all.slice(rootAt - 1, rootAt + 11);
+  const rootAt = blockLines.indexOf("const root = rootRef.current, types = ['dragenter', 'dragover', 'dragleave', 'drop'] as const;");
+  assert.ok(rootAt > 0, 'the drag is not heard on the root of the editor, in the block');
+  const dragEffects = blockLines.slice(rootAt - 1, rootAt + 11);
   assert.deepEqual(dragEffects, ['useEffect(() => {', "const root = rootRef.current, types = ['dragenter', 'dragover', 'dragleave', 'drop'] as const;", 'if (!root) return;',
     'for (const type of types) root.addEventListener(type, onFileDrag);', 'return () => { for (const type of types) root.removeEventListener(type, onFileDrag); };', '}, [onFileDrag]);',
     'useEffect(() => {', 'if (!fileDrag) return;', 'const over = () => setFileDrag(null);',
@@ -3037,7 +3048,7 @@ test('anchor 74: the drop and the paste — their guards, what they read, and th
   const fieldAt = pasteLines.indexOf("if (root?.contains(element) && mapImagePasteWanted({ ...facts, text: false }) && !Array.from(event.clipboardData?.types ?? []).includes('text/plain')) {");
   assert.ok(fieldAt > -1, 'the branch of a field of the editor is not as written');
   assert.deepEqual(pasteLines.slice(fieldAt + 1, fieldAt + 4), ['if (pictures) noteFieldPaste(); else if (!files.length) void pasteClipboardFile(true);', '}', 'return;']);
-  assert.ok(all.includes('const noteFieldPaste = useEvent(() => { if (current) imageAdd.say(current.id, MAP_IMAGE_FIELD_NOTE); });'), 'a picture pasted into a field is told otherwise');
+  assert.ok(blockLines.includes('const noteFieldPaste = useEvent(() => { if (current) imageAdd.say(current.id, MAP_IMAGE_FIELD_NOTE); });'), 'a picture pasted into a field is told otherwise');
   // Swallowed twice in the block: the drag, and a paste inside its branch of a picture, which goes the paste's way in. Swallowed with no
   // picture, or in the branch of a field, a paste of words would be lost. A paste with no file in it asks the main process, and a paste of
   // files that are no pictures does nothing.
@@ -3066,9 +3077,9 @@ test('anchor 74: the drop and the paste — their guards, what they read, and th
     '} else if (!files.length) void pasteClipboardFile(false);',
     '}']);
   // Heard on the window as it bubbles, where it arrives at the body too, and let go with the same function.
-  const pasteAt = all.indexOf("window.addEventListener('paste', onImagePaste);");
-  assert.ok(pasteAt > 0, 'a paste is not heard on the window');
-  assert.deepEqual(all.slice(pasteAt - 1, pasteAt + 3), ['useEffect(() => {', "window.addEventListener('paste', onImagePaste);", "return () => window.removeEventListener('paste', onImagePaste);", '}, [onImagePaste]);']);
+  const pasteAt = blockLines.indexOf("window.addEventListener('paste', onImagePaste);");
+  assert.ok(pasteAt > 0, 'a paste is not heard on the window, in the block');
+  assert.deepEqual(blockLines.slice(pasteAt - 1, pasteAt + 3), ['useEffect(() => {', "window.addEventListener('paste', onImagePaste);", "return () => window.removeEventListener('paste', onImagePaste);", '}, [onImagePaste]);']);
   // A picture file copied in Explorer may not be in the event at all: only the main process can read its path, and its answer comes a moment
   // later. Not into a tab that was left meanwhile, not under a drag that began meanwhile (the scroll of a start would shift it), and asked
   // from a field it only tells: it never adds a picture with the cursor in the field. The main process is asked from this one place.
