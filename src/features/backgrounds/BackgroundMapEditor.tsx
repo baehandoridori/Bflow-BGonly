@@ -862,7 +862,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (!point || !matrix) { pressLog.current = NO_PRESSES; return; }
     event.preventDefault(); event.stopPropagation();
     setSymbolPaletteOpen(false);
-    svgRef.current?.focus();
+    // Without a scroll: a plan partly scrolled away (a narrow window, after an add brought its line into view) would jump and leave the pointer off what was pressed.
+    svgRef.current?.focus({ preventScroll: true });
     // A press anywhere but on a point lets go of the picked point. A + is no point: while it is pulled the polygon
     // has one more point, and the old index would name another dot.
     if (typeof handle !== 'object' || handle.insert) setActiveVertex(null);

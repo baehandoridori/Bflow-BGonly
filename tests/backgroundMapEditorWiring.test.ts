@@ -3490,6 +3490,10 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   assert.deepEqual(listed.slice(seen, seen + 7), ['const seen = useRef(adding.seq);', 'useEffect(() => {', 'if (adding.seq === seen.current) return;', 'seen.current = adding.seq;',
     'if (adding.running && resultsRef.current) resultsRef.current.scrollTop = 0;', "noticeRef.current?.scrollIntoView({ block: 'nearest' });", '}, [adding.seq]);']);
   assert.equal(count(gallery, /scrollIntoView/g), 1, 'the image list brings something into view in another place');
+  // That start can leave the top of the plan scrolled away in a narrow window. A press on the plan then takes the focus where the plan is: a focus
+  // that scrolled would move the room just pressed out from under the pointer (gate B, F3). The canvas is focused nowhere else with a scroll.
+  assert.ok(handler.pointerDown().includes('svgRef.current?.focus({ preventScroll: true });'), 'a press on the plan scrolls the tab and the room pressed leaves the pointer');
+  assert.equal(count(editor, /svgRef\.current\?\.focus\(\)/g), 0, 'the plan takes the focus with a scroll');
   // ＋ 이미지 추가: the mock of the preview is asked first and what it answers is taken, an empty list too; only no answer at all opens the
   // dialog. The hidden input reads its files before it is emptied, and takes several. The dialog is opened in that one function, and never
   // for a blocked target.
