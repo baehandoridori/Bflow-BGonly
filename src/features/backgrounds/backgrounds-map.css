@@ -31,7 +31,7 @@
 .bg-library .bmap-tree-row.is-active { border-left-color:rgb(var(--color-accent)); background:rgb(var(--color-accent) / .13); color:rgb(var(--color-accent-sub)); }
 .bmap-draft-dot { font-size:8px; color:rgb(var(--bmap-edit)); margin-left:auto; }
 .bmap-tree-footer { margin-top:auto; padding:24px 16px 4px; color:rgb(var(--color-text-secondary)); font-size:11px; line-height:1.7; }
-.bmap-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:clip; }
+.bmap-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:clip; position:relative; }
 /* Edit mode: a band over the map and a frame around it, in two colours worked out from the theme (useMapEditColors sets them on this element; these are the values of the default theme). Keep this block before the media queries: the narrow layout overrides it with rules of the same weight. */
 .bmap-layout { --bmap-edit:245 178 64; --bmap-edit-ink:28 22 8; --bmap-edit-h:40px; }
 .bmap-edit-strip { position:sticky; top:0; z-index:5; flex:0 0 var(--bmap-edit-h); height:var(--bmap-edit-h); display:flex; align-items:center; gap:10px; padding:0 12px 0 18px; overflow:hidden; background:rgb(var(--bmap-edit)); color:rgb(var(--bmap-edit-ink)); font-size:12px; }
@@ -371,6 +371,43 @@
 .bmap-gallery-empty strong { font-size:12px; font-weight:500; color:rgb(var(--color-text-primary)); }
 .bmap-gallery-empty p { font-size:11px; margin-top:4px; }
 .bmap-gallery-empty>svg { flex-shrink:0; opacity:.65; }
+/* Pictures added from this screen (mapImageDrop.ts): the ones on their way, the ones just added, the one line that says how it went. All of it is inside the image list, whose own height is fixed: the map above never moves for it. */
+.bmap-gallery-notice { display:flex; flex:0 1 auto; gap:8px; min-height:40px; margin:0 18px 8px; padding:6px 6px 6px 12px; border:1px solid rgb(var(--color-accent) / .35); border-radius:8px; background:rgb(var(--color-accent) / .08); font-size:12px; line-height:1.6; }
+.bmap-gallery-notice>div { flex:1; min-width:0; min-height:0; max-height:62px; overflow-y:auto; overflow-wrap:anywhere; }
+.bmap-gallery-notice ul { margin:2px 0 0; padding:0; list-style:none; color:#ed7e79; }
+[data-color-mode="light"] .bmap-gallery-notice ul { color:#b3362f; }
+.bg-library .bmap-gallery-notice button { flex-shrink:0; align-self:flex-start; width:26px; min-height:26px; padding:0; border:0; background:transparent; color:rgb(var(--color-text-secondary)); font-size:15px; }
+.bg-library .bmap-gallery-add[aria-disabled="true"],.bg-library .bmap-gallery-add[aria-disabled="true"]:hover { color:rgb(var(--color-text-secondary) / .5); background:transparent; border-color:transparent; cursor:default; }
+.bg-library .bmap-gallery-ghost,.bg-library .bmap-gallery-ghost:hover { position:relative; border-style:dashed; border-color:rgb(var(--color-bg-border)); }
+.bmap-gallery-ghost .bg-thumbnail { opacity:.55; }
+.bg-library .bmap-gallery-ghost[data-step="failed"] { border-color:rgb(237 126 121 / .55); }
+.bmap-gallery-step { position:absolute; inset:0 0 auto; z-index:1; height:3px; background:rgb(var(--color-bg-border) / .6); }
+.bmap-gallery-step>i { display:block; height:100%; background:rgb(var(--color-accent-sub)); transform-origin:left center; transform:scaleX(var(--bmap-step,0)); }
+[data-color-mode="light"] .bmap-gallery-step>i { background:rgb(var(--color-text-secondary)); }
+.bg-library .bmap-gallery-card.is-added { position:relative; border-color:rgb(var(--color-accent-sub) / .8); }
+.bmap-gallery-mark { position:absolute; top:9px; left:6px; z-index:1; padding:1px 7px; border:1px solid rgb(var(--color-accent-sub)); border-radius:999px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:10px; font-weight:600; }
+/* Files dragged over the editor: one sheet over the map column. It takes no room and no press, and its words stay in the part of the tab that is on screen. */
+.bmap-drop { position:absolute; inset:0; z-index:6; display:flex; justify-content:center; align-items:flex-start; border:2px dashed rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-primary) / .55); pointer-events:none; }
+.bmap-drop-label { position:sticky; top:35%; display:flex; flex-direction:column; align-items:center; gap:4px; max-width:min(520px,calc(100% - 32px)); margin:0; padding:12px 18px; border:1px solid rgb(var(--color-accent-sub) / .6); border-radius:10px; background:rgb(var(--color-bg-card)); font-size:12px; text-align:center; }
+.bmap-drop-label>strong { max-width:100%; overflow-wrap:anywhere; font-size:14px; font-weight:650; }
+.bmap-drop[data-blocked] { border-color:rgb(237 126 121 / .7); }
+.bmap-drop[data-blocked] .bmap-drop-label { border-color:rgb(237 126 121 / .6); }
+/* The choices of the place prompt. */
+.bmap-place-choices { display:flex; flex-direction:column; gap:8px; min-width:0; margin:12px 0; padding:0; border:0; }
+.bmap-place-choice { display:flex; align-items:flex-start; gap:10px; font-size:12px; line-height:1.7; color:rgb(var(--color-text-secondary)); cursor:pointer; }
+.bmap-place-choice strong { display:block; font-size:13px; font-weight:550; color:rgb(var(--color-text-primary)); }
+.bmap-place-choice input { flex-shrink:0; margin-top:5px; accent-color:rgb(var(--color-accent)); }
+/* The second paragraph of the question of 편집 끝내기 (MAP_LINKS_LOST_NOTE): the paragraph reset of the library takes its margin away. Only right inside a dialog: the lead of the delete dialog spaces its paragraphs by its own gap. */
+.bg-modal-content>.bmap-confirm-text+.bmap-confirm-text { margin-top:8px; }
+/* What moves, and only where motion is wanted: the sheet and its words come in, a card that was just added rises, the bar of a step grows. Everything that tells something is drawn above, without these. */
+@keyframes bmap-drop-in { from { opacity:0; } }
+@keyframes bmap-rise-in { from { opacity:0; transform:translateY(6px); } }
+@media (prefers-reduced-motion: no-preference) {
+  .bmap-drop { animation:bmap-drop-in var(--motion-fast) var(--ease-out) both; }
+  .bmap-drop-label { animation:bmap-rise-in var(--motion-base) var(--ease-out) both; }
+  .bmap-gallery-card.is-added { animation:bmap-rise-in var(--motion-base) var(--ease-out) both; }
+  .bmap-gallery-step>i { transition:transform var(--motion-base) var(--ease-out); }
+}
 @media(max-width:1100px) { .bmap-gallery-grid { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; } .bmap-gallery-actions { gap:0; } .bmap-gallery-filters { order:3; flex:1 0 100%; } .bmap-header { padding:10px 14px; } }
 @media(max-width:1100px) { .bmap-edit-strip { padding-left:14px; } }
 @media(max-width:900px) {

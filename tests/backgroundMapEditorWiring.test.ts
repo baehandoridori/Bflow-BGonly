@@ -3033,4 +3033,124 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   for (const word of ['backgroundReadClipboardFile', '__bflowMockBackgroundAdd']) assert.ok(mock.includes(word), `the preview has no ${word}`);
   assert.ok(mock.includes('backgroundPickImages: async () => { const hook = (window as DevPreviewWindow).__bflowMockBackgroundAdd; return hook?.pick ? hook.pick() : /\\bElectron\\//.test(navigator.userAgent) ? [] : undefined; },'),
     'the picker of the preview can open a file dialog in the app engine');
+  // What is shown of adding pictures, in the stylesheet, line by line and as written. The column of the map is the box the sheet of a drag
+  // is laid on: it gets a position, and it still cuts what overflows it without becoming a scroll box (anchor 54).
+  const lines = sheetLines(), has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
+  const column = lines[lineOf(lines, '.bmap-main {')];
+  has(declarations(column), 'position:relative', 'overflow:clip');
+  assert.ok(!column.includes('overflow:hidden'), 'the column of the map is a scroll box');
+  // The rules of the line, the ghosts and 추가됨, the button, the sheet, the choices of the place prompt and the second paragraph of the
+  // question of 편집 끝내기, and the two keyframes outside the block of motion: each once, as a line of its own, from its very start.
+  const rules = [
+    '.bmap-gallery-notice { display:flex; flex:0 1 auto; gap:8px; min-height:40px; margin:0 18px 8px; padding:6px 6px 6px 12px; border:1px solid rgb(var(--color-accent) / .35); border-radius:8px; background:rgb(var(--color-accent) / .08); font-size:12px; line-height:1.6; }',
+    '.bmap-gallery-notice>div { flex:1; min-width:0; min-height:0; max-height:62px; overflow-y:auto; overflow-wrap:anywhere; }',
+    '.bmap-gallery-notice ul { margin:2px 0 0; padding:0; list-style:none; color:#ed7e79; }',
+    '[data-color-mode="light"] .bmap-gallery-notice ul { color:#b3362f; }',
+    '.bg-library .bmap-gallery-notice button { flex-shrink:0; align-self:flex-start; width:26px; min-height:26px; padding:0; border:0; background:transparent; color:rgb(var(--color-text-secondary)); font-size:15px; }',
+    '.bg-library .bmap-gallery-add[aria-disabled="true"],.bg-library .bmap-gallery-add[aria-disabled="true"]:hover { color:rgb(var(--color-text-secondary) / .5); background:transparent; border-color:transparent; cursor:default; }',
+    '.bg-library .bmap-gallery-ghost,.bg-library .bmap-gallery-ghost:hover { position:relative; border-style:dashed; border-color:rgb(var(--color-bg-border)); }',
+    '.bmap-gallery-ghost .bg-thumbnail { opacity:.55; }',
+    '.bg-library .bmap-gallery-ghost[data-step="failed"] { border-color:rgb(237 126 121 / .55); }',
+    '.bmap-gallery-step { position:absolute; inset:0 0 auto; z-index:1; height:3px; background:rgb(var(--color-bg-border) / .6); }',
+    '.bmap-gallery-step>i { display:block; height:100%; background:rgb(var(--color-accent-sub)); transform-origin:left center; transform:scaleX(var(--bmap-step,0)); }',
+    '[data-color-mode="light"] .bmap-gallery-step>i { background:rgb(var(--color-text-secondary)); }',
+    '.bg-library .bmap-gallery-card.is-added { position:relative; border-color:rgb(var(--color-accent-sub) / .8); }',
+    '.bmap-gallery-mark { position:absolute; top:9px; left:6px; z-index:1; padding:1px 7px; border:1px solid rgb(var(--color-accent-sub)); border-radius:999px; background:rgb(var(--color-bg-card)); color:rgb(var(--color-text-primary)); font-size:10px; font-weight:600; }',
+    '.bmap-drop { position:absolute; inset:0; z-index:6; display:flex; justify-content:center; align-items:flex-start; border:2px dashed rgb(var(--color-accent-sub)); background:rgb(var(--color-bg-primary) / .55); pointer-events:none; }',
+    '.bmap-drop-label { position:sticky; top:35%; display:flex; flex-direction:column; align-items:center; gap:4px; max-width:min(520px,calc(100% - 32px)); margin:0; padding:12px 18px; border:1px solid rgb(var(--color-accent-sub) / .6); border-radius:10px; background:rgb(var(--color-bg-card)); font-size:12px; text-align:center; }',
+    '.bmap-drop-label>strong { max-width:100%; overflow-wrap:anywhere; font-size:14px; font-weight:650; }',
+    '.bmap-drop[data-blocked] { border-color:rgb(237 126 121 / .7); }',
+    '.bmap-drop[data-blocked] .bmap-drop-label { border-color:rgb(237 126 121 / .6); }',
+    '.bmap-place-choices { display:flex; flex-direction:column; gap:8px; min-width:0; margin:12px 0; padding:0; border:0; }',
+    '.bmap-place-choice { display:flex; align-items:flex-start; gap:10px; font-size:12px; line-height:1.7; color:rgb(var(--color-text-secondary)); cursor:pointer; }',
+    '.bmap-place-choice strong { display:block; font-size:13px; font-weight:550; color:rgb(var(--color-text-primary)); }',
+    '.bmap-place-choice input { flex-shrink:0; margin-top:5px; accent-color:rgb(var(--color-accent)); }',
+    '.bg-modal-content>.bmap-confirm-text+.bmap-confirm-text { margin-top:8px; }',
+    '@keyframes bmap-drop-in { from { opacity:0; } }',
+    '@keyframes bmap-rise-in { from { opacity:0; transform:translateY(6px); } }',
+  ];
+  for (const rule of rules) assert.equal(lines.filter(line => line === rule).length, 1, `not once, as a line of its own: ${rule}`);
+  // The sheet takes no room and no press: the map does not move as a drag comes in, and every event of the drag reaches what is under it.
+  // Its words stay in the part of the tab that is on screen, and a long name wraps there: cut with an ellipsis, what the pictures become is lost.
+  has(baseRule(lines, '.bmap-drop {'), 'position:absolute', 'inset:0', 'pointer-events:none');
+  has(baseRule(lines, '.bmap-drop-label {'), 'position:sticky');
+  const titleRule = lines[lineOf(lines, '.bmap-drop-label>strong {')];
+  has(declarations(titleRule), 'overflow-wrap:anywhere');
+  for (const word of ['text-overflow', 'nowrap']) assert.ok(!titleRule.includes(word), `the title of the sheet is cut: ${word}`);
+  // The line keeps one height whether its button is there or not, gives way down to that height where the list is low (its words scroll
+  // inside), and breaks a long file name anywhere rather than scroll sideways.
+  const noticeRule = lines[lineOf(lines, '.bmap-gallery-notice {')];
+  has(declarations(noticeRule), 'min-height:40px', 'flex:0 1 auto');
+  for (const word of ['align-items', 'flex-shrink:0']) assert.ok(!noticeRule.includes(word), `the line of the image list does not give way: ${word}`);
+  has(baseRule(lines, '.bmap-gallery-notice>div {'), 'min-height:0', 'max-height:62px', 'overflow-wrap:anywhere');
+  // The bar of a step is out of the flow (a ghost is no taller than a card), and on a light page it is drawn in the colour of the secondary
+  // words: the accent is lost on its ground there.
+  has(baseRule(lines, '.bmap-gallery-step {'), 'position:absolute');
+  assert.ok(lines.includes('[data-color-mode="light"] .bmap-gallery-step>i { background:rgb(var(--color-text-secondary)); }'), 'the bar of a step cannot be seen on a light page');
+  // 추가됨 is words in the colours of a card, ringed by the accent: white words on the accent cannot be read under every theme.
+  const markRule = lines[lineOf(lines, '.bmap-gallery-mark {')];
+  has(declarations(markRule), 'background:rgb(var(--color-bg-card))', 'color:rgb(var(--color-text-primary))');
+  assert.ok(!markRule.includes('#fff'), 'the mark is white words');
+  // Only the picture of a ghost is faded: faded whole, its small words sink into the ground.
+  assert.deepEqual(lines.filter(line => line.includes('bmap-gallery-ghost') && line.includes('opacity')), ['.bmap-gallery-ghost .bg-thumbnail { opacity:.55; }']);
+  // What moves is declared in a block of its own for those who want motion, after the block of the band (anchor 54 reads the first one as
+  // the band's), and that block holds the four lines alone: a keyframe inside it is no rule, and the build warns. No new class moves elsewhere.
+  const fresh = /bmap-drop|bmap-gallery-ghost|bmap-gallery-notice|bmap-gallery-step|bmap-gallery-mark|bmap-gallery-add|bmap-place-choice|is-added/;
+  const named = lines.flatMap((line, at) => !line.trimStart().startsWith('/*') && fresh.test(line) ? [at] : []);
+  const calm = lines.flatMap((line, at) => line === '@media (prefers-reduced-motion: no-preference) {' ? [at] : []);
+  assert.equal(calm.length, 2, 'the motion of adding pictures has no block of its own beside the one of the band');
+  const motionAt = calm[1], motionEnd = lines.indexOf('}', motionAt);
+  for (const at of named) if (/animation|transition/.test(lines[at])) assert.ok(motionAt < at && at < motionEnd, `moves whatever the motion setting: ${lines[at]}`);
+  assert.deepEqual(lines.slice(motionAt + 1, motionEnd).map(line => line.trim()), ['.bmap-drop { animation:bmap-drop-in var(--motion-fast) var(--ease-out) both; }',
+    '.bmap-drop-label { animation:bmap-rise-in var(--motion-base) var(--ease-out) both; }', '.bmap-gallery-card.is-added { animation:bmap-rise-in var(--motion-base) var(--ease-out) both; }',
+    '.bmap-gallery-step>i { transition:transform var(--motion-base) var(--ease-out); }']);
+  const bandMotion = lines.findIndex(line => line.trimStart().startsWith('.bmap-edit-strip>* { animation:'));
+  assert.ok(bandMotion > -1 && bandMotion < motionAt, 'the block of adding pictures comes before the block of the band');
+  // Nothing of it blurs what is behind it, repeats or slants.
+  for (const line of new Set([...rules, column, ...named.map(at => lines[at])])) assert.doesNotMatch(line, /backdrop-filter|infinite|font-style/, line);
+  // The image list, read without its comments. A batch and its line belong to one map, or to the map on show once theirs is gone. A picture
+  // saved while its batch runs is drawn once, as its ghost. While a save runs the line is read against the library as it was before that
+  // save, and it says how the batch stands now: its link saved since or taken back, its pictures deleted.
+  const gallery = read('BackgroundMapGallery.tsx'), listed = lined(gallery);
+  for (const line of ['const mine = (mapId: string | null | undefined) => !!mapId && (mapId === current.id || !maps.some(map => map.id === mapId));',
+    'const jobs = mine(adding.mapId) ? adding.jobs : MAP_IMAGE_IDLE.jobs, notice = mine(adding.notice?.mapId) ? adding.notice : null;',
+    'const scopedViews = useMemo(() => selectMapBackgroundViews(snapshot, maps, current, selected).filter(view => !jobs.some(job => job.id === view.id)), [snapshot, maps, current, selected, jobs]);',
+    'const confirmed = useRef(snapshot);', 'if (!saving) confirmed.current = snapshot;',
+    'const noticeText = notice?.live ? mapImageSummary(mapImageOutcomeNow(notice.live.outcome, notice.live.link, confirmed.current.maps.find(map => map.id === notice.mapId), notice.mapId === current.id ? current : undefined, confirmed.current)) : notice?.text;'])
+    assert.ok(listed.includes(line), `not a line of the image list: ${line}`);
+  const noticeLine = listed.find(line => line.startsWith('const noticeText = ')) ?? '';
+  for (const text of ['mapImageOutcomeNow(', 'confirmed.current']) assert.ok(noticeLine.includes(text), `the line of a batch is not read as it stands now: ${text}`);
+  for (const text of ['snapshot.maps', 'mapImageLinkNow(']) assert.ok(!noticeLine.includes(text), `the line of a batch is read past the confirmed library or past its pictures: ${text}`);
+  // Brought into view as a batch starts and as the line speaks up, never as a batch ends nor on a mere redraw, and in this one place.
+  const seen = listed.indexOf('const seen = useRef(adding.seq);');
+  assert.ok(seen > -1, 'the image list keeps no count of what it brought into view');
+  assert.deepEqual(listed.slice(seen, seen + 7), ['const seen = useRef(adding.seq);', 'useEffect(() => {', 'if (adding.seq === seen.current) return;', 'seen.current = adding.seq;',
+    'if (adding.running && resultsRef.current) resultsRef.current.scrollTop = 0;', "noticeRef.current?.scrollIntoView({ block: 'nearest' });", '}, [adding.seq]);']);
+  assert.equal(count(gallery, /scrollIntoView/g), 1, 'the image list brings something into view in another place');
+  // ＋ 이미지 추가: the mock of the preview is asked first and what it answers is taken, an empty list too; only no answer at all opens the
+  // dialog. The hidden input reads its files before it is emptied, and takes several. The dialog is opened in that one function, and never
+  // for a blocked target.
+  const pick = listed.indexOf('const pickImages = () => {');
+  assert.ok(pick > -1, 'the image list has no way to pick files');
+  assert.deepEqual(listed.slice(pick, pick + 5), ['const pickImages = () => {', 'const mock = window.electronAPI.backgroundPickImages;', 'if (!mock) { input.current?.click(); return; }',
+    'void mock().then(files => { if (files) onAddFiles?.(files); else input.current?.click(); });', '};']);
+  assert.ok(listed.includes(`<input ref={input} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="추가할 그림 파일" tabIndex={-1} onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (files.length) onAddFiles?.(files); }} />`),
+    'the hidden input of the file dialog is not as written');
+  assert.equal(count(gallery, /input\.current\?\.click\(\)/g), 2, 'the file dialog is opened past pickImages');
+  assert.ok(piece(gallery, '<button type="button" className="bmap-gallery-add"', '</button>').includes('onClick={() => { if (!words.blocked) pickImages(); }}'), 'the button opens the file dialog for a blocked target');
+  // The button names what the list names: one target, read from what the editor shows.
+  assert.equal(count(gallery, /resolveMapImageTarget\(/g), 1, 'the image list reads a target twice');
+  assert.ok(gallery.includes('resolveMapImageTarget(snapshot, maps, current, selected)'), 'the target of the button is not what the list names');
+  // What is read out, and what the list has no business with. The hint of an empty list stays as anchor 58 reads it.
+  assert.ok(gallery.includes("!snapshot.canManage ? '관리자가 도면이나 공간에 연결한 배경이 여기에 표시됩니다.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'"),
+    'the hint of an empty list is not as anchor 58 reads it');
+  for (const text of ['{MAP_IMAGE_HINT}', 'role="status"', 'role="alert"', 'aria-disabled={words.blocked}', 'aria-label="안내 닫기"', '{noticeText}'])
+    assert.ok(gallery.includes(text), `not in the image list: ${text}`);
+  for (const text of ['{notice.text}', '편집 시작', 'sonner', 'createObjectURL']) assert.ok(!gallery.includes(text), `in the image list: ${text}`);
+  // A ghost: its bar and its step at the top of the card, where a low list still shows them, the picture between, and below it the two
+  // lines a card will have. And a card just added says so in words, not by its colour alone.
+  const ghost = piece(gallery, 'className="bmap-gallery-card bmap-gallery-ghost"', '</div>)}');
+  inOrder(ghost, 'className="bmap-gallery-step"', 'className="bg-thumbnail"', 'className="bmap-gallery-mark"', 'className="bmap-gallery-card-body"');
+  assert.ok(ghost.includes('<span className="bmap-gallery-mark">{MAP_IMAGE_STEPS[job.step].label} · {index + 1}/{jobs.length}</span>'), 'the step of a ghost is not told as written');
+  assert.ok(gallery.includes('{added && <span className="bmap-gallery-mark">추가됨</span>}'), 'a card just added is told by its colour alone');
 });
