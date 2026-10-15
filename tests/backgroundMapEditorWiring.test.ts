@@ -2988,6 +2988,45 @@ test('anchor 75: a batch uploads, then saves one command at a time under the loc
   ]);
 });
 
+test('anchor 77: the place prompt is a dialog of the editor, acts on what it was opened for, and answers only a new press after 0.4 seconds', () => {
+  // The place prompt, read when this anchor asks for it: without the file this anchor fails, not every anchor of this file. `lined` is a
+  // piece as its lines, without their indent.
+  const prompt = read('BackgroundMapImageAdd.tsx');
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean), lines = lined(prompt);
+  // It comes up by itself, after a drop, a paste or the file dialog, and a press already on its way must not answer it: it is armed once,
+  // 0.4 seconds after it came up, in a ref (the grace is no state), by a timer that goes with the prompt.
+  const armedAt = lines.indexOf('const armed = useRef(false);');
+  assert.ok(armedAt > -1, 'the prompt keeps no grace in a ref');
+  assert.deepEqual(lines.slice(armedAt, armedAt + 5), ['const armed = useRef(false);', 'useEffect(() => {',
+    'const timer = window.setTimeout(() => { armed.current = true; }, MAP_IMAGE_ADD.promptGraceMs);', 'return () => window.clearTimeout(timer);', '}, []);']);
+  assert.ok(read('mapImageDrop.ts').includes('promptGraceMs: 400'), 'the grace is not 0.4 seconds');
+  // The answer: nothing before the grace is over (its first line), then a new place by a name that is not empty, or a place the library
+  // still has as the prompt is drawn: one deleted elsewhere while it was up is not answered with (the plan would throw after it closed).
+  assert.deepEqual(lined(block(prompt, 'const submit = () => {')), ['const submit = () => {', 'if (!armed.current) return;',
+    "if (mode === 'new') { if (name.trim()) onConfirm({ kind: 'new', name }); else setError('장소 이름을 적어 주세요.'); }",
+    "else if (places.some(place => place.id === placeId)) onConfirm({ kind: 'existing', placeId });", "else setError('넣을 장소를 다시 골라 주세요.');", '}']);
+  // Enter in any field and the button are one way in, the submit of the form, so the grace holds both. A key held as the prompt came up
+  // goes on repeating after the grace: no repeat of Enter answers and no repeated Space presses a button, while a new key does, and a Space
+  // held in the name field stays a space.
+  assert.ok(prompt.includes('<form onSubmit={event => { event.preventDefault(); submit(); }} onKeyDown={noRepeat}>'), 'the form answers past the grace, or a held key');
+  assert.deepEqual(lined(block(prompt, 'const noRepeat = (event: ReactKeyboardEvent<HTMLFormElement>) => {')), ['const noRepeat = (event: ReactKeyboardEvent<HTMLFormElement>) => {',
+    "if (event.repeat && (event.key === 'Enter' || (event.key === ' ' && event.target instanceof HTMLButtonElement))) event.preventDefault();", '}']);
+  // The button that answers is a submit and the one element the prompt opens on (K9). 취소, Esc and × close it at once: the grace is for
+  // an answer alone.
+  assert.equal(count(prompt, /data-autofocus/g), 1, 'the prompt opens on another element as well');
+  assert.ok(prompt.includes('<button type="submit" className="bg-button bg-primary" data-autofocus>이 장소로 넣기</button>'), 'the button that answers is no submit, or the prompt opens elsewhere');
+  assert.ok(prompt.includes('<button type="button" className="bg-button" onClick={onCancel}>취소</button>'), '취소 submits, or waits for the grace');
+  assert.ok(prompt.includes('<BackgroundModal title="배경 장소 정하기" onClose={onCancel}>'), 'Esc and × wait for the grace');
+  // It opens on a place of that name under that parent that no map uses, else on a new place named as the owner. When there is one is the
+  // pure test's (M-1).
+  for (const text of ["target.sameNamePlaceId ? 'existing' : 'new'", "target.sameNamePlaceId ?? places[0]?.id ?? ''"])
+    assert.ok(prompt.includes(text), `not what the prompt opens on: ${text}`);
+  // It holds no key of the window (it runs nothing yet: closing it loses nothing), tells nothing past itself, and reads nothing of the map
+  // on show: it acts on the target it was opened with alone.
+  for (const text of ["addEventListener('keydown'", 'sonner']) assert.ok(!prompt.includes(text), `in the place prompt: ${text}`);
+  assert.doesNotMatch(prompt, /(?<![.\w])current\b/, 'the place prompt reads the map on show');
+});
+
 test('anchor 78: what is shown stays in the image list, motion stays in its block, the file dialog is one function, the new channel is four places, and the pure module is pure', () => {
   // The rules and the words of adding pictures are one pure module, read here when this anchor asks for it: its tests run it
   // under Node as it is, with no page, no React, no three.js and no alias of the bundler.
