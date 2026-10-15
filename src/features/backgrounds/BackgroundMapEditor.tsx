@@ -239,6 +239,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     stopped: MapDeletePlan | null } | null>(null);
   /** The question that comes first when the pictures need a place. It holds what it was opened for, and acts on that alone. */
   const [placePrompt, setPlacePrompt] = useState<{ target: Extract<MapImageTarget, { status: 'needs-place' }>; sources: readonly MapImageSource[]; count: number; drafted: boolean } | null>(null);
+  /** Files dragged over the editor, as the overlay tells it: 'type' when none of them can go in. */
+  const [fileDrag, setFileDrag] = useState<'ok' | 'type' | null>(null);
   const deleting = useRef(false);                            // a run is in progress. A ref: a second press can come before `busy` is drawn
   /** Every map this dialog has set out to delete, over all its presses. */
   const deleteAimed = useRef<string[]>([]);
@@ -1157,6 +1159,92 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const answerPlacePrompt = useEvent((choice: MapImagePlaceChoice) => { if (!placePrompt) return; setPlacePrompt(null); imageAdd.start(planMapImageAdd(snapshot, placePrompt.target, choice, placePrompt.sources.map(mapImageSourceFacts), new Date(), uuid), placePrompt.sources); });
   /** ＋ 이미지 추가: the files picked in the image list come in by the one way in, with their paths on this PC. */
   const addPickedImages = useEvent((files: File[]) => addImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: false }))));
+  /** A press on the plan that was not taken because a save was running: what was pressed is not selected. A paste shows nothing beforehand of where it goes, so the next one must not land on the selection that press meant to change. */
+  const pressMissed = useRef(false);
+  const notePress = useEvent((event: PointerEvent) => {
+    if (event.isPrimary && event.button === 0 && event.target instanceof Node && svgRef.current?.contains(event.target)) pressMissed.current = disabled;
+  });
+  useEffect(() => {
+    window.addEventListener('pointerdown', notePress, true);
+    return () => window.removeEventListener('pointerdown', notePress, true);
+  }, [notePress]);
+  /** What a paste adds. After a press that was not taken it adds nothing, once, and says so. */
+  const pasteImages = useEvent((sources: readonly MapImageSource[]) => {
+    if (pressMissed.current && current) { pressMissed.current = false; imageAdd.say(current.id, MAP_IMAGE_PRESS_NOTE); return; }
+    addImages(sources);
+  });
+  /** The cursor is in a field of the editor and the clipboard holds a picture and no text: the field keeps its paste (of a picture it takes nothing), and one line says why no picture came in. */
+  const noteFieldPaste = useEvent(() => { if (current) imageAdd.say(current.id, MAP_IMAGE_FIELD_NOTE); });
+  /** A picture file copied in Explorer may not be in the paste event at all: only the main process can read its path from the clipboard. `inField`: the cursor is in a field of the editor. */
+  const pasteClipboardFile = useEvent(async (inField: boolean) => {
+    const found = await window.electronAPI.backgroundReadClipboardFile().catch(() => null), root = rootRef.current;
+    // The answer comes a moment later: not into a tab that was left meanwhile, and not under a drag that began meanwhile.
+    if (!found || !root || root.offsetParent === null || pointerRef.current || doc.isGestureActive()) return;
+    if (inField) noteFieldPaste(); else pasteImages([{ kind: 'path', path: found.filePath }]);
+  });
+  /** Ctrl+V adds the picture on the clipboard. Heard on the window: unless the cursor is in a text field a paste arrives at the body, whatever has the focus. A field keeps its own paste. */
+  const onImagePaste = useEvent((event: ClipboardEvent) => {
+    const root = rootRef.current, element = event.target instanceof Element ? event.target : null;
+    const facts = { shown: !!root && root.offsetParent !== null, canManage: snapshot.canManage, hasMap: !!current,
+      dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };
+    const files = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((file): file is File => !!file);
+    const pictures = files.some(file => file.type.startsWith('image/'));
+    if (!mapImagePasteWanted(facts)) {
+      // Nothing but the cursor in a field of the editor is in the way, and the clipboard holds no text. A picture in the event is said at once; with no file in it at all the main process is asked whether a picture file was copied.
+      if (root?.contains(element) && mapImagePasteWanted({ ...facts, text: false }) && !Array.from(event.clipboardData?.types ?? []).includes('text/plain')) {
+        if (pictures) noteFieldPaste(); else if (!files.length) void pasteClipboardFile(true);
+      }
+      return;
+    }
+    if (pictures) {
+      event.preventDefault();
+      pasteImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: true })));
+    } else if (!files.length) void pasteClipboardFile(false);
+  });
+  useEffect(() => {
+    window.addEventListener('paste', onImagePaste);
+    return () => window.removeEventListener('paste', onImagePaste);
+  }, [onImagePaste]);
+  /** The element of the editor the drag went into last. */
+  const dragInside = useRef<EventTarget | null>(null);
+  /** Files dragged over the editor, wherever in it: one overlay says what they would be added to, and a drop adds them. Any other drag is none of its business. */
+  const onFileDrag = useEvent((event: DragEvent) => {
+    const data = event.dataTransfer;
+    if (!data || !Array.from(data.types).includes('Files') || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;
+    if (event.type === 'dragleave') {
+      // From one child to another is no leave, and either of two things tells it: the engine names the element gone into, and that element has had its dragenter first.
+      // Out of the editor, out of the window, or let go where nothing is taken: the overlay goes.
+      const within = event.relatedTarget instanceof Node && !!rootRef.current?.contains(event.relatedTarget);
+      if (!within && event.target === dragInside.current) { dragInside.current = null; setFileDrag(null); }
+      return;
+    }
+    dragInside.current = event.type === 'drop' ? null : event.target;
+    event.preventDefault();
+    // A name box left open is settled as a press on the plan settles it: the overlay then names what was typed, and the save run does not wait on the box.
+    if (renamingRef.current) focusCanvas();
+    const refused = mapImageDragRefused(Array.from(data.items, item => ({ kind: item.kind, type: item.type })));
+    // 'none': the pointer shows that nothing is taken here, and the engine then sends no drop at all. Such a drag ends in a dragleave.
+    data.dropEffect = mapImageTargetWords(resolveMapImageTarget(snapshot, maps, current, selected), { editing, running: imageAdd.view.running, wrongType: refused }).blocked ? 'none' : 'copy';
+    if (event.type !== 'drop') { setFileDrag(refused ? 'type' : 'ok'); return; }
+    setFileDrag(null);
+    // A picture dragged out of a browser or a mail window is a file the engine made up for the drag: its path does not last, so none is kept.
+    const disk = Array.from(data.types).every(type => type === 'Files');
+    // Read here, while the event lasts: afterwards the list is empty.
+    addImages(Array.from(data.files, file => ({ kind: 'file' as const, file, path: disk ? mapImageFilePath(file) : '', pasted: false })));
+  });
+  useEffect(() => {
+    const root = rootRef.current, types = ['dragenter', 'dragover', 'dragleave', 'drop'] as const;
+    if (!root) return;
+    for (const type of types) root.addEventListener(type, onFileDrag);
+    return () => { for (const type of types) root.removeEventListener(type, onFileDrag); };
+  }, [onFileDrag]);
+  // The overlay never outlives its drag: while files are dragged the page gets no pointer event at all, so the first one says the drag is over.
+  useEffect(() => {
+    if (!fileDrag) return;
+    const over = () => setFileDrag(null);
+    window.addEventListener('pointermove', over, true); window.addEventListener('pointerdown', over, true);
+    return () => { window.removeEventListener('pointermove', over, true); window.removeEventListener('pointerdown', over, true); };
+  }, [fileDrag]);
   // A background that a draft still ties to a camera was deleted (from its card): the draft lets go of it. Kept, the map could never be saved, and the list of views has no row left to untick.
   const knownViews = useMemo(() => new Set(snapshot.views.map(item => item.id)), [snapshot.views]);
   useEffect(() => {
@@ -1429,6 +1517,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
           <ObjectList nodes={settledCurrent?.nodes ?? current.nodes} selectedIds={listSelection.ids} primaryId={listSelection.primaryId} hiddenIds={hiddenIds} hiddenCount={hiddenCount} onSelect={selectFromList} onToggleHidden={toggleHidden} onShowAll={showAll} />
         </aside>
       </BackgroundMapPanels>
+      {fileDrag && <MapImageDropOverlay words={mapImageTargetWords(resolveMapImageTarget(snapshot, maps, current, selected), { editing, running: imageAdd.view.running, wrongType: fileDrag === 'type' })} />}
     </main>}
     {placePrompt && <MapImagePlacePrompt target={placePrompt.target} count={placePrompt.count} drafted={placePrompt.drafted} places={snapshot.places} onCancel={() => setPlacePrompt(null)} onConfirm={answerPlacePrompt} />}
     {createForm && <BackgroundModal title={createForm.spaceId ? '이 공간의 내부 도면 만들기' : '새 도면 만들기'} onClose={() => { if (!busy) { setCreateForm(null); setError(''); } }}><form onSubmit={event => { event.preventDefault(); void createMap(); }}>

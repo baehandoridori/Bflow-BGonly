@@ -2153,27 +2153,32 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   assert.ok(read('mapPlanPreview.ts').includes('scale: PlanSideScale = planSideScale(map, camera)'), 'planSideView takes no scale');
 });
 
-test('anchor 65: an open dialog of the editor is one line, and three places read it', () => {
-  // That a dialog of the editor is open is said in one line, of all five: the question (discard, delete), the three
-  // forms (a new map, a link, the settings) and the delete dialog of a map. Each asks about a map it holds: nothing may
-  // change the maps under it, and what the editor has to say is shown inside it. One of the five left out of that line
-  // is a dialog under which the drafts follow the library and the message is drawn a second time, behind it. Without
-  // `mapDelete` that dialog is the delete dialog of a map.
+test('anchor 65: an open dialog of the editor is one line, and seven places read it', () => {
+  // That a dialog of the editor is open is said in one line, of all six: the question (discard, delete), the three
+  // forms (a new map, a link, the settings), the delete dialog of a map and the place prompt of added pictures. Each
+  // holds what it was opened for: nothing may change the maps under it, and the first five show what the editor has to
+  // say inside them. One of the six left out of that line is a dialog under which the drafts follow the library, and
+  // pictures come in. Without `mapDelete` that dialog is the delete dialog of a map.
   const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt);';
   const lines = editor.split('\n').map(line => line.trim());
   assert.ok(lines.includes(made), `not a line of its own: ${made}`);
-  // The word stands five times, on five lines: the one that makes it and, in this order, the three places that read it.
+  // The word stands nine times, on nine lines: the one that makes it and, in this order, the seven places that read it.
   // The drafts follow the library only while no dialog is open, and the effect that asks them to waits for the value:
   // it asks again as the dialog closes, and without the value there a draft would stay behind the library after the
-  // dialog is closed (anchor 56 holds both lines in their place). Ctrl+S is left to an open dialog (anchor 53). And the
-  // editor's own message, the block above the band, is not drawn while a dialog is open: the sentence is inside the
-  // dialog then. A sixth place would be a reader no anchor knows, and with a place less one of the three asks something else.
+  // dialog is closed (anchor 56 holds both lines in their place). Ctrl+S is left to an open dialog (anchor 53). The save
+  // run of a batch of added pictures does not start under one (`idle`), and no picture comes in under one, by any of
+  // the three ways: the one way in turns it away, a paste is left to the dialog, and a drag of files over the editor
+  // brings up no sheet and is not swallowed, so it drops nothing. And the editor's own message, the block above the band,
+  // is not drawn while a dialog is open: the sentence is inside the dialog then. An eighth place would be a reader no
+  // anchor knows, and with a place less one of the seven asks something else.
   const guard = 'if (disabled || doc.isGestureActive() || dialogOpen) return;', waited = 'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);';
   const key = 'if (dialogOpen || document.querySelector(openDialogs)) return;', band = '{error && !(dialogOpen && !placePrompt) && <div className="bg-error" role="alert" ref={errorRef}>';
   const idle = 'idle: () => !pointerRef.current && !doc.isGestureActive() && !renamingRef.current && !polygon.length && !busy && !dialogOpen && !document.querySelector(openDialogs) });';
   const add = 'if (!sources.length || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;';
-  assert.equal(count(editor, /\bdialogOpen\b/g), 7, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the save run of added pictures, the way pictures come in, the message');
-  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, idle, add, `${band}{error}</div>}`]);
+  const paste = 'dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };';
+  const drop = "if (!data || !Array.from(data.types).includes('Files') || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;";
+  assert.equal(count(editor, /\bdialogOpen\b/g), 9, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the save run of added pictures, the three ways pictures come in, the message');
+  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, idle, add, paste, drop, `${band}{error}</div>}`]);
   // The place prompt draws no message of the editor and clears none: under it the message stays drawn, as before it came up.
   assert.ok(!editor.includes('{error && !dialogOpen && '), 'the message of the editor goes as the place prompt comes up');
   // The dialogs are listed in that one line and nowhere else: in neither order the three places used to write four of
@@ -2912,6 +2917,32 @@ test('anchor 73: the three ways in are one function that reads its target at tha
     'const answerPlacePrompt = useEvent((choice: MapImagePlaceChoice) => { if (!placePrompt) return; setPlacePrompt(null); imageAdd.start(planMapImageAdd(snapshot, placePrompt.target, choice, placePrompt.sources.map(mapImageSourceFacts), new Date(), uuid), placePrompt.sources); });',
     "const addPickedImages = useEvent((files: File[]) => addImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: false }))));"])
     assert.ok(lined(imageBlock).includes(line), `not a line of its own: ${line}`);
+  // Each of the three ways reaches that function once, and nothing else does: the drop, the paste (past its check for a missed press) and
+  // the picker. The paste is reached twice: with the pictures of the event, and with the path of a file copied in Explorer that the main
+  // process read. A paste that called the one way in directly would put a picture into a selection a press during a save meant to change.
+  assert.equal(count(editor, /\baddImages\(/g), 3, 'the drop, the paste and the picker');
+  assert.equal(count(editor, /\bpasteImages\(/g), 2, 'the pictures of a paste event and the file the main process found');
+  // The target is read in three places, each from what the image list names: the one way in, the drag as it tells the pointer whether a
+  // drop is taken, and the sheet as it says where the pictures go. With the maps of the library in place of the editor's, a place that a
+  // draft of another map uses would be offered as free.
+  assert.equal(count(editor, /resolveMapImageTarget\(/g), 3, 'the one way in, the drag and its sheet');
+  assert.equal(count(editor, /resolveMapImageTarget\(snapshot, maps, current, selected\)/g), 3, 'the target is not read from what the image list names');
+  // Told at once in four places: a blocked target and a list with nothing that can go in (the one way in), a paste after a missed press, a
+  // picture pasted into a field of the editor. A blocked target left without a word would be a paste that did nothing.
+  assert.equal(count(editor, /imageAdd\.say\(/g), 4, 'the line of the image list is told something in another place');
+  // A paste shows nothing beforehand of where it goes: after a press on the plan that was not taken because a save ran, it adds nothing,
+  // once, and says so. The note is taken back first, or every paste after it would be turned away. Then the one way in.
+  assert.deepEqual(lined(block(imageBlock, 'const pasteImages = useEvent((sources: readonly MapImageSource[]) => {')), ['const pasteImages = useEvent((sources: readonly MapImageSource[]) => {',
+    'if (pressMissed.current && current) { pressMissed.current = false; imageAdd.say(current.id, MAP_IMAGE_PRESS_NOTE); return; }', 'addImages(sources);', '}']);
+  // The note is written by every press of the main button on the plan, before anything takes it: whether the editor was locked then. A press
+  // that is taken clears it, and a press elsewhere (a button pressed while a save runs) writes nothing. Heard on the window in the capture
+  // phase, and let go with the same flag.
+  assert.deepEqual(lined(block(imageBlock, 'const notePress = useEvent((event: PointerEvent) => {')), ['const notePress = useEvent((event: PointerEvent) => {',
+    'if (event.isPrimary && event.button === 0 && event.target instanceof Node && svgRef.current?.contains(event.target)) pressMissed.current = disabled;', '}']);
+  const noteAt = lined(imageBlock).indexOf("window.addEventListener('pointerdown', notePress, true);");
+  assert.ok(noteAt > 0, 'a press on the plan is not noted on the window');
+  assert.deepEqual(lined(imageBlock).slice(noteAt - 1, noteAt + 3), ['useEffect(() => {', "window.addEventListener('pointerdown', notePress, true);",
+    "return () => window.removeEventListener('pointerdown', notePress, true);", '}, [notePress]);']);
   // The controller is made first, with the one call of the editor that sends a command and the tie of the editor. It locks the editor as a
   // save of the map does, and right before that a text field of the inspector that holds the cursor is left, as 도면 저장 leaves it: what is
   // being typed is settled while the fields still take it. A button or a row of the object list keeps its focus, and with it the keys of the
@@ -2919,6 +2950,138 @@ test('anchor 73: the three ways in are one function that reads its target at tha
   assert.deepEqual(lined(imageBlock).slice(0, 3), ['const imageAdd = useMapImageAdd({ execute, link: linkAddedImages,',
     "lock: on => { if (on) { const active = document.activeElement; if (active instanceof HTMLElement && active.matches(textFields) && active.closest('.bmap-inspector')) active.blur(); } setBusy(on); },",
     'idle: () => !pointerRef.current && !doc.isGestureActive() && !renamingRef.current && !polygon.length && !busy && !dialogOpen && !document.querySelector(openDialogs) });']);
+});
+
+test('anchor 74: the drop and the paste — their guards, what they read, and their listeners', () => {
+  // The two ways pictures come in from outside the page, in the block of adding pictures (anchor 73 cuts it the same way): a drag of files
+  // over the editor and a paste. `lined` is a piece as its lines, without their indent, and `all` is the editor so. A function is cut from
+  // its first line to the brace that closes it: its last line is a lone `}`.
+  const imageBlock = piece(editor, 'const imageAdd = useMapImageAdd(', 'const gallery = useMemo(');
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean), all = lined(editor);
+  // The drag. Only a drag that carries files is its business, and not for a read-only account, with no map or under an open dialog: back at
+  // the first line, with no sheet and nothing swallowed, so a drag of words or of a link goes on as it would.
+  const dragOpener = 'const onFileDrag = useEvent((event: DragEvent) => {', drag = block(imageBlock, dragOpener), dragLines = lined(drag);
+  assert.equal(dragLines[2], "if (!data || !Array.from(data.types).includes('Files') || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;",
+    'the first line of the drag takes a drag without files, or under a dialog');
+  // A leave from one child to another is no leave, and either of two things tells it: the engine names the element gone into, inside the
+  // editor, or it sent the dragenter of that element first, so the element left is not the one gone into last. Without the first the sheet
+  // flickers in an engine that sends the events the other way round, without the second in one that names no element. The element gone into
+  // last is noted on every other event, a drop letting go of it: noted on a dragenter alone, a drag whose first dragenter came under a dialog
+  // would never let the sheet go. Then the event is swallowed: without that no drop comes.
+  const enteredAt = dragLines.indexOf("dragInside.current = event.type === 'drop' ? null : event.target;");
+  assert.ok(enteredAt > 4, 'the element a drag went into last is not noted after the branch of a leave');
+  assert.deepEqual(dragLines.slice(enteredAt - 5, enteredAt + 2), ["if (event.type === 'dragleave') {",
+    'const within = event.relatedTarget instanceof Node && !!rootRef.current?.contains(event.relatedTarget);',
+    'if (!within && event.target === dragInside.current) { dragInside.current = null; setFileDrag(null); }', 'return;', '}',
+    "dragInside.current = event.type === 'drop' ? null : event.target;", 'event.preventDefault();']);
+  // A name box left open is settled as a press on the plan settles it, as soon as the drag comes in: the sheet and the place prompt then
+  // name what was typed, and a batch dropped with the box open does not wait for it for ever. Then the pointer is told whether a drop is
+  // taken: a blocked target, a batch that runs or files of no picture type take none, and the engine then sends no drop at all.
+  inOrder(drag, 'event.preventDefault();', 'if (renamingRef.current) focusCanvas();', 'data.dropEffect = ');
+  assert.ok((dragLines.find(line => line.startsWith('data.dropEffect = ')) ?? '').endsWith(".blocked ? 'none' : 'copy';"), 'a drop is taken where the sheet says it is not');
+  // The files are read in the drop alone, while the event lasts (afterwards the list is empty), and in this one place. A picture dragged out
+  // of a browser or a mail window is a file the engine made up for the drag: its path does not last, so none is kept.
+  assert.equal(count(editor, /\bdata\.files\b/g), 1, 'the files of a drag are read in another place');
+  inOrder(drag, "if (event.type !== 'drop') { setFileDrag(refused ? 'type' : 'ok'); return; }", 'Array.from(data.files, ');
+  for (const text of ["const disk = Array.from(data.types).every(type => type === 'Files');", "path: disk ? mapImageFilePath(file) : ''"])
+    assert.ok(drag.includes(text), `a picture dragged out of a browser keeps its path: ${text}`);
+  // And the drag holds nothing else, as the design writes it.
+  assert.deepEqual(dragLines, [dragOpener,
+    'const data = event.dataTransfer;',
+    "if (!data || !Array.from(data.types).includes('Files') || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;",
+    "if (event.type === 'dragleave') {",
+    'const within = event.relatedTarget instanceof Node && !!rootRef.current?.contains(event.relatedTarget);',
+    'if (!within && event.target === dragInside.current) { dragInside.current = null; setFileDrag(null); }',
+    'return;',
+    '}',
+    "dragInside.current = event.type === 'drop' ? null : event.target;",
+    'event.preventDefault();',
+    'if (renamingRef.current) focusCanvas();',
+    'const refused = mapImageDragRefused(Array.from(data.items, item => ({ kind: item.kind, type: item.type })));',
+    "data.dropEffect = mapImageTargetWords(resolveMapImageTarget(snapshot, maps, current, selected), { editing, running: imageAdd.view.running, wrongType: refused }).blocked ? 'none' : 'copy';",
+    "if (event.type !== 'drop') { setFileDrag(refused ? 'type' : 'ok'); return; }",
+    'setFileDrag(null);',
+    "const disk = Array.from(data.types).every(type => type === 'Files');",
+    "addImages(Array.from(data.files, file => ({ kind: 'file' as const, file, path: disk ? mapImageFilePath(file) : '', pasted: false })));",
+    '}']);
+  // Heard by native listeners on the root of the editor, four, and the same four let go with the same function: the dialogs of the editor
+  // are portals into the body, outside the root, so a drag over one of them never reaches it (a React handler on the root would hear them).
+  // And a net that never lets the sheet outlive its drag: while files are dragged the page gets no pointer event at all, so the first one
+  // says the drag is over, however it ended. Heard on the window in the capture phase, four times, and let go with the same flag.
+  const rootAt = all.indexOf("const root = rootRef.current, types = ['dragenter', 'dragover', 'dragleave', 'drop'] as const;");
+  assert.ok(rootAt > 0, 'the drag is not heard on the root of the editor');
+  const dragEffects = all.slice(rootAt - 1, rootAt + 11);
+  assert.deepEqual(dragEffects, ['useEffect(() => {', "const root = rootRef.current, types = ['dragenter', 'dragover', 'dragleave', 'drop'] as const;", 'if (!root) return;',
+    'for (const type of types) root.addEventListener(type, onFileDrag);', 'return () => { for (const type of types) root.removeEventListener(type, onFileDrag); };', '}, [onFileDrag]);',
+    'useEffect(() => {', 'if (!fileDrag) return;', 'const over = () => setFileDrag(null);',
+    "window.addEventListener('pointermove', over, true); window.addEventListener('pointerdown', over, true);",
+    "return () => { window.removeEventListener('pointermove', over, true); window.removeEventListener('pointerdown', over, true); };", '}, [fileDrag]);']);
+  assert.equal(count(dragEffects.slice(6).join('\n'), /, true\)/g), 4, 'the net is not heard and let go in the capture phase');
+  // The paste. Its facts are the six the guard asks: the editor on show, an account that may edit, a map, no open dialog (asked of the
+  // state and of the document, never of the target: under a modal the paste arrives at the body), the cursor in no text field and nothing
+  // pressed or dragged. Whether the cursor is in a text field is asked of the target alone, which is that field: a real paste arrives at the
+  // body wherever else the focus is. Asked of the element that has the focus, a select would answer otherwise, and the events of the check
+  // window would go another way than real ones: in the block the focus is read once, by the lock.
+  const pasteOpener = 'const onImagePaste = useEvent((event: ClipboardEvent) => {', paste = block(imageBlock, pasteOpener), pasteLines = lined(paste);
+  assert.deepEqual(pasteLines.slice(1, 4), ['const root = rootRef.current, element = event.target instanceof Element ? event.target : null;',
+    'const facts = { shown: !!root && root.offsetParent !== null, canManage: snapshot.canManage, hasMap: !!current,',
+    'dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };']);
+  assert.equal(count(imageBlock, /document\.activeElement/g), 1, 'the focus is read past the lock');
+  assert.ok((lined(imageBlock).find(line => line.includes('document.activeElement')) ?? '').startsWith('lock: on => {'), 'the focus is read past the lock');
+  // What is pasted: the files among the items, and of them the pictures.
+  assert.ok(pasteLines.includes("const files = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((file): file is File => !!file);"),
+    'the files of a paste are not read from its items');
+  // When nothing but the cursor in a field of the editor is in the way and the clipboard holds no text, a picture is told at once, and with
+  // no file in the event at all the main process is asked whether a picture file was copied: one line, and the field keeps its paste.
+  // Without the text check every name pasted into a field would bring the line up; outside the editor nothing is said.
+  const fieldAt = pasteLines.indexOf("if (root?.contains(element) && mapImagePasteWanted({ ...facts, text: false }) && !Array.from(event.clipboardData?.types ?? []).includes('text/plain')) {");
+  assert.ok(fieldAt > -1, 'the branch of a field of the editor is not as written');
+  assert.deepEqual(pasteLines.slice(fieldAt + 1, fieldAt + 4), ['if (pictures) noteFieldPaste(); else if (!files.length) void pasteClipboardFile(true);', '}', 'return;']);
+  assert.ok(all.includes('const noteFieldPaste = useEvent(() => { if (current) imageAdd.say(current.id, MAP_IMAGE_FIELD_NOTE); });'), 'a picture pasted into a field is told otherwise');
+  // Swallowed twice in the block: the drag, and a paste inside its branch of a picture, which goes the paste's way in. Swallowed with no
+  // picture, or in the branch of a field, a paste of words would be lost. A paste with no file in it asks the main process, and a paste of
+  // files that are no pictures does nothing.
+  assert.equal(count(imageBlock, /event\.preventDefault\(\);/g), 2, 'an event of a drag or a paste is swallowed in another place');
+  assert.equal(count(drag, /event\.preventDefault\(\);/g), 1, 'the drag is not swallowed in one place');
+  assert.equal(count(paste, /event\.preventDefault\(\);/g), 1, 'a paste is swallowed in another place');
+  const pictureBranch = block(paste, 'if (pictures) {');
+  for (const text of ['event.preventDefault();', 'pasteImages(']) assert.ok(pictureBranch.includes(text), `the branch of a pasted picture does not hold: ${text}`);
+  assert.equal(pasteLines[pasteLines.length - 2], '} else if (!files.length) void pasteClipboardFile(false);', 'a paste with no file in it does not ask the main process');
+  // And the paste holds nothing else, as the design writes it.
+  assert.deepEqual(pasteLines, [pasteOpener,
+    'const root = rootRef.current, element = event.target instanceof Element ? event.target : null;',
+    'const facts = { shown: !!root && root.offsetParent !== null, canManage: snapshot.canManage, hasMap: !!current,',
+    'dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };',
+    "const files = Array.from(event.clipboardData?.items ?? []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((file): file is File => !!file);",
+    "const pictures = files.some(file => file.type.startsWith('image/'));",
+    'if (!mapImagePasteWanted(facts)) {',
+    "if (root?.contains(element) && mapImagePasteWanted({ ...facts, text: false }) && !Array.from(event.clipboardData?.types ?? []).includes('text/plain')) {",
+    'if (pictures) noteFieldPaste(); else if (!files.length) void pasteClipboardFile(true);',
+    '}',
+    'return;',
+    '}',
+    'if (pictures) {',
+    'event.preventDefault();',
+    "pasteImages(files.map(file => ({ kind: 'file' as const, file, path: mapImageFilePath(file), pasted: true })));",
+    '} else if (!files.length) void pasteClipboardFile(false);',
+    '}']);
+  // Heard on the window as it bubbles, where it arrives at the body too, and let go with the same function.
+  const pasteAt = all.indexOf("window.addEventListener('paste', onImagePaste);");
+  assert.ok(pasteAt > 0, 'a paste is not heard on the window');
+  assert.deepEqual(all.slice(pasteAt - 1, pasteAt + 3), ['useEffect(() => {', "window.addEventListener('paste', onImagePaste);", "return () => window.removeEventListener('paste', onImagePaste);", '}, [onImagePaste]);']);
+  // A picture file copied in Explorer may not be in the event at all: only the main process can read its path, and its answer comes a moment
+  // later. Not into a tab that was left meanwhile, not under a drag that began meanwhile (the scroll of a start would shift it), and asked
+  // from a field it only tells: it never adds a picture with the cursor in the field. The main process is asked from this one place.
+  const fileOpener = 'const pasteClipboardFile = useEvent(async (inField: boolean) => {', fileLines = lined(block(imageBlock, fileOpener));
+  assert.deepEqual(fileLines.slice(2, 4), ['if (!found || !root || root.offsetParent === null || pointerRef.current || doc.isGestureActive()) return;',
+    "if (inField) noteFieldPaste(); else pasteImages([{ kind: 'path', path: found.filePath }]);"]);
+  assert.deepEqual(fileLines, [fileOpener, 'const found = await window.electronAPI.backgroundReadClipboardFile().catch(() => null), root = rootRef.current;',
+    'if (!found || !root || root.offsetParent === null || pointerRef.current || doc.isGestureActive()) return;',
+    "if (inField) noteFieldPaste(); else pasteImages([{ kind: 'path', path: found.filePath }]);", '}']);
+  assert.equal(count(editor, /backgroundReadClipboardFile\(/g), 1, 'the main process is asked for a copied file in another place');
+  // Nothing else is asked: not the clipboard of the page, not the channel of the character board, and no handler of an element (a React
+  // handler of a paste would not hear one that arrives at the body).
+  for (const text of ['navigator.clipboard', 'clipboardReadImage', 'onDrop=', 'onPaste=']) assert.ok(!editor.includes(text), `in the editor: ${text}`);
 });
 
 test('anchor 75: a batch uploads, then saves one command at a time under the lock, ties last, and sends nothing more after a save failed', () => {
@@ -3373,4 +3536,12 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   assert.ok(memoAt > -1, 'the memo of the image list was not found');
   assert.ok(editorLines[memoAt].endsWith(' adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={imageAdd.dismiss} /> : null,'), 'the image list is not handed the batch, the save, the way in or the close');
   assert.ok(editorLines[memoAt + 1].endsWith(' imageAdd.view, pending, addPickedImages, imageAdd.dismiss]);'), 'the memo of the image list does not wait for the batch');
+  // The sheet of a drag is the last child of the column of the map, right behind the panels: laid over the header, the band, the map, the
+  // inspector and the image list as one, in the flow of nothing (the column is the box it is laid on). What it says is made as it is drawn,
+  // from what the image list names. The panels are handed the image list as they always were (anchor 54).
+  const panelsEnd = editorLines.indexOf('</BackgroundMapPanels>');
+  assert.ok(panelsEnd > -1, 'the panels of the editor are not closed on a line of their own');
+  assert.deepEqual(editorLines.slice(panelsEnd, panelsEnd + 3), ['</BackgroundMapPanels>',
+    "{fileDrag && <MapImageDropOverlay words={mapImageTargetWords(resolveMapImageTarget(snapshot, maps, current, selected), { editing, running: imageAdd.view.running, wrongType: fileDrag === 'type' })} />}", '</main>}']);
+  assert.ok(editor.includes('<BackgroundMapPanels gallery={gallery}>'), 'the panels are handed something else than the image list');
 });
