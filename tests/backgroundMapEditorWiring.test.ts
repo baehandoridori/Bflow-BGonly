@@ -1044,10 +1044,13 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
   // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
   inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
-  // The word stands seven times: the function, this call, the delete dialog of a map as it comes up and as a run of it
+  // The word stands eight times: the function, this call, the delete dialog of a map as it comes up and as a run of it
   // stops (anchor 66 holds those two where they are), hiding a node when what the properties show changes
-  // (setNodesHidden), and the two buttons of the image list that go away as they are pressed (below).
-  assert.equal(count(editor, /\bswallowSecondClick\b/g), 7, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, hiding that changes what the properties show, and the two buttons of the image list that go away as they are pressed');
+  // (setNodesHidden), the two buttons of the image list that go away as they are pressed (below), and the × of the
+  // editor's notice: the notice goes from over the band, the band moves up by its height, and 도면 저장 comes under the
+  // pointer — the second click of a double-click on the × would save the map, or open the choice about it.
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 8, "the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, hiding that changes what the properties show, and the two buttons of the image list that go away as they are pressed, and the × of the editor's notice, which takes the notice away from over the band");
+  assert.equal(editor.split("onClick={() => { setNotice(''); swallowSecondClick(); }}").length - 1, 1, "the × of the editor's notice lets no second click through to the band that moves up under it");
   // '도면 전체' and the line's ×: pressed, each goes away and '＋ 이미지 추가' or a card slides under the pointer — the second click of a
   // double-click would open the file dialog or a card.
   for (const line of ['const clearSelection = useEvent(() => { select(null); swallowSecondClick(); });', 'const dismissNotice = useEvent(() => { imageAdd.dismiss(); swallowSecondClick(); });'])
@@ -1400,10 +1403,11 @@ test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the wo
   };
   // 편집 시작, the whole tag. A plain button of the library, a border and no fill: not the accent fill (`bg-primary`) of
   // the button it replaced. While the map is edited it is off and kept from readers, and the stylesheet hides it by that
-  // `aria-hidden`. Its own click hides it, so the click sends the keyboard to the canvas: left on a hidden button, Delete
-  // and Ctrl+Z would reach nothing. And nothing else is on the tag: `hidden`, say, would take it out of the row.
+  // `aria-hidden`; and off until this PC's list of kept edits is read (a draft opened before it would be written over
+  // the edit kept for that map). Its own click hides it, so the click sends the keyboard to the canvas: left on a hidden
+  // button, Delete and Ctrl+Z would reach nothing. And nothing else is on the tag: `hidden`, say, would take it out of the row.
   const start = button('편집 시작');
-  assert.equal(start, '<button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button>');
+  assert.equal(start, '<button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing || !keptSettled} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button>');
   // It keeps its place in the row: straight after 도면 설정, in no branch. Taken out while editing (`!editing &&`), 도면 설정
   // would slide under the pointer, and the second click of a double-click on 편집 시작 would open the settings. And it
   // stays inside what only an account that may edit is shown: a read-only account has no such button.
@@ -2157,7 +2161,7 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   assert.ok(read('mapPlanPreview.ts').includes('scale: PlanSideScale = planSideScale(map, camera)'), 'planSideView takes no scale');
 });
 
-test('anchor 65: an open dialog of the editor is one line, and seven places read it', () => {
+test('anchor 65: an open dialog of the editor is one line, and nine places read it', () => {
   // That a dialog of the editor is open is said in one line, of all six: the question (discard, delete), the three
   // forms (a new map, a link, the settings), the delete dialog of a map and the place prompt of added pictures. Each
   // holds what it was opened for: nothing may change the maps under it, and the first five show what the editor has to
@@ -2166,23 +2170,27 @@ test('anchor 65: an open dialog of the editor is one line, and seven places read
   const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt);';
   const lines = editor.split('\n').map(line => line.trim());
   assert.ok(lines.includes(made), `not a line of its own: ${made}`);
-  // The word stands nine times, on nine lines: the one that makes it and, in this order, the seven places that read it.
+  // The word stands eleven times, on eleven lines: the one that makes it and, in this order, the nine places that read it.
   // The drafts follow the library only while no dialog is open, and the effect that asks them to waits for the value:
   // it asks again as the dialog closes, and without the value there a draft would stay behind the library after the
   // dialog is closed (anchor 56 holds both lines in their place). Ctrl+S is left to an open dialog (anchor 53). The save
   // run of a batch of added pictures does not start under one (`idle`), and no picture comes in under one, by any of
   // the three ways: the one way in turns it away, a paste is left to the dialog, and a drag of files over the editor
-  // brings up no sheet and is not swallowed, so it drops nothing. And the editor's own message, the block above the band,
-  // is not drawn while a dialog is open: the sentence is inside the dialog then. An eighth place would be a reader no
-  // anchor knows, and with a place less one of the seven asks something else.
+  // brings up no sheet and is not swallowed, so it drops nothing. The restore does not run under a dialog either (no kept
+  // edit comes back, and no save whose answer was lost is put back, under the map a dialog holds), and its effect waits
+  // for the value: it looks again as the dialog closes. And the editor's own message, the block above the band,
+  // is not drawn while a dialog is open: the sentence is inside the dialog then. A tenth place would be a reader no
+  // anchor knows, and with a place less one of the nine asks something else.
   const guard = 'if (disabled || doc.isGestureActive() || dialogOpen) return;', waited = 'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);';
   const key = 'if (dialogOpen || document.querySelector(openDialogs)) return;', band = '{error && !(dialogOpen && !placePrompt) && <div className="bg-error" role="alert" ref={errorRef}>';
   const idle = 'idle: () => !pointerRef.current && !doc.isGestureActive() && !renamingRef.current && !polygon.length && !busy && !dialogOpen && !document.querySelector(openDialogs) });';
   const add = 'if (!sources.length || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;';
   const paste = 'dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };';
   const drop = "if (!data || !Array.from(data.types).includes('Files') || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;";
-  assert.equal(count(editor, /\bdialogOpen\b/g), 9, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the save run of added pictures, the three ways pictures come in, the message');
-  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, idle, add, paste, drop, `${band}{error}</div>}`]);
+  const restoreGuard = 'if (!keptSettled || !snapshot.canManage || disabled || gestureActive || dialogOpen) return;';
+  const restoreWaits = '}, [session, keptStatus, snapshot, disabled, gestureActive, dialogOpen, currentId]);';
+  assert.equal(count(editor, /\bdialogOpen\b/g), 11, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the save run of added pictures, the three ways pictures come in, the guard of the restore and what it waits for, the message');
+  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, idle, add, paste, drop, restoreGuard, restoreWaits, `${band}{error}</div>}`]);
   // The place prompt draws no message of the editor and clears none: under it the message stays drawn, as before it came up.
   assert.ok(!editor.includes('{error && !dialogOpen && '), 'the message of the editor goes as the place prompt comes up');
   // The dialogs are listed in that one line and nowhere else: in neither order the three places used to write four of
