@@ -46,7 +46,7 @@ Supabase(PostgreSQL + Realtime)를 SSOT로 사용 (Google Sheets에서 전환 �
 | 배포 | `G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\` |
 | 개인 설정 | `%APPDATA%\Bflow-BGonly\` (layout.json, preferences.json) |
 
-**데이터**: 씬/에피소드/체크박스/메모/캘린더(공유·개인 일정/태그/알림) → Supabase (PostgreSQL, 캘린더는 렌더러 → IPC → 메인에서 권한 강제), 이미지 → Supabase Storage (`scene-images` 버킷, 800px/JPEG 80% 리사이즈), 캐릭터 현황판 그림은 화면용(800px) 옆에 올린 파일 그대로를 `{이름}.orig` 로 함께 보관하고 '이미지 복사'는 그 원본을 쓴다(v1.134.1~, 주소 규칙은 `src/shared/characterImageOriginal.ts`), 레거시 Drive 이미지는 `drive-img://` 프로토콜로 표시만 유지, 위젯 레이아웃/개인 설정 → %APPDATA% 로컬 파일. 캐릭터 현황판 '최근 수정순'(v1.138.0~)은 `characters.updated_at` 을 쓰므로 카드 순서만 바뀐 UPDATE 는 수정 시각을 유지한다(`DEVLOG/migrations/2026-10-15-characters-updated-at-ignore-sort-order.sql` — 캐릭터 MVP 마이그레이션을 다시 돌리면 공용 트리거로 되돌아가니 이 파일도 다시 실행)
+**데이터**: 씬/에피소드/체크박스/메모/캘린더(공유·개인 일정/태그/알림) → Supabase (PostgreSQL, 캘린더는 렌더러 → IPC → 메인에서 권한 강제), 이미지 → Supabase Storage (`scene-images` 버킷, 800px/JPEG 80% 리사이즈), 캐릭터 현황판 그림은 화면용(800px) 옆에 올린 파일 그대로를 `{이름}.orig` 로 함께 보관하고 '이미지 복사'는 그 원본을 쓴다(v1.134.1~, 주소 규칙은 `src/shared/characterImageOriginal.ts`), 레거시 Drive 이미지는 `drive-img://` 프로토콜로 표시만 유지, 위젯 레이아웃/개인 설정 → %APPDATA% 로컬 파일. 캐릭터 현황판 '최근 수정순'(v1.138.0~)은 `characters.updated_at` 을 쓰므로 카드 순서만 바뀐 UPDATE 는 수정 시각을 유지한다(`DEVLOG/migrations/2026-10-15-characters-updated-at-ignore-sort-order.sql` — 캐릭터 MVP 마이그레이션을 다시 돌리면 공용 트리거로 되돌아가니 이 파일도 다시 실행) 배경 도면의 저장 안 한 편집(v1.140.0~)은 메인 프로세스가 계정별 파일 %APPDATA%\Bflow-BGonly\background-map-kept.<계정 id>.json 에 쓴다(채널 background-kept:list·background-kept:put, 계정은 메인의 세션이 정하고 Supabase에 보내지 않는다 — AGENTS.md '배경 라이브러리 데이터 경계').
 
 ### 제약 사항
 
