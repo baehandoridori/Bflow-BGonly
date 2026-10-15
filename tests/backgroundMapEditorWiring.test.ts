@@ -2894,8 +2894,9 @@ test('anchor 75: a batch uploads, then saves one command at a time under the loc
   assert.ok(locked > -1 && lines[locked + 1] === 'try {', 'the lock is not a line of its own right before the try of the saves');
   assert.ok(lines.some(line => line.startsWith('stopped = why;')), 'the rest is sent after a save failed, or held back only after some');
   assert.equal(lines[lines.lastIndexOf('} finally {') + 1], 'running.current = false;', 'the ref is not let go in the finally of the batch');
-  assert.equal(count(hook, /\.lock\(true\)/g), 1, 'the editor is locked in another place');
-  assert.equal(count(hook, /\.lock\(false\)/g), 1, 'the editor is let go in another place');
+  // Each once, however the call is written: on `latest.current`, or on a `lock` read out of it first.
+  assert.equal(count(hook, /\block\(true\)/g), 1, 'the editor is locked in another place');
+  assert.equal(count(hook, /\block\(false\)/g), 1, 'the editor is let go in another place');
   // At rest: the store reads and saves nothing, and the editor (asked as it is rendered by then) drags, draws, names and opens nothing.
   // A save of this feature leaves no red line of the library up: the image list says why, in plain words. Never once the screen was left
   // or the account changed: the store may be another session's by then, and its library would pass for one that holds what was saved. A
@@ -2939,8 +2940,16 @@ test('anchor 75: a batch uploads, then saves one command at a time under the loc
   // 추가됨 leaves by itself, timed by the controller, and the timer goes with its effect.
   for (const line of ['const timer = window.setTimeout(() => setView(now => ({ ...now, marked: [] })), MAP_IMAGE_ADD.addedMarkMs);', 'return () => window.clearTimeout(timer);'])
     assert.ok(lined(hook).includes(line), `not a line of the controller: ${line}`);
-  // And the body of the controller holds nothing else: the lines of the design as written, from its state to the end of a batch.
-  assert.deepEqual(lined(piece(hook, 'const [view, setView] = useState<MapImageAddView>(MAP_IMAGE_IDLE);', 'const start = ')), [
+  // Around the hook: the screen opens on no batch running, every id it saves is a new one, and the wait for rest hands the page back
+  // between its looks (a wait that never did would freeze the screen while a drag, a polygon, the name box or a dialog keeps it busy).
+  for (const line of ['export const MAP_IMAGE_IDLE: MapImageAddView = { mapId: null, running: false, jobs: [], notice: null, recent: [], marked: [], seq: 0 };',
+    'const uuid = () => crypto.randomUUID();', 'const sleep = (ms: number) => new Promise<void>(done => window.setTimeout(done, ms));'])
+    assert.ok(lined(hook).includes(line), `not a line of the controller: ${line}`);
+  // And the body of the controller holds nothing else: the lines of the design as written, from the line that opens it to what it hands
+  // back. A batch is started and left to run (`start`), and `say` and `dismiss` stay the same functions: the memo of the image list
+  // depends on `dismiss`, and a new one at every draw would draw the whole list again at every move of a drag.
+  assert.deepEqual(lined(piece(hook, 'say(mapId: string, text: string, failed?: { name: string; reason: string }[]): void; dismiss(): void } {', 'return { view, start, say, dismiss };')), [
+    'say(mapId: string, text: string, failed?: { name: string; reason: string }[]): void; dismiss(): void } {',
     'const [view, setView] = useState<MapImageAddView>(MAP_IMAGE_IDLE);', 'const latest = useRef(deps); latest.current = deps;', 'const alive = useRef(true), running = useRef(false);',
     'useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);', 'useEffect(() => {', 'if (!view.marked.length) return;',
     'const timer = window.setTimeout(() => setView(now => ({ ...now, marked: [] })), MAP_IMAGE_ADD.addedMarkMs);', 'return () => window.clearTimeout(timer);', '}, [view.marked]);',
@@ -2973,6 +2982,9 @@ test('anchor 75: a batch uploads, then saves one command at a time under the loc
     'setView(now => ({ ...now, running: false, jobs: [], recent: [...added, ...now.recent], marked: added,',
     'notice: { mapId: plan.mapId, text: mapImageSummary(outcome), failed, ...(link ? { live: { outcome, link } } : {}) } }));', '} finally {', 'running.current = false;',
     'if (alive.current) setView(now => now.running ? { ...now, running: false, jobs: [], notice: null } : now);', '}', '}',
+    'const start = (plan: MapImagePlan, sources: readonly MapImageSource[]) => { void run(plan, sources); };',
+    'const say = useCallback((mapId: string, text: string, failed: { name: string; reason: string }[] = []) => setView(now => ({ ...now, notice: { mapId, text, failed }, seq: now.seq + 1 })), []);',
+    'const dismiss = useCallback(() => setView(now => now.running ? now : { ...now, notice: null }), []);',
   ]);
 });
 
