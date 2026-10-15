@@ -12,6 +12,8 @@ import { keptEntryProblem } from '../src/shared/backgroundKeptEdits.ts';
 import type { KeptMapEdit } from '../src/shared/backgroundKeptEdits.ts';
 import { KEPT_DOT_TEXT, KEPT_LIST_TIMEOUT_MS, flushKeptMapEditsBeforeLogout, keptMapEditCount, keptMapEditsStored, primeKeptMapEdits, releaseKeptMapEdits, setKeptMapFlush, useKeptMapEdits } from '../src/features/backgrounds/mapKeptSignal.ts';
 import type { KeptSignal } from '../src/features/backgrounds/mapKeptSignal.ts';
+import { createMapDraftSession } from '../src/features/backgrounds/mapDraftSession.ts';
+import type { MapDraftSession } from '../src/features/backgrounds/mapDraftSession.ts';
 
 // The unsaved map edits this PC keeps, as the page sees them. Every verdict comes from the real modules of the library
 // (domain.ts, mapDocument.ts, mapWorkflow.ts) on one library that is whole in itself: the places 학교 > 교실, one view V,
@@ -475,4 +477,411 @@ test('KS-c: the flush before logout never throws, and the two counts', async t =
   assert.equal(keptMapEditCount({ ...IDLE_SIGNAL, kept: ['a', 'b'], changed: ['b', 'c'] }), 3);
   assert.equal(keptMapEditsStored({ ...IDLE_SIGNAL, kept: ['a', 'b'], failed: ['b', 'c'] }), 1);
   assert.equal(KEPT_DOT_TEXT, '저장 안 한 도면 편집이 있어요');
+});
+
+// The session (mapDraftSession.ts): the document of one account and its copy on this PC. Driven by a clock moved by hand,
+// a fake signal and a fake file of main, so that nothing here waits on time that passes.
+
+/** A clock moved by hand: what is set runs as its time comes, in the order of those times. */
+function clock() {
+  let now = 0, last = 0;
+  const due = new Map<number, { at: number; run: () => void }>();
+  return {
+    now: () => now,
+    set: (run: () => void, ms: number): unknown => { due.set(++last, { at: now + ms, run }); return last; },
+    clear: (handle: unknown) => { due.delete(handle as number); },
+    /** How many are set and neither ran nor were cleared. */
+    pending: () => due.size,
+    /** The time moves on by `ms`; what comes due on the way runs at its time, and so does what is set meanwhile and comes due within. */
+    advance(ms: number) {
+      const end = now + ms;
+      for (;;) {
+        let next: { handle: number; at: number; run: () => void } | undefined;
+        for (const [handle, timer] of due) if (timer.at <= end && (!next || timer.at < next.at)) next = { handle, ...timer };
+        if (!next) break;
+        due.delete(next.handle);
+        now = next.at;
+        next.run();
+      }
+      now = end;
+    },
+  };
+}
+/** An answer of the fake file held back, given by hand: as the file gives it, or as a refusal. */
+type HeldAnswer = { resolve(): void; reject(): void };
+/**
+ * A session of account 'u' on its own clock, signal and file, made anew for each case. Each put is logged as it is called and
+ * leaves the file as main would. While `rules.hold` is on its answer waits in `held`; the next `refuseWrites` writes and
+ * `refuseRemoves` removes are refused.
+ */
+function keeper(signalPatch: Partial<KeptSignal> = {}) {
+  const time = clock();
+  let signal: KeptSignal = { userId: 'u', status: 'ready', listed: {}, kept: [], changed: [], failed: [], ...signalPatch };
+  const fake = { read: () => signal, write: (patch: Partial<KeptSignal>) => { signal = { ...signal, ...patch }; } };
+  const puts: [string, KeptMapEdit | null][] = [], file: Record<string, KeptMapEdit> = {}, held: HeldAnswer[] = [];
+  const rules = { hold: false, refuseWrites: 0, refuseRemoves: 0 };
+  const put = (mapId: string, entry: KeptMapEdit | null) => new Promise<void>((resolve, reject) => {
+    puts.push([mapId, entry]);
+    const refused = entry ? rules.refuseWrites > 0 : rules.refuseRemoves > 0;
+    if (refused && entry) rules.refuseWrites--;
+    else if (refused) rules.refuseRemoves--;
+    const answer = () => {
+      if (refused) return reject(new Error('보관하지 못함'));
+      if (entry) file[mapId] = entry; else delete file[mapId];
+      resolve();
+    };
+    if (rules.hold) held.push({ resolve: answer, reject: () => reject(new Error('보관하지 못함')) });
+    else answer();
+  });
+  const make = (patch: { userId?: string } = {}) =>
+    createMapDraftSession({ userId: 'u', put, signal: fake, timers: { set: time.set, clear: time.clear }, now: time.now, ...patch });
+  return { time, signal: () => signal, setSignal: fake.write, puts, file, held, rules, make };
+}
+/** One edit of a map in the document of the session, its name: one undo step. The map is opened first when it has no draft. */
+function rename(session: MapDraftSession, map: BackgroundMap, name: string) {
+  session.store.dispatch({ type: 'begin-editing', map });
+  session.store.dispatch({ type: 'update', map: { ...mapDraft(session.store.getState(), map.id)!.value, name } });
+}
+/** A save of a map as its draft holds it: the draft is put back on what was saved, one revision on, as persistMaps does. */
+function save(session: MapDraftSession, mapId: string) {
+  const draft = mapDraft(session.store.getState(), mapId)!;
+  session.store.dispatch({ type: 'rebase-drafts', maps: [{ ...draft.value, revision: (draft.baseRevision ?? 0) + 1 }] });
+}
+/** The calls of the fake file, each as its map and what it did. */
+const sends = (puts: [string, KeptMapEdit | null][]) => puts.map(([mapId, entry]) => [mapId, entry === null ? 'remove' : 'write']);
+/** The map with its space moved along to `x`: a drag on the plan. */
+const moved = (map: BackgroundMap, x: number): BackgroundMap => ({ ...map, nodes: map.nodes.map(node => node.type === 'space' ? { ...node, x } : node) });
+
+test('KP-8a: a settled edit is written within 0.3 seconds, every 0.3 seconds while the edits go on, never the preview of a drag, and the dot comes on at once', async () => {
+  {
+    const { time, signal, puts, make } = keeper();
+    const session = make();
+    // The first edit marks its map changed in the same tick, before anything is written: the dot comes on with the edit.
+    rename(session, FLOOR_MAP, '가');
+    assert.deepEqual(signal().changed, [FLOOR]);
+    assert.equal(puts.length, 0);
+    // Three edits 0.1 seconds apart: nothing yet. 0.3 seconds after the first, one write of all three, and the one map changed.
+    time.advance(100); rename(session, FLOOR_MAP, '나');
+    time.advance(100); rename(session, FLOOR_MAP, '다');
+    await settle();
+    assert.equal(puts.length, 0);
+    time.advance(300); await settle();
+    assert.deepEqual(puts, [[FLOOR, { baseRevision: 5, steps: 3, keptAt: 300, value: mapDraft(session.store.getState(), FLOOR)!.value }]]);
+    assert.deepEqual(signal().changed, [FLOOR]);
+  }
+  {
+    // Ten edits 0.12 seconds apart: written every 0.3 seconds while they go on (three by the tenth), and the tenth 0.3 seconds after it.
+    const { time, puts, make } = keeper();
+    const session = make();
+    for (let index = 1; index <= 10; index++) {
+      if (index > 1) time.advance(120);
+      rename(session, FLOOR_MAP, `이름 ${index}`);
+    }
+    await settle();
+    assert.deepEqual(puts.map(([, entry]) => entry!.steps), [3, 6, 9]);
+    time.advance(300); await settle();
+    assert.equal(puts.length, 4);
+    assert.deepEqual(puts[3], [FLOOR, { baseRevision: 5, steps: 10, keptAt: 1380, value: mapDraft(session.store.getState(), FLOOR)!.value }]);
+    assert.equal((puts[3][1]!.value as BackgroundMap).name, '이름 10');
+  }
+  {
+    // Written once, then a drag of ten previews 0.5 seconds apart: nothing more while it runs. Released, what it ends on, 0.3 seconds later.
+    const { time, puts, make } = keeper();
+    const session = make();
+    for (const name of ['가', '나', '다']) rename(session, FLOOR_MAP, name);
+    time.advance(300); await settle();
+    assert.equal(puts.length, 1);
+    session.store.dispatch({ type: 'gesture-begin', mapId: FLOOR });
+    const start = mapDraft(session.store.getState(), FLOOR)!.value;
+    for (let step = 1; step <= 10; step++) {
+      if (step > 1) time.advance(500);
+      session.store.dispatch({ type: 'gesture-preview', map: moved(start, 100 + step * 10) });
+    }
+    await settle();
+    assert.equal(puts.length, 1);
+    session.store.dispatch({ type: 'gesture-finish' });
+    time.advance(300); await settle();
+    assert.equal(puts.length, 2);
+    assert.deepEqual(puts[1][1]!.value, moved(start, 200));
+    assert.deepEqual(puts[1][1]!.value, mapDraft(session.store.getState(), FLOOR)!.value);
+  }
+  {
+    // A timer that comes due while a drag runs writes the map as it was when the drag started, never a preview.
+    const { time, puts, make } = keeper();
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    const start = mapDraft(session.store.getState(), FLOOR)!.value;
+    time.advance(100);
+    session.store.dispatch({ type: 'gesture-begin', mapId: FLOOR });
+    session.store.dispatch({ type: 'gesture-preview', map: moved(start, 40) });
+    time.advance(200); await settle();
+    assert.deepEqual(puts, [[FLOOR, { baseRevision: 5, steps: 1, keptAt: 300, value: start }]]);
+  }
+  {
+    // A session with no account keeps nothing and marks nothing.
+    const { time, signal, puts, make } = keeper();
+    const session = make({ userId: '' });
+    for (const name of ['가', '나', '다']) rename(session, FLOOR_MAP, name);
+    time.advance(1000); await settle();
+    assert.deepEqual([puts, signal().changed], [[], []]);
+  }
+});
+
+test('KP-8b: only what this session wrote or restored is removed — a save, a discard, a write still in flight, and a refused remove', async () => {
+  {
+    // A save puts the draft back on what was saved: its entry is removed at once, nothing is written after, and nothing stays marked.
+    const { time, signal, puts, file, make } = keeper();
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(300); await settle();
+    save(session, FLOOR);
+    assert.deepEqual(sends(puts), [[FLOOR, 'write'], [FLOOR, 'remove']]);
+    time.advance(1000); await settle();
+    assert.equal(puts.length, 2);
+    assert.deepEqual([signal().changed, signal().kept, file], [[], [], {}]);
+  }
+  {
+    // A draft discarded before it was written: no call at all.
+    const { time, puts, make } = keeper();
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(200);
+    session.store.dispatch({ type: 'discard', mapId: FLOOR });
+    time.advance(1000); await settle();
+    assert.deepEqual(puts, []);
+  }
+  {
+    // Undone to clean while its write is still out: the remove goes at once, right behind that write (the entry was this session's as the write went).
+    const { time, puts, held, rules, make } = keeper();
+    rules.hold = true;
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(300);
+    session.store.dispatch({ type: 'undo', mapId: FLOOR });
+    assert.deepEqual(sends(puts), [[FLOOR, 'write'], [FLOOR, 'remove']]);
+    for (const answer of held) answer.resolve();
+    await settle();
+  }
+  {
+    // A remove refused, the map edited again and that write taken: the flush removes nothing of it, and the file holds the new entry.
+    const { time, puts, file, rules, make } = keeper();
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(300); await settle();
+    rules.refuseRemoves = 1;
+    session.store.dispatch({ type: 'undo', mapId: FLOOR });
+    await settle();
+    rename(session, FLOOR_MAP, '나');
+    time.advance(300); await settle();
+    await session.flush();
+    assert.deepEqual(sends(puts), [[FLOOR, 'write'], [FLOOR, 'remove'], [FLOOR, 'write']]);
+    assert.deepEqual(file, { [FLOOR]: puts[2][1] });
+    assert.equal((file[FLOOR].value as BackgroundMap).name, '나');
+  }
+  {
+    // A remove refused with no draft left: it goes out again with the next write, of another map.
+    const { time, puts, file, rules, make } = keeper();
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(300); await settle();
+    rules.refuseRemoves = 1;
+    session.store.dispatch({ type: 'discard', mapId: FLOOR });
+    await settle();
+    assert.deepEqual(file, { [FLOOR]: puts[0][1] });
+    rename(session, MAIN_MAP, '본관 (고침)');
+    time.advance(300); await settle();
+    assert.deepEqual(sends(puts), [[FLOOR, 'write'], [FLOOR, 'remove'], [FLOOR, 'remove'], [MAIN, 'write']]);
+    assert.deepEqual(Object.keys(file), [MAIN]);
+  }
+});
+
+test('KP-8c: nothing is written before the list is read, a refusal is told and forgotten, and flush and dispose', async t => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  {
+    // While the list is read nothing is written. Once it is read, within 0.3 seconds.
+    const { time, signal, setSignal, puts, make } = keeper({ status: 'loading' });
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(900); await settle();
+    assert.deepEqual([puts, signal().failed], [[], []]);
+    setSignal({ status: 'ready' });
+    time.advance(300); await settle();
+    assert.deepEqual(sends(puts), [[FLOOR, 'write']]);
+  }
+  {
+    // The list could not be read: nothing written a second on, and the map marked as not kept. Read at last: written within 0.3 seconds, the mark gone.
+    const { time, signal, setSignal, puts, make } = keeper({ status: 'unavailable' });
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(1000); await settle();
+    assert.deepEqual([puts, signal().failed], [[], [FLOOR]]);
+    setSignal({ status: 'ready' });
+    time.advance(300); await settle();
+    assert.deepEqual([sends(puts), signal().failed], [[[FLOOR, 'write']], []]);
+  }
+  {
+    // Unavailable, an edit, 0.4 seconds and a save: the mark goes at once and stays gone, and no timer is left behind.
+    const { time, signal, puts, make } = keeper({ status: 'unavailable' });
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(400);
+    assert.deepEqual(signal().failed, [FLOOR]);
+    save(session, FLOOR);
+    assert.deepEqual([signal().failed, time.pending()], [[], 0]);
+    time.advance(1000); await settle();
+    assert.deepEqual([signal().failed, time.pending(), puts], [[], 0, []]);
+  }
+  {
+    // A write refused: a line in the console, and the map marked. The flush sends it again; taken, the mark goes.
+    const { time, signal, puts, rules, make } = keeper();
+    const session = make();
+    rules.refuseWrites = 1;
+    rename(session, FLOOR_MAP, '가');
+    time.advance(300); await settle();
+    assert.deepEqual(signal().failed, [FLOOR]);
+    assert.deepEqual(warn.mock.calls.at(-1)!.arguments.slice(0, 2), ['[background] kept map edit not written:', FLOOR]);
+    await session.flush();
+    assert.deepEqual([sends(puts), signal().failed], [[[FLOOR, 'write'], [FLOOR, 'write']], []]);
+  }
+  {
+    // A map whose write was refused, saved or discarded: its mark goes at once.
+    const { time, signal, rules, make } = keeper();
+    const session = make();
+    rules.refuseWrites = 2;
+    rename(session, FLOOR_MAP, '가');
+    rename(session, MAIN_MAP, '나');
+    time.advance(300); await settle();
+    assert.deepEqual(signal().failed, [FLOOR, MAIN]);
+    save(session, FLOOR);
+    assert.deepEqual(signal().failed, [MAIN]);
+    session.store.dispatch({ type: 'discard', mapId: MAIN });
+    assert.deepEqual(signal().failed, []);
+  }
+  {
+    // Saved while its write was out, and that write refused afterwards: no mark, nor once the map is edited again.
+    const { time, signal, held, rules, make } = keeper();
+    rules.hold = true;
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(300);
+    save(session, FLOOR);
+    held[0].reject();
+    await settle();
+    assert.deepEqual(signal().failed, []);
+    rename(session, FLOOR_MAP, '나');
+    assert.deepEqual(signal().failed, []);
+    for (const answer of held.slice(1)) answer.resolve();
+    await settle();
+  }
+  {
+    // A write out with no answer yet: the flush waits for it as well, though it did not send it.
+    const { time, held, rules, make } = keeper();
+    rules.hold = true;
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(300);
+    let flushed = false;
+    void session.flush().then(() => { flushed = true; });
+    await settle();
+    assert.equal(flushed, false);
+    held[0].resolve();
+    await settle();
+    assert.equal(flushed, true);
+  }
+  {
+    // Disposed within 0.3 seconds of an edit: no timer is left, nothing is written a second on, nor after another edit.
+    const { time, puts, make } = keeper();
+    const session = make();
+    rename(session, FLOOR_MAP, '가');
+    time.advance(200);
+    assert.equal(time.pending(), 1);
+    session.dispose();
+    assert.equal(time.pending(), 0);
+    time.advance(1000); await settle();
+    rename(session, FLOOR_MAP, '나');
+    time.advance(1000); await settle();
+    assert.deepEqual(puts, []);
+  }
+});
+
+test('KP-8d: catching up — once per login what this PC kept comes back, an own save whose answer was lost is put back, and discardAll', async t => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  /** An entry as main lists it: kept on revision 5 with three unsaved edits, unless the patch says otherwise. */
+  const entry = (value: unknown, patch: Partial<KeptMapEdit> = {}): KeptMapEdit => ({ baseRevision: 5, steps: 3, keptAt: 1700000000000, value, ...patch });
+  // A to restore (2층 under another name), B as the library holds it (교실 안), C a map this version cannot hold (본관 with a key it does not know).
+  const listed = { [FLOOR]: entry(KEPT_FLOOR), [ROOM]: entry(ROOM_MAP, { baseRevision: 1 }), [MAIN]: entry({ ...MAIN_MAP, glow: true }, { baseRevision: 2 }) };
+  {
+    const { time, signal, puts, make } = keeper({ listed, kept: Object.keys(listed) });
+    const session = make();
+    // Once per login: A comes back as a draft with the count it had, the map to show. B is removed, and that is the only call.
+    assert.deepEqual(session.catchUp(LIBRARY), { count: 1, mapId: FLOOR });
+    assert.equal(session.catchUp(LIBRARY), null);
+    assert.deepEqual(mapDraft(session.store.getState(), FLOOR), { value: KEPT_FLOOR, baseRevision: 5, past: [], future: [], dropped: 3 });
+    assert.deepEqual(puts, [[ROOM, null]]);
+    // A is in the file already: nothing is written of it, a second on either. The file holds A and C as far as this PC knows, and A is changed.
+    assert.equal(time.pending(), 0);
+    time.advance(1000); await settle();
+    assert.deepEqual(puts, [[ROOM, null]]);
+    assert.deepEqual([signal().kept, signal().changed], [[FLOOR, MAIN], [FLOOR]]);
+    // C stays in the file, told in the console, and gets no call: not even when it is opened and discarded.
+    assert.deepEqual(warn.mock.calls.map(call => call.arguments), [['[background] kept map edit not restored:', MAIN, 'invalid']]);
+    session.store.dispatch({ type: 'begin-editing', map: MAIN_MAP });
+    session.store.dispatch({ type: 'discard', mapId: MAIN });
+    time.advance(1000); await settle();
+    assert.deepEqual(puts, [[ROOM, null]]);
+    // A discarded: its entry goes.
+    session.store.dispatch({ type: 'discard', mapId: FLOOR });
+    assert.deepEqual(puts, [[ROOM, null], [FLOOR, null]]);
+  }
+  // The list not read, or the signal another account's: nothing comes back and nothing is called. Once it is read, the next catch-up restores.
+  const unread: Partial<KeptSignal>[] = [{ status: 'unavailable' }, { userId: 'v' }];
+  for (const patch of unread) {
+    const { setSignal, puts, make } = keeper({ listed, kept: Object.keys(listed), ...patch });
+    const session = make();
+    assert.equal(session.catchUp(LIBRARY), null);
+    assert.deepEqual([puts, session.store.getState().drafts], [[], {}]);
+    setSignal({ userId: 'u', status: 'ready' });
+    assert.deepEqual(session.catchUp(LIBRARY), { count: 1, mapId: FLOOR });
+  }
+  {
+    // A save of this PC whose answer was lost: the library holds what the draft holds, on revision 6. Put back on it: clean, its entry removed, the dot off.
+    const { time, signal, puts, make } = keeper();
+    const session = make();
+    rename(session, FLOOR_MAP, '2층 (저장 중에 떠남)');
+    time.advance(300); await settle();
+    const value = mapDraft(session.store.getState(), FLOOR)!.value;
+    session.catchUp(at({ ...value, revision: 6 }));
+    assert.deepEqual(mapDraft(session.store.getState(), FLOOR), { value: { ...value, revision: 6 }, baseRevision: 6, past: [], future: [], dropped: 0 });
+    assert.deepEqual([sends(puts), signal().changed], [[[FLOOR, 'write'], [FLOOR, 'remove']], []]);
+  }
+  {
+    // Other content on revision 6: nothing at all.
+    const { time, puts, make } = keeper();
+    const session = make();
+    rename(session, FLOOR_MAP, '2층 (이 PC)');
+    time.advance(300); await settle();
+    const before = session.store.getState();
+    session.catchUp(at({ ...FLOOR_MAP, revision: 6, name: '2층 (다른 곳)' }));
+    assert.equal(session.store.getState(), before);
+    assert.deepEqual(sends(puts), [[FLOOR, 'write']]);
+  }
+  {
+    // A restored, D (본관) written in this run, E (교실 안) edited within 0.3 seconds: every draft goes, A and D are removed once each, E has nothing to remove.
+    const { time, signal, puts, make } = keeper({ listed: { [FLOOR]: entry(KEPT_FLOOR) }, kept: [FLOOR] });
+    const session = make();
+    assert.deepEqual(session.catchUp(LIBRARY), { count: 1, mapId: FLOOR });
+    rename(session, MAIN_MAP, '본관 (이번에)');
+    time.advance(300); await settle();
+    rename(session, ROOM_MAP, '교실 안 (이번에)');
+    time.advance(100);
+    session.discardAll();
+    assert.deepEqual(session.store.getState().drafts, {});
+    assert.deepEqual(sends(puts), [[MAIN, 'write'], [FLOOR, 'remove'], [MAIN, 'remove']]);
+    time.advance(1000); await settle();
+    assert.equal(puts.length, 3);
+    assert.deepEqual(signal().changed, []);
+    // What this PC kept comes back once per login: not again.
+    assert.equal(session.catchUp(LIBRARY), null);
+    assert.deepEqual(session.store.getState().drafts, {});
+  }
 });
