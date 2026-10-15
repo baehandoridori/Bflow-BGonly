@@ -182,6 +182,12 @@ export function uniqueMapImageName(base: string, taken: ReadonlySet<string>): st
     if (!taken.has(name)) return name;
   }
 }
+/** The first background of the place with `path` for the source of one of its pictures, in any revision, compared as two paths are (4.6).
+ *  The old work file (`filePath`) is another file and is not read. No path: none. */
+export function findSameSourceView(snapshot: BackgroundSnapshot, placeId: string, path: string): BackgroundView | undefined {
+  const key = pathKey(path);
+  return key ? snapshot.views.find(view => view.placeId === placeId && view.variants.some(variant => variant.revisions.some(revision => pathKey(revision.sourceImagePath ?? '') === key))) : undefined;
+}
 export type MapImagePlaceChoice = { kind: 'existing'; placeId: string } | { kind: 'new'; name: string };
 /** `newPlace` is saved first when it is not null. `place`: the tie the pictures stand on, the node that holds or is given the place (`nodeId` a space id, or null for the map)
  *  and what it held when the target was read (`was`: the place itself for a target that had one, else null or the id of a place that is gone).
@@ -189,6 +195,54 @@ export type MapImagePlaceChoice = { kind: 'existing'; placeId: string } | { kind
 export type MapImagePlan = { mapId: string; scope: MapImageScope; targetName: string; placeId: string; placeName: string; newPlace: BackgroundPlace | null;
   place: { nodeId: string | null; was: string | null }; cameraId: string | null; cameraPlaceId: string | null;
   items: { index: number; viewId: string; name: string }[]; reused: string[]; reusedNames: string[]; refused: { index: number; name: string; reason: MapImageRefusal }[]; over: number };
+/** One batch, planned on the library of the moment it starts (5.1). Every id is made here, in this order: the new place, then the pictures. */
+export function planMapImageAdd(snapshot: BackgroundSnapshot, target: MapImageOpenTarget, choice: MapImagePlaceChoice | null, files: readonly MapImageFileFacts[], at: Date, newId: () => string): MapImagePlan {
+  // The place: the target's own, or the answer of the place prompt, a place of the library or a new one that is saved first.
+  let newPlace: BackgroundPlace | null = null, place: Pick<BackgroundPlace, 'id' | 'name'> | undefined;
+  if (target.status === 'ready') place = { id: target.placeId, name: target.placeName };
+  else if (choice?.kind === 'new') {
+    newPlace = { id: newId(), revision: 1, name: cut(choice.name.trim(), MAP_IMAGE_ADD.nameLimit) || '새 장소', parentId: target.parentPlaceId, folderPath: '' };
+    place = newPlace;
+  } else if (choice) place = snapshot.places.find(item => item.id === choice.placeId);
+  // Never so from the editor: the prompt checked its answer against the library of the same moment (6.3).
+  if (!place) throw new Error('넣을 장소를 다시 골라 주세요.');
+  const placeId = place.id, sorted = sortMapImageFiles(files), reused: BackgroundView[] = [], items: MapImagePlan['items'] = [];
+  // A name is taken by a background of that place, or by a picture before it in the batch. Of another place it is no matter.
+  const taken = new Set(snapshot.views.filter(view => view.placeId === placeId).map(view => view.name));
+  for (const index of sorted.accepted) {
+    // A picture whose source a background of that place has already is not made again (K4): a camera is tied to that background.
+    const same = findSameSourceView(snapshot, placeId, files[index].path);
+    if (same) { if (!reused.includes(same)) reused.push(same); continue; }
+    const name = uniqueMapImageName(mapImageBaseName(files[index], at), taken);
+    taken.add(name);
+    items.push({ index, viewId: newId(), name });
+  }
+  return { mapId: target.mapId, scope: target.scope, targetName: target.name, placeId, placeName: place.name, newPlace,
+    // What the pictures stand on: for a target that had its place, that place, tied already; else what the node held when it was read.
+    place: { nodeId: target.placeNodeId, was: target.status === 'ready' ? target.placeId : target.placeWas },
+    // The place of a camera is that of the space it stands in, never the map's: the answer, where the place goes to that space.
+    cameraId: target.cameraId, cameraPlaceId: target.status === 'ready' ? target.cameraPlaceId : target.scope === 'camera' && target.ownerKind === 'space' ? placeId : null,
+    items, reused: reused.map(view => view.id), reusedNames: reused.map(view => view.name),
+    refused: sorted.refused.map(({ index, reason }) => ({ index, name: files[index].name, reason })), over: sorted.over };
+}
+/** The background of one uploaded picture, as 5.3 has it: one 낮 variant with one revision, the picture. A source path longer than the
+ *  library takes is left out. Two ids, the variant's first. */
+export function buildMapImageView(plan: Pick<MapImagePlan, 'placeId' | 'cameraPlaceId'>, item: { viewId: string; name: string }, upload: { imageUrl: string; sourceImagePath: string }, createdAt: string, newId: () => string): BackgroundView {
+  const variantId = newId(), revisionId = newId();
+  return { id: item.viewId, revision: 1, name: item.name, placeId: plan.placeId, cameraPlaceId: plan.cameraPlaceId, visiblePlaceIds: [], relatedPlaceIds: [], shot: MAP_IMAGE_DEFAULTS.shot, tags: [], memo: '',
+    variants: [{ id: variantId, name: MAP_IMAGE_DEFAULTS.variantName, time: MAP_IMAGE_DEFAULTS.time, workFilePath: '', activeRevisionId: revisionId,
+      revisions: [{ id: revisionId, imageUrl: upload.imageUrl, filePath: '', sourceImagePath: upload.sourceImagePath.length > MAP_IMAGE_ADD.pathLimit ? '' : upload.sourceImagePath, createdAt }] }] };
+}
+/** The saves of a batch in the order they are sent: the new place first, then one background for each uploaded picture. The link comes after them and is no command of its own. */
+export function mapImageSaves(plan: MapImagePlan, uploads: readonly { viewId: string; imageUrl: string; sourceImagePath: string }[], createdAt: string, newId: () => string): BackgroundCommand[] {
+  const saves: BackgroundCommand[] = plan.newPlace ? [{ type: 'save', kind: 'place', entity: plan.newPlace, expectedRevision: null }] : [];
+  // In the order of the plan, of the pictures that went up alone: one that did not would be saved with no picture.
+  for (const item of plan.items) {
+    const upload = uploads.find(each => each.viewId === item.viewId);
+    if (upload) saves.push({ type: 'save', kind: 'view', entity: buildMapImageView(plan, item, upload, createdAt, newId), expectedRevision: null });
+  }
+  return saves;
+}
 /** What a batch ties to the map, and stands on: the place of its owner (`place`, `placeId`: set when the owner still holds `was`, and done already for a target that had its place), and for a camera the views. `viewIds`: the backgrounds of the batch that are in the library, reused and added. */
 export type MapImageLink = { place: { nodeId: string | null; was: string | null }; placeId: string; cameraId: string | null; viewIds: readonly string[] };
 /** `library`: what is there to be tied. A background that is gone is left out and a place that is gone is not set: `complete` is false then. */

@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { BackgroundCamera, BackgroundMap, BackgroundNode, BackgroundPlace, BackgroundSnapshot, BackgroundSpace, BackgroundSymbol, BackgroundView } from '../src/features/backgrounds/types.ts';
-import { validateBackgroundEntity, validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
+import type { BackgroundCamera, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPlace, BackgroundSnapshot, BackgroundSpace, BackgroundSymbol, BackgroundView } from '../src/features/backgrounds/types.ts';
+import { applyBackgroundCommand, validateBackgroundEntity, validateBackgroundSnapshot } from '../src/features/backgrounds/domain.ts';
+import { createMapDocument, mapDraft, mapDraftChanged, mapDraftSteps, reduceMapDocument } from '../src/features/backgrounds/mapDocument.ts';
+import type { MapDocumentState } from '../src/features/backgrounds/mapDocument.ts';
+import { selectMapBackgroundViews } from '../src/features/backgrounds/mapGallery.ts';
 import { spacesAt } from '../src/features/backgrounds/mapStack.ts';
-import { MAP_IMAGE_REFUSAL_TEXT, dropMissingViews, linkMapImages, mapImageBaseName, mapImageDragRefused, mapImageLinkNow, mapImageLinkWanted, mapImageOutcomeNow, mapImagePasteWanted,
-  mapImagePathFacts, mapImagePlaceWords, mapImageRefusedList, mapImageSourceFacts, mapImageTargetWords, mapLinksAdded, resolveMapImageTarget, sortMapImageFiles, uniqueMapImageName } from '../src/features/backgrounds/mapImageDrop.ts';
-import type { MapImageLink, MapImageOutcome, MapImageTarget } from '../src/features/backgrounds/mapImageDrop.ts';
+import { saveMapChanges } from '../src/features/backgrounds/mapWorkflow.ts';
+import { MAP_IMAGE_REFUSAL_TEXT, buildMapImageView, dropMissingViews, findSameSourceView, linkMapImages, mapImageBaseName, mapImageDragRefused, mapImageLinkNow, mapImageLinkWanted, mapImageOutcomeNow,
+  mapImagePasteWanted, mapImagePathFacts, mapImagePlaceWords, mapImageRefusedList, mapImageSaves, mapImageSourceFacts, mapImageTargetWords, mapLinksAdded, planMapImageAdd, resolveMapImageTarget,
+  sortMapImageFiles, uniqueMapImageName } from '../src/features/backgrounds/mapImageDrop.ts';
+import type { MapImageFileFacts, MapImageLink, MapImageOpenTarget, MapImageOutcome, MapImagePlaceChoice, MapImagePlan, MapImageTarget } from '../src/features/backgrounds/mapImageDrop.ts';
 
 // Pictures added to a map by a drop, a paste or the picker: the rules and the words of the pure module, asked of the real
 // modules of the library. One base library: the places 학교 > 2-1 교실, and two maps with the same objects, 2층 with a place of
@@ -490,6 +495,241 @@ test('M-4: the name of a background made from a file', () => {
   assert.equal(uniqueMapImageName(spaced, new Set([spaced])), `${'가'.repeat(155)} (2)`);
 });
 
+/** When a batch is planned: a picture pasted then is named by this time on this PC, 14:05. */
+const AT = new Date(2026, 9, 13, 14, 5);
+/** When its saves start, as the controller writes it. */
+const CREATED = '2026-10-13T05:05:00.000Z';
+/** Ids as the editor makes them, counted from `from` in the order they are asked for. */
+const counter = (from = 0x9000) => { let n = 0; return () => uid(from + n++); };
+/** The first id of a batch counted from the start: its new place, where one is saved. */
+const NEW_PLACE = uid(0x9000);
+/** Three pictures of one batch: two from the disk with their paths, a PNG and a JPEG, and one pasted, named by the engine. */
+const PICTURES: readonly MapImageFileFacts[] = freeze([pageFile('교실.png', 'image/png', { path: 'C:\\art\\교실.png' }), pageFile('복도.jpg', 'image/jpeg', { path: 'C:\\art\\복도.jpg' }),
+  pageFile('image.png', 'image/png', { pasted: true })]);
+/** What the upload of each picture of a plan gave back: an address of the storage, and the path of the disk it came from ('' for none). */
+const uploaded = (plan: MapImagePlan, files: readonly MapImageFileFacts[] = PICTURES) =>
+  plan.items.map(item => ({ viewId: item.viewId, imageUrl: `https://storage.example/backgrounds/${item.viewId}.png`, sourceImagePath: files[item.index].path }));
+/** One command as the library takes it from an account that may change it, its own checks on the way: it throws what the library throws. */
+const run = (snapshot: BackgroundSnapshot, command: BackgroundCommand): BackgroundSnapshot => {
+  if (command.type === 'save') validateBackgroundEntity(command.kind, command.entity);
+  const next = applyBackgroundCommand(snapshot, command, { canManage: true });
+  validateBackgroundSnapshot(next);
+  return next;
+};
+const runAll = (snapshot: BackgroundSnapshot, commands: readonly BackgroundCommand[]) => commands.reduce(run, snapshot);
+/** A map of a library, by its id. */
+const mapIn = (snapshot: BackgroundSnapshot, id: string): BackgroundMap => {
+  const found = snapshot.maps.find(map => map.id === id);
+  assert.ok(found, `the library has no map ${id}`);
+  return found;
+};
+/** The target the editor reads with `node` in hand (null: nothing), open: it has a place, or one is asked for. */
+const openTarget = (map: BackgroundMap, node: string | null, snapshot: BackgroundSnapshot = library, maps: readonly BackgroundMap[] = snapshot.maps): MapImageOpenTarget => {
+  const target = resolve(map, node ?? undefined, snapshot, maps);
+  return target.status === 'blocked' ? assert.fail(`nothing can be added: ${target.reason}`) : target;
+};
+/** The background a command saves. */
+const viewOf = (command: BackgroundCommand): BackgroundView => command.type === 'save' && command.kind === 'view' ? command.entity : assert.fail(`no background is saved: ${command.type}`);
+type Head = Omit<MapImagePlan, 'items' | 'reused' | 'reusedNames' | 'refused' | 'over'>;
+/**
+ * The ten targets of M-5 on the base library: what is in hand (null: nothing), the answer of the place prompt where one is asked
+ * for, whether the tie changes the map, the nodes whose list shows the pictures once they are in (null: nothing in hand), and the
+ * head of the plan: where the pictures go, the tie they stand on, the camera and the place where it stands.
+ */
+const TARGETS: { label: string; map: BackgroundMap; node: string | null; choice: MapImagePlaceChoice | null; ties: boolean; shown: (string | null)[]; head: Head }[] = [
+  { label: '2-1 교실', map: floor, node: CLASSROOM, choice: null, ties: false, shown: [CLASSROOM],
+    head: { mapId: FLOOR, scope: 'space', targetName: '2-1 교실', placeId: CLASS, placeName: '2-1 교실', newPlace: null, place: { nodeId: CLASSROOM, was: CLASS }, cameraId: null, cameraPlaceId: null } },
+  { label: '2층', map: floor, node: null, choice: null, ties: false, shown: [null],
+    head: { mapId: FLOOR, scope: 'map', targetName: '2층', placeId: SCHOOL, placeName: '학교', newPlace: null, place: { nodeId: null, was: SCHOOL }, cameraId: null, cameraPlaceId: null } },
+  // Standing in 2-1 교실, its property empty: in the list of that room as well, by the place.
+  { label: '교실 카메라', map: floor, node: CLASS_CAMERA, choice: null, ties: true, shown: [CLASS_CAMERA, CLASSROOM],
+    head: { mapId: FLOOR, scope: 'camera', targetName: '교실 카메라', placeId: CLASS, placeName: '2-1 교실', newPlace: null, place: { nodeId: CLASSROOM, was: CLASS }, cameraId: CLASS_CAMERA, cameraPlaceId: CLASS } },
+  // Standing in 창고, which has no place: the place of the map, and no place of the camera.
+  { label: '창고 카메라', map: floor, node: STORE_CAMERA, choice: null, ties: true, shown: [STORE_CAMERA],
+    head: { mapId: FLOOR, scope: 'camera', targetName: '창고 카메라', placeId: SCHOOL, placeName: '학교', newPlace: null, place: { nodeId: null, was: SCHOOL }, cameraId: STORE_CAMERA, cameraPlaceId: null } },
+  { label: '의자 2', map: floor, node: CHAIR_2, choice: null, ties: false, shown: [CHAIR_2],
+    head: { mapId: FLOOR, scope: 'map', targetName: '2층', placeId: SCHOOL, placeName: '학교', newPlace: null, place: { nodeId: null, was: SCHOOL }, cameraId: null, cameraPlaceId: null } },
+  { label: '창고, a new place', map: floor, node: STORE, choice: { kind: 'new', name: '창고' }, ties: true, shown: [STORE],
+    head: { mapId: FLOOR, scope: 'space', targetName: '창고', placeId: NEW_PLACE, placeName: '창고', newPlace: { id: NEW_PLACE, revision: 1, name: '창고', parentId: SCHOOL, folderPath: '' },
+      place: { nodeId: STORE, was: null }, cameraId: null, cameraPlaceId: null } },
+  { label: '창고, a place there', map: floor, node: STORE, choice: { kind: 'existing', placeId: CLASS }, ties: true, shown: [STORE],
+    head: { mapId: FLOOR, scope: 'space', targetName: '창고', placeId: CLASS, placeName: '2-1 교실', newPlace: null, place: { nodeId: STORE, was: null }, cameraId: null, cameraPlaceId: null } },
+  { label: '별관, a new place', map: annex, node: null, choice: { kind: 'new', name: '별관' }, ties: true, shown: [null],
+    head: { mapId: ANNEX, scope: 'map', targetName: '별관', placeId: NEW_PLACE, placeName: '별관', newPlace: { id: NEW_PLACE, revision: 1, name: '별관', parentId: null, folderPath: '' },
+      place: { nodeId: null, was: null }, cameraId: null, cameraPlaceId: null } },
+  // On 별관 the place goes to 창고, where it stands, and is the place of the camera. Its property names 2-1 교실: it is in the list of 창고.
+  { label: '창고 카메라 of 별관, a new place', map: annex, node: STORE_CAMERA, choice: { kind: 'new', name: '창고' }, ties: true, shown: [STORE_CAMERA, STORE],
+    head: { mapId: ANNEX, scope: 'camera', targetName: '창고 카메라', placeId: NEW_PLACE, placeName: '창고', newPlace: { id: NEW_PLACE, revision: 1, name: '창고', parentId: null, folderPath: '' },
+      place: { nodeId: STORE, was: null }, cameraId: STORE_CAMERA, cameraPlaceId: NEW_PLACE } },
+  // Standing nowhere, the place goes to the map: no place of the camera.
+  { label: '떠 있는 카메라 of 별관, a new place', map: annex, node: FLOATING_CAMERA, choice: { kind: 'new', name: '별관' }, ties: true, shown: [FLOATING_CAMERA, null],
+    head: { mapId: ANNEX, scope: 'camera', targetName: '떠 있는 카메라', placeId: NEW_PLACE, placeName: '별관', newPlace: { id: NEW_PLACE, revision: 1, name: '별관', parentId: null, folderPath: '' },
+      place: { nodeId: null, was: null }, cameraId: FLOATING_CAMERA, cameraPlaceId: null } },
+];
+
+test('M-5a: every target, three pictures, no draft — every command and every library on the way are whole', () => {
+  for (const { label, map, node, choice, ties, shown } of TARGETS) {
+    const newId = counter(), plan = planMapImageAdd(library, openTarget(map, node), choice, PICTURES, AT, newId);
+    const saves = mapImageSaves(plan, uploaded(plan), CREATED, newId), ids = plan.items.map(item => item.viewId);
+    // The new place first where one was asked for, then the three backgrounds: each new, none of them expected to be there.
+    assert.deepEqual(saves.map(command => command.type === 'save' ? command.kind : command.type), [...(choice?.kind === 'new' ? ['place'] : []), 'view', 'view', 'view'], label);
+    for (const command of saves) assert.equal(command.type === 'save' && command.expectedRevision, null, label);
+    // Each through the checks of the library in turn: every library on the way is whole.
+    const added = runAll(library, saves);
+    // The tie last, on the library as it is by then. With no draft it is saved at once: that map alone, on its revision.
+    const link: MapImageLink = { place: plan.place, placeId: plan.placeId, cameraId: plan.cameraId, viewIds: [...plan.reused, ...ids] }, saved = mapIn(added, map.id);
+    const tied = linkMapImages(saved, link, added);
+    assert.equal(tied.complete, true, label);
+    let final = added;
+    if (ties) {
+      assert.notEqual(tied.map, saved, label);
+      const command = saveMapChanges(added, {}, [tied.map]);
+      assert.deepEqual(command.maps, [{ entity: tied.map, expectedRevision: saved.revision }], label);
+      final = run(added, command);
+    } else {
+      // A space or a map with its place, saved: nothing of the map is written, and the tie is kept.
+      assert.equal(tied.map, saved, label);
+      assert.equal(mapImageLinkNow(saved, saved, link, added), 'kept', label);
+    }
+    // The three are in the list of the target, and those of a camera in the list of the room it stands in, by the place.
+    const now = mapIn(final, map.id);
+    for (const id of shown) {
+      const listed = selectMapBackgroundViews(final, final.maps, now, id === null ? undefined : nodeOf(now, id)).map(view => view.id);
+      for (const view of ids) assert.ok(listed.includes(view), `${label}: not in the list of ${id ?? 'the map'}`);
+    }
+  }
+});
+
+test('M-5b: the plan — the tie it stands on, the index of each picture, its name, two of three uploads, and what it refuses', () => {
+  // Every target, whole: where the pictures go, the tie they stand on, the camera and its place, and one item for each picture.
+  for (const { label, map, node, choice, head } of TARGETS) {
+    const first = head.newPlace ? 1 : 0;
+    assert.deepEqual(planMapImageAdd(library, openTarget(map, node), choice, PICTURES, AT, counter()), { ...head, items: [
+      { index: 0, viewId: uid(0x9000 + first), name: '교실' }, { index: 1, viewId: uid(0x9001 + first), name: '복도' }, { index: 2, viewId: uid(0x9002 + first), name: '붙여 넣은 그림 14:05' },
+    ], reused: [], reusedNames: [], refused: [], over: 0 }, label);
+  }
+  // A space that holds the id of a place gone since (a draft): the tie stands on that id, which it holds, not on none.
+  const goneStore = withNode(floor, STORE, { placeId: GONE });
+  assert.deepEqual(planMapImageAdd(library, openTarget(goneStore, STORE, library, over(library.maps, goneStore)), { kind: 'new', name: '창고' }, PICTURES, AT, counter()).place, { nodeId: STORE, was: GONE });
+
+  // One background as 5.3 has it, whole: of a camera with the place where the camera stands, of a space with none. Only the ids of
+  // its variant and its revision are read from it.
+  for (const [node, cameraPlaceId] of [[CLASS_CAMERA, CLASS], [CLASSROOM, null]] as const) {
+    const newId = counter(), plan = planMapImageAdd(library, openTarget(floor, node), null, PICTURES, AT, newId);
+    const views = mapImageSaves(plan, uploaded(plan), CREATED, newId).map(viewOf);
+    assert.deepEqual(views, [['교실', 'C:\\art\\교실.png'], ['복도', 'C:\\art\\복도.jpg'], ['붙여 넣은 그림 14:05', '']].map(([name, sourceImagePath], n) => {
+      const variant = views[n].variants[0], revision = variant.revisions[0];
+      return { id: plan.items[n].viewId, revision: 1, name, placeId: CLASS, cameraPlaceId, visiblePlaceIds: [], relatedPlaceIds: [], shot: 'wide', tags: [], memo: '',
+        variants: [{ id: variant.id, name: '낮', time: 'day', workFilePath: '', activeRevisionId: revision.id,
+          revisions: [{ id: revision.id, imageUrl: `https://storage.example/backgrounds/${plan.items[n].viewId}.png`, filePath: '', sourceImagePath, createdAt: CREATED }] }] };
+    }), node);
+  }
+  // A source path longer than the library takes is not written; the picture goes in all the same.
+  const long = (length: number) => `C:\\${'가'.repeat(length - 3)}`;
+  for (const [path, written] of [[long(4096), long(4096)], [long(4097), '']]) {
+    const view = buildMapImageView({ placeId: CLASS, cameraPlaceId: null }, { viewId: uid(0x9800), name: '긴 경로' }, { imageUrl: '', sourceImagePath: path }, CREATED, counter(0x9810));
+    assert.equal(view.variants[0].revisions[0].sourceImagePath, written, `${path.length} units`);
+    validateBackgroundEntity('view', view);
+  }
+
+  // Each picture by its place in the list handed in: a file refused before them and one given twice take no item, and the refused
+  // one is named by its place in that list too. What is over ten is counted.
+  const mixed = [pageFile('스케치.psd', ''), pageFile('a.png', 'image/png'), pageFile('a.png', 'image/png'), pageFile('b.png', 'image/png')];
+  const sorted = planMapImageAdd(library, openTarget(floor, CLASSROOM), null, mixed, AT, counter());
+  assert.deepEqual(sorted.items.map(item => [item.index, item.name]), [[1, 'a'], [3, 'b']]);
+  assert.deepEqual([sorted.refused, sorted.over], [[{ index: 0, name: '스케치.psd', reason: 'type' }], 0]);
+  const twelve = planMapImageAdd(library, openTarget(floor, CLASSROOM), null, Array.from({ length: 12 }, (_, n) => pageFile(`사진 ${n}.png`, 'image/png')), AT, counter());
+  assert.deepEqual([twelve.items.length, twelve.refused, twelve.over], [10, [], 2]);
+  // One name each within a batch: the second 교실, from another folder, and the second picture pasted in that minute are numbered.
+  const alike = [pageFile('교실.png', 'image/png', { path: 'C:\\a\\교실.png' }), pageFile('교실.png', 'image/png', { path: 'C:\\b\\교실.png' }),
+    pageFile('image.png', 'image/png', { pasted: true }), pageFile('image.png', 'image/png', { pasted: true })];
+  assert.deepEqual(planMapImageAdd(library, openTarget(floor, CLASSROOM), null, alike, AT, counter()).items.map(item => item.name), ['교실', '교실 (2)', '붙여 넣은 그림 14:05', '붙여 넣은 그림 14:05 (2)']);
+
+  // Two of the three uploaded, the second having failed: their backgrounds alone, after the new place, in the order of the plan
+  // whatever the order of the uploads. None uploaded: the new place alone, or nothing.
+  const savedIds = (saves: BackgroundCommand[]) => saves.map(command => command.type === 'save' ? command.entity.id : command.type);
+  const newId = counter(), store = planMapImageAdd(library, openTarget(floor, STORE), { kind: 'new', name: '창고' }, PICTURES, AT, newId), [firstUp, , thirdUp] = uploaded(store);
+  assert.deepEqual(savedIds(mapImageSaves(store, [thirdUp, firstUp], CREATED, newId)), [NEW_PLACE, store.items[0].viewId, store.items[2].viewId]);
+  assert.deepEqual(savedIds(mapImageSaves(store, [], CREATED, newId)), [NEW_PLACE]);
+  const room = planMapImageAdd(library, openTarget(floor, CLASSROOM), null, PICTURES, AT, newId);
+  assert.deepEqual(mapImageSaves(room, uploaded(room).slice(0, 2), CREATED, newId).map(command => viewOf(command).name), ['교실', '복도']);
+  assert.deepEqual(mapImageSaves(room, [], CREATED, newId), []);
+
+  // Asked for a place with no answer, or with a place the library does not have: it throws. The editor never asks so (6.3).
+  for (const choice of [null, { kind: 'existing', placeId: GONE }] as const)
+    assert.throws(() => planMapImageAdd(library, openTarget(floor, STORE), choice, PICTURES, AT, counter()), /넣을 장소를 다시 골라 주세요/, choice?.kind ?? 'no answer');
+  // A new place is named as answered: its spaces aside, 160 units at most and never half a character, or 새 장소. It hangs where the
+  // target says, and the pictures go to it.
+  const named = (name: string) => planMapImageAdd(library, openTarget(floor, STORE), { kind: 'new', name }, PICTURES, AT, counter());
+  assert.deepEqual(named('  새 창고 ').newPlace, { id: NEW_PLACE, revision: 1, name: '새 창고', parentId: SCHOOL, folderPath: '' });
+  assert.deepEqual([named('  새 창고 ').placeId, named('  새 창고 ').placeName], [NEW_PLACE, '새 창고']);
+  assert.equal(named('   ').newPlace?.name, '새 장소');
+  assert.equal(named('가'.repeat(170)).newPlace?.name, '가'.repeat(160));
+  assert.equal(named(`${'가'.repeat(159)}🏫`).newPlace?.name, '가'.repeat(159));
+
+  // The ids in the order they are made: the new place, the pictures, then for each background its variant and its revision.
+  const asked: string[] = [], recorded = () => { const id = uid(0x9100 + asked.length); asked.push(id); return id; };
+  const ordered = planMapImageAdd(library, openTarget(floor, STORE), { kind: 'new', name: '창고' }, PICTURES, AT, recorded);
+  assert.deepEqual([ordered.newPlace?.id, ...ordered.items.map(item => item.viewId)], asked);
+  const orderedViews = mapImageSaves(ordered, uploaded(ordered), CREATED, recorded).slice(1).map(viewOf);
+  assert.deepEqual(orderedViews.flatMap(view => [view.variants[0].id, view.variants[0].revisions[0].id]), asked.slice(4));
+  assert.equal(asked.length, 10);
+});
+
+test('M-6: with a draft the tie is one undo step, and a clean draft goes on from the library first', () => {
+  // Three pictures for 교실 카메라 while 2층 is edited: the backgrounds are saved at once, and the tie goes into the draft.
+  const newId = counter(), plan = planMapImageAdd(library, openTarget(floor, CLASS_CAMERA), null, PICTURES, AT, newId);
+  const added = runAll(library, mapImageSaves(plan, uploaded(plan), CREATED, newId)), ids = plan.items.map(item => item.viewId);
+  const link: MapImageLink = { place: plan.place, placeId: plan.placeId, cameraId: plan.cameraId, viewIds: [...plan.reused, ...ids] };
+  const draftOf = (state: MapDocumentState) => {
+    const draft = mapDraft(state, FLOOR);
+    assert.ok(draft, 'no draft of 2층');
+    return draft;
+  };
+  /** The tie put in the draft of 2층 as the editor puts it: one update of the whole of it. */
+  const tieIn = (state: MapDocumentState, snapshot: BackgroundSnapshot) => reduceMapDocument(state, { type: 'update', map: linkMapImages(draftOf(state).value, link, snapshot).map });
+  const cameraIn = (map: BackgroundMap) => (nodeOf(map, CLASS_CAMERA) as BackgroundCamera).viewIds;
+
+  // Opened on 2층 as saved, one other edit first (벽장 renamed), then the tie: two steps, the three views in the one.
+  const opened = reduceMapDocument(createMapDocument(), { type: 'begin-editing', map: mapIn(added, FLOOR) });
+  const edited = reduceMapDocument(opened, { type: 'update', map: withNode(draftOf(opened).value, CLOSET, { name: '수납장' }) });
+  const tied = tieIn(edited, added);
+  assert.equal(mapDraftSteps(draftOf(tied)), 2);
+  assert.deepEqual(cameraIn(draftOf(tied).value), ids);
+  // Saved with the draft, at 도면 저장: that map on the revision the draft was opened on, and a whole library with both edits.
+  const command = saveMapChanges(added, tied.drafts, [draftOf(tied).value]);
+  assert.deepEqual(command.maps.map(item => [item.entity.id, item.expectedRevision]), [[FLOOR, 1]]);
+  const saved = mapIn(run(added, command), FLOOR);
+  assert.deepEqual([nodeOf(saved, CLOSET).name, cameraIn(saved)], ['수납장', ids]);
+  // One undo takes the tie back, all three views at once; the rename stays, and so do the backgrounds: saved like that, the map
+  // holds none of them and the library all three.
+  const undone = reduceMapDocument(tied, { type: 'undo', mapId: FLOOR });
+  assert.equal(mapDraftSteps(draftOf(undone)), 1);
+  assert.deepEqual(draftOf(undone).value, draftOf(edited).value);
+  const kept = run(added, saveMapChanges(added, undone.drafts, [draftOf(undone).value]));
+  assert.deepEqual([cameraIn(mapIn(kept, FLOOR)), kept.views.map(view => view.id)], [[], ids]);
+  // While a gesture runs it is the one writer of the map: the update of a tie is dropped, the state the very same.
+  const dragging = reduceMapDocument(edited, { type: 'gesture-begin', mapId: FLOOR });
+  assert.equal(tieIn(dragging, added), dragging);
+
+  // A clean draft opened on revision 5, and the library at 6 by now: another PC saved 2층 meanwhile, 벽장 renamed there.
+  const five: BackgroundMap = { ...mapIn(added, FLOOR), revision: 5 };
+  const six = lib({ views: added.views, maps: [withNode({ ...five, revision: 6 }, CLOSET, { name: '수납장' }), annex] });
+  const clean = reduceMapDocument(createMapDocument(), { type: 'begin-editing', map: five });
+  assert.equal(mapDraftChanged(draftOf(clean)), false);
+  // Gone on from the library first, then tied: on 6, one step, and 도면 저장 goes through as 7 with the edit of the other PC.
+  const followed = tieIn(reduceMapDocument(clean, { type: 'rebase-drafts', maps: [mapIn(six, FLOOR)] }), six);
+  assert.deepEqual([draftOf(followed).baseRevision, mapDraftSteps(draftOf(followed))], [6, 1]);
+  const seven = mapIn(run(six, saveMapChanges(six, followed.drafts, [draftOf(followed).value])), FLOOR);
+  assert.deepEqual([seven.revision, nodeOf(seven, CLOSET).name, cameraIn(seven)], [7, '수납장', ids]);
+  // Tied on 5 as it is: the same save is refused.
+  const stale = tieIn(clean, six);
+  assert.equal(draftOf(stale).baseRevision, 5);
+  assert.throws(() => run(six, saveMapChanges(six, stale.drafts, [draftOf(stale).value])), /다른 사용자가 내용을 변경했습니다/);
+  // A draft with an edit not saved is changed: not one to go on from the library, which would drop that edit.
+  assert.equal(mapDraftChanged(draftOf(reduceMapDocument(clean, { type: 'update', map: withNode(five, CLOSET, { name: '창고 2' }) }))), true);
+});
+
 /** Backgrounds a batch put in under 2-1 교실, whole: a library that holds them checks as the library checks itself. */
 const [SHOT_A, SHOT_B, SHOT_C] = [0x81, 0x82, 0x83].map(uid);
 const background = (id: string, n: number): BackgroundView => ({ id, revision: 1, name: `교실 전경 ${n + 1}`, placeId: CLASS, cameraPlaceId: null, visiblePlaceIds: [], relatedPlaceIds: [],
@@ -661,6 +901,65 @@ test('M-7b: where a link stands now, whether anything is to be tied, and how an 
   assert.deepEqual(mapImageOutcomeNow(placeAlone, placeOnly, floor, placed, library), placeAlone);
   assert.deepEqual(mapImageOutcomeNow(placeAlone, placeOnly, placeSaved.maps[0], placeSaved.maps[0], placeSaved), { ...placeAlone, link: 'kept' });
   assert.deepEqual(mapImageOutcomeNow(placeAlone, placeOnly, floor, floor, library), { ...placeAlone, link: 'undone' });
+});
+
+test('M-8: the same source is reused, not made again', () => {
+  /** A background there before the batch: `name` in `placeId`, one variant whose revisions have these sources and these old work files. */
+  const there = (n: number, placeId: string, name: string, ...pictures: { source?: string; filePath?: string }[]): BackgroundView => ({
+    id: uid(0xb0 + n), revision: 1, name, placeId, cameraPlaceId: null, visiblePlaceIds: [], relatedPlaceIds: [], shot: 'wide', tags: [], memo: '',
+    variants: [{ id: uid(0xb100 + n), name: '낮', time: 'day', activeRevisionId: uid(0xb200 + n * 0x10), revisions: pictures.map((picture, k) => ({ id: uid(0xb200 + n * 0x10 + k), imageUrl: '',
+      filePath: picture.filePath ?? '', ...(picture.source === undefined ? {} : { sourceImagePath: picture.source }), createdAt: CREATED })) }] });
+  // The first background of that place with the path for the source of one of its pictures, in any revision, compared as two paths
+  // are (their spaces aside, either slash, any case). Not by the old work file, not in another place, and never for no path.
+  const sources = lib({ views: [
+    there(1, SCHOOL, '교실', { source: 'C:\\art\\교실.png' }),
+    there(2, CLASS, '옛 교실', { filePath: 'C:\\art\\교실.png' }),
+    there(3, CLASS, '빈 경로', { source: '' }),
+    there(4, CLASS, '교실 전경', { source: 'C:\\art\\교실_v1.png' }, { source: ' c:/ART/교실.PNG ' }),
+    there(5, CLASS, '교실 전경 2', { source: 'C:\\art\\교실.png' }),
+  ] });
+  const found = (placeId: string, path: string) => findSameSourceView(sources, placeId, path)?.name;
+  assert.equal(found(CLASS, 'C:\\art\\교실.png'), '교실 전경');
+  assert.equal(found(CLASS, 'c:/art/교실_V1.png'), '교실 전경');
+  assert.equal(found(SCHOOL, 'C:\\art\\교실.png'), '교실');
+  for (const path of ['', '   ', 'C:\\art\\복도.jpg']) assert.equal(found(CLASS, path), undefined, JSON.stringify(path));
+  // Two files of one background, two of its revisions: it is used again once, and nothing is made.
+  const revised = planMapImageAdd(sources, openTarget(floor, CLASSROOM, sources), null,
+    [pageFile('교실.png', 'image/png', { path: 'C:\\art\\교실.png' }), pageFile('교실_v1.png', 'image/png', { path: 'C:\\art\\교실_v1.png' })], AT, counter());
+  assert.deepEqual([revised.reused, revised.reusedNames, revised.items], [[uid(0xb4)], ['교실 전경'], []]);
+
+  // 교실.png from the disk put in for 교실 카메라 and saved; its tie to the camera went with the draft, discarded. Put in again by
+  // the same path, in another case and with the other slash, before a new picture: the one there is used again, and only the new
+  // one is made, the second of the list. Both are tied to the camera.
+  const newId = counter(), first = planMapImageAdd(library, openTarget(floor, CLASS_CAMERA), null, [PICTURES[0]], AT, newId);
+  const once = runAll(library, mapImageSaves(first, uploaded(first, [PICTURES[0]]), CREATED, newId)), made = first.items[0].viewId;
+  const again = [pageFile('교실.PNG', 'image/png', { path: 'c:/ART/교실.PNG' }), PICTURES[1]];
+  const reuse = planMapImageAdd(once, openTarget(floor, CLASS_CAMERA, once), null, again, AT, newId);
+  assert.deepEqual([reuse.reused, reuse.reusedNames, reuse.items.map(item => [item.index, item.name])], [[made], ['교실'], [[1, '복도']]]);
+  const twice = runAll(once, mapImageSaves(reuse, uploaded(reuse, again), CREATED, newId));
+  const tied = linkMapImages(mapIn(twice, FLOOR), { place: reuse.place, placeId: reuse.placeId, cameraId: reuse.cameraId, viewIds: [...reuse.reused, ...reuse.items.map(item => item.viewId)] }, twice);
+  assert.deepEqual([tied.complete, viewsOf(tied.map, CLASS_CAMERA), twice.views.length], [true, [made, reuse.items[0].viewId], 2]);
+  // In another place the same file is a background of its own, under the same name: a name of another place is no matter.
+  const elsewhere = planMapImageAdd(once, openTarget(floor, null, once), null, [PICTURES[0]], AT, newId);
+  assert.deepEqual([elsewhere.placeId, elsewhere.reused, elsewhere.items.map(item => item.name)], [SCHOOL, [], ['교실']]);
+  // The path in the old work file alone is not the same source: made anew, and numbered beside the name taken there.
+  const legacy = lib({ views: [there(2, CLASS, '교실', { filePath: 'C:\\art\\교실.png' })] });
+  const anew = planMapImageAdd(legacy, openTarget(floor, CLASSROOM, legacy), null, [PICTURES[0]], AT, newId);
+  assert.deepEqual([anew.reused, anew.items.map(item => item.name)], [[], ['교실 (2)']]);
+  // A name taken in that place is numbered, and the next one by the picture before it as well; one of another place is not.
+  const takenNames = lib({ views: [there(6, CLASS, 'a', { source: 'C:\\old\\a.png' }), there(7, SCHOOL, 'b', { source: 'C:\\old\\b.png' })] });
+  const files = [pageFile('a.png', 'image/png', { path: 'C:\\x\\a.png' }), pageFile('a.png', 'image/png', { path: 'C:\\y\\a.png' }), pageFile('b.png', 'image/png', { path: 'C:\\x\\b.png' })];
+  assert.deepEqual(planMapImageAdd(takenNames, openTarget(floor, CLASSROOM, takenNames), null, files, AT, newId).items.map(item => item.name), ['a (2)', 'a (3)', 'b']);
+
+  // 창고 given a new place and its pictures, the tie lost with the draft: asked again, that place is picked beforehand, and the
+  // same files put in there again are not made twice. The pasted picture, with no path, is a new one, numbered.
+  const store = planMapImageAdd(library, openTarget(floor, STORE), { kind: 'new', name: '창고' }, PICTURES, AT, newId), placeId = store.placeId;
+  const stored = runAll(library, mapImageSaves(store, uploaded(store), CREATED, newId));
+  assert.deepEqual(resolve(floor, STORE, stored), { ...toSpace(FLOOR, STORE, '창고'), status: 'needs-place', placeNodeId: STORE, placeWas: null, ownerKind: 'space', ownerName: '창고',
+    suggestedName: '창고', parentPlaceId: SCHOOL, sameNamePlaceId: placeId });
+  const refilled = planMapImageAdd(stored, openTarget(floor, STORE, stored), { kind: 'existing', placeId }, PICTURES, AT, newId);
+  assert.deepEqual([refilled.newPlace, refilled.placeId, refilled.reused, refilled.items.map(item => [item.index, item.name])],
+    [null, placeId, store.items.slice(0, 2).map(item => item.viewId), [[2, '붙여 넣은 그림 14:05 (2)']]]);
 });
 
 test('M-9: mapLinksAdded, dropMissingViews and the six facts of a paste', () => {
