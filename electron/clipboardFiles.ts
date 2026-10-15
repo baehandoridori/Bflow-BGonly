@@ -31,3 +31,6 @@ export function imageMimeForPath(filePath: string): string | null {
   if (dot < 0) return null;
   return IMAGE_EXT_MIME[filePath.slice(dot).toLowerCase()] ?? null;
 }
+
+/** 탐색기에서 복사한 첫 파일이 그림(png·jpg·jpeg·webp·gif·bmp)이면 그 경로, 아니면 null. 파일은 열지 않고, 클립보드를 읽다 실패해도 null. */
+export function clipboardImageFilePath(readBuffer: (format: string) => Buffer): string | null { try { const target = parseFileNameWBuffer(readBuffer('FileNameW')); return target && imageMimeForPath(target) ? target : null; } catch { return null; } }

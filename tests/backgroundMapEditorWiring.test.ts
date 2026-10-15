@@ -2883,4 +2883,37 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   for (const name of ['types.ts', 'domain.ts', 'mapWorkflow.ts', 'mapDocument.ts', 'mapStack.ts', 'useBackgroundStore.ts'])
     assert.doesNotMatch(raw(new URL(name, directory)), /map_?image/i, `${name} knows the feature`);
   assert.doesNotMatch(raw(new URL('../src/features/playground/featureFlag.ts', import.meta.url)), /map_?image/i, 'featureFlag.ts knows the feature');
+  // The new channel is four places, read as written: the handler, the main process, the bridge of the page and the type, and the mock of the preview.
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean);
+  const ipc = raw(new URL('../electron/backgroundIpc.ts', import.meta.url));
+  assert.ok(ipc.includes("'background:read-clipboard-file'"), 'the main process has no channel for the path of a copied file');
+  // A path of this PC and nothing more: the session is checked first, and neither the library nor a file is read.
+  const clipboardHandler = piece(ipc, "deps.ipc.handle('background:read-clipboard-file'", '});');
+  assert.ok(clipboardHandler.includes('originFor(requestEpoch);'), 'the channel answers a page of a replaced session');
+  assert.ok(!clipboardHandler.includes('deps.store.read('), 'the channel reads the library');
+  // The path comes from the format that has it. The function is cut out alone: the head comment of its file names the format that is always empty.
+  const filePathOf = block(raw(new URL('../electron/clipboardFiles.ts', import.meta.url)), 'export function clipboardImageFilePath(readBuffer: (format: string) => Buffer): string | null {');
+  assert.ok(filePathOf.includes("readBuffer('FileNameW')"), 'the path of a copied file is not read from FileNameW');
+  assert.ok(!filePathOf.includes('CF_HDROP'), 'the path of a copied file is read from a format that is always empty');
+  const main = raw(new URL('../electron/main.ts', import.meta.url));
+  assert.ok(main.includes('readClipboardFilePath: () => clipboardImageFilePath(format => clipboard.readBuffer(format)),'), 'the main process hands the channel no reader of the clipboard');
+  // The channel of the character board is left as it was, to the letter.
+  assert.deepEqual(lined(block(main, "ipcMain.handle('clipboard:read-image-file', async () => {")), [
+    "ipcMain.handle('clipboard:read-image-file', async () => {", 'try {', "const target = parseFileNameWBuffer(clipboard.readBuffer('FileNameW'));", 'if (!target) return null;',
+    'const mime = imageMimeForPath(target);', 'if (!mime) return null; // 첫 파일이 이미지가 아니면 무시 (psd/moho/txt 등)', 'const stat = await fs.promises.stat(target);',
+    'if (!stat.isFile() || stat.size > CLIPBOARD_IMAGE_FILE_MAX_BYTES) return null;', 'const data = await fs.promises.readFile(target);', 'return {', 'fileName: path.basename(target),',
+    "dataUrl: `data:${mime};base64,${data.toString('base64')}`,", '};', '} catch (err) {', "console.warn('[clipboard] read-image-file 실패:', err);", 'return null;', '}', '}',
+  ]);
+  // The bridge of the page asks the channel and nothing picks files there: the file dialog of the installed app is the page's own.
+  const preload = raw(new URL('../electron/preload.ts', import.meta.url));
+  assert.ok(preload.includes("backgroundReadClipboardFile: () => ipcRenderer.invoke('background:read-clipboard-file', canonicalSessionEpoch),"), 'the page cannot ask for the path of a copied file');
+  assert.ok(!preload.includes('backgroundPickImages'), 'the installed app picks files past the page');
+  const types = raw(new URL('../src/types/index.ts', import.meta.url));
+  assert.ok(types.includes('backgroundReadClipboardFile: () => Promise<{ filePath: string } | null>;'), 'the type of the new channel is missing');
+  assert.ok(types.includes('backgroundPickImages?: () => Promise<File[] | undefined>;'), 'the picker of the preview is not optional');
+  // The mock answers from its hook, and in the check window of the app engine it hands an empty list instead of a file dialog.
+  const mock = raw(new URL('../src/mocks/devElectronAPI.ts', import.meta.url));
+  for (const word of ['backgroundReadClipboardFile', '__bflowMockBackgroundAdd']) assert.ok(mock.includes(word), `the preview has no ${word}`);
+  assert.ok(mock.includes('backgroundPickImages: async () => { const hook = (window as DevPreviewWindow).__bflowMockBackgroundAdd; return hook?.pick ? hook.pick() : /\\bElectron\\//.test(navigator.userAgent) ? [] : undefined; },'),
+    'the picker of the preview can open a file dialog in the app engine');
 });

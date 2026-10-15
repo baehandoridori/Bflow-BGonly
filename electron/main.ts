@@ -98,7 +98,7 @@ import {
 import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
 import { compareVersions, readManifest } from './autoUpdate/manifest';
 import { resolveChildFolderPath } from './pathCreateFolder';
-import { parseFileNameWBuffer, imageMimeForPath } from './clipboardFiles';
+import { parseFileNameWBuffer, imageMimeForPath, clipboardImageFilePath } from './clipboardFiles';
 import { fitWidgetPopupBounds, fitWidgetPopupSize, WIDGET_POPUP_MIN_HEIGHT, WIDGET_POPUP_MIN_WIDTH } from './widgetPopupBounds';
 import { QUIT_FLUSHED_CHANNEL, waitForRendererQuitFlush } from './rendererQuitFlush';
 import {
@@ -2561,6 +2561,7 @@ registerBackgroundIpc({
   onChanged: () => broadcastToAllWindows('background:changed', {}),
   uploadImage: uploadBackgroundImage,
   readImageFile: filePath => readBackgroundImageFile(filePath, { decode: buffer => nativeImage.createFromBuffer(buffer) }),
+  readClipboardFilePath: () => clipboardImageFilePath(format => clipboard.readBuffer(format)),
 });
 calendarStore.setCalendarSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
 registerCalendarSubscriptionIpc({
