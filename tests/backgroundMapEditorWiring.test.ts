@@ -3110,17 +3110,31 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   for (const line of new Set([...rules, column, ...named.map(at => lines[at])])) assert.doesNotMatch(line, /backdrop-filter|infinite|font-style/, line);
   // The image list, read without its comments. A batch and its line belong to one map, or to the map on show once theirs is gone. A picture
   // saved while its batch runs is drawn once, as its ghost. While a save runs the line is read against the library as it was before that
-  // save, and it says how the batch stands now: its link saved since or taken back, its pictures deleted.
+  // save, and it says how the batch stands now: its link saved since or taken back, its pictures deleted. The cards added since the screen
+  // opened stand first, and filters that hide one just added let go; 추가됨 lasts as long as the mark, not as long as the screen. The button
+  // reads what the list names and is blocked while a batch runs: its file dialog never opens for files that would then be refused.
   const gallery = read('BackgroundMapGallery.tsx'), listed = lined(gallery);
   for (const line of ['const mine = (mapId: string | null | undefined) => !!mapId && (mapId === current.id || !maps.some(map => map.id === mapId));',
     'const jobs = mine(adding.mapId) ? adding.jobs : MAP_IMAGE_IDLE.jobs, notice = mine(adding.notice?.mapId) ? adding.notice : null;',
     'const scopedViews = useMemo(() => selectMapBackgroundViews(snapshot, maps, current, selected).filter(view => !jobs.some(job => job.id === view.id)), [snapshot, maps, current, selected, jobs]);',
+    'const ordered = useMemo(() => adding.recent.length ? [...adding.recent.flatMap(id => views.filter(view => view.id === id)), ...views.filter(view => !adding.recent.includes(view.id))] : views, [views, adding.recent]);',
+    'const words = mapImageTargetWords(resolveMapImageTarget(snapshot, maps, current, selected), { editing: false, running: adding.running, wrongType: false });',
     'const confirmed = useRef(snapshot);', 'if (!saving) confirmed.current = snapshot;',
-    'const noticeText = notice?.live ? mapImageSummary(mapImageOutcomeNow(notice.live.outcome, notice.live.link, confirmed.current.maps.find(map => map.id === notice.mapId), notice.mapId === current.id ? current : undefined, confirmed.current)) : notice?.text;'])
+    'const noticeText = notice?.live ? mapImageSummary(mapImageOutcomeNow(notice.live.outcome, notice.live.link, confirmed.current.maps.find(map => map.id === notice.mapId), notice.mapId === current.id ? current : undefined, confirmed.current)) : notice?.text;',
+    'useEffect(() => { if (hasFilters && adding.marked.some(id => scopedViews.some(view => view.id === id) && !views.some(view => view.id === id))) resetFilters(); }, [adding.marked]);',
+    'const added = adding.marked.includes(view.id);'])
     assert.ok(listed.includes(line), `not a line of the image list: ${line}`);
   const noticeLine = listed.find(line => line.startsWith('const noticeText = ')) ?? '';
   for (const text of ['mapImageOutcomeNow(', 'confirmed.current']) assert.ok(noticeLine.includes(text), `the line of a batch is not read as it stands now: ${text}`);
   for (const text of ['snapshot.maps', 'mapImageLinkNow(']) assert.ok(!noticeLine.includes(text), `the line of a batch is read past the confirmed library or past its pictures: ${text}`);
+  // The line stands between the header and the box of cards, as the block of 7.4: the box that is brought into view, the list of what
+  // could not be added only when there is some, and no close button while its batch runs.
+  inOrder(gallery, '</header>', '{notice && <div className="bmap-gallery-notice" ref={noticeRef}>', '<div className="bmap-gallery-results" ');
+  const noticeAt = listed.indexOf('{notice && <div className="bmap-gallery-notice" ref={noticeRef}>');
+  assert.ok(noticeAt > -1, 'the line of a batch is not as written');
+  assert.deepEqual(listed.slice(noticeAt, noticeAt + 4), ['{notice && <div className="bmap-gallery-notice" ref={noticeRef}>',
+    '<div><p role="status">{noticeText}</p>{notice.failed.length > 0 && <ul role="alert" aria-label={`넣지 못한 그림 ${notice.failed.length}장`}>{notice.failed.map((item, index) => <li key={index}><strong>{item.name}</strong> — {item.reason}</li>)}</ul>}</div>',
+    '{!adding.running && <button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={onDismissNotice}>×</button>}', '</div>}']);
   // Brought into view as a batch starts and as the line speaks up, never as a batch ends nor on a mere redraw, and in this one place.
   const seen = listed.indexOf('const seen = useRef(adding.seq);');
   assert.ok(seen > -1, 'the image list keeps no count of what it brought into view');
@@ -3134,10 +3148,15 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   assert.ok(pick > -1, 'the image list has no way to pick files');
   assert.deepEqual(listed.slice(pick, pick + 5), ['const pickImages = () => {', 'const mock = window.electronAPI.backgroundPickImages;', 'if (!mock) { input.current?.click(); return; }',
     'void mock().then(files => { if (files) onAddFiles?.(files); else input.current?.click(); });', '};']);
-  assert.ok(listed.includes(`<input ref={input} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="추가할 그림 파일" tabIndex={-1} onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (files.length) onAddFiles?.(files); }} />`),
-    'the hidden input of the file dialog is not as written');
+  const hiddenInput = `<input ref={input} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="추가할 그림 파일" tabIndex={-1} onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (files.length) onAddFiles?.(files); }} />`;
+  assert.ok(listed.includes(hiddenInput), 'the hidden input of the file dialog is not as written');
   assert.equal(count(gallery, /input\.current\?\.click\(\)/g), 2, 'the file dialog is opened past pickImages');
   assert.ok(piece(gallery, '<button type="button" className="bmap-gallery-add"', '</button>').includes('onClick={() => { if (!words.blocked) pickImages(); }}'), 'the button opens the file dialog for a blocked target');
+  // The input and the button stand first among the buttons of the header, in the branch of an account that may edit: the editor hands
+  // every account its way in, and a read-only account is shown neither (4.1). The button is the tag of the table: its tooltip names the
+  // target, or says why it is blocked.
+  assert.deepEqual(lined(piece(gallery, '<div className="bmap-gallery-actions">', '{selected && <button')), ['<div className="bmap-gallery-actions">', '{snapshot.canManage && onAddFiles && <>', hiddenInput,
+    '<button type="button" className="bmap-gallery-add" aria-disabled={words.blocked} title={words.blocked ? `${words.title}. ${words.detail}` : words.title} onClick={() => { if (!words.blocked) pickImages(); }}>＋ 이미지 추가</button>', '</>}']);
   // The button names what the list names: one target, read from what the editor shows.
   assert.equal(count(gallery, /resolveMapImageTarget\(/g), 1, 'the image list reads a target twice');
   assert.ok(gallery.includes('resolveMapImageTarget(snapshot, maps, current, selected)'), 'the target of the button is not what the list names');
@@ -3147,10 +3166,29 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   for (const text of ['{MAP_IMAGE_HINT}', 'role="status"', 'role="alert"', 'aria-disabled={words.blocked}', 'aria-label="안내 닫기"', '{noticeText}'])
     assert.ok(gallery.includes(text), `not in the image list: ${text}`);
   for (const text of ['{notice.text}', '편집 시작', 'sonner', 'createObjectURL']) assert.ok(!gallery.includes(text), `in the image list: ${text}`);
+  // The hint that pictures may be dropped or pasted is told in the empty list, and to an account that may edit alone.
+  assert.ok(piece(gallery, '<div className="bmap-gallery-empty">', '{hasFilters && <button').includes('{snapshot.canManage && onAddFiles && !scopedViews.length && <p>{MAP_IMAGE_HINT}</p>}'),
+    'the hint of dropping and pasting is told to a read-only account, or outside the empty list');
   // A ghost: its bar and its step at the top of the card, where a low list still shows them, the picture between, and below it the two
   // lines a card will have. And a card just added says so in words, not by its colour alone.
   const ghost = piece(gallery, 'className="bmap-gallery-card bmap-gallery-ghost"', '</div>)}');
   inOrder(ghost, 'className="bmap-gallery-step"', 'className="bg-thumbnail"', 'className="bmap-gallery-mark"', 'className="bmap-gallery-card-body"');
   assert.ok(ghost.includes('<span className="bmap-gallery-mark">{MAP_IMAGE_STEPS[job.step].label} · {index + 1}/{jobs.length}</span>'), 'the step of a ghost is not told as written');
   assert.ok(gallery.includes('{added && <span className="bmap-gallery-mark">추가됨</span>}'), 'a card just added is told by its colour alone');
+  // The grid is drawn while there are ghosts alone: the first batch of an empty list shows its ghosts, not the empty state. They stand at the
+  // front of the box of cards, the box that is brought to its top as a batch starts, and the cards follow in their order. A ghost is the
+  // block of 7.3, line by line: hidden from readers, its bar as long as its step, its picture the uploaded preview once there is one.
+  assert.ok(gallery.includes('{views.length || jobs.length ? <div className="bmap-gallery-grid">'), 'the ghosts of an empty list are not drawn');
+  assert.ok((listed.find(line => line.startsWith('<div className="bmap-gallery-results" ')) ?? '').endsWith(' ref={resultsRef}>'), 'the box of the cards is not brought to its top as a batch starts');
+  inOrder(piece(gallery, '<div className="bmap-gallery-grid">', '</div> : <div className="bmap-gallery-empty">'), '{jobs.map(', '{ordered.map(');
+  const ghosts = listed.indexOf('{jobs.map((job, index) => <div key={job.id} className="bmap-gallery-card bmap-gallery-ghost" data-step={job.step} aria-hidden="true">');
+  assert.ok(ghosts > -1, 'a ghost is not as written');
+  assert.deepEqual(listed.slice(ghosts, ghosts + 6), ['{jobs.map((job, index) => <div key={job.id} className="bmap-gallery-card bmap-gallery-ghost" data-step={job.step} aria-hidden="true">',
+    `<span className="bmap-gallery-step"><i style={{ '--bmap-step': MAP_IMAGE_STEPS[job.step].part } as CSSProperties} /></span>`,
+    '<div className="bg-thumbnail">{job.imageUrl ? <img src={job.imageUrl} alt="" /> : <span><ImageIcon size={25} /></span>}</div>',
+    '<span className="bmap-gallery-mark">{MAP_IMAGE_STEPS[job.step].label} · {index + 1}/{jobs.length}</span>',
+    '<div className="bmap-gallery-card-body"><strong>{job.name}</strong><span><span>{shotLabel[MAP_IMAGE_DEFAULTS.shot]}</span><span>{MAP_IMAGE_DEFAULTS.variantName}</span></span></div>', '</div>)}']);
+  // A card just added says so by its class and in its name, for as long as the mark lasts.
+  for (const text of ["className={added ? 'bmap-gallery-card is-added' : 'bmap-gallery-card'}", "aria-label={`${view.name} · ${variant.name} 상세 보기${added ? ', 방금 추가됨' : ''}`}"])
+    assert.ok(gallery.includes(text), `a card just added does not say so: ${text}`);
 });
