@@ -1373,7 +1373,7 @@ test('anchor 57: a save is told inside the band, for a moment', () => {
   // a write to the library: the editor's `busy` is also on while an underlay is uploaded.
   const strip = handler.strip();
   for (const part of ['mapEditStatus(draft, pending,', 'savedNotice?.mapId === current.id',
-    'status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)}']) assert.ok(strip.includes(part), `not found: ${part}`);
+    "status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id, standing !== 'current' ? standing : keptFailed ? 'unkept' : null)}"]) assert.ok(strip.includes(part), `not found: ${part}`);
   // The same words are read out as it happens, from a region that is not seen.
   assert.ok(editStrip().includes('<span className="sr-only" role="status">{status.announce}</span>'));
   // No toast, in any screen of the feature: it would come up in a corner of the window, away from the band that was pressed.

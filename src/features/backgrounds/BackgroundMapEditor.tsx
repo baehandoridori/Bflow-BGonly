@@ -42,8 +42,9 @@ import type { MapImageLink, MapImagePlaceChoice, MapImageTarget } from './mapIma
 import { mapImageFilePath, useMapImageAdd } from './useMapImageAdd';
 import type { MapImageLinked, MapImageSource } from './useMapImageAdd';
 import { MapImageDropOverlay, MapImagePlacePrompt } from './BackgroundMapImageAdd';
-import { MAP_KEEP_TEXT } from './mapDraftKeep';
+import { MAP_KEEP_TEXT, mapDraftStanding } from './mapDraftKeep';
 import { useKeptMapEdits } from './mapKeptSignal';
+import type { MapDraftStanding } from './mapDraftKeep';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
@@ -294,6 +295,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt);
   const keptStatus = useKeptMapEdits(signal => signal.userId === viewerId ? signal.status : 'idle');
   const keptSettled = keptStatus === 'ready' || keptStatus === 'unavailable';
+  const keptFailed = useKeptMapEdits(signal => signal.userId === viewerId && !!current && signal.failed.includes(current.id));
+  /** How the map on show stands against the library. Held while a save of this editor runs: the store shows that save before it is confirmed, and until its draft is put back an own save would read as one made elsewhere. */
+  const standingRef = useRef<MapDraftStanding>('current');
+  if (!disabled) standingRef.current = editing && current ? mapDraftStanding(draft, snapshot) : 'current';
+  const standing = standingRef.current;
   // The name box is drawn only while its node can still be renamed here; otherwise it goes without a commit.
   const renamingNode = renaming && mode === 'plan' && canEdit && renaming.mapId === current?.id
     ? current.nodes.find(node => node.id === renaming.nodeId && !node.locked) : undefined;
@@ -1339,7 +1345,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       </header>
       {error && !(dialogOpen && !placePrompt) && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => { setNotice(''); swallowSecondClick(); }}>×</button></div>}
-      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
+      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id, standing !== 'current' ? standing : keptFailed ? 'unkept' : null)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
           <div className="bmap-toolbar" role="toolbar" aria-label="도면 도구">
