@@ -1,6 +1,6 @@
 import { Component, Fragment, Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { Move3d, Orbit, Rotate3d, Scale3d } from 'lucide-react';
+import { Eye, EyeOff, Move3d, Orbit, Rotate3d, Scale3d } from 'lucide-react';
 import type { BackgroundCamera, BackgroundCameraColor, BackgroundCommand, BackgroundMap, BackgroundNode, BackgroundPoint, BackgroundSnapshot, BackgroundSpace, BackgroundSpaceSurface, BackgroundSymbol, BackgroundSymbolKind } from './types';
 import { BackgroundModal, EmptyState, Field, uploadBackgroundImage } from './BackgroundUI';
 import { BackgroundMapGallery } from './BackgroundMapGallery';
@@ -15,6 +15,7 @@ import { BackgroundMapNumberField as NumberField } from './BackgroundMapNumberFi
 import { BackgroundMapDeleteDialog } from './BackgroundMapDeleteDialog';
 import { addMapCamera, lockMapNodes, moveMapNode, nodeNameAnchor, polygonSpace, rectToPolygon, removeMapNode, removeMapNodes, removePolygonVertex, renameMapNode, replaceMapNode, setCameraColor, setSpaceSurface, transformMapSpace } from './mapGeometry';
 import { spacesAt, stackedSpaces } from './mapStack';
+import { NO_MAP_VIEW_PREFS, hiddenNodeCount, mapRoomIds, mapViewPrefsOf, readMapViewPrefs, selectionWithout, shownMap, storeMapViewPrefs, withHiddenNodes, withSolidSpaces } from './mapViewPrefs';
 import { MAP_SPATIAL_DEFAULTS, cameraAngles, cameraAspect, cameraPitchLabel, isRoadSpace, nodeAngles, nodeElevation, nodePlanOutline, nodeVolumeHeight, projectCameraToPlan, roadCentreLine } from './mapSpatial';
 import { mapNodeNumber, setMapNodeNumber } from './mapNumberField';
 import type { MapNumberKey } from './mapNumberField';
@@ -40,7 +41,7 @@ import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
 
-type Props = { snapshot: BackgroundSnapshot; pending: boolean; execute: (command: BackgroundCommand) => Promise<void>; onOpenView: (id: string, variantId?: string) => void; onOpenCatalog: () => void };
+type Props = { snapshot: BackgroundSnapshot; pending: boolean; execute: (command: BackgroundCommand) => Promise<void>; onOpenView: (id: string, variantId?: string) => void; onOpenCatalog: () => void; viewerId: string };
 /** `hand` pans the plan and orbits the 3D world. The drawing tools exist on the plan only. */
 type Tool = 'select' | 'hand' | 'rect' | 'ellipse' | 'polygon' | 'road' | 'symbol';
 type CreateForm = { id: string; name: string; parentId: string | null; spaceId: string | null; placeId: string | null };
@@ -102,6 +103,8 @@ const UNAVAILABLE_3D = '3D 화면을 사용할 수 없어 평면으로 돌아왔
 const ROAD_HINT = '도로는 벽 없는 바닥이에요. 다른 공간과 겹치면 늘 아래에 깔려요. 다른 공간에 덮인 도로는 그 자리를 천천히 한 번 더 누르거나 오른쪽 목록에서 골라요.';
 const ROAD_HINT_ROUND = '둥근 도로에는 가운데 점선이 없어요.';
 const ROAD_HINT_NO_STRIP = '가운데 점선은 길 양쪽 옆줄의 점이 같은 수로 서로 마주 볼 때 보여요. 한쪽에 점을 더했으면 맞은편에도 하나 더해 주세요. 광장처럼 길 모양이 아닌 곳에는 그리지 않아요.';
+/** What the eye does, said under the object list at all times: hidden on this screen only, and still part of the map. A hidden node must never read as a deleted one. */
+const HIDDEN_NOTE = '숨긴 것은 이 PC의 내 화면에서만 안 보여요. 도면에는 그대로 있어서, 저장해도 지워지지 않아요.';
 const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string }[] = [
   { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기' },
   { id: 'rotate', label: '회전', Icon: Rotate3d, hint: '고리를 끌어 돌리기' },
@@ -156,22 +159,27 @@ class Map3DBoundary extends Component<{ onFail: (reason: string) => void; childr
 const kindLabel = (node: BackgroundNode) => node.type === 'camera' ? '카메라' : node.type === 'space' ? (isRoadSpace(node) ? '도로' : '공간') : getSymbolPreset(node.symbol).label;
 
 /** Every placement of the map, so items hidden under others (cameras on one spot) can each be picked. Every selected row is marked; the primary alone is the current one. */
-const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, onSelect }: { nodes: BackgroundNode[]; selectedIds: readonly string[]; primaryId: string | null; onSelect: (id: string) => void }) {
+const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, hiddenIds, hiddenCount, onSelect, onToggleHidden, onShowAll }: { nodes: BackgroundNode[]; selectedIds: readonly string[]; primaryId: string | null; hiddenIds: ReadonlySet<string>; hiddenCount: number; onSelect: (id: string) => void; onToggleHidden: (id: string) => void; onShowAll: () => void }) {
   const ordered = [...nodes.filter(node => node.type === 'camera'), ...nodes.filter(node => node.type === 'symbol'), ...nodes.filter(node => node.type === 'space')];
   return <section className="bmap-objects" aria-label="오브젝트 목록">
-    <div className="bmap-section-heading"><strong>오브젝트</strong><span className="bmap-badge">{ordered.length}개</span></div>
-    {ordered.length ? <ul className="bmap-node-list">{ordered.map(node => <li key={node.id}>
-      <button type="button" className={selectedIds.includes(node.id) ? 'is-selected' : ''} aria-current={node.id === primaryId ? 'true' : undefined} aria-label={`${node.name || '이름 없음'}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}`} onClick={() => onSelect(node.id)}>
-        <span className={`bmap-node-kind is-${node.type}`} data-camera-color={node.type === 'camera' ? node.color : undefined} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : isRoadSpace(node) ? '═' : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
-        <span className="bmap-node-name">{node.name || '이름 없음'}</span>
-        {node.locked && <span className="bmap-node-lock" aria-hidden="true">🔒</span>}
-        <span className="bmap-node-type" aria-hidden="true">{kindLabel(node)}</span>
-      </button>
-    </li>)}</ul> : <p className="bmap-hint">아직 배치된 것이 없어요.</p>}
+    <div className="bmap-section-heading"><strong>오브젝트</strong>{hiddenCount > 0 && <button type="button" className="bmap-text-button bmap-show-all" title={HIDDEN_NOTE} onClick={onShowAll}>모두 보이기</button>}<span className="bmap-badge">{hiddenCount > 0 ? `숨김 ${hiddenCount} · ` : ''}{ordered.length}개</span></div>
+    <span className="sr-only" role="status">{hiddenCount > 0 ? `숨긴 것 ${hiddenCount}개` : '숨긴 것이 없어요'}</span>
+    {ordered.length ? <><ul className="bmap-node-list">{ordered.map(node => {
+      const hidden = hiddenIds.has(node.id), name = node.name || '이름 없음';
+      return <li key={node.id} className={hidden ? 'is-hidden' : undefined}>
+        <button type="button" className={selectedIds.includes(node.id) ? 'is-selected' : ''} aria-current={node.id === primaryId ? 'true' : undefined} aria-label={`${name}, ${kindLabel(node)}${node.locked ? ', 잠김' : ''}${hidden ? ', 숨김' : ''}`} onClick={() => onSelect(node.id)}>
+          <span className={`bmap-node-kind is-${node.type}`} data-camera-color={node.type === 'camera' ? node.color : undefined} aria-hidden="true">{node.type === 'camera' ? '◉' : node.type === 'symbol' ? <SymbolIcon symbol={node.symbol} size={16} /> : isRoadSpace(node) ? '═' : node.shape === 'ellipse' ? '◯' : node.shape === 'polygon' ? '⬡' : '▭'}</span>
+          <span className="bmap-node-name">{node.name || '이름 없음'}</span>
+          {node.locked && <span className="bmap-node-lock" aria-hidden="true">🔒</span>}
+          <span className="bmap-node-type" aria-hidden="true">{kindLabel(node)}</span>
+        </button>
+        <button type="button" className="bmap-node-eye" aria-label={`${name} ${hidden ? '다시 보이기' : '숨기기'}`} title={hidden ? '다시 보이기' : '숨기기 · 이 PC에서만 안 보여요'} onClick={() => onToggleHidden(node.id)}>{hidden ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}</button>
+      </li>;
+    })}</ul><p className="bmap-hint">{HIDDEN_NOTE}</p></> : <p className="bmap-hint">아직 배치된 것이 없어요.</p>}
   </section>;
 });
 
-export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, onOpenCatalog }: Props) {
+export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, onOpenCatalog, viewerId }: Props) {
   const doc = useBackgroundMapDocument();
   const { state } = doc, drafts = state.drafts;
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -189,6 +197,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   // state is set: a state update that comes after the preview of the same pointer move runs this whole component
   // once more even when it changes nothing, so a drag would render twice for every move.
   const [snapEnabled, setSnapEnabled] = useState(readSnapPreference);
+  const [viewPrefs, setViewPrefs] = useState(() => readMapViewPrefs(viewerId));   // the eye and the box, by map: read once, the editor is drawn anew for another account
   const [guides, setGuides] = useState<readonly SnapGuide[]>(NO_GUIDES);
   const shownGuides = useRef<readonly SnapGuide[]>(NO_GUIDES);
   const showGuides = (next: readonly SnapGuide[]) => {
@@ -252,6 +261,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const maps = useMemo(() => effectiveMaps(snapshot, drafts), [snapshot, drafts]);
   const current = maps.find(map => map.id === currentId) ?? maps[0];
   const draft = mapDraft(state, current?.id);
+  const { hidden: hiddenIds, solid: solidIds } = mapViewPrefsOf(viewPrefs, current?.id);   // the same sets until an eye or a box is pressed: a drag wakes neither the list nor 3D
   const view = mapViewport(state, current?.id);
   // Keyed on the stored list, not on the viewport: a pan or a zoom keeps `selectedIds` and so keeps this value.
   const selection = useMemo(() => mapSelection(current, view.selectedIds), [current, view.selectedIds]);
@@ -290,6 +300,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const settledMaps = settledMapsRef.current;
   const settledCurrent = current && (gestureStartMap(state, current.id) ?? current);
   const settledSelected = settledCurrent?.nodes.find(node => node.id === selected?.id);
+  const hiddenCount = useMemo(() => hiddenNodeCount(settledCurrent, hiddenIds), [settledCurrent, hiddenIds]);   // said by the list and the footer: hidden nodes of the map the list is drawn from, never the id of one that is gone
   // What the object list marks, read from the settled map and memoised, so a drag does not draw the list again.
   const listSelection = useMemo((): MapSelection => {
     const group = mapSelection(settledCurrent, view.selectedIds);
@@ -577,7 +588,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   function placeSymbol(point: BackgroundPoint, base = current) {
     if (!base || !canEdit || tool !== 'symbol' || doc.isGestureActive() || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
     const preset = getSymbolPreset(symbolKind);
-    const containingSpace = spacesAt(base, point)[0];
+    const containingSpace = spacesAt(shownMap(base, hiddenIds), point)[0];
     // It stands on the floor of its space. A floor on the ground writes no key, so older maps stay as they are.
     const level = containingSpace ? nodeElevation(containingSpace) : MAP_SPATIAL_DEFAULTS.symbolElevation;
     const symbol: BackgroundSymbol = { id: uuid(), type: 'symbol', name: preset.label, symbol: preset.id, x: point.x - preset.width / 2, y: point.y - preset.height / 2, width: preset.width, height: preset.height, rotation: 0, spaceId: containingSpace?.id ?? null, locked: false, hinge: 'left', swing: 'inward',
@@ -848,7 +859,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const again = sameSpotAgain(spot, current.id, hit?.id ?? null, held);
     // The select tool (while viewing: any tool but the hand): what this press does is decided in one pure place.
     const plan = panning || drawing || handle ? null : resolvePlanPress({ canEdit, shift: event.shiftKey, hit: hit ?? null,
-      pile: hit ? planPileAt(live, hit.id, point, undefined, item => planMarkCovers(item, point)) : [],
+      pile: hit ? planPileAt(shownMap(live, hiddenIds), hit.id, point, undefined, item => planMarkCovers(item, point)) : [],
       selection: held, again, node: id => live.nodes.find(item => item.id === id) });
     if (plan?.selectAtPress !== undefined) select(plan.selectAtPress);
     // A press with Space held, and one the plan does not log (Shift), is no half of a double-click.
@@ -895,8 +906,9 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     const gesture = planGestureOf(session);
     // Alt is read at every move: held it frees the drag, released the drag sticks again. The distances are
     // screen pixels at the zoom of the press.
+    // The guides come from what is shown; the drag is computed on the whole map of the press, so a hidden member follows its space.
     const snap = snapEnabled && !event.altKey
-      ? { candidates: session.candidates ??= planGestureCandidates(gesture, session.initial),
+      ? { candidates: session.candidates ??= planGestureCandidates(gesture, shownMap(session.initial, hiddenIds)),
           tolerance: MAP_SNAP.tolerancePx * session.scale, reach: MAP_SNAP.reachPx * session.scale }
       : null;
     const preview = previewPlanGesture(gesture, session.initial, session.start, point, snap);
@@ -919,7 +931,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       setMarquee(null);
       if (!cancel && session.moved && canEdit) {
         const live = mapDraft(doc.getState(), session.mapId)?.value, point = pointFrom(event, session.matrix);
-        if (live && point) doc.selectMany(session.mapId, planMarqueeIds(live, planRect(session.start, point)));
+        if (live && point) doc.selectMany(session.mapId, planMarqueeIds(shownMap(live, hiddenIds), planRect(session.start, point)));
       }
     } else if (session.mode !== 'pan') {
       if (cancel || !canEdit || !session.moved) doc.cancelGesture();
@@ -1047,6 +1059,33 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   // Stable callbacks: the 3D viewport, the companion plan and the image grid must not re-subscribe on every preview.
   const selectNode = useEvent((id: string | null) => select(id));
   const clearSelection = useEvent(() => select(null));
+  // View settings of this PC: the eye of the object list and the closed box of a room in 3D. They write no map: no undo step, nothing to save.
+  const setNodesHidden = useEvent((ids: readonly string[], hidden: boolean): boolean => {
+    // Not during a drag: its session works on what was drawn and stacked at the press.
+    if (!current || pointerRef.current || doc.isGestureActive()) return false;
+    const next = withHiddenNodes(viewPrefs, current, ids, hidden);
+    if (next !== viewPrefs) { setViewPrefs(next); storeMapViewPrefs(viewerId, next); }
+    if (!hidden) return true;
+    // What is hidden is never selected: it leaves the group picked on the plan, the hand of the 3D view, and the pick that view stored.
+    const live = mapDraft(doc.getState(), current.id)?.value ?? current;
+    const left = selectionWithout(live, liveSelection(current.id, live), mapViewport(doc.getState(), current.id).selectedId, ids, mode === 'plan');
+    if (!left.changed) return true;
+    doc.selectMany(current.id, left.ids);
+    // In 3D, with a group still picked on the plan, the node in hand is a pick of its own: kept, or let go.
+    if (mode === '3d' && left.ids.length > 1) select(left.inHand);
+    // The list moves under the pointer only when the properties above it show something else.
+    if (left.moved) swallowSecondClick();
+    return true;
+  });
+  const toggleHidden = useEvent((id: string) => { setNodesHidden([id], !hiddenIds.has(id)); });
+  const showAll = useEvent(() => { if (setNodesHidden([...hiddenIds], false)) focusCanvas(); });
+  /** A row of the object list. A hidden one is shown first: nothing hidden is ever selected. */
+  const selectFromList = useEvent((id: string) => { if (!hiddenIds.has(id) || setNodesHidden([id], false)) select(id); });
+  const setSpacesSolid = useEvent((ids: readonly string[], solid: boolean) => {
+    if (!current || pointerRef.current || doc.isGestureActive()) return;
+    const next = withSolidSpaces(viewPrefs, current, ids, solid);
+    if (next !== viewPrefs) { setViewPrefs(next); storeMapViewPrefs(viewerId, next); }
+  });
   const openView = useEvent(onOpenView), openCatalog = useEvent(onOpenCatalog);
   const beginCanvasGesture = useEvent(() => { if (current && canEdit && !pointerRef.current) doc.beginGesture(current.id); });
   const previewCanvasGesture = useEvent((map: BackgroundMap) => { if (canEdit) doc.previewGesture(map); });
@@ -1097,6 +1136,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const fieldLocked = !canEdit || !!selected?.locked;
   /** The node in hand is a road: it has a floor height and no walls. */
   const selectedRoad = selected?.type === 'space' && isRoadSpace(selected);
+  /** In 3D every room is see-through while the symbol tool is in hand: a floor has to be aimed at. It hangs on `editing`, not on `canEdit`: that one goes with every save, and each box would close and open with it. */
+  const roomsOpen = tool === 'symbol' && editing;
   /** Of the selected nodes, those a group delete leaves because they are locked, and those it removes. */
   const groupLocked = groupNodes.filter(node => node.locked).length, groupFree = groupNodes.length - groupLocked;
   const spaceName = (id: string | null) => current?.nodes.find(node => node.type === 'space' && node.id === id)?.name ?? '공간 미지정';
@@ -1172,6 +1213,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
           }} onDoubleClick={canvasDoubleClick}>
             {current.imageUrl && <image href={current.imageUrl} x="0" y="0" width="1000" height="680" preserveAspectRatio="xMidYMid meet" opacity="0.65" pointerEvents="none" />}
             {stackedSpaces(current).map(node => {
+              if (hiddenIds.has(node.id)) return null;
               const isSelected = shownIds.has(node.id), road = isRoadSpace(node), centre = roadCentreLine(node);
               return <g key={node.id} className={`bmap-space ${road ? 'is-road ' : ''}${isSelected ? 'is-selected' : ''} ${node.locked ? 'is-locked' : ''}${node.id === renamingNode?.id ? ' is-renaming' : ''}`} transform={`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`} role="button" aria-label={`${node.name}${road ? ', 도로' : ''}${node.childMapId ? ', 상세 도면 연결' : ''}`} tabIndex={0} onPointerDown={event => pointerDown(event, node)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); select(node.id); } }}>
                 {node.shape === 'ellipse' ? <ellipse cx={node.width / 2} cy={node.height / 2} rx={node.width / 2} ry={node.height / 2} /> : node.shape === 'polygon' ? <polygon points={node.points.map(point => `${point.x * node.width},${point.y * node.height}`).join(' ')} /> : <rect width={node.width} height={node.height} rx={road ? 0 : 4} />}
@@ -1181,7 +1223,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                 {node.childMapId && <text className="bmap-space-detail" x={node.width / 2} y={node.height / 2 + 21} textAnchor="middle" pointerEvents="none">상세 도면 ↗</text>}
               </g>;
             })}
-            {current.nodes.filter((node): node is BackgroundSymbol => node.type === 'symbol').map(node => {
+            {current.nodes.filter((node): node is BackgroundSymbol => node.type === 'symbol' && !hiddenIds.has(node.id)).map(node => {
               const isSelected = shownIds.has(node.id), tilt = nodeAngles(node);
               return <Fragment key={node.id}>
                 {/* A tilted object casts the outline of its whole box; its own plan size is untouched. */}
@@ -1194,7 +1236,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                 </g>
               </Fragment>;
             })}
-            {current.nodes.filter((node): node is BackgroundCamera => node.type === 'camera').map(node => {
+            {current.nodes.filter((node): node is BackgroundCamera => node.type === 'camera' && !hiddenIds.has(node.id)).map(node => {
               // The fan and the line follow the horizontal part of the line of sight (cos pitch). Looking straight
               // up or down has no horizontal part, so a vertical mark replaces them. The fan is a direction reference.
               const plan = projectCameraToPlan(node), reach = Math.hypot(plan.direction.x, plan.direction.y);
@@ -1227,10 +1269,10 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
                   onBeginGesture={beginCanvasGesture} onPreview={previewCanvasGesture} onFinishGesture={finishCanvasGesture} onCancelGesture={cancelCanvasGesture}
                   tool={tool === 'hand' ? 'look' : 'select'} gizmoMode={gizmoMode} placing={tool === 'symbol' && canEdit} onPlace={placeAt}
                   focusRequest={focusRequest} initialView={viewStates.current[current.id] ?? null} onViewChange={storeView}
-                  lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} />
+                  lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} hiddenIds={hiddenIds} solidIds={roomsOpen ? NO_MAP_VIEW_PREFS.solid : solidIds} />
               </Suspense></Map3DBoundary>
             </div>
-            <BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} />
+            <BackgroundMapPlanPreview map={current} selectedId={singleId} onSelect={selectNode} canEdit={canEdit} scrub={fieldScrub} hiddenIds={hiddenIds} />
           </div>}
           {/* An HTML input beside the SVG, placed over its node. Keyed by the node, so each opening starts with that node's name. */}
           {renamingNode && <BackgroundMapNameBox key={renamingNode.id} svgRef={svgRef} anchor={nodeNameAnchor(renamingNode)}
@@ -1238,7 +1280,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             initial={renamingNode.name} positionKey={`${view.x}:${view.y}:${view.zoom}:${canvasSize.width}:${canvasSize.height}`}
             onCommit={commitName} onCancel={cancelName} onHistory={passNameHistory} />}
           {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '관리자가 공간을 배치하면 여기에 표시됩니다.'}</span></div>}
-          <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' ? footerHint : undefined}>{footerHint}</span>{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
+          <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' || hiddenCount > 0 ? footerHint : undefined}>{footerHint}</span>{hiddenCount > 0 && <div className="bmap-hidden-slot"><button type="button" className="bmap-hidden-chip" title={HIDDEN_NOTE} onClick={showAll}>숨김 {hiddenCount}개 · 모두 보이기</button></div>}{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
         <aside className="bmap-inspector" id="bmap-selection-properties" aria-label="선택 속성" hidden={!inspectorOpen}>
@@ -1270,6 +1312,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               {/* The centre line is the look of a road: where the shape has none, say why, or it reads as a bug. */}
               {isRoadSpace(selected) && !roadCentreLine(selected) && <p className="bmap-hint">{selected.shape === 'ellipse' ? ROAD_HINT_ROUND : ROAD_HINT_NO_STRIP}</p>}
             </>}
+            {/* A view setting of this PC, not a property of the space: there while viewing too, and never switched off by a lock or a save. In 3D only, where it shows. Below the kind of the space: a road has no such section, and nothing above that select may move when it is switched. */}
+            {mode === '3d' && selected.type === 'space' && !selectedRoad && <section className="bmap-solid" aria-label="3D에서 보는 방식">
+              <label className="bmap-check"><input type="checkbox" checked={solidIds.has(selected.id)} onChange={event => setSpacesSolid([selected.id], event.target.checked)} />속이 안 보이는 박스로 보기</label>
+              <p className="bmap-hint">이 PC에서 3D를 보는 방식만 바뀌어요. 도면에는 저장되지 않아요. 박스 안에 든 것은 3D에서 안 보여요. 오브젝트 목록에서 고를 수 있어요.{roomsOpen ? ' 기호를 놓는 동안에는 모든 공간이 비쳐 보여요.' : ''}</p>
+              <div className="bmap-link-actions"><button type="button" className="bmap-text-button" onClick={() => setSpacesSolid(mapRoomIds(current), true)}>모든 공간을 박스로</button><button type="button" className="bmap-text-button" onClick={() => setSpacesSolid([...solidIds], false)}>모두 비치게</button></div>
+            </section>}
             {selected.type === 'camera' && (() => {
               const angles = cameraAngles(selected), aspect = cameraAspect(selected), preset = ASPECT_PRESETS.find(item => Math.abs(item.value - aspect) < 0.005);
               return <>
@@ -1318,6 +1366,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             onDelete={() => { setError(''); setConfirmation('delete-group'); }} /> : <>
             <div className="bmap-section-heading"><strong>도면 구성</strong><span className="bmap-badge">{current.nodes.filter(node => node.type === 'space').length}개 공간</span></div>
             <p className="bmap-hint">공간을 선택하면 내부 도면을 만들거나 연결할 수 있습니다.</p>
+            {mode === '3d' && <p className="bmap-hint">공간을 고르면 속이 안 보이는 박스로 볼 수 있어요.</p>}
             {snapshot.canManage && <button type="button" className="bg-button bmap-draw-action" disabled={disabled} title={mode === '3d' ? '공간은 평면에서 그려요. 평면으로 바꿔 드릴게요.' : undefined} onClick={() => { if (!editing) beginEditing(); if (mode !== 'plan') switchMode('plan'); setTool('rect'); }}>＋ 공간 그리기</button>}
             <section className="bmap-children"><div className="bmap-section-heading"><strong>하위 도면</strong><span>{childMaps.length}</span></div>
               {childMaps.map(map => <button type="button" key={map.id} className="bmap-child-row" disabled={disabled} onClick={() => navigate(map.id)}><span>{map.name}</span><span>→</span></button>)}
@@ -1325,7 +1374,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               {snapshot.canManage && <button type="button" className="bmap-text-button" disabled={disabled || !!polygon.length} onClick={() => openCreate(current.id)}>＋ 하위 도면 만들기</button>}
             </section>
           </>}
-          <ObjectList nodes={settledCurrent?.nodes ?? current.nodes} selectedIds={listSelection.ids} primaryId={listSelection.primaryId} onSelect={selectNode} />
+          <ObjectList nodes={settledCurrent?.nodes ?? current.nodes} selectedIds={listSelection.ids} primaryId={listSelection.primaryId} hiddenIds={hiddenIds} hiddenCount={hiddenCount} onSelect={selectFromList} onToggleHidden={toggleHidden} onShowAll={showAll} />
         </aside>
       </BackgroundMapPanels>
     </main>}
