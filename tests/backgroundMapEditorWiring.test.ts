@@ -2871,6 +2871,111 @@ test('anchor 72: the closed box is a view setting of a room in 3D, below the kin
   assert.ok(library.includes('key={user?.id || "signed-out"}'), 'the editor is not drawn anew for another account');
 });
 
+test('anchor 75: a batch uploads, then saves one command at a time under the lock, ties last, and sends nothing more after a save failed', () => {
+  // The controller of adding pictures, read when this anchor asks for it: without the file this anchor fails, not every anchor of this
+  // file. `lined` is a piece as its lines, without their indent, and `run` is one batch, from its first line to the brace that closes it.
+  const hook = read('useMapImageAdd.ts');
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean);
+  const run = block(hook, 'async function run(plan: MapImagePlan, sources: readonly MapImageSource[]) {'), lines = lined(run);
+  // A batch, in this order. One at a time, asked of a ref: a second can be asked for before `view` is drawn, and as state it would be a
+  // render behind. The pictures go up one after another, each the file the plan names by its place in the list handed in: by the count
+  // of the loop, a file refused ahead of it would send another picture under its name. The saves start only once the store and the
+  // editor are at rest, so a start never cancels a drag, and the lock is the line right before the try of the saves: nothing comes
+  // between it and the first command, where a press could land. One command at a time, and once a save failed the rest is not sent: the
+  // line that stops has no condition before it (with one, ten pictures would wait ten times on a broken connection). The tie comes last,
+  // on the library as the last command left it (read before the loop, it would not hold the backgrounds just saved), and only when there
+  // is something to tie. The lock and the ref are let go in a finally: a throw would leave the editor locked, or no batch would start again.
+  inOrder(run, 'if (running.current) return;', 'running.current = true;', 'const source = sources[item.index];', 'await uploadBackgroundImage(source.file)',
+    'while (!quiet()) { await sleep(120); if (gone()) return; }', 'latest.current.lock(true);', 'for (const command of mapImageSaves(plan, uploads, new Date().toISOString(), uuid)) {',
+    'await save(command,', 'stopped = why;', 'const library = useBackgroundStore.getState().snapshot;',
+    'link = { place: plan.place, placeId: plan.placeId, cameraId: plan.cameraId, viewIds: [...plan.reused, ...added] };', 'if (mapImageLinkWanted(link, library)) {',
+    'await latest.current.link(plan.mapId, link, library)', '} finally { latest.current.lock(false); }', 'running.current = false;');
+  const locked = lines.indexOf('latest.current.lock(true);');
+  assert.ok(locked > -1 && lines[locked + 1] === 'try {', 'the lock is not a line of its own right before the try of the saves');
+  assert.ok(lines.some(line => line.startsWith('stopped = why;')), 'the rest is sent after a save failed, or held back only after some');
+  assert.equal(lines[lines.lastIndexOf('} finally {') + 1], 'running.current = false;', 'the ref is not let go in the finally of the batch');
+  assert.equal(count(hook, /\.lock\(true\)/g), 1, 'the editor is locked in another place');
+  assert.equal(count(hook, /\.lock\(false\)/g), 1, 'the editor is let go in another place');
+  // At rest: the store reads and saves nothing, and the editor (asked as it is rendered by then) drags, draws, names and opens nothing.
+  // A save of this feature leaves no red line of the library up: the image list says why, in plain words. Never once the screen was left
+  // or the account changed: the store may be another session's by then, and its library would pass for one that holds what was saved. A
+  // reply that was lost is no failure when the library read again holds what was saved, and the batch goes on. The tie is told as the
+  // editor answers it: what was tied in part stays a part.
+  for (const line of ['const quiet = () => { const store = useBackgroundStore.getState(); return !store.loading && !store.pending && latest.current.idle(); };',
+    'const hush = () => { if (!gone()) useBackgroundStore.setState({ error: null }); };',
+    "catch (cause) { hush(); return !gone() && held(useBackgroundStore.getState().snapshot) ? '' : mapImageCauseText(cause); }",
+    "tie = done.how === 'none' ? { link: done.complete ? 'none' : 'missed' } : { link: done.how, partial: !done.complete };"])
+    assert.ok(lines.includes(line), `not a line of the batch: ${line}`);
+  // The red line is put out where a save of this feature fails after it was sent, the save of a picture and the tie, and the store is
+  // written nowhere else.
+  assert.equal(count(hook, /useBackgroundStore\.setState\(/g), 1, 'the store is written in another place');
+  assert.equal(count(hook, /\bhush\(\);/g), 2, 'the red line is not put out after the save of a picture and after the tie');
+  // A batch that ended carries its tie, so that its line is read anew at every draw, and it scrolls nothing (its `seq` is left as it
+  // is): it may end under a drag. Its outcome names the first background that was there already, counts what did not go in, and says
+  // whether the pictures came as a file copied in Explorer.
+  const ended = piece(run, 'setView(now => ({ ...now, running: false, jobs: [], recent:', '} finally {');
+  assert.ok(ended.includes('...(link ? { live: { outcome, link } } : {})'), 'a batch that ended does not carry its tie');
+  assert.ok(!ended.includes('seq'), 'the end of a batch brings the line into view');
+  const outcome = piece(run, 'const outcome: MapImageOutcome = {', 'setView(now => ({ ...now, running: false');
+  for (const text of ['reusedName: plan.reusedNames[0]', 'failed: failed.length', "byPath: sources.some(source => source.kind === 'path')"])
+    assert.ok(outcome.includes(text), `not in the outcome of a batch: ${text}`);
+  assert.equal(count(hook, /seq: now\.seq \+ 1/g), 2, 'the line is brought into view as a batch starts and as say speaks, and then alone');
+  // Every wait is followed by a look at whether the screen is still there: after an upload that went and one that failed, in the wait
+  // for rest, after each command, and after the saves. The look asks both, the screen and the account.
+  assert.equal(count(hook, /if \(gone\(\)\) return;/g), 5, 'a wait is not followed by a look at the screen');
+  const gone = lines.find(line => line.startsWith('const gone = '));
+  assert.ok(!!gone && gone.includes('!alive.current') && gone.includes('actorId'), 'the look at the screen leaves out the screen or the account');
+  // A file copied in Explorer is read by the main process and then goes up: an answer with no address throws, so no save is sent for a
+  // picture that did not go up. The path of a file of the page never throws: a file with none has ''.
+  assert.deepEqual(lined(block(hook, 'async function uploadFromPath(path: string): Promise<string> {')), ['async function uploadFromPath(path: string): Promise<string> {',
+    'const read = await window.electronAPI.backgroundReadImageFile(path), result = await window.electronAPI.backgroundUploadImage(read.dataUrl);',
+    "if (!result.ok || !result.url) throw new Error(result.error || '이미지를 올리지 못했습니다. 다시 시도해 주세요.');", 'return result.url;', '}']);
+  assert.ok(hook.includes("export function mapImageFilePath(file: File): string { try { return window.electronAPI.getPathForFile(file) || ''; } catch { return ''; } }"),
+    'the path of a file of the page can throw');
+  // Nothing is sent at once, nothing is kept past the screen, no toast: a command goes out through the one call of the store, in `save`.
+  for (const word of ['Promise.all', 'Promise.allSettled', 'localStorage', 'sonner', 'shut']) assert.ok(!hook.includes(word), `the controller has ${word}`);
+  assert.equal(count(hook, /\.execute\(/g), 1, 'a command is sent past save');
+  assert.ok(run.includes('latest.current.execute(command)'), 'a command is not sent by the editor as it is rendered by then');
+  // 추가됨 leaves by itself, timed by the controller, and the timer goes with its effect.
+  for (const line of ['const timer = window.setTimeout(() => setView(now => ({ ...now, marked: [] })), MAP_IMAGE_ADD.addedMarkMs);', 'return () => window.clearTimeout(timer);'])
+    assert.ok(lined(hook).includes(line), `not a line of the controller: ${line}`);
+  // And the body of the controller holds nothing else: the lines of the design as written, from its state to the end of a batch.
+  assert.deepEqual(lined(piece(hook, 'const [view, setView] = useState<MapImageAddView>(MAP_IMAGE_IDLE);', 'const start = ')), [
+    'const [view, setView] = useState<MapImageAddView>(MAP_IMAGE_IDLE);', 'const latest = useRef(deps); latest.current = deps;', 'const alive = useRef(true), running = useRef(false);',
+    'useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);', 'useEffect(() => {', 'if (!view.marked.length) return;',
+    'const timer = window.setTimeout(() => setView(now => ({ ...now, marked: [] })), MAP_IMAGE_ADD.addedMarkMs);', 'return () => window.clearTimeout(timer);', '}, [view.marked]);',
+    'async function run(plan: MapImagePlan, sources: readonly MapImageSource[]) {', 'if (running.current) return;', 'running.current = true;', 'const actor = useBackgroundStore.getState().actorId;',
+    'const gone = () => !alive.current || useBackgroundStore.getState().actorId !== actor;', 'const hush = () => { if (!gone()) useBackgroundStore.setState({ error: null }); };',
+    'const step = (id: string, patch: Partial<MapImageJob>) => setView(now => ({ ...now, jobs: now.jobs.map(job => job.id === id ? { ...job, ...patch } : job) }));',
+    'const failed = plan.refused.map(item => ({ name: item.name, reason: MAP_IMAGE_REFUSAL_TEXT[item.reason] }));',
+    'const uploads: { viewId: string; name: string; imageUrl: string; sourceImagePath: string }[] = [], added: string[] = [];',
+    "let tie: Pick<MapImageOutcome, 'link' | 'partial' | 'linkCause'> = { link: 'none' }, link: MapImageLink | null = null;",
+    "setView(now => ({ ...now, mapId: plan.mapId, running: true, jobs: plan.items.map(item => ({ id: item.viewId, name: item.name, step: 'ready', imageUrl: '' })),",
+    'notice: { mapId: plan.mapId, text: mapImageBusyText(plan.scope, plan.targetName, plan.items.length + plan.reused.length), failed: [] }, seq: now.seq + 1 }));', 'try {', 'for (const item of plan.items) {',
+    'const source = sources[item.index];', "step(item.viewId, { step: 'uploading' });", 'try {',
+    "const imageUrl = source.kind === 'file' ? await uploadBackgroundImage(source.file) : await uploadFromPath(source.path);", 'if (gone()) return;',
+    'uploads.push({ viewId: item.viewId, name: item.name, imageUrl, sourceImagePath: source.path });', "step(item.viewId, { step: 'waiting', imageUrl });", '} catch (cause) {', 'if (gone()) return;',
+    "failed.push({ name: item.name, reason: mapImageCauseText(cause) }); step(item.viewId, { step: 'failed' });", '}', '}', 'if (uploads.length || plan.reused.length) {',
+    'const quiet = () => { const store = useBackgroundStore.getState(); return !store.loading && !store.pending && latest.current.idle(); };', 'while (!quiet()) { await sleep(120); if (gone()) return; }',
+    'latest.current.lock(true);', 'try {', 'const save = async (command: BackgroundCommand, held: (library: BackgroundSnapshot) => boolean) => {', "try { await latest.current.execute(command); return ''; }",
+    "catch (cause) { hush(); return !gone() && held(useBackgroundStore.getState().snapshot) ? '' : mapImageCauseText(cause); }", '};', "let stopped = '';",
+    'for (const command of mapImageSaves(plan, uploads, new Date().toISOString(), uuid)) {', "if (command.type !== 'save') continue;",
+    'const id = command.entity.id, job = uploads.find(upload => upload.viewId === id);',
+    "if (stopped) { if (job) { failed.push({ name: job.name, reason: stopped }); step(id, { step: 'failed' }); } continue; }", "if (job) step(id, { step: 'saving' });",
+    "const why = await save(command, library => (command.kind === 'place' ? library.places : library.views).some(item => item.id === id));", 'if (gone()) return;',
+    'if (!why) { if (job) added.push(id); continue; }', "if (job) { failed.push({ name: job.name, reason: why }); step(id, { step: 'failed' }); }", 'stopped = why;', '}',
+    'const library = useBackgroundStore.getState().snapshot;', 'link = { place: plan.place, placeId: plan.placeId, cameraId: plan.cameraId, viewIds: [...plan.reused, ...added] };',
+    'if (mapImageLinkWanted(link, library)) {', 'try {', 'const done = await latest.current.link(plan.mapId, link, library);',
+    "tie = done.how === 'none' ? { link: done.complete ? 'none' : 'missed' } : { link: done.how, partial: !done.complete };",
+    "} catch (cause) { hush(); tie = { link: 'failed', linkCause: mapImageCauseText(cause) }; }", '}', '} finally { latest.current.lock(false); }', '}', 'if (gone()) return;',
+    'const outcome: MapImageOutcome = { scope: plan.scope, targetName: plan.targetName, placeName: plan.placeName, added: added.length, reused: plan.reused.length, reusedName: plan.reusedNames[0],',
+    "failed: failed.length, over: plan.over, byPath: sources.some(source => source.kind === 'path'), ...tie };",
+    'setView(now => ({ ...now, running: false, jobs: [], recent: [...added, ...now.recent], marked: added,',
+    'notice: { mapId: plan.mapId, text: mapImageSummary(outcome), failed, ...(link ? { live: { outcome, link } } : {}) } }));', '} finally {', 'running.current = false;',
+    'if (alive.current) setView(now => now.running ? { ...now, running: false, jobs: [], notice: null } : now);', '}', '}',
+  ]);
+});
+
 test('anchor 78: what is shown stays in the image list, motion stays in its block, the file dialog is one function, the new channel is four places, and the pure module is pure', () => {
   // The rules and the words of adding pictures are one pure module, read here when this anchor asks for it: its tests run it
   // under Node as it is, with no page, no React, no three.js and no alias of the bundler.
