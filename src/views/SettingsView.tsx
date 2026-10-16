@@ -21,6 +21,8 @@ const CompositorSection = lazy(() => import('@/components/settings/CompositorSec
 const ActingSupervisorSection = lazy(() => import('@/components/settings/ActingSupervisorSection').then(m => ({ default: m.ActingSupervisorSection })));
 // 어드민 전용 — 권한 관리
 const AdminRoleSection = lazy(() => import('@/components/settings/AdminRoleSection').then(m => ({ default: m.AdminRoleSection })));
+// v1.142.0~: 어드민 전용 — 배경 편집자 지정
+const BackgroundEditorSection = lazy(() => import('@/components/settings/BackgroundEditorSection').then(m => ({ default: m.BackgroundEditorSection })));
 const CharacterFolderRootSection = lazy(() => import('@/components/settings/CharacterFolderRootSection').then(m => ({ default: m.CharacterFolderRootSection })));
 import { loadPreferences } from '@/services/settingsService';
 import {
@@ -99,6 +101,7 @@ export function SettingsView() {
         return (
           <div className="flex flex-col gap-6">
             <AdminRoleSection />
+            <BackgroundEditorSection />
             <CharacterFolderRootSection />
           </div>
         );

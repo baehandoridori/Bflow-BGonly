@@ -307,6 +307,8 @@ test('KP-9: the words of mapDraftKeep.ts, letter for letter', () => {
   assert.equal(MAP_KEEP_TEXT.below, '접어 둔 하위 도면에 저장 안 한 변경이 있어요');
   assert.equal(MAP_KEEP_TEXT.broken, '도면 화면을 그리지 못했어요. 저장하지 않은 도면 편집 때문일 수 있어요.');
   assert.equal(MAP_KEEP_TEXT.brokenDiscard, '저장하지 않은 편집을 버리고 다시 열기');
+  assert.equal(MAP_KEEP_TEXT.noRight(2), '배경을 고칠 권한이 없어져서, 이 PC에서 저장하지 않은 도면 편집 2개를 저장할 수 없어요. 권한을 다시 받으면 이어서 고칠 수 있어요.');
+  assert.equal(MAP_KEEP_TEXT.noRightDiscard, '고치던 내용 버리기');
   assert.equal(MAP_STALE_TEXT.moved.title, '다른 곳에서 이 도면이 먼저 저장됐어요');
   assert.equal(MAP_STALE_TEXT.moved.lead, '이 PC에서 고친 내용과 다른 곳에서 저장한 내용은 하나로 합칠 수 없어요.');
   assert.equal(MAP_STALE_TEXT.moved.drop, '내 편집 버리고 최신 내용 받기');

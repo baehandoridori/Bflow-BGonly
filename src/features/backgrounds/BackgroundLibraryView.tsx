@@ -117,7 +117,7 @@ export default function BackgroundLibraryView() {
                 : updateRequired
                   ? "업데이트 필요"
                   : snapshot.canManage
-                    ? "관리자 편집 가능"
+                    ? "편집 가능"
                     : "라이브러리 보기"}
           </span>
           <button

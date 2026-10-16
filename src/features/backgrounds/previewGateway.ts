@@ -11,6 +11,8 @@ const KEY='bflow-background-library-preview-v1',CHANNEL='bflow-background-librar
 const listeners=new Set<()=>void>();
 const canonicalJson=(value:unknown)=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
 function notify(){for(const listener of listeners)try{listener();}catch{}if(typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel(CHANNEL);channel.postMessage({changed:true});channel.close();}}
+/** A change that touches what every reader may do (the editor list of 2026-10-16): open screens read again, as after a save. */
+export function notifyBackgroundPreview():void{notify();}
 export function subscribeBackgroundPreview(listener:()=>void):()=>void {
   listeners.add(listener);const channel=typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'?new BroadcastChannel(CHANNEL):null;
   if(channel)channel.onmessage=()=>listener();const storage=(event:StorageEvent)=>{if(event.key===KEY)listener();};

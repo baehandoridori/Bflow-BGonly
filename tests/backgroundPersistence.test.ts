@@ -195,3 +195,22 @@ test('clipboard file path: the epoch is checked first, nothing but the clipboard
   // A path of this PC and nothing more: neither the library nor the rights are asked for. The channel that reads the file asks.
   assert.equal(storeReads, 0);
 });
+
+test('the editor list goes through the two admin session wrappers, with the epoch checked and every window told of a change', async () => {
+  const { createBackgroundStore, parseEditorIds } = await load('electron/backgroundStore.ts'); const calls: any[] = [];
+  const store = createBackgroundStore({ rpc: async (name: string, args: any) => { calls.push({ name, args }); return { data: ['u1', 'u2'], error: null }; } }, { tokenFor: (actor: string) => `token-${actor}` });
+  assert.deepEqual(await store.listEditors('admin'), ['u1', 'u2']);
+  assert.deepEqual(await store.setEditor('admin', 'u3', true), ['u1', 'u2']);
+  // Only the session token says who asks: the server decides that only an admin may.
+  assert.deepEqual(calls, [{ name: 'background_editors_session_list', args: { p_session_token: 'token-admin' } }, { name: 'background_editors_session_set', args: { p_session_token: 'token-admin', p_user_id: 'u3', p_editor: true } }]);
+  await assert.rejects(store.setEditor('admin', '', true), /사용자/); await assert.rejects(store.setEditor('admin', 'u3', 'yes'), /사용자/); assert.equal(calls.length, 2);
+  for (const bad of [null, {}, [1], [''], ['x'.repeat(201)]]) assert.throws(() => parseEditorIds(bad), /명단/);
+  const { registerBackgroundIpc } = await load('electron/backgroundIpc.ts'); const handlers = new Map<string, Function>(); let changed = 0; const seen: unknown[] = [];
+  registerBackgroundIpc({ ipc: { handle: (name: string, handler: Function) => handlers.set(name, handler) }, getSessionOriginOrThrow: () => ({ userId: 'admin', epoch: 1 }), onChanged() { changed++; },
+    store: { read: async () => empty(), execute: async () => empty(), listEditors: async (actor: string) => { seen.push(['list', actor]); return ['u1']; }, setEditor: async (actor: string, user: string, editor: boolean) => { seen.push(['set', actor, user, editor]); return [user]; } } });
+  await assert.rejects(handlers.get('background-editors:list')!({}, 2), /세션/); await assert.rejects(handlers.get('background-editors:set')!({}, 'u2', true, 2), /세션/); assert.deepEqual(seen, []);
+  assert.deepEqual(await handlers.get('background-editors:list')!({}, 1), ['u1']);
+  await assert.rejects(handlers.get('background-editors:set')!({}, 'u2', 'true', 1), /사용자/);
+  assert.deepEqual(await handlers.get('background-editors:set')!({}, 'u2', true, 1), ['u2']); assert.equal(changed, 1);
+  assert.deepEqual(seen, [['list', 'admin'], ['set', 'admin', 'u2', true]]);
+});

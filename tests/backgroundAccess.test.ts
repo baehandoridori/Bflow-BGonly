@@ -14,26 +14,28 @@ const others = [
   undefined,
 ];
 
-test('the background library is open to the trial account only, like the playground', () => {
-  assert.equal(canAccessBackgroundLibrary(hansol, false), true);
-  assert.equal(resolveAllowedView('background-library', hansol, false), 'background-library');
-  for (const user of others) {
-    assert.equal(canAccessBackgroundLibrary(user as never, false), false);
-    assert.equal(resolveAllowedView('background-library', user as never, false), 'dashboard', 'a saved or stale view never lands on the hidden screen');
+test('the background library is open to everyone signed in (v1.142.0): who may edit is the server\'s to say', () => {
+  // Every signed-in member, in the app and in the preview: the menu and the screen. Editing is not decided here.
+  for (const user of [hansol, previewHansol, ...others.slice(0, 3)]) {
+    for (const preview of [false, true]) {
+      assert.equal(canAccessBackgroundLibrary(user, preview), true, `${user.name} ${preview}`);
+      assert.equal(resolveAllowedView('background-library', user, preview), 'background-library');
+    }
+  }
+  // No one signed in, or no usable identity: no menu, and a saved or stale view never lands on the screen.
+  for (const user of [{ id: 1, name: '배한솔' }, { id: '', name: '빈 아이디' }, { id: 'x' }, null, undefined]) {
+    assert.equal(canAccessBackgroundLibrary(user as never, false), false, JSON.stringify(user));
+    assert.equal(resolveAllowedView('background-library', user as never, false), 'dashboard');
   }
   // Other screens are untouched by the gate.
   assert.equal(resolveAllowedView('character-board', others[0], false), 'character-board');
-  // It follows the playground rule exactly, so both open together.
-  for (const user of [hansol, previewHansol, ...others]) {
-    for (const preview of [false, true]) assert.equal(canAccessBackgroundLibrary(user as never, preview), canAccessPlayground(user as never, preview));
-  }
 });
 
-test('the preview account opens it only in explicit preview mode', () => {
-  assert.equal(canAccessBackgroundLibrary(previewHansol, false), false);
-  assert.equal(canAccessBackgroundLibrary(previewHansol, true), true);
-  assert.equal(resolveAllowedView('background-library', previewHansol, true), 'background-library');
-  assert.equal(resolveAllowedView('background-library', { id: '1', name: '다른 사용자' }, true), 'dashboard');
+test('the playground stays the trial account\'s alone: the two gates no longer open together', () => {
+  assert.equal(canAccessPlayground(hansol, false), true); assert.equal(canAccessPlayground(previewHansol, true), true);
+  for (const user of others) assert.equal(canAccessPlayground(user as never, false), false);
+  assert.equal(resolveAllowedView('playground', others[0], false), 'dashboard');
+  assert.equal(resolveAllowedView('background-library', others[0], false), 'background-library');
 });
 
 test('the menu and the routed view both go through the gate', () => {

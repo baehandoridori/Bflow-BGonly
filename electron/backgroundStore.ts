@@ -17,8 +17,16 @@ function parseSnapshot(data: unknown): BackgroundSnapshot {
   return value;
 }
 
+/** The editor list of the background library (2026-10-16): the ids of the users an admin picked, as the server has them. */
+export function parseEditorIds(data: unknown): string[] {
+  if (!Array.isArray(data) || data.length > 1000 || !data.every(item => typeof item === 'string' && item.length > 0 && item.length <= 200)) {
+    throw new Error('배경 편집자 명단이 올바르지 않습니다.');
+  }
+  return data as string[];
+}
+
 export function createBackgroundStore(client: BackgroundRpcClient, sessions: BackgroundSessionResolver) {
-  async function call(actorId: string, name: string, args: Record<string, unknown> = {}) {
+  async function call<T = BackgroundSnapshot>(actorId: string, name: string, args: Record<string, unknown> = {}, parse: (data: unknown) => T = parseSnapshot as (data: unknown) => T): Promise<T> {
     const token = sessions.tokenFor(actorId);
     if (typeof token !== 'string' || !token.trim()) throw new Error('로그인 세션이 필요합니다. 다시 로그인해 주세요.');
     const { data, error } = await client.rpc(name, { p_session_token: token, ...args });
@@ -28,13 +36,19 @@ export function createBackgroundStore(client: BackgroundRpcClient, sessions: Bac
       }
       throw Object.assign(new Error(error.message || '배경 저장 중 오류가 발생했습니다.'), { code: error.code });
     }
-    return parseSnapshot(data);
+    return parse(data);
   }
   return {
     read: (actorId: string): Promise<BackgroundSnapshot> => call(actorId, 'background_library_read'),
     execute: async (actorId: string, request: BackgroundRequest): Promise<BackgroundSnapshot> => {
       validateBackgroundRequest(request);
       return call(actorId, 'background_library_execute', { p_request_id: request.requestId, p_command: request.command });
+    },
+    /** Admins only: the server refuses everyone else (42501). */
+    listEditors: (actorId: string): Promise<string[]> => call(actorId, 'background_editors_session_list', {}, parseEditorIds),
+    setEditor: async (actorId: string, userId: string, editor: boolean): Promise<string[]> => {
+      if (typeof userId !== 'string' || !userId || userId.length > 200 || typeof editor !== 'boolean') throw new Error('배경 편집자로 정할 사용자가 올바르지 않습니다.');
+      return call(actorId, 'background_editors_session_set', { p_user_id: userId, p_editor: editor }, parseEditorIds);
     },
   };
 }

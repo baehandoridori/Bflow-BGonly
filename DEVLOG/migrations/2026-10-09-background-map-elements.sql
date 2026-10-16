@@ -13,6 +13,8 @@
 -- nodes, would pass: do not get round the error that way (a deleted map cannot be brought back), apply
 -- the chain again. While no such map is stored yet, only saves that carry one of these shapes fail.
 -- After a run of the base file, run the 3D file first: this file refuses to run on the base validator.
+-- Then 2026-10-16-background-editors.sql, the last of the chain: it replaces snapshot and execute, which a
+-- run of the base file puts back and this file does not touch.
 --
 -- Replaces public.background_library_validate_entity and nothing else. The body is the 3D body with three
 -- additions; tests/backgroundDatabaseContract.test.ts fails if they drift apart.

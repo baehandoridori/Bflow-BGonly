@@ -100,6 +100,9 @@ export const MAP_KEEP_TEXT = {
   below: '접어 둔 하위 도면에 저장 안 한 변경이 있어요',
   broken: '도면 화면을 그리지 못했어요. 저장하지 않은 도면 편집 때문일 수 있어요.',
   brokenDiscard: '저장하지 않은 편집을 버리고 다시 열기',
+  /** The account may no longer edit (taken off the editor list, v1.142.0): its drafts cannot be saved, and the band that ends them is gone. */
+  noRight: (n: number) => `배경을 고칠 권한이 없어져서, 이 PC에서 저장하지 않은 도면 편집 ${n}개를 저장할 수 없어요. 권한을 다시 받으면 이어서 고칠 수 있어요.`,
+  noRightDiscard: '고치던 내용 버리기',
 } as const;
 /** The words of the choice about a map saved or deleted elsewhere first. */
 export const MAP_STALE_TEXT = {

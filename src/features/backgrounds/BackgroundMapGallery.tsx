@@ -97,7 +97,7 @@ export function BackgroundMapGallery({ snapshot, maps, current, selected, onClea
           </button>;
         })}
       </div> : <div className="bmap-gallery-empty">
-        <ImageIcon size={23} /><div><strong>{scopedViews.length ? '조건에 맞는 배경이 없어요' : '아직 연결된 배경이 없어요'}</strong><p>{scopedViews.length ? '검색어나 구도, 시간대를 바꿔 보세요.' : !snapshot.canManage ? '관리자가 도면이나 공간에 연결한 배경이 여기에 표시됩니다.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'}</p>{snapshot.canManage && onAddFiles && !scopedViews.length && <p>{MAP_IMAGE_HINT}</p>}</div>
+        <ImageIcon size={23} /><div><strong>{scopedViews.length ? '조건에 맞는 배경이 없어요' : '아직 연결된 배경이 없어요'}</strong><p>{scopedViews.length ? '검색어나 구도, 시간대를 바꿔 보세요.' : !snapshot.canManage ? '도면이나 공간에 연결한 배경이 여기에 표시돼요.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'}</p>{snapshot.canManage && onAddFiles && !scopedViews.length && <p>{MAP_IMAGE_HINT}</p>}</div>
         {hasFilters && <button type="button" onClick={resetFilters}>필터 초기화</button>}
       </div>}
     </div>

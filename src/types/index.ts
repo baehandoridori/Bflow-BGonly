@@ -1062,6 +1062,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
   backgroundUploadImage: (base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
   backgroundReadImageFile: (filePath: string) => Promise<{ dataUrl: string; filePath: string }>;
   backgroundReadClipboardFile: () => Promise<{ filePath: string } | null>;
+  /** The background editors an admin picked (2026-10-16): admins only, the server refuses everyone else. */
+  backgroundEditorsList: () => Promise<string[]>;
+  backgroundEditorsSet: (userId: string, editor: boolean) => Promise<string[]>;
   /** The unsaved map edits this PC keeps for the signed-in account (v1.140.0): the main session names the account. */
   backgroundKeptList: () => Promise<Record<string, import('../shared/backgroundKeptEdits').KeptMapEdit>>;
   backgroundKeptPut: (mapId: string, entry: import('../shared/backgroundKeptEdits').KeptMapEdit | null) => Promise<void>;

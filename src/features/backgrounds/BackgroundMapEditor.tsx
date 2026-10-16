@@ -294,6 +294,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const shownIds = useMemo(() => new Set(marqueeIds ?? selection.ids), [marqueeIds, selection]);
   const disabled = pending || busy;
   const editing = !!draft && snapshot.canManage;
+  /** Changed drafts of an account that may no longer edit: they cannot be saved, and the band that would end them is gone. */
+  const unsavedWithoutRight = snapshot.canManage ? 0 : Object.values(drafts).filter(mapDraftChanged).length;
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
   /** A dialog of the editor is open. Each asks about a map it holds: nothing may change the maps under it, and the editor's own message is shown inside it. */
@@ -1381,12 +1383,13 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       {!maps.length && <p className="bmap-hint">등록된 도면이 없습니다.</p>}
       <div className="bmap-tree-footer">공간을 선택해 내부 도면을 만들고 이어가세요.</div>
     </aside>
-    {!current ? <div className="bmap-main"><EmptyState title="첫 도면을 만들어 보세요" description={snapshot.canManage ? '이름을 정하고 공간을 그리면 시작할 수 있습니다.' : '관리자가 도면을 등록하면 이곳에서 탐색할 수 있습니다.'}>{snapshot.canManage && <button type="button" className="bg-button bg-primary" onClick={() => openCreate(null)}>도면 만들기</button>}</EmptyState></div> : <main className={`bmap-main${editing ? ' is-editing' : ''}`}>
+    {!current ? <div className="bmap-main"><EmptyState title="첫 도면을 만들어 보세요" description={snapshot.canManage ? '이름을 정하고 공간을 그리면 시작할 수 있습니다.' : '배경 편집 권한이 있는 사람이 도면을 등록하면 이곳에서 볼 수 있어요.'}>{snapshot.canManage && <button type="button" className="bg-button bg-primary" onClick={() => openCreate(null)}>도면 만들기</button>}</EmptyState></div> : <main className={`bmap-main${editing ? ' is-editing' : ''}`}>
       <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2></div></div>
         <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button><button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing || !keptSettled} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button></>}</div>
       </header>
       {error && !(dialogOpen && !placePrompt) && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
       {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => { setNotice(''); swallowSecondClick(); }}>×</button></div>}
+      {unsavedWithoutRight > 0 && <div className="bmap-notice bmap-notice-actions" role="status"><span>{MAP_KEEP_TEXT.noRight(unsavedWithoutRight)}</span><button type="button" disabled={disabled} onClick={() => session.discardAll()}>{MAP_KEEP_TEXT.noRightDiscard}</button></div>}
       {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id, standing !== 'current' ? standing : keptFailed ? 'unkept' : null)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
@@ -1490,7 +1493,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             drop={renamingNode.type === 'camera' ? MAP_EDIT_MARK.nameBoxCameraDrop : 0} label={`${kindLabel(renamingNode)} 이름`}
             initial={renamingNode.name} positionKey={`${view.x}:${view.y}:${view.zoom}:${canvasSize.width}:${canvasSize.height}`}
             onCommit={commitName} onCancel={cancelName} onHistory={passNameHistory} />}
-          {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '관리자가 공간을 배치하면 여기에 표시됩니다.'}</span></div>}
+          {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '배경 편집 권한이 있는 사람이 공간을 배치하면 여기에 표시돼요.'}</span></div>}
           <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' || hiddenCount > 0 ? footerHint : undefined}>{footerHint}</span>{hiddenCount > 0 && <div className="bmap-hidden-slot"><button type="button" className="bmap-hidden-chip" title={HIDDEN_NOTE} onClick={showAll}>숨김 {hiddenCount}개 · 모두 보이기</button></div>}{mode === 'plan' && <div className="bmap-zoom">{editing && snapToggle}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}{mode === '3d' && editing && <div className="bmap-zoom">{snapToggle}</div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
@@ -1505,7 +1508,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               {linkedMap ? <><strong>{linkedMap.name}</strong><button type="button" className="bg-button bg-primary" disabled={disabled} onClick={() => navigate(linkedMap.id)}>상세 도면 열기 →</button><p>{editing && mode === 'plan' ? '공간을 더블클릭해도 열립니다. 이름은 F2 키나 위의 이름 칸에서 바꿔요.' : '공간을 더블클릭해도 열립니다.'}</p></> : <><p>이 공간의 내부를 별도 도면으로 이어보세요.</p>{snapshot.canManage && <button type="button" className="bg-button bg-primary" disabled={disabled || selected.locked || !!polygon.length} onClick={() => openCreate(current.id, selected)}>내부 도면 만들기</button>}</>}
               {snapshot.canManage && <div className="bmap-link-actions"><button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => { setError(''); setLinkForm({ spaceId: selected.id, mapId: selected.childMapId ?? '', search: '' }); }}>{linkedMap ? '연결 변경' : '기존 도면 연결'}</button>{linkedMap && <button type="button" className="bmap-text-button" disabled={disabled || selected.locked || !!polygon.length} onClick={() => { focusCanvas(); void linkMap(null, selected.id); }}>연결 해제</button>}</div>}
               {selected.locked && <p>잠금을 해제하면 연결을 바꿀 수 있습니다.</p>}
-              {draftChanged && <p className="bmap-save-note">연결할 때 현재 공간 편집 내용도 함께 저장됩니다.</p>}
+              {snapshot.canManage && draftChanged && <p className="bmap-save-note">연결할 때 현재 공간 편집 내용도 함께 저장됩니다.</p>}
             </section>}
             {/* Out in the open, not in the folded 'position, size, lock' section, where it would not be found. An ellipse gets nothing.
                 On the plan only, where the points it speaks of can be worked on: the 3D view stays as it was. */}

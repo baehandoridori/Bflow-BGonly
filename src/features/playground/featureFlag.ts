@@ -26,14 +26,15 @@ export function canAccessPlayground(
 }
 
 /**
- * 배경 라이브러리는 시험 단계라 배플레이그라운드와 같은 계정(배한솔)에만 연다.
- * 메뉴 노출과 화면 진입이 모두 이 함수를 거치므로, 공개 범위를 넓힐 때는 여기만 바꾼다.
+ * 배경 라이브러리는 v1.142.0부터 팀 전체에 열려 있다: 로그인한 사람이면 누구나 메뉴와 화면을 본다. 고칠 수 있는 사람은
+ * 서버가 정한다(관리자와, 관리자가 설정에서 지정한 배경 편집자 — 나머지는 보기와 에피소드별 배경만).
+ * 메뉴 노출과 화면 진입이 모두 이 함수를 거치므로, 공개 범위를 바꿀 때는 여기만 바꾼다.
  */
 export function canAccessBackgroundLibrary(
   user: PlaygroundIdentity,
-  previewMode = isExplicitPlaygroundPreviewMode(),
+  _previewMode = isExplicitPlaygroundPreviewMode(),
 ): boolean {
-  return canAccessPlayground(user, previewMode);
+  return typeof user?.id === 'string' && user.id.length > 0 && typeof user.name === 'string';
 }
 
 const KNOWN_VIEWS = new Set<ViewMode>([

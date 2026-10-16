@@ -14,6 +14,8 @@
 -- "Every write" above and here means every write that leaves such a map stored: deleting the map, or
 -- saving it without those nodes, passes. Do not get past the error that way (a deleted map cannot be
 -- brought back): apply the chain again.
+-- 2026-10-16-background-editors.sql comes last in the chain. It replaces other functions (snapshot,
+-- execute), so this file does not undo it: only a run of the base file does.
 --
 -- Replaces public.background_library_validate_entity and nothing else. The body is the base body with
 -- the map node branches widened; tests/backgroundDatabaseContract.test.ts fails if the two drift apart.
