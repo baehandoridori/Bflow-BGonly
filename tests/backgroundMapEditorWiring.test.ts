@@ -3859,7 +3859,7 @@ test('anchor 82: the dots and the gate of the body — the sidebar dot inside th
   // an empty store and let the clean drafts go. The tab of the maps has a dot when there is anything to count (no tooltip: it takes
   // no press, and the hidden words say it), and the notice that an update is needed counts what is kept, less what was refused.
   const view = read('BackgroundLibraryView.tsx'), viewLines = lined(view);
-  for (const line of ['const { snapshot, loading, pending, error, updateRequired, execute, actorId } = useBackgroundStore();',
+  for (const line of ['const { snapshot, loading, pending, error, updateRequired, execute, actorId, read } = useBackgroundStore();',
     'const keptCount = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditCount(signal) : 0);',
     'const keptStored = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditsStored(signal) : 0);'])
     assert.ok(viewLines.includes(line), `not a line of the library screen: ${line}`);

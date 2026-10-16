@@ -51,7 +51,7 @@ import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
 
-type Props = { snapshot: BackgroundSnapshot; pending: boolean; execute: (command: BackgroundCommand) => Promise<void>; onOpenView: (id: string, variantId?: string) => void; onOpenCatalog: () => void; viewerId: string };
+type Props = { snapshot: BackgroundSnapshot; /** The snapshot was read from the server for this account: its canManage is the right. */ snapshotRead: boolean; pending: boolean; execute: (command: BackgroundCommand) => Promise<void>; onOpenView: (id: string, variantId?: string) => void; onOpenCatalog: () => void; viewerId: string };
 /** `hand` pans the plan and orbits the 3D world. The drawing tools exist on the plan only. */
 type Tool = 'select' | 'hand' | 'rect' | 'ellipse' | 'polygon' | 'road' | 'symbol';
 type CreateForm = { id: string; name: string; parentId: string | null; spaceId: string | null; placeId: string | null };
@@ -190,7 +190,7 @@ const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, hid
   </section>;
 });
 
-export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, onOpenCatalog, viewerId }: Props) {
+export function BackgroundMapEditor({ snapshot, snapshotRead, pending, execute, onOpenView, onOpenCatalog, viewerId }: Props) {
   const doc = useBackgroundMapDocument(viewerId);
   const { state, session } = doc, drafts = state.drafts;
   const [currentId, setCurrentId] = useState<string | null>(() => session.shownMapId);   // the map picked when this screen was last up in this run
@@ -294,8 +294,12 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const shownIds = useMemo(() => new Set(marqueeIds ?? selection.ids), [marqueeIds, selection]);
   const disabled = pending || busy;
   const editing = !!draft && snapshot.canManage;
-  /** Changed drafts of an account that may no longer edit: they cannot be saved, and the band that would end them is gone. */
-  const unsavedWithoutRight = snapshot.canManage ? 0 : Object.values(drafts).filter(mapDraftChanged).length;
+  /**
+   * Changed drafts of an account that may no longer edit: they cannot be saved, and the band that would end them is gone.
+   * Asked of a snapshot the server answered alone: a first read that failed (no network on the way back to this screen)
+   * leaves the placeholder's canManage, false, and a right that is intact would be shown as lost.
+   */
+  const unsavedWithoutRight = snapshot.canManage || !snapshotRead ? 0 : Object.values(drafts).filter(mapDraftChanged).length;
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
   /** A dialog of the editor is open. Each asks about a map it holds: nothing may change the maps under it, and the editor's own message is shown inside it. */

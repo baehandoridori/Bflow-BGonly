@@ -18,6 +18,9 @@ const fn = (text: string, name: string) => {
 const RIGHT_BEFORE = "SELECT COALESCE(role='admin',false) INTO can_manage FROM public.users WHERE id=actor FOR SHARE;";
 const RIGHT_AFTER = 'SELECT public.background_editors_can_edit(id) INTO can_manage FROM public.users WHERE id=actor FOR SHARE;';
 const REFUSED_BEFORE = '배경 관리는 관리자만 할 수 있습니다.', REFUSED_AFTER = '배경을 고칠 권한이 없습니다. 관리자에게 배경 편집자로 지정해 달라고 요청해 주세요.';
+/** The right asked again under the library's lock, which a change of the list takes too (a save already past the first check). */
+const LOCK = ' PERFORM pg_advisory_xact_lock(2119212026,1);\n';
+const RECHECK = " -- The right once more, under the lock a change of the editor list takes as well: an editor taken off the list while\n -- this request was being checked does not save after all. Episode usage needs no right.\n IF EXISTS(SELECT 1 FROM jsonb_array_elements(operations) item WHERE item->>'kind'<>'usage') AND NOT public.background_editors_can_edit(actor) THEN RAISE EXCEPTION '" + REFUSED_AFTER + "' USING ERRCODE='42501'; END IF;\n";
 
 test('E-1: the editor file is the fourth of the chain, and every header says what a re-run of the base file undoes', () => {
   assert.match(header(editors), /^-- Chain: base -> 3D -> elements -> this file /m);
@@ -31,7 +34,8 @@ test('E-1: the editor file is the fourth of the chain, and every header says wha
 
 test('E-2: snapshot and execute are the base bodies with only the edit right and the words of a refusal changed', () => {
   // The edit right is asked in one place, and the user row is still read under the same lock: a missing row is still 42501.
-  assert.equal(fn(editors, 'background_library_execute'), fn(base, 'background_library_execute').replace(RIGHT_BEFORE, RIGHT_AFTER).replaceAll(REFUSED_BEFORE, REFUSED_AFTER));
+  assert.equal(fn(base, 'background_library_execute').split(LOCK).length, 2, 'the base takes the lock once');
+  assert.equal(fn(editors, 'background_library_execute'), fn(base, 'background_library_execute').replace(RIGHT_BEFORE, RIGHT_AFTER).replaceAll(REFUSED_BEFORE, REFUSED_AFTER).replace(LOCK, LOCK + RECHECK));
   assert.equal(fn(editors, 'background_library_snapshot'), fn(base, 'background_library_snapshot').replace("'canManage',EXISTS(SELECT 1 FROM public.users WHERE id=actor AND role='admin'))", "'canManage',public.background_editors_can_edit(actor))"));
   assert.equal((fn(base, 'background_library_execute').match(new RegExp(REFUSED_BEFORE.replace('.', '\\.'), 'g')) ?? []).length, 2);
   assert.match(fn(editors, 'background_editors_can_edit'), /u\.role='admin' OR EXISTS\(SELECT 1 FROM public\.background_editors e WHERE e\.user_id=u\.id\)/);

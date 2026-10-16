@@ -77,6 +77,9 @@ BEGIN
  END IF;
  -- Global reference lock, individual entity revision: unrelated edits still never conflict.
  PERFORM pg_advisory_xact_lock(2119212026,1);
+ -- The right once more, under the lock a change of the editor list takes as well: an editor taken off the list while
+ -- this request was being checked does not save after all. Episode usage needs no right.
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(operations) item WHERE item->>'kind'<>'usage') AND NOT public.background_editors_can_edit(actor) THEN RAISE EXCEPTION '배경을 고칠 권한이 없습니다. 관리자에게 배경 편집자로 지정해 달라고 요청해 주세요.' USING ERRCODE='42501'; END IF;
  SELECT r.command INTO receipt FROM public.background_library_receipts r WHERE r.actor_id=actor AND r.request_id=p_request_id;
  IF FOUND THEN
   IF receipt<>p_command THEN RAISE EXCEPTION '같은 요청 식별자로 다른 내용을 저장할 수 없습니다.' USING ERRCODE='22023'; END IF;

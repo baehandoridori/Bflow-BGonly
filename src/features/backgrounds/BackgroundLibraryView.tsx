@@ -43,7 +43,7 @@ class MapEditorGuard extends Component<{ children: ReactNode; onDiscard(): void 
 export default function BackgroundLibraryView() {
   const user = useAuthStore((state) => state.currentUser),
     allEpisodes = useDataStore((state) => state.episodes);
-  const { snapshot, loading, pending, error, updateRequired, execute, actorId } = useBackgroundStore();
+  const { snapshot, loading, pending, error, updateRequired, execute, actorId, read } = useBackgroundStore();
   const keptCount = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditCount(signal) : 0);
   const keptStored = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditsStored(signal) : 0);
   const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("maps"),
@@ -173,6 +173,7 @@ export default function BackgroundLibraryView() {
                 <MapEditorGuard onDiscard={() => { if (user) mapDraftSessionOf(user.id).discardAll(); }}>
                   <BackgroundMapEditor
                     snapshot={snapshot}
+                    snapshotRead={read}
                     pending={pending}
                     execute={execute}
                     viewerId={user?.id ?? ''}
