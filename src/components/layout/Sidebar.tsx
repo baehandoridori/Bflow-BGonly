@@ -472,8 +472,8 @@ export function Sidebar() {
                   <span className="sr-only">{getCalendarAuthLabel(calendarAuthState)}</span>
                 </span>
               )}
-              {/* 숫자 배지: 늘면 '톡', 0 이 되면 작게 줄며 사라진다(움직임 폴리싱 7번). */}
               {item.id === 'background-library' && <BackgroundKeptDot userId={currentUser?.id ?? null} />}
+              {/* 숫자 배지: 늘면 '톡', 0 이 되면 작게 줄며 사라진다(움직임 폴리싱 7번). */}
               {item.id === 'compositing-revisions' && (
                 <CountBadge
                   count={totalOpenRevisions}
