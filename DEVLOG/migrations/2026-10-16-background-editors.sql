@@ -8,6 +8,7 @@
 -- files. Apply it before the app release that opens the background screen to the team.
 -- The new functions are named background_editors_*, never background_library_*: the earlier files revoke every
 -- background_library_% function and grant only read and execute again.
+-- Applied to production on 2026-10-16 as 20261016105647 (background_editors), after the elements file (20261010090509).
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '45s';

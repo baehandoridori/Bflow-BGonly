@@ -339,5 +339,5 @@ Resolved by opening the code (root C:/Bflow-BGonly/.claude/worktrees/background-
 | ① 평면 편집 기본기 | `docs/superpowers/specs/2026-10-08-background-map-editing-basics-design.md` | 2026-10-08 구현·수동 검증 완료(v1.131.0), 배포는 PR 머지 뒤 |
 | ② 선택 도구 개편 | `docs/superpowers/specs/2026-10-09-background-map-selection-tools-design.md` | 2026-10-09 구현·수동 검증 완료(v1.132.0), 배포는 PR 머지 뒤 |
 | ③ 새 도면 요소 | `docs/superpowers/specs/2026-10-09-background-map-new-elements-design.md` | 2026-10-10 구현 완료(v1.133.0) · 수동 검증·운영 DB 적용·배포 대기 |
-| ④ 팀 공개와 편집 권한 | - | **v1.142.0 구현(2026-10-16, 한솔의 답: 팀 전체 보기 + 편집자 지정 / 편집자는 배경 화면 전체 / 한 번에 공개)** · 운영 DB 적용·배포 대기 |
+| ④ 팀 공개와 편집 권한 | - | **v1.142.0 구현(2026-10-16, 한솔의 답: 팀 전체 보기 + 편집자 지정 / 편집자는 배경 화면 전체 / 한 번에 공개)** · **운영 DB 적용(2026-10-16, `20261016105647`) · v1.142.0 배포 완료(2026-10-16 20:01 KST, PR #337 → main 6f9acfca)** · 팀 PC 실기 확인 대기 |
 | ⑤ 도면 주석 | - | 대기 (결정 필요) |
