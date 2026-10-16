@@ -15,6 +15,8 @@ import { RetakeNotificationService } from '../../electron/retakeNotificationServ
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
 import { createThreadTodoPreviewStore, type ThreadTodoPreviewStore } from './threadTodoPreviewStore';
 import { createBackgroundPreviewGateway, subscribeBackgroundPreview } from '../features/backgrounds/previewGateway';
+import { KEPT_EDITS, KEPT_EDITS_REFUSAL, keptEntriesOf, keptEntryProblem } from '../shared/backgroundKeptEdits';
+import type { KeptMapEdit } from '../shared/backgroundKeptEdits';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 import {
   buildDevPreviewCommentReadStates,
@@ -155,6 +157,24 @@ function requireBackgroundPreviewSession() {
   return { actor, assertCurrent, gateway: createBackgroundPreviewGateway({
     id: actor.id, canManage: actor.role === 'admin', episodeNumbers: MOCK_EPISODES.map(ep => ep.episodeNumber),
   }, { storage: window.localStorage, assertCurrent }) };
+}
+
+/** The unsaved map edits the preview keeps (v1.140.0): main's file of one account, mirrored in one localStorage value per account. */
+const PREVIEW_KEPT_KEY = 'bflow:preview:background-map-kept:';
+function readPreviewKept(userId: string): Record<string, unknown> {
+  const text = window.localStorage.getItem(PREVIEW_KEPT_KEY + encodeURIComponent(userId));
+  if (text === null) return {};
+  const stored = JSON.parse(text) as { version?: unknown; entries?: unknown } | null;
+  if (!stored || stored.version !== KEPT_EDITS.version || !stored.entries || typeof stored.entries !== 'object' || Array.isArray(stored.entries)) throw new Error(KEPT_EDITS_REFUSAL.version);
+  return stored.entries as Record<string, unknown>;
+}
+function writePreviewKept(userId: string, mapId: string, entry: KeptMapEdit | null): void {
+  const problem = entry === null ? (typeof mapId === 'string' ? null : KEPT_EDITS_REFUSAL.shape) : keptEntryProblem(mapId, entry);
+  if (problem) throw new Error(problem);
+  const entries = { ...readPreviewKept(userId) }, has = Object.prototype.hasOwnProperty.call(entries, mapId);
+  if (entry === null) { if (!has) return; delete entries[mapId]; }
+  else { if (!has && Object.keys(entries).length >= KEPT_EDITS.maxEntries) throw new Error(KEPT_EDITS_REFUSAL.count); entries[mapId] = entry; }
+  window.localStorage.setItem(PREVIEW_KEPT_KEY + encodeURIComponent(userId), JSON.stringify({ version: KEPT_EDITS.version, entries }));
 }
 
 type MockCalendarRow = Awaited<ReturnType<ElectronAPI['calendarCreate']>>;
@@ -3799,6 +3819,8 @@ export function installDevElectronAPI(): void {
       assertCurrent(); return { dataUrl, filePath: samplePath };
     },
     backgroundReadClipboardFile: async () => { requireBackgroundPreviewSession(); const filePath = (window as DevPreviewWindow).__bflowMockBackgroundAdd?.clipboardFile; return filePath ? { filePath } : null; },
+    backgroundKeptList: async () => { const { actor, assertCurrent } = requireBackgroundPreviewSession(); const entries = keptEntriesOf(readPreviewKept(actor.id)); assertCurrent(); return entries; },
+    backgroundKeptPut: async (mapId, entry) => { const { actor, assertCurrent } = requireBackgroundPreviewSession(); assertCurrent(); writePreviewKept(actor.id, mapId, entry); },
     backgroundPickImages: async () => { const hook = (window as DevPreviewWindow).__bflowMockBackgroundAdd; return hook?.pick ? hook.pick() : /\bElectron\//.test(navigator.userAgent) ? [] : undefined; },
     ganttExecute: async (request) => {
       const { gateway, options } = requireGanttPreviewSession();

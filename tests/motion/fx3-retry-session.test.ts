@@ -383,9 +383,9 @@ test('세션이 바뀌면(렌더러 로그인 사용자 · 메인 세션 방송)
   assert.match(app, /useEffect\(\(\) => onSceneSaveSessionEnded\(\(\) => \{ void loadData\(\); \}\), \[loadData\]\);/);
 });
 
-test('직접 로그아웃은 세션이 살아 있을 때 기다리던 저장을 한 번 보내 본 뒤(최대 3초) 로그아웃한다', () => {
+test('직접 로그아웃은 세션이 살아 있을 때 기다리던 저장을 한 번 보내 본 뒤(최대 3초) 배경 도면의 보관도 마저 적은 뒤 로그아웃한다', () => {
   const menu = read('src/components/auth/UserMenu.tsx');
-  assert.match(menu, /const handleLogout = async \(\) => \{\n(?:\s+\/\/.*\n)*\s+await flushSceneSavesBeforeLogout\(\);\n\s+await logout\(\);\n\s+setCurrentUser\(null\);/);
+  assert.match(menu, /const handleLogout = async \(\) => \{\n(?:\s+\/\/.*\n)*\s+await flushSceneSavesBeforeLogout\(\);\n(?:\s+\/\/.*\n)*\s+await flushKeptMapEditsBeforeLogout\(\);\n\s+await logout\(\);\n\s+setCurrentUser\(null\);/);
   const service = read('src/services/sceneSaveRetry.ts');
   assert.match(service, /export const LOGOUT_FLUSH_MAX_MS = 3000;/);
   assert.match(service, /await flushNowWithin\(controller, maxWaitMs, retryEnv\);/);

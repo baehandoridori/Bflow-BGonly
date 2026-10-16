@@ -42,6 +42,10 @@ import type { MapImageLink, MapImagePlaceChoice, MapImageTarget } from './mapIma
 import { mapImageFilePath, useMapImageAdd } from './useMapImageAdd';
 import type { MapImageLinked, MapImageSource } from './useMapImageAdd';
 import { MapImageDropOverlay, MapImagePlacePrompt } from './BackgroundMapImageAdd';
+import { MAP_KEEP_TEXT, mapDraftStanding, rescueMapCopy, rescueMapName } from './mapDraftKeep';
+import { useKeptMapEdits } from './mapKeptSignal';
+import type { MapDraftStanding } from './mapDraftKeep';
+import { BackgroundMapKeptDialog } from './BackgroundMapKeptDialog';
 import { BackgroundSymbolGlyph, SymbolIcon } from './BackgroundSymbolGlyph';
 import { getSymbolPreset, symbolCatalog } from './symbolCatalog';
 import './backgrounds-map.css';
@@ -185,9 +189,9 @@ const ObjectList = memo(function ObjectList({ nodes, selectedIds, primaryId, hid
 });
 
 export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, onOpenCatalog, viewerId }: Props) {
-  const doc = useBackgroundMapDocument();
-  const { state } = doc, drafts = state.drafts;
-  const [currentId, setCurrentId] = useState<string | null>(null);
+  const doc = useBackgroundMapDocument(viewerId);
+  const { state, session } = doc, drafts = state.drafts;
+  const [currentId, setCurrentId] = useState<string | null>(() => session.shownMapId);   // the map picked when this screen was last up in this run
   const [mode, setMode] = useState<MapDisplayMode>('plan');
   const [tool, setTool] = useState<Tool>('select');
   const [gizmoMode, setGizmoMode] = useState<Map3DGizmoMode>('translate');
@@ -241,6 +245,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const [placePrompt, setPlacePrompt] = useState<{ target: Extract<MapImageTarget, { status: 'needs-place' }>; sources: readonly MapImageSource[]; count: number; drafted: boolean } | null>(null);
   /** Files dragged over the editor, as the overlay tells it: 'type' when none of them can go in. */
   const [fileDrag, setFileDrag] = useState<'ok' | 'type' | null>(null);
+  /** The choice about a map that was saved or deleted elsewhere first, asked by 도면 저장. It holds the map it was opened for, and acts on that alone. */
+  const [staleChoice, setStaleChoice] = useState<{ mapId: string } | null>(null);
   const deleting = useRef(false);                            // a run is in progress. A ref: a second press can come before `busy` is drawn
   /** Every map this dialog has set out to delete, over all its presses. */
   const deleteAimed = useRef<string[]>([]);
@@ -289,7 +295,14 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const canEdit = editing && !disabled;
   const gestureActive = state.gesture !== null;
   /** A dialog of the editor is open. Each asks about a map it holds: nothing may change the maps under it, and the editor's own message is shown inside it. */
-  const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt);
+  const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt || staleChoice);
+  const keptStatus = useKeptMapEdits(signal => signal.userId === viewerId ? signal.status : 'idle');
+  const keptSettled = keptStatus === 'ready' || keptStatus === 'unavailable';
+  const keptFailed = useKeptMapEdits(signal => signal.userId === viewerId && !!current && signal.failed.includes(current.id));
+  /** How the map on show stands against the library. Held while a save of this editor runs: the store shows that save before it is confirmed, and until its draft is put back an own save would read as one made elsewhere. */
+  const standingRef = useRef<MapDraftStanding>('current');
+  if (!disabled) standingRef.current = editing && current ? mapDraftStanding(draft, snapshot) : 'current';
+  const standing = standingRef.current;
   // The name box is drawn only while its node can still be renamed here; otherwise it goes without a commit.
   const renamingNode = renaming && mode === 'plan' && canEdit && renaming.mapId === current?.id
     ? current.nodes.find(node => node.id === renaming.nodeId && !node.locked) : undefined;
@@ -605,7 +618,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     updateMap({ ...base, nodes: [...base.nodes, symbol] }); select(symbol.id); setTool('select');
   }
   function beginEditing() {
-    if (!current || !snapshot.canManage || disabled) return;
+    if (!current || !snapshot.canManage || disabled || !keptSettled) return;
     doc.beginEditing(current);
     setTool('select'); setError('');
   }
@@ -641,6 +654,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     // Nothing unsaved: no write. A save of an untouched map would still raise its revision and signal every open screen.
     // Read from the store: the field that was being typed in has just been committed by leaving it.
     if (!mapDraftChanged(mapDraft(doc.getState(), current.id))) return;
+    // Saved or deleted elsewhere first: nothing is sent. What to do with the edits of this PC is asked.
+    if (standing !== 'current') { setError(''); setStaleChoice({ mapId: current.id }); return; }
     if (!current.name.trim()) { setError('도면 이름을 입력해 주세요.'); setRefused(count => count + 1); return; }
     const settled = settle(), captured = settled.maps.find(map => map.id === current.id);
     if (!captured) return;
@@ -684,7 +699,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
     if (existing) {
       const linked = !createForm.spaceId || snapshot.maps.find(map => map.id === createForm.parentId)?.nodes.some(node => node.type === 'space' && node.id === createForm.spaceId && node.childMapId === existing.id);
       if (!linked) { setError('도면은 생성되었지만 연결 상태가 바뀌었습니다. 기존 도면 연결에서 선택해 주세요.'); return; }
-      if (createForm.parentId) doc.discard(createForm.parentId);
+      if (createForm.parentId && createForm.spaceId) doc.discard(createForm.parentId);
       enterNewMap(existing); setCreateForm(null); return;
     }
     const map: BackgroundMap = { id: createForm.id, revision: 0, name: createForm.name.trim(), parentId: createForm.parentId, placeId: createForm.placeId, imageUrl: '', nodes: [] };
@@ -716,6 +731,27 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       if (value.parentId) expandPath(value.parentId);
       setSettingsForm(null);
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
+  }
+  /** The answer about a map saved or deleted elsewhere first. Nothing is merged, and nothing is written over what was saved there. */
+  async function answerStale(choice: 'back' | 'discard' | 'copy') {
+    if (!staleChoice || disabled) return;
+    const mapId = staleChoice.mapId, held = mapDraft(doc.getState(), mapId), saved = snapshot.maps.find(map => map.id === mapId);
+    if (choice === 'back' || !held) { setStaleChoice(null); setError(''); return; }
+    if (choice === 'discard') {
+      // Moved: the draft goes on from what was saved elsewhere, and editing goes on. Gone: the draft goes, and the screen moves to where the map hung.
+      if (saved) doc.rebaseDrafts([saved]);
+      else { doc.discard(mapId); setCurrentId(held.value.parentId); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); }
+      setPolygon([]); setActiveVertex(null); setStaleChoice(null); setError(''); return;
+    }
+    // A new map of the edits of this PC, saved the way every save of maps goes, and edited on as a new map is. The map saved elsewhere is not touched.
+    const copy = rescueMapCopy(snapshot, held.value, uuid()), command: MapSaveCommand = { type: 'save-maps', maps: [{ entity: copy, expectedRevision: null }] };
+    setBusy(true); setError('');
+    try {
+      await persistMaps(command);
+      doc.discard(mapId); doc.beginEditing(savedMaps(command)[0]);
+      setCurrentId(copy.id); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setStaleChoice(null);
+      if (copy.parentId) expandPath(copy.parentId);
+    } catch (cause) { setError(mapDeleteCauseText(cause)); } finally { setBusy(false); }
   }
   async function uploadUnderlay(file: File) {
     if (!settingsForm || disabled || !snapshot.canManage) return;
@@ -1264,6 +1300,17 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const gallery = useMemo(() => settledCurrent ? <BackgroundMapGallery key={settledCurrent.id} snapshot={snapshot} maps={settledMaps} current={settledCurrent} selected={settledSelected} onClearSelection={clearSelection} onOpenView={openView} onOpenCatalog={openCatalog} adding={imageAdd.view} saving={pending} onAddFiles={addPickedImages} onDismissNotice={dismissNotice} /> : null,
     [snapshot, settledMaps, settledCurrent, settledSelected, clearSelection, openView, openCatalog, imageAdd.view, pending, addPickedImages, dismissNotice]);
 
+  // Each read of the library, before the first paint it can: a save of this PC whose answer was lost (the screen was left while it ran)
+  // is put back on what the library holds, and once per login what this PC kept comes back as drafts, without a question, said once.
+  // Only against a library read as an editor's, with no save (a batch of pictures locks the editor for its saves), drag or dialog running.
+  useLayoutEffect(() => {
+    if (!keptSettled || !snapshot.canManage || disabled || gestureActive || dialogOpen) return;
+    const restored = session.catchUp(snapshot);
+    if (!restored?.count) return;
+    if (restored.mapId && currentId === null) setCurrentId(restored.mapId);
+    setNotice(MAP_KEEP_TEXT.restored(restored.count));
+  }, [session, keptStatus, snapshot, disabled, gestureActive, dialogOpen, currentId]);
+  useEffect(() => { session.shownMapId = currentId; }, [session, currentId]);
   const treeRows: { map: BackgroundMap; depth: number }[] = [];
   const visited = new Set<string>();
   function tree(parentId: string | null, depth: number) {
@@ -1277,6 +1324,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const linkTarget = maps.find(map => map.id === linkForm?.mapId);
   const movedLink = linkTarget && current && linkTarget.parentId !== current.id;
   const draftChanged = mapDraftChanged(draft);
+  /** Maps over a map with unsaved edits: a collapsed row says what it hides. */
+  const changedBelow = useMemo(() => { const ids = new Set<string>(); for (const id of Object.keys(drafts)) if (mapDraftChanged(drafts[id])) for (const above of mapPath(maps, id).slice(0, -1)) ids.add(above.id); return ids; }, [maps, drafts]);
   const linksAdded = useMemo(() => !!draft && !!current && mapLinksAdded(snapshot.maps.find(map => map.id === current.id), draft.value), [snapshot.maps, draft, current?.id]);
   const deletePlan = useMemo(() => mapDelete ? planMapDelete(snapshot, drafts, mapDelete.mapId, mapDelete.mode) : null, [snapshot, drafts, mapDelete?.mapId, mapDelete?.mode]);
   const fieldLocked = !canEdit || !!selected?.locked;
@@ -1311,18 +1360,18 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       <div className="bmap-section-heading"><strong>도면</strong>{snapshot.canManage && <button type="button" className="bmap-new-root" disabled={disabled} onClick={() => openCreate(null)}>＋ 새 도면</button>}</div>
       <nav aria-label="도면 목록">{treeRows.filter(({ map }) => !mapPath(maps, map.id).slice(0, -1).some(parent => collapsed.has(parent.id))).map(({ map, depth }) => <div key={map.id} className={`bmap-tree-item ${map.id === current?.id ? 'is-active' : ''}`} style={{ paddingLeft: 6 + depth * 13 }}>
         {maps.some(child => child.parentId === map.id) ? <button type="button" className="bmap-tree-toggle" aria-label={`${map.name} ${collapsed.has(map.id) ? '펼치기' : '접기'}`} aria-expanded={!collapsed.has(map.id)} onClick={() => setCollapsed(previous => { const next = new Set(previous); if (next.has(map.id)) next.delete(map.id); else next.add(map.id); return next; })}>{collapsed.has(map.id) ? '›' : '⌄'}</button> : <span className="bmap-tree-spacer" />}
-        <button type="button" className="bmap-tree-row" onClick={() => navigate(map.id)} aria-current={map.id === current?.id ? 'page' : undefined}><span>{map.name}</span>{mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 안 한 변경이 있어요">●</span>}</button>
+        <button type="button" className="bmap-tree-row" onClick={() => navigate(map.id)} aria-current={map.id === current?.id ? 'page' : undefined}><span>{map.name}</span>{mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 안 한 변경이 있어요">●</span>}{collapsed.has(map.id) && !mapDraftChanged(mapDraft(state, map.id)) && changedBelow.has(map.id) && <span className="bmap-draft-dot" title={MAP_KEEP_TEXT.below}>●</span>}</button>
       </div>)}</nav>
       {!maps.length && <p className="bmap-hint">등록된 도면이 없습니다.</p>}
       <div className="bmap-tree-footer">공간을 선택해 내부 도면을 만들고 이어가세요.</div>
     </aside>
     {!current ? <div className="bmap-main"><EmptyState title="첫 도면을 만들어 보세요" description={snapshot.canManage ? '이름을 정하고 공간을 그리면 시작할 수 있습니다.' : '관리자가 도면을 등록하면 이곳에서 탐색할 수 있습니다.'}>{snapshot.canManage && <button type="button" className="bg-button bg-primary" onClick={() => openCreate(null)}>도면 만들기</button>}</EmptyState></div> : <main className={`bmap-main${editing ? ' is-editing' : ''}`}>
       <header className="bmap-header"><div><nav className="bmap-breadcrumb" aria-label="현재 도면 경로">{mapPath(maps, current.id).map((map, index) => <span key={map.id}>{index > 0 && <span className="bmap-crumb-separator">/</span>}<button type="button" onClick={() => navigate(map.id)} aria-current={map.id === current.id ? 'page' : undefined}>{map.name}</button></span>)}</nav><div className="bmap-title"><h2>{current.name}</h2></div></div>
-        <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button><button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button></>}</div>
+        <div className="bmap-actions"><button type="button" className="bg-button bmap-quiet" aria-expanded={inspectorOpen} aria-controls="bmap-selection-properties" onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? '속성 접기' : '속성 열기'}</button>{snapshot.canManage && <><button type="button" className="bg-button bmap-quiet" disabled={disabled} onClick={openSettings}>도면 설정</button><button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing || !keptSettled} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button></>}</div>
       </header>
       {error && !(dialogOpen && !placePrompt) && <div className="bg-error" role="alert" ref={errorRef}>{error}</div>}
-      {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
-      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
+      {notice && <div className="bmap-notice" role="status"><span>{notice}</span><button type="button" aria-label="안내 닫기" title="안내 닫기" onClick={() => { setNotice(''); swallowSecondClick(); }}>×</button></div>}
+      {editing && draft && <BackgroundMapEditStrip status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id, standing !== 'current' ? standing : keptFailed ? 'unkept' : null)} disabled={disabled} onEnd={endEditing} onSave={requestSave} />}
       <BackgroundMapPanels gallery={gallery}>
         <section className={`bmap-canvas-wrap${mode === '3d' ? ' is-3d' : ''}`} aria-label="도면 작업 영역">
           <div className="bmap-toolbar" role="toolbar" aria-label="도면 도구">
@@ -1513,7 +1562,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             <div className="bmap-section-heading"><strong>도면 구성</strong><span className="bmap-badge">{current.nodes.filter(node => node.type === 'space').length}개 공간</span></div>
             <p className="bmap-hint">공간을 선택하면 내부 도면을 만들거나 연결할 수 있습니다.</p>
             {mode === '3d' && <p className="bmap-hint">공간을 고르면 속이 안 보이는 박스로 볼 수 있어요.</p>}
-            {snapshot.canManage && <button type="button" className="bg-button bmap-draw-action" disabled={disabled} title={mode === '3d' ? '공간은 평면에서 그려요. 평면으로 바꿔 드릴게요.' : undefined} onClick={() => { if (!editing) beginEditing(); if (mode !== 'plan') switchMode('plan'); setTool('rect'); }}>＋ 공간 그리기</button>}
+            {snapshot.canManage && <button type="button" className="bg-button bmap-draw-action" disabled={disabled || !keptSettled} title={mode === '3d' ? '공간은 평면에서 그려요. 평면으로 바꿔 드릴게요.' : undefined} onClick={() => { if (!editing) beginEditing(); if (mode !== 'plan') switchMode('plan'); setTool('rect'); }}>＋ 공간 그리기</button>}
             <section className="bmap-children"><div className="bmap-section-heading"><strong>하위 도면</strong><span>{childMaps.length}</span></div>
               {childMaps.map(map => <button type="button" key={map.id} className="bmap-child-row" disabled={disabled} onClick={() => navigate(map.id)}><span>{map.name}</span><span>→</span></button>)}
               {!childMaps.length && <p className="bmap-hint">필요한 만큼 안쪽 도면을 이어가세요.</p>}
@@ -1534,6 +1583,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       {error && <p className="bg-error" role="alert">{error}</p>}
       <div className="bmap-modal-actions"><button type="button" className="bg-button" disabled={disabled} onClick={() => { setCreateForm(null); setError(''); }}>취소</button><button type="submit" className="bg-button bg-primary" disabled={!createForm.name.trim() || disabled}>{busy ? '만드는 중…' : '만들고 들어가기'}</button></div>
     </form></BackgroundModal>}
+    {staleChoice && <BackgroundMapKeptDialog gone={!snapshot.maps.some(map => map.id === staleChoice.mapId)} kept={!keptFailed} copyName={rescueMapName(mapDraft(state, staleChoice.mapId)?.value.name ?? '')} error={error} busy={busy} disabled={disabled} onBack={() => void answerStale('back')} onDiscard={() => void answerStale('discard')} onCopy={() => void answerStale('copy')} />}
     {linkForm && current && <BackgroundModal title="기존 도면 연결" onClose={() => { if (!busy) { setLinkForm(null); setError(''); } }}><form onSubmit={event => { event.preventDefault(); void linkMap(linkForm.mapId); }}>
       <p className="bmap-dialog-context">‘{current.nodes.find(node => node.id === linkForm.spaceId)?.name}’ 공간에서 열 도면을 선택하세요.</p>
       <Field label="도면 찾기"><input autoFocus data-autofocus type="search" value={linkForm.search} disabled={disabled} onChange={event => setLinkForm({ ...linkForm, search: event.target.value })} placeholder="도면 이름으로 검색" /></Field>

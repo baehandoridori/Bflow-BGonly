@@ -971,9 +971,9 @@ test('anchor 50: a save never ends edit mode: every saved map that was being edi
   // revision before that save, and the next save would be refused. Nothing after the wait reads that render or opens a draft.
   const after = persist.slice(positions(persist, waited)[0] + waited.length);
   for (const stale of [/\bsnapshot\b/, /\bcurrent\b/, /\bdraft\b/, /doc\.beginEditing/, /doc\.enterNewMap/]) assert.doesNotMatch(after, stale);
-  // No save drops a draft any more, and the six saves all go through that function.
+  // No save drops a draft any more, and the seven saves all go through that function.
   assert.doesNotMatch(editor, /dropDrafts/);
-  assert.equal(count(editor, /await persistMaps\(/g), 6, 'the map, a new map, a link, the settings, the save step of a map delete, the tie of pictures added while viewing');
+  assert.equal(count(editor, /await persistMaps\(/g), 7, 'the map, a new map, a link, the settings, the save step of a map delete, the tie of pictures added while viewing, the copy of the edits of this PC over a map saved or deleted elsewhere');
   const binding = read('useBackgroundMapDocument.ts');
   assert.doesNotMatch(binding, /dropDrafts/);
   // The calls of the editor reach the reducer through these two lines, and each sends its own action. Swapped, a save would
@@ -1044,10 +1044,13 @@ test('anchor 52: edit mode ends without a question only when nothing would be lo
   // window, where a press drops the selection and a double-click enters a space). For the length of a double-click no
   // press reaches the page. Only on this path: after the question the band goes with a click on the dialog.
   inOrder(end, 'leaveEditing(); focusCanvas();', 'swallowSecondClick();');
-  // The word stands seven times: the function, this call, the delete dialog of a map as it comes up and as a run of it
+  // The word stands eight times: the function, this call, the delete dialog of a map as it comes up and as a run of it
   // stops (anchor 66 holds those two where they are), hiding a node when what the properties show changes
-  // (setNodesHidden), and the two buttons of the image list that go away as they are pressed (below).
-  assert.equal(count(editor, /\bswallowSecondClick\b/g), 7, 'the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, hiding that changes what the properties show, and the two buttons of the image list that go away as they are pressed');
+  // (setNodesHidden), the two buttons of the image list that go away as they are pressed (below), and the × of the
+  // editor's notice: the notice goes from over the band, the band moves up by its height, and 도면 저장 comes under the
+  // pointer — the second click of a double-click on the × would save the map, or open the choice about it.
+  assert.equal(count(editor, /\bswallowSecondClick\b/g), 8, "the function, 편집 끝내기, the delete dialog of a map as it opens and as a run of it stops, hiding that changes what the properties show, and the two buttons of the image list that go away as they are pressed, and the × of the editor's notice, which takes the notice away from over the band");
+  assert.equal(editor.split("onClick={() => { setNotice(''); swallowSecondClick(); }}").length - 1, 1, "the × of the editor's notice lets no second click through to the band that moves up under it");
   // '도면 전체' and the line's ×: pressed, each goes away and '＋ 이미지 추가' or a card slides under the pointer — the second click of a
   // double-click would open the file dialog or a card.
   for (const line of ['const clearSelection = useEvent(() => { select(null); swallowSecondClick(); });', 'const dismissNotice = useEvent(() => { imageAdd.dismiss(); swallowSecondClick(); });'])
@@ -1370,7 +1373,7 @@ test('anchor 57: a save is told inside the band, for a moment', () => {
   // a write to the library: the editor's `busy` is also on while an underlay is uploaded.
   const strip = handler.strip();
   for (const part of ['mapEditStatus(draft, pending,', 'savedNotice?.mapId === current.id',
-    'status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id)}']) assert.ok(strip.includes(part), `not found: ${part}`);
+    "status={mapEditStatus(draft, pending, savedNotice?.mapId === current.id, standing !== 'current' ? standing : keptFailed ? 'unkept' : null)}"]) assert.ok(strip.includes(part), `not found: ${part}`);
   // The same words are read out as it happens, from a region that is not seen.
   assert.ok(editStrip().includes('<span className="sr-only" role="status">{status.announce}</span>'));
   // No toast, in any screen of the feature: it would come up in a corner of the window, away from the band that was pressed.
@@ -1400,10 +1403,11 @@ test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the wo
   };
   // 편집 시작, the whole tag. A plain button of the library, a border and no fill: not the accent fill (`bg-primary`) of
   // the button it replaced. While the map is edited it is off and kept from readers, and the stylesheet hides it by that
-  // `aria-hidden`. Its own click hides it, so the click sends the keyboard to the canvas: left on a hidden button, Delete
-  // and Ctrl+Z would reach nothing. And nothing else is on the tag: `hidden`, say, would take it out of the row.
+  // `aria-hidden`; and off until this PC's list of kept edits is read (a draft opened before it would be written over
+  // the edit kept for that map). Its own click hides it, so the click sends the keyboard to the canvas: left on a hidden
+  // button, Delete and Ctrl+Z would reach nothing. And nothing else is on the tag: `hidden`, say, would take it out of the row.
   const start = button('편집 시작');
-  assert.equal(start, '<button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button>');
+  assert.equal(start, '<button type="button" className="bg-button bmap-edit-start" disabled={disabled || editing || !keptSettled} aria-hidden={editing || undefined} onClick={() => { beginEditing(); setInspectorOpen(true); focusCanvas(); }}>편집 시작</button>');
   // It keeps its place in the row: straight after 도면 설정, in no branch. Taken out while editing (`!editing &&`), 도면 설정
   // would slide under the pointer, and the second click of a double-click on 편집 시작 would open the settings. And it
   // stays inside what only an account that may edit is shown: a read-only account has no such button.
@@ -1456,7 +1460,7 @@ test('anchor 59: the new test files run in the build', () => {
   // The build runs every test file a pattern of names finds. A file that is deleted, or renamed out of that pattern, takes
   // its tests with it and leaves the build green. This file is old and inside the pattern: it asks for the new ones by name.
   const tests = new URL('./', import.meta.url), names = readdirSync(tests);
-  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts', 'backgroundMapDelete.test.ts', 'backgroundMapViewPrefs.test.ts', 'backgroundMapImageDrop.test.ts']) {
+  for (const name of ['backgroundMapEditStatus.test.ts', 'backgroundMapEditColor.test.ts', 'backgroundMapNumberField.test.ts', 'backgroundMapDelete.test.ts', 'backgroundMapViewPrefs.test.ts', 'backgroundMapImageDrop.test.ts', 'backgroundMapKeep.test.ts', 'backgroundKeptEdits.test.ts']) {
     assert.ok(names.includes(name), `not in the tests folder: ${name}`);
     const source = readFileSync(new URL(name, tests), 'utf8');
     // And each tests something: a file whose tests are all skipped is green as well.
@@ -2157,32 +2161,37 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   assert.ok(read('mapPlanPreview.ts').includes('scale: PlanSideScale = planSideScale(map, camera)'), 'planSideView takes no scale');
 });
 
-test('anchor 65: an open dialog of the editor is one line, and seven places read it', () => {
-  // That a dialog of the editor is open is said in one line, of all six: the question (discard, delete), the three
-  // forms (a new map, a link, the settings), the delete dialog of a map and the place prompt of added pictures. Each
-  // holds what it was opened for: nothing may change the maps under it, and the first five show what the editor has to
-  // say inside them. One of the six left out of that line is a dialog under which the drafts follow the library, and
-  // pictures come in. Without `mapDelete` that dialog is the delete dialog of a map.
-  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt);';
+test('anchor 65: an open dialog of the editor is one line, and nine places read it', () => {
+  // That a dialog of the editor is open is said in one line, of all seven: the question (discard, delete), the three
+  // forms (a new map, a link, the settings), the delete dialog of a map, the place prompt of added pictures and the
+  // choice about a map saved or deleted elsewhere first. Each holds what it was opened for: nothing may change the maps
+  // under it, and all but the place prompt show what the editor has to say inside them. One of the seven left out of
+  // that line is a dialog under which the drafts follow the library, and pictures come in. Without `mapDelete` that
+  // dialog is the delete dialog of a map.
+  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt || staleChoice);';
   const lines = editor.split('\n').map(line => line.trim());
   assert.ok(lines.includes(made), `not a line of its own: ${made}`);
-  // The word stands nine times, on nine lines: the one that makes it and, in this order, the seven places that read it.
+  // The word stands eleven times, on eleven lines: the one that makes it and, in this order, the nine places that read it.
   // The drafts follow the library only while no dialog is open, and the effect that asks them to waits for the value:
   // it asks again as the dialog closes, and without the value there a draft would stay behind the library after the
   // dialog is closed (anchor 56 holds both lines in their place). Ctrl+S is left to an open dialog (anchor 53). The save
   // run of a batch of added pictures does not start under one (`idle`), and no picture comes in under one, by any of
   // the three ways: the one way in turns it away, a paste is left to the dialog, and a drag of files over the editor
-  // brings up no sheet and is not swallowed, so it drops nothing. And the editor's own message, the block above the band,
-  // is not drawn while a dialog is open: the sentence is inside the dialog then. An eighth place would be a reader no
-  // anchor knows, and with a place less one of the seven asks something else.
+  // brings up no sheet and is not swallowed, so it drops nothing. The restore does not run under a dialog either (no kept
+  // edit comes back, and no save whose answer was lost is put back, under the map a dialog holds), and its effect waits
+  // for the value: it looks again as the dialog closes. And the editor's own message, the block above the band,
+  // is not drawn while a dialog is open: the sentence is inside the dialog then. A tenth place would be a reader no
+  // anchor knows, and with a place less one of the nine asks something else.
   const guard = 'if (disabled || doc.isGestureActive() || dialogOpen) return;', waited = 'useEffect(() => { followSaved(); }, [followSaved, snapshot.maps, disabled, gestureActive, dialogOpen]);';
   const key = 'if (dialogOpen || document.querySelector(openDialogs)) return;', band = '{error && !(dialogOpen && !placePrompt) && <div className="bg-error" role="alert" ref={errorRef}>';
   const idle = 'idle: () => !pointerRef.current && !doc.isGestureActive() && !renamingRef.current && !polygon.length && !busy && !dialogOpen && !document.querySelector(openDialogs) });';
   const add = 'if (!sources.length || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;';
   const paste = 'dialog: dialogOpen || !!document.querySelector(openDialogs), text: !!element?.closest(textFields), dragging: !!pointerRef.current || doc.isGestureActive() };';
   const drop = "if (!data || !Array.from(data.types).includes('Files') || !current || !snapshot.canManage || dialogOpen || document.querySelector(openDialogs)) return;";
-  assert.equal(count(editor, /\bdialogOpen\b/g), 9, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the save run of added pictures, the three ways pictures come in, the message');
-  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, idle, add, paste, drop, `${band}{error}</div>}`]);
+  const restoreGuard = 'if (!keptSettled || !snapshot.canManage || disabled || gestureActive || dialogOpen) return;';
+  const restoreWaits = '}, [session, keptStatus, snapshot, disabled, gestureActive, dialogOpen, currentId]);';
+  assert.equal(count(editor, /\bdialogOpen\b/g), 11, 'made, the guard of the follow and what its effect waits for, Ctrl+S, the save run of added pictures, the three ways pictures come in, the guard of the restore and what it waits for, the message');
+  assert.deepEqual(lines.filter(line => /\bdialogOpen\b/.test(line)), [made, guard, waited, key, idle, add, paste, drop, restoreGuard, restoreWaits, `${band}{error}</div>}`]);
   // The place prompt draws no message of the editor and clears none: under it the message stays drawn, as before it came up.
   assert.ok(!editor.includes('{error && !dialogOpen && '), 'the message of the editor goes as the place prompt comes up');
   // The dialogs are listed in that one line and nowhere else: in neither order the three places used to write four of
@@ -3568,4 +3577,348 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   assert.deepEqual(editorLines.slice(panelsEnd, panelsEnd + 3), ['</BackgroundMapPanels>',
     "{fileDrag && <MapImageDropOverlay words={mapImageTargetWords(resolveMapImageTarget(snapshot, maps, current, selected), { editing, running: imageAdd.view.running, wrongType: fileDrag === 'type' })} />}", '</main>}']);
   assert.ok(editor.includes('<BackgroundMapPanels gallery={gallery}>'), 'the panels are handed something else than the image list');
+});
+
+test('anchor 79: the document belongs to the account and outlives the screen, its session is one per login and cleaned up as the editor goes, and the editor alone is guarded', () => {
+  // The files of the keeping of unsaved edits are read here, when this anchor asks for them. `lined` is a source as its lines,
+  // without their indent (anchor 66).
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean);
+  // The hook takes the document of the account's session and makes none of its own: a document of the screen would go with the
+  // screen, and every draft and undo step with it on a visit to another menu. As the editor goes, a drag that runs is cancelled and
+  // the field being typed in is ended, for the document stays. And as the editor comes up, a list of kept edits that could not be
+  // read is read again: in an effect, the one place it is asked for, never while drawing (the signal draws the sidebar anew).
+  const hook = read('useBackgroundMapDocument.ts'), hookLines = lined(hook);
+  for (const line of ['const [session] = useState(() => mapDraftSessionOf(userId));', 'const store = session.store;',
+    "useEffect(() => () => { store.dispatch({ type: 'gesture-cancel' }); store.dispatch({ type: 'end-coalescing' }); }, [store]);",
+    'useEffect(() => { if (userId) primeKeptMapEdits(userId); }, [userId]);']) assert.ok(hookLines.includes(line), `not a line of the hook: ${line}`);
+  assert.ok(!hook.includes('createMapDocumentStore'), 'the hook makes a document of its own, which goes with the screen');
+  assert.equal(count(hook, /primeKeptMapEdits\(/g), 1, 'the list is read past the effect of the hook');
+  // One session for the account signed in: the same account is handed the same one, another account a new one, once the one before
+  // was disposed of (B would see the drafts of A). It writes through the bridge of main, merges its marks into the signal (a write
+  // that replaced the signal would wipe the account and the status, and nothing would be kept), and runs on the timers of the window.
+  const sessionOf = block(hook, 'export function mapDraftSessionOf(userId: string): MapDraftSession {');
+  for (const text of ['if (active?.userId === userId) return active;', 'active?.dispose();']) assert.ok(sessionOf.includes(text), `not in mapDraftSessionOf: ${text}`);
+  const made = lined(piece(sessionOf, 'createMapDraftSession({', '});'));
+  for (const line of ['put: (mapId, entry) => window.electronAPI.backgroundKeptPut(mapId, entry),',
+    'signal: { read: useKeptMapEdits.getState, write: patch => useKeptMapEdits.setState(patch) },',
+    'timers: { set: (run, ms) => window.setTimeout(run, ms), clear: handle => window.clearTimeout(handle as number) },',
+    'now: Date.now,']) assert.ok(made.includes(line), `not a line of the session that is made: ${line}`);
+  assert.ok(!sessionOf.includes('primeKeptMapEdits('), 'the list is read while the editor is drawn');
+  // Hung once in the run, never once for each session (one more at every login): quitting and 지금 업데이트 ask the session alive at
+  // that moment for what it still has to write, and so does logging out, never with an empty promise; and a change of account
+  // disposes of the session there and then. Each line once, as a line of its own, inside the branch that runs once.
+  const hooked = lined(block(hook, 'if (!hooked) {'));
+  for (const line of ['window.electronAPI?.onBeforeQuitFlush?.(() => active?.flush());', 'setKeptMapFlush(() => active?.flush() ?? Promise.resolve());',
+    'useAuthStore.subscribe((now, before) => { if (now.currentUser?.id !== before.currentUser?.id) { active?.dispose(); active = null; } });']) {
+    assert.equal(hookLines.filter(item => item === line).length, 1, `not once, as a line of its own: ${line}`);
+    assert.ok(hooked.includes(line), `not hung once in the run: ${line}`);
+  }
+  // The session makes the document, once. Every draft goes in one dispatch when the editor could not draw them.
+  const session = read('mapDraftSession.ts');
+  assert.equal(count(session, /createMapDocumentStore\(\)/g), 1, 'the session does not make its document once');
+  assert.equal(block(session, 'discardAll() {'), "discardAll() { store.dispatch({ type: 'drop-drafts', mapIds: Object.keys(store.getState().drafts) }); }");
+  // The editor takes the document of the account and starts on the map picked when it was last up in this run (none picked: null,
+  // and the first map is on show). It writes back the map picked, never the map on show: after a visit to another menu a restore
+  // that came late would not show the map kept last. And its own cleanup still lets go of a drag, and of the capture of the pointer.
+  const all = lined(editor);
+  for (const line of ['const doc = useBackgroundMapDocument(viewerId);', 'const { state, session } = doc, drafts = state.drafts;',
+    'const [currentId, setCurrentId] = useState<string | null>(() => session.shownMapId);',
+    'useEffect(() => { session.shownMapId = currentId; }, [session, currentId]);', 'useEffect(() => abortGesture, [abortGesture]);'])
+    assert.ok(all.includes(line), `not a line of the editor: ${line}`);
+  // A failure while the editor is drawn is caught round the editor alone, inside the tab of the maps: drawn again it would fail again
+  // on the same drafts, which outlive the screen and come back after a restart. Its button lets them all go and puts the guard back,
+  // so the editor is drawn anew. The other tabs and the header are not inside it.
+  const view = read('BackgroundLibraryView.tsx'), viewLines = lined(view);
+  for (const line of ['static getDerivedStateFromError() { return { failed: true }; }', "componentDidCatch(error: Error) { console.error('[background] map editor failed:', error); }",
+    'return <div className="bg-empty" role="alert"><p>{MAP_KEEP_TEXT.broken}</p><button type="button" className="bg-button bg-primary" onClick={() => { this.props.onDiscard(); this.setState({ failed: false }); }}>{MAP_KEEP_TEXT.brokenDiscard}</button></div>;'])
+    assert.ok(viewLines.includes(line), `not a line of the guard of the editor: ${line}`);
+  const guarded = piece(view, '<MapEditorGuard onDiscard={() => { if (user) mapDraftSessionOf(user.id).discardAll(); }}>', '</MapEditorGuard>');
+  assert.equal(count(guarded, /<BackgroundMapEditor\b/g), 1, 'the editor is not inside its guard');
+  assert.equal(count(view, /<BackgroundMapEditor\b/g), 1, 'the editor is drawn outside its guard as well');
+  assert.ok(!guarded.includes('<BackgroundAssetPanel'), 'the guard holds the whole body');
+});
+
+test('anchor 80: settled edits are kept within 0.3 seconds and only what this session wrote or restored is removed, and what was kept comes back once per login under no save, drag or dialog', () => {
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean);
+  // The rules of keeping, as the session writes them (5: P1, P2 with arm, P4, and P6 with P5 inside it). Only a settled document is
+  // looked at: during a drag nothing, so the preview of a drag is never written. A changed draft sets the timer of its map only when
+  // none is set: set again at every change, edits that go on would write nothing until they stop. A timer that rings is let go first.
+  // Before the list of this login is read nothing is written (an entry not read yet would be written over): the map waits, marked as
+  // not kept when the list cannot be read. What is written is the map as it settled, the map a drag of it started on. A draft gone
+  // clean or gone loses its timer and its mark first, and its entry only when this session wrote or restored it: an entry not read,
+  // not restored or not written in this run is never removed.
+  const session = read('mapDraftSession.ts'), sessionLines = lined(session);
+  for (const line of ['if (disposed || !keeps || state.gesture !== null) return;', 'if (mapDraftChanged(draft)) arm(mapId); else drop(mapId);',
+    'for (const mapId of Object.keys(seen)) if (!(mapId in drafts)) drop(mapId);',
+    'function arm(mapId: string) { if (!timers.has(mapId)) timers.set(mapId, deps.timers.set(() => fire(mapId), MAP_KEEP_DELAY_MS)); }',
+    "if (!ready()) { if (deps.signal.read().status === 'unavailable') fail(mapId); arm(mapId); return; }",
+    'send(mapId, keptEntryOf(draft, gestureStartMap(state, mapId) ?? draft.value, deps.now()));',
+    'function drop(mapId: string) { unarm(mapId); unfail(mapId); if (!owned.delete(mapId)) return; send(mapId, null); }'])
+    assert.ok(sessionLines.includes(line), `not a line of the session: ${line}`);
+  assert.equal(lined(block(session, 'function fire(mapId: string) {'))[1], 'timers.delete(mapId);', 'a timer that rang is not let go first, so its map is never armed again');
+  // Read is read for this account: the list of the account before, or one still loading, is no list of this login.
+  assert.ok((sessionLines.find(line => line.startsWith('const ready = ')) ?? '').includes("signal.userId === deps.userId && signal.status === 'ready'"),
+    'the session writes before the list of this account was read');
+  // The delay itself, and three modules that send nothing to the library and store nothing in the page: the writes, the signal and
+  // the timers are handed to the session, and the rules are pure. Word by word, so a longer name is no find.
+  const keep = read('mapDraftKeep.ts'), signal = read('mapKeptSignal.ts');
+  assert.ok(keep.includes('export const MAP_KEEP_DELAY_MS = 300;'), 'a settled edit is not kept within 0.3 seconds');
+  for (const [name, source] of [['mapDraftSession.ts', session], ['mapDraftKeep.ts', keep], ['mapKeptSignal.ts', signal]])
+    for (const word of [/\bexecute\b/, /\buseBackgroundStore\b/, /\bbackgroundExecute\b/, /\blocalStorage\b/]) assert.doesNotMatch(source, word, `${name} reaches past itself`);
+  for (const [name, source] of [['mapDraftSession.ts', session], ['mapDraftKeep.ts', keep]])
+    for (const word of [/\bwindow\b/, /\bdocument\b/]) assert.doesNotMatch(source, word, `${name} reaches the page`);
+  // The restore, in the editor: before the first paint it can (a layout effect, so no map shows for a frame and is replaced), only
+  // against a library read as an editor's, and never under a save (a batch of pictures locks the editor for its saves), a drag or a
+  // dialog, but under an upload, which changes no draft. It waits for the status of the list, not for its being settled, so a list
+  // that is read late still comes back. Then the line that writes back the map picked, as 6.5 has them. The dispatch of a restore is
+  // the session's: the editor still dispatches in one place (anchor 23).
+  const restoreEffect = piece(editor, 'useLayoutEffect(() => {\n    if (!keptSettled', 'const treeRows');
+  assert.deepEqual(lined(restoreEffect), ['useLayoutEffect(() => {', 'if (!keptSettled || !snapshot.canManage || disabled || gestureActive || dialogOpen) return;',
+    'const restored = session.catchUp(snapshot);', 'if (!restored?.count) return;', 'if (restored.mapId && currentId === null) setCurrentId(restored.mapId);',
+    'setNotice(MAP_KEEP_TEXT.restored(restored.count));', '}, [session, keptStatus, snapshot, disabled, gestureActive, dialogOpen, currentId]);',
+    'useEffect(() => { session.shownMapId = currentId; }, [session, currentId]);']);
+  assert.equal(count(editor, /session\.catchUp\(/g), 1, 'the session is caught up past the effect');
+  assert.equal(count(editor, /doc\.dispatch\(/g), 1, 'the editor dispatches past the pick');
+  // Until the list of this login is read no draft is opened: 편집 시작 does nothing (its dimming is anchor 58's), and ＋ 공간 그리기,
+  // which opens one on its way to the rectangle, is dimmed as well. A draft opened before the list would be written over the edit
+  // kept for that map.
+  assert.equal(lined(block(editor, 'function beginEditing() {'))[1], 'if (!current || !snapshot.canManage || disabled || !keptSettled) return;');
+  const drawn = '>＋ 공간 그리기</button>', drawnAt = editor.indexOf(drawn);
+  assert.equal(count(editor, new RegExp(drawn, 'g')), 1, 'one button reads ＋ 공간 그리기');
+  assert.ok(editor.slice(editor.lastIndexOf('<button', drawnAt), drawnAt).includes('disabled={disabled || !keptSettled}'), '＋ 공간 그리기 opens a draft before the list is read');
+  // The retry of 내부 도면 만들기 lets the draft of the parent go only when the command whose answer was lost held the parent: with a
+  // link to a space. Without one, the unsaved edits of the parent and their copy on this PC stay.
+  const retry = lined(block(piece(editor, 'async function createMap(', 'async function linkMap('), 'if (existing) {'));
+  assert.ok(retry.includes('if (createForm.parentId && createForm.spaceId) doc.discard(createForm.parentId);'), 'the retry is not as written');
+  assert.ok(!editor.includes('if (createForm.parentId) doc.discard('), 'the retry lets the parent go without a link');
+  // The status of the list for this account (another account's is none), and its being settled: read, or not readable.
+  const all = lined(editor);
+  for (const line of ["const keptStatus = useKeptMapEdits(signal => signal.userId === viewerId ? signal.status : 'idle');",
+    "const keptSettled = keptStatus === 'ready' || keptStatus === 'unavailable';"]) assert.ok(all.includes(line), `not a line of the editor: ${line}`);
+});
+
+test('anchor 81: a map saved or deleted elsewhere first — the standing is frozen during a save, 도면 저장 asks instead of sending, and the copy is saved as every map is', () => {
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean), all = lined(editor);
+  // Right behind the line that says a dialog is open, in this order: the status of the list of this account and its being settled
+  // (6.1), whether the last write of the map on show was refused (asked of this account: the id of a map is the same in another),
+  // and how that map stands against the library itself (never against the maps the drafts shadow, which always stand as they are).
+  // Held while a job of the editor runs: the library shows a save before it is confirmed, and until its draft is put back an own
+  // save would read as one made elsewhere, and the band would blink at every save.
+  const made = 'const dialogOpen = !!(confirmation || createForm || linkForm || settingsForm || mapDelete || placePrompt || staleChoice);';
+  const madeAt = all.indexOf(made);
+  assert.ok(madeAt > -1, `not a line of the editor: ${made}`);
+  assert.deepEqual(all.slice(madeAt + 1, madeAt + 7), ["const keptStatus = useKeptMapEdits(signal => signal.userId === viewerId ? signal.status : 'idle');",
+    "const keptSettled = keptStatus === 'ready' || keptStatus === 'unavailable';",
+    'const keptFailed = useKeptMapEdits(signal => signal.userId === viewerId && !!current && signal.failed.includes(current.id));',
+    "const standingRef = useRef<MapDraftStanding>('current');",
+    "if (!disabled) standingRef.current = editing && current ? mapDraftStanding(draft, snapshot) : 'current';", 'const standing = standingRef.current;']);
+  // 도면 저장 and Ctrl+S on such a map send nothing and ask: after the check that something is unsaved (nothing unsaved stands as it
+  // is), before the check of the name, and so after the polygon (anchor 51). The choice is opened there alone, and holds its map.
+  const save = handler.saveMap(), asked = "if (standing !== 'current') { setError(''); setStaleChoice({ mapId: current.id }); return; }";
+  inOrder(save, 'if (!mapDraftChanged(mapDraft(doc.getState(), current.id))) return;', asked, 'if (!current.name.trim()) {');
+  assert.ok(lined(save).includes(asked), `not a line of its own: ${asked}`);
+  assert.equal(count(editor, /setStaleChoice\(\{/g), 1, 'the choice is opened past 도면 저장');
+  assert.ok(all.includes('const [staleChoice, setStaleChoice] = useState<{ mapId: string } | null>(null);'), 'the state of the choice is not as written');
+  // The choice is drawn where the editor draws its dialogs, right behind the dialog of a new map and before the one of a link: not
+  // behind the question (anchor 66 holds that order), and not hung on the map on show. It is told whether the edits were kept.
+  const drawn = "{staleChoice && <BackgroundMapKeptDialog gone={!snapshot.maps.some(map => map.id === staleChoice.mapId)} kept={!keptFailed} copyName={rescueMapName(mapDraft(state, staleChoice.mapId)?.value.name ?? '')} error={error} busy={busy} disabled={disabled} onBack={() => void answerStale('back')} onDiscard={() => void answerStale('discard')} onCopy={() => void answerStale('copy')} />}";
+  const drawnAt = all.indexOf(drawn);
+  assert.ok(drawnAt > -1, 'the choice is not drawn as written');
+  assert.equal(all[drawnAt - 1], '</form></BackgroundModal>}', 'the choice does not follow the dialog of a new map');
+  assert.ok(all[drawnAt + 1].startsWith('{linkForm && current && <BackgroundModal'), 'the dialog of a link does not follow the choice');
+  inOrder(editor, '{createForm && <BackgroundModal ', drawn, '{linkForm && current && <BackgroundModal ');
+  assert.equal(count(editor, /<BackgroundMapKeptDialog\b/g), 1, 'the choice is drawn more than once');
+  // The answer, line by line (8.5). Nothing is merged and nothing written over what was saved elsewhere: 돌아가기 closes it; the
+  // latest is taken by putting the draft back on the map the library holds (a changed draft never follows the library), and edit mode
+  // goes on; a map that is gone lets its draft go and the screen moves up; the copy is a new map saved the way every save of maps
+  // goes, never by `execute`, the draft of the old map let go only once the copy is saved, and the new map edited on. The command is
+  // made before the wait: after it this handler holds the render that started it (anchor 66).
+  const answer = piece(editor, 'async function answerStale(', 'async function uploadUnderlay(');
+  assert.deepEqual(lined(answer), ["async function answerStale(choice: 'back' | 'discard' | 'copy') {", 'if (!staleChoice || disabled) return;',
+    'const mapId = staleChoice.mapId, held = mapDraft(doc.getState(), mapId), saved = snapshot.maps.find(map => map.id === mapId);',
+    "if (choice === 'back' || !held) { setStaleChoice(null); setError(''); return; }", "if (choice === 'discard') {", 'if (saved) doc.rebaseDrafts([saved]);',
+    "else { doc.discard(mapId); setCurrentId(held.value.parentId); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); }",
+    "setPolygon([]); setActiveVertex(null); setStaleChoice(null); setError(''); return;", '}',
+    "const copy = rescueMapCopy(snapshot, held.value, uuid()), command: MapSaveCommand = { type: 'save-maps', maps: [{ entity: copy, expectedRevision: null }] };",
+    "setBusy(true); setError('');", 'try {', 'await persistMaps(command);', 'doc.discard(mapId); doc.beginEditing(savedMaps(command)[0]);',
+    "setCurrentId(copy.id); setPolygon([]); setTool('select'); setSymbolPaletteOpen(false); setFocusRequest(null); setStaleChoice(null);",
+    'if (copy.parentId) expandPath(copy.parentId);', '} catch (cause) { setError(mapDeleteCauseText(cause)); } finally { setBusy(false); }', '}']);
+  assert.ok(!answer.includes('execute('), 'the copy is sent past the function every save of maps goes through');
+  inOrder(answer, 'command: MapSaveCommand', 'await ');
+  assert.doesNotMatch(answer.slice(positions(answer, 'await ')[0]), /(?<![.\w])(?:snapshot|current|draft|maps)\b/, 'the answer reads its render after the wait');
+  // The dialog: no form (Enter answers the button in focus), opened on 돌아가기, its buttons in this order. As the delete dialog of a
+  // map: a key from outside it is held, two presses of Esc do not close it, the repeats of a key held as it came up press nothing,
+  // and the focus comes back to 돌아가기 once a save is over. Its first paragraph says whether the edits were kept.
+  const dialog = read('BackgroundMapKeptDialog.tsx'), dialogLines = lined(dialog);
+  assert.ok(!dialog.includes('<form'), 'the choice is a form');
+  assert.equal(count(dialog, /\bdata-autofocus\b/g), 1, 'the choice opens on more than one button');
+  const buttons = ['<button type="button" className="bg-button" data-autofocus ref={back} disabled={disabled} onClick={onBack}>돌아가기</button>',
+    '<button type="button" className="bg-button bmap-danger" disabled={disabled} onClick={onDiscard}>{text.drop}</button>',
+    `<button type="button" className="bg-button bg-primary" disabled={disabled} onClick={onCopy}>{busy ? '저장 중…' : MAP_STALE_TEXT.save}</button>`];
+  for (const button of buttons) assert.ok(dialogLines.includes(button), `not a button of the choice: ${button}`);
+  inOrder(dialog, ...buttons);
+  assert.deepEqual(lined(block(dialog, 'useEffect(() => {')), ['useEffect(() => {', "const dialog = back.current?.closest('dialog');", 'if (!dialog) return;',
+    'const reopen = () => { if (dialog.isConnected && !dialog.open) dialog.showModal(); };', 'const hold = (event: KeyboardEvent) => {', 'event.stopPropagation();',
+    "if ((event.ctrlKey || event.metaKey) && ['KeyR', 'KeyZ', 'KeyY'].includes(event.code)) event.preventDefault();",
+    "if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault();", '};',
+    "dialog.addEventListener('close', reopen); window.addEventListener('keydown', hold, true);",
+    "return () => { dialog.removeEventListener('close', reopen); window.removeEventListener('keydown', hold, true); };", '}']);
+  for (const line of ['useEffect(() => { if (!disabled) back.current?.focus(); }, [disabled]);',
+    '<p className="bmap-confirm-text">{text.lead} {kept ? MAP_STALE_TEXT.kept : MAP_STALE_TEXT.unkept}</p>']) assert.ok(dialogLines.includes(line), `not a line of the choice: ${line}`);
+  // The band says it first (8.2): changed and saved or deleted elsewhere is a state of its own, in front of changed, whose words
+  // say a write that was refused.
+  const status = lined(read('mapEditStatus.ts')), stale = ["if (changed && (note === 'moved' || note === 'gone')) return { phase: 'stale', changed, steps, detail: note === 'moved' ? '다른 곳에서 먼저 저장됐어요' : '다른 곳에서 지워졌어요', canSave: true, saveLabel: '도면 저장',",
+    "announce: note === 'moved' ? '이 도면이 다른 곳에서 먼저 저장됐어요. 도면 저장을 누르면 어떻게 할지 고를 수 있어요' : '이 도면이 다른 곳에서 지워졌어요. 도면 저장을 누르면 어떻게 할지 고를 수 있어요' };",
+    "if (changed) return { phase: 'changed', changed, steps, detail: note === 'unkept' ? '이 PC에 보관하지 못했어요' : draft.baseRevision === null ? '아직 저장한 적 없는 도면이에요' : `저장 안 한 변경 ${steps}개`, canSave: true, saveLabel: '도면 저장',",
+    "announce: note === 'unkept' ? '저장 안 한 변경을 이 PC에 보관하지 못했어요. 도면 저장을 눌러 주세요' : '' };"];
+  const staleAt = status.indexOf(stale[0]);
+  assert.ok(staleAt > -1, 'the band has no state for a map saved or deleted elsewhere first');
+  assert.deepEqual(status.slice(staleAt, staleAt + 4), stale);
+  // Its look: the words in an outlined box with a mark in front, not filled as unsaved edits are, and still.
+  const lines = sheetLines(), rules = ['.bmap-edit-strip[data-phase="stale"] .bmap-edit-state>span { padding:1px 8px; border:1px solid rgb(var(--bmap-edit-ink)); border-radius:999px; font-weight:600; }',
+    '.bmap-edit-strip[data-phase="stale"] .bmap-edit-state>span::before { content:"!"; margin-right:5px; font-weight:700; }'];
+  for (const rule of rules) assert.equal(lines.filter(line => line === rule).length, 1, `not once, as a line of its own: ${rule}`);
+  for (const line of lines.filter(line => line.includes('data-phase="stale"'))) assert.doesNotMatch(line, /animation|transition/, line);
+});
+
+test('anchor 82: the dots and the gate of the body — the sidebar dot inside the item the gate lets through, the tab dot, the collapsed row, and the logout that keeps first', () => {
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean);
+  // Files of the app outside this feature are read as written, comments and all (anchor 78).
+  const raw = (url: URL) => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
+  // The sidebar: the dot is imported once and drawn once, inside the icon of the item the gate lets through, and the gate is as it
+  // was. So the list of kept edits is read for an account that may see the menu, and the dot is on no other item. The icon is cut up
+  // to the label behind it: the dot of the calendar inside it closes a span of its own.
+  const sidebar = raw(new URL('../src/components/layout/Sidebar.tsx', import.meta.url)), sidebarLines = lined(sidebar);
+  const dotUse = "{item.id === 'background-library' && <BackgroundKeptDot userId={currentUser?.id ?? null} />}";
+  for (const line of ["import { BackgroundKeptDot } from '@/features/backgrounds/BackgroundKeptDot';", dotUse,
+    ".filter((item) => item.id !== 'background-library' || canAccessBackgroundLibrary(currentUser))"])
+    assert.equal(sidebarLines.filter(item => item === line).length, 1, `not once, as a line of the sidebar: ${line}`);
+  assert.equal(count(sidebar, /<BackgroundKeptDot\b/g), 1, 'the dot is drawn more than once');
+  assert.ok(lined(piece(sidebar, '<span className="shrink-0 w-12 flex justify-center relative">', 'className="text-sm font-medium')).includes(dotUse), 'the dot is drawn outside the icon of its item');
+  // The dot: shown for the signal of this account alone, it reads the list as it comes up, and lets the signal go as it goes only when
+  // the account signed in is no longer that one (drawn anew in the same login, the marks of the session stay and 편집 시작 is not
+  // dimmed again). It imports nothing but React, the account and the signal: the sidebar is always loaded.
+  const dot = read('BackgroundKeptDot.tsx'), dotLines = lined(dot);
+  assert.deepEqual([...dot.matchAll(/^import .* from '([^']+)';$/gm)].map(match => match[1]), ['react', '@/stores/useAuthStore', './mapKeptSignal']);
+  assert.equal(count(dot, /\bimport\b/g), 3, 'the dot imports more');
+  for (const line of ['const shown = useKeptMapEdits(state => !!userId && state.userId === userId && keptMapEditCount(state) > 0);',
+    'return () => { if (useAuthStore.getState().currentUser?.id !== userId) releaseKeptMapEdits(userId); };',
+    'return <span className="absolute -top-0.5 right-1.5 h-2.5 w-2.5 rounded-full border border-bg-card bg-accent shadow-[0_0_0_1px_rgb(var(--color-text-secondary))]" title={KEPT_DOT_TEXT}><span className="sr-only">{KEPT_DOT_TEXT}</span></span>;'])
+    assert.ok(dotLines.includes(line), `not a line of the dot: ${line}`);
+  // The signal is loaded with them: zustand and one type, and nothing of the document, the domain or the drafts.
+  const signal = read('mapKeptSignal.ts'), signalLines = lined(signal), imports = signalLines.filter(line => /\bimport\b/.test(line));
+  assert.deepEqual(imports, ["import { create } from 'zustand';", "import type { KeptMapEdit } from '../../shared/backgroundKeptEdits.ts';"]);
+  for (const word of ['domain', 'mapDocument', 'mapDraft']) assert.ok(!imports.some(line => line.includes(word)), `the signal imports ${word}`);
+  for (const line of ["export const KEPT_DOT_TEXT = '저장 안 한 도면 편집이 있어요';",
+    'export function keptMapEditCount(signal: KeptSignal): number { return new Set([...signal.kept, ...signal.changed]).size; }',
+    'export function keptMapEditsStored(signal: KeptSignal): number { return signal.kept.filter(id => !signal.failed.includes(id)).length; }'])
+    assert.ok(signalLines.includes(line), `not a line of the signal: ${line}`);
+  // The library screen. Its body is drawn only once the store was set up for this account: before that the editor would come up on
+  // an empty store and let the clean drafts go. The tab of the maps has a dot when there is anything to count (no tooltip: it takes
+  // no press, and the hidden words say it), and the notice that an update is needed counts what is kept, less what was refused.
+  const view = read('BackgroundLibraryView.tsx'), viewLines = lined(view);
+  for (const line of ['const { snapshot, loading, pending, error, updateRequired, execute, actorId } = useBackgroundStore();',
+    'const keptCount = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditCount(signal) : 0);',
+    'const keptStored = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditsStored(signal) : 0);'])
+    assert.ok(viewLines.includes(line), `not a line of the library screen: ${line}`);
+  assert.deepEqual(viewLines.filter(line => line.includes('bg-tab-dot')), ['{id === "maps" && keptCount > 0 && <span className="bg-tab-dot"><span className="sr-only">{KEPT_DOT_TEXT}</span></span>}'],
+    'the tab dot is not as written, or says it in a tooltip');
+  assert.ok(lined(piece(view, ') : (', '</section>')).includes('{(loading || actorId !== (user?.id ?? null)) && !snapshot.maps.length && !snapshot.places.length ? ('),
+    'the body is drawn before the store was set up for this account');
+  assert.ok(lined(piece(view, '{updateRequired ? (', ') : (')).includes('{keptStored > 0 && <p>{MAP_KEEP_TEXT.update(keptStored)}</p>}'), 'the notice of an update does not count what is kept');
+  // The tree: a row folded over a map with unsaved edits says so with the dot of a changed row, right behind that dot, and only on
+  // a row that is not changed itself.
+  assert.ok(lined(editor).includes('const changedBelow = useMemo(() => { const ids = new Set<string>(); for (const id of Object.keys(drafts)) if (mapDraftChanged(drafts[id])) for (const above of mapPath(maps, id).slice(0, -1)) ids.add(above.id); return ids; }, [maps, drafts]);'),
+    'the maps over a changed map are not as written');
+  assert.ok(editor.includes('mapDraftChanged(mapDraft(state, map.id)) && <span className="bmap-draft-dot" title="저장 안 한 변경이 있어요">●</span>}{collapsed.has(map.id) && !mapDraftChanged(mapDraft(state, map.id)) && changedBelow.has(map.id) && <span className="bmap-draft-dot" title={MAP_KEEP_TEXT.below}>●</span>}'),
+    'the dot of a folded row is not right behind the dot of a changed row');
+  // The tab dot over the end of its tab, so the tab keeps its width: placed on the button, ringed for the page, taking no press, still.
+  const tabSheet = readFileSync(new URL('backgrounds.css', directory), 'utf8').replace(/\r\n/g, '\n'), dotAt = tabSheet.indexOf('.bg-tab-dot {');
+  assert.ok(dotAt > -1, 'the tab dot has no rule');
+  const dotRule = tabSheet.slice(dotAt, tabSheet.indexOf('}', dotAt) + 1);
+  for (const declaration of ['position: absolute;', 'right: 2px;', 'box-shadow: 0 0 0 1px rgb(var(--color-text-secondary));', 'pointer-events: none;'])
+    assert.ok(dotRule.includes(declaration), `not declared for the tab dot: ${declaration}`);
+  assert.doesNotMatch(dotRule, /animation|transition/, 'the tab dot moves');
+  const sheet = tabSheet.split('\n'), tabsAt = sheet.indexOf('.bg-library-tabs button {');
+  assert.ok(tabsAt > -1, 'the buttons of the tabs have no rule of their own');
+  assert.ok(sheet.slice(tabsAt, sheet.indexOf('}', tabsAt)).map(line => line.trim()).includes('position: relative;'), 'the tab dot is not placed on its tab');
+  // Logging out: the scene saves, then what is kept, while the session is alive, and only then the logout.
+  const menu = raw(new URL('../src/components/auth/UserMenu.tsx', import.meta.url));
+  assert.equal(lined(menu).filter(line => line === "import { flushKeptMapEditsBeforeLogout } from '@/features/backgrounds/mapKeptSignal';").length, 1, 'the user menu does not import the flush of what is kept');
+  inOrder(block(menu, 'const handleLogout = async () => {'), 'await flushSceneSavesBeforeLogout();', 'await flushKeptMapEditsBeforeLogout();', 'await logout();');
+});
+
+test('anchor 83: the file and the two channels are four places and one module of main, and a write is synced before its rename', () => {
+  const lined = (source: string) => source.split('\n').map(line => line.trim()).filter(Boolean);
+  const raw = (url: URL) => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
+  // The main process: the module is imported once, its store is made and its channels registered right behind the channels of the
+  // library, and quitting waits for what it still writes once the windows answered: behind both lists of what quitting waits for
+  // (inside one, a write a window sent at the last moment would not be waited for), and before the update is applied. The
+  // channels are the module's, not named here.
+  const main = raw(new URL('../electron/main.ts', import.meta.url)), mainLines = lined(main);
+  assert.equal(mainLines.filter(line => line === "import { createKeptEditsStore, finishKeptEditsBeforeExit, registerKeptEditsIpc } from './backgroundKeptEdits';").length, 1, 'the module of main is not imported once');
+  const library = block(main, 'registerBackgroundIpc({');
+  assert.deepEqual(lined(main.slice(main.indexOf(library) + library.length)).filter(line => !line.startsWith('//')).slice(0, 3),
+    [');', 'const backgroundKeptEdits = createKeptEditsStore(getDataPath());', 'registerKeptEditsIpc({ ipc: ipcMain, getSessionOriginOrThrow, store: backgroundKeptEdits });']);
+  const quit = main.slice(main.indexOf("app.on('before-quit'"), main.indexOf("process.on('exit'")).split('\n');
+  const finished = quit.flatMap((line, at) => line.trim() === 'await finishKeptEditsBeforeExit({ rendererFlush, store: backgroundKeptEdits });' ? [at] : []);
+  const lists = quit.flatMap((line, at) => line.trimEnd().endsWith('rendererFlush,') ? [at] : []), update = quit.findIndex(line => line.includes('// ★ 자동 업데이트 적용'));
+  assert.equal(finished.length, 1, 'quitting does not wait once for what main still writes');
+  assert.equal(lists.length, 2, 'the two lists of what quitting waits for are not found');
+  assert.ok(Math.max(...lists) < finished[0] && finished[0] < update, 'what main still writes is not waited for behind both lists and before the update');
+  assert.ok(!main.includes("'background-kept:"), 'a channel of the kept edits is named in main');
+  // The bridge of the page carries the epoch of its session, and names no account.
+  const preload = lined(raw(new URL('../electron/preload.ts', import.meta.url)));
+  for (const line of ["backgroundKeptList: () => ipcRenderer.invoke('background-kept:list', canonicalSessionEpoch),",
+    "backgroundKeptPut: (mapId: string, entry: unknown) => ipcRenderer.invoke('background-kept:put', mapId, entry, canonicalSessionEpoch),"])
+    assert.equal(preload.filter(item => item === line).length, 1, `not once, as a line of the bridge: ${line}`);
+  // Both members are required: a mock that left one out would not pass the type check.
+  const types = raw(new URL('../src/types/index.ts', import.meta.url)), typeLines = lined(types);
+  for (const line of ["backgroundKeptList: () => Promise<Record<string, import('../shared/backgroundKeptEdits').KeptMapEdit>>;",
+    "backgroundKeptPut: (mapId: string, entry: import('../shared/backgroundKeptEdits').KeptMapEdit | null) => Promise<void>;"])
+    assert.ok(typeLines.includes(line), `not a line of the type: ${line}`);
+  assert.doesNotMatch(types, /backgroundKept(?:List|Put)\?:/, 'a member of the kept edits is optional');
+  // The mirror of the preview: one value per account, the two members as main answers them, and a write checked as main checks it.
+  const mock = raw(new URL('../src/mocks/devElectronAPI.ts', import.meta.url)), mockLines = lined(mock);
+  for (const line of ["const PREVIEW_KEPT_KEY = 'bflow:preview:background-map-kept:';",
+    'backgroundKeptList: async () => { const { actor, assertCurrent } = requireBackgroundPreviewSession(); const entries = keptEntriesOf(readPreviewKept(actor.id)); assertCurrent(); return entries; },',
+    'backgroundKeptPut: async (mapId, entry) => { const { actor, assertCurrent } = requireBackgroundPreviewSession(); assertCurrent(); writePreviewKept(actor.id, mapId, entry); },'])
+    assert.ok(mockLines.includes(line), `not a line of the mock: ${line}`);
+  assert.ok(block(mock, 'function writePreviewKept(userId: string, mapId: string, entry: KeptMapEdit | null): void {').includes('keptEntryProblem('), 'the mirror writes what main would refuse');
+  // The module of main: no Electron (the tests bundle it and run it) and nothing of Supabase. A write goes to a temporary file that
+  // is synced to the disk before it takes the place of the file: written in place, a file could be left half written; renamed before
+  // it was synced, it could be left full of zeros by a power cut, and moved aside as broken with every kept edit in it.
+  const store = raw(new URL('../electron/backgroundKeptEdits.ts', import.meta.url)), storeLines = lined(store).filter(line => !line.startsWith('//'));
+  assert.doesNotMatch(store, /from\s+['"]electron['"]/, 'the module of main imports Electron');
+  assert.doesNotMatch(store, /supabase/i, 'the module of main knows Supabase');
+  const writes = ['const temp = `${file}.tmp`, text = JSON.stringify(document);',
+    "await waitOutLock(async () => { const handle = await files.open(temp, 'w'); try { await handle.writeFile(text, 'utf8'); await handle.sync(); } finally { await handle.close(); } });",
+    'await waitOutLock(() => files.rename(temp, file));'];
+  const writeAt = storeLines.indexOf(writes[0]);
+  assert.ok(writeAt > -1, 'a write does not go to a temporary file');
+  assert.deepEqual(storeLines.slice(writeAt, writeAt + 3), writes);
+  inOrder(store, "files.open(temp, 'w')", 'handle.sync()', 'files.rename(temp, file)');
+  // A lock held by antivirus software is tried three times and never read as nothing. Quitting waits for the windows, then the store.
+  assert.deepEqual(lined(block(store, 'async function waitOutLock<T>(work: () => Promise<T>): Promise<T> {')), ['async function waitOutLock<T>(work: () => Promise<T>): Promise<T> {',
+    'for (let tries = 1; ; tries++) {', 'try { return await work(); }',
+    "catch (error) { if (tries >= 3 || !['EBUSY', 'EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException)?.code ?? '')) throw error; }",
+    'await new Promise(done => setTimeout(done, 80));', '}', '}']);
+  const finish = "export async function finishKeptEditsBeforeExit(deps: { rendererFlush: Promise<unknown>; store: Pick<KeptEditsStore, 'flush'>; maxMs?: number }): Promise<void> {";
+  assert.deepEqual(lined(block(store, finish)), [finish, 'await deps.rendererFlush.catch(() => undefined);', 'await deps.store.flush(deps.maxMs);', '}']);
+  // A file that cannot be read is no empty one: only no file yet is (ENOENT). A broken one is moved aside under a name of its own,
+  // numbered so that two in one millisecond do not take each other's place. And nothing is written that does not pass the check.
+  for (const text of ['`${file}.broken-${now()}-${++broken}`', "'ENOENT'", 'keptEntryProblem(']) assert.ok(store.includes(text), `not in the module of main: ${text}`);
+  // The two channels, as 3.3 has them: the account is the session of main, the epoch of the page is checked as for the library,
+  // a list read while the session changed is dropped, and a put reaches the store before any wait.
+  const handlers = ["deps.ipc.handle('background-kept:list', async (_event, requestEpoch) => {", 'const origin = originFor(requestEpoch);',
+    'const entries = await deps.store.list(origin.userId);', 'const now = deps.getSessionOriginOrThrow();',
+    "if (now.userId !== origin.userId || now.epoch !== origin.epoch) throw new Error('로그인 세션이 변경되어 보관 목록 응답을 폐기했습니다.');", 'return entries;', '});',
+    "deps.ipc.handle('background-kept:put', async (_event, mapId, entry, requestEpoch) => { const origin = originFor(requestEpoch); await deps.store.put(origin.userId, mapId, entry); });"];
+  const handlersAt = storeLines.indexOf(handlers[0]);
+  assert.ok(handlersAt > -1, 'the channel of the list is not as written');
+  assert.deepEqual(storeLines.slice(handlersAt, handlersAt + handlers.length), handlers);
+  const originFor = (source: string) => lined(block(source, 'function originFor(requestEpoch: unknown) {'));
+  assert.deepEqual(originFor(store), originFor(raw(new URL('../electron/backgroundIpc.ts', import.meta.url))), 'the epoch of the page is checked otherwise than for the library');
+  // The shared module is pure: main, the mock and the type all take it.
+  assert.doesNotMatch(raw(new URL('../src/shared/backgroundKeptEdits.ts', import.meta.url)), /\bimport\b/, 'the shared module imports');
 });

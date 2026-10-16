@@ -25,6 +25,7 @@ import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarI
 import { registerCalendarReminders } from './calendarReminders';
 import { registerGanttIpc } from './ganttIpc';
 import { registerBackgroundIpc } from './backgroundIpc';
+import { createKeptEditsStore, finishKeptEditsBeforeExit, registerKeptEditsIpc } from './backgroundKeptEdits';
 import { createBackgroundStore, startBackgroundRealtime } from './backgroundStore';
 import { uploadBackgroundImage } from './backgroundStorage';
 import { readBackgroundImageFile } from './backgroundImageFile';
@@ -2563,6 +2564,9 @@ registerBackgroundIpc({
   readImageFile: filePath => readBackgroundImageFile(filePath, { decode: buffer => nativeImage.createFromBuffer(buffer) }),
   readClipboardFilePath: () => clipboardImageFilePath(format => clipboard.readBuffer(format)),
 });
+// The unsaved map edits this PC keeps, one file per account in the app's folder. Nothing of it goes to Supabase.
+const backgroundKeptEdits = createKeptEditsStore(getDataPath());
+registerKeptEditsIpc({ ipc: ipcMain, getSessionOriginOrThrow, store: backgroundKeptEdits });
 calendarStore.setCalendarSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
 registerCalendarSubscriptionIpc({
   getSessionOriginOrThrow,
@@ -5628,6 +5632,9 @@ app.on('before-quit', (e) => {
           rendererFlush,
         ]);
       }
+
+      // 배경 도면의 보관 파일: 창이 마저 보낸 쓰기까지 끝난 뒤에 끈다(최대 2초).
+      await finishKeptEditsBeforeExit({ rendererFlush, store: backgroundKeptEdits });
 
       // ★ 자동 업데이트 적용 (마지막 step)
       // "지금 업데이트"는 즉시 installer helper를 띄워 최신 버전으로 연다.

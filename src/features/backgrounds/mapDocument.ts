@@ -38,6 +38,8 @@ export type MapUpdateOptions = {
   /** Consecutive updates of one map with the same key share one undo step. */
   coalesceKey?: string;
 };
+/** A kept draft brought back after a restart (restore-drafts): its value, its revision and the count it had (mapDraftSteps). */
+export type MapRestoredDraft = { value: BackgroundMap; baseRevision: number | null; steps: number };
 export type MapDocumentAction =
   | { type: 'begin-editing'; map: BackgroundMap }
   | { type: 'enter-new-map'; map: BackgroundMap }
@@ -45,6 +47,7 @@ export type MapDocumentAction =
   | { type: 'drop-drafts'; mapIds: readonly string[] }
   | { type: 'rebase-drafts'; maps: readonly BackgroundMap[] }
   | { type: 'follow-saved'; maps: readonly BackgroundMap[] }
+  | { type: 'restore-drafts'; drafts: readonly MapRestoredDraft[] }
   | ({ type: 'update'; map: BackgroundMap } & MapUpdateOptions)
   | { type: 'end-coalescing' }
   | { type: 'undo'; mapId: string }
@@ -97,6 +100,19 @@ function dropDrafts(state: MapDocumentState, mapIds: readonly string[]): MapDocu
   for (const id of removed) delete drafts[id];
   return { ...state, drafts: removed.length ? drafts : state.drafts, gesture, coalescing: null };
 }
+/**
+ * Kept drafts come back after a restart, each as one value on its base revision. The undo history did not survive: the edits
+ * it holds count as edits the history no longer holds (`dropped`), at least one, so it reads as unsaved with the count it had.
+ * A draft with unsaved edits is never replaced; a clean one is. A gesture or a field edit on a replaced draft ends with it.
+ */
+function restoreDrafts(state: MapDocumentState, restored: readonly MapRestoredDraft[]): MapDocumentState {
+  const targets = restored.filter(item => !mapDraftChanged(mapDraft(state, item.value.id)));
+  if (!targets.length) return state;
+  const drafts = { ...state.drafts }, replaced = new Set(targets.map(item => item.value.id));
+  for (const item of targets) drafts[item.value.id] = { value: structuredClone(item.value), baseRevision: item.baseRevision, past: [], future: [], dropped: Math.max(1, item.steps) };
+  return { ...state, drafts, gesture: state.gesture && replaced.has(state.gesture.mapId) ? null : state.gesture,
+    coalescing: state.coalescing && replaced.has(state.coalescing.mapId) ? null : state.coalescing };
+}
 /** One finished edit of a draft: an undo step. A step the full history lets go of is counted, so it still reads as unsaved. */
 function commitDraft(draft: MapDraft, next: BackgroundMap, entry?: BackgroundMap): MapDraft {
   const committed = commitMapHistory(draft, next, entry);
@@ -145,6 +161,7 @@ export function reduceMapDocument(state: MapDocumentState, action: MapDocumentAc
       for (const id of gone) delete drafts[id];
       return { ...followed, drafts };
     }
+    case 'restore-drafts': return restoreDrafts(state, action.drafts);
     case 'update': {
       const id = action.map.id, draft = mapDraft(state, id);
       // While a gesture previews a map, that gesture is the only writer of the map.

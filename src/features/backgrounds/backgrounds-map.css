@@ -45,6 +45,9 @@
 /* Just saved: bold, with a tick before the words. */
 .bmap-edit-strip[data-phase="saved"] .bmap-edit-state>span { font-weight:600; }
 .bmap-edit-strip[data-phase="saved"] .bmap-edit-state>span::before { content:"✓"; margin-right:5px; }
+/* Saved or deleted elsewhere first: the words in an outlined box with a mark before them. Not filled like unsaved edits, and the same height. */
+.bmap-edit-strip[data-phase="stale"] .bmap-edit-state>span { padding:1px 8px; border:1px solid rgb(var(--bmap-edit-ink)); border-radius:999px; font-weight:600; }
+.bmap-edit-strip[data-phase="stale"] .bmap-edit-state>span::before { content:"!"; margin-right:5px; font-weight:700; }
 .bmap-edit-key { flex-shrink:0; padding:1px 5px; border:1px solid rgb(var(--bmap-edit-ink) / .35); border-radius:4px; font-size:10px; opacity:.8; }
 .bmap-edit-actions { display:flex; flex-shrink:0; gap:6px; }
 .bg-library .bmap-edit-strip button { min-height:28px; padding:0 11px; border-color:rgb(var(--bmap-edit-ink) / .45); border-radius:6px; background:transparent; color:rgb(var(--bmap-edit-ink)); font-size:12px; white-space:nowrap; }
@@ -239,7 +242,7 @@
 /* What hiding does, under the rows at all times: an eye that is pressed moves nothing. */
 .bmap-objects>.bmap-node-list+.bmap-hint { margin-top:8px; }
 .bmap-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:24px; }
-.bmap-confirm-text { font-size:13px; line-height:1.8; color:rgb(var(--color-text-secondary)); }
+.bmap-confirm-text { font-size:13px; line-height:1.8; color:rgb(var(--color-text-secondary)); overflow-wrap:anywhere; }
 @media(max-width:1200px) { .bmap-tree { flex-basis:155px; } .bmap-inspector { flex-basis:220px; padding:14px 12px; } .bmap-toolbar button>span:nth-child(2) { display:none; } .bmap-canvas-footer>span { max-width:180px; } .bmap-canvas-wrap.is-3d .bmap-canvas-footer>span { max-width:none; } }
 
 /* Context actions stay visible; technical properties are disclosed when needed. */

@@ -1,7 +1,10 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useAuthStore } from '@/stores/useAuthStore';
 import type { BackgroundMap } from './types.ts';
-import { createMapDocumentStore } from './mapDocument.ts';
 import type { MapDocumentAction, MapDocumentState, MapUpdateOptions, MapViewport } from './mapDocument.ts';
+import { createMapDraftSession } from './mapDraftSession.ts';
+import type { MapDraftSession } from './mapDraftSession.ts';
+import { primeKeptMapEdits, setKeptMapFlush, useKeptMapEdits } from './mapKeptSignal.ts';
 
 export type BackgroundMapDocument = {
   /** State of the current render. */
@@ -30,11 +33,37 @@ export type BackgroundMapDocument = {
   select(mapId: string, id: string | null): void;
   selectMany(mapId: string, ids: readonly string[]): void;
   setViewport(mapId: string, viewport: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>>): void;
+  /** The account's document and its copy on this PC: what outlives the screen. */ session: MapDraftSession;
 };
 
+let active: MapDraftSession | null = null;
+let hooked = false;
+export function mapDraftSessionOf(userId: string): MapDraftSession {
+  if (active?.userId === userId) return active;
+  active?.dispose();
+  active = createMapDraftSession({
+    userId,
+    put: (mapId, entry) => window.electronAPI.backgroundKeptPut(mapId, entry),
+    signal: { read: useKeptMapEdits.getState, write: patch => useKeptMapEdits.setState(patch) },
+    timers: { set: (run, ms) => window.setTimeout(run, ms), clear: handle => window.clearTimeout(handle as number) },
+    now: Date.now,
+  });
+  if (!hooked) {
+    hooked = true;
+    // Tray 종료 and 지금 업데이트: main waits up to three seconds for what each window has to finish. 로그아웃 waits as well, while the session is alive.
+    window.electronAPI?.onBeforeQuitFlush?.(() => active?.flush());
+    setKeptMapFlush(() => active?.flush() ?? Promise.resolve());
+    useAuthStore.subscribe((now, before) => { if (now.currentUser?.id !== before.currentUser?.id) { active?.dispose(); active = null; } });
+  }
+  return active;
+}
+
 /** Thin React binding of the map document reducer. Every map surface of one editor shares it. */
-export function useBackgroundMapDocument(): BackgroundMapDocument {
-  const [store] = useState(() => createMapDocumentStore());
+export function useBackgroundMapDocument(userId: string): BackgroundMapDocument {
+  const [session] = useState(() => mapDraftSessionOf(userId));
+  const store = session.store;
+  useEffect(() => () => { store.dispatch({ type: 'gesture-cancel' }); store.dispatch({ type: 'end-coalescing' }); }, [store]);
+  useEffect(() => { if (userId) primeKeptMapEdits(userId); }, [userId]);
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const actions = useMemo(() => ({
     getState: store.getState,
@@ -60,6 +89,7 @@ export function useBackgroundMapDocument(): BackgroundMapDocument {
     select: (mapId: string, id: string | null) => store.dispatch({ type: 'select', mapId, id }),
     selectMany: (mapId: string, ids: readonly string[]) => store.dispatch({ type: 'select-many', mapId, ids }),
     setViewport: (mapId: string, viewport: Partial<Pick<MapViewport, 'x' | 'y' | 'zoom'>>) => store.dispatch({ type: 'set-viewport', mapId, viewport }),
-  }), [store]);
+    session,
+  }), [store, session]);
   return useMemo(() => ({ state, ...actions }), [state, actions]);
 }
