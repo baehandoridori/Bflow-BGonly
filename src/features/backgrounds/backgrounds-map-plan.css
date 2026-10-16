@@ -115,5 +115,10 @@
 .bmap-plan-side.is-lifting .bmap-plan-side-ring { stroke-opacity:.7; }
 /* The height in the summary is the number being dragged: its colour says so. Same size, same weight. */
 .bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong { color:var(--bmap-plan-cam-line); }
+/* The tip of the sight arrow while its camera can be edited: a soft dot on the point of the arrow says it can be dragged round the lens, and a wider area takes the press. The lens's area lies over it where the two meet. While it is dragged the dot is stronger and the pitch in the summary takes the colour of the camera, as the height does for the lens. */
+.bmap-plan-side-aim { fill:var(--bmap-plan-cam-line); fill-opacity:.3; stroke:transparent; stroke-width:16px; pointer-events:all; cursor:grab; touch-action:none; }
+.bmap-plan-side-aim:hover { fill-opacity:.55; }
+.bmap-plan-side.is-aiming .bmap-plan-side-aim { fill-opacity:.55; }
+.bmap-plan-readout:has(.bmap-plan-side.is-aiming) .is-pitch strong { color:var(--bmap-plan-cam-line); }
 /* A camera with a colour of its own: the four camera variables of this plan follow it, on both themes. */
 .bmap-plan-preview [data-camera-color] { --bmap-plan-cam:rgb(var(--bmap-cam)); --bmap-plan-cam-line:rgb(var(--bmap-cam)); --bmap-plan-cam-edge:rgb(var(--color-bg-primary)); --bmap-plan-cam-soft:rgb(var(--bmap-cam) / .18); }

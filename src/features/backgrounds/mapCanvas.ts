@@ -1,4 +1,5 @@
 import type { BackgroundMap, BackgroundPoint } from './types.ts';
+import type { NodeWorldPoseInput } from './mapGeometry.ts';
 import type { MapNumberKey } from './mapNumberField.ts';
 
 /**
@@ -53,7 +54,13 @@ export type Map3DProps = MapCanvasProps & {
   hiddenIds?: ReadonlySet<string>;
   /** Rooms drawn as closed boxes. Absent: none. */
   solidIds?: ReadonlySet<string>;
+  /** Snapping of a handle drag, while the editor's snap is on: where the dragged root may stand at this step, or null to leave it where the handles put it. Absent: no snapping. */
+  snapPose?(request: Map3DSnapRequest): NodeWorldPoseInput | null;
 };
+/** One step of a handle drag in 3D: the node, the handle in hand (its axes, as the controls name them) and the pose of the node's root as the drag started and as the handles have it now. */
+export type MapGizmoPoseRequest = { map: BackgroundMap; id: string; mode: Map3DGizmoMode; axis: string; start: NodeWorldPoseInput; pose: NodeWorldPoseInput };
+/** What the 3D view adds for the editor to snap that step as the plan would: map units per screen pixel at the node (NaN: unknown), and Shift held on the last move. */
+export type Map3DSnapRequest = MapGizmoPoseRequest & { unitsPerPixel: number; big: boolean };
 
 /** Where a drag of one number starts: its value, and the map every preview of that drag is computed from. */
 export type MapScrubOrigin = { start: number; map: BackgroundMap };

@@ -25,6 +25,7 @@ import { planGestureCandidates, previewPlanGesture } from './mapPlanGesture';
 import type { PlanGesture } from './mapPlanGesture';
 import { MAP_SNAP, sameSnapGuides } from './mapSnap';
 import type { SnapCandidates, SnapGuide } from './mapSnap';
+import { snapGizmoPose } from './mapGizmoSnap';
 import { planPileAt } from './mapPlanPreview';
 import { planMarkCovers, planMarqueeIds, planRect, resolvePlanPress, sameSpotAgain } from './mapPlanSelect';
 import type { PlanPressClick, PlanRect, PlanSpot } from './mapPlanSelect';
@@ -114,10 +115,11 @@ const ROAD_HINT_ROUND = '둥근 도로에는 가운데 점선이 없어요.';
 const ROAD_HINT_NO_STRIP = '가운데 점선은 길 양쪽 옆줄의 점이 같은 수로 서로 마주 볼 때 보여요. 한쪽에 점을 더했으면 맞은편에도 하나 더해 주세요. 광장처럼 길 모양이 아닌 곳에는 그리지 않아요.';
 /** What the eye does, said under the object list at all times: hidden on this screen only, and still part of the map. A hidden node must never read as a deleted one. */
 const HIDDEN_NOTE = '숨긴 것은 이 PC의 내 화면에서만 안 보여요. 도면에는 그대로 있어서, 저장해도 지워지지 않아요.';
-const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string }[] = [
-  { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기' },
-  { id: 'rotate', label: '회전', Icon: Rotate3d, hint: '고리를 끌어 돌리기' },
-  { id: 'scale', label: '크기', Icon: Scale3d, hint: '손잡이를 끌어 크기 바꾸기' },
+/** `code`: the key that chooses the mode in 3D, by its place on the keyboard, so a Korean input mode does not change it. */
+const GIZMO_MODES: { id: Map3DGizmoMode; label: string; Icon: typeof Move3d; hint: string; key: string; code: string }[] = [
+  { id: 'translate', label: '이동', Icon: Move3d, hint: '화살표를 끌어 옮기기', key: 'W', code: 'KeyW' },
+  { id: 'rotate', label: '회전', Icon: Rotate3d, hint: '고리를 끌어 돌리기', key: 'E', code: 'KeyE' },
+  { id: 'scale', label: '크기', Icon: Scale3d, hint: '손잡이를 끌어 크기 바꾸기', key: 'R', code: 'KeyR' },
 ];
 const ASPECT_PRESETS = [{ label: '16:9', value: 16 / 9 }, { label: '4:3', value: 4 / 3 }, { label: '1:1', value: 1 }, { label: '2.39:1', value: 2.39 }, { label: '9:16', value: 9 / 16 }];
 const PITCH_PRESETS = [{ label: '수평', pitch: 0 }, { label: '수직 위', pitch: 90 }, { label: '수직 아래', pitch: -90 }];
@@ -412,14 +414,16 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (event.key !== 'Alt') return;
-      if (event.type === 'keydown' && pointerRef.current) altDrag.current = true;     // Alt pressed during a drag
+      if (event.type === 'keydown' && (pointerRef.current || doc.isGestureActive())) altDrag.current = true;     // Alt pressed during a drag
       if (!altDrag.current) return;
       event.preventDefault();                                                          // its auto-repeat comes here too
       if (event.type === 'keyup') altDrag.current = false;                             // that Alt is released
     };
+    // A drag away from the plan (a handle in 3D, the side view of a camera): Alt held on any of its moves. The plan tells its own.
+    const move = (event: PointerEvent) => { if (event.altKey && doc.isGestureActive()) altDrag.current = true; };
     const forget = () => { altDrag.current = false; };                                 // Alt+Tab and the like: the release never reaches this window
-    window.addEventListener('keydown', key, true); window.addEventListener('keyup', key, true); window.addEventListener('blur', forget);
-    return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('keyup', key, true); window.removeEventListener('blur', forget); };
+    window.addEventListener('keydown', key, true); window.addEventListener('keyup', key, true); window.addEventListener('pointermove', move, true); window.addEventListener('blur', forget);
+    return () => { window.removeEventListener('keydown', key, true); window.removeEventListener('keyup', key, true); window.removeEventListener('pointermove', move, true); window.removeEventListener('blur', forget); };
   }, []);
   /**
    * Space held over the plan. Heard on the window, like the Alt above: a press moves the focus to the canvas, and the
@@ -1092,6 +1096,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
       if (event.key === '0') { event.preventDefault(); fitView(); return; }
       if (event.key === 'F2' && selected) { event.preventDefault(); renameSelected(); return; }
     }
+    // 3D shortcuts: W, E and R choose how the picked placement is changed, as the three buttons do. Not while typing, under a dialog or during a drag.
+    if (mode === '3d' && editing && !disabled && !doc.isGestureActive() && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.repeat && !event.nativeEvent.isComposing && !target.closest(textEntry) && !target.closest('dialog')) {
+      const chosen = GIZMO_MODES.find(item => item.code === event.code);
+      if (chosen) { event.preventDefault(); setGizmoMode(chosen.id); setTool('select'); setSymbolPaletteOpen(false); return; }
+    }
     if (target.closest(interactive)) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd' && selected?.type === 'symbol' && canEdit) { event.preventDefault(); duplicateSymbol(); }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(event.shiftKey); }
@@ -1355,6 +1364,11 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
         : editing ? `클릭해 선택 · ${GIZMO_MODES.find(item => item.id === gizmoMode)!.hint} · 오른쪽 버튼으로 끌어 둘러보기 · 휠로 확대 · 공간 그리기는 평면에서`
           : '클릭해 선택 · 오른쪽 버튼으로 끌어 둘러보기 · 휠로 확대 · 공간 더블클릭으로 상세 도면 열기';
 
+  // The snap switch of this PC, the same in both modes: on the plan it snaps the drags, in 3D the handles (Shift for big steps there).
+  const snapToggle = <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled}
+    title={!snapEnabled ? '스냅 꺼짐: 놓은 자리 그대로예요' : mode === 'plan' ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 켜짐: 가까운 가장자리·높이에 붙고 숫자는 정수로 맞춰요 · Shift를 누르면 10씩·15°씩 · Alt를 누른 채 끌면 잠깐 꺼져요'}
+    onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>;
+
   return <div className="bmap-layout" ref={rootRef} onKeyDown={keyboard} tabIndex={-1}>
     <aside className="bmap-tree" aria-label="도면 트리">
       <div className="bmap-section-heading"><strong>도면</strong>{snapshot.canManage && <button type="button" className="bmap-new-root" disabled={disabled} onClick={() => openCreate(null)}>＋ 새 도면</button>}</div>
@@ -1382,7 +1396,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             <span className="bmap-divider" />
             {toolItems.map(item => <button type="button" key={item.id} className={`${tool === item.id ? 'is-active' : ''}${item.named ? ' bmap-toolbar-named' : ''}`} title={item.title} aria-label={item.label} aria-pressed={tool === item.id} disabled={disabled} onClick={() => { setTool(item.id); setPolygon([]); setSymbolPaletteOpen(false); setActiveVertex(null); }}>{typeof item.icon === 'string' ? <span aria-hidden="true">{item.icon}</span> : item.icon}<span>{item.label}</span></button>)}
             {mode === '3d' && editing && <><span className="bmap-divider" /><div className="bmap-gizmo-modes" role="group" aria-label="선택한 배치를 조절하는 방식">
-              {GIZMO_MODES.map(item => <button type="button" key={item.id} className={gizmoMode === item.id && tool === 'select' ? 'is-active' : ''} title={`${item.label}: ${item.hint}`} aria-label={item.label} aria-pressed={gizmoMode === item.id && tool === 'select'} disabled={disabled} onClick={() => { setGizmoMode(item.id); setTool('select'); setSymbolPaletteOpen(false); }}><item.Icon size={17} strokeWidth={1.8} aria-hidden="true" /><span>{item.label}</span></button>)}
+              {GIZMO_MODES.map(item => <button type="button" key={item.id} className={`bmap-toolbar-named${gizmoMode === item.id && tool === 'select' ? ' is-active' : ''}`} title={`${item.label} (${item.key}): ${item.hint}`} aria-label={item.label} aria-pressed={gizmoMode === item.id && tool === 'select'} disabled={disabled} onClick={() => { setGizmoMode(item.id); setTool('select'); setSymbolPaletteOpen(false); }}><item.Icon size={17} strokeWidth={1.8} aria-hidden="true" /><span>{item.label}</span></button>)}
             </div></>}
             {editing && <><span className="bmap-divider" /><button type="button" className="bmap-toolbar-named bmap-toolbar-camera" title="정해진 기본 위치에 새 카메라를 만들어요" aria-label="카메라 추가" disabled={!canEdit} onClick={addCamera}><span aria-hidden="true">◉</span><span>카메라 추가</span></button></>}
             {editing && <div className="bmap-symbol-picker">
@@ -1462,7 +1476,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               <Map3DBoundary onFail={leave3D}><Suspense fallback={<div className="bmap-3d-loading" role="status">3D 화면을 준비하고 있어요…</div>}>
                 <Map3D map={current} selectedId={singleId} canEdit={canEdit} onSelect={selectNode}
                   onBeginGesture={beginCanvasGesture} onPreview={previewCanvasGesture} onFinishGesture={finishCanvasGesture} onCancelGesture={cancelCanvasGesture}
-                  tool={tool === 'hand' ? 'look' : 'select'} gizmoMode={gizmoMode} placing={tool === 'symbol' && canEdit} onPlace={placeAt}
+                  tool={tool === 'hand' ? 'look' : 'select'} gizmoMode={gizmoMode} placing={tool === 'symbol' && canEdit} onPlace={placeAt} snapPose={snapEnabled ? snapGizmoPose : undefined}
                   focusRequest={focusRequest} initialView={viewStates.current[current.id] ?? null} onViewChange={storeView}
                   lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} hiddenIds={hiddenIds} solidIds={roomsOpen ? NO_MAP_VIEW_PREFS.solid : solidIds} />
               </Suspense></Map3DBoundary>
@@ -1475,7 +1489,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
             initial={renamingNode.name} positionKey={`${view.x}:${view.y}:${view.zoom}:${canvasSize.width}:${canvasSize.height}`}
             onCommit={commitName} onCancel={cancelName} onHistory={passNameHistory} />}
           {mode === 'plan' && !current.nodes.length && !current.imageUrl && !polygon.length && <div className="bmap-canvas-empty"><strong>{editing ? '공간을 그려 도면을 채워보세요' : '아직 배치된 공간이 없습니다'}</strong><span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '관리자가 공간을 배치하면 여기에 표시됩니다.'}</span></div>}
-          <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' || hiddenCount > 0 ? footerHint : undefined}>{footerHint}</span>{hiddenCount > 0 && <div className="bmap-hidden-slot"><button type="button" className="bmap-hidden-chip" title={HIDDEN_NOTE} onClick={showAll}>숨김 {hiddenCount}개 · 모두 보이기</button></div>}{mode === 'plan' && <div className="bmap-zoom">{editing && <button type="button" className="bmap-snap-toggle" aria-pressed={snapEnabled} title={snapEnabled ? '스냅 켜짐: 가까운 가장자리·가운데에 붙어요 · Alt를 누른 채 끌면 잠깐 꺼져요' : '스냅 꺼짐: 놓은 자리 그대로예요'} onClick={() => { const next = !snapEnabled; setSnapEnabled(next); storeSnapPreference(next); }}>스냅</button>}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}</div>
+          <div className="bmap-canvas-footer"><span className="bmap-footer-hint" title={mode === 'plan' || hiddenCount > 0 ? footerHint : undefined}>{footerHint}</span>{hiddenCount > 0 && <div className="bmap-hidden-slot"><button type="button" className="bmap-hidden-chip" title={HIDDEN_NOTE} onClick={showAll}>숨김 {hiddenCount}개 · 모두 보이기</button></div>}{mode === 'plan' && <div className="bmap-zoom">{editing && snapToggle}<button type="button" aria-label="도면 축소" title="축소 (−)" onClick={() => zoomBy(0.8)}>−</button><span>{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="도면 확대" title="확대 (+)" onClick={() => zoomBy(1.25)}>＋</button><button type="button" title="그려 둔 것 전체가 보이게 맞춤 (0)" onClick={fitView}>맞춤</button></div>}{mode === '3d' && editing && <div className="bmap-zoom">{snapToggle}</div>}</div>
           {mode === 'plan' && tool === 'polygon' && <div className="bmap-polygon-actions"><span>{polygon.length}개 점</span><button type="button" className="bg-button bg-primary" disabled={polygon.length < 3 || !canEdit} onClick={finishPolygon}>다각형 완성</button><button type="button" className="bg-button" onClick={() => { setPolygon([]); setTool('select'); }}>취소</button></div>}
         </section>
         <aside className="bmap-inspector" id="bmap-selection-properties" aria-label="선택 속성" hidden={!inspectorOpen}>

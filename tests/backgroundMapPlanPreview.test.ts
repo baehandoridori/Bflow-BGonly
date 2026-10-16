@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PLAN_FALLBACK_SIZE, PLAN_KIND_LABELS, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_DRAG, PLAN_SIDE_VIEW,
+  PLAN_FALLBACK_SIZE, PLAN_KIND_LABELS, PLAN_MARK, PLAN_PREVIEW_HINT, PLAN_SIDE_DRAG, PLAN_SIDE_TILT, PLAN_SIDE_VIEW, planSideAngle, planSideDragPitch,
   nextPlanSelection, planArrowTip, planCameraGlyph, planCameraReadout, planDegrees, planKindLabel, planNodeCovers, planNodeLabel, planNodeReadout, planNodeSummary,
   planNumber, planOutlinePoints, planPileAt, planReadoutText, planSelectedNode, planSideDragLevel, planSideLevel, planSideScale, planSideView, planSideY,
   planSightMark, planStackUnder, planUnitsPerPixel, planViewBox, planVolumeReadout,
@@ -492,6 +492,42 @@ test('S-5: on a held scale the floor and the room stay, the lens moves, and the 
   const below = planSideView(pitRoom, member({ elevation: -10, pitch: -90 }), pit);
   near(below.camera.y, box.bottom + travel * 5.5 / 4.5, 'the lens under the box'); assert.equal(below.camera.y.toFixed(1), '110.9');
   assert.deepEqual(below.tip, below.camera);
+});
+
+test('S-6: the tip of the arrow turns round the lens: whole degrees, caught at level and either vertical, Shift by fifteens, Alt nowhere', () => {
+  const lens = { x: 44, y: 40 };
+  // Seen from the lens, ahead is level, above is up and under is down (y grows downwards). Behind the lens the turn goes on past 90.
+  near(planSideAngle(lens, { x: 84, y: 40 }), 0); near(planSideAngle(lens, { x: 44, y: 0 }), 90); near(planSideAngle(lens, { x: 44, y: 80 }), -90);
+  near(planSideAngle(lens, { x: 84, y: 0 }), 45); near(planSideAngle(lens, { x: 4, y: 0 }), 135); near(planSideAngle(lens, { x: 4, y: 40 }), 180);
+  // No place, or the lens itself: no turn.
+  for (const at of [null, { x: Number.NaN, y: 0 }, { x: 0, y: Number.POSITIVE_INFINITY }, { x: 44.5, y: 40.5 }]) assert.ok(Number.isNaN(planSideAngle(lens, at)), JSON.stringify(at));
+  // The arrow drawn for a pitch points the way that pitch turns: the tip of a side view read back gives the pitch it was drawn for.
+  const room = freeze(mapOf([legacySpace]));
+  for (const pitch of [-90, -60, -12, 0, 33, 75, 90]) {
+    const side = planSideView(room, cameraAt({ spaceId: 'space', pitch }));
+    near(planSideAngle(side.camera, side.head[0]), pitch, `pitch ${pitch}`);
+  }
+  // Whole degrees, and the pitch it started from while no whole degree is nearer.
+  assert.equal(planSideDragPitch(20.4, 20, false, false), 20); assert.equal(planSideDragPitch(21.6, 20, false, false), 22); assert.equal(planSideDragPitch(-33.4, 20, false, false), -33);
+  assert.equal(planSideDragPitch(12.5, 12.5, false, false), 12.5); assert.equal(planSideDragPitch(12.9, 12.5, false, false), 13);
+  // Caught at level and at either vertical, within three degrees either way.
+  for (const degrees of [-3, -1.2, 0, 2.9, 3]) assert.equal(planSideDragPitch(degrees, 20, false, false), 0, `${degrees}`);
+  assert.equal(planSideDragPitch(3.4, 20, false, false), 3); assert.equal(planSideDragPitch(87, 20, false, false), 90); assert.equal(planSideDragPitch(86.6, 20, false, false), 87);
+  assert.equal(planSideDragPitch(-87.5, 20, false, false), -90);
+  // Past the verticals (behind the lens) it stays at the vertical: the saved limits.
+  assert.equal(planSideDragPitch(140, 20, false, false), PLAN_SIDE_TILT.stops[2]); assert.equal(planSideDragPitch(-179, 20, false, false), -90); assert.equal(planSideDragPitch(140, 20, false, true), 90);
+  // A start where it is caught stays the start: a press that has not moved changes nothing.
+  assert.equal(planSideDragPitch(2, 2, false, false), 2); assert.equal(planSideDragPitch(-88, -88, false, false), -88);
+  // Shift: steps of fifteen, and the start where that is as near or nearer.
+  assert.equal(PLAN_SIDE_TILT.big, 15);
+  assert.equal(planSideDragPitch(37, 20, true, false), 30); assert.equal(planSideDragPitch(38, 20, true, false), 45); assert.equal(planSideDragPitch(-8, 20, true, false), -15);
+  assert.equal(planSideDragPitch(22, 20, true, false), 20); assert.equal(planSideDragPitch(-7, 0, true, false), 0); assert.equal(planSideDragPitch(-7.6, 0, true, false), -15);
+  // Alt: whole degrees, caught nowhere.
+  assert.equal(planSideDragPitch(2.2, 20, false, true), 2); assert.equal(planSideDragPitch(-88.4, 20, false, true), -88); assert.equal(planSideDragPitch(0.4, 20, false, true), 0);
+  // No number: the start.
+  for (const degrees of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) assert.equal(planSideDragPitch(degrees, 20, false, false), 20, `${degrees}`);
+  // Never minus zero.
+  assert.ok(Object.is(planSideDragPitch(-0.4, 20, false, true), 0)); assert.ok(Object.is(planSideDragPitch(-7, 20, true, false), 0));
 });
 
 test('readout strings name direction, up or down view, height and field of view', () => {

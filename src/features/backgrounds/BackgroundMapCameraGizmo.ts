@@ -3,7 +3,7 @@ import { BoxGeometry, CylinderGeometry, Euler, Matrix4, Mesh, MeshBasicMaterial,
 import type { BufferGeometry, Camera, Object3D, Quaternion, Vector3 } from 'three';
 import { applyNodeWorldPose } from './mapGeometry.ts';
 import type { NodeWorldPoseInput } from './mapGeometry.ts';
-import type { Map3DGizmoMode } from './mapCanvas.ts';
+import type { Map3DGizmoMode, MapGizmoPoseRequest } from './mapCanvas.ts';
 import type { BackgroundMap, BackgroundNode } from './types.ts';
 
 /**
@@ -25,7 +25,7 @@ export function mapGizmoSetup(type: BackgroundNode['type'], mode: Map3DGizmoMode
 }
 
 /** Node roots sit directly under an untransformed group, so their own transform is the world pose. */
-export function rootWorldPose(root: Object3D): NodeWorldPoseInput {
+export function rootWorldPose(root: Pick<Object3D, 'position' | 'quaternion' | 'scale'>): NodeWorldPoseInput {
   const { position, quaternion, scale } = root;
   return { position: { x: position.x, y: position.y, z: position.z }, quaternion: { x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w },
     scale: { x: scale.x, y: scale.y, z: scale.z } };
@@ -49,6 +49,8 @@ export type MapGizmoHost = {
   onPreview(map: BackgroundMap): void;
   onFinishGesture(): void;
   onCancelGesture(): void;
+  /** Snapping: where the root may stand at this step of the drag, or null to leave it where the handles put it. Absent: no snapping. */
+  snapPose?(request: MapGizmoPoseRequest): NodeWorldPoseInput | null;
 };
 export type MapGizmoOptions = {
   /** Pointer travel in CSS pixels before a press on a handle changes anything, so a click or double click never nudges a node. */
@@ -368,7 +370,24 @@ export class MapNodeGizmo {
     if (drag.handle !== null) { this.host.unschedule(drag.handle); drag.handle = null; }
     if (!drag.pending) return;
     drag.pending = false;
+    this.snapRoot(drag);
     drag.shown = previewMapFromRoot(drag.initialMap, drag.id, drag.root);
     this.host.onPreview(drag.shown);
+  }
+
+  /**
+   * Where the host snaps the pose the handles gave, the root is put there, so what is drawn is what is stored. The
+   * controls work out every step from where the drag started, never from the last one: a snapped step is not carried on.
+   */
+  private snapRoot(drag: Drag): void {
+    const axis = this.controls.axis;
+    if (!this.host.snapPose || !axis) return;
+    const snapped = this.host.snapPose({ map: drag.initialMap, id: drag.id, mode: this.controls.mode, axis,
+      start: rootWorldPose({ position: drag.position, quaternion: drag.quaternion, scale: drag.scale }), pose: rootWorldPose(drag.root) });
+    if (!snapped) return;
+    const { position, quaternion, scale } = snapped;
+    drag.root.position.set(position.x, position.y, position.z);
+    drag.root.quaternion.set(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
+    drag.root.scale.set(scale.x, scale.y, scale.z);
   }
 }
