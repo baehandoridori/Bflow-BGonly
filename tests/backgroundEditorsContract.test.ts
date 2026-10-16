@@ -58,6 +58,11 @@ test('E-3: the list is reached only through the two admin wrappers, and only fou
   assert.match(fn(editors, 'background_editors_can_edit'), /SECURITY INVOKER/);
 });
 
+test('E-6: the applied body is as it was: production holds it (20261016105647), and only the comment lines above BEGIN; may change', () => {
+  const at = editors.indexOf('\nBEGIN;\n'); assert.ok(at >= 0);
+  assert.equal(createHash('sha256').update(editors.slice(at + 1)).digest('hex'), '9a5b9cfb018230364acdeb9ad0b023693f3bf5240055e2588658a8916e2ea722');
+});
+
 const tokens = { admin: 'a'.repeat(64), member: 'b'.repeat(64), editor: 'c'.repeat(64) };
 async function boot() {
   const { PGlite } = await import(pathToFileURL(runtime!).href); const db = new PGlite();

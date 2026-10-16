@@ -1538,6 +1538,6 @@ src/
 - [x] 운영 DB 파일 `DEVLOG/migrations/2026-10-16-background-editors.sql`(사슬의 넷째): `background_editors` 표(정책·직접 권한 없음), 편집 권한 판정 `background_editors_can_edit` 한 곳, 스냅샷·실행 함수를 그 판정으로 바꿔 넣음(나머지 글자는 기본 파일 그대로 — 테스트 E-2가 견준다), 관리자 세션 래퍼 `background_editors_session_list`·`background_editors_session_set`. 기본 파일을 다시 돌리면 관리자만 고치는 상태로 돌아가므로(편집자는 읽기만) 사슬을 다시 적용한다.
 - [x] 앱: 메뉴 공개(`canAccessBackgroundLibrary` = 로그인한 사람), 설정 '권한·노출'의 '배경 편집자 지정'(관리자만, 체크하면 바로 저장), 편집 권한 문구('관리자만' → '배경 편집 권한'), 편집 중에 권한이 빠지면 안내와 '고치던 내용 버리기', 보기 전용 배경 카드의 안내.
 - [x] 수동 검증(가볍게 진행 — 앱 엔진 확인 한 번, 2026-10-16. 결과: `DEVLOG/background-library-verification-2026-09-21.md`의 '2026-10-16 팀 공개와 배경 편집자 (v1.142.0)')
-- [ ] 운영 DB 적용(앱 배포 전, 한솔 확인 뒤)
-- [ ] 배포
+- [x] 운영 DB 적용: 2026-10-16 19:56 KST, 적용 번호 `20261016105647`(`background_editors`) — 한솔 확인 뒤, 머지 커밋 `6f9acfca`의 파일 그대로. 적용 전후 대조 통과(검증 기록)
+- [x] 배포: PR #337 → main 6f9acfca, G드라이브 2026-10-16 20:01 KST(설치 파일 115.1MiB, 설치 파일·latest.yml·manifest 해시 일치)
 - [ ] 배포 뒤: 한솔이 실제 팀원을 편집자로 지정, 다른 PC에서 보기 전용·편집 확인
