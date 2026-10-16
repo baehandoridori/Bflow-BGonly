@@ -4,7 +4,8 @@ import type { MapFieldScrub, MapScrubOrigin } from './mapCanvas.ts';
 import { MAP_NUMBER_SCRUB } from './mapNumberField.ts';
 import type { MapNumberKey } from './mapNumberField.ts';
 
-export type MapScrubPoint = { clientX: number; clientY: number; shiftKey: boolean };
+/** `altKey`: held at a move or a release. A press and a start moved by the slop do not say. */
+export type MapScrubPoint = { clientX: number; clientY: number; shiftKey: boolean; altKey?: boolean };
 /** What one control makes of a pressed pointer. Built at the press. */
 export type MapScrubDrive<S> = {
   field: MapNumberKey;

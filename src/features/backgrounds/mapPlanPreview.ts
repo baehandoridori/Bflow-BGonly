@@ -270,6 +270,30 @@ export function planSideDragLevel(scale: PlanSideScale, y: number, start: number
   const snapped = clamp(Math.round(level / step) * step, limits.min, limits.max) + 0;
   return Math.abs(level - start) <= Math.abs(level - snapped) ? start : snapped;
 }
+/** A drag of the tip of the sight arrow: the pitches it is caught at (level and the two verticals) and how near, in degrees, and its step while Shift is held. */
+export const PLAN_SIDE_TILT = { stops: [-90, 0, 90], capture: 3, big: 15 } as const;
+/**
+ * How far a point of the picture is turned up from level, seen from the lens, in degrees: the side view draws +x as the
+ * way the camera faces and y downwards. Behind the lens it goes on past ±90, to ±180 straight behind. NaN for a point
+ * that is no place, or that stands on the lens.
+ */
+export function planSideAngle(lens: BackgroundPoint, at: BackgroundPoint | null): number {
+  if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) return Number.NaN;
+  const dx = at.x - lens.x, dy = lens.y - at.y;
+  return Math.hypot(dx, dy) < 1 ? Number.NaN : Math.atan2(dy, dx) / RADIANS + 0;
+}
+/**
+ * The pitch a drag of the tip gives with the arrow turned to `degrees`: within the saved limits, in whole degrees, and
+ * caught at level and at either vertical within `capture` degrees. `big` (Shift held): in steps of `big` instead. `free`
+ * (Alt held): nothing catches it. `start` itself where that is as near or nearer, and when `degrees` is no number.
+ */
+export function planSideDragPitch(degrees: number, start: number, big: boolean, free: boolean): number {
+  if (!Number.isFinite(degrees)) return start;
+  const { min, max } = MAP_SPATIAL_LIMITS.pitch, turn = clamp(degrees, min, max), step = big ? PLAN_SIDE_TILT.big : 1;
+  const stop = big || free ? undefined : PLAN_SIDE_TILT.stops.find(value => Math.abs(turn - value) <= PLAN_SIDE_TILT.capture);
+  const snapped = stop ?? clamp(Math.round(turn / step) * step, min, max) + 0;
+  return Math.abs(turn - start) <= Math.abs(turn - snapped) ? start : snapped;
+}
 /** Side elevation of one camera: how high it is and how far up or down it looks. */
 export function planSideView(map: BackgroundMap, camera: BackgroundCamera, scale: PlanSideScale = planSideScale(map, camera)): PlanSideView {
   // A scale handed in is one held for a drag of the lens: the floor line and the room stay, and the lens moves alone, past the two lines of its travel as well.

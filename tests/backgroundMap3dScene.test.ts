@@ -11,7 +11,8 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapFloorPile, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, topDownMapView, visibleMapHits } from '../src/features/backgrounds/map3dScene.ts';
 import type { MapPickHit } from '../src/features/backgrounds/map3dScene.ts';
 import { MAP_GIZMO_COLORS, MAP_GIZMO_SHAPE, mapGizmoSize, MapNodeGizmo, mapGizmoSetup, previewMapFromRoot, rootWorldPose, styleMapGizmo } from '../src/features/backgrounds/BackgroundMapCameraGizmo.ts';
-import type { Map3DProps, Map3DViewState } from '../src/features/backgrounds/mapCanvas.ts';
+import type { MapGizmoHost } from '../src/features/backgrounds/BackgroundMapCameraGizmo.ts';
+import type { Map3DProps, Map3DViewState, MapGizmoPoseRequest } from '../src/features/backgrounds/mapCanvas.ts';
 import { createMapDocumentStore, mapDraft, mapSelection, mapViewport, pickAction, singleViewId } from '../src/features/backgrounds/mapDocument.ts';
 import { beginMapGesture, finishMapGesture, previewMapGesture } from '../src/features/backgrounds/mapEditSession.ts';
 import type { MapGesture } from '../src/features/backgrounds/mapEditSession.ts';
@@ -1525,7 +1526,7 @@ type GizmoHarness = {
   scene: Map3DScene; gizmo: MapNodeGizmo; calls: string[]; previews: BackgroundMap[]; ended: BackgroundMap[];
   frame(): void; press(axis: 'X' | 'Y' | 'Z'): void; move(x: number, y: number): void; release(): void; queued(): number;
 };
-function gizmoHarness(map: BackgroundMap, selectedId: string, mode: 'translate' | 'rotate' | 'scale', slop = 0): GizmoHarness {
+function gizmoHarness(map: BackgroundMap, selectedId: string, mode: 'translate' | 'rotate' | 'scale', slop = 0, snapPose?: MapGizmoHost['snapPose']): GizmoHarness {
   const scene = new Map3DScene();
   scene.sync(map, selectedId);
   const viewer = new PerspectiveCamera(MAP3D_VIEW_FOV, 1.5, 1, 20000);
@@ -1542,6 +1543,7 @@ function gizmoHarness(map: BackgroundMap, selectedId: string, mode: 'translate' 
     onPreview: next => { calls.push('preview'); previews.push(next); current = next; },
     onFinishGesture: () => { calls.push('finish'); },
     onCancelGesture: () => { calls.push('cancel'); },
+    ...(snapPose ? { snapPose } : {}),
   }, { slop });
   scene.scene.add(gizmo.helper);
   const node = map.nodes.find(item => item.id === selectedId);
@@ -1607,6 +1609,32 @@ test('one gizmo drag is one gesture: begin, coalesced previews, one finish', () 
   assert.equal(calls.filter(call => call === 'finish').length, 1);
   assert.ok(!calls.includes('cancel'));
   gizmo.dispose();
+  harness.scene.dispose();
+});
+
+test('a snap of the host puts the root where it says before the preview, and every step is asked from where the drag started', () => {
+  const lens = camera(20, { x: 250, y: 180, angle: 135 });
+  const map = mapOf([space(1), lens]), requests: MapGizmoPoseRequest[] = [];
+  // A host that puts the camera on the hundreds along the plan, and leaves a step alone once the root is past 400.
+  const harness = gizmoHarness(map, lens.id, 'translate', 0, request => {
+    requests.push(request);
+    return request.pose.position.x > 400 ? null : { ...request.pose, position: { ...request.pose.position, x: Math.round(request.pose.position.x / 100) * 100 } };
+  });
+  const root = rootOf(harness.scene, lens), start = root.position.clone();
+  harness.press('X'); harness.move(0.05, 0); harness.frame();
+  assert.equal(requests.length, 1);
+  const [asked] = requests;
+  assert.deepEqual([asked.map, asked.id, asked.mode, asked.axis], [map, lens.id, 'translate', 'X']);
+  assert.deepEqual(asked.start.position, { x: start.x, y: start.y, z: start.z }, 'the root as the drag started');
+  assert.equal(root.position.x % 100, 0, 'the root stands where the host said');
+  assert.equal((harness.previews[0].nodes[1] as BackgroundCamera).x, root.position.x, 'and the preview is that pose');
+  // The next step comes from the controls again, from where the drag started: the snapped step is not carried on.
+  harness.move(0.1, 0); harness.frame();
+  assert.equal(requests.length, 2);
+  assert.notEqual(requests[1].pose.position.x % 100, 0, 'the handles gave a pose of their own');
+  harness.release();
+  assert.equal(harness.ended[0], harness.previews.at(-1));
+  harness.gizmo.dispose();
   harness.scene.dispose();
 });
 

@@ -316,9 +316,14 @@ test('anchor 17: the Alt of a drag is kept from the window menu until that key i
   for (const listener of ["window.addEventListener('keydown', key, true);", "window.addEventListener('keyup', key, true);", "window.addEventListener('blur', forget);"])
     assert.ok(effect.includes(listener), listener);
   const key = piece(effect, 'const key = (event: KeyboardEvent) => {', 'const forget = () =>');
-  // The third place that switches it on: Alt pressed while the pointer is already down and resting.
-  inOrder(key, "if (event.key !== 'Alt') return;", "if (event.type === 'keydown' && pointerRef.current) altDrag.current = true;",
+  // The third place that switches it on: Alt pressed while the pointer is already down and resting, on the plan or in a
+  // drag of the document away from it (a handle in 3D, the side view of a camera, both of which read Alt since 2026-10-16).
+  inOrder(key, "if (event.key !== 'Alt') return;", "if (event.type === 'keydown' && (pointerRef.current || doc.isGestureActive())) altDrag.current = true;",
     'if (!altDrag.current) return;', 'event.preventDefault();', "if (event.type === 'keyup') altDrag.current = false;");
+  // And the fourth: Alt held on a move of such a drag, which the plan's handlers never hear (held before the press, it
+  // has no keydown in the drag). Heard on the window, before anything below it, while the document has a gesture.
+  assert.ok(effect.includes("const move = (event: PointerEvent) => { if (event.altKey && doc.isGestureActive()) altDrag.current = true; };"), 'a drag away from the plan does not keep its Alt from the window menu');
+  for (const listener of ["window.addEventListener('pointermove', move, true);", "window.removeEventListener('pointermove', move, true);"]) assert.ok(effect.includes(listener), listener);
   assert.equal(count(key, /altDrag\.current = false/g), 1, 'only the release of the key ends it');
   assert.match(effect, /const forget = \(\) => \{ altDrag\.current = false; \};/);
   // Switched on where the session is recorded, and on every move of it, before the drag threshold.
@@ -1749,9 +1754,12 @@ test('anchor 62: the pointer of a slide is heard on the window, its capture is o
   // time after asking whether one still runs: the editor may have cancelled it already (Escape, a save starting).
   assert.equal(count(hook, /scrub\.cancel\(\)/g), 3, 'given up, taken down, taken down while it started');
   assert.equal(count(hook, /scrub\.alive\(\)\) latest\.current\.scrub\.cancel\(\)/g), 3, 'each cancel asks first');
-  // Shift is the one modifier that is read, off the pointer events themselves: no key is listened for, and Alt means
-  // nothing here (on the plan it is kept from the window menu, anchor 17; a drag that starts outside the canvas is not).
-  for (const none of ['altKey', 'ctrlKey', 'metaKey', "addEventListener('keydown'"]) assert.ok(!hook.includes(none), `still there: ${none}`);
+  // Shift and Alt are read off the pointer events themselves, by the controls that want them: no key is listened for,
+  // and the hook names Alt only in the type of a point (the tip of the side view reads it, 2026-10-16). The release of
+  // an Alt held in a drag is kept from the window menu by the editor, wherever the drag started (anchor 17).
+  own('export type MapScrubPoint = { clientX: number; clientY: number; shiftKey: boolean; altKey?: boolean };');
+  assert.equal(count(hook, /altKey/g), 1, 'the hook does more with Alt than name it');
+  for (const none of ['ctrlKey', 'metaKey', "addEventListener('keydown'"]) assert.ok(!hook.includes(none), `still there: ${none}`);
   // And the hook holds nothing else: from its first line through the brace that closes it, it is the lines above and what
   // joins them, in this order. What joins them, and what goes wrong without it. `latest` is brought up to date at every
   // render: a control that was off when it was first drawn (view mode, a locked node) would stay deaf once it is on. The
@@ -2008,13 +2016,30 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   const held = `const node = origin.map.nodes.find(item => item.id === camera.id), held = ${taken} node?.type === 'camera' ? node : camera);`;
   const opened = `return { scale: held, start: origin.start, toY, ${grab} };`, lifted = `read: (drag, at) => ${level},`;
   own(`${drive},`, held, toY, kept, opened, lifted, `${closed},`);
+  // The tip of the sight arrow is a second handle (asked for on 2026-10-16), under the same rule and through the same
+  // hook: its drag is the pitch, and it starts past the slop along the way the tip moves first, up and down while the
+  // arrow lies nearer level and sideways while it stands nearer upright. The lens it turns round is found on the map
+  // the drag starts on, as the lift takes its scale there. A place on screen becomes a place in the picture through the
+  // matrix of the SVG, and the arrow keeps the turn it has from the pointer where the drag starts: with none it would
+  // jump to the pointer by as much as the press stood beside the tip. What the turn then gives is a pitch in the pure
+  // module (planSideAngle and planSideDragPitch, which S-6 runs), with Shift for steps of fifteen and Alt for no stops.
+  // While it runs the figure says so, asked of the scrub as the held scale is, and however it ends that is let go.
+  const aimDrive = "field: 'pitch', axis: Math.abs(side.head[0].y - side.camera.y) > Math.abs(side.head[0].x - side.camera.x) ? 'x' : 'y', immediate: false";
+  const aimLens = "const node = origin.map.nodes.find(item => item.id === camera.id), lens = planSideView(origin.map, node?.type === 'camera' ? node : camera).camera;";
+  const toPoint = 'const toPoint = (clientX: number, clientY: number) => inverse ? new DOMPoint(clientX, clientY).matrixTransform(inverse) : null;';
+  const aimed = 'const aimed = useRef(false), aiming = aimed.current && scrub.alive();', aimKept = 'aimed.current = true; redraw(turn => turn + 1);';
+  const turned = 'const turn = planSideAngle(lens, toPoint(from.clientX, from.clientY));', aimOpened = 'return { lens, toPoint, start: origin.start, grab: Number.isFinite(turn) ? origin.start - turn : 0 };';
+  const pitched = 'read: (drag, at) => planSideDragPitch(planSideAngle(drag.lens, drag.toPoint(at.clientX, at.clientY)) + drag.grab, drag.start, at.shiftKey, at.altKey === true),';
+  const aimClosed = 'close: () => { aimed.current = false; redraw(turn => turn + 1); },';
+  own(aimed, `${aimDrive},`, aimLens, toPoint, aimKept, turned, aimOpened, pitched, aimClosed);
   // What the handle adds is drawn only while the lens is one: the halo, the small up-down mark and the area that takes
   // the press each stand once, on a line of their own that opens with that condition. Drawn without it, a camera that
   // cannot be edited would be shown a handle that does nothing: a halo, the cursor of a drag, a tooltip.
   const ring = '{draggable && <circle className="bmap-plan-side-ring" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />}';
   const marks = '{draggable && <path className="bmap-plan-side-marks" d={`M ${x0 - 3} ${fixed(y - 4)} L ${x0} ${fixed(y - 8)} L ${x0 + 3} ${fixed(y - 4)} M ${x0 - 3} ${fixed(y + 4)} L ${x0} ${fixed(y + 8)} L ${x0 + 3} ${fixed(y + 4)}`} />}';
   const area = '{draggable && <circle className="bmap-plan-side-grab" onPointerDown={lift} cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot}><title>위아래로 끌어 카메라 높이 바꾸기 · 끄는 도중 Esc는 취소</title></circle>}';
-  for (const added of ['bmap-plan-side-ring', 'bmap-plan-side-marks', 'bmap-plan-side-grab']) {
+  const tipArea = '{draggable && <circle className="bmap-plan-side-aim" onPointerDown={aim} cx={fixed(side.head[0].x)} cy={fixed(side.head[0].y)} r={box.dot}><title>화살표 끝을 끌어 카메라가 보는 위아래 각도 바꾸기 · Shift는 15°씩 · 끄는 도중 Esc는 취소</title></circle>}';
+  for (const added of ['bmap-plan-side-ring', 'bmap-plan-side-marks', 'bmap-plan-side-grab', 'bmap-plan-side-aim']) {
     const found = lines.filter(line => line.includes(added));
     assert.equal(found.length, 1, `one line draws ${added}`);
     assert.ok(found[0].startsWith('{draggable && '), `drawn for a camera that cannot be edited: ${found[0]}`);
@@ -2022,7 +2047,7 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // The caption tells those who can drag the lens that they can, in a span of its own: the stylesheet hides that span
   // where the picture is too narrow for the longer words (below). Written as one text, the caption would always be cut
   // off there. To everyone else it reads as it always did.
-  const caption = '<figcaption>옆에서 본 방향{draggable && <span className="bmap-plan-side-tip"> · 점을 끌어 높이 조절</span>}</figcaption>';
+  const caption = '<figcaption>옆에서 본 방향{draggable && <span className="bmap-plan-side-tip"> · 점은 높이, 화살표 끝은 각도 조절</span>}</figcaption>';
   own(caption);
   // The handle is for the pointer alone: no stop for Tab, no slider, no key. The keyboard has the height field of the
   // inspector, which holds the same number: a second stop would be a second rule for joining the undo steps of one
@@ -2044,20 +2069,22 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // the figure as it always was, element for element and in its order: for a camera that cannot be edited (view mode,
   // a locked camera, a save running) the lines that open with `draggable` draw nothing, and what is left is the room,
   // the floor line and its six hatches, the pole, the level line, the line of sight with its head, and the lens. The
-  // halo and the mark come before the lens, which is drawn over the inner half of the halo. The area that takes the
-  // press comes last, over everything, and it is the one element with a handler: under the lens, a press on the very
-  // centre of the lens would land on the lens and start nothing.
+  // halo and the mark come before the lens, which is drawn over the inner half of the halo. The two areas that take a
+  // press come last and are the two elements with a handler: the tip's over the arrow head (under it, a press on the
+  // head would land on the head and start nothing), and the lens's last of all, over everything, so that where the
+  // two meet (an arrow cut short at an edge of the box) the lens is lifted.
   assert.deepEqual(lines.map(line => line.replace(/^(const x0 = box\.cameraX - )[\d.]+(, y = side\.camera\.y;)$/, '$1n$2')), [
     "import { useRef, useState } from 'react';", "import type { JSX, PointerEvent as ReactPointerEvent } from 'react';", "import type { MapFieldScrub } from './mapCanvas';",
     "import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';",
-    "import { PLAN_SIDE_VIEW, planSideDragLevel, planSideScale, planSideView, planSideY } from './mapPlanPreview';", "import type { PlanSideScale } from './mapPlanPreview';",
+    "import { PLAN_SIDE_VIEW, planSideAngle, planSideDragLevel, planSideDragPitch, planSideScale, planSideView, planSideY } from './mapPlanPreview';", "import type { PlanSideScale } from './mapPlanPreview';",
     "import { useMapScrubPointer } from './useMapScrubPointer';",
     'const fixed = (value: number) => Math.round(value * 100) / 100 + 0;', "const pointList = (points: BackgroundPoint[]) => points.map(point => `${fixed(point.x)},${fixed(point.y)}`).join(' ');",
     'export function BackgroundMapPlanSide({ map, camera, canEdit, scrub, label }: {', 'map: BackgroundMap; camera: BackgroundCamera;', 'canEdit: boolean; scrub: MapFieldScrub;', 'label: string }): JSX.Element {',
     `${handle}, box = PLAN_SIDE_VIEW;`, 'const frozen = useRef<PlanSideScale | null>(null), [, redraw] = useState(0);', 'const svgRef = useRef<SVGSVGElement>(null);', `const press = ${pointer};`, live, drawn,
     'const lift = (event: ReactPointerEvent<SVGCircleElement>) => press(event, {', `${drive},`, 'open: (origin, from) => {', held, 'const inverse = svgRef.current?.getScreenCTM()?.inverse();', toY, kept, opened, '},',
-    lifted, `${closed},`, '});', 'const x0 = box.cameraX - n, y = side.camera.y;',
-    "return <figure className={`bmap-plan-side${draggable ? ' is-draggable' : ''}${live ? ' is-lifting' : ''}`}>",
+    lifted, `${closed},`, '});', aimed, 'const aim = (event: ReactPointerEvent<SVGCircleElement>) => press(event, {', `${aimDrive},`, 'open: (origin, from) => {', aimLens,
+    'const inverse = svgRef.current?.getScreenCTM()?.inverse();', toPoint, aimKept, turned, aimOpened, '},', pitched, aimClosed, '});', 'const x0 = box.cameraX - n, y = side.camera.y;',
+    "return <figure className={`bmap-plan-side${draggable ? ' is-draggable' : ''}${live ? ' is-lifting' : ''}${aiming ? ' is-aiming' : ''}`}>",
     '<svg ref={svgRef} viewBox={`0 0 ${box.width} ${box.height}`} role="img" aria-label={label}>',
     '{side.room && <rect className="bmap-plan-side-room" x={box.left} y={fixed(side.room.top)} width={box.right - box.left} height={fixed(Math.max(1, side.room.bottom - side.room.top))} />}',
     '<line className="bmap-plan-side-floor" x1={box.left} x2={box.right} y1={fixed(side.floorY)} y2={fixed(side.floorY)} />',
@@ -2066,7 +2093,7 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
     '<line className="bmap-plan-side-level" x1={side.camera.x} x2={side.camera.x + box.arrow + box.head} y1={fixed(side.camera.y)} y2={fixed(side.camera.y)} />',
     '<line className="bmap-plan-sight" x1={side.camera.x} y1={fixed(side.camera.y)} x2={fixed(side.tip.x)} y2={fixed(side.tip.y)} />',
     '<polygon className="bmap-plan-sight-head" points={pointList(side.head)} />', ring, marks,
-    '<circle className="bmap-plan-dot" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />', area, '</svg>', caption, '</figure>;', '}']);
+    '<circle className="bmap-plan-dot" cx={side.camera.x} cy={fixed(side.camera.y)} r={box.dot} />', tipArea, area, '</svg>', caption, '</figure>;', '}']);
   // And in what the side view draws, `read` took nothing away: from its `return` to the end the file is the same
   // letters with and without what `read` drops (anchor 63 says why that is asked).
   const rawSide = readFileSync(new URL('BackgroundMapPlanSide.tsx', directory), 'utf8').replace(/\r\n/g, '\n'), figure = 'return <figure className=';
@@ -2102,15 +2129,17 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // view of its own any more: left there, a second picture would stand beside the one with the handle.
   for (const none of ['setPointerCapture', "addEventListener('pointermove'", 'bmap-plan-side', 'planSideView(']) assert.ok(!preview.includes(none), `still in the companion plan: ${none}`);
   // The stylesheet of the companion plan, line by line and as written: a rule is one line there, and the comments stay.
-  // The handle is drawn by these seven rules and by no other, each one line, in this order: two inside the blocks of
-  // the short and wide plan, then five base rules. They are looked for in what is left of the sheet without its
-  // comments: a rule written behind a comment, or under another selector, could undo any line read below.
+  // The two handles are drawn by these eleven rules and by no other, each one line, in this order: two inside the
+  // blocks of the short and wide plan, five base rules of the lens, then four of the tip. They are looked for in what is
+  // left of the sheet without its comments: a rule written behind a comment, or under another selector, could undo any
+  // line read below.
   const plan = readFileSync(new URL('backgrounds-map-plan.css', directory), 'utf8').replace(/\r\n/g, '\n').split('\n');
   const has = (rule: string[], ...parts: string[]) => { for (const item of parts) assert.ok(rule.includes(item), `not declared: ${item} (${rule.join('; ')})`); };
   const bare = plan.join('\n').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, '')).split('\n');
-  const rules = bare.map(line => line.trim()).filter(line => /bmap-plan-side-(?:grab|ring|marks|tip)|is-lifting/.test(line));
+  const rules = bare.map(line => line.trim()).filter(line => /bmap-plan-side-(?:grab|ring|marks|tip|aim)|is-lifting|is-aiming/.test(line));
   assert.deepEqual(rules.map(line => line.slice(0, line.indexOf('{') + 1)), ['.bmap-plan-side-tip {', '.bmap-plan-side-marks {', '.bmap-plan-side-grab {', '.bmap-plan-side-ring {', '.bmap-plan-side-marks {',
-    '.bmap-plan-side.is-lifting .bmap-plan-side-ring {', '.bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong {']);
+    '.bmap-plan-side.is-lifting .bmap-plan-side-ring {', '.bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong {',
+    '.bmap-plan-side-aim {', '.bmap-plan-side-aim:hover {', '.bmap-plan-side.is-aiming .bmap-plan-side-aim {', '.bmap-plan-readout:has(.bmap-plan-side.is-aiming) .is-pitch strong {']);
   for (const line of rules) assert.equal(count(line, /\{/g), 1, `more than one rule on a line: ${line}`);
   // Nothing of the handle moves by itself: a drag is the hand moving it. Nothing of it blurs what is behind it. And no
   // colour is written out: the handle is painted from the camera variables of this plan, or not at all, so the handle
@@ -2128,6 +2157,9 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // plan keeps its strokes unscaled, and no rule of the handle undoes that: drawn in the units of the picture, the halo
   // could not be told from the edge of the lens in the smallest picture, and the area would shrink with the picture.
   has(baseRule(plan, '.bmap-plan-side-grab {'), 'fill:transparent', 'stroke:transparent', 'stroke-width:24px', 'pointer-events:all', 'cursor:ns-resize', 'touch-action:none');
+  // The tip's area is the same size of dot on the point of the arrow, with a stroke 16 pixels wide that takes a press,
+  // and it is the one part of a handle that paints: a soft dot, so the tip reads as something to drag.
+  has(baseRule(plan, '.bmap-plan-side-aim {'), 'fill:var(--bmap-plan-cam-line)', 'stroke:transparent', 'stroke-width:16px', 'pointer-events:all', 'touch-action:none');
   // The engine reads touch-action from boxes only: on a shape inside a picture it is dropped, and the lens inherits the
   // scrolling of the page, so a touch or a pen that starts there turns into a scroll after a few pixels and the drag is
   // cancelled. While the lens can be dragged the picture as a whole takes it; in view mode the picture is as before.
@@ -2144,6 +2176,9 @@ test('anchor 64: the lens of the side view is a handle only while its camera can
   // and nothing that has a size. A larger or a heavier number there would make the readout jump as a drag starts.
   for (const lifted of ['.bmap-plan-side.is-lifting .bmap-plan-side-ring {', '.bmap-plan-readout:has(.bmap-plan-side.is-lifting) .is-elevation strong {'])
     for (const item of baseRule(plan, lifted)) assert.match(item, /^(?:color|stroke-opacity):/, `a drag changes more than a colour: ${item}`);
+  // So does the dot on the tip under the pointer and while it is dragged, and the pitch in the readout.
+  for (const aimed of ['.bmap-plan-side-aim:hover {', '.bmap-plan-side.is-aiming .bmap-plan-side-aim {', '.bmap-plan-readout:has(.bmap-plan-side.is-aiming) .is-pitch strong {'])
+    for (const item of baseRule(plan, aimed)) assert.match(item, /^(?:color|fill-opacity):/, `a drag of the tip changes more than a colour: ${item}`);
   // The up-down mark is two open lines, and unfilled like the halo. What a shape is filled with has to be written: the
   // check of the colours above reads only what a rule declares, and a shape with no fill declared is filled in black
   // by the engine, the colour of no camera. Each of the two lines would be closed into a small black wedge.
@@ -2514,10 +2549,11 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
 
 test('anchor 67: the eye filters what is drawn and what a pointer is asked about, and every writer is handed the whole draft', () => {
   // The one rule of the eye: what is drawn and what a pointer is asked about leave out what it hides, and what is
-  // written never does. The map without the hidden nodes is made in four places of the editor and in no other, each an
+  // written never does. The map without the hidden nodes is made in five places of the editor and in no other, each an
   // argument of a pure question about what lies under the pointer, never a map that is written: the pile of a press,
-  // the snap candidates of a drag, what a selection box takes, and the space a new symbol stands in.
-  assert.equal(count(editor, /\bshownMap\(/g), 4, 'the pile, the snap candidates, the box and the space of a new symbol');
+  // the snap candidates of a drag, what a selection box takes, the space a new symbol stands in, and what a handle of 3D
+  // sticks to (2026-10-16 — the gizmo still writes its pose into the whole map it started from, below).
+  assert.equal(count(editor, /\bshownMap\(/g), 5, 'the pile, the snap candidates, the box, the space of a new symbol and the snap of the 3D handles');
   const down = handler.pointerDown(), move = handler.pointerMove(), up = handler.pointerUp(), place = handler.placeSymbol();
   // The press. Its pile is what the plan draws under the pointer: a hidden space in the middle of a pile is stepped over,
   // never picked. The session is opened on the whole draft as it is at this very moment: a drag previews that map and
@@ -2762,6 +2798,12 @@ test('anchor 70: in 3D a hidden node and what a closed room holds are not drawn,
   // which builds its props without them: these letters are what holds it.
   const props3d = piece(read('mapCanvas.ts'), 'export type Map3DProps = MapCanvasProps & {', 'export type MapScrubOrigin');
   for (const field of ['hiddenIds?: ReadonlySet<string>;', 'solidIds?: ReadonlySet<string>;']) assert.ok(props3d.includes(field), `not an optional prop of the 3D view: ${field}`);
+  // The handles of 3D snap to what is shown alone, as the drags of the plan do (their candidates are read from shownMap),
+  // and only while the snap switch is on: the 3D view is handed the editor's own function, and none with the switch off.
+  // The snap is optional as well: a viewport handed none drags freely, as before 2026-10-16.
+  assert.ok(editor.includes('const snapHandle = useEvent((request: Map3DSnapRequest) => snapGizmoPose({ ...request, map: shownMap(request.map, hiddenIds) }));'), 'the 3D handles stick to what the eye hides');
+  assert.ok(piece(editor, '<Map3D map={current}', '/>').includes(' snapPose={snapEnabled ? snapHandle : undefined}'), 'the 3D view is handed another snap, or one with the switch off');
+  assert.ok(props3d.includes('snapPose?(request: Map3DSnapRequest): NodeWorldPoseInput | null;'), 'the snap of the 3D view is not optional');
 });
 
 test('anchor 71: the chip takes no room in the footer, and the new classes are written in their own lines alone', () => {

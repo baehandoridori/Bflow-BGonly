@@ -3,12 +3,13 @@ import { MOUSE, PerspectiveCamera, Plane, Raycaster, TOUCH, Vector2, Vector3, We
 import type { Scene } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import type { Map3DProps, Map3DViewState } from './mapCanvas';
+import type { Map3DProps, Map3DViewState, MapGizmoPoseRequest } from './mapCanvas';
 import type { BackgroundCamera, BackgroundMap, BackgroundPoint } from './types';
 import { MAP3D_DARK_PALETTE, MAP3D_VIEW_FOV, Map3DScene, fitMapView, mapClickAim, mapSpacePile, mapWorldBounds, pickMapFloor, pickMapNode, resolveMapClick, sameMap3DPalette, topDownMapView, visibleMapHits } from './map3dScene';
 import type { Map3DPalette, MapPickHit } from './map3dScene';
 import { MapNodeGizmo, mapGizmoSetup } from './BackgroundMapCameraGizmo';
 import { stackedMapNodeIds } from './mapGeometry';
+import type { NodeWorldPoseInput } from './mapGeometry';
 import { MAP_SPATIAL_DEFAULTS, cameraAspect, isRoadSpace, nodeWorldPose, verticalFov } from './mapSpatial';
 import './backgrounds-map-3d.css';
 
@@ -78,6 +79,11 @@ class Map3DViewport {
   private readonly pointer = new Vector2();
   private readonly floorPlane = new Plane(new Vector3(0, 1, 0), 0);
   private readonly hit = new Vector3();
+  private readonly probe = new Vector3();
+  /** Shift and Alt as the last press or move of the pointer had them: Alt leaves a handle drag unsnapped, Shift makes its steps big. */
+  private keys = { shift: false, alt: false };
+  /** The height of one screen pixel per unit of depth, as last drawn. */
+  private pixelAngle = 0;
   private readonly onNotice: (text: string) => void;
   private readonly beforeFrame = new Map<number, () => void>();
   private resizeObserver: ResizeObserver | null = null;
@@ -180,6 +186,7 @@ class Map3DViewport {
       onFinishGesture: () => this.props.onFinishGesture(),
       // The pointer may still be down: its late release is not a click. A cancelled drag ends the memory of the spot, as on the plan.
       onCancelGesture: () => { if (this.press) this.press.moved = true; this.turn = null; this.props.onCancelGesture(); },
+      snapPose: request => this.snapPose(request),
     }, { slop: CLICK_SLOP });
     this.scene3d.scene.add(this.gizmo.helper);
     this.gizmo.controls.addEventListener('change', this.requestRender);
@@ -360,8 +367,18 @@ class Map3DViewport {
       renderer.setScissorTest(true);
     }
     renderer.setClearColor(this.palette.background, 1);
-    this.scene3d.setLabelScale(2 * Math.tan(this.camera.fov * RADIANS / 2) / view.height);
+    // The labels are sized by it, and the snap of a handle drag reaches by it.
+    this.pixelAngle = 2 * Math.tan(this.camera.fov * RADIANS / 2) / view.height;
+    this.scene3d.setLabelScale(this.pixelAngle);
     renderer.render(this.scene3d.scene, this.camera);
+  }
+  /** The editor's snap of this step of a handle drag: none while Alt was held on the last move, as on the plan. */
+  private snapPose(request: MapGizmoPoseRequest): NodeWorldPoseInput | null {
+    const snap = this.props.snapPose;
+    if (!snap || this.keys.alt) return null;
+    // The plan's snap distances are screen pixels: one pixel at the node, in map units.
+    const at = request.pose.position, depth = -this.probe.set(at.x, at.y, at.z).applyMatrix4(this.camera.matrixWorldInverse).z;
+    return snap({ ...request, unitsPerPixel: depth > 0 && this.pixelAngle > 0 ? depth * this.pixelAngle : Number.NaN, big: this.keys.shift });
   }
   /** Set up the viewer camera for this frame and return the part of the canvas it draws into (CSS pixels from the top left). */
   private frameView(): ViewRect {
@@ -584,6 +601,7 @@ class Map3DViewport {
   /** A press anywhere but on the canvas (the bar over it, the companion plan, the inspector, the object list, the toolbar, a dialog): the same spot is pressed anew after it. */
   private readonly onPressElsewhere = (event: PointerEvent): void => { if (event.target !== this.canvas) this.turn = null; };
   private readonly onPointerDown = (event: PointerEvent): void => {
+    this.keys = { shift: event.shiftKey, alt: event.altKey };
     this.host.focus({ preventScroll: true });
     // TransformControls has already seen this press, so its hover state tells whether a handle is under the pointer.
     this.press = event.isPrimary && event.button === 0
@@ -592,6 +610,8 @@ class Map3DViewport {
     if (!this.press) this.turn = null;
   };
   private readonly onPointerMove = (event: PointerEvent): void => {
+    // Heard before the controls hear this move: the step it makes is snapped with the keys it has.
+    this.keys = { shift: event.shiftKey, alt: event.altKey };
     const press = this.press;
     if (!press || press.pointerId !== event.pointerId) return;
     const travel = Math.hypot(event.clientX - press.x, event.clientY - press.y);
