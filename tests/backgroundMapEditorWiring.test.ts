@@ -2549,10 +2549,11 @@ test('anchor 66: the delete dialog acts on the map it was opened for, sends the 
 
 test('anchor 67: the eye filters what is drawn and what a pointer is asked about, and every writer is handed the whole draft', () => {
   // The one rule of the eye: what is drawn and what a pointer is asked about leave out what it hides, and what is
-  // written never does. The map without the hidden nodes is made in four places of the editor and in no other, each an
+  // written never does. The map without the hidden nodes is made in five places of the editor and in no other, each an
   // argument of a pure question about what lies under the pointer, never a map that is written: the pile of a press,
-  // the snap candidates of a drag, what a selection box takes, and the space a new symbol stands in.
-  assert.equal(count(editor, /\bshownMap\(/g), 4, 'the pile, the snap candidates, the box and the space of a new symbol');
+  // the snap candidates of a drag, what a selection box takes, the space a new symbol stands in, and what a handle of 3D
+  // sticks to (2026-10-16 — the gizmo still writes its pose into the whole map it started from, below).
+  assert.equal(count(editor, /\bshownMap\(/g), 5, 'the pile, the snap candidates, the box, the space of a new symbol and the snap of the 3D handles');
   const down = handler.pointerDown(), move = handler.pointerMove(), up = handler.pointerUp(), place = handler.placeSymbol();
   // The press. Its pile is what the plan draws under the pointer: a hidden space in the middle of a pile is stepped over,
   // never picked. The session is opened on the whole draft as it is at this very moment: a drag previews that map and
@@ -2797,6 +2798,12 @@ test('anchor 70: in 3D a hidden node and what a closed room holds are not drawn,
   // which builds its props without them: these letters are what holds it.
   const props3d = piece(read('mapCanvas.ts'), 'export type Map3DProps = MapCanvasProps & {', 'export type MapScrubOrigin');
   for (const field of ['hiddenIds?: ReadonlySet<string>;', 'solidIds?: ReadonlySet<string>;']) assert.ok(props3d.includes(field), `not an optional prop of the 3D view: ${field}`);
+  // The handles of 3D snap to what is shown alone, as the drags of the plan do (their candidates are read from shownMap),
+  // and only while the snap switch is on: the 3D view is handed the editor's own function, and none with the switch off.
+  // The snap is optional as well: a viewport handed none drags freely, as before 2026-10-16.
+  assert.ok(editor.includes('const snapHandle = useEvent((request: Map3DSnapRequest) => snapGizmoPose({ ...request, map: shownMap(request.map, hiddenIds) }));'), 'the 3D handles stick to what the eye hides');
+  assert.ok(piece(editor, '<Map3D map={current}', '/>').includes(' snapPose={snapEnabled ? snapHandle : undefined}'), 'the 3D view is handed another snap, or one with the switch off');
+  assert.ok(props3d.includes('snapPose?(request: Map3DSnapRequest): NodeWorldPoseInput | null;'), 'the snap of the 3D view is not optional');
 });
 
 test('anchor 71: the chip takes no room in the footer, and the new classes are written in their own lines alone', () => {

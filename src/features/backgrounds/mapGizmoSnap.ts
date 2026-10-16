@@ -97,24 +97,28 @@ function snapAngle(degrees: number, stops: readonly number[], big: boolean): num
   return stop ?? whole(degrees);
 }
 
+/** A change of an angle smaller than this is the noise of the arithmetic, not a turn. */
+const TURN_NOISE = 1e-6;
 /**
- * A turn about one ring. The ring decides the angle it drives: about the vertical (Y) the heading, about the side (X) the
- * tilt, about the line of sight or the depth (Z) the roll. That angle is snapped and the others stay as the handles left them.
+ * A turn about one ring. Each angle the turn changed is snapped and an angle it left alone stays as it was: a ring
+ * mostly drives one (the heading, the tilt or the roll), but about a tilted or rolled frame it moves the others a little,
+ * and a camera looking straight up or down reads a turn about its line of sight as a change of heading.
  */
 function snapGizmoTurn(node: BackgroundNode, request: Map3DSnapRequest): NodeWorldPoseInput | null {
   const { pose, axis, big } = request;
   if (axis !== 'X' && axis !== 'Y' && axis !== 'Z') return null;
-  const tilt = (degrees: number) => clamp(snapAngle(degrees, MAP_GIZMO_SNAP.pitchStops, big), MAP_SPATIAL_LIMITS.pitch.min, MAP_SPATIAL_LIMITS.pitch.max) + 0;
-  const roll = (degrees: number) => normalizeSignedDegrees(snapAngle(degrees, MAP_GIZMO_SNAP.rollStops, big));
+  const changed = (before: number, after: number) => Math.abs(normalizeSignedDegrees(after - before)) > TURN_NOISE;
+  const tilt = (before: number, after: number) => changed(before, after) ? clamp(snapAngle(after, MAP_GIZMO_SNAP.pitchStops, big), MAP_SPATIAL_LIMITS.pitch.min, MAP_SPATIAL_LIMITS.pitch.max) + 0 : after;
+  const roll = (before: number, after: number) => changed(before, after) ? normalizeSignedDegrees(snapAngle(after, MAP_GIZMO_SNAP.rollStops, big)) : after;
+  const heading = (before: number, after: number) => changed(before, after) ? snapHeading(after, big) : after;
   if (node.type === 'camera') {
-    const read = cameraAnglesFromOrientation(pose.quaternion, cameraAngles(node));
-    const angles = axis === 'Y' ? { ...read, angle: snapHeading(read.angle, big) } : axis === 'X' ? { ...read, pitch: tilt(read.pitch) } : { ...read, roll: roll(read.roll) };
-    return { ...pose, quaternion: cameraOrientation(angles) };
+    const before = cameraAngles(node), read = cameraAnglesFromOrientation(pose.quaternion, before);
+    return { ...pose, quaternion: cameraOrientation({ angle: heading(before.angle, read.angle), pitch: tilt(before.pitch, read.pitch), roll: roll(before.roll, read.roll) }) };
   }
+  const before = nodeAngles(node), read = nodeAnglesFromOrientation(pose.quaternion, before);
   // A space stays upright: only its heading is read back (applyNodeWorldPose), so only its heading is snapped.
-  const read = nodeAnglesFromOrientation(pose.quaternion, nodeAngles(node));
-  const angles = axis === 'Y' || node.type === 'space' ? { ...read, rotation: snapHeading(read.rotation, big) } : axis === 'X' ? { ...read, pitch: tilt(read.pitch) } : { ...read, roll: roll(read.roll) };
-  return { ...pose, quaternion: nodeOrientation(angles) };
+  if (node.type === 'space') return { ...pose, quaternion: nodeOrientation({ ...read, rotation: snapHeading(read.rotation, big) }) };
+  return { ...pose, quaternion: nodeOrientation({ rotation: heading(before.rotation, read.rotation), pitch: tilt(before.pitch, read.pitch), roll: roll(before.roll, read.roll) }) };
 }
 
 /** A stretch: each length the handle drives is a whole number (Shift: a step of `size`), never under the least a box may have. */

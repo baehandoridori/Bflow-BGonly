@@ -33,7 +33,7 @@ import type { MapSelection, MapUpdateOptions, MapViewport } from './mapDocument'
 import { useBackgroundMapDocument } from './useBackgroundMapDocument';
 import { MAP_SAVED_NOTICE_MS, mapEditStatus } from './mapEditStatus';
 import { useMapEditColors } from './useMapEditColors';
-import type { Map3DGizmoMode, Map3DViewState, MapDisplayMode, MapFieldScrub } from './mapCanvas';
+import type { Map3DGizmoMode, Map3DSnapRequest, Map3DViewState, MapDisplayMode, MapFieldScrub } from './mapCanvas';
 import { backgroundMapPath } from './domain';
 import { connectMap, createMapAndConnect, effectiveMaps, mapCanNest, moveMapChanges, saveMapChanges, savedMaps, type MapSaveCommand } from './mapWorkflow';
 import { mapDeleteCauseText, mapDeleteStopText, planMapDelete } from './mapDelete';
@@ -1182,6 +1182,8 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
   const fieldScrub = useMemo((): MapFieldScrub => ({ begin: beginFieldScrub, preview: previewFieldScrub, finish: finishCanvasGesture, cancel: cancelCanvasGesture, alive: doc.isGestureActive }),
     [beginFieldScrub, previewFieldScrub, finishCanvasGesture, cancelCanvasGesture, doc.isGestureActive]);
   const placeAt = useEvent((point: BackgroundPoint) => placeSymbol(point));
+  // The handles of 3D snap as the plan's drags do: what the eye hides is not there to stick to.
+  const snapHandle = useEvent((request: Map3DSnapRequest) => snapGizmoPose({ ...request, map: shownMap(request.map, hiddenIds) }));
   const storeView = useEvent((next: Map3DViewState) => { if (current) viewStates.current[current.id] = next; });
   const changeLookThrough = useEvent((id: string | null) => {
     if (id && current) select(id);
@@ -1476,7 +1478,7 @@ export function BackgroundMapEditor({ snapshot, pending, execute, onOpenView, on
               <Map3DBoundary onFail={leave3D}><Suspense fallback={<div className="bmap-3d-loading" role="status">3D 화면을 준비하고 있어요…</div>}>
                 <Map3D map={current} selectedId={singleId} canEdit={canEdit} onSelect={selectNode}
                   onBeginGesture={beginCanvasGesture} onPreview={previewCanvasGesture} onFinishGesture={finishCanvasGesture} onCancelGesture={cancelCanvasGesture}
-                  tool={tool === 'hand' ? 'look' : 'select'} gizmoMode={gizmoMode} placing={tool === 'symbol' && canEdit} onPlace={placeAt} snapPose={snapEnabled ? snapGizmoPose : undefined}
+                  tool={tool === 'hand' ? 'look' : 'select'} gizmoMode={gizmoMode} placing={tool === 'symbol' && canEdit} onPlace={placeAt} snapPose={snapEnabled ? snapHandle : undefined}
                   focusRequest={focusRequest} initialView={viewStates.current[current.id] ?? null} onViewChange={storeView}
                   lookThroughId={lookThroughId} onLookThroughChange={changeLookThrough} onOpenSpace={openSpaceFrom3D} onUnavailable={leave3D} hiddenIds={hiddenIds} solidIds={roomsOpen ? NO_MAP_VIEW_PREFS.solid : solidIds} />
               </Suspense></Map3DBoundary>

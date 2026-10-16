@@ -64,6 +64,8 @@ test('G-1: a move along the plan sticks to what is near as the plan does, else w
   // Both plan axes at once (the square of X and Z): each sticks or rounds on its own.
   const both = stored<BackgroundSymbol>(step(chair, 'translate', 'XZ', moved(chair, { x: -38.5, z: 20.4 })));
   assert.deepEqual([both.x, both.y], [460, 170]);
+  // What is not in the map handed over is not there to stick to: the editor hands over what the eye shows.
+  assert.equal(applyNodeWorldPose(map, chair.id, snapped({ ...step(chair, 'translate', 'X', moved(chair, { x: -38.5 })), map: plan(room, chair, lens) })).nodes[2].x, 462);
   // A camera is its own point.
   assert.deepEqual([stored<BackgroundCamera>(step(lens, 'translate', 'X', moved(lens, { x: 10.6 }))).x, stored<BackgroundCamera>(step(lens, 'translate', 'Z', moved(lens, { z: -0.4 }))).y], [711, 200]);
 });
@@ -103,6 +105,20 @@ test('G-3: a turn stops at the quarter turns, and at level and either vertical f
   // What the ring does not drive stays where the handles left it.
   const tilted = aimed({ pitch: -31.6 }, 'X');
   assert.equal(tilted.angle, 30); assert.ok(!('roll' in tilted) || tilted.roll === 0);
+  // A camera looking straight down reads a turn about its line of sight as a change of heading: the heading is snapped.
+  const down = camera('down', 300, 300, { pitch: -90, angle: 30 }), poles = plan(room, down);
+  const atPole = (axis: string, angles: { angle: number; pitch: number; roll: number }) =>
+    applyNodeWorldPose(poles, down.id, snapped({ ...step(down, 'rotate', axis, { quaternion: cameraOrientation(angles) }), map: poles })).nodes[1] as BackgroundCamera;
+  const spun = atPole('Z', { angle: 30, pitch: -90, roll: 20.37 });
+  assert.equal(spun.pitch, -90); assert.ok(Number.isInteger(spun.angle) && spun.angle !== 30, `heading ${spun.angle}`); assert.ok(!spun.roll, `roll ${spun.roll}`);
+  // Tilted off the pole by the ring about its up: the tilt changed, and it is the tilt that is snapped.
+  assert.equal(atPole('Y', { angle: 30, pitch: -81.6, roll: 0 }).pitch, -82);
+  // A tilted camera turned about its own up: the heading moves most, and what the turn brings to the tilt and the roll is tidied as well.
+  const half = (degrees: number) => degrees * Math.PI / 360, q = cameraOrientation(cameraAngles(lens)), r = { x: 0, y: Math.sin(half(17.3)), z: 0, w: Math.cos(half(17.3)) };
+  const turnedUp = { x: q.w * r.x + q.x * r.w + q.y * r.z - q.z * r.y, y: q.w * r.y - q.x * r.z + q.y * r.w + q.z * r.x, z: q.w * r.z + q.x * r.y - q.y * r.x + q.z * r.w, w: q.w * r.w - q.x * r.x - q.y * r.y - q.z * r.z };
+  const swung = stored<BackgroundCamera>(step(lens, 'rotate', 'Y', { quaternion: turnedUp }));
+  for (const value of [swung.angle, swung.pitch ?? 0, swung.roll ?? 0]) assert.ok(Number.isInteger(value), `${swung.angle} / ${swung.pitch} / ${swung.roll}`);
+  assert.notEqual(swung.angle, 30);
   // The free rings are off, so there is nothing to snap for them.
   assert.equal(snapGizmoPose(step(lens, 'rotate', 'E', {})), null);
 });
