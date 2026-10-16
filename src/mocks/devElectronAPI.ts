@@ -14,7 +14,7 @@ import { version as appVersion } from '../../package.json';
 import { RetakeNotificationService } from '../../electron/retakeNotificationService';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
 import { createThreadTodoPreviewStore, type ThreadTodoPreviewStore } from './threadTodoPreviewStore';
-import { createBackgroundPreviewGateway, subscribeBackgroundPreview } from '../features/backgrounds/previewGateway';
+import { createBackgroundPreviewGateway, notifyBackgroundPreview, subscribeBackgroundPreview } from '../features/backgrounds/previewGateway';
 import { KEPT_EDITS, KEPT_EDITS_REFUSAL, keptEntriesOf, keptEntryProblem } from '../shared/backgroundKeptEdits';
 import type { KeptMapEdit } from '../shared/backgroundKeptEdits';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
@@ -155,8 +155,22 @@ function requireBackgroundPreviewSession() {
     if (actor.id !== previewCanonicalUserId || epoch !== previewCanonicalEpoch) throw new Error('로그인 세션이 변경되었습니다. 다시 시도해 주세요.');
   };
   return { actor, assertCurrent, gateway: createBackgroundPreviewGateway({
-    id: actor.id, canManage: actor.role === 'admin', episodeNumbers: MOCK_EPISODES.map(ep => ep.episodeNumber),
+    id: actor.id, canManage: previewCanEditBackground(actor), episodeNumbers: MOCK_EPISODES.map(ep => ep.episodeNumber),
   }, { storage: window.localStorage, assertCurrent }) };
+}
+
+/** The background editors an admin picked (2026-10-16), as the server's list: one localStorage value, ids of users that exist. */
+const PREVIEW_BACKGROUND_EDITORS_KEY = 'bflow:preview:background-editors';
+function readPreviewBackgroundEditors(): string[] {
+  const known = new Set(getMockUsers().map(user => user.id));
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(PREVIEW_BACKGROUND_EDITORS_KEY) ?? '[]');
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && known.has(item)).sort() : [];
+  } catch { return []; }
+}
+/** The edit right of the server: an admin, or a user on the list. */
+function previewCanEditBackground(user: PreviewUser): boolean {
+  return user.role === 'admin' || readPreviewBackgroundEditors().includes(user.id);
 }
 
 /** The unsaved map edits the preview keeps (v1.140.0): main's file of one account, mirrored in one localStorage value per account. */
@@ -3792,13 +3806,13 @@ export function installDevElectronAPI(): void {
     onBackgroundChanged: (callback) => subscribeBackgroundPreview(callback),
     backgroundUploadImage: async (base64Data) => {
       const { actor, assertCurrent } = requireBackgroundPreviewSession();
-      if (actor.role !== 'admin') throw new Error('배경 이미지 업로드는 관리자만 할 수 있습니다.');
+      if (!previewCanEditBackground(actor)) throw new Error('배경 이미지를 올릴 권한이 없습니다. 관리자에게 배경 편집자로 지정해 달라고 요청해 주세요.');
       if (typeof base64Data !== 'string' || base64Data.length > 2_000_000 || !/^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(base64Data)) return {ok:false,error:'2MB 이하의 PNG, JPEG, WebP 미리보기를 선택해 주세요.'};
       const url = await shrinkPreviewImage(base64Data); assertCurrent(); return {ok:true,url};
     },
     backgroundReadImageFile: async (filePath) => {
       const { actor, assertCurrent } = requireBackgroundPreviewSession();
-      if (actor.role !== 'admin') throw new Error('배경 이미지 파일 연결은 관리자만 할 수 있습니다.');
+      if (!previewCanEditBackground(actor)) throw new Error('배경 이미지 파일을 연결할 권한이 없습니다. 관리자에게 배경 편집자로 지정해 달라고 요청해 주세요.');
       const samplePath = 'G:\\공유 드라이브\\JBBJ\\배경\\교실\\교실_낮.png';
       if (typeof filePath !== 'string' || filePath.trim() !== samplePath) {
         throw new Error(`브라우저 프리뷰에서는 PC 파일 경로를 직접 읽을 수 없습니다. 이미지 파일을 선택하거나 예제 경로를 사용해 주세요: ${samplePath}`);
@@ -3817,6 +3831,22 @@ export function installDevElectronAPI(): void {
       context.fillStyle = '#f3f1e6'; context.font = '18px sans-serif'; context.fillText('프리뷰 예제 · 교실 낮', 226, 133);
       const dataUrl = canvas.toDataURL('image/png');
       assertCurrent(); return { dataUrl, filePath: samplePath };
+    },
+    backgroundEditorsList: async () => {
+      const { actor, assertCurrent } = requireBackgroundPreviewSession();
+      if (actor.role !== 'admin') throw new Error('배경 편집자 명단은 관리자만 볼 수 있습니다.');
+      const list = readPreviewBackgroundEditors(); assertCurrent(); return list;
+    },
+    backgroundEditorsSet: async (userId, editor) => {
+      const { actor, assertCurrent } = requireBackgroundPreviewSession();
+      if (actor.role !== 'admin') throw new Error('배경 편집자는 관리자만 정할 수 있습니다.');
+      if (typeof userId !== 'string' || typeof editor !== 'boolean' || !getMockUsers().some(user => user.id === userId)) throw new Error('배경 편집자로 정할 사용자를 찾을 수 없습니다.');
+      const next = new Set(readPreviewBackgroundEditors());
+      if (editor) next.add(userId); else next.delete(userId);
+      window.localStorage.setItem(PREVIEW_BACKGROUND_EDITORS_KEY, JSON.stringify([...next].sort()));
+      // As the server's signal: every open background screen reads again and shows its right as it is now.
+      notifyBackgroundPreview(); assertCurrent();
+      return readPreviewBackgroundEditors();
     },
     backgroundReadClipboardFile: async () => { requireBackgroundPreviewSession(); const filePath = (window as DevPreviewWindow).__bflowMockBackgroundAdd?.clipboardFile; return filePath ? { filePath } : null; },
     backgroundKeptList: async () => { const { actor, assertCurrent } = requireBackgroundPreviewSession(); const entries = keptEntriesOf(readPreviewKept(actor.id)); assertCurrent(); return entries; },

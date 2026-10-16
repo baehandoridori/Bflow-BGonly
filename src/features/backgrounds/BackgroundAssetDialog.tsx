@@ -200,6 +200,7 @@ export function AssetDialog({
         }}
       >
         {readOnly && <p className="bg-note">원본 확인 화면입니다. 배경 수정은 배경 목록에서 진행해 주세요.</p>}
+        {!readOnly && !snapshot.canManage && <p className="bg-note">보기 전용이에요. 배경을 고치려면 관리자에게 배경 편집자로 지정해 달라고 요청해 주세요.</p>}
         <div className="bg-asset-detail">
           <section className="bg-asset-visual">
             <div

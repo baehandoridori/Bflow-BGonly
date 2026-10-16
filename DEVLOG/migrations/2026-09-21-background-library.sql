@@ -8,6 +8,9 @@
 -- after EVERY run of this file run both again, in that order; until then every write that leaves a map
 -- with one of their fields stored is rejected with 22023 (in practice every edit). Do not delete or
 -- strip such a map to get past the error: apply the chain again.
+-- Last, run 2026-10-16-background-editors.sql again too: this file puts back the admin-only
+-- background_library_snapshot and background_library_execute, which take the listed editors' right away
+-- (fail closed: they can still read) until that file runs again.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '45s';

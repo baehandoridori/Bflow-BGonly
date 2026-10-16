@@ -139,14 +139,14 @@ export function applyBackgroundCommand(snapshot: BackgroundSnapshot, command: Ba
   // Reuse the same structural validation in preview, optimistic state and main.
   validateBackgroundRequest({requestId:'00000000-0000-4000-8000-000000000000',command});
   if(command.type==='save-maps') {
-    requireValue(actor.canManage,'배경 관리자가 편집할 수 있습니다.');
+    requireValue(actor.canManage,'배경을 고칠 권한이 없습니다. 관리자에게 배경 편집자로 지정해 달라고 요청해 주세요.');
     // Check every original revision before applying anything; links are checked against the final graph.
     for(const {entity,expectedRevision} of command.maps){const current=snapshot.maps.find(map=>map.id===entity.id);requireValue(expectedRevision===null?!current:!!current&&current.revision===expectedRevision,'다른 사용자가 내용을 변경했습니다. 새로고침 후 다시 저장해 주세요.');}
     const result=structuredClone(snapshot);
     for(const {entity,expectedRevision} of command.maps){const index=result.maps.findIndex(map=>map.id===entity.id),saved={...structuredClone(entity),revision:(expectedRevision??0)+1};if(index<0)result.maps.push(saved);else result.maps[index]=saved;}
     validateBackgroundSnapshot(result);return result;
   }
-  requireValue(actor.canManage||command.kind==='usage','배경 관리자가 편집할 수 있습니다.');
+  requireValue(actor.canManage||command.kind==='usage','배경을 고칠 권한이 없습니다. 관리자에게 배경 편집자로 지정해 달라고 요청해 주세요.');
   const key=backgroundCollections[command.kind];const rows=snapshot[key] as BackgroundEntities[BackgroundKind][];
   const targetId=command.type==='save'?command.entity.id:command.id,current=rows.find(r=>r.id===targetId);
   requireValue(command.expectedRevision===null?!current:!!current&&current.revision===command.expectedRevision,'다른 사용자가 내용을 변경했습니다. 새로고침 후 다시 저장해 주세요.');

@@ -1433,13 +1433,13 @@ test('anchor 58: the header keeps a quiet 편집 시작 in its place, and the wo
   // under the band, where the button is hidden: its two hints speak of editing the map and name no button. The whole
   // choice, like the hint of the editor below: each hint to its last mark, the one about a view under a picked camera
   // and the other under anything else, and before both the branch of a read-only account, which is not told to edit.
-  assert.ok(gallery.includes("!snapshot.canManage ? '관리자가 도면이나 공간에 연결한 배경이 여기에 표시됩니다.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'"));
+  assert.ok(gallery.includes("!snapshot.canManage ? '도면이나 공간에 연결한 배경이 여기에 표시돼요.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'"));
   assert.equal(count(gallery, /도면을 편집하면서/g), 2);
   assert.ok(!gallery.includes('편집 시작'));
   // The hint of an empty map, the whole line. It names the button in the branch of those who are not editing, and there
   // only to an account that may edit: a read-only account, which has no such button, is told who fills the map. The
   // editor says the name on the button and in that hint, nowhere else.
-  assert.ok(editor.includes(`<span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '관리자가 공간을 배치하면 여기에 표시됩니다.'}</span>`));
+  assert.ok(editor.includes(`<span>{editing ? '도형을 고르고 빈 곳을 드래그하거나 밑그림을 올려보세요.' : snapshot.canManage ? "'편집 시작'을 누르면 공간·문·사물·카메라를 배치할 수 있습니다." : '배경 편집 권한이 있는 사람이 공간을 배치하면 여기에 표시돼요.'}</span>`));
   assert.equal(count(editor, /편집 시작/g), 2);
   // The badge beside the title is gone, in either of its wordings and whatever the quotes: the band says it, and its
   // words are in mapEditStatus.ts.
@@ -3574,7 +3574,7 @@ test('anchor 78: what is shown stays in the image list, motion stays in its bloc
   assert.equal(count(gallery, /resolveMapImageTarget\(/g), 1, 'the image list reads a target twice');
   assert.ok(gallery.includes('resolveMapImageTarget(snapshot, maps, current, selected)'), 'the target of the button is not what the list names');
   // What is read out, and what the list has no business with. The hint of an empty list stays as anchor 58 reads it.
-  assert.ok(gallery.includes("!snapshot.canManage ? '관리자가 도면이나 공간에 연결한 배경이 여기에 표시됩니다.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'"),
+  assert.ok(gallery.includes("!snapshot.canManage ? '도면이나 공간에 연결한 배경이 여기에 표시돼요.' : selected?.type === 'camera' ? '도면을 편집하면서 이 카메라에 배경 시점을 연결해 주세요.' : '도면 설정에서, 또는 도면을 편집하면서 공간에 배경 장소를 연결하면 여기에 모입니다.'"),
     'the hint of an empty list is not as anchor 58 reads it');
   for (const text of ['{MAP_IMAGE_HINT}', 'role="status"', 'role="alert"', 'aria-disabled={words.blocked}', 'aria-label="안내 닫기"', '{noticeText}'])
     assert.ok(gallery.includes(text), `not in the image list: ${text}`);
@@ -3859,7 +3859,7 @@ test('anchor 82: the dots and the gate of the body — the sidebar dot inside th
   // an empty store and let the clean drafts go. The tab of the maps has a dot when there is anything to count (no tooltip: it takes
   // no press, and the hidden words say it), and the notice that an update is needed counts what is kept, less what was refused.
   const view = read('BackgroundLibraryView.tsx'), viewLines = lined(view);
-  for (const line of ['const { snapshot, loading, pending, error, updateRequired, execute, actorId } = useBackgroundStore();',
+  for (const line of ['const { snapshot, loading, pending, error, updateRequired, execute, actorId, read } = useBackgroundStore();',
     'const keptCount = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditCount(signal) : 0);',
     'const keptStored = useKeptMapEdits(signal => signal.userId === user?.id ? keptMapEditsStored(signal) : 0);'])
     assert.ok(viewLines.includes(line), `not a line of the library screen: ${line}`);

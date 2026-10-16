@@ -5,6 +5,8 @@ import { mapSaveWasApplied } from './mapWorkflow.ts';
 
 export interface BackgroundState {
   snapshot:BackgroundSnapshot;actorId:string|null;loading:boolean;pending:boolean;error:string|null;
+  /** The snapshot on show came from the server for this account. Until then its canManage is a placeholder's and says nothing about the right (v1.142.0). */
+  read:boolean;
   /** The stored library holds a kind, key or value this version does not know: nothing is shown and nothing is saved until the app is updated. */
   updateRequired: boolean;
   initialize(actorId:string|null,gateway?:BackgroundGateway):Promise<void>;
@@ -19,17 +21,17 @@ const message=(error:unknown)=>error instanceof Error?error.message:String(error
 export function createBackgroundStore(){
   let gateway:BackgroundGateway|null=null,generation=0,readTicket=0,unsubscribe:(()=>void)|null=null,refreshQueued=false;
   return create<BackgroundState>((set,get)=>({
-    snapshot:emptyBackgroundSnapshot(),actorId:null,loading:false,pending:false,error:null,updateRequired:false,
+    snapshot:emptyBackgroundSnapshot(),actorId:null,loading:false,pending:false,error:null,updateRequired:false,read:false,
     initialize:async(actorId,supplied)=>{
       const version=++generation;++readTicket;unsubscribe?.();unsubscribe=null;gateway=null;refreshQueued=false;
-      set({snapshot:emptyBackgroundSnapshot(),actorId,loading:!!actorId,pending:false,error:null,updateRequired:false});if(!actorId)return;
+      set({snapshot:emptyBackgroundSnapshot(),actorId,loading:!!actorId,pending:false,error:null,updateRequired:false,read:false});if(!actorId)return;
       try{const active=supplied??defaultGateway();gateway=active;unsubscribe=active.subscribe?.(()=>{if(version!==generation)return;if(get().pending){refreshQueued=true;return;}void get().refresh();})??null;await get().refresh();}
       catch(error){if(version===generation)set({loading:false,error:message(error)});}
     },
     refresh:async(preserveError=false)=>{
       if(!gateway||!get().actorId)return false;if(get().pending){refreshQueued=true;return false;}
       const active=gateway,version=generation,ticket=++readTicket;
-      try{const snapshot=await active.read();validateBackgroundSnapshot(snapshot);if(version!==generation||ticket!==readTicket||get().pending)return false;set({snapshot,loading:false,updateRequired:false,...(!preserveError?{error:null}:{})});return true;}
+      try{const snapshot=await active.read();validateBackgroundSnapshot(snapshot);if(version!==generation||ticket!==readTicket||get().pending)return false;set({snapshot,loading:false,updateRequired:false,read:true,...(!preserveError?{error:null}:{})});return true;}
       catch(error){
         if(version===generation&&ticket===readTicket){
           if(error instanceof BackgroundUnsupportedError){
@@ -50,7 +52,7 @@ export function createBackgroundStore(){
       try{
         const snapshot=await active.execute({requestId:crypto.randomUUID(),command});validateBackgroundSnapshot(snapshot);
         if(version!==generation)throw new Error('로그인 세션이 변경되어 저장 응답을 폐기했습니다.');
-        set({snapshot,pending:false});
+        set({snapshot,pending:false,read:true});
       }catch(error){
         if(version!==generation)throw error;
         // Keep the mutation lock while recovering so recovery cannot overwrite a newer edit.
