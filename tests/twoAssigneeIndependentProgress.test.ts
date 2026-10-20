@@ -76,8 +76,10 @@ test('loaded assignee progress rehydrates aggregate scene flags for legacy progr
 
   assert.match(util, /applyAssigneeProgressMetadata/);
   assert.match(util, /aggregateScenePatchFromAssignees\(scene, assigneeProgress, part\.department\)/);
-  assert.match(service, /export async function readAll\(\): Promise<Episode\[]> \{[\s\S]*readAllMetadataFromSupabase\(\)[\s\S]*applyAssigneeProgressMetadata\(episodes, metadata\)/);
-  assert.match(app, /const episodes = await readAll\(\);/);
+  // 메타데이터는 씬과 동시에 한 번만 읽고, 완료 기록을 붙인 뒤 담당자별 진행을 얹는다(2026-10-20).
+  assert.match(service, /export async function readAllWithMetadata\(\)[\s\S]*readAllMetadataFromSupabase\(\)[\s\S]*applyAssigneeProgressMetadata\(withCompletion, metadata\)/);
+  assert.match(service, /export async function readAll\(\): Promise<Episode\[]> \{\s*return \(await readAllWithMetadata\(\)\)\.episodes;/);
+  assert.match(app, /const \{ episodes, metadata \} = await readAllWithMetadata\(\);/);
 });
 
 test('stale assignee metadata is ignored once a scene no longer has multiple assignees', () => {

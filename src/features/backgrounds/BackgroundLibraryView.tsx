@@ -82,7 +82,10 @@ export default function BackgroundLibraryView() {
     const refresh = () => {
       void useBackgroundStore.getState().refresh();
     };
-    const timer = window.setInterval(refresh, 15000);
+    // 15초 확인은 창이 보일 때만 — 트레이·최소화에서는 쉬고, 다시 열면 focus 로 바로 읽는다(2026-10-20 서버 신호 줄이기).
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 15000);
     window.addEventListener("focus", refresh);
     return () => {
       window.clearInterval(timer);

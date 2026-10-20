@@ -57,7 +57,8 @@ export function GanttView() {
     return()=>{answer.current?.(false);answer.current=null;void useGanttStore.getState().initialize(null);};
   },[user?.id]);
   useEffect(()=>{if(user&&preferencesLoadedFor===preferenceKey)try{localStorage.setItem(preferenceKey,JSON.stringify({hidden,collapsed,treeCollapsed,closedSpaces}));}catch{}},[hidden,collapsed,treeCollapsed,closedSpaces,preferenceKey,preferencesLoadedFor]);
-  useEffect(()=>{const timer=setInterval(()=>void useGanttStore.getState().refresh(),15000);const refresh=()=>void useGanttStore.getState().refresh();window.addEventListener('focus',refresh);window.addEventListener('bflow:calendar-changed',refresh);return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);window.removeEventListener('bflow:calendar-changed',refresh);};},[]);
+  // 15초 확인은 창이 보일 때만 — 트레이·최소화에서는 쉬고, 다시 열면 focus 로 바로 읽는다(2026-10-20 서버 신호 줄이기).
+  useEffect(()=>{const timer=setInterval(()=>{if(document.visibilityState==='visible')void useGanttStore.getState().refresh();},15000);const refresh=()=>void useGanttStore.getState().refresh();window.addEventListener('focus',refresh);window.addEventListener('bflow:calendar-changed',refresh);return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);window.removeEventListener('bflow:calendar-changed',refresh);};},[]);
   useEffect(()=>{if(selectedProject&&!snapshot.projects.some(p=>p.id===selectedProject)){setSelectedProject(null);setSelected([]);setInspecting(false);}if(!pending)setContext(previous=>previous&&!snapshot.projects.some(p=>p.id===previous.project.id)?null:previous);},[snapshot,pending]);
   const names=useMemo(()=>Object.fromEntries(users.map(u=>[u.id,u.name])),[users]);
   const editable=(p:GanttProject)=>{const current=snapshot.projects.find(row=>row.id===p.id);return !!user&&!!current&&!current.calendarLink&&canEditProject(snapshot,user.id,current);};

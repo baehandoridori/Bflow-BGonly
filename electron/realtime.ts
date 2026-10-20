@@ -43,6 +43,8 @@ export interface RealtimeCallbacks {
     table: SharedCalendarRealtimeTable,
     payload: SharedCalendarRealtimeInvalidation,
   ) => void;
+  /** 캘린더 행·간트 연결이 바뀌었거나, 끊긴 사이 바뀌었을 수 있을 때(재연결). 내용 없이 알리기만 한다. */
+  onCalendarDataMaybeChanged?: () => void;
   onCalendarNotificationInsert?: (payload: ChangePayload) => void;
   onActivityInsert: (payload: ChangePayload) => void;
   onStatusChange: (status: string, metadata: RealtimeStatusMetadata) => void;
@@ -164,6 +166,7 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
         console.log(`[Realtime] ${table} 이벤트 수신:`, payload.eventType);
         // 공유 캘린더 행은 renderer 권한 경계 밖으로 전달하지 않는다. 변경 종류만 알리고,
         // 각 renderer가 현재 actor 기준의 canonical IPC를 다시 읽어 권한을 재검증한다.
+        callbacks.onCalendarDataMaybeChanged?.();
         callbacks.onCalendarChange(table, { eventType: payload.eventType });
       },
     );
@@ -177,7 +180,10 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
   // 각 이벤트마다 전체 상태를 다시 병합하도록 스냅샷을 넘긴다.
   // 간트 테이블은 publication 에 없다(행 내용이 anon 구독자에게 흘러가지 않게). DB 트리거가
   // realtime.send 로 같은 공개 채널에 '변경됐다' 신호만 보내고, 앱은 RPC 로 다시 읽는다.
-  built.on('broadcast', { event: 'gantt-changed' }, () => callbacks.onGanttChange?.());
+  built.on('broadcast', { event: 'gantt-changed' }, () => {
+    callbacks.onCalendarDataMaybeChanged?.();
+    callbacks.onGanttChange?.();
+  });
   // 팀 할 일(comment_thread_todos)도 같은 방식 — 트리거가 내용 없는 신호만 보내고 앱이 래퍼로 다시 읽는다 (피드백 58).
   built.on('broadcast', { event: 'thread-todos-changed' }, () => callbacks.onThreadTodosChange?.());
   // 휴가도 같은 방식 — 휴가 시스템(같은 Supabase 프로젝트의 hr 스키마) DB 트리거가 휴가·대휴가 바뀔 때
@@ -237,6 +243,8 @@ function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
     if (reconnected) callbacks.onThreadTodosChange?.();
     // 휴가 신호도 내용 없는 broadcast 라 끊긴 동안 온 것은 사라진다 — 같은 경계에서 한 번 다시 읽게 한다.
     if (reconnected) callbacks.onVacationChange?.();
+    // 알림용 일정 목록도 끊긴 사이 바뀌었을 수 있다.
+    if (reconnected) callbacks.onCalendarDataMaybeChanged?.();
 
     if (status === 'SUBSCRIBED') {
       // 연결 성공 — 재시도 카운터 초기화

@@ -288,20 +288,6 @@ function isDuplicateKeyError(error: SupabaseErrorLike | null): boolean {
   return error.code === '23505' || message.includes('duplicate key');
 }
 
-const SCENE_COMPLETION_META_TYPE = 'scene-completion';
-
-function parseSceneCompletionMeta(value: string | null | undefined): { completedBy: string; completedAt: string } | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as { completedBy?: unknown; completedAt?: unknown };
-    if (typeof parsed.completedBy !== 'string' || typeof parsed.completedAt !== 'string') return null;
-    if (!parsed.completedBy || !parsed.completedAt) return null;
-    return { completedBy: parsed.completedBy, completedAt: parsed.completedAt };
-  } catch {
-    return null;
-  }
-}
-
 // ─── 연결 테스트 ────────────────────────────────
 
 export async function testConnection(): Promise<{ ok: boolean; error?: string }> {
@@ -370,30 +356,9 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     }, POSTGREST_PAGE_SIZE);
   }
 
-  const sceneCompletionById = new Map<string, { completedBy: string; completedAt: string }>();
-  const sceneIds = scenes.map((scene) => scene.id);
-  if (sceneIds.length > 0) {
-    // PostgREST 는 GET 쿼리의 URL 길이 한계가 약 2~4KB.
-    // UUID 36자 × N개를 `in(...)` 파라미터로 넣으면 200~300개를 넘어서는 순간 400 Bad Request.
-    // 스튜디오 규모 확장(에피소드당 150~300씬 × 수십 에피소드)에 대비해 배치 분할.
-    // 100개 배치 = URL 약 3.7KB, 10,000개 씬도 100회 RTT 로 커버 가능.
-    // 향후 데이터가 수만 건 규모로 커지면 PostgreSQL RPC 함수로 POST 1회 호출로 전환 고려.
-    const completionRows: Array<{ key: string; value: string | null }> = [];
-    for (const chunk of chunkForInQuery(sceneIds, POSTGREST_IN_CHUNK_SIZE)) {
-      const { data, error } = await supabase
-        .from('metadata')
-        .select('key, value')
-        .eq('type', SCENE_COMPLETION_META_TYPE)
-        .in('key', chunk);
-      throwIfError(error);
-      if (data) completionRows.push(...(data as Array<{ key: string; value: string | null }>));
-    }
-    for (const row of completionRows) {
-      const meta = parseSceneCompletionMeta(row.value as string | null | undefined);
-      if (!meta) continue;
-      sceneCompletionById.set(row.key as string, meta);
-    }
-  }
+  // 씬 완료 기록(누가·언제 다 끝냈나)은 여기서 읽지 않는다. 화면 쪽이 같은 순간에 전체 메타데이터를
+  // 한 번 읽어 붙인다(src/utils/loadedMetadata.ts). 예전에는 씬 100개씩 끊어 약 30번을 차례로 읽어서
+  // 켜진 PC 마다 15초에 30건이 더 나갔다 (2026-10-20 서버 신호 줄이기).
 
   // 4) 조립
   const scenesByPart = new Map<string, typeof scenes>();
@@ -427,7 +392,6 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
           department: p.department,
           sheetName: makeSheetName(ep.episode_number, p.part_id, p.department),
           scenes: partScenes.map((s) => ({
-            ...(sceneCompletionById.get(s.id) ?? {}),
             id: s.id,
             no: s.sort_order,
             sceneId: s.scene_number,

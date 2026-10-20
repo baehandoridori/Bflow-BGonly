@@ -18,6 +18,7 @@ import type {
   PublicUserDirectory,
 } from '../types';
 import { applyAssigneeProgressMetadata } from '../utils/assigneeProgress';
+import { applySceneCompletionMetadata, SCENE_COMPLETION_META_TYPE } from '../utils/loadedMetadata';
 import { normalizeCharacterImageBackground, normalizeCharacterImageFit } from '../utils/characterAssets';
 import { sanitizeTabGroups } from '@/utils/characterTabGroups';
 import type { CalendarNotificationPushRow } from '../shared/calendarNotifications';
@@ -313,8 +314,6 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { waitForSceneUuidWithStore } from '../utils/sceneUuidPolling';
 import { buildPartMetadataMaps, type PartMetadataMaps } from '../utils/partMemoHelpers';
 
-const SCENE_COMPLETION_META_TYPE = 'scene-completion';
-
 /**
  * v1.25.12 — 옵티미스틱 추가된 씬의 UUID 가 채워질 때까지 폴링.
  * 씬 추가 직후 이미지 업로드 같은 후속 작업에서 사용.
@@ -469,16 +468,25 @@ export async function readPartMetadataMaps(): Promise<PartMetadataMaps> {
   return buildPartMetadataMaps(rows);
 }
 
+type LoadedMetadataRow = { type: string; key: string; value: string };
+
+/** 전체 에피소드 + 전체 메타데이터를 **동시에 한 번씩** 읽는다 (2026-10-20 서버 신호 줄이기).
+ *  씬 완료 기록·담당자별 진행·에피소드 제목/메모는 모두 이 메타 목록에서 고른다.
+ *  예전처럼 완료 기록을 씬 100개씩 끊어 따로 읽거나, 화면마다 메타를 또 읽지 마라.
+ *  메타를 못 읽으면 통째로 실패한다 — 완료 기록이 빠진 채로 화면을 덮어 '되돌아간 것'처럼 보이지 않게
+ *  (예전에도 완료 기록 조회가 실패하면 전체가 실패했다). */
+export async function readAllWithMetadata(): Promise<{ episodes: Episode[]; metadata: LoadedMetadataRow[] }> {
+  const [episodes, metadata] = await Promise.all([
+    readAllFromSupabase(),
+    readAllMetadataFromSupabase() as Promise<LoadedMetadataRow[]>,
+  ]);
+  const withCompletion = applySceneCompletionMetadata(episodes, metadata);
+  return { episodes: applyAssigneeProgressMetadata(withCompletion, metadata), metadata };
+}
+
 /** 전체 에피소드 데이터 조회 */
 export async function readAll(): Promise<Episode[]> {
-  const episodes = await readAllFromSupabase();
-  try {
-    const metadata = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
-    return applyAssigneeProgressMetadata(episodes, metadata);
-  } catch (err) {
-    console.warn('[supabaseService] 담당자별 진행 메타데이터 적용 실패:', err);
-    return episodes;
-  }
+  return (await readAllWithMetadata()).episodes;
 }
 
 // ─── 배치 실행 ──────────

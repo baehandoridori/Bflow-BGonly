@@ -49,8 +49,10 @@ const UserManagerModal = lazy(() => import('@/components/auth/UserManagerModal')
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
-import { readAll } from '@/services/supabaseService';
-import { testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
+import { readAll, readAllWithMetadata, getSupabaseRealtimeStatus } from '@/services/supabaseService';
+import { testSupabaseConnection, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
+import { episodeLabelsFromMetadata } from '@/utils/loadedMetadata';
+import { createAutoSyncScheduler, MAIN_WINDOW_SYNC_INTERVALS, type AutoSyncScheduler } from '@/utils/autoSyncScheduler';
 import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
@@ -715,21 +717,12 @@ export default function App() {
       const sbConn = await testSupabaseConnection();
       if (sbConn.ok) {
         setActiveDataSource('supabase');
-        const episodes = await readAll();
+        // 씬과 메타데이터를 동시에 한 번씩만 읽는다 — 제목·메모도 같은 메타 목록에서 고른다.
+        const { episodes, metadata } = await readAllWithMetadata();
         setLastSyncTime(Date.now());
-
-        // 메타데이터 로드 (Supabase)
-        try {
-          const metaList = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
-          const titles: Record<number, string> = {};
-          const memos: Record<number, string> = {};
-          for (const m of metaList) {
-            if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
-            if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
-          }
-          setEpisodeTitles(titles);
-          setEpisodeMemos(memos);
-        } catch { /* 메타데이터 로드 실패는 무시 */ }
+        const { titles, memos } = episodeLabelsFromMetadata(metadata);
+        setEpisodeTitles(titles);
+        setEpisodeMemos(memos);
         setEpisodes(episodes);
         return;
       }
@@ -789,6 +782,13 @@ export default function App() {
   ));
   const loadData = useCallback(() => syncQueue.request('auto'), [syncQueue]);
   const refreshDataManually = useCallback(() => { void syncQueue.request('manual'); }, [syncQueue]);
+  // 실시간 변경·재연결로 전부 다시 받아야 할 때. 창이 트레이·최소화로 숨어 있으면 미뤄 두었다가
+  // 다시 보일 때 받는다(autoSyncScheduler). 로그인 전처럼 스케줄러가 없으면 예전처럼 바로 받는다.
+  const autoSyncRef = useRef<AutoSyncScheduler | null>(null);
+  const reloadFromEvent = useCallback(() => {
+    if (autoSyncRef.current) autoSyncRef.current.requestFromEvent();
+    else void loadData();
+  }, [loadData]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {
@@ -2270,18 +2270,18 @@ export default function App() {
         return;
       }
 
-      // 그 외 (INSERT, DELETE, 구조 변경 등) → 디바운스 full reload
+      // 그 외 (INSERT, DELETE, 구조 변경 등) → 디바운스 full reload (창이 숨어 있으면 다시 보일 때)
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         console.log(`[Supabase Realtime] ${table} ${payload?.eventType} → reload`);
-        loadData();
+        reloadFromEvent();
       }, 300);
     });
     return () => {
       cleanup();
       if (debounceTimer) clearTimeout(debounceTimer);
     };
-  }, [loadData]);
+  }, [reloadFromEvent]);
 
   // 스냅샷 릴레이: 다른 창에서 보낸 전체 데이터 직접 적용
   useEffect(() => {
@@ -2898,11 +2898,11 @@ export default function App() {
         if (changedTable && (changedTable.startsWith('calendar') || changedTable === 'private_calendar_events')) {
           return;
         }
-        // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
+        // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload (창이 숨어 있으면 다시 보일 때)
         if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
           console.log('[Broadcast] 구조 변경 감지 → reload');
-          loadData();
+          reloadFromEvent();
         }, 300);
       }
 
@@ -3039,7 +3039,7 @@ export default function App() {
       cleanup();
       if (reloadTimer) clearTimeout(reloadTimer);
     };
-  }, [loadData]);
+  }, [reloadFromEvent]);
 
   // 환경설정(글꼴 크기/색상) 변경 브로드캐스트 구독
   // — 설정 창이 메인 창과 동일하지만, 메인도 자기 자신의 브로드캐스트에 반응해 재적용해야
@@ -3146,22 +3146,51 @@ export default function App() {
   // 앞 사람의 아직 저장 안 된 체크가 다음 사람 화면에 다음 폴링까지 남아 있지 않게.
   useEffect(() => onSceneSaveSessionEnded(() => { void loadData(); }), [loadData]);
 
-  // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (5초 간격)
+  // 자동 전부 다시 받기: 실시간 알림을 놓쳤을 때를 위한 안전망 (2026-10-20 서버 신호 줄이기).
+  // 예전엔 창 상태와 상관없이 15초마다 받았다. 이제 보이는 창은 실시간이 붙어 있으면 1분, 끊겼으면 15초,
+  // 트레이·최소화는 5분. 다시 보이면 미뤄 둔 변경이나 30초 넘게 지난 내용을 바로 받는다 (autoSyncScheduler).
   useEffect(() => {
     if (!authReady) return;
-    const POLL_INTERVAL = 15_000;
-    const timer = setInterval(() => {
-      loadData();
-    }, POLL_INTERVAL);
-    return () => clearInterval(timer);
-  }, [authReady, loadData]);
+    let realtimeConnected = false;
+    let disposed = false;
+    const scheduler = createAutoSyncScheduler({
+      run: () => loadData(),
+      isBusy: () => syncQueue.getState().syncing,
+      isVisible: () => document.visibilityState === 'visible',
+      isConnected: () => realtimeConnected,
+      intervals: MAIN_WINDOW_SYNC_INTERVALS,
+      getLastSyncedAt: () => useDataStore.getState().lastSyncTime,
+    });
+    autoSyncRef.current = scheduler;
+    scheduler.start();
+    const onVisibility = () => scheduler.refreshState();
+    document.addEventListener('visibilitychange', onVisibility);
+    const setRealtime = (status: string) => {
+      realtimeConnected = status === 'SUBSCRIBED';
+      scheduler.refreshState();
+    };
+    // 처음 상태는 물어서 알고, 그 뒤로는 알림을 따른다 — 물은 답이 늦게 와도 더 새 알림을 덮지 않게.
+    let statusEventSeen = false;
+    const stopStatus = onSupabaseStatusChange((status) => {
+      statusEventSeen = true;
+      setRealtime(status);
+    });
+    void getSupabaseRealtimeStatus().then((status) => { if (!disposed && !statusEventSeen) setRealtime(status); });
+    return () => {
+      disposed = true;
+      stopStatus?.();
+      document.removeEventListener('visibilitychange', onVisibility);
+      scheduler.stop();
+      if (autoSyncRef.current === scheduler) autoSyncRef.current = null;
+    };
+  }, [authReady, loadData, syncQueue]);
 
-  // Supabase Realtime 연결 상태 모니터링: 재연결 시 즉시 동기화
+  // Supabase Realtime 연결 상태 모니터링: 재연결 시 동기화 (창이 숨어 있으면 다시 보일 때)
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseStatus) return;
-    const cleanup = installAppRealtimeCalendarReconnectCatchUp(loadData);
+    const cleanup = installAppRealtimeCalendarReconnectCatchUp(reloadFromEvent);
     return () => { cleanup?.(); };
-  }, [loadData]);
+  }, [reloadFromEvent]);
 
   // 자동 로그인: 스플래시 종료 후 시간대별 인사 표시
   // welcomeUser가 있으면 수동 로그인이므로 건너뜀 (WelcomeToast onDismiss에서 처리)
