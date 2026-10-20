@@ -212,6 +212,7 @@ test('App: 버튼·단축키는 직접(manual), 폴링·실시간 재로드는 �
   assert.match(app, /const refreshDataManually = useCallback\(\(\) => \{ void syncQueue\.request\('manual'\); \}, \[syncQueue\]\);/);
   assert.match(app, /onRefresh=\{refreshDataManually\}/);
   assert.match(app, /useGlobalShortcuts\(\{ onReload: refreshDataManually \}\);/);
-  assert.match(app, /setInterval\(\(\) => \{\s*loadData\(\);\s*\}, POLL_INTERVAL\)/);
+  // 자동 안전망 받기도 '자동' 길(loadData)로 돈다 — 창 상태별 간격은 autoSyncScheduler 가 정한다(2026-10-20).
+  assert.match(app, /createAutoSyncScheduler\(\{\s*run: \(\) => loadData\(\),/);
   assert.doesNotMatch(app, /setSyncing\(/, '동기화 중 표시는 syncQueue 가 센다');
 });

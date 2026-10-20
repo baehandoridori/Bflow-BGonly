@@ -20,8 +20,9 @@ async function harness(rows:any[]){
  },module,module.exports,Clock);
  const timerApi={setInterval:(callback:()=>Promise<unknown>,ms:number)=>{assert.equal(ms,30000);const timer={unref:()=>{unrefs++;}};timers.set(timer,callback);return timer;},clearInterval:(timer:any)=>timers.delete(timer)};
  const quit=()=>{quitCallbacks.splice(0).forEach(fn=>fn());};
- const register=()=>module.exports.registerCalendarReminders(()=>{if(!origin)throw new Error('로그인 필요');return origin;},()=>{},timerApi);register();
- return {shown,files,poll:(muted:string[]=[])=>handler({},muted),restart:()=>{quit();register();},defer:(value:Promise<void>)=>{gate=value;},switchSession:(userId='other',epoch=2)=>{origin={userId,epoch};},logout:()=>{origin=null;},time:(value:number)=>{currentNow=value;},tick:async()=>{currentNow+=30000;await Promise.all([...timers.values()].map(fn=>fn()));},reads:()=>readCount,unrefs:()=>unrefs,timers:()=>timers.size,quit};
+ let handle:{invalidate():void};
+ const register=()=>{handle=module.exports.registerCalendarReminders(()=>{if(!origin)throw new Error('로그인 필요');return origin;},()=>{},timerApi);};register();
+ return {shown,files,poll:(muted:string[]=[])=>handler({},muted),restart:()=>{quit();register();},defer:(value:Promise<void>)=>{gate=value;},switchSession:(userId='other',epoch=2)=>{origin={userId,epoch};},logout:()=>{origin=null;},time:(value:number)=>{currentNow=value;},tick:async()=>{currentNow+=30000;await Promise.all([...timers.values()].map(fn=>fn()));},reads:()=>readCount,unrefs:()=>unrefs,timers:()=>timers.size,quit,invalidate:()=>handle.invalidate()};
 }
 test('main reminder transport excludes private overview and muted calendars and persists dedupe before delivery',async()=>{
  const h=await harness([row('shared'),row('private-event','private')]);
@@ -54,17 +55,32 @@ test('background timer uses latest mute preferences and requires registration af
 test('a background read discards results after session changes and receives mute changes before it finishes',async()=>{
  for(const change of ['session','mute']){
   const h=await harness([row('background')]);h.time(now-30000);await h.poll();let release!:()=>void;h.defer(new Promise<void>(resolve=>release=resolve));
-  const pending=h.tick();await Promise.resolve();if(change==='session')h.switchSession();else await h.poll(['team']);release();await pending;assert.equal(h.shown.length,0);assert.equal(h.files.size,0);
+  h.invalidate();const pending=h.tick();await Promise.resolve();if(change==='session')h.switchSession();else await h.poll(['team']);release();await pending;assert.equal(h.shown.length,0);assert.equal(h.files.size,0);
  }
 });
 
 test('main timer survives a failed read and stops pending delivery when the app quits',async()=>{
  const h=await harness([row('retry')]);h.time(now-30000);await h.poll();
- const failure=Promise.reject(new Error('offline'));h.defer(failure);await h.tick();assert.equal(h.shown.length,0);
+ const failure=Promise.reject(new Error('offline'));h.defer(failure);h.invalidate();await h.tick();assert.equal(h.shown.length,0);
  h.defer(Promise.resolve());await h.tick();assert.equal(h.shown.length,1,'failed background reads retry without a renderer request');
  const quitting=await harness([row('quit')]);quitting.time(now-30000);await quitting.poll();let release!:()=>void;
- quitting.defer(new Promise<void>(resolve=>release=resolve));const pending=quitting.tick();quitting.quit();release();await pending;
+ quitting.defer(new Promise<void>(resolve=>release=resolve));quitting.invalidate();const pending=quitting.tick();quitting.quit();release();await pending;
  assert.equal(quitting.shown.length,0);assert.equal(quitting.files.size,0);assert.equal(quitting.timers(),0);
+});
+
+test('30초 확인은 받아 둔 일정으로 하고, 바뀜 신호나 5분이 지나야 다시 읽는다',async()=>{
+ const h=await harness([row('cached')]);h.time(now-10*60000);await h.poll();assert.equal(h.reads(),1);
+ for(let i=0;i<9;i++)await h.tick();
+ assert.equal(h.reads(),1,'4분 30초 동안은 받아 둔 목록을 쓴다');
+ await h.tick();assert.equal(h.reads(),2,'5분이 지나면 다시 읽는다');
+ h.invalidate();await h.tick();assert.equal(h.reads(),3,'일정이 바뀌었다는 신호 뒤 첫 확인에서 다시 읽는다');
+ await h.tick();assert.equal(h.reads(),3);
+ h.switchSession('viewer',2);await h.poll();assert.equal(h.reads(),4,'다른 로그인은 받아 둔 목록을 같이 쓰지 않는다');
+});
+test('읽는 중에 바뀜 신호가 오면 그 결과를 다음 확인에 다시 쓰지 않는다',async()=>{
+ const h=await harness([row('racing')]);h.time(now-10*60000);let release!:()=>void;h.defer(new Promise<void>(resolve=>release=resolve));
+ const pending=h.poll();await Promise.resolve();h.invalidate();release();await pending;assert.equal(h.reads(),1);
+ h.defer(Promise.resolve());await h.tick();assert.equal(h.reads(),2);
 });
 
 test('same-user epoch change requires fresh preferences even if no timer observed the logout',async()=>{

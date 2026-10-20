@@ -40,7 +40,9 @@ import {
 import { reconcileAuthoritativeUserDirectory } from '@/services/authoritativeUserSession';
 import { useIcsEventsFeed } from '@/hooks/useIcsEventsFeed';
 import { applyPreferencesToDOM } from '@/utils/typography';
-import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
+import { readAll, readAllWithMetadata, checkConnection, getSupabaseRealtimeStatus } from '@/services/supabaseService';
+import { episodeLabelsFromMetadata } from '@/utils/loadedMetadata';
+import { createAutoSyncScheduler, POPUP_WINDOW_SYNC_INTERVALS } from '@/utils/autoSyncScheduler';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
 import { invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
@@ -566,13 +568,19 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     });
   }, [widgetId]);
 
-  // 실시간 데이터 동기화: 델타 기반 부분 업데이트 + 120초 emergency fallback
+  // 실시간 데이터 동기화: 델타 기반 부분 업데이트 + 안전망 전부 다시 받기(autoSyncScheduler — 실시간이 붙어 있으면 5분,
+  // 끊겼으면 예전처럼 2분, 창이 숨었으면 5분이고 그동안 온 변경은 다시 보일 때 받는다).
   useEffect(() => {
     if (!ready) return;
 
     let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    let eventTimer: ReturnType<typeof setTimeout> | null = null;
+    let reloadsInFlight = 0;
+    let realtimeConnected = false;
+    let disposed = false;
 
     const reloadData = async () => {
+      reloadsInFlight += 1;
       try {
         const api = window.electronAPI;
         if (!api) return;
@@ -581,21 +589,12 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         if (connected) {
           useAppStore.getState().setDataConnected(true);
           setUsersSheetsMode(true); // 피드백 45: 재연결 후에도 아래 loadUsers() 가 원격 목록을 읽도록.
-          const episodes = await readAll();
+          // 씬과 메타데이터를 동시에 한 번씩만 읽고, 제목·메모도 같은 메타 목록에서 고른다.
+          const { episodes, metadata } = await readAllWithMetadata();
           useDataStore.getState().setEpisodes(episodes);
-          // 메타데이터 일괄 로딩 (Supabase)
-          try {
-            const { readAllMetadataFromSupabase } = await import('@/services/supabaseService');
-            const metaList = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
-            const titles: Record<number, string> = {};
-            const memos: Record<number, string> = {};
-            for (const m of metaList) {
-              if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
-              if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
-            }
-            useDataStore.getState().setEpisodeTitles(titles);
-            useDataStore.getState().setEpisodeMemos(memos);
-          } catch { /* 메타데이터 로딩 실패는 무시 */ }
+          const { titles, memos } = episodeLabelsFromMetadata(metadata);
+          useDataStore.getState().setEpisodeTitles(titles);
+          useDataStore.getState().setEpisodeMemos(memos);
         } else {
           // 재연결 시도
           const cfg = await loadGasConfig();
@@ -616,10 +615,52 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       } catch (err) {
         console.error('[WidgetPopup] 동기화 실패:', err);
       } finally {
-        // 120초 보충 조회에도 리테이크의 독립 cache를 비운 뒤 정본을 다시 읽는다.
+        reloadsInFlight -= 1;
+        // 안전망 보충 조회에도 리테이크의 독립 cache를 비운 뒤 정본을 다시 읽는다.
         if (widgetId === 'my-retakes') window.dispatchEvent(new Event('bflow:revisions-invalidated'));
       }
     };
+
+    // 안전망: 이 창이 받는 중이거나 이 창에서 방금 고친 직후(쿨다운)면 차례를 미룬다.
+    const scheduler = createAutoSyncScheduler({
+      run: () => reloadData(),
+      isBusy: () => reloadsInFlight > 0 || _reloadCooldown,
+      isVisible: () => document.visibilityState === 'visible',
+      isConnected: () => realtimeConnected,
+      intervals: POPUP_WINDOW_SYNC_INTERVALS,
+    });
+    scheduler.start();
+    const onVisibility = () => scheduler.refreshState();
+    document.addEventListener('visibilitychange', onVisibility);
+
+    // 변경 알림이 한꺼번에 와도(씬 여러 개 추가·삭제) 한 번만 받는다. 창이 숨어 있으면 다시 보일 때 받는다.
+    const requestReload = () => {
+      if (eventTimer) clearTimeout(eventTimer);
+      eventTimer = setTimeout(() => {
+        eventTimer = null;
+        scheduler.requestFromEvent();
+      }, 300);
+    };
+
+    // 실시간이 끊겼다가 다시 붙으면 그 사이 놓친 변경을 한 번 받는다(본 창의 재연결 따라잡기와 같다).
+    let missedWhileDisconnected = false;
+    const setRealtime = (status: string) => {
+      const connected = status === 'SUBSCRIBED';
+      if (!connected) missedWhileDisconnected = true;
+      else if (missedWhileDisconnected) {
+        missedWhileDisconnected = false;
+        requestReload();
+      }
+      realtimeConnected = connected;
+      scheduler.refreshState();
+    };
+    // 처음 상태는 물어서 알고, 그 뒤로는 알림을 따른다 — 물은 답이 늦게 와도 더 새 알림을 덮지 않게.
+    let statusEventSeen = false;
+    const cleanupStatusForSync = window.electronAPI?.onSupabaseStatus?.((status) => {
+      statusEventSeen = true;
+      setRealtime(status);
+    });
+    void getSupabaseRealtimeStatus().then((status) => { if (!disposed && !statusEventSeen) setRealtime(status); });
 
     // onSheetChanged 리스너 삭제됨 — Supabase Realtime이 대체 (M-3)
 
@@ -630,11 +671,6 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       if (d?.episodeTitles) useDataStore.getState().setEpisodeTitles(d.episodeTitles);
       if (d?.episodeMemos) useDataStore.getState().setEpisodeMemos(d.episodeMemos);
     });
-
-    // Emergency fallback: 120초마다 full reload (delta/relay 누락 방지)
-    const emergencyPoll = setInterval(() => {
-      if (!_reloadCooldown) reloadData();
-    }, 120_000);
 
     // Supabase Realtime: DB 변경 감지 → delta 직접 적용 또는 full reload
     const cleanupRealtime = window.electronAPI?.onSupabaseRealtime?.((event: unknown) => {
@@ -653,7 +689,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
       if (table === 'users') {
         void reconcilePopupUserDirectory()
-          .then((result) => { if (result !== 'deleted') reloadData(); })
+          .then((result) => { if (result !== 'deleted') requestReload(); })
           .catch((error) => console.warn('[WidgetPopup] users 변경 재로드 실패:', error));
         return;
       }
@@ -684,10 +720,10 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       // 그 외 → 디바운스 full reload
       if (_reloadCooldown) {
         if (reloadTimer) clearTimeout(reloadTimer);
-        reloadTimer = setTimeout(() => { reloadData(); }, _COOLDOWN_MS + 500);
+        reloadTimer = setTimeout(() => { scheduler.requestFromEvent(); }, _COOLDOWN_MS + 500);
         return;
       }
-      reloadData();
+      requestReload();
     });
     const cleanupRealtimeStatus = installPopupRealtimeCalendarReconnectCatchUp();
 
@@ -731,20 +767,28 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         }
         if (table === 'users') {
           void reconcilePopupUserDirectory()
-            .then((result) => { if (result !== 'deleted') reloadData(); })
+            .then((result) => { if (result !== 'deleted') requestReload(); })
             .catch((error) => console.warn('[WidgetPopup] users 변경 재로드 실패:', error));
-        } else {
-          reloadData();
+          return;
         }
+        // 간트·캘린더는 각자 정본 재조회 길이 있고, 이 창의 전부 다시 받기는 씬·사용자만 다시 읽는다 (본 창과 같은 규칙).
+        if (typeof table === 'string' && (
+          table.startsWith('gantt_') || table.startsWith('calendar') || table === 'private_calendar_events'
+        )) return;
+        requestReload();
       }
     });
 
     return () => {
+      disposed = true;
       cleanupSnapshot?.();
       cleanupRealtime?.();
       cleanupRealtimeStatus?.();
       cleanupBroadcast?.();
-      clearInterval(emergencyPoll);
+      cleanupStatusForSync?.();
+      document.removeEventListener('visibilitychange', onVisibility);
+      scheduler.stop();
+      if (eventTimer) clearTimeout(eventTimer);
       if (reloadTimer) clearTimeout(reloadTimer);
     };
   }, [ready, widgetId]);
@@ -809,25 +853,10 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         }
 
         if (connected) {
-          const loadedEpisodes = await readAll();
+          // 에피소드마다 제목·메모를 하나씩 읽지 않는다 — 같이 읽은 전체 메타 목록에서 고른다.
+          const { episodes: loadedEpisodes, metadata } = await readAllWithMetadata();
           useDataStore.getState().setEpisodes(loadedEpisodes);
-
-          const [titleResults, memoResults] = await Promise.all([
-            Promise.all(loadedEpisodes.map((ep) =>
-              readMetadata('episode-title', String(ep.episodeNumber))
-                .then((d) => [ep.episodeNumber, d?.value] as const)
-                .catch(() => [ep.episodeNumber, undefined] as const),
-            )),
-            Promise.all(loadedEpisodes.map((ep) =>
-              readMetadata('episode-memo', String(ep.episodeNumber))
-                .then((d) => [ep.episodeNumber, d?.value] as const)
-                .catch(() => [ep.episodeNumber, undefined] as const),
-            )),
-          ]);
-          const titles: Record<number, string> = {};
-          const memos: Record<number, string> = {};
-          for (const [num, val] of titleResults) if (val) titles[num] = val;
-          for (const [num, val] of memoResults) if (val) memos[num] = val;
+          const { titles, memos } = episodeLabelsFromMetadata(metadata);
           useDataStore.getState().setEpisodeTitles(titles);
           useDataStore.getState().setEpisodeMemos(memos);
         } else {

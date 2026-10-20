@@ -2614,7 +2614,8 @@ setCalendarChangedLocalListener((payload) => {
   );
 });
 
-registerCalendarReminders(getSessionOriginOrThrow, () => { mainWindow?.show(); mainWindow?.focus(); });
+// 알림용 일정 목록은 바뀜 신호(실시간 캘린더·간트 변경, 재연결)가 올 때나 5분마다만 다시 읽는다.
+const calendarReminders = registerCalendarReminders(getSessionOriginOrThrow, () => { mainWindow?.show(); mainWindow?.focus(); });
 calendarNotificationDrain = registerCalendarIpc({
   getSessionUserIdOrThrow,
   getSessionOriginOrThrow,
@@ -3369,6 +3370,8 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onCalendarChange: (table, payload) => broadcastSupabaseCalendarEvent(table, payload),
+    // 알림용 일정 목록은 캘린더·간트가 바뀌었거나 재연결됐을 때만 다시 읽는다(나머지는 5분마다).
+    onCalendarDataMaybeChanged: () => calendarReminders.invalidate(),
     onGanttChange: () => {
       broadcastToAllWindows('gantt:changed', {});
       broadcastToAllWindows('calendar:changed', { action: 'UPDATE' });
