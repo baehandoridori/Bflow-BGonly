@@ -41,6 +41,7 @@ import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEdit
 import { editingBeamClass } from '@/utils/editingPresence';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { useMotionArmed } from '@/hooks/useMotionArmed';
+import { useHighlightPop } from '@/hooks/useHighlightPop';
 import {
   persistLengthChangeAtomic,
   saveLengthChangeField,
@@ -144,6 +145,8 @@ export function UnifiedSceneCard({
   const cardRootRef = useRef<HTMLDivElement>(null);
   // 선택 체크는 선택될 때만 상자가 생긴다 — '톡'은 한 번 그려진 카드에서만(처음부터 선택된 채 그려지면 바로).
   useMotionArmed(cardRootRef);
+  // 검색·알림으로 온 카드는 화면에 들어온 뒤 잠깐 크게 띄운다.
+  useHighlightPop(cardRootRef, isHighlighted);
   const prevHighlightedRef = useRef(false);
 
   // 우클릭 컨텍스트 메뉴 상태
@@ -347,11 +350,6 @@ export function UnifiedSceneCard({
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}
       ref={cardRootRef}
-      {...(isHighlighted ? {
-        initial: { scale: 1.06 },
-        animate: { scale: 1 },
-        transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
-      } : {})}
     >
         {/* 17번: 완료 초록빛 번짐·카드 '톡'(동작 줄이기면 완료 칸 빛) — 카드 루트의 첫 자식이어야 한다. */}
         <SceneCompletionFx celebrating={celebrating} tinted={completionTintEnabled && isMergedComplete} />

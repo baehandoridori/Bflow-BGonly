@@ -305,18 +305,35 @@ export async function testConnection(): Promise<{ ok: boolean; error?: string }>
 // EPISODES
 // ═══════════════════════════════════════════════
 
-/** 모든 에피소드 + 파트 + 씬 읽기 (기존 readAllEpisodes 대체) */
+/** 모든 에피소드 + 파트 + 씬 읽기 (기존 readAllEpisodes 대체) — 보관한 에피소드는 빠진다. */
 export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
-  // 1) 활성 에피소드
-  const { data: episodes, error: epErr } = await supabase
+  return readEpisodesWithScenes({ status: 'active' });
+}
+
+/**
+ * 보관함에서 고른 에피소드 하나만 파트·씬까지 읽는다(2026-10-21 보관 다듬기).
+ * 평소 전부 받기에는 보관한 에피소드가 빠지므로, 보관함에서 열어 볼 때만 이 한 편을 받는다.
+ */
+export async function readArchivedEpisodeDetail(episodeNumber: number): Promise<SupabaseEpisodeData | null> {
+  const [episode] = await readEpisodesWithScenes({ status: 'archived', episodeNumber });
+  return episode ?? null;
+}
+
+export async function readEpisodesWithScenes(filter: {
+  status: 'active' | 'archived';
+  episodeNumber?: number;
+}): Promise<SupabaseEpisodeData[]> {
+  // 1) 에피소드 (평소엔 활성 전부, 보관함에서 열 때는 고른 한 편)
+  let episodeQuery = supabase
     .from('episodes')
     .select('id, episode_number, title, memo, reel_file_path')
-    .eq('status', 'active')
-    .order('episode_number');
+    .eq('status', filter.status);
+  if (filter.episodeNumber !== undefined) episodeQuery = episodeQuery.eq('episode_number', filter.episodeNumber);
+  const { data: episodes, error: epErr } = await episodeQuery.order('episode_number');
   throwIfError(epErr);
   if (!episodes || episodes.length === 0) return [];
 
-  // 2) 활성 파트 (모든 에피소드)
+  // 2) 활성 파트 (위 에피소드들)
   const epIds = episodes.map((e) => e.id);
   const { data: parts, error: partErr } = await supabase
     .from('parts')

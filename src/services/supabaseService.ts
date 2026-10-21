@@ -450,6 +450,15 @@ export async function readArchived(): Promise<{ episodeNumber: number; title: st
   return data.map((d) => ({ ...d, partCount: d.partCount ?? 0 }));
 }
 
+/** 보관함에서 고른 에피소드 한 편만 받는다(보기 전용). 평소 전부 받기에는 들어가지 않는다. */
+export async function readArchivedEpisodeDetail(episodeNumber: number): Promise<Episode | null> {
+  const data = (await window.electronAPI.supabaseReadArchivedEpisode(episodeNumber)) as
+    | (Episode & { reel_file_path?: string | null })
+    | null;
+  if (!data) return null;
+  return { ...data, reelFilePath: data.reelFilePath ?? data.reel_file_path ?? null };
+}
+
 /** 메타데이터 저장 */
 export async function writeMetadata(type: string, key: string, value: string): Promise<void> {
   await window.electronAPI.supabaseWriteMetadata(type, key, value);

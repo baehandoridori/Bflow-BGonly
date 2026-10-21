@@ -8,7 +8,8 @@ import { sceneProgress } from '@/utils/calcStats';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { formatPartDisplayName } from '@/utils/partDisplayName';
 import { DEPARTMENT_CONFIGS } from '@/types';
-import type { Episode } from '@/types';
+import type { Episode, ScenesDeptFilter } from '@/types';
+import { buildSpotlightSceneGroups } from '@/utils/spotlightSceneGroups';
 import { cn } from '@/utils/cn';
 import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 import { revealInList } from '@/utils/slidingIndicator';
@@ -118,6 +119,11 @@ export function SpotlightSearch() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const epName = (ep: Episode) => episodeTitles[ep.episodeNumber] || ep.title;
+  // 씬 검색은 같은 씬의 BG·ACT 를 한 줄로 — 통합 보기와 같은 묶음. 글자 칠 때마다가 아니라 데이터가 바뀔 때만 만든다.
+  const sceneGroupsByEpisode = useMemo(
+    () => new Map(episodes.map((ep) => [ep.episodeNumber, buildSpotlightSceneGroups(ep)] as const)),
+    [episodes],
+  );
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -228,7 +234,7 @@ export function SpotlightSearch() {
   const resetAndNavigate = useCallback((opts: {
     episode?: number;
     part?: string;
-    department?: 'bg' | 'acting';
+    department?: ScenesDeptFilter;
     assignee?: string;
     sceneId?: string;
     toastMsg?: string;
@@ -382,29 +388,6 @@ export function SpotlightSearch() {
         }
 
         for (const scene of part.scenes) {
-          const sceneScore = fuzzyScore(q, scene.sceneId);
-          if (sceneScore > 0) {
-            const pct = Math.round(sceneProgress(scene));
-            items.push({
-              id: `scene-${part.sheetName}-${scene.sceneId}`,
-              category: 'scene',
-              title: scene.sceneId,
-              subtitle: `${epName(ep)} ${part.partId}파트 · ${deptLabel}`,
-              meta: `${pct}%`,
-              pct,
-              icon: <Hash size={16} />,
-              score: sceneScore,
-              action: () => {
-                resetAndNavigate({
-                  episode: ep.episodeNumber,
-                  part: part.partId,
-                  department: part.department,
-                  sceneId: scene.sceneId,
-                });
-                close();
-              },
-            });
-          }
           if (scene.memo && fuzzyScore(q, scene.memo) > 0) {
             const memoText = stripEntityTokens(scene.memo);
             items.push({
@@ -450,6 +433,39 @@ export function SpotlightSearch() {
             });
           }
         }
+      }
+
+      // ── 씬 검색: 같은 씬의 BG·ACT 를 한 줄로, 엔터를 누르면 통합 보기에서 그 씬으로 ──
+      for (const group of sceneGroupsByEpisode.get(ep.episodeNumber) ?? []) {
+        const sceneScore = Math.max(
+          group.bgScene ? fuzzyScore(q, group.bgScene.sceneId) : 0,
+          group.actScene ? fuzzyScore(q, group.actScene.sceneId) : 0,
+        );
+        if (sceneScore <= 0) continue;
+        const groupScenes = [group.bgScene, group.actScene].filter((item): item is NonNullable<typeof item> => item !== null);
+        const pct = Math.round(groupScenes.reduce((sum, item) => sum + sceneProgress(item), 0) / groupScenes.length);
+        const deptText = group.bgScene && group.actScene
+          ? `${DEPARTMENT_CONFIGS.bg.shortLabel}·${DEPARTMENT_CONFIGS.acting.shortLabel}`
+          : DEPARTMENT_CONFIGS[group.bgScene ? 'bg' : 'acting'].shortLabel;
+        items.push({
+          id: `scene-${group.key}`,
+          category: 'scene',
+          title: group.sceneId,
+          subtitle: `${epName(ep)} ${group.partId}파트 · ${deptText}`,
+          meta: `${pct}%`,
+          pct,
+          icon: <Hash size={16} />,
+          score: sceneScore,
+          action: () => {
+            resetAndNavigate({
+              episode: ep.episodeNumber,
+              part: group.partId,
+              department: 'all',
+              sceneId: group.highlightSceneId,
+            });
+            close();
+          },
+        });
       }
 
       // ── 에피소드 메모 검색 ──
@@ -618,6 +634,7 @@ export function SpotlightSearch() {
   }, [
     query,
     episodes,
+    sceneGroupsByEpisode,
     calEvents,
     episodeMemos,
     partMemos,

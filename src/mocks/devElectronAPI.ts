@@ -2108,6 +2108,11 @@ function getMockEpisodes(): Episode[] {
     ?? (localStore.__mockEpisodes = cloneMockEpisodes()) as Episode[];
 }
 
+interface MockArchivedEpisode { episode: Episode; archivedBy: string; archivedAt: string; archiveMemo: string }
+function getMockArchivedEpisodes(): MockArchivedEpisode[] {
+  return (localStore.__mockArchivedEpisodes as MockArchivedEpisode[] | undefined) ?? [];
+}
+
 function createMockScene(sheetName: string, sceneId: string, assignee: string, memo: string, no: number): Scene {
   const safeSheet = sheetName.replace(/[^a-z0-9_-]+/gi, '-');
   const safeScene = sceneId.replace(/[^a-z0-9_-]+/gi, '-');
@@ -2880,9 +2885,40 @@ export function installDevElectronAPI(): void {
     },
     supabaseAddEpisode: async () => {},
     supabaseSoftDeleteEpisode: async () => {},
-    supabaseArchiveEpisode: async () => {},
-    supabaseUnarchiveEpisode: async () => {},
-    supabaseReadArchived: async () => [],
+    // 보관도 실제처럼 목록에서 빼 두었다가 보관함에서 한 편씩 꺼내 보게 한다(미리보기에서 보관함 확인용).
+    supabaseArchiveEpisode: async (episodeNumber, archivedBy, archiveMemo) => {
+      const episodes = getMockEpisodes();
+      const index = episodes.findIndex((item) => item.episodeNumber === episodeNumber);
+      if (index < 0) return;
+      const [episode] = episodes.splice(index, 1);
+      localStore.__mockEpisodes = episodes;
+      const archived = getMockArchivedEpisodes();
+      archived.push({ episode, archivedBy: archivedBy || '', archivedAt: new Date().toISOString().slice(0, 10), archiveMemo: archiveMemo || '' });
+      localStore.__mockArchivedEpisodes = archived;
+    },
+    supabaseUnarchiveEpisode: async (episodeNumber) => {
+      const archived = getMockArchivedEpisodes();
+      const index = archived.findIndex((item) => item.episode.episodeNumber === episodeNumber);
+      if (index < 0) return;
+      const [{ episode }] = archived.splice(index, 1);
+      localStore.__mockArchivedEpisodes = archived;
+      const episodes = getMockEpisodes();
+      episodes.push(episode);
+      episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+      localStore.__mockEpisodes = episodes;
+    },
+    supabaseReadArchived: async () => getMockArchivedEpisodes().map((item) => ({
+      episodeNumber: item.episode.episodeNumber,
+      title: item.episode.title,
+      partCount: item.episode.parts.length,
+      archivedBy: item.archivedBy,
+      archivedAt: item.archivedAt,
+      archiveMemo: item.archiveMemo,
+    })),
+    supabaseReadArchivedEpisode: async (episodeNumber) => {
+      const found = getMockArchivedEpisodes().find((item) => item.episode.episodeNumber === episodeNumber);
+      return found ? JSON.parse(JSON.stringify(found.episode)) : null;
+    },
     supabaseAddPart: async () => {},
     supabaseSoftDeletePart: async () => {},
     supabaseAddScene: async (sheetName, sceneId, assignee, memo) => addMockScene(sheetName, sceneId, assignee, memo),

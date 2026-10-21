@@ -279,7 +279,8 @@ test('컴포지팅 상태도 전량을 받는다', () => {
 });
 
 test('에피소드 전량 읽기의 씬 루프는 받은 행 수만큼만 전진한다', () => {
-  const src = functionSource(supabaseSrc, 'readAllEpisodes');
+  // 활성 전부 읽기(readAllEpisodes)와 보관함 한 편 읽기가 같은 본문을 쓴다.
+  const src = functionSource(supabaseSrc, 'readEpisodesWithScenes');
   assert.match(src, /collectAllPages</, '씬 페이지는 공용 헬퍼로 모아야 한다');
   // 완료 기록은 여기서 따로 읽지 않고 화면 쪽이 전체 메타(전량 페이지 읽기)에서 고른다 (2026-10-20 서버 신호 줄이기).
   assert.doesNotMatch(src, /from\('metadata'\)/, '완료 기록을 씬 묶음마다 따로 읽는 길로 되돌아갔습니다');

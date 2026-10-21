@@ -101,7 +101,8 @@ test('에피소드 이름 폴백: 빈 문자열 대신 EP.xx', () => {
 
 test('Supabase 에피소드 읽기는 빈 제목을 EP.xx 로 채운다', () => {
   for (const [fn, expr] of [
-    ['readAllEpisodes', /title: ep\.title \|\| defaultEpisodeTitle\(ep\.episode_number\)/],
+    // 활성 전부 읽기와 보관함 한 편 읽기가 같은 본문(readEpisodesWithScenes)을 쓴다.
+    ['readEpisodesWithScenes', /title: ep\.title \|\| defaultEpisodeTitle\(ep\.episode_number\)/],
     ['readArchivedEpisodes', /title: e\.title \|\| defaultEpisodeTitle\(e\.episode_number\)/],
   ] as const) {
     const src = functionSource(fn);

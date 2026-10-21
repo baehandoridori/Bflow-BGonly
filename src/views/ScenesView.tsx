@@ -9,7 +9,7 @@ import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState, SceneAssigneeProgress, SceneAssigneeProgressMap, SceneWorkLink } from '@/types';
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
-import { updateEpisodeReelPath, updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
+import { updateEpisodeReelPath, updateScenePhaseInSupabase, dispatchActingFeedbackNotification, readArchivedEpisodeDetail } from '@/services/supabaseService';
 import { sceneProgress, isFullyDone, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { findPartById, getCanonicalPartIds, partIdMatches } from '@/utils/partId';
@@ -81,6 +81,7 @@ import { HighlightText } from '@/components/common/HighlightText';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
+import { ArchivedEpisodeViewer } from '@/components/scenes/ArchivedEpisodeViewer';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
@@ -137,6 +138,7 @@ import { getSceneWorkLinkSlots, getUniqueSceneUuids } from '@/utils/sceneWorkLin
 import { SceneWorkLinkBadges } from '@/components/scenes/SceneWorkLinkBadges';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { useMotionArmed } from '@/hooks/useMotionArmed';
+import { useHighlightPop } from '@/hooks/useHighlightPop';
 import { useGridFlip } from '@/hooks/useGridFlip';
 import { useReflowLinger } from '@/hooks/useReflowLinger';
 import {
@@ -435,21 +437,26 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 }
 
 /* ── 글로우 하이라이트 CSS 주입 (스포트라이트/인원별 뷰에서 이동 시) ── */
+// 2026-10-21: 세 번 깜빡이던 빛은 잘 안 보였다. 카드는 useHighlightPop 이 잠깐 크게 띄우고, 테두리 빛은 한 번 또렷하게
+// 켜 둔 채 머물다 사라진다. '동작 줄이기'·'움직임: 최소'면 빛이 움직이지 않고 그대로 남았다가 강조가 끝날 때 사라진다
+// (이 CSS 는 실행 중에 넣으므로 빌드의 '최소' 짝 만들기를 거치지 않는다 — 그래서 [data-motion-minimal] 도 직접 적는다).
 const GLOW_CSS = `
-@keyframes scene-glow-pulse {
-  0%   { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.8), 0 0 16px 4px rgb(var(--color-accent) / 0.5), 0 0 40px 8px rgb(var(--color-accent) / 0.2), 0 0 60px 12px rgb(var(--color-accent-sub) / 0.08); }
-  50%  { box-shadow: 0 0 0 3px rgb(var(--color-accent) / 1), 0 0 24px 6px rgb(var(--color-accent) / 0.6), 0 0 50px 12px rgb(var(--color-accent) / 0.3), 0 0 80px 16px rgb(var(--color-accent-sub) / 0.12); }
-  100% { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.8), 0 0 16px 4px rgb(var(--color-accent) / 0.5), 0 0 40px 8px rgb(var(--color-accent) / 0.2), 0 0 60px 12px rgb(var(--color-accent-sub) / 0.08); }
-}
-@keyframes scene-glow-fade {
-  0%   { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.8), 0 0 16px 4px rgb(var(--color-accent) / 0.5), 0 0 40px 8px rgb(var(--color-accent) / 0.2); }
-  100% { box-shadow: 0 0 0 0px rgb(var(--color-accent) / 0), 0 0 0px 0px rgb(var(--color-accent) / 0), 0 0 0px 0px rgb(var(--color-accent) / 0); }
+@keyframes scene-glow-hold {
+  0%   { box-shadow: 0 0 0 3px rgb(var(--color-accent) / 0.95), 0 0 22px 6px rgb(var(--color-accent) / 0.5), 0 0 56px 14px rgb(var(--color-accent-sub) / 0.14); }
+  72%  { box-shadow: 0 0 0 3px rgb(var(--color-accent) / 0.95), 0 0 22px 6px rgb(var(--color-accent) / 0.5), 0 0 56px 14px rgb(var(--color-accent-sub) / 0.14); }
+  100% { box-shadow: 0 0 0 0px rgb(var(--color-accent) / 0), 0 0 0px 0px rgb(var(--color-accent) / 0), 0 0 0px 0px rgb(var(--color-accent-sub) / 0); }
 }
 .scene-highlight {
-  animation: scene-glow-pulse 0.9s ease-in-out 3, scene-glow-fade 0.8s ease-out 2.7s forwards;
-  border-color: rgb(var(--color-accent) / 0.8) !important;
+  animation: scene-glow-hold 3.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  border-color: rgb(var(--color-accent) / 0.9) !important;
   z-index: 10;
 }
+@media (prefers-reduced-motion: reduce) {
+  .scene-highlight { animation: none; box-shadow: 0 0 0 3px rgb(var(--color-accent) / 0.9); }
+  .scene-highlight-bg { animation: none !important; background: rgb(var(--color-accent) / 0.08) !important; }
+}
+html[data-motion-minimal] .scene-highlight { animation: none; box-shadow: 0 0 0 3px rgb(var(--color-accent) / 0.9); }
+html[data-motion-minimal] .scene-highlight-bg { animation: none !important; background: rgb(var(--color-accent) / 0.08) !important; }
 .scene-highlight-bg {
   position: absolute;
   inset: 0;
@@ -619,6 +626,8 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const highlightCardRef = useRef<HTMLDivElement>(null);
   // 선택 체크는 선택될 때만 상자가 생긴다 — '톡'은 한 번 그려진 카드에서만(처음부터 선택된 채 그려지면 바로).
   useMotionArmed(highlightCardRef);
+  // 검색·알림으로 온 카드는 화면에 들어온 뒤 잠깐 크게 띄운다.
+  useHighlightPop(highlightCardRef, Boolean(isHighlighted));
   const wasHighlightedRef = useRef(false);
   useEffect(() => {
     if (isHighlighted && !wasHighlightedRef.current && claimHighlightScroll(highlightScrollKey([sheetName], scene.sceneId))) {
@@ -721,11 +730,6 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
       onContextMenu={handleContextMenu}
       ref={highlightCardRef}
-      {...(isHighlighted ? {
-        initial: { scale: 1.06 },
-        animate: { scale: 1 },
-        transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
-      } : {})}
     >
       {/* 17번: 완료 초록빛 번짐·카드 '톡'(동작 줄이기면 완료 칸 빛) — 카드 루트의 첫 자식이어야 한다. */}
       <SceneCompletionFx celebrating={celebrating} tinted={completionTintEnabled && isComplete} />
@@ -2864,6 +2868,8 @@ export function ScenesView() {
 
   // 아카이빙된 에피소드 목록
   const [archivedEpisodes, setArchivedEpisodes] = useState<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; memo?: string }[]>([]);
+  // 보관함에서 연 에피소드(보기 전용). 그 한 편만 그때 받는다.
+  const [openArchivedEpisode, setOpenArchivedEpisode] = useState<number | null>(null);
 
   // 동기화 매니저: 버전 카운터 + 낙관적 보호 플래그
   const syncVersionRef = useRef(0);
@@ -5703,10 +5709,23 @@ export function ScenesView() {
             archivedEpisodes={archivedEpisodes}
             onArchiveEpisode={openArchiveDialog}
             onUnarchiveEpisode={handleUnarchiveEpisode}
+            onOpenArchivedEpisode={setOpenArchivedEpisode}
             onEpisodeContextMenu={handleEpisodeContextMenu}
             onCollapse={() => setTreeOpen(false)}
           />
         </motion.div>
+        {openArchivedEpisode !== null && (
+          <ArchivedEpisodeViewer
+            episodeNumber={openArchivedEpisode}
+            displayName={
+              episodeTitles[openArchivedEpisode]
+              || archivedEpisodes.find((item) => item.episodeNumber === openArchivedEpisode)?.title
+              || `EP.${String(openArchivedEpisode).padStart(2, '0')}`
+            }
+            load={readArchivedEpisodeDetail}
+            onClose={() => setOpenArchivedEpisode(null)}
+          />
+        )}
 
         {/* 접힌 상태: 아이콘 바 */}
         {!treeOpen && (
