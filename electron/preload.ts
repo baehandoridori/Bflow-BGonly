@@ -230,7 +230,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ─── Supabase ──────────────────────────────────
   supabaseTestConnection: () =>
-    ipcRenderer.invoke('supabase:test-connection') as Promise<{ ok: boolean; error?: string }>,
+    ipcRenderer.invoke('supabase:test-connection') as Promise<{ ok: boolean; error?: string; quotaBlocked?: boolean }>,
   supabaseReadAll: (options?: { force?: boolean }) =>
     ipcRenderer.invoke('supabase:read-all', options),
   supabaseAddEpisode: (episodeNumber: number, department?: string) =>

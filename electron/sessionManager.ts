@@ -25,7 +25,8 @@ export interface RememberedAuthSession {
 export type RemoteLoginResult =
   | { status: 'ok'; token: string; user: SessionUserRecord }
   | { status: 'rejected'; error: string }
-  | { status: 'unavailable'; error?: string };
+  /** reason 'quota-blocked': 서버 업체가 사용량 한도로 막았다(402). 인터넷 문제와 다르게 안내한다. */
+  | { status: 'unavailable'; error?: string; reason?: 'quota-blocked' };
 
 export interface CanonicalSessionPayload {
   user: SanitizedSessionUser | null;
@@ -141,6 +142,13 @@ export class SessionManager {
       const remote = await this.dependencies.remoteLogin?.(name, password);
       if (remote?.status === 'rejected') return { ok: false, error: remote.error };
       if (remote?.status === 'ok') return { ok: true, user: remote.user, token: remote.token };
+      // 2026-10-21 차단 때 '인터넷 연결을 확인' 만 떠서 팀원들이 원인을 몰랐다 — 한도 차단은 따로 알린다.
+      if (remote?.status === 'unavailable' && remote.reason === 'quota-blocked') {
+        return {
+          ok: false,
+          error: 'B flow 서버가 사용량 한도에 걸려 잠시 막혀 있어요. 인터넷이나 비밀번호 문제가 아니니 관리자에게 알려 주세요. 풀리면 바로 다시 로그인할 수 있어요.',
+        };
+      }
     } catch {
       // transport 예외에도 같은 안전한 복구 안내를 사용하고 자격 증명을 재전송하지 않는다.
     }
