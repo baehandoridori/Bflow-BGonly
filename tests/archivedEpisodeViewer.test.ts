@@ -6,7 +6,8 @@ const read = (path: string) => readFile(new URL(`../${path}`, import.meta.url), 
 
 test('평소 전부 받기에는 보관한 에피소드가 빠지고, 보관함에서는 고른 한 편만 받는다', async () => {
   const supabase = await read('electron/supabase.ts');
-  assert.match(supabase, /export async function readAllEpisodes\(\): Promise<SupabaseEpisodeData\[\]> \{\s*return readEpisodesWithScenes\(\{ status: 'active' \}\);/);
+  assert.match(supabase, /export async function readAllEpisodes\(options: \{ force\?: boolean \} = \{\}\): Promise<SupabaseEpisodeData\[\]> \{\s*return readEpisodesWithScenes\(\{ status: 'active' \}, options\);/);
+  assert.match(supabase, /: await fetchScenesPaged\(partIds\);/, '보관함에서 연 한 편은 캐시를 거치지 않는다');
   assert.match(supabase, /export async function readArchivedEpisodeDetail\(episodeNumber: number\)[\s\S]*?readEpisodesWithScenes\(\{ status: 'archived', episodeNumber \}\)/);
   assert.match(supabase, /\.eq\('status', filter\.status\);\s*if \(filter\.episodeNumber !== undefined\) episodeQuery = episodeQuery\.eq\('episode_number', filter\.episodeNumber\);/);
 });

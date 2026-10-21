@@ -79,7 +79,14 @@ test('collectAllPages: fetchPage 가 던진 에러는 그대로 전파된다', a
 });
 
 test('readAllMetadata 는 페이지네이션으로 전량을 읽는다 (1000행 캡 방지)', () => {
-  const src = functionSource('readAllMetadata');
+  // v1.144.0: 쪽 나누기 읽기는 fetchMetadataPaged 가 맡고, readAllMetadata 는 '바뀐 것만 받기' 캐시를 거친다.
+  const start = supabaseSrc.indexOf('async function fetchMetadataPaged(');
+  assert.notEqual(start, -1, 'fetchMetadataPaged 를 찾지 못했습니다');
+  const end = supabaseSrc.slice(start).search(/\r?\n\}\r?\n/);
+  const src = supabaseSrc.slice(start, start + end);
+  const reader = functionSource('readAllMetadata');
+  assert.match(reader, /metadataCache\.sync\(\[METADATA_SCOPE\], \{ force: options\.force === true \}\)/);
+  assert.match(supabaseSrc, /fetchAll: \(\) => fetchMetadataPaged\(\),\s*fetchChangedSince: \(_groups, sinceIso\) => fetchMetadataPaged\(sinceIso\),/);
   assert.match(src, /collectAllPages</, 'collectAllPages 로 페이지를 끝까지 받아야 한다');
   assert.match(src, /\.range\(from, to\)/, 'range() 로 페이지 구간을 지정해야 한다');
   assert.match(

@@ -1193,7 +1193,8 @@ export interface ElectronAPI extends CalendarApiInputContract {
 
   // ─── Supabase ──────────────────────────────────
   supabaseTestConnection: () => Promise<{ ok: boolean; error?: string }>;
-  supabaseReadAll: () => Promise<unknown[]>;
+  /** force: 바뀐 것만 받기 캐시를 건너뛰고 전부 다시 받는다(직접 새로고침). */
+  supabaseReadAll: (options?: { force?: boolean }) => Promise<unknown[]>;
   supabaseAddEpisode: (episodeNumber: number, department?: string) => Promise<void>;
   supabaseSoftDeleteEpisode: (episodeNumber: number) => Promise<void>;
   supabaseArchiveEpisode: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<void>;
@@ -1621,7 +1622,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
   supabaseAddRevisionSet: (input: Omit<CompRevisionSet, 'id' | 'status' | 'createdAt' | 'updatedAt'>) => Promise<CompRevisionSet>;
   supabaseUpdateRevisionSet: (id: string, fields: Partial<Pick<CompRevisionSet, 'title' | 'episodeNumber' | 'department' | 'aggregatorId' | 'status'>>) => Promise<CompRevisionSet>;
   supabaseDeleteRevisionSet: (id: string) => Promise<void>;
-  supabaseReadAllMetadata: () => Promise<unknown[]>;
+  supabaseReadAllMetadata: (options?: { force?: boolean }) => Promise<unknown[]>;
   supabaseReadMetadata: (type: string, key: string) => Promise<unknown>;
   supabaseWriteMetadata: (type: string, key: string, value: string) => Promise<void>;
   supabaseGetActivity: (opts: { table?: string; action?: 'read' | 'write'; rangeMs: number; buckets: number })
