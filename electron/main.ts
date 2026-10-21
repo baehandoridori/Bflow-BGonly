@@ -1345,6 +1345,7 @@ import {
   unarchiveEpisode as sbUnarchiveEpisode,
   updateEpisodeReelPath as sbUpdateEpisodeReelPath,
   readArchivedEpisodes as sbReadArchived,
+  readArchivedEpisodeDetail as sbReadArchivedEpisodeDetail,
   addPart as sbAddPart,
   softDeletePart as sbSoftDeletePart,
   addScene as sbAddScene,
@@ -2005,6 +2006,13 @@ ipcMain.handle('supabase:update-episode-reel-path', wrapIpc(async (_e: unknown, 
 }));
 ipcMain.handle('supabase:read-archived', wrapIpc(async () => {
   return sbReadArchived();
+}));
+// 보관함에서 고른 에피소드 한 편만 씬까지 읽는다(보기 전용).
+ipcMain.handle('supabase:read-archived-episode', wrapIpc(async (_e: unknown, episodeNumber: unknown) => {
+  if (typeof episodeNumber !== 'number' || !Number.isInteger(episodeNumber) || episodeNumber < 0) {
+    throw new Error('에피소드 번호가 올바르지 않습니다.');
+  }
+  return sbReadArchivedEpisodeDetail(episodeNumber);
 }));
 
 // ─── Parts ───

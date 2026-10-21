@@ -245,6 +245,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:update-episode-reel-path', episodeNumber, reelFilePath),
   supabaseReadArchived: () =>
     ipcRenderer.invoke('supabase:read-archived'),
+  supabaseReadArchivedEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('supabase:read-archived-episode', episodeNumber),
   supabaseAddPart: (episodeNumber: number, partId: string, department?: string) =>
     ipcRenderer.invoke('supabase:add-part', episodeNumber, partId, department),
   supabaseSoftDeletePart: (sheetName: string) =>

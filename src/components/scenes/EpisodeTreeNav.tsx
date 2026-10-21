@@ -34,6 +34,8 @@ interface EpisodeTreeNavProps {
   onEpisodeEdit: (epNum: number) => void;
   onArchiveEpisode: (epNum: number) => void;
   onUnarchiveEpisode: (epNum: number) => void;
+  /** 보관함에서 에피소드를 골라 보기 전용으로 연다(그 한 편만 받는다). */
+  onOpenArchivedEpisode?: (epNum: number) => void;
   onEpisodeContextMenu: (e: React.MouseEvent, epNum: number) => void;
   onCollapse?: () => void;
 }
@@ -125,6 +127,7 @@ export function EpisodeTreeNav({
   onEpisodeEdit,
   onArchiveEpisode,
   onUnarchiveEpisode,
+  onOpenArchivedEpisode,
   onEpisodeContextMenu,
   onCollapse,
 }: EpisodeTreeNavProps) {
@@ -505,6 +508,7 @@ export function EpisodeTreeNav({
               archivedEpisodes={archivedEpisodes}
               episodeTitles={episodeTitles}
               onUnarchive={onUnarchiveEpisode}
+              onOpen={onOpenArchivedEpisode}
             />
           </div>
         )}
@@ -518,10 +522,12 @@ function ArchivedSection({
   archivedEpisodes,
   episodeTitles,
   onUnarchive,
+  onOpen,
 }: {
   archivedEpisodes: ArchivedEpisodeInfo[];
   episodeTitles: Record<number, string>;
   onUnarchive: (epNum: number) => void;
+  onOpen?: (epNum: number) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -551,18 +557,26 @@ function ArchivedSection({
                 key={archived.episodeNumber}
                 className="group/arc flex items-center gap-1.5 px-2 py-1.5 mx-1 rounded-md text-text-secondary/40"
               >
-                <Folder size={12} className="shrink-0 text-amber-500/30" />
-                <div className="flex flex-col flex-1 min-w-0">
-                  <span className="text-[11px] font-medium truncate leading-tight">{displayName}</span>
-                  <span className="text-[9px] text-text-secondary/30 leading-tight">
-                    {archived.partCount}개 파트
-                    {archived.archivedBy && ` · ${archived.archivedBy}`}
-                    {archived.archivedAt && ` · ${archived.archivedAt}`}
+                <button
+                  type="button"
+                  onClick={() => onOpen?.(archived.episodeNumber)}
+                  disabled={!onOpen}
+                  className="flex items-center gap-1.5 flex-1 min-w-0 text-left rounded-sm hover:text-text-secondary enabled:cursor-pointer disabled:cursor-default"
+                  title={onOpen ? `${displayName} 열어 보기 (보기만 할 수 있어요)` : undefined}
+                >
+                  <Folder size={12} className="shrink-0 text-amber-500/30" />
+                  <span className="flex flex-col flex-1 min-w-0">
+                    <span className="text-[11px] font-medium truncate leading-tight">{displayName}</span>
+                    <span className="text-[9px] text-text-secondary/30 leading-tight">
+                      {archived.partCount}개 파트
+                      {archived.archivedBy && ` · ${archived.archivedBy}`}
+                      {archived.archivedAt && ` · ${archived.archivedAt}`}
+                    </span>
+                    {archived.memo && (
+                      <span className="text-[9px] text-amber-500/40 truncate leading-tight">{archived.memo}</span>
+                    )}
                   </span>
-                  {archived.memo && (
-                    <span className="text-[9px] text-amber-500/40 italic truncate leading-tight">{archived.memo}</span>
-                  )}
-                </div>
+                </button>
                 <button
                   onClick={() => onUnarchive(archived.episodeNumber)}
                   className="p-0.5 opacity-0 group-hover/arc:opacity-100 text-text-secondary/30 hover:text-accent transition-[opacity,color] shrink-0"

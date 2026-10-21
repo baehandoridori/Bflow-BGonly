@@ -1200,6 +1200,8 @@ export interface ElectronAPI extends CalendarApiInputContract {
   supabaseUnarchiveEpisode: (episodeNumber: number) => Promise<void>;
   supabaseUpdateEpisodeReelPath: (episodeNumber: number, reelFilePath: string | null) => Promise<void>;
   supabaseReadArchived: () => Promise<unknown[]>;
+  /** 보관함에서 고른 에피소드 한 편(파트·씬 포함). 없으면 null. */
+  supabaseReadArchivedEpisode: (episodeNumber: number) => Promise<unknown | null>;
   supabaseAddPart: (episodeNumber: number, partId: string, department?: string) => Promise<void>;
   supabaseSoftDeletePart: (sheetName: string) => Promise<void>;
   supabaseAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<{ sceneUuid: string | null }>;
