@@ -319,7 +319,7 @@ export async function readArchivedEpisodeDetail(episodeNumber: number): Promise<
   return episode ?? null;
 }
 
-async function readEpisodesWithScenes(filter: {
+export async function readEpisodesWithScenes(filter: {
   status: 'active' | 'archived';
   episodeNumber?: number;
 }): Promise<SupabaseEpisodeData[]> {
