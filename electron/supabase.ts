@@ -8,6 +8,7 @@ import {
 import { deleteImage as storageDeleteImage } from './storage';
 import { withCharacterOriginalPaths } from '../src/shared/characterImageOriginal';
 import { createRetryManager } from './retry-utils';
+import { createIncrementalRowCache } from './incrementalRowCache';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds, type CharacterCommentSummaries } from '../src/shared/characterCommentSummary';
 import {
   chunkForInQuery,
@@ -305,9 +306,10 @@ export async function testConnection(): Promise<{ ok: boolean; error?: string }>
 // EPISODES
 // ═══════════════════════════════════════════════
 
-/** 모든 에피소드 + 파트 + 씬 읽기 (기존 readAllEpisodes 대체) — 보관한 에피소드는 빠진다. */
-export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
-  return readEpisodesWithScenes({ status: 'active' });
+/** 모든 에피소드 + 파트 + 씬 읽기 (기존 readAllEpisodes 대체) — 보관한 에피소드는 빠진다.
+ *  씬은 '바뀐 것만 받기' 캐시를 거친다(v1.144.0). force 면 씬을 전부 다시 받는다(직접 새로고침). */
+export async function readAllEpisodes(options: { force?: boolean } = {}): Promise<SupabaseEpisodeData[]> {
+  return readEpisodesWithScenes({ status: 'active' }, options);
 }
 
 /**
@@ -319,10 +321,58 @@ export async function readArchivedEpisodeDetail(episodeNumber: number): Promise<
   return episode ?? null;
 }
 
+type SceneRow = {
+  id: string; part_id: string; scene_number: string; sort_order: number;
+  memo: string; storyboard_url: string; guide_url: string; assignee: string;
+  layout: string; lo: boolean; done: boolean; review: boolean; png: boolean;
+  created_at?: string | null; updated_at?: string | null;
+  scene_state?: string | null; work_round?: number | null; feedback_round?: number | null;
+};
+const SCENE_COLUMNS = 'id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change, created_at, updated_at, scene_state, work_round, feedback_round';
+
+/** 파트 묶음의 씬을 쪽 나누기로 끝까지 받는다. sinceIso 가 있으면 그보다 나중에 고쳐진 씬만. */
+async function fetchScenesPaged(partIds: string[], sinceIso?: string): Promise<SceneRow[]> {
+  // PostgREST 는 한 응답을 기본 1000행으로 제한한다. 스튜디오 전체 씬이 1000개를 넘으면
+  // 단일 select 로는 뒷부분(높은 sort_order) 씬이 통째로 누락되고, 그 결과 씬 추가 폼이
+  // 이미 존재하는 번호를 "다음 번호"로 제안해 UNIQUE(part_id, scene_number) 위반(중복 키)으로
+  // 추가가 실패한다. → range() 로 페이지를 끝까지 받아 전체 씬을 적재한다.
+  // sort_order 동률이 있어도 페이지 경계에서 누락/중복이 없도록 고유키(id)로 2차 정렬한다.
+  return collectAllPages<SceneRow>(async (from, to) => {
+    let query = supabase
+      .from('scenes')
+      .select(SCENE_COLUMNS)
+      .in('part_id', partIds);
+    if (sinceIso) query = query.gt('updated_at', sinceIso);
+    const { data: sceneRows, error: sceneErr } = await query
+      .order('sort_order')
+      .order('id')
+      .range(from, to);
+    throwIfError(sceneErr);
+    return (sceneRows ?? []) as SceneRow[];
+  }, POSTGREST_PAGE_SIZE);
+}
+
+/** 평소 전부 받기의 씬 — 마지막으로 받은 씬을 기억해 두고 다음부터는 바뀐 씬만 받는다(v1.144.0).
+ *  지운 씬은 서버 행 개수로 알아채 그때만 전부 다시 받는다. 범위는 보관하지 않은 에피소드의 파트. */
+const activeSceneCache = createIncrementalRowCache<SceneRow>({
+  keyOf: (row) => row.id,
+  groupOf: (row) => row.part_id,
+  fetchAll: (partIds) => fetchScenesPaged(partIds),
+  fetchChangedSince: (partIds, sinceIso) => fetchScenesPaged(partIds, sinceIso),
+  count: async (partIds) => {
+    const { count, error } = await supabase
+      .from('scenes')
+      .select('id', { count: 'exact', head: true })
+      .in('part_id', partIds);
+    throwIfError(error);
+    return count ?? 0;
+  },
+});
+
 export async function readEpisodesWithScenes(filter: {
   status: 'active' | 'archived';
   episodeNumber?: number;
-}): Promise<SupabaseEpisodeData[]> {
+}, options: { force?: boolean } = {}): Promise<SupabaseEpisodeData[]> {
   // 1) 에피소드 (평소엔 활성 전부, 보관함에서 열 때는 고른 한 편)
   let episodeQuery = supabase
     .from('episodes')
@@ -343,34 +393,14 @@ export async function readEpisodesWithScenes(filter: {
     .order('part_id');
   throwIfError(partErr);
 
-  // 3) 모든 씬 (활성 파트)
+  // 3) 씬 — 평소 전부 받기는 '바뀐 것만' 캐시, 보관함에서 연 한 편은 그 파트만 그대로 받는다.
   const partIds = (parts || []).map((p) => p.id);
-  let scenes: {
-    id: string; part_id: string; scene_number: string; sort_order: number;
-    memo: string; storyboard_url: string; guide_url: string; assignee: string;
-    layout: string; lo: boolean; done: boolean; review: boolean; png: boolean;
-    created_at?: string | null; updated_at?: string | null;
-    scene_state?: string | null; work_round?: number | null; feedback_round?: number | null;
-  }[] = [];
-
+  let scenes: SceneRow[] = [];
   if (partIds.length > 0) {
-    // Supabase IN 쿼리는 최대 수백 개까지 괜찮음.
-    // PostgREST 는 한 응답을 기본 1000행으로 제한한다. 스튜디오 전체 씬이 1000개를 넘으면
-    // 단일 select 로는 뒷부분(높은 sort_order) 씬이 통째로 누락되고, 그 결과 씬 추가 폼이
-    // 이미 존재하는 번호를 "다음 번호"로 제안해 UNIQUE(part_id, scene_number) 위반(중복 키)으로
-    // 추가가 실패한다. → range() 로 페이지를 끝까지 받아 전체 씬을 적재한다.
-    // sort_order 동률이 있어도 페이지 경계에서 누락/중복이 없도록 고유키(id)로 2차 정렬한다.
-    scenes = await collectAllPages<typeof scenes[number]>(async (from, to) => {
-      const { data: sceneRows, error: sceneErr } = await supabase
-        .from('scenes')
-        .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change, created_at, updated_at, scene_state, work_round, feedback_round')
-        .in('part_id', partIds)
-        .order('sort_order')
-        .order('id')
-        .range(from, to);
-      throwIfError(sceneErr);
-      return (sceneRows ?? []) as typeof scenes;
-    }, POSTGREST_PAGE_SIZE);
+    const useCache = filter.status === 'active' && filter.episodeNumber === undefined;
+    scenes = useCache
+      ? (await activeSceneCache.sync(partIds, { force: options.force === true })).rows
+      : await fetchScenesPaged(partIds);
   }
 
   // 씬 완료 기록(누가·언제 다 끝냈나)은 여기서 읽지 않는다. 화면 쪽이 같은 순간에 전체 메타데이터를
@@ -383,6 +413,10 @@ export async function readEpisodesWithScenes(filter: {
     const arr = scenesByPart.get(s.part_id) || [];
     arr.push(s);
     scenesByPart.set(s.part_id, arr);
+  }
+  // 캐시는 받은 순서대로 쌓이므로, 예전 조회 순서(sort_order → id)로 다시 맞춘다.
+  for (const arr of scenesByPart.values()) {
+    arr.sort((a, b) => (a.sort_order - b.sort_order) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
   const partsByEp = new Map<string, typeof parts>();
@@ -2821,17 +2855,41 @@ export async function deleteSceneWorkLink(
  *  게다가 upsert 로 행이 갱신될 때마다 물리적 위치가 바뀌어 잘려나가는 행이 계속 달라지므로
  *  증상이 "간헐적"으로 보인다. → range() 로 끝까지 받아 전량을 적재한다.
  *  페이지 경계에서 누락/중복이 없도록 고유키(id)로 정렬한다. */
-export async function readAllMetadata(): Promise<{ type: string; key: string; value: string; updatedAt: string }[]> {
-  type MetadataRow = { type: string; key: string; value: string | null; updated_at: string | null };
-  const rows = await collectAllPages<MetadataRow>(async (from, to) => {
-    const { data, error } = await supabase
+type MetadataRow = { type: string; key: string; value: string | null; updated_at: string | null };
+
+/** 메타데이터를 쪽 나누기로 끝까지 받는다. sinceIso 가 있으면 그보다 나중에 고쳐진 행만. */
+async function fetchMetadataPaged(sinceIso?: string): Promise<MetadataRow[]> {
+  return collectAllPages<MetadataRow>(async (from, to) => {
+    let query = supabase
       .from('metadata')
-      .select('type, key, value, updated_at')
+      .select('type, key, value, updated_at');
+    if (sinceIso) query = query.gt('updated_at', sinceIso);
+    const { data, error } = await query
       .order('id', { ascending: true })
       .range(from, to);
     throwIfError(error);
     return (data || []) as MetadataRow[];
   }, POSTGREST_PAGE_SIZE);
+}
+
+/** 메타데이터도 바뀐 행만 받는다(v1.144.0). 지운 행(완료 기록 해제 등)은 서버 행 개수로 알아채 전부 다시 받는다. */
+const METADATA_SCOPE = 'all';
+const metadataCache = createIncrementalRowCache<MetadataRow>({
+  keyOf: (row) => `${row.type}\u0000${row.key}`,
+  groupOf: () => METADATA_SCOPE,
+  fetchAll: () => fetchMetadataPaged(),
+  fetchChangedSince: (_groups, sinceIso) => fetchMetadataPaged(sinceIso),
+  count: async () => {
+    const { count, error } = await supabase
+      .from('metadata')
+      .select('id', { count: 'exact', head: true });
+    throwIfError(error);
+    return count ?? 0;
+  },
+});
+
+export async function readAllMetadata(options: { force?: boolean } = {}): Promise<{ type: string; key: string; value: string; updatedAt: string }[]> {
+  const { rows } = await metadataCache.sync([METADATA_SCOPE], { force: options.force === true });
   return rows.map((m) => ({
     type: m.type,
     key: m.key,

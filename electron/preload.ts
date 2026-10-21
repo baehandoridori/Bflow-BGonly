@@ -231,8 +231,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ─── Supabase ──────────────────────────────────
   supabaseTestConnection: () =>
     ipcRenderer.invoke('supabase:test-connection') as Promise<{ ok: boolean; error?: string }>,
-  supabaseReadAll: () =>
-    ipcRenderer.invoke('supabase:read-all'),
+  supabaseReadAll: (options?: { force?: boolean }) =>
+    ipcRenderer.invoke('supabase:read-all', options),
   supabaseAddEpisode: (episodeNumber: number, department?: string) =>
     ipcRenderer.invoke('supabase:add-episode', episodeNumber, department),
   supabaseSoftDeleteEpisode: (episodeNumber: number) =>
@@ -445,8 +445,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:update-revision-set', id, fields),
   supabaseDeleteRevisionSet: (id: string) =>
     ipcRenderer.invoke('supabase:delete-revision-set', id),
-  supabaseReadAllMetadata: () =>
-    ipcRenderer.invoke('supabase:read-all-metadata'),
+  supabaseReadAllMetadata: (options?: { force?: boolean }) =>
+    ipcRenderer.invoke('supabase:read-all-metadata', options),
   supabaseReadMetadata: (type: string, key: string) =>
     ipcRenderer.invoke('supabase:read-metadata', type, key),
   supabaseWriteMetadata: (type: string, key: string, value: string) =>

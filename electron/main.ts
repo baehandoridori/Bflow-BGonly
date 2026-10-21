@@ -1986,8 +1986,11 @@ ipcMain.handle('supabase:test-connection', wrapIpc(async () => {
 }));
 
 // ─── Episodes ───
-ipcMain.handle('supabase:read-all', wrapIpc(async () => {
-  return sbReadAllEpisodes();
+// options.force: 직접 새로고침 — '바뀐 것만 받기' 캐시를 건너뛰고 전부 다시 받는다(v1.144.0).
+const readForceOption = (options: unknown): boolean =>
+  typeof options === 'object' && options !== null && (options as { force?: unknown }).force === true;
+ipcMain.handle('supabase:read-all', wrapIpc(async (_e: unknown, options?: unknown) => {
+  return sbReadAllEpisodes({ force: readForceOption(options) });
 }));
 ipcMain.handle('supabase:add-episode', wrapIpc(async (_e: unknown, episodeNumber: number, department?: string) => {
   await sbAddEpisode(episodeNumber, department);
@@ -3068,8 +3071,8 @@ ipcMain.handle('supabase:delete-revision-set', wrapIpc(async (_e: unknown, id: s
 }));
 
 // ─── Metadata ───
-ipcMain.handle('supabase:read-all-metadata', wrapIpc(async () => {
-  return sbReadAllMetadata();
+ipcMain.handle('supabase:read-all-metadata', wrapIpc(async (_e: unknown, options?: unknown) => {
+  return sbReadAllMetadata({ force: readForceOption(options) });
 }));
 ipcMain.handle('supabase:read-metadata', wrapIpc(async (_e: unknown, type: string, key: string) => {
   return sbReadMetadata(type, key);

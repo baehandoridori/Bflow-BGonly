@@ -36,8 +36,11 @@ export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: s
 
 // ─── Episodes ───────────────────────────────────
 
-export async function readAllFromSupabase(): Promise<Episode[]> {
-  const data = await window.electronAPI.supabaseReadAll();
+/** 받기 옵션 — force 면 메인의 '바뀐 것만 받기' 캐시를 건너뛰고 전부 다시 받는다(직접 새로고침, v1.144.0). */
+export interface ReadAllOptions { force?: boolean }
+
+export async function readAllFromSupabase(options?: ReadAllOptions): Promise<Episode[]> {
+  const data = await window.electronAPI.supabaseReadAll(options);
   return (data as Array<Episode & { reel_file_path?: string | null }>).map((ep) => ({
     ...ep,
     reelFilePath: ep.reelFilePath ?? ep.reel_file_path ?? null,
@@ -293,8 +296,8 @@ export async function updateRevisionInSupabase(id: string, updates: Record<strin
 
 // ─── Metadata ───────────────────────────────────
 
-export async function readAllMetadataFromSupabase(): Promise<unknown[]> {
-  return window.electronAPI.supabaseReadAllMetadata();
+export async function readAllMetadataFromSupabase(options?: ReadAllOptions): Promise<unknown[]> {
+  return window.electronAPI.supabaseReadAllMetadata(options);
 }
 
 export async function readMetadataFromSupabase(type: string, key: string): Promise<unknown> {
@@ -484,10 +487,10 @@ type LoadedMetadataRow = { type: string; key: string; value: string };
  *  예전처럼 완료 기록을 씬 100개씩 끊어 따로 읽거나, 화면마다 메타를 또 읽지 마라.
  *  메타를 못 읽으면 통째로 실패한다 — 완료 기록이 빠진 채로 화면을 덮어 '되돌아간 것'처럼 보이지 않게
  *  (예전에도 완료 기록 조회가 실패하면 전체가 실패했다). */
-export async function readAllWithMetadata(): Promise<{ episodes: Episode[]; metadata: LoadedMetadataRow[] }> {
+export async function readAllWithMetadata(options?: ReadAllOptions): Promise<{ episodes: Episode[]; metadata: LoadedMetadataRow[] }> {
   const [episodes, metadata] = await Promise.all([
-    readAllFromSupabase(),
-    readAllMetadataFromSupabase() as Promise<LoadedMetadataRow[]>,
+    readAllFromSupabase(options),
+    readAllMetadataFromSupabase(options) as Promise<LoadedMetadataRow[]>,
   ]);
   const withCompletion = applySceneCompletionMetadata(episodes, metadata);
   return { episodes: applyAssigneeProgressMetadata(withCompletion, metadata), metadata };

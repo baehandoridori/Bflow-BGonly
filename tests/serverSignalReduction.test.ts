@@ -61,7 +61,7 @@ test('에피소드 제목·메모도 같은 메타 목록에서 고른다', () =
 test('전부 다시 받기 한 번에 메타데이터는 한 번만, 씬과 동시에 읽는다', () => {
   const service = read('src/services/supabaseService.ts');
   const body = functionBody(service, 'readAllWithMetadata');
-  assert.match(body, /Promise\.all\(\[\s*readAllFromSupabase\(\),\s*readAllMetadataFromSupabase\(\)/);
+  assert.match(body, /Promise\.all\(\[\s*readAllFromSupabase\(options\),\s*readAllMetadataFromSupabase\(options\)/);
   assert.match(body, /applySceneCompletionMetadata\(episodes, metadata\)/);
   assert.match(body, /applyAssigneeProgressMetadata\(withCompletion, metadata\)/);
 
@@ -71,7 +71,8 @@ test('전부 다시 받기 한 번에 메타데이터는 한 번만, 씬과 동�
   assert.doesNotMatch(episodesBody, /from\('metadata'\)/, '씬 완료 기록을 씬 100개씩 끊어 따로 읽던 길로 되돌아갔습니다');
 
   const app = read('src/App.tsx');
-  assert.match(app, /const \{ episodes, metadata \} = await readAllWithMetadata\(\);/);
+  assert.match(app, /const \{ episodes, metadata \} = await readAllWithMetadata\(\{ force: options\.force === true \}\);/);
+  assert.match(app, /\(kind\) => fetchAllDataRef\.current\(\{ force: kind === 'manual' \}\)/, '직접 새로고침만 전부 다시 받는다');
   assert.doesNotMatch(app, /readAllMetadataFromSupabase\(\)/, '본 창이 메타데이터를 또 읽으면 안 된다');
 
   const popup = read('src/views/WidgetPopup.tsx');

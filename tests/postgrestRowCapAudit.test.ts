@@ -279,9 +279,13 @@ test('컴포지팅 상태도 전량을 받는다', () => {
 });
 
 test('에피소드 전량 읽기의 씬 루프는 받은 행 수만큼만 전진한다', () => {
-  // 활성 전부 읽기(readAllEpisodes)와 보관함 한 편 읽기가 같은 본문을 쓴다.
+  // 활성 전부 읽기(readAllEpisodes)와 보관함 한 편 읽기가 같은 본문을 쓰고, 씬 쪽 읽기는 fetchScenesPaged 가 맡는다(v1.144.0).
   const src = functionSource(supabaseSrc, 'readEpisodesWithScenes');
-  assert.match(src, /collectAllPages</, '씬 페이지는 공용 헬퍼로 모아야 한다');
+  const paged = functionSource(supabaseSrc, 'fetchScenesPaged');
+  assert.match(paged, /collectAllPages</, '씬 페이지는 공용 헬퍼로 모아야 한다');
+  assert.match(paged, /\.order\('sort_order'\)\s*\.order\('id'\)/, '동률 정렬키 뒤에 고유키');
+  assert.match(src, /activeSceneCache\.sync\(partIds, \{ force: options\.force === true \}\)/, '평소 전부 받기는 바뀐 것만 받기 캐시');
+  assert.match(src, /arr\.sort\(\(a, b\) => \(a\.sort_order - b\.sort_order\)/, '캐시에서 꺼낸 씬도 예전 순서로');
   // 완료 기록은 여기서 따로 읽지 않고 화면 쪽이 전체 메타(전량 페이지 읽기)에서 고른다 (2026-10-20 서버 신호 줄이기).
   assert.doesNotMatch(src, /from\('metadata'\)/, '완료 기록을 씬 묶음마다 따로 읽는 길로 되돌아갔습니다');
   assert.doesNotMatch(

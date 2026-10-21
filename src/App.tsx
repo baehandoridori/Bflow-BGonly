@@ -710,7 +710,7 @@ export default function App() {
 
   // 데이터 로드 본체 — Supabase에서 데이터 읽기 (Sheets fallback).
   // '동기화 중' 표시는 아래 syncQueue 가 맡는다(겹친 실행 수를 세고, 직접/자동을 구분).
-  const fetchAllData = useCallback(async () => {
+  const fetchAllData = useCallback(async (options: { force?: boolean } = {}) => {
     setSyncError(null);
     try {
       // Supabase 우선 시도
@@ -718,7 +718,8 @@ export default function App() {
       if (sbConn.ok) {
         setActiveDataSource('supabase');
         // 씬과 메타데이터를 동시에 한 번씩만 읽는다 — 제목·메모도 같은 메타 목록에서 고른다.
-        const { episodes, metadata } = await readAllWithMetadata();
+        // 평소엔 메인이 기억해 둔 데이터에 바뀐 것만 받아 붙이고, 직접 새로고침이면 전부 다시 받는다(v1.144.0).
+        const { episodes, metadata } = await readAllWithMetadata({ force: options.force === true });
         setLastSyncTime(Date.now());
         const { titles, memos } = episodeLabelsFromMetadata(metadata);
         setEpisodeTitles(titles);
@@ -777,7 +778,7 @@ export default function App() {
   const fetchAllDataRef = useRef(fetchAllData);
   fetchAllDataRef.current = fetchAllData;
   const [syncQueue] = useState(() => createSyncQueue(
-    () => fetchAllDataRef.current(),
+    (kind) => fetchAllDataRef.current({ force: kind === 'manual' }),
     ({ syncing, kind }) => useDataStore.getState().setSyncState(syncing, kind),
   ));
   const loadData = useCallback(() => syncQueue.request('auto'), [syncQueue]);
