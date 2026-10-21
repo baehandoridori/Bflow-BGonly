@@ -19,6 +19,7 @@ import {
 } from '../src/shared/postgrestPaging';
 import { defaultEpisodeTitle } from '../src/shared/episodeTitle';
 import { withHttpStatusMark } from '../src/shared/saveFailureMark';
+import { isServerQuotaBlocked } from '../src/shared/serverQuota';
 import type {
   PersonalTodoLabelColorKey,
   PersonalTodoLabelRecord,
@@ -291,10 +292,11 @@ function isDuplicateKeyError(error: SupabaseErrorLike | null): boolean {
 
 // ─── 연결 테스트 ────────────────────────────────
 
-export async function testConnection(): Promise<{ ok: boolean; error?: string }> {
+/** quotaBlocked: 서버 업체가 사용량 한도로 막았다(402) — 상단 표시가 '연결 안 됨'과 구분해 알린다. */
+export async function testConnection(): Promise<{ ok: boolean; error?: string; quotaBlocked?: boolean }> {
   try {
-    const { error } = await supabase.from('episodes').select('id').limit(1);
-    if (error) return { ok: false, error: error.message };
+    const { error, status } = await supabase.from('episodes').select('id').limit(1);
+    if (error) return { ok: false, error: error.message, quotaBlocked: isServerQuotaBlocked(status, error.message) };
     return { ok: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1355,16 +1357,23 @@ export async function readUsers(): Promise<SupabaseUser[]> {
 
 export type AppLoginResult =
   | { status: 'ok'; token: string; user: SupabaseUser }
-  | { status: 'rejected'; error: string };
+  | { status: 'rejected'; error: string }
+  | { status: 'unavailable'; reason: 'quota-blocked' };
 
 function isSessionRpcError(error: { code?: string } | null | undefined): boolean {
   return error?.code === '42501';
 }
 
-/** 서버 로그인. 네트워크 오류·함수 미적용은 throw(호출자가 '서버 불가' 로 처리), 인증 실패는 rejected. */
+/**
+ * 서버 로그인. 네트워크 오류·함수 미적용은 throw(호출자가 '서버 불가' 로 처리), 인증 실패는 rejected.
+ * 서버 업체가 사용량 한도로 막았으면(402) unavailable + quota-blocked — 로그인 화면이 그 까닭을 알린다.
+ */
 export async function loginSession(name: string, password: string): Promise<AppLoginResult> {
-  const { data, error } = await supabase.rpc('app_login', { p_name: name, p_password: password });
-  if (error) throw error;
+  const { data, error, status } = await supabase.rpc('app_login', { p_name: name, p_password: password });
+  if (error) {
+    if (isServerQuotaBlocked(status, error.message)) return { status: 'unavailable', reason: 'quota-blocked' };
+    throw error;
+  }
   const result = data as { ok?: unknown; error?: unknown; token?: unknown; user?: SupabaseUser | null } | null;
   if (!result || typeof result.ok !== 'boolean') throw new Error('로그인 서버 응답이 올바르지 않습니다.');
   if (!result.ok) {

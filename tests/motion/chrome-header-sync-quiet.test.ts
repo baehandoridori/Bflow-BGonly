@@ -127,6 +127,9 @@ test('자동 받아오기는 문구를 바꾸지 않고, 직접 새로고침·�
   assert.equal(resolveSyncLabel({ ...base, isSyncing: true, syncKind: 'manual' }), 'syncing');
   assert.equal(resolveSyncLabel({ ...base, spinning: true }), 'syncing', '아이콘이 멈출 때까지 기다렸다가 체크가 톡');
   assert.equal(resolveSyncLabel({ ...base, isSyncing: true, syncKind: 'auto', lastSyncTime: null }), 'syncing', '한 번도 못 받았으면 최신 상태가 아니다');
+  assert.equal(resolveSyncLabel({ ...base, offline: true }), 'stale', '서버에 닿지 못하면 최신 상태가 아니다');
+  assert.equal(resolveSyncLabel({ ...base, isSyncing: true, syncKind: 'auto', offline: true }), 'stale');
+  assert.equal(resolveSyncLabel({ ...base, isSyncing: true, syncKind: 'manual', offline: true }), 'syncing', '직접 새로고침 중엔 도는 것이 먼저');
 });
 
 test('상태 변화 → 회전 시작·멈춤·숨쉬기', () => {

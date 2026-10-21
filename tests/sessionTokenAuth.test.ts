@@ -163,6 +163,24 @@ test('a missing login provider fails closed without falling back to local creden
   assert.deepEqual(directoryReads, []);
 });
 
+test('a server blocked by its usage limit says so instead of blaming the internet, and still never authenticates', async () => {
+  const { manager, written, published, directoryReads } = harness({
+    users: [{ id: 'user-a', name: 'A', password: 'a' }],
+    status: 'fallback',
+    remoteLogin: async () => ({ status: 'unavailable', reason: 'quota-blocked' }),
+  });
+  const result = await manager.login({ name: 'A', password: 'a' });
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /사용량 한도/);
+  assert.match(result.error ?? '', /관리자에게 알려/);
+  assert.doesNotMatch(result.error ?? '', /인터넷 연결을 확인|비밀번호가 일치하지|등록되지 않은/);
+  assert.equal(manager.getCanonicalUserId(), null);
+  assert.equal(manager.getSessionToken(), null);
+  assert.deepEqual(written, []);
+  assert.deepEqual(published, []);
+  assert.deepEqual(directoryReads, []);
+});
+
 test('a thrown login transport error is safe and never triggers directory fallback', async () => {
   const { manager, written, published, directoryReads } = harness({
     remoteLogin: async () => { throw new Error('private transport details'); },

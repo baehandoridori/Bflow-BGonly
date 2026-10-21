@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, RefreshCw } from 'lucide-react';
+import { CheckCircle2, Clock3, RefreshCw } from 'lucide-react';
+import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { animateEl } from '@/utils/motion';
@@ -27,6 +28,7 @@ export function HeaderSyncStatus({ onRefresh }: { onRefresh: () => void }) {
   const isSyncing = useDataStore((s) => s.isSyncing);
   const syncKind = useDataStore((s) => s.syncKind);
   const lastSyncTime = useDataStore((s) => s.lastSyncTime);
+  const offline = useAppStore((s) => s.activeDataSource === 'offline' || s.activeDataSource === 'quota-blocked');
   const { reduce, lite } = useMotionPref();
 
   const iconRef = useRef<SVGSVGElement>(null);
@@ -112,8 +114,9 @@ export function HeaderSyncStatus({ onRefresh }: { onRefresh: () => void }) {
     }
   }, []);
 
-  const label = resolveSyncLabel({ isSyncing, syncKind, lastSyncTime, spinning });
+  const label = resolveSyncLabel({ isSyncing, syncKind, lastSyncTime, spinning, offline });
   const busy = label === 'syncing';
+  const stale = label === 'stale';
   const manualBusy = syncKind === 'manual' || spinning;
 
   const lastSyncLabel = lastSyncTime
@@ -139,14 +142,26 @@ export function HeaderSyncStatus({ onRefresh }: { onRefresh: () => void }) {
           동기화 중...
         </span>
         <span
-          aria-hidden={busy}
+          aria-hidden={label !== 'fresh'}
           className={cn(
             'col-start-1 row-start-1 flex items-center justify-end gap-1.5 transition-opacity duration-[160ms]',
-            busy ? 'opacity-0' : 'opacity-100',
+            label === 'fresh' ? 'opacity-100' : 'opacity-0',
           )}
         >
           <CheckCircle2 ref={checkRef} size={14} className="text-emerald-500" />
           최신 상태
+        </span>
+        <span
+          aria-hidden={!stale}
+          className={cn(
+            'col-start-1 row-start-1 flex items-center justify-end gap-1.5 transition-opacity duration-[160ms]',
+            stale ? 'opacity-100' : 'opacity-0',
+          )}
+        >
+          <Clock3 size={14} />
+          {lastSyncTime
+            ? `${new Date(lastSyncTime).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })} 기준`
+            : '받은 내용 없음'}
         </span>
       </div>
 

@@ -45,7 +45,11 @@ export type SceneViewMode = 'card' | 'sheet';
 export type SceneGroupMode = 'flat' | 'layout';
 export type DashboardDeptFilter = Department | 'all';
 
-export type DataSource = 'supabase' | 'sheets' | null;
+/**
+ * 상단 연결 표시. 'offline' = 서버에 닿지 못함, 'quota-blocked' = 서버 업체가 사용량 한도로 막음(402).
+ * 예전엔 서버가 안 되면 'sheets' 로 표시했지만 시트에서 대신 읽는 것이 없어 원인만 가렸다(2026-10-21).
+ */
+export type DataSource = 'supabase' | 'offline' | 'quota-blocked' | null;
 
 export interface ScheduleDateNavigationRequest {
   id: number;

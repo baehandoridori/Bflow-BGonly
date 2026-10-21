@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Sun, Moon, Database, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, Sun, Moon, Database, CloudOff, ServerOff } from 'lucide-react';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
@@ -10,6 +10,7 @@ import { NotificationBell } from '@/components/NotificationPanel';
 import { HeaderPointsBadge } from './HeaderPointsBadge';
 import { HeaderSyncStatus } from './HeaderSyncStatus';
 import { resolveHeaderTitle } from './headerTitle';
+import { resolveHeaderConnectionBadge } from './headerConnection';
 
 interface HeaderProps {
   activeView: ViewMode;
@@ -26,6 +27,7 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
 
   const headerTitle = resolveHeaderTitle(activeView, episodeDashboardEp, episodeTitles);
+  const connection = resolveHeaderConnectionBadge(activeDataSource);
 
   // 움직임 폴리싱 18번: '돌아가기'가 생기거나 없어질 때 제목이 순간이동하지 않고 스르륵 비켜선다(FLIP).
   // 바뀌기 직전 자리는 렌더 단계에서 잰다(DOM 이 아직 옛 상태) — useStackFlip 과 같은 방식.
@@ -88,17 +90,21 @@ export function Header({ activeView, onRefresh }: HeaderProps) {
 
       {/* 오른쪽: 액션 버튼들 */}
       <div className="flex items-center gap-3">
-        {/* 데이터 소스 뱃지 (아이콘만) */}
-        {activeDataSource && (
-          <div className="flex items-center gap-2 mr-1" title={`현재 연결: ${activeDataSource}`}>
-            <span className={cn(
-              'flex items-center justify-center w-6 h-6 rounded-md',
-              activeDataSource === 'supabase'
-                ? 'bg-emerald-500/10 text-emerald-500'
-                : 'bg-amber-500/10 text-amber-500'
-            )}>
-              {activeDataSource === 'supabase' ? <Database size={14} /> : <FileSpreadsheet size={14} />}
-            </span>
+        {/* 서버 연결 표시 — 연결되면 아이콘만, 닿지 못하면 까닭을 글자로 */}
+        {connection && (
+          <div
+            className={cn(
+              'mr-1 flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md text-xs font-medium',
+              connection.label ? 'px-2' : 'w-6 justify-center',
+              connection.tone === 'ok' && 'bg-emerald-500/10 text-emerald-500',
+              connection.tone === 'offline' && 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+              connection.tone === 'blocked' && 'bg-red-500/10 text-red-600 dark:text-red-400',
+            )}
+            title={connection.title}
+            role={connection.label ? 'status' : undefined}
+          >
+            {connection.tone === 'ok' ? <Database size={14} /> : connection.tone === 'offline' ? <CloudOff size={14} /> : <ServerOff size={14} />}
+            {connection.label && <span>{connection.label}</span>}
           </div>
         )}
 
