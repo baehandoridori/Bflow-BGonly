@@ -4,8 +4,13 @@
  * 다른 사람의 변경은 실시간 연결이 바로 알려 준다. 주기적인 전부 다시 받기는 그 알림을 놓쳤을 때를 위한
  * 안전망일 뿐인데, 예전에는 켜진 PC 마다 15초에 한 번씩 창이 트레이에 있어도 돌아 하루 약 49만 건이 됐다.
  *
+ * 한 번 받을 때마다 씬 전체(약 1.7MB)와 메타데이터 전체(약 0.4MB)가 내려온다. 2026-10-21 아침 서버 업체가
+ * 데이터 전송 한도(exceed_egress_quota)를 넘었다며 모든 접속을 402 로 막아 팀 전체가 로그인하지 못했다.
+ * 1분 간격도 켜진 창 15개면 하루 약 15GB 라 한 달 한도(250GB)를 넘으므로, 안전망은 10분으로 늘렸다
+ * (v1.142.2). 실시간이 다시 붙을 때와 창이 다시 보일 때 받는 길은 그대로라 놓친 변경은 그때 채워진다.
+ *
  * - 창이 보이고 실시간이 붙어 있으면: 마지막으로 받은 뒤 visibleConnectedMs 가 지나야 받는다.
- * - 창이 보이는데 실시간이 끊겼으면: visibleDisconnectedMs(예전 15초). 이때는 이게 변경을 아는 유일한 길이다.
+ * - 창이 보이는데 실시간이 끊겼으면: visibleDisconnectedMs. 이때는 이게 변경을 아는 유일한 길이다.
  * - 창이 숨었으면(트레이·최소화): hiddenMs. 실시간으로 온 '전부 다시 받아야 하는 변경'도 미뤄 두고 표시만 해 둔다.
  * - 다시 보이면: 미뤄 둔 변경이 있거나 마지막으로 받은 지 staleOnShowMs 가 지났으면 바로 받는다.
  *   화면은 갖고 있던 내용을 그대로 보여 주고, 받는 동안 뒤에서 조용히 바뀐다.
@@ -31,18 +36,18 @@ export interface AutoSyncIntervals {
 
 /** 본 창 — 화면 대부분이 여기서 받은 내용을 쓴다. */
 export const MAIN_WINDOW_SYNC_INTERVALS: AutoSyncIntervals = {
-  visibleConnectedMs: 60_000,
-  visibleDisconnectedMs: 15_000,
-  hiddenMs: 5 * 60_000,
-  staleOnShowMs: 30_000,
+  visibleConnectedMs: 10 * 60_000,
+  visibleDisconnectedMs: 60_000,
+  hiddenMs: 30 * 60_000,
+  staleOnShowMs: 5 * 60_000,
 };
 
 /** 위젯 새 창 — 칸 단위 변경은 실시간으로 바로 고쳐 쓰고, 예전 안전망도 2분이었다. */
 export const POPUP_WINDOW_SYNC_INTERVALS: AutoSyncIntervals = {
-  visibleConnectedMs: 5 * 60_000,
+  visibleConnectedMs: 15 * 60_000,
   visibleDisconnectedMs: 2 * 60_000,
-  hiddenMs: 5 * 60_000,
-  staleOnShowMs: 60_000,
+  hiddenMs: 30 * 60_000,
+  staleOnShowMs: 5 * 60_000,
 };
 
 /** 타이머가 거의 제때 울렸으면 다시 미루지 않는다(아주 짧은 재예약이 이어지지 않게). */
