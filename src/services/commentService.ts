@@ -364,11 +364,13 @@ export function applyRemoteCommentChange(change: RemoteCommentChange): CommentsI
     return { partIds: change.partId ? [change.partId] : [], commentAction: change.action };
   }
   const detail = applyCommentOpToCaches(change.op, { commentId: change.commentId, action: change.action });
-  if (!detail && change.op.kind === 'delete' && !change.partId) {
+  // 파트 행이 하나도 안 바뀌었으면(예전 시트 대체 경로 묶음만 버렸어도) 씬 댓글이 아니었을 수 있다.
+  if ((!detail || (detail.partIds?.length ?? 0) === 0) && change.op.kind === 'delete' && !change.partId) {
     // 실시간 DELETE 는 id 만 싣는다 — 씬 캐시에 없던 댓글이면 캐릭터 댓글일 수 있다(예전 버전이 지웠거나 방송이 빠졌을 때).
     //   그 댓글을 보여 주는 화면과 캐릭터 배지만 다시 본다.
+    // 지우기는 반응을 늘리지 않으니 '캐시만 다시 보기'(patched) 로 — 패널이 반응을 다시 읽지 않는다.
     const unresolved: CommentsInvalidatedDetail = {
-      commentId: change.commentId, commentAction: 'delete', unresolvedDelete: true,
+      commentId: change.commentId, commentAction: 'delete', unresolvedDelete: true, patched: true,
     };
     window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: unresolved }));
     return unresolved;
