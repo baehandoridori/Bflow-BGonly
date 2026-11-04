@@ -130,6 +130,11 @@ test('PC 시계가 달라도 실시간(커밋 순서)을 따르고, 이미 지�
   // 첫 수정의 방송이 늦게 도착 — 실시간으로 이미 지나간 값이라 버린다
   assert.deepEqual(cache.apply({ kind: 'patch', source: 'broadcast', id: 'c1', fields: { text: '빠른 시계 수정', editedAt: fast } }), []);
   assert.equal(cache.findById('c1')?.text, '정확한 시계 수정');
+  // DB 가 찍은 시각 글자(+00:00)와 방송 글자(.000Z)가 달라도 같은 수정으로 알아본다(코덱스 3차)
+  cache.apply({ kind: 'upsert', source: 'realtime', row: row('c2', { text: '첫 수정', editedAt: '2026-11-04T01:00:00+00:00' }) });
+  cache.apply({ kind: 'upsert', source: 'realtime', row: row('c2', { text: '둘째 수정', editedAt: '2026-11-04T01:05:00+00:00' }) });
+  assert.deepEqual(cache.apply({ kind: 'patch', source: 'broadcast', id: 'c2', fields: { text: '첫 수정', editedAt: '2026-11-04T01:00:00.000Z' } }), []);
+  assert.equal(cache.findById('c2')?.text, '둘째 수정');
   // 실시간보다 먼저 온 새 수정 방송은 바로 반영(빠른 길)
   assert.deepEqual(cache.apply({ kind: 'patch', source: 'broadcast', id: 'c1', fields: { text: '세 번째 수정', editedAt: '2026-11-04T02:00:00.000Z' } }), ['part-bg']);
   assert.equal(cache.findById('c1')?.text, '세 번째 수정');

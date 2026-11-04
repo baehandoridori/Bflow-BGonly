@@ -123,6 +123,16 @@ export function applyCommentRowOp(rows: readonly CommentRow[], op: CommentRowOp)
   return changed ? { rows: next, changed } : { rows, changed: false };
 }
 
+/**
+ * 같은 시각을 같은 글자로 — DB 는 '2026-11-04T01:00:00+00:00', 메인 방송은 '2026-11-04T01:00:00.000Z' 처럼 찍는다(코덱스 3차).
+ * 같은 수정인지 맞춰 보는 데만 쓴다(앞뒤 비교는 하지 않는다). 읽을 수 없는 값은 그대로.
+ */
+export function canonicalTimestamp(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : value;
+}
+
 /** 이 변경이 어느 파트의 행을 건드릴 수 있는지(upsert 는 그 행의 파트, 나머지는 id 로 찾아야 한다). */
 function opTouchesPart(op: CommentRowOp, partId: string, rows: readonly CommentRow[] | undefined): boolean {
   if (op.kind === 'upsert') {
@@ -181,7 +191,8 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
   //   수정 시각은 PC 시계라 크기 비교를 하지 않고 '실시간으로 이미 보고 지나간 값인가'만 본다.
   const realtimeEdits = new Map<string, { latest: string | null; seen: Set<string> }>();
   const REALTIME_EDIT_LIMIT = 2000;
-  const noteRealtimeEdit = (id: string, editedAt: string | null) => {
+  const noteRealtimeEdit = (id: string, rawEditedAt: string | null) => {
+    const editedAt = canonicalTimestamp(rawEditedAt);
     let record = realtimeEdits.get(id);
     if (!record) {
       record = { latest: null, seen: new Set() };
@@ -198,7 +209,8 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
   const isSupersededBroadcastPatch = (op: CommentRowOp): boolean => {
     if (op.kind !== 'patch' || op.source !== 'broadcast' || !op.fields.editedAt) return false;
     const record = realtimeEdits.get(op.id);
-    return !!record && record.seen.has(op.fields.editedAt) && record.latest !== op.fields.editedAt;
+    const editedAt = canonicalTimestamp(op.fields.editedAt);
+    return !!record && !!editedAt && record.seen.has(editedAt) && record.latest !== editedAt;
   };
 
   const epochOf = (partId: string) => `${globalEpoch}:${epochByPart.get(partId) ?? 0}`;
