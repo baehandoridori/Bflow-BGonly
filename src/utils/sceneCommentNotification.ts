@@ -32,6 +32,8 @@ export interface NormalizedSceneComment {
   mentions: readonly string[];
   imageCount?: number;
   parentCommentId: string | null;
+  /** 원댓글 작성자(보낸 PC 가 방송에 실어 준다). 없으면 받는 쪽 캐시로 판정. */
+  parentAuthorId?: string | null;
   revisionId: string | null;
   characterId: string | null;
   createdAt?: string | null;
@@ -184,7 +186,7 @@ export function decideSceneCommentNotification(
   }
 
   if (isMentioned) return decision('mention', `${author}님이 나를 태그했습니다`);
-  if (comment.parentCommentId && deps.isCommentByUser(comment.parentCommentId, me.id)) {
+  if (comment.parentCommentId && (comment.parentAuthorId === me.id || deps.isCommentByUser(comment.parentCommentId, me.id))) {
     return decision('reply', `${author}님이 내 댓글에 답글을 남겼습니다`);
   }
   if (!settings.autoNotify || !scene) return null;
@@ -250,6 +252,8 @@ export function normalizeSceneCommentFromRealtimeRow(row: unknown): NormalizedSc
     mentions: asNames(r.mentions),
     imageCount: imageCountOf(r.images),
     parentCommentId: asText(r.parent_comment_id),
+    // 실시간 행에는 원댓글 작성자가 없다(방송이 실어 온다).
+    parentAuthorId: null,
     revisionId: asText(r.revision_id),
     characterId: asText(r.character_id),
     createdAt: asText(r.created_at),
@@ -277,6 +281,7 @@ export function normalizeSceneCommentFromAddedBroadcast(payload: unknown): Norma
     mentions: asNames(p.mentions),
     imageCount: imageCountOf(p.images),
     parentCommentId: asText(p.parentCommentId),
+    parentAuthorId: asText(p.parentAuthorId),
     revisionId: asText(p.revisionId),
     characterId,
     createdAt: asText(p.createdAt),
@@ -302,8 +307,9 @@ export function normalizeSceneCommentFromUpdatedBroadcast(payload: unknown): Nor
     text: typeof p.text === 'string' ? p.text : '',
     mentions: asNames(p.mentions),
     imageCount: imageCountOf(p.images),
-    parentCommentId: null,
-    revisionId: null,
+    // 알림을 누르면 그 답글 스레드·리테이크 탭으로 가게(판정은 addedMentions 만 본다).
+    parentCommentId: asText(p.parentCommentId),
+    revisionId: asText(p.revisionId),
     characterId: asText(p.characterId),
     createdAt: asText(p.editedAt),
     kind: 'edit',
@@ -328,6 +334,7 @@ export function normalizeSceneCommentFromMissedRow(row: unknown): NormalizedScen
     mentions: asNames(r.mentions),
     imageCount: imageCountOf(r.images),
     parentCommentId: asText(r.parentCommentId),
+    parentAuthorId: asText(r.parentAuthorId),
     revisionId: asText(r.revisionId),
     characterId: null,
     createdAt: asText(r.createdAt),

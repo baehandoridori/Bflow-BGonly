@@ -29,7 +29,7 @@ import { revisionNoToLabel } from '@/constants/revision';
 import { formatCommentTime } from '@/utils/formatTime';
 import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
-import { describeMentionDelivery, notifyMentionsForComment, type MentionDeliveryResult } from '@/services/slackWebhookService';
+import { describeMentionDelivery, startMentionDelivery, type MentionDeliveryEntry } from '@/services/slackWebhookService';
 import { useDataStore } from '@/stores/useDataStore';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { EntityText } from '@/components/common/EntityText';
@@ -104,7 +104,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
 
   const [allComments, setAllComments] = useState<SceneComment[]>([]);
   // 내 댓글의 슬랙 전달 결과(씬 댓글 B안 §6.2) — 말풍선 아래 작은 글.
-  const [slackDelivery, setSlackDelivery] = useState<Map<string, { result: MentionDeliveryResult; retry: () => void }>>(() => new Map());
+  const [slackDelivery, setSlackDelivery] = useState<Map<string, MentionDeliveryEntry>>(() => new Map());
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState(true);
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
@@ -384,21 +384,18 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
         if (sent.mentions.length > 0 || extraTargetIds.length > 0) {
           const scene = useDataStore.getState().episodes.flatMap((ep) => ep.parts)
             .find((p) => p.sheetName === sheetName)?.scenes.find((sc) => String(sc.no) === String(sceneId));
-          const send = () => {
-            void notifyMentionsForComment({
-              comment: { text: sent.text, images: sent.images, mentions: sent.mentions },
-              sheetName,
-              sceneNo: sceneId,
-              sceneLabel: scene?.sceneId ?? null,
-              me: currentUser,
-              users,
-              extraTargetIds,
-            }).then((result) => {
-              if (result.targets === 0 || !mountedRef.current) return;
-              setSlackDelivery((prev) => new Map(prev).set(sent.id, { result, retry: send }));
-            });
-          };
-          send();
+          startMentionDelivery({
+            comment: { text: sent.text, images: sent.images, mentions: sent.mentions },
+            sheetName,
+            sceneNo: sceneId,
+            sceneLabel: scene?.sceneId ?? null,
+            me: currentUser,
+            users,
+            extraTargetIds,
+          }, (entry) => {
+            if (!mountedRef.current) return;
+            setSlackDelivery((prev) => new Map(prev).set(sent.id, entry));
+          });
         }
       }
     } catch (err) {
@@ -495,8 +492,10 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
                 role={note.failed ? 'alert' : undefined}
                 className="mt-0.5 flex flex-wrap items-center justify-end gap-x-1.5 text-[11px]"
               >
-                <span className={note.failed ? 'font-semibold text-status-low' : 'text-text-secondary/70'}>{note.text}</span>
-                {note.failed && (
+                <span className={note.failed && !entry.sending ? 'font-semibold text-status-low' : 'text-text-secondary/70'}>
+                  {entry.sending ? '슬랙 다시 보내는 중…' : note.text}
+                </span>
+                {note.failed && !entry.sending && (
                   <button
                     type="button"
                     onClick={(event) => { event.stopPropagation(); entry.retry(); }}

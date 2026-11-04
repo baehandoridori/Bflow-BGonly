@@ -15,14 +15,17 @@ export interface NotificationSettings {
   osNotification?: boolean;
 }
 
-/** 저장된 설정(예전 키 포함) → 지금 설정. 예전 '내 씬 변경'·'내 씬 댓글'을 하나라도 껐으면 '내 씬 자동 알림'도 꺼진 것으로 본다. */
+/**
+ * 저장된 설정(예전 키 포함) → 지금 설정. 예전 '내 씬 변경'·'내 씬 댓글'을 하나라도 껐으면 '내 씬 자동 알림'도 꺼진 것으로 본다.
+ * 예전 '내 씬 댓글'은 리테이크 등록·진행·리테이크 댓글 알림도 같이 껐다 — 껐던 사람은 '리테이크 알림'도 꺼진 채로 옮긴다.
+ */
 export function resolveNotificationSettings(saved: Record<string, unknown> | null | undefined): Required<NotificationSettings> {
   const s = saved ?? {};
   const bool = (key: string): boolean | undefined => (typeof s[key] === 'boolean' ? (s[key] as boolean) : undefined);
   const legacyAuto = bool('sceneChange') === false || bool('commentNotify') === false ? false : undefined;
   return {
     sceneAuto: bool('sceneAuto') ?? legacyAuto ?? true,
-    retake: bool('retake') ?? true,
+    retake: bool('retake') ?? (bool('commentNotify') === false ? false : undefined) ?? true,
     reaction: bool('reaction') ?? false,
     osNotification: bool('osNotification') ?? true,
   };

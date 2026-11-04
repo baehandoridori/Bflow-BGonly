@@ -3,7 +3,14 @@
  * 댓글 @멘션 시 멘션된 팀원에게 슬랙 워크플로 알림 전송
  */
 
-import { buildMentionWebhookPayloads, type MentionWebhookUser } from '../utils/mentionWebhookPayloads.ts';
+import {
+  buildMentionWebhookPayloads,
+  mergeMentionDeliveryRetry,
+  type MentionDeliveryResult,
+  type MentionWebhookUser,
+} from '../utils/mentionWebhookPayloads.ts';
+
+export type { MentionDeliveryResult } from '../utils/mentionWebhookPayloads.ts';
 import { stripEntityTokens } from '../utils/entityTokens.ts';
 
 interface RiggingAnnounceParams {
@@ -69,16 +76,6 @@ export async function sendRiggingAnnounce(params: RiggingAnnounceParams): Promis
   return window.electronAPI.sendRiggingWebhook(payload);
 }
 
-/** 댓글 슬랙 알림 결과 — 말풍선 아래 작은 상태('슬랙 전달됨 · 1명은 슬랙 ID 없음' / '슬랙 전송 실패')에 쓴다. */
-export interface MentionDeliveryResult {
-  /** 보내려 한 사람 수(슬랙 ID 없는 사람 포함, 나 제외). */
-  targets: number;
-  sent: number;
-  failed: number;
-  /** 슬랙 ID 가 없어 못 보낸 사람 이름. */
-  missing: string[];
-}
-
 export interface NotifyMentionsInput {
   comment: { text: string; images?: readonly string[] | null; mentions: readonly string[] };
   /** 댓글이 저장된 시트(예 'EP05_A_BG')와 scene.no — 바로가기 주소. */
@@ -90,6 +87,8 @@ export interface NotifyMentionsInput {
   users: readonly MentionWebhookUser[];
   /** 멘션 말고 더 보낼 사람(리테이크 댓글의 요청자). 답글 상대는 넣지 않는다(한솔 결정 2026-11-04). */
   extraTargetIds?: readonly string[];
+  /** '다시 보내기' — 이 사람들에게만 보낸다(처음에 실패한 사람). */
+  onlyTargetIds?: readonly string[];
 }
 
 /**
@@ -109,19 +108,21 @@ export async function notifyMentionsForComment(input: NotifyMentionsInput): Prom
     const user = byId.get(id);
     if (user) targets.push(user);
   }
+  const only = input.onlyTargetIds ? new Set(input.onlyTargetIds) : null;
   const plan = buildMentionWebhookPayloads({
     comment: input.comment,
     sheetName: input.sheetName,
     sceneNo: input.sceneNo,
     sceneLabel: input.sceneLabel,
     me: input.me,
-    targets,
+    targets: only ? targets.filter((user) => only.has(user.id)) : targets,
     plainText: stripEntityTokens,
   });
   const result: MentionDeliveryResult = {
     targets: plan.payloads.length + plan.missing.length,
     sent: 0,
     failed: 0,
+    failedIds: [],
     missing: plan.missing,
   };
   const send = window.electronAPI?.sendSlackWebhook;
@@ -132,10 +133,48 @@ export async function notifyMentionsForComment(input: NotifyMentionsInput): Prom
       result.sent += 1;
     } catch (err) {
       result.failed += 1;
+      result.failedIds.push(target.id);
       console.error('[SlackWebhook] 댓글 알림 전송 실패', { target: target.name, err });
     }
   }
   return result;
+}
+
+/** 말풍선 아래 슬랙 상태 한 칸 — 결과·보내는 중·다시 보내기. */
+export interface MentionDeliveryEntry {
+  result: MentionDeliveryResult;
+  sending: boolean;
+  retry: () => void;
+}
+
+/**
+ * 슬랙 보내기 + '다시 보내기'를 한 벌로(본문 입력칸·스레드 창·리테이크 카드가 같이 쓴다).
+ * 다시 보내기는 처음에 실패한 사람에게만 보내고(받은 사람에게 두 번 가지 않게), 보내는 중에는 다시 눌러도 무시한다.
+ * 보낼 사람이 없으면 onUpdate 를 부르지 않는다.
+ */
+export function startMentionDelivery(
+  input: NotifyMentionsInput,
+  onUpdate: (entry: MentionDeliveryEntry) => void,
+): void {
+  let current: MentionDeliveryResult | null = null;
+  let sending = false;
+  const retry = () => {
+    if (sending || !current || current.failedIds.length === 0) return;
+    run(current.failedIds);
+  };
+  const run = (onlyTargetIds?: readonly string[]) => {
+    sending = true;
+    if (current) onUpdate({ result: current, sending: true, retry });
+    void notifyMentionsForComment({ ...input, onlyTargetIds }).then((result) => {
+      current = current ? mergeMentionDeliveryRetry(current, result) : result;
+    }).catch((err) => {
+      console.error('[SlackWebhook] 댓글 알림 전송 실패', err);
+    }).finally(() => {
+      sending = false;
+      if (current && current.targets > 0) onUpdate({ result: current, sending: false, retry });
+    });
+  };
+  run();
 }
 
 /** 말풍선 아래 한 줄 — 보낼 사람이 없으면 null. */

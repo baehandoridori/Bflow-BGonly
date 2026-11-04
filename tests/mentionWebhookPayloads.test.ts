@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildMentionWebhookPayloads,
+  mergeMentionDeliveryRetry,
   slackCommentText,
   slackEpisodeAndPart,
 } from '../src/utils/mentionWebhookPayloads.ts';
@@ -64,7 +65,19 @@ test('알림 설정: 기본값과 예전 저장값 옮기기', () => {
   // 예전 '내 씬 댓글 알림'·'내 씬 변경 알림' 중 하나라도 껐으면 '내 씬 자동 알림'도 꺼짐. 멘션은 항상(키 없음).
   assert.equal(resolveNotificationSettings({ commentNotify: false }).sceneAuto, false);
   assert.equal(resolveNotificationSettings({ sceneChange: false }).sceneAuto, false);
-  assert.equal(resolveNotificationSettings({ commentNotify: false }).retake, true, '예전 댓글 토글이 리테이크까지 끄던 것은 옮기지 않는다');
+  // 예전 '내 씬 댓글'은 리테이크 등록·진행·리테이크 댓글 알림도 같이 껐다 — 껐던 사람은 리테이크 알림도 꺼진 채로.
+  assert.equal(resolveNotificationSettings({ commentNotify: false }).retake, false, '예전에 끈 사람에게 리테이크 알림이 갑자기 오지 않게');
+  assert.equal(resolveNotificationSettings({ sceneChange: false }).retake, true, '내 씬 변경 토글은 리테이크와 무관');
+  assert.equal(resolveNotificationSettings({ retake: true, commentNotify: false }).retake, true, '새 키가 우선');
   assert.equal(resolveNotificationSettings({ sceneAuto: true, commentNotify: false }).sceneAuto, true, '새 키가 우선');
   assert.equal(resolveNotificationSettings({ reaction: true, sound: false, syncComplete: true, toastDuration: 7000 }).reaction, true);
+});
+
+test('다시 보내기 결과 합치기 — 받은 사람은 그대로 더하고, 실패는 이번 결과로', () => {
+  const first = { targets: 3, sent: 1, failed: 1, failedIds: ['u-kim'], missing: ['박정인'] };
+  const ok = mergeMentionDeliveryRetry(first, { targets: 1, sent: 1, failed: 0, failedIds: [], missing: [] });
+  assert.deepEqual(ok, { targets: 3, sent: 2, failed: 0, failedIds: [], missing: ['박정인'] });
+  const again = mergeMentionDeliveryRetry(first, { targets: 1, sent: 0, failed: 1, failedIds: ['u-kim'], missing: [] });
+  assert.deepEqual(again.failedIds, ['u-kim']);
+  assert.equal(again.sent, 1);
 });

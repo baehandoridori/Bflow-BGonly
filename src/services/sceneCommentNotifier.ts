@@ -21,6 +21,7 @@ import {
   isCommentByUser,
 } from '@/utils/sceneNotificationRecipients';
 import { stripEntityTokens } from '@/utils/entityTokens';
+import { findCommentInCache } from '@/services/commentService';
 import { setLastSeenAt } from '@/utils/lastSeenTracker';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import {
@@ -35,12 +36,24 @@ import {
 import type { Scene } from '@/types';
 
 const arrivals = createNotificationDedupe(500);
+/** 실시간 답글이 원댓글 작성자를 실어 오는 방송을 기다리는 시간. 방송은 보통 0.1초 안에 온다. */
+const REALTIME_REPLY_WAIT_MS = 1500;
 const decisions = createNotificationDedupe(500);
+/**
+ * 놓친 알림 모으기가 한 번 끝난 사용자. 그 전에는 실시간 멘션이 놓친 알림 기준 시각을 옮기지 않는다(로컬 리뷰) —
+ * 모으기가 실패해 다시 할 때, 그 사이 실시간 멘션 하나가 기준을 '지금'으로 옮겨 앞 구간을 건너뛰지 않게.
+ */
+let catchUpReadyUserId: string | null = null;
+
+export function markSceneCommentCatchUpReady(userId: string): void {
+  catchUpReadyUserId = userId;
+}
 
 /** 로그아웃·계정 전환 때 비운다(다른 사람의 알림 기억을 넘기지 않게). */
 export function resetSceneCommentNotifier(): void {
   arrivals.clear();
   decisions.clear();
+  catchUpReadyUserId = null;
 }
 
 function findScene(comment: NormalizedSceneComment): Scene | null {
@@ -130,10 +143,18 @@ export function claimSceneCommentDecision(decision: SceneCommentNotificationDeci
 export function notifyIncomingSceneComment(
   comment: NormalizedSceneComment | null,
   getSettings: () => NotificationSettings,
+  options: { source?: 'realtime' | 'broadcast' } = {},
 ): void {
   if (!comment?.commentId) return;
   const me = useAuthStore.getState().currentUser;
   if (!me || !comment.userId || comment.userId === me.id) return;
+  // 실시간 행에는 원댓글 작성자가 없다 — 원댓글이 내 캐시에 없으면 그것을 실어 오는 방송을 잠깐 기다린다(코덱스 2차).
+  //   방송이 먼저 오면 그쪽이 판정하고, 이 길은 같은 도착 키라 건너뛴다. 방송이 끝내 안 오면 캐시로 판정한다.
+  if (options.source === 'realtime' && comment.kind !== 'edit' && comment.parentCommentId && !comment.parentAuthorId
+    && !findCommentInCache(comment.parentCommentId)) {
+    setTimeout(() => notifyIncomingSceneComment({ ...comment }, getSettings, {}), REALTIME_REPLY_WAIT_MS);
+    return;
+  }
   // 수정은 수정마다 따로(코덱스 1차) — 같은 수정의 두 길(실시간·방송)만 겹친다.
   const arrivalKey = comment.kind === 'edit'
     ? `${comment.commentId}:edit:${comment.createdAt ?? ''}`
@@ -152,7 +173,9 @@ export function notifyIncomingSceneComment(
       metadata: decision.metadata,
     }, settings, { quiet: decision.quiet });
     // 실시간으로 받은 '나를 부른 알림'도 놓친 알림 기준 시각을 옮긴다 — 다음 로그인 때 '놓친 알림 N개'가 거짓으로 뜨지 않게(§6.3).
-    if (decision.type === 'mention') setLastSeenAt(me.id, comment.createdAt || new Date().toISOString());
+    if (decision.type === 'mention' && catchUpReadyUserId === me.id) {
+      setLastSeenAt(me.id, comment.createdAt || new Date().toISOString());
+    }
   };
 
   const mentionsMe = (comment.kind === 'edit' ? comment.addedMentions ?? [] : comment.mentions).includes(me.name);

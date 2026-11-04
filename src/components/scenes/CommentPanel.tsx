@@ -27,7 +27,7 @@ import { groupReactionsByEmoji } from '@/utils/commentReactionUtils';
 import { ReactionChip } from './ReactionChip';
 import { EmojiPicker } from './EmojiPicker';
 import { SmilePlus } from 'lucide-react';
-import { describeMentionDelivery, notifyMentionsForComment, type MentionDeliveryResult } from '@/services/slackWebhookService';
+import { describeMentionDelivery, type MentionDeliveryResult, startMentionDelivery, type MentionDeliveryEntry } from '@/services/slackWebhookService';
 import { useDataStore } from '@/stores/useDataStore';
 import { formatCommentTime } from '@/utils/formatTime';
 import { EntityText } from '@/components/common/EntityText';
@@ -470,9 +470,10 @@ function CommentSendClock() {
 }
 
 /** 내 댓글의 슬랙 전달 결과 — 말풍선 아래 작은 글(씬 댓글 B안 §6.2). 실패면 '다시 보내기'. */
-function SlackDeliveryNote({ result, align = 'start', onRetry }: {
+function SlackDeliveryNote({ result, align = 'start', sending = false, onRetry }: {
   result: MentionDeliveryResult;
   align?: 'start' | 'end';
+  sending?: boolean;
   onRetry: () => void;
 }) {
   const note = describeMentionDelivery(result);
@@ -483,8 +484,10 @@ function SlackDeliveryNote({ result, align = 'start', onRetry }: {
       role={note.failed ? 'alert' : undefined}
       className={cn('mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px]', align === 'end' ? 'justify-end' : 'justify-start')}
     >
-      <span className={note.failed ? 'font-semibold text-status-low' : 'text-text-secondary/70'}>{note.text}</span>
-      {note.failed && (
+      <span className={note.failed && !sending ? 'font-semibold text-status-low' : 'text-text-secondary/70'}>
+        {sending ? '슬랙 다시 보내는 중…' : note.text}
+      </span>
+      {note.failed && !sending && (
         <>
           <span className="text-text-secondary/60" aria-hidden>·</span>
           <button
@@ -878,27 +881,6 @@ export function CommentPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
-  /**
-   * 스레드에서 특정 사람에게 답글 — 입력창에 '@이름 ' 을 보이게 넣는다(사용자가 지울 수 있다, v1.146.0 §6.1).
-   * 원댓글 작성자(답글 알림을 따로 받는다)·나 자신이면 넣지 않는다. 이미 다른 '@이름 ' 으로 시작하면 바꾸고, 쓰던 글은 건드리지 않는다.
-   */
-  const prefillThreadMention = (target: SceneCommentWithSource, rootId: string | null) => {
-    if (!target?.userName || target.userName === currentUser?.name) return;
-    if (rootId && target.id === rootId) return;
-    const prefix = `@${target.userName} `;
-    const apply = (prev: string) => {
-      const trimmed = prev.trimStart();
-      if (!trimmed) return prefix;
-      const existing = trimmed.match(/^@(\S+)\s/);
-      if (existing) return existing[1] === target.userName ? prev : prefix + trimmed.slice(existing[0].length);
-      return prev;
-    };
-    setThreadInput((prev) => {
-      const next = apply(prev);
-      threadInputValueRef.current = next;
-      return next;
-    });
-  };
   const openThreadReply = useCallback((target: SceneCommentWithSource) => {
     const threadTarget = buildCommentReplyTarget(comments, target);
     const threadRootId = threadTarget.parentCommentId ?? threadTarget.rootComment?.id ?? target.id;
@@ -913,7 +895,6 @@ export function CommentPanel({
     });
     setReplyTarget(null);
     setThreadMentionTarget(target);
-    prefillThreadMention(target, threadTarget.rootComment?.id ?? threadRootId);
     requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [comments]); // eslint-disable-line react-hooks/exhaustive-deps
   const revisionExists = useCallback((revisionId?: string | null): revisionId is string => {
@@ -929,7 +910,6 @@ export function CommentPanel({
     setActiveRevisionThreadId(revisionId);
     setReplyTarget(null);
     setThreadMentionTarget(mentionTarget);
-    if (mentionTarget) prefillThreadMention(mentionTarget, null);
     if (focusComposer) requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [revisionExists]); // eslint-disable-line react-hooks/exhaustive-deps
   const openContextualThreadReply = useCallback((target: SceneCommentWithSource) => {
@@ -1780,7 +1760,7 @@ export function CommentPanel({
   // v1.146.0(씬 댓글 B안 §6.2): 본문에 직접 부른 @이름 + 리테이크 댓글이면 요청자. 답글 상대에게는 보내지 않는다(한솔 결정).
   //   작성자 슬랙 ID 가 없어도 받는 사람에게는 보낸다. 결과(전달됨·슬랙 ID 없음·실패)는 말풍선 아래에 보인다.
   //   캐릭터 댓글은 슬랙 바로가기 주소가 없어 앱 알림만 간다.
-  const [slackDelivery, setSlackDelivery] = useState<Map<string, { result: MentionDeliveryResult; retry: () => void }>>(() => new Map());
+  const [slackDelivery, setSlackDelivery] = useState<Map<string, MentionDeliveryEntry>>(() => new Map());
   const notifyCommentMentions = (comment: SceneComment, webhookSceneKey: string, onlyNames?: readonly string[]) => {
     if (!currentUser || characterCommentKey) return;
     const names = onlyNames ?? comment.mentions;
@@ -1790,21 +1770,15 @@ export function CommentPanel({
     const { sheetName: hookSheetName, sceneId: hookSceneId } = parseSceneKey(webhookSceneKey);
     const hookPart = useDataStore.getState().episodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === hookSheetName);
     const hookScene = hookPart?.scenes.find((sc) => String(sc.no) === String(hookSceneId));
-    const send = () => {
-      void notifyMentionsForComment({
-        comment: { text: comment.text, images: comment.images, mentions: names },
-        sheetName: hookSheetName,
-        sceneNo: hookSceneId,
-        sceneLabel: hookScene?.sceneId ?? null,
-        me: currentUser,
-        users,
-        extraTargetIds,
-      }).then((result) => {
-        if (result.targets === 0) return;
-        setSlackDelivery((prev) => new Map(prev).set(comment.id, { result, retry: send }));
-      });
-    };
-    send();
+    startMentionDelivery({
+      comment: { text: comment.text, images: comment.images, mentions: names },
+      sheetName: hookSheetName,
+      sceneNo: hookSceneId,
+      sceneLabel: hookScene?.sceneId ?? null,
+      me: currentUser,
+      users,
+      extraTargetIds,
+    }, (entry) => setSlackDelivery((prev) => new Map(prev).set(comment.id, entry)));
   };
 
   /** 저장된 뒤 할 일 — 처음 보낼 때와 '다시 보내기'가 같은 길로. */
@@ -3174,6 +3148,7 @@ export function CommentPanel({
                   <SlackDeliveryNote
                     align="end"
                     result={slackDelivery.get(comment.id)!.result}
+                    sending={slackDelivery.get(comment.id)!.sending}
                     onRetry={slackDelivery.get(comment.id)!.retry}
                   />
                 )}
@@ -3891,6 +3866,7 @@ export function CommentPanel({
                     {message.userId === currentUser?.id && slackDelivery.get(message.id) && (
                       <SlackDeliveryNote
                         result={slackDelivery.get(message.id)!.result}
+                        sending={slackDelivery.get(message.id)!.sending}
                         onRetry={slackDelivery.get(message.id)!.retry}
                       />
                     )}

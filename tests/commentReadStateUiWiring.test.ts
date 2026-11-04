@@ -126,7 +126,7 @@ test('revision comment thread supports user mentions like the main comment panel
   assert.match(revisionCommentThread, /MentionDropdown/);
   assert.match(revisionCommentThread, /EntityText/);
   // v1.146.0(§6.2): 댓글 패널과 같은 슬랙 함수(직접 부른 @이름 + 리테이크 요청자).
-  assert.match(revisionCommentThread, /notifyMentionsForComment\(\{/);
+  assert.match(revisionCommentThread, /startMentionDelivery\(\{/);
   assert.match(revisionCommentThread, /revision\?\.requesterId && revision\.requesterId !== currentUser\.id \? \[revision\.requesterId\] : \[\]/);
 });
 
@@ -149,7 +149,7 @@ test('comment and revision images share enlarge, copy, and download actions', ()
 test('revision comment notifications include explicitly mentioned users', () => {
   // v1.146.0(§6.1): 리테이크 댓글 판정도 함수 하나(decideSceneCommentNotification) — 직접 멘션은 리테이크 대상과 상관없이 멘션.
   //   동작은 tests/sceneCommentNotification.test.ts 가 본다.
-  assert.match(app, /notifyIncomingSceneComment\(normalizeSceneCommentFromRealtimeRow\(payload\.new\), getNotiSettings\)/);
+  assert.match(app, /notifyIncomingSceneComment\(normalizeSceneCommentFromRealtimeRow\(payload\.new\), getNotiSettings, \{ source: 'realtime' \}\)/);
   assert.match(app, /notifyIncomingSceneComment\(normalizeSceneCommentFromAddedBroadcast\(data\.payload\), getNotiSettings\)/);
   assert.doesNotMatch(app, /dispatchRevisionCommentNotification/);
 });
@@ -157,7 +157,7 @@ test('revision comment notifications include explicitly mentioned users', () => 
 test('revision comment broadcasts keep revision context and avoid general comment notification fallback', () => {
   assert.match(electronBroadcast, /revisionId\?: string \| null/);
   assert.match(electronBroadcast, /revisionId: revisionId \?\? null/);
-  assert.match(electronSupabase, /broadcastCommentAdded\(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId, \{ images, createdAt, sceneUuid \}\)/);
+  assert.match(electronSupabase, /broadcastCommentAdded\(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId, \{ images, createdAt, sceneUuid, parentAuthorId \}\)/);
   // v1.146.0: 리테이크 맥락 판정은 정리 함수가 revisionId 를 그대로 싣고 판정 함수가 일반 자동 알림과 섞지 않는다.
   assert.match(notificationDecision, /revisionId: asText\(p\.revisionId\)/);
   assert.match(notificationDecision, /리테이크 댓글 — 일반 댓글 자동 알림\(담당·참여자\)과 섞지 않는다/);

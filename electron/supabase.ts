@@ -179,6 +179,10 @@ export interface SupabaseComment {
   revisionId?: string | null;
   /** v1.24.0: 1단계 대댓글이면 부모 댓글 id, 일반 댓글이면 null. */
   parentCommentId?: string | null;
+  /** v1.146.0: 놓친 알림 복원 — 내 댓글에 달린 답글이면 내 id. */
+  parentAuthorId?: string | null;
+  /** v1.146.0: 놓친 알림 복원 — 내가 요청자·담당자·알림 대상인 리테이크의 댓글이면 그 리테이크. */
+  revision?: { id: string; revisionNo: number | null; requesterId: string | null; assigneeIds: string[]; notifyUserIds: string[] } | null;
 }
 
 export interface CommentReadStateRow {
@@ -1584,6 +1588,116 @@ export async function fetchMissedMentions(
     cursor = { createdAt: String(last.created_at), id: String(last.id) };
   }
 
+  // v1.146.0(코덱스 2차): 내 댓글에 달린 답글 — 답글 상대를 mentions 에 넣지 않게 되어 위 멘션 조회로는 못 찾는다.
+  //   그 사이 달린 답글(최근 순 최대 REPLY_SCAN 개)의 원댓글 작성자를 100개씩 읽어 내 것만 고른다.
+  const REPLY_SCAN = 400;
+  const seenIds = new Set(matched.map((row) => row.id));
+  const { data: replyRows, error: replyErr } = await supabase
+    .from('comments')
+    .select(COLUMNS)
+    .gt('created_at', since)
+    .neq('user_id', userId)
+    .is('character_id', null)
+    .not('parent_comment_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(REPLY_SCAN);
+  if (replyErr) throw new Error(`fetchMissedMentions(replies) failed: ${replyErr.message}`);
+  const replies = ((replyRows || []) as Array<Record<string, any>>).filter((row) => !seenIds.has(row.id));
+  const parentIds = [...new Set(replies.map((row) => String(row.parent_comment_id)))];
+  const myParents = new Set<string>();
+  for (let start = 0; start < parentIds.length; start += 100) {
+    const chunk = parentIds.slice(start, start + 100);
+    const { data: parents, error: parentErr } = await supabase
+      .from('comments')
+      .select('id, user_id')
+      .in('id', chunk);
+    if (parentErr) throw new Error(`fetchMissedMentions(parents) failed: ${parentErr.message}`);
+    for (const parent of parents || []) if (parent.user_id === userId) myParents.add(String(parent.id));
+  }
+  for (const c of replies) {
+    if (matched.length >= limit) break;
+    if (!myParents.has(String(c.parent_comment_id))) continue;
+    matched.push({
+      id: c.id,
+      partId: c.part_id,
+      sceneId: c.scene_id,
+      sceneUuid: c.scene_uuid ?? null,
+      userId: c.user_id,
+      userName: c.user_name,
+      text: c.text,
+      mentions: c.mentions || [],
+      images: c.images || [],
+      createdAt: c.created_at,
+      editedAt: c.edited_at,
+      revisionId: c.revision_id ?? null,
+      parentCommentId: c.parent_comment_id ?? null,
+      parentAuthorId: userId,
+    });
+  }
+  // v1.146.0(로컬 리뷰): 내가 요청자·담당자·알림 대상인 리테이크의 댓글 — 요청자 이름을 mentions 에 넣지 않게 되어
+  //   위 조회로는 못 찾는다. 그 사이 달린 리테이크 댓글(최근 순 최대 REPLY_SCAN 개)의 리테이크를 100개씩 읽어 고른다.
+  if (matched.length < limit) {
+    const seenNow = new Set(matched.map((row) => row.id));
+    const { data: retakeRows, error: retakeErr } = await supabase
+      .from('comments')
+      .select(COLUMNS)
+      .gt('created_at', since)
+      .neq('user_id', userId)
+      .is('character_id', null)
+      .not('revision_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(REPLY_SCAN);
+    if (retakeErr) throw new Error(`fetchMissedMentions(retakes) failed: ${retakeErr.message}`);
+    const retakeComments = ((retakeRows || []) as Array<Record<string, any>>).filter((row) => !seenNow.has(row.id));
+    const revisionIds = [...new Set(retakeComments.map((row) => String(row.revision_id)))];
+    const mine = new Map<string, { id: string; revisionNo: number | null; requesterId: string | null; assigneeIds: string[]; notifyUserIds: string[] }>();
+    for (let start = 0; start < revisionIds.length; start += 100) {
+      const chunk = revisionIds.slice(start, start + 100);
+      const { data: revs, error: revErr } = await supabase
+        .from('comp_revisions')
+        .select('id, revision_no, requester_id, assignee_ids, notify_user_ids')
+        .in('id', chunk);
+      if (revErr) throw new Error(`fetchMissedMentions(revisions) failed: ${revErr.message}`);
+      for (const rev of (revs || []) as Array<Record<string, any>>) {
+        const assigneeIds = Array.isArray(rev.assignee_ids) ? rev.assignee_ids.filter((x: unknown) => typeof x === 'string') : [];
+        const notifyUserIds = Array.isArray(rev.notify_user_ids) ? rev.notify_user_ids.filter((x: unknown) => typeof x === 'string') : [];
+        const requesterId = typeof rev.requester_id === 'string' ? rev.requester_id : null;
+        if (requesterId !== userId && !assigneeIds.includes(userId) && !notifyUserIds.includes(userId)) continue;
+        mine.set(String(rev.id), {
+          id: String(rev.id),
+          revisionNo: typeof rev.revision_no === 'number' ? rev.revision_no : null,
+          requesterId,
+          assigneeIds,
+          notifyUserIds,
+        });
+      }
+    }
+    for (const c of retakeComments) {
+      if (matched.length >= limit) break;
+      const revision = mine.get(String(c.revision_id));
+      if (!revision) continue;
+      matched.push({
+        id: c.id,
+        partId: c.part_id,
+        sceneId: c.scene_id,
+        sceneUuid: c.scene_uuid ?? null,
+        userId: c.user_id,
+        userName: c.user_name,
+        text: c.text,
+        mentions: c.mentions || [],
+        images: c.images || [],
+        createdAt: c.created_at,
+        editedAt: c.edited_at,
+        revisionId: c.revision_id ?? null,
+        parentCommentId: c.parent_comment_id ?? null,
+        revision,
+      });
+    }
+  }
+  matched.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || String(b.id).localeCompare(String(a.id)));
+
   return matched;
 }
 
@@ -1873,7 +1987,19 @@ export async function addComment(
   // v1.24.0 P0 #1: broadcast 페이로드에 commentId/parentCommentId/partId 추가 →
   //   렌더러가 realtime/broadcast 어느 쪽에서 먼저 도착하든 같은 알림 분기 호출 가능.
   //   v1.145.0: images·createdAt 도 실어 받는 쪽이 다시 읽지 않고 캐시에 끼워 넣는다.
-  broadcastCommentAdded(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId, { images, createdAt, sceneUuid });
+  // v1.146.0(코덱스 2차): 답글이면 원댓글 작성자를 한 번 읽어 방송에 싣는다(보내는 PC 한 번 — 받는 PC 마다 읽지 않게).
+  //   예전엔 답글 상대를 mentions 에 넣어 알렸지만, 그 때문에 답글마다 슬랙이 갔다. 못 읽으면 받는 쪽 캐시로 판정한다.
+  let parentAuthorId: string | null = null;
+  if (safeParent) {
+    const { data: parentRow, error: parentErr } = await supabase
+      .from('comments')
+      .select('user_id')
+      .eq('id', safeParent)
+      .maybeSingle();
+    if (parentErr) console.warn('[addComment] 원댓글 작성자 조회 실패 — 받는 쪽 캐시로 판정:', parentErr.message);
+    parentAuthorId = (parentRow?.user_id as string | null | undefined) ?? null;
+  }
+  broadcastCommentAdded(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId, { images, createdAt, sceneUuid, parentAuthorId });
 }
 
 /** 댓글 수정.
@@ -1891,7 +2017,7 @@ export async function editComment(
   //   못 읽어도 수정은 진행한다(받는 쪽은 id 로 찾아 고친다, 새 멘션 알림만 빠진다).
   const { data: before, error: beforeErr } = await supabase
     .from('comments')
-    .select('part_id, scene_id, character_id, mentions, user_id, user_name')
+    .select('part_id, scene_id, character_id, mentions, user_id, user_name, revision_id, parent_comment_id')
     .eq('id', commentId)
     .maybeSingle();
   if (beforeErr) console.warn('[editComment] 수정 전 댓글 조회 실패 — 새 멘션 알림 생략:', beforeErr.message);
@@ -1918,6 +2044,9 @@ export async function editComment(
     addedMentions: previousMentions ? mentions.filter((name) => !previousMentions.includes(name)) : [],
     userId: (before?.user_id as string | null | undefined) ?? null,
     userName: (before?.user_name as string | null | undefined) ?? null,
+    // 수정으로 넣은 @ 알림이 리테이크 탭·답글 자리로 가게(로컬 리뷰).
+    revisionId: (before?.revision_id as string | null | undefined) ?? null,
+    parentCommentId: (before?.parent_comment_id as string | null | undefined) ?? null,
   });
 }
 

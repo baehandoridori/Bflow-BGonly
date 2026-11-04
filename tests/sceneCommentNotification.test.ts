@@ -141,6 +141,10 @@ test('세 길(실시간 행·추가 방송·수정 방송)이 같은 모양으�
   const edit = mod.normalizeSceneCommentFromUpdatedBroadcast({ commentId: 'c1', partId: 'p', sceneId: '3', userId: 'u', text: 't', mentions: ['a', 'b'], addedMentions: ['b'], editedAt: 'E' });
   assert.equal(edit?.kind, 'edit');
   assert.deepEqual(edit?.addedMentions, ['b']);
+  // 수정으로 넣은 @ 알림도 누르면 그 답글 스레드·리테이크 탭으로 가게 자리를 싣는다.
+  const editInReply = mod.normalizeSceneCommentFromUpdatedBroadcast({ commentId: 'c3', userId: 'u', addedMentions: ['b'], parentCommentId: 'root', revisionId: 'rev', editedAt: 'E' });
+  assert.equal(editInReply?.parentCommentId, 'root');
+  assert.equal(editInReply?.revisionId, 'rev');
 });
 
 test('수정으로 넣은 멘션은 그 댓글의 예전 알림과 따로 센다(정체성에 수정 시각)', async () => {
@@ -151,4 +155,27 @@ test('수정으로 넣은 멘션은 그 댓글의 예전 알림과 따로 센다
   const e = getNotificationIdentity({ type: edit!.type, metadata: edit!.metadata });
   assert.equal(a, 'scene_comment:c1');
   assert.equal(e, 'scene_comment:c1:edit:2026-11-04T02:00:00Z');
+});
+
+test('원댓글이 내 캐시에 없어도 보낸 쪽이 실어 준 원댓글 작성자로 답글을 안다(코덱스 2차)', async () => {
+  const d = decideSceneCommentNotification(comment({ parentCommentId: 'root', parentAuthorId: ME.id }), ME, deps({ isCommentByUser: () => false }), ON);
+  assert.equal(d?.reason, 'reply');
+  const notMine = decideSceneCommentNotification(comment({ parentCommentId: 'root', parentAuthorId: 'u-other' }), ME, deps({ isCommentByUser: () => false }), ON);
+  assert.equal(notMine, null);
+  const mod = await import('../src/utils/sceneCommentNotification.ts');
+  assert.equal(mod.normalizeSceneCommentFromAddedBroadcast({ commentId: 'c1', parentCommentId: 'root', parentAuthorId: 'u-me', userId: 'u', text: '' })?.parentAuthorId, 'u-me');
+  assert.equal(mod.normalizeSceneCommentFromMissedRow({ id: 'c1', parentCommentId: 'root', parentAuthorId: 'u-me', userId: 'u', text: '' })?.parentAuthorId, 'u-me');
+});
+
+test('놓친 리테이크 댓글 — 메인이 실어 온 리테이크로 같은 ‘리테이크’ 판정', () => {
+  const revision = { id: 'rev-1', revisionNo: 2, requesterId: ME.id, assigneeIds: [], notifyUserIds: [] };
+  const row = { id: 'c-r', partId: 'p-1', sceneId: '1', userId: 'u-kim', userName: '김어진', text: '확인 부탁', mentions: [], createdAt: 'T', revisionId: 'rev-1' };
+  return import('../src/utils/sceneCommentNotification.ts').then((mod) => {
+    const normalized = mod.normalizeSceneCommentFromMissedRow(row)!;
+    const found = decideSceneCommentNotification(normalized, ME, deps({ getRevision: (id) => (id === revision.id ? revision : null) }), ON);
+    assert.equal(found?.reason, 'retake');
+    assert.match(found!.title, /re#2/);
+    const notMine = decideSceneCommentNotification(normalized, ME, deps({ getRevision: () => ({ ...revision, requesterId: 'u-other' }) }), ON);
+    assert.equal(notMine, null);
+  });
 });

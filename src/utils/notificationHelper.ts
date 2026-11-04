@@ -74,9 +74,11 @@ export interface DispatchNotificationOptions {
 export function dispatchNotification(payload: NotifyPayload, settings?: NotificationSettings, options: DispatchNotificationOptions = {}) {
   const store = useNotificationStore.getState();
   const unreadBefore = store.unreadCount;
-  // 같은 알림(같은 댓글·같은 리테이크 동작)이 이미 목록에 있으면 스토어가 합친다 — 그때는 토스트를 다시 띄우지 않는다(§6.1).
+  // 같은 씬 댓글 알림이 이미 목록에 있으면 스토어가 합친다 — 그때는 토스트를 다시 띄우지 않는다(§6.1).
+  //   씬 댓글만 — 리테이크 진행·피드백처럼 같은 정체성으로 새 소식이 오는 알림은 예전처럼 토스트를 낸다(로컬 리뷰).
   const identity = getNotificationIdentity({ type: payload.type, metadata: payload.metadata });
-  const alreadyListed = !!identity && store.notifications.some((n) => getNotificationIdentity(n) === identity);
+  const alreadyListed = !!identity && identity.startsWith('scene_comment:')
+    && store.notifications.some((n) => getNotificationIdentity(n) === identity);
   const notificationId = store.addNotification({
     type: payload.type,
     title: payload.title,

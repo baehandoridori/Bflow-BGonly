@@ -121,7 +121,9 @@ interface NotificationState {
    * 예전엔 로그인마다 알림 목록에 최대 50개를 다시 넣어, 지워도 다음 로그인에 되살아났다. 디스크에 저장하지 않는다.
    */
   outstandingRetakeCount: number;
-  setOutstandingRetakeCount: (count: number) => void;
+  /** '허브 열기'가 갈 화면 — 모두 세트 리테이크면 리테이크 허브, 세트 없는 리테이크가 하나라도 있으면 리테이크 보드. */
+  outstandingRetakeView: 'retake-hub' | 'compositing-revisions';
+  setOutstandingRetakeCount: (count: number, view?: 'retake-hub' | 'compositing-revisions') => void;
 
   // 액션
   addNotification: (n: NotificationDraft) => string;
@@ -191,7 +193,11 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   unreadMentionCount: 0,
   panelOpen: false,
   outstandingRetakeCount: 0,
-  setOutstandingRetakeCount: (count) => set({ outstandingRetakeCount: Math.max(0, Math.floor(count)) }),
+  outstandingRetakeView: 'retake-hub',
+  setOutstandingRetakeCount: (count, view = 'retake-hub') => set({
+    outstandingRetakeCount: Math.max(0, Math.floor(count)),
+    outstandingRetakeView: view,
+  }),
 
   addNotification: (n) => {
     const notification: AppNotification = {

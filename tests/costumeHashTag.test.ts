@@ -90,9 +90,9 @@ test('피드백 49: 조용한 재조회가 끝난 뒤 딥링크를 소비 + 알�
   //   v1.146.0(§6.2): 슬랙 조립은 공용 함수 하나 — 태그를 뺀 글(plainText: stripEntityTokens)로 만든다.
   const panel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf8');
   assert.doesNotMatch(panel, /commentText: comment\.text,/);
-  assert.match(panel, /notifyMentionsForComment\(\{/);
+  assert.match(panel, /startMentionDelivery\(\{/);
   const revisionThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
-  assert.match(revisionThread, /notifyMentionsForComment\(\{/);
+  assert.match(revisionThread, /startMentionDelivery\(\{/);
   const slack = readFileSync('src/services/slackWebhookService.ts', 'utf8');
   assert.match(slack, /plainText: stripEntityTokens,/);
   // 모달 안 클릭도 같은 게이트를 쓴다 — 재조회 중 클릭은 보류했다가 끝난 뒤 판정 (코덱스 6차 P2).

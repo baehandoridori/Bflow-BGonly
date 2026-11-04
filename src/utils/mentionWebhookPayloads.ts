@@ -36,6 +36,29 @@ export interface MentionWebhookPlan {
   missing: string[];
 }
 
+/** 댓글 슬랙 알림 결과 — 말풍선 아래 작은 상태('슬랙 전달됨 · 1명은 슬랙 ID 없음' / '슬랙 전송 실패')에 쓴다. */
+export interface MentionDeliveryResult {
+  /** 보내려 한 사람 수(슬랙 ID 없는 사람 포함, 나 제외). */
+  targets: number;
+  sent: number;
+  failed: number;
+  /** 보내지 못한 사람 id — '다시 보내기'는 이 사람들에게만 보낸다(받은 사람에게 두 번 가지 않게). */
+  failedIds: string[];
+  /** 슬랙 ID 가 없어 못 보낸 사람 이름. */
+  missing: string[];
+}
+
+/** '다시 보내기' 결과를 처음 결과에 합친다 — 받는 사람 수·슬랙 ID 없는 사람은 처음 그대로, 실패는 이번 결과로. */
+export function mergeMentionDeliveryRetry(previous: MentionDeliveryResult, retry: MentionDeliveryResult): MentionDeliveryResult {
+  return {
+    targets: previous.targets,
+    sent: previous.sent + retry.sent,
+    failed: retry.failed,
+    failedIds: [...retry.failedIds],
+    missing: [...previous.missing],
+  };
+}
+
 export function buildDeepLinkForScene(sheetName: string, sceneNo: string): string {
   return `bflow://scene/${encodeURIComponent(sheetName)}/${encodeURIComponent(sceneNo)}`;
 }

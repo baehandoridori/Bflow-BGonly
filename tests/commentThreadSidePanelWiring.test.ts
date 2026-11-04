@@ -109,7 +109,8 @@ test('side thread has its own composer and main composer stays top-level', () =>
   // v1.146.0(§6.1): 보이지 않는 자동 멘션 없음 — 사용자가 친 @이름만 멘션. 특정 사람 답글은 입력창에 '@이름 ' 을 보이게 넣는다.
   assert.doesNotMatch(commentPanel, /mentions\.push\(mentionTargetName\)/);
   assert.doesNotMatch(commentPanel, /mentions\.push\(replyThreadTarget\.replyToComment\.userName\)/);
-  assert.match(commentPanel, /const prefillThreadMention = \(target: SceneCommentWithSource, rootId: string \| null\) =>/);
+  // 답글 상대 '@이름' 을 입력창에 넣지 않는다 — 넣으면 진짜 멘션이 되어 답글 상대에게 슬랙까지 간다(로컬 리뷰).
+  assert.doesNotMatch(commentPanel, /prefillThreadMention/);
   assert.match(commentPanel, /images: submittedThreadImageUrls/);
   assert.match(commentPanel, /setThreadAttachedImages\(\[\]\)/);
   assert.match(commentPanel, /threadAttachedImagesRef\.current = \[\]/);

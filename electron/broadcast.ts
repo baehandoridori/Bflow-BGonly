@@ -408,7 +408,7 @@ export function broadcastCommentAdded(
   partId?: string,
   revisionId?: string | null,
   /** v1.145.0: 받는 쪽이 다시 읽지 않고 캐시에 끼워 넣을 수 있게 댓글 나머지 칸도 싣는다. */
-  extra?: { images?: string[]; createdAt?: string; sceneUuid?: string | null; characterId?: string | null },
+  extra?: { images?: string[]; createdAt?: string; sceneUuid?: string | null; characterId?: string | null; parentAuthorId?: string | null },
 ): void {
   safeSend('comment-added', {
     sceneId,
@@ -424,6 +424,8 @@ export function broadcastCommentAdded(
     createdAt: extra?.createdAt ?? null,
     sceneUuid: extra?.sceneUuid ?? null,
     characterId: extra?.characterId ?? null,
+    // v1.146.0(코덱스 2차): 답글이면 원댓글 작성자 — 받는 쪽이 그 댓글을 캐시에 안 들고 있어도 '내 댓글에 답글' 을 안다.
+    parentAuthorId: extra?.parentAuthorId ?? null,
     ts: Date.now(),
   });
 }
@@ -443,6 +445,8 @@ export interface CommentUpdatedPayload {
   addedMentions: string[];
   userId: string | null;
   userName: string | null;
+  revisionId?: string | null;
+  parentCommentId?: string | null;
   ts: number;
 }
 export function broadcastCommentUpdated(payload: Omit<CommentUpdatedPayload, 'ts'>): void {

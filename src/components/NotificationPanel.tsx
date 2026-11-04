@@ -403,7 +403,7 @@ export function NotificationBell() {
 
 // ─── 드롭다운 패널 ───────────────────────────────────
 function NotificationDropdown() {
-  const { notifications, markAllAsRead, setPanelOpen, unreadCount, outstandingRetakeCount } = useNotificationStore();
+  const { notifications, markAllAsRead, setPanelOpen, unreadCount, outstandingRetakeCount, outstandingRetakeView } = useNotificationStore();
   const ref = useRef<HTMLDivElement>(null);
   const showDevTools = isDevPreviewNotificationToolsEnabled();
   const { reduce } = useMotionPref();
@@ -687,12 +687,12 @@ function NotificationDropdown() {
               onClick={() => {
                 const app = useAppStore.getState();
                 app.pushNavigationBackTarget();
-                app.setView('retake-hub');
+                app.setView(outstandingRetakeView);
                 setPanelOpen(false);
               }}
               className="text-[12px] font-medium text-accent hover:underline underline-offset-2 cursor-pointer"
             >
-              허브 열기
+              {outstandingRetakeView === 'retake-hub' ? '허브 열기' : '리테이크 보기'}
             </button>
           </div>
         )}

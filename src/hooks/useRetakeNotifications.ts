@@ -10,6 +10,11 @@ import { toast } from 'sonner';
 import type { RetakeDeliveryEvent, RetakeReminderPayload } from '@/shared/retakeNotifications';
 
 /** 아직 끝내지 않은 내 담당 리테이크(요청자 본인 것 제외). 알림 창 맨 위 '담당 리테이크 N건' 의 기준. */
+/** '허브 열기'가 갈 화면 — 세트 없는 리테이크는 리테이크 허브에 안 보이므로 하나라도 있으면 리테이크 보드로. */
+function outstandingRetakeViewFor(revisions: ReadonlyArray<{ setId?: string | null }>): 'retake-hub' | 'compositing-revisions' {
+  return revisions.length > 0 && revisions.every((revision) => !!revision.setId) ? 'retake-hub' : 'compositing-revisions';
+}
+
 function isOutstandingRetakeFor(
   revision: { status?: string; finalResolvedAt?: string | null; assigneeIds?: string[] | null; assigneeStates?: Record<string, { state?: string } | undefined> | null; requesterId?: string },
   userId: string,
@@ -46,7 +51,7 @@ export function useRetakeNotifications(): void {
         || useNotificationStore.getState().activeUserId !== userId) return;
       const outstanding = revisions.filter((revision) => isOutstandingRetakeFor(revision, userId));
       // v1.146.0(§6.3): 알림 목록에 넣지 않고 알림 창 맨 위 한 줄로만 보인다(지워도 다음 로그인에 되살아나던 문제).
-      useNotificationStore.getState().setOutstandingRetakeCount(outstanding.length);
+      useNotificationStore.getState().setOutstandingRetakeCount(outstanding.length, outstandingRetakeViewFor(outstanding));
     }).catch((error) => { if (!cancelled) console.warn('[retake catch-up] 조회 실패', error); });
     const unsubscribe = window.electronAPI?.onSupabaseBroadcast?.((raw: unknown) => {
       const event = raw as { event?: string; payload?: RetakeReminderPayload | RetakeDeliveryEvent } | null;
@@ -146,8 +151,7 @@ export function useRetakeNotifications(): void {
     if (revisionsLoading) return;
     if (useNotificationStore.getState().activeUserId !== currentUser.id) return;
     if (localRevisions.length === 0) return;
-    useNotificationStore.getState().setOutstandingRetakeCount(
-      localRevisions.filter((revision) => isOutstandingRetakeFor(revision, currentUser.id)).length,
-    );
+    const outstanding = localRevisions.filter((revision) => isOutstandingRetakeFor(revision, currentUser.id));
+    useNotificationStore.getState().setOutstandingRetakeCount(outstanding.length, outstandingRetakeViewFor(outstanding));
   }, [localRevisions, revisionsLoading, currentUser?.id]);
 }

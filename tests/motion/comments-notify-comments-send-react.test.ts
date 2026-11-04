@@ -216,8 +216,8 @@ test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 
   assert.match(after, /if \(draft\.markReadOnSuccess\) markUnreadCommentsRead\(\);/);
   assert.match(after, /URL\.revokeObjectURL\(item\.previewUrl\)/);
   assert.match(after, /notifyCommentMentions\(draft\.comment, draft\.webhookSceneKey\);/);
-  // v1.146.0(§6.2): 슬랙은 공용 함수 하나(notifyMentionsForComment) — 패널 안에서도 한 곳에서만 부른다.
-  assert.equal([...panel.matchAll(/notifyMentionsForComment\(\{/g)].length, 1, '멘션 알림은 한 곳에서만');
+  // v1.146.0(§6.2): 슬랙은 공용 함수 하나(startMentionDelivery — 보내기·실패한 사람에게만 다시) — 패널 안에서도 한 곳에서만 부른다.
+  assert.equal([...panel.matchAll(/startMentionDelivery\(\{/g)].length, 1, '멘션 알림은 한 곳에서만');
   // 실시간 재조회가 보내는 중·실패 말풍선을 지우지 않게, 서버에 있으면 저장된 것으로
   // (20번 safety-net: 합친 뒤 휴지통을 누른 댓글만 빼서 list 로 쓴다)
   assert.match(panel, /const \{ list: mergedList, saved \} = mergeUnsentComments\(deduped, unsent\.map\(\(entry\) => entry\.comment\)\);[\s\S]{0,160}?const list = withoutPendingDeletes\(mergedList, pendingDeletesRef\.current\);/);

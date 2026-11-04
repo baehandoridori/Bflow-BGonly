@@ -56,7 +56,7 @@ import { createAutoSyncScheduler, MAIN_WINDOW_SYNC_INTERVALS, type AutoSyncSched
 import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { applyCommentBroadcast, applyRealtimeCommentPayload, invalidatePartCache } from '@/services/commentService';
-import { claimSceneCommentDecision, decideIncomingSceneComment, notifyIncomingSceneComment, resetSceneCommentNotifier } from '@/services/sceneCommentNotifier';
+import { claimSceneCommentDecision, decideIncomingSceneComment, markSceneCommentCatchUpReady, notifyIncomingSceneComment, resetSceneCommentNotifier } from '@/services/sceneCommentNotifier';
 import {
   normalizeSceneCommentFromAddedBroadcast,
   normalizeSceneCommentFromMissedRow,
@@ -247,31 +247,71 @@ export async function applyIncomingSharedBflowCalendarChangeInApp(raw: unknown):
 }
 
 /**
- * 놓친 멘션 모아 오기 — last_seen 이후 나를 부른 댓글을 알림 목록에 넣는다(토스트는 요약 한 번).
- * 로그인 때와 실시간이 끊겼다 다시 붙을 때 부른다(v1.146.0, 코덱스 1차): 실시간으로 받은 멘션이 기준 시각을 옮기므로,
- * 끊긴 사이 온 멘션은 다시 붙을 때 이 함수가 그 기준 시각부터 다시 본다. 실시간·복원이 같은 판정·같은 중복 집합을 쓴다.
+ * 놓친 멘션 모아 오기 — last_seen 이후 나를 부른 댓글(직접 @·내 댓글에 답글·내가 대상인 리테이크 댓글)을
+ * 알림 목록에 넣는다(토스트는 요약 한 번). 로그인 때와 실시간이 끊겼다 다시 붙을 때 부른다(v1.146.0).
+ * 실시간·복원이 같은 판정·같은 중복 집합을 쓴다.
+ *  - 진행 중이면 그 결과를 같이 기다린다(두 번 읽지 않게).
+ *  - 재연결 때는 1분에 한 번만 — 그 안에 또 붙으면 남은 시간 뒤 한 번 더 본다(끊긴 구간을 건너뛰지 않게).
+ *  - 성공하면 기준 시각을 '조회 시작 10분 전'까지 옮긴다 — 아무것도 없을 때 같은 긴 구간을 매번 다시 읽지 않게.
+ *    10분은 PC 마다 다른 시계 차이 몫(겹쳐 다시 읽은 것은 중복 집합·알림 목록이 걸러 준다).
  */
-async function catchUpMissedMentions(
+const MENTION_CATCHUP_OVERLAP_MS = 10 * 60 * 1000;
+const MENTION_CATCHUP_RECONNECT_GAP_MS = 60 * 1000;
+type MentionCatchUpResult = 'done' | 'failed' | 'stale';
+let mentionCatchUpInFlight: { userId: string; promise: Promise<MentionCatchUpResult> } | null = null;
+let mentionCatchUpLastStart: { userId: string; at: number } | null = null;
+let mentionCatchUpDeferred: ReturnType<typeof setTimeout> | null = null;
+
+function catchUpMissedMentions(
   me: { id: string; name: string },
   getSettings: () => NotificationSettings,
-): Promise<'done' | 'failed' | 'skipped'> {
+  reason: 'login' | 'reconnect' = 'login',
+): Promise<MentionCatchUpResult> {
+  if (mentionCatchUpInFlight?.userId === me.id) return mentionCatchUpInFlight.promise;
+  if (reason === 'reconnect' && mentionCatchUpLastStart?.userId === me.id) {
+    const wait = mentionCatchUpLastStart.at + MENTION_CATCHUP_RECONNECT_GAP_MS - Date.now();
+    if (wait > 0) {
+      if (!mentionCatchUpDeferred) {
+        mentionCatchUpDeferred = setTimeout(() => {
+          mentionCatchUpDeferred = null;
+          const current = useAuthStore.getState().currentUser;
+          if (current?.id === me.id) void catchUpMissedMentions({ id: current.id, name: current.name }, getSettings, 'reconnect');
+        }, wait);
+      }
+      return Promise.resolve('stale');
+    }
+  }
+  mentionCatchUpLastStart = { userId: me.id, at: Date.now() };
+  const promise = runMentionCatchUp(me, getSettings).finally(() => {
+    if (mentionCatchUpInFlight?.promise === promise) mentionCatchUpInFlight = null;
+  });
+  mentionCatchUpInFlight = { userId: me.id, promise };
+  return promise;
+}
+
+async function runMentionCatchUp(
+  me: { id: string; name: string },
+  getSettings: () => NotificationSettings,
+): Promise<MentionCatchUpResult> {
   const { getLastSeenAt, setLastSeenAt, ensureLastSeenInitialized } = await import('@/utils/lastSeenTracker');
   const lastSeen = getLastSeenAt(me.id);
   if (!lastSeen) {
     // 첫 로그인 — 이전 알림 catch-up 안 함, 시각만 기록
     ensureLastSeenInitialized(me.id);
-    return 'skipped';
+    markSceneCommentCatchUpReady(me.id);
+    return 'done';
   }
+  const fetchStartedAt = Date.now();
   try {
     const missed = await window.electronAPI?.supabaseFetchMissedMentions?.(me.id, me.name, lastSeen, 50);
-    if (!missed || missed.length === 0) return 'done';
-    if (useAuthStore.getState().currentUser?.id !== me.id) return 'skipped';
+    if (useAuthStore.getState().currentUser?.id !== me.id) return 'stale';
     // 알림 패널에만 누적 (토스트 X — 한꺼번에 N 개 띄우면 시끄러움)
     // v1.146.0(씬 댓글 B안 §6.1): 제목·이동 정보는 실시간과 같은 판정 함수로 만든다. 실시간으로 이미 받은 알림은 건너뛴다.
     const store = useNotificationStore.getState();
     let added = 0;
-    for (const c of orderCatchupRowsForPrepend(missed)) {
-      const decision = decideIncomingSceneComment(normalizeSceneCommentFromMissedRow(c), getSettings());
+    for (const c of orderCatchupRowsForPrepend(missed ?? [])) {
+      // 리테이크 댓글이면 메인이 그 리테이크(요청자·담당자·알림 대상)를 같이 실어 온다 — 같은 판정으로 '리테이크' 알림.
+      const decision = decideIncomingSceneComment(normalizeSceneCommentFromMissedRow(c), getSettings(), c.revision ?? null);
       if (!decision || !claimSceneCommentDecision(decision)) continue;
       store.addNotification({
         type: decision.type,
@@ -283,7 +323,9 @@ async function catchUpMissedMentions(
       });
       added += 1;
     }
-    if (missed[0]?.createdAt) setLastSeenAt(me.id, missed[0].createdAt);
+    if (missed?.[0]?.createdAt) setLastSeenAt(me.id, missed[0].createdAt);
+    setLastSeenAt(me.id, new Date(fetchStartedAt - MENTION_CATCHUP_OVERLAP_MS).toISOString());
+    markSceneCommentCatchUpReady(me.id);
     if (added > 0) {
       // 요약 토스트 1번 (한솔이 인지)
       sonnerToast(`놓친 알림 ${added}개를 가져왔어요`, {
@@ -1123,7 +1165,7 @@ export default function App() {
     const me = currentUser;
     console.log('[catchup] 처리 시작', { id: me.id, name: me.name });
 
-    void catchUpMissedMentions(me, getNotiSettings).then((result) => {
+    void catchUpMissedMentions(me, getNotiSettings, 'login').then((result) => {
       if (result === 'failed') releaseCatchupRunOnError(catchupDoneUserIdRef, me.id);
     });
   }, [currentUser, authReady]);
@@ -1684,7 +1726,7 @@ export default function App() {
       //   v1.146.0(씬 댓글 B안 §6.1): 멘션·답글·리테이크·담당 자동 알림 판정은 decideSceneCommentNotification 하나.
       if (table === 'comments') {
         if (payload?.eventType === 'INSERT' && payload?.new) {
-          notifyIncomingSceneComment(normalizeSceneCommentFromRealtimeRow(payload.new), getNotiSettings);
+          notifyIncomingSceneComment(normalizeSceneCommentFromRealtimeRow(payload.new), getNotiSettings, { source: 'realtime' });
         }
         if (payload?.eventType === 'DELETE') {
           const deletedId = (payload?.old as { id?: string } | undefined)?.id;
@@ -2868,7 +2910,7 @@ export default function App() {
       invalidatePartCache();
       // v1.146.0(코덱스 1차): 끊긴 사이 온 멘션 — 실시간 멘션이 기준 시각을 옮기기 전에 그 구간을 다시 본다.
       const me = useAuthStore.getState().currentUser;
-      if (me) void catchUpMissedMentions({ id: me.id, name: me.name }, getNotiSettings);
+      if (me) void catchUpMissedMentions({ id: me.id, name: me.name }, getNotiSettings, 'reconnect');
     });
   }, [getNotiSettings]);
 
