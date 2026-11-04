@@ -39,6 +39,7 @@
 .cmt-tab-n { font-size: 10.5px; font-weight: 600; color: rgb(var(--color-text-secondary)); font-variant-numeric: tabular-nums; }
 .cmt-tab[aria-selected='true'] .cmt-tab-n { color: rgb(var(--comment-link-rgb)); }
 .cmt-tabs-extra { margin-left: auto; display: inline-flex; align-items: center; padding-bottom: 4px; }
+.cmt-tablist { display: flex; gap: 14px; }
 
 /* 날짜 줄 · '새 댓글' 줄 */
 .cmt-day { display: flex; align-items: center; gap: 10px; margin: 10px 4px 4px; font-size: 11px; font-weight: 600; color: rgb(var(--color-text-secondary)); }
@@ -63,7 +64,9 @@
 .cmt-body [data-entity-mention]:hover { background: transparent; text-decoration: underline; text-underline-offset: 2px; }
 .cmt-images { display: grid; gap: 4px; margin-top: 8px; max-width: 300px; }
 .cmt-images.is-multi { grid-template-columns: 1fr 1fr; }
-.cmt-images img { width: 100%; max-height: 112px; object-fit: cover; border-radius: 8px; border: 1px solid rgb(var(--color-bg-border)); cursor: zoom-in; }
+.cmt-images img { width: 100%; max-height: 112px; object-fit: cover; border-radius: 8px; border: 1px solid rgb(var(--color-bg-border)); cursor: zoom-in; display: block; }
+.cmt-image-button { display: block; padding: 0; border: 0; background: none; border-radius: 8px; cursor: zoom-in; }
+.cmt-image-button:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: 2px; }
 .cmt-edit-box { display: grid; gap: 6px; }
 .cmt-edit-box textarea { width: 100%; resize: none; border-radius: 8px; border: 1px solid rgb(var(--color-bg-border)); background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); font-size: 13px; line-height: 1.5; padding: 6px 8px; outline: none; }
 .cmt-edit-box textarea:focus { border-color: rgb(var(--color-text-secondary) / 0.6); }
@@ -78,6 +81,7 @@
 .cmt-thread-count { font-size: 12px; font-weight: 700; color: rgb(var(--comment-link-rgb)); }
 .cmt-thread-last { font-size: 11px; color: rgb(var(--color-text-secondary)); }
 .cmt-thread-new { font-size: 10px; font-weight: 700; color: rgb(var(--color-on-accent)); background: rgb(var(--color-accent)); border-radius: 999px; padding: 0 6px; }
+.cmt-thread-failed { font-size: 10.5px; font-weight: 700; color: var(--status-error); }
 
 /* 호버 도구 줄(행 우상단) — 키보드 초점에도 */
 .cmt-toolbar { position: absolute; top: -12px; right: 10px; display: flex; align-items: center; gap: 1px; padding: 3px; border-radius: 9px; background: rgb(var(--color-bg-card)); border: 1px solid rgb(var(--color-bg-border)); box-shadow: var(--comment-float-shadow); opacity: 0; transform: translateY(2px); pointer-events: none; transition: opacity var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out); z-index: 3; }
@@ -162,6 +166,11 @@
 .cmt-thread-divider::after { content: ''; flex: 1; height: 1px; background: rgb(var(--color-bg-border)); }
 .cmt-thread-foot { border-top: 1px solid rgb(var(--color-bg-border)); padding: 10px; flex-shrink: 0; position: relative; }
 .cmt-thread-empty { padding: 18px 8px; text-align: center; font-size: 12px; color: rgb(var(--color-text-secondary)); }
+
+/* 좁은 폭(패널 320px·스레드 창 열림)에서도 카드·요약 줄이 옆으로 넘치지 않고 줄바꿈 */
+.cmt-retake { min-width: 0; }
+.cmt-retake-foot { flex-wrap: wrap; row-gap: 4px; }
+.cmt-thread-summary { flex-wrap: wrap; row-gap: 2px; max-width: 100%; text-align: left; }
 
 /* 반응이 없는 행 — 줄 자리를 비우고 '+' 는 감춘다(추가는 도구 줄 😊). */
 .cmt-row .cmt-reactions.is-empty { height: 0; margin-top: 0; overflow: visible; }

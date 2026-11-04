@@ -159,6 +159,30 @@ function topAncestor<C extends FeedCommentLike>(comment: C, byId: Map<string, C>
   return current;
 }
 
+/**
+ * 스레드 창에 그릴 글 — 본문 요약('답글 N개'·'댓글 N개')과 같은 묶음 규칙(코드 리뷰).
+ *  - 원댓글 스레드: 맨 위 원댓글이 그 글인 답글 전부(답글의 답글 같은 옛 기록 포함, 리테이크 묶음은 제외).
+ *  - 리테이크 스레드: 그 리테이크 댓글 + 리테이크 댓글에 단 옛 답글(revision_id 없이 저장된 것).
+ * 시간 순서.
+ */
+export function threadMembers<C extends FeedCommentLike>(
+  comments: readonly C[],
+  target: { rootId: string } | { revisionId: string },
+): C[] {
+  const byId = new Map(comments.map((c) => [c.id, c]));
+  const picked = comments.filter((comment) => {
+    if ('revisionId' in target) {
+      if (comment.revisionId) return comment.revisionId === target.revisionId;
+      const top = topAncestor(comment, byId);
+      return top.id !== comment.id && top.revisionId === target.revisionId;
+    }
+    if (comment.revisionId || comment.id === target.rootId) return false;
+    const top = topAncestor(comment, byId);
+    return top.id === target.rootId && !top.revisionId;
+  });
+  return picked.sort(byTime((c) => c.createdAt));
+}
+
 type Entry<C extends FeedCommentLike, E extends FeedEventLike> =
   | { kind: 'comment'; at: string; key: string; comment: C; replies: C[] }
   | { kind: 'retake'; at: string; key: string; revisionId: string; comments: C[]; events: E[] }

@@ -18,7 +18,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { avatarColor, avatarInitials } from '@/utils/userAvatar';
-import { formatTimeShort } from '@/utils/formatTime';
+import { formatCommentTime, formatTimeShort } from '@/utils/formatTime';
 import {
   RETAKE_ACTION_LABEL,
   RETAKE_STATUS_LABEL,
@@ -72,21 +72,44 @@ export function CommentFilterTabs({
   /** 오른쪽 끝(예: '스레드 다시 열기'). */
   extra?: ReactNode;
 }) {
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const move = (index: number) => {
+    const next = TABS[(index + TABS.length) % TABS.length];
+    onChange(next.id);
+    tabRefs.current[(index + TABS.length) % TABS.length]?.focus();
+  };
+  const current = Math.max(0, TABS.findIndex((tab) => tab.id === filter));
   return (
-    <div className="cmt-tabs" role="tablist" aria-label="댓글 보기">
-      {TABS.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          aria-selected={filter === tab.id}
-          className="cmt-tab"
-          onClick={() => onChange(tab.id)}
-        >
-          {tab.label}
-          {tab.count && <span className="cmt-tab-n">{counts[tab.count]}</span>}
-        </button>
-      ))}
+    <div className="cmt-tabs">
+      <div
+        role="tablist"
+        aria-label="댓글 보기"
+        className="cmt-tablist"
+        onKeyDown={(event) => {
+          // 탭 사이는 화살표로(roving). 상세 모달이 ←/→ 를 '씬 넘기기'로 받지 않게 여기서 멈춘다.
+          const keys: Record<string, number> = { ArrowLeft: current - 1, ArrowRight: current + 1, Home: 0, End: TABS.length - 1 };
+          if (!(event.key in keys)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          move(keys[event.key]);
+        }}
+      >
+        {TABS.map((tab, index) => (
+          <button
+            key={tab.id}
+            ref={(el) => { tabRefs.current[index] = el; }}
+            type="button"
+            role="tab"
+            aria-selected={filter === tab.id}
+            tabIndex={filter === tab.id ? 0 : -1}
+            className="cmt-tab"
+            onClick={() => onChange(tab.id)}
+          >
+            {tab.label}
+            {tab.count && <span className="cmt-tab-n">{counts[tab.count]}</span>}
+          </button>
+        ))}
+      </div>
       {extra && <span className="cmt-tabs-extra">{extra}</span>}
     </div>
   );
@@ -116,12 +139,12 @@ export function CommentNewDivider({ nodeRef, fading }: { nodeRef?: (node: HTMLDi
 
 // ─── 시스템 활동 한 줄 ─────────────────────────────────────
 
-export function CommentActivityLine({ text, at, phase, inset = false }: { text: string; at: string; phase?: RetakePhase; inset?: boolean }) {
+export function CommentActivityLine({ text, at, phase, inset = false }: { text: string; at: string; phase?: RetakePhase; /** 스레드 창 — 날짜 줄이 없어 지난 날은 날짜까지 보인다. */ inset?: boolean }) {
   return (
     <div className={inset ? 'cmt-activity is-inset' : 'cmt-activity'} data-phase={phase ?? 'other'}>
       <span className="cmt-activity-dot" aria-hidden />
       <span className="cmt-activity-text" title={text}>{text}</span>
-      <span className="cmt-activity-time">{formatTimeShort(at)}</span>
+      <span className="cmt-activity-time">{inset ? formatCommentTime(at) : formatTimeShort(at)}</span>
     </div>
   );
 }
@@ -132,22 +155,26 @@ export function CommentThreadSummaryButton({
   summary,
   noun = '답글',
   onOpen,
+  failedCount = 0,
 }: {
   summary: CommentThreadSummary;
   noun?: '답글' | '댓글';
   onOpen: () => void;
+  /** 이 스레드에 아직 보내지 못한 내 글 수 — 스레드 창을 닫은 뒤에도 '다시 보내기'를 찾아가게. */
+  failedCount?: number;
 }) {
   return (
     <button
       type="button"
       className="cmt-thread-summary"
       onClick={(event) => { event.stopPropagation(); onOpen(); }}
-      aria-label={`${noun} ${summary.count}개 보기${summary.newCount ? `, 새 ${summary.newCount}개` : ''}`}
+      aria-label={`${noun} ${summary.count}개 보기${summary.newCount ? `, 새 ${summary.newCount}개` : ''}${failedCount ? `, 보내지 못한 글 ${failedCount}개` : ''}`}
     >
       <MiniAvatars people={summary.participants} />
       <span className="cmt-thread-count">{noun} {summary.count}개</span>
       <span className="cmt-thread-last">마지막 {formatTimeShort(summary.lastAt)}</span>
       {summary.newCount > 0 && <span className="cmt-thread-new">새 {summary.newCount}</span>}
+      {failedCount > 0 && <span className="cmt-thread-failed">보내지 못한 글 {failedCount}</span>}
     </button>
   );
 }
@@ -167,6 +194,8 @@ export interface CommentMenuItem {
   danger?: boolean;
   /** 이 항목 앞에 구분선. */
   separated?: boolean;
+  /** 고른 뒤 초점을 다른 곳(수정 입력칸 등)이 가져간다 — ⋯ 단추로 돌려주지 않는다. */
+  movesFocus?: boolean;
   onSelect: () => void;
 }
 
@@ -194,7 +223,13 @@ export function CommentRowToolbar({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const firstItemRef = useRef<HTMLButtonElement>(null);
+  const firstItemRef = useRef<HTMLButtonElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const closeMenu = (restoreFocus: boolean) => {
+    setMenuOpen(false);
+    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
+  };
 
   // 메뉴 밖을 누르면 닫는다(메뉴 단추 자체는 제외 — 그 단추가 직접 토글한다).
   useEffect(() => {
@@ -210,7 +245,14 @@ export function CommentRowToolbar({
 
   const shortName = userName.length > 2 ? userName.slice(-2) : userName;
   return (
-    <div ref={wrapRef} onClick={(event) => event.stopPropagation()}>
+    <div
+      ref={wrapRef}
+      onClick={(event) => event.stopPropagation()}
+      onBlur={(event) => {
+        // Tab 으로 메뉴 밖으로 나가면 닫는다(다음 줄 위에 메뉴가 남지 않게).
+        if (menuOpen && !wrapRef.current?.contains(event.relatedTarget as Node | null)) setMenuOpen(false);
+      }}
+    >
       <div className={menuOpen ? 'cmt-toolbar is-open' : 'cmt-toolbar'} role="toolbar" aria-label={`${userName} 댓글 동작`}>
         {QUICK_REACTIONS.map((r) => (
           <button key={r.emoji} type="button" title={r.label} aria-label={`${r.label} 반응`} onClick={() => onQuickReact(r.emoji)}>
@@ -235,6 +277,7 @@ export function CommentRowToolbar({
         )}
         {menuItems.length > 0 && (
           <button
+            ref={triggerRef}
             type="button"
             aria-label="더보기"
             title="더보기"
@@ -255,21 +298,34 @@ export function CommentRowToolbar({
               // 모달·스레드 창까지 닫히지 않게 여기서 멈춘다.
               event.preventDefault();
               event.stopPropagation();
-              setMenuOpen(false);
+              closeMenu(true);
+              return;
             }
+            const items = itemRefs.current.filter((el): el is HTMLButtonElement => !!el);
+            const at = items.indexOf(document.activeElement as HTMLButtonElement);
+            const nextIndex: Record<string, number> = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: items.length - 1 };
+            if (!(event.key in nextIndex) || items.length === 0) return;
+            // 상세 모달의 화살표(씬 넘기기)로 새지 않게.
+            event.preventDefault();
+            event.stopPropagation();
+            items[(nextIndex[event.key] + items.length) % items.length]?.focus();
           }}
         >
           {menuItems.map((item, index) => {
             const Icon = MENU_ICONS[item.icon];
+            itemRefs.current.length = menuItems.length;
             return (
               <div key={item.id}>
                 {item.separated && <hr />}
                 <button
-                  ref={index === 0 ? firstItemRef : undefined}
+                  ref={(el) => {
+                    itemRefs.current[index] = el;
+                    if (index === 0) firstItemRef.current = el;
+                  }}
                   type="button"
                   role="menuitem"
                   className={item.danger ? 'is-danger' : undefined}
-                  onClick={() => { setMenuOpen(false); item.onSelect(); }}
+                  onClick={() => { closeMenu(!item.movesFocus); item.onSelect(); }}
                 >
                   <Icon size={13} aria-hidden />
                   {item.label}
@@ -300,6 +356,7 @@ export function RetakeRootCard({
   onOpenDetail,
   actions,
   inThread = false,
+  failedCount = 0,
 }: {
   label: string;
   status: RetakeCardStatus;
@@ -316,13 +373,15 @@ export function RetakeRootCard({
   /** 스레드 창 안 — 담당 완료·해결 같은 버튼. */
   actions?: Array<{ id: RetakeAction; onClick: () => void; busy?: boolean }>;
   inThread?: boolean;
+  /** 이 리테이크에 아직 보내지 못한 내 댓글 수. */
+  failedCount?: number;
 }) {
   return (
     <div className="cmt-retake" data-retake-card data-status={status}>
       <div className="cmt-retake-head">
         <span className="cmt-retake-label">{label}</span>
         <span className="cmt-status" data-status={status}>{RETAKE_STATUS_LABEL[status]}</span>
-        <span>{requesterName ? `요청 ${requesterName} · ` : ''}{formatTimeShort(at)}</span>
+        <span>{requesterName ? `요청 ${requesterName} · ` : ''}{inThread ? formatCommentTime(at) : formatTimeShort(at)}</span>
       </div>
       <div className={inThread ? 'cmt-retake-desc' : 'cmt-retake-desc is-clamped'}>{description}</div>
       <div className="cmt-retake-meta">
@@ -363,7 +422,7 @@ export function RetakeRootCard({
       ) : (
         <div className="cmt-retake-foot">
           {commentSummary && onOpenThread ? (
-            <CommentThreadSummaryButton summary={commentSummary} noun="댓글" onOpen={onOpenThread} />
+            <CommentThreadSummaryButton summary={commentSummary} noun="댓글" onOpen={onOpenThread} failedCount={failedCount} />
           ) : onOpenThread ? (
             <button type="button" className="cmt-retake-open" onClick={(event) => { event.stopPropagation(); onOpenThread(); }}>
               댓글 달기

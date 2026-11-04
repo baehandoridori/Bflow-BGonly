@@ -202,6 +202,6 @@ test('19번 CSS: 동작 줄이기에서 칩 톡·숫자 굴림·툴팁·이모�
 });
 
 test('댓글 패널: 씬·캐릭터가 바뀔 때만 처음부터 다시, 상대 부서 키만 바뀌면 조용히 다시 불러온다', () => {
-  assert.match(panel, /if \(loadIdentityRef\.current !== primaryStorageKey\) \{\s*loadIdentityRef\.current = primaryStorageKey;\s*setLoadStatus\('loading'\);[\s\S]*?setUnreadDividerSlot\(UNREAD_DIVIDER_UNCAPTURED\);\s*setNewBelowCount\(0\);\s*loadComments\(\);\s*return;\s*\}\s*loadComments\(\{ absorbNew: true \}\);\s*\}, \[loadComments, primaryStorageKey\]\);/);
+  assert.match(panel, /if \(loadIdentityRef\.current !== primaryStorageKey\) \{\s*loadIdentityRef\.current = primaryStorageKey;\s*setLoadStatus\('loading'\);[\s\S]*?setUnreadDividerSlot\(UNREAD_DIVIDER_UNCAPTURED\);\s*setUnreadBaseline\(null\);\s*setNewBelowCount\(0\);\s*loadComments\(\);\s*return;\s*\}\s*loadComments\(\{ absorbNew: true \}\);\s*\}, \[loadComments, primaryStorageKey\]\);/);
   assert.match(panel, /if \(options\?\.absorbNew\) list\.forEach\(\(c\) => knownCommentIdsRef\.current\.add\(c\.id\)\);/);
 });

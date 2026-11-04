@@ -154,3 +154,19 @@ test('아바타 — 같은 사람 같은 색(CSS 변수), 이니셜은 이름 �
   assert.equal(avatarInitials('이도'), '이도');
   assert.equal(avatarInitials('  '), '?');
 });
+
+test('스레드 창 글 — 본문 요약과 같은 묶음(답글의 답글·리테이크 댓글에 단 옛 답글 포함)', async () => {
+  const { threadMembers } = await import('../src/utils/commentFeedModel.ts');
+  const root = c({ id: 'root' });
+  const r1 = c({ id: 'r1', parentCommentId: 'root' });
+  const rr = c({ id: 'rr', parentCommentId: 'r1' });
+  const rc = c({ id: 'rc', revisionId: 'rev1' });
+  const legacy = c({ id: 'legacy', parentCommentId: 'rc' });
+  const other = c({ id: 'other' });
+  const all = [rr, root, r1, rc, legacy, other];
+  assert.deepEqual(threadMembers(all, { rootId: 'root' }).map((x) => x.id), ['r1', 'rr']);
+  assert.deepEqual(threadMembers(all, { revisionId: 'rev1' }).map((x) => x.id), ['rc', 'legacy']);
+  const feed = buildCommentFeed({ comments: all, events: [], filter: 'all', isUnread: none, meName: null, now: NOW });
+  const card = feed.items.find((i) => i.kind === 'retake');
+  assert.equal(card && card.kind === 'retake' && card.commentSummary?.count, 2, '카드 숫자와 스레드 창 글 수가 같다');
+});

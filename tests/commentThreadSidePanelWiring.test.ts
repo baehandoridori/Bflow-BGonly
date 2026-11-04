@@ -19,7 +19,8 @@ test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /setActiveThreadRootId\(threadRootId\)/);
   assert.match(commentPanel, /onThreadPanelOpenChange\?\.\(activeThreadOpen\)/);
   assert.doesNotMatch(commentPanel, /onThreadPanelOpenChange\?\.\(activeThreadRootId != null\)/);
-  assert.match(commentPanel, /comments\s*\n\s*\.filter\(\(c\) => c\.parentCommentId === activeThreadRoot\.id\)/);
+  // v1.147.0: 스레드 창 답글은 본문 요약과 같은 묶음(threadMembers — 답글의 답글 같은 옛 기록 포함, 동작은 commentFeedModel 테스트).
+  assert.match(commentPanel, /activeThreadRoot \? threadMembers\(comments, \{ rootId: activeThreadRoot\.id \}\) : \[\]/);
   assert.doesNotMatch(commentPanel, /activeThreadRoot \? repliesByParent\.get\(activeThreadRoot\.id\)/);
   assert.match(commentPanel, /data-comment-thread-side-panel/);
   assert.match(commentPanel, /스레드/);
@@ -199,7 +200,7 @@ test('retake root cards can open the detail card or the comment-side retake thre
 
 test('retake side thread stores replies as revision comments instead of fake parent comments', () => {
   assert.match(commentPanel, /const activeRevisionThreadComments = useMemo/);
-  assert.match(commentPanel, /comments\s*\n\s*\.filter\(\(c\) => c\.revisionId === activeRevisionThreadId\)/);
+  assert.match(commentPanel, /activeRevisionThreadId \? threadMembers\(comments, \{ revisionId: activeRevisionThreadId \}\) : \[\]/);
   assert.match(commentPanel, /const activeThreadOpen = activeThreadRoot != null \|\| activeRevisionThreadId != null/);
   assert.match(commentPanel, /const activeRevisionThreadAvailable = !activeRevisionThreadId \|\| !!activeRevisionThread/);
   assert.match(commentPanel, /&& activeRevisionThreadAvailable/);

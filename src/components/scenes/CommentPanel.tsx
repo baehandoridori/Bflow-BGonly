@@ -33,6 +33,7 @@ import {
   availableRetakeActions,
   buildCommentFeed,
   groupedFlags,
+  threadMembers,
   retakeActivityPhase,
   retakeActivitySentence,
   retakeCardStatus,
@@ -177,7 +178,7 @@ interface CommentPanelProps {
   sceneThreadKey?: string;
   onCountChange?: (count: number) => void;
   /** v1.147.0: 헤더 '원댓글 N · 리테이크 M'. */
-  onFeedSummaryChange?: (summary: { roots: number; retakes: number }) => void;
+  onFeedSummaryChange?: (summary: { roots: number; retakes: number } | null) => void;
   /** 댓글 사이에 시간순으로 끼어들어가는 시스템 이벤트 (씬 생성/완료/리테이크 등) */
   inlineEvents?: CommentInlineEvent[];
   /** v1.24.0: 외부 점프 시 자동 스크롤 + 펄스 강조할 댓글 id. 답글이면 부모 자동 펼침. */
@@ -411,7 +412,7 @@ function ReactionsArea({
           // 보내는 중엔 마우스를 올려도 드러나지 않는다(누를 수 없는 버튼이 떠오르지 않게).
           'disabled:invisible',
           compact ? 'w-5 h-5' : 'w-6 h-5',
-          hasReactions ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-70 hover:opacity-100',
+          'opacity-0 group-hover:opacity-80 hover:opacity-100 focus-visible:opacity-100',
         )}
         aria-label="이모지 추가"
         title="이모지 추가"
@@ -761,6 +762,11 @@ export function CommentPanel({
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(focusCommentId ?? null);
   const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [lastReadAt, setLastReadAt] = useState<string | null>(null);
+  /**
+   * 패널을 연 때의 읽음 시각(코드 리뷰) — 시각 옆 점·답글 요약 '새 N'·'안 읽음' 탭은 이것으로 본다.
+   * 첫 안 읽은 댓글이 보이면 곧바로 읽음 처리되므로 살아 있는 읽음 시각으로 보면 점이 열자마자 사라졌다('새 댓글' 줄과 같은 방식).
+   */
+  const [unreadBaseline, setUnreadBaseline] = useState<{ readAt: string | null } | null>(null);
   // 읽음 기록을 받기 전에 목록을 그리면 '새 댓글' 줄이 맨 위 댓글에 잘못 붙었다가 옮겨 간다 — 받은 뒤에 처음 자리를 잡는다.
   const [readStateReady, setReadStateReady] = useState(false);
   const readMarkedRef = useRef<string | null>(null);
@@ -1043,6 +1049,7 @@ export function CommentPanel({
       openPinStartedRef.current = false;
       openPinRef.current = null;
       setUnreadDividerSlot(UNREAD_DIVIDER_UNCAPTURED);
+      setUnreadBaseline(null);
       setNewBelowCount(0);
       loadComments();
       return;
@@ -1271,17 +1278,31 @@ export function CommentPanel({
     };
   }, [focusCommentId]);
 
-  // v1.24.0: focusCommentId 가 답글이면 부모 댓글 펼침 보장. comments 가 늦게 도착해도 처리.
+  // v1.24.0: focusCommentId 가 답글이면 그 스레드, 리테이크 댓글이면 그 리테이크 스레드를 연다. comments 가 늦게 도착해도 처리.
+  //   한 번 열면 그만(코드 리뷰) — 모달이 열려 있는 동안 focusCommentId 가 그대로라, 댓글·리테이크가 바뀔 때마다 다시 열어
+  //   쓰던 답글을 지우지 않게. 다른 탭('리테이크' 등)에 숨어 있으면 찾지 못하므로 '전체'로 돌린다.
+  const appliedFocusRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusCommentId) return;
+    if (!focusCommentId) {
+      appliedFocusRef.current = null;
+      return;
+    }
+    setFeedFilter('all');
+  }, [focusCommentId]);
+  useEffect(() => {
+    if (!focusCommentId || appliedFocusRef.current === focusCommentId) return;
     const target = comments.find((c) => c.id === focusCommentId);
-    if (target?.revisionId && revisions.some((r) => r.id === target.revisionId)) {
+    if (!target) return; // 아직 안 왔다 — 도착하면 다시
+    if (target.revisionId) {
+      if (!revisions.some((r) => r.id === target.revisionId)) return; // 리테이크를 불러오면 다시
+      appliedFocusRef.current = focusCommentId;
       setThreadMentionTarget(null);
       setActiveThreadRootId(null);
       setActiveRevisionThreadId(target.revisionId);
       return;
     }
-    if (target?.parentCommentId) {
+    appliedFocusRef.current = focusCommentId;
+    if (target.parentCommentId) {
       const replyFocusThread = buildCommentReplyTarget(comments, target);
       const threadRootId = replyFocusThread.parentCommentId;
       if (!threadRootId) return;
@@ -1963,20 +1984,13 @@ export function CommentPanel({
   useEffect(() => {
     onThreadPanelOpenChange?.(activeThreadOpen);
   }, [activeThreadOpen, onThreadPanelOpenChange]);
+  // 스레드 창 글은 본문 요약('답글 N개'·'댓글 N개')과 같은 묶음(utils/commentFeedModel threadMembers) — 숫자와 창이 어긋나지 않게.
   const activeThreadReplies = useMemo(
-    () => activeThreadRoot
-      ? comments
-        .filter((c) => c.parentCommentId === activeThreadRoot.id)
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      : [],
+    () => activeThreadRoot ? threadMembers(comments, { rootId: activeThreadRoot.id }) : [],
     [activeThreadRoot, comments],
   );
   const activeRevisionThreadComments = useMemo(
-    () => activeRevisionThreadId
-      ? comments
-        .filter((c) => c.revisionId === activeRevisionThreadId)
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      : [],
+    () => activeRevisionThreadId ? threadMembers(comments, { revisionId: activeRevisionThreadId }) : [],
     [activeRevisionThreadId, comments],
   );
   const activeRevisionThreadAvailable = !activeRevisionThreadId || !!activeRevisionThread;
@@ -2091,14 +2105,14 @@ export function CommentPanel({
   }, [currentUser?.id, hasUnreadComments, lastReadAt, orderedVisibleComments]);
   const firstUnreadCommentId = firstUnreadComment?.id ?? null;
 
-  /** 안 읽은 댓글 — 남의 글이고 마지막 읽음 시각보다 뒤(시각 옆 점·'안 읽음' 탭·답글 요약의 '새 N'). */
+  /** 안 읽은 댓글 — 남의 글이고 패널을 연 때의 읽음 시각보다 뒤(시각 옆 점·'안 읽음' 탭·답글 요약의 '새 N'). */
   const isCommentUnread = useCallback((comment: SceneCommentWithSource) => {
-    if (!currentUser?.id || !hasUnreadComments || comment.userId === currentUser.id) return false;
+    if (!currentUser?.id || !unreadBaseline || comment.userId === currentUser.id) return false;
     const createdMs = Date.parse(comment.createdAt);
     if (!Number.isFinite(createdMs)) return false;
-    const readMs = lastReadAt ? Date.parse(lastReadAt) : Number.NEGATIVE_INFINITY;
+    const readMs = unreadBaseline.readAt ? Date.parse(unreadBaseline.readAt) : Number.NEGATIVE_INFINITY;
     return createdMs > readMs;
-  }, [currentUser?.id, hasUnreadComments, lastReadAt]);
+  }, [currentUser?.id, unreadBaseline]);
 
   // v1.147.0(씬 댓글 B안 §5.2~5.5): 본문에는 원댓글만(답글은 요약 줄), 리테이크는 카드 하나, 활동은 한 줄, 날짜 줄.
   const feed = useMemo(() => buildCommentFeed({
@@ -2109,9 +2123,6 @@ export function CommentPanel({
     meName: currentUser?.name ?? null,
   }), [comments, inlineEvents, feedFilter, isCommentUnread, currentUser?.name]);
   const feedCounts: CommentFeedCounts = feed.counts;
-  useEffect(() => {
-    onFeedSummaryChange?.({ roots: feedCounts.roots, retakes: feedCounts.retakes });
-  }, [feedCounts.roots, feedCounts.retakes, onFeedSummaryChange]);
 
   // ── 움직임 폴리싱 4번(comment-open-calm): 처음 자리 · '새 댓글' 줄 · 읽는 중 새 댓글 ──
   // 목록은 댓글과 읽음 기록이 모두 도착한 뒤 처음 그린다(그 전엔 0.15초 뒤 회색 말풍선 자리).
@@ -2123,6 +2134,10 @@ export function CommentPanel({
     return () => window.clearTimeout(timer);
   }, [loadStatus, readStateReady]);
   const listReady = loadStatus === 'ready' && (readStateReady || readStateWaitExpired);
+  // 헤더 '원댓글 N · 리테이크 M' — 다 불러온 뒤에만(불러오는 중·실패에는 숨겨 목록과 어긋나지 않게).
+  useEffect(() => {
+    onFeedSummaryChange?.(listReady ? { roots: feedCounts.roots, retakes: feedCounts.retakes } : null);
+  }, [listReady, feedCounts.roots, feedCounts.retakes, onFeedSummaryChange]);
   // 줄은 처음 자리를 잡을 때 정한 자리(읽음 처리 뒤에도 유지)에만 붙인다. 정하기 전(처음 그리는 순간)엔 지금 첫 안 읽은 댓글.
   // 읽음 기록 없이 붙이면 맨 위 댓글에 잘못 붙으므로 기록이 온 뒤에만.
   const dividerCommentId = listReady && readStateReady ? unreadDividerCommentId(unreadDividerSlot, firstUnreadCommentId) : null;
@@ -2138,6 +2153,7 @@ export function CommentPanel({
   // 처음 그린 그 순간의 첫 안 읽은 댓글로 한 번만 정한다 — 그 뒤 실시간으로 온 댓글엔 줄을 만들지 않는다.
   useEffect(() => {
     if (!listReady || !readStateReady) return;
+    setUnreadBaseline((baseline) => baseline ?? { readAt: lastReadAt });
     setUnreadDividerSlot((slot) => captureUnreadDivider(
       slot,
       firstUnreadComment ? { id: firstUnreadComment.id, createdAt: firstUnreadComment.createdAt } : null,
@@ -2224,7 +2240,10 @@ export function CommentPanel({
       return !!node && node.getBoundingClientRect().top >= viewBottom - 4;
     }).length;
     // 내가 단 답글(스레드 칸에서 보냄)은 부모 아래에 붙으므로 본문을 맨 아래로 끌고 가지 않는다.
-    const mineTopLevel = added.mine.filter((id) => !comments.find((c) => c.id === id)?.parentCommentId).length;
+    const mineTopLevel = added.mine.filter((id) => {
+      const mine = comments.find((c) => c.id === id);
+      return !mine?.parentCommentId && !mine?.revisionId;
+    }).length;
     const action = commentArrivalAction({
       mineAdded: mineTopLevel,
       othersBelow,
@@ -2423,16 +2442,51 @@ export function CommentPanel({
     setComposerEmoji((current) => (current === 'thread' ? null : current));
     setActiveThreadRootId(null);
     setActiveRevisionThreadId(null);
+    const opener = threadOpenerRef.current;
+    threadOpenerRef.current = null;
+    requestAnimationFrame(() => {
+      const back = opener && opener.isConnected ? opener : inputRef.current;
+      back?.focus({ preventScroll: true });
+    });
   }, [activeThreadRootId, threadMention.close, threadHash.close]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 패널의 이모지 창(반응·입력)은 Esc 로 패널이 닫는다 — 창 자체는 Esc 를 받지 않아 상세 모달까지 닫히며 쓰던 글을 잃었다(코드 리뷰).
+  useEffect(() => {
+    if (!reactionPicker && !composerEmoji) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setReactionPicker(null);
+      setComposerEmoji(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [reactionPicker, composerEmoji]);
+
   // 스레드 창은 Esc 로 닫힌다(§5.4). 상세 모달까지 닫히지 않게 창 단계(capture)에서 먼저 받고 멈춘다.
+  //   초점이 이 패널 안일 때(또는 마지막으로 이 패널을 누른 뒤 초점이 아무 데도 없을 때)만 — 다른 창(그림 보기·# 메뉴·
+  //   상세 모달의 다른 칸)의 Esc 를 가로채지 않게. 캐릭터 상세처럼 패널을 감싼 dialog 안에서도 동작한다.
   //   메뉴·이모지 창·라이트박스·수정 중·멘션 목록이 열려 있으면 그쪽이 Esc 를 쓴다.
+  const pointerInPanelRef = useRef(false);
+  useEffect(() => {
+    if (!activeThreadOpen) return;
+    const onDown = (event: PointerEvent) => {
+      pointerInPanelRef.current = !!panelRef.current?.contains(event.target as Node | null);
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [activeThreadOpen]);
   useEffect(() => {
     if (!activeThreadOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const panel = panelRef.current;
       const target = event.target as Element | null;
-      if (target?.closest?.('.cmt-menu, [role="dialog"], [data-emoji-picker]')) return;
+      const onBody = !target || target === document.body || target === document.documentElement;
+      const inPanel = !!panel && !!target && !onBody && panel.contains(target);
+      if (!inPanel && !(onBody && pointerInPanelRef.current)) return;
+      if (target?.closest?.('.cmt-menu')) return;
       if (lightbox || reactionPicker || composerEmoji || editingId
         || threadMention.active || threadHash.active || mention.active || hash.active) return;
       event.preventDefault();
@@ -2443,18 +2497,27 @@ export function CommentPanel({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [activeThreadOpen, lightbox, reactionPicker, composerEmoji, editingId, threadMention.active, threadHash.active, mention.active, hash.active, closeThreadPane]);
 
+  // 스레드 창을 닫으면 연 단추(없으면 본문 입력칸)로 초점을 돌려준다 — 키보드로 쓰던 자리를 잃지 않게.
+  const threadOpenerRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (!activeThreadOpen) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (active && panelRef.current?.contains(active)) threadOpenerRef.current = active;
+  }, [activeThreadOpen]);
+
   // 리테이크 탭 카드의 '스레드 열기' — 이 패널의 스레드 창으로(같은 행·같은 입력창, §5.4). 받으면 handled 표시.
   useEffect(() => {
     if (characterCommentKey) return;
     const onOpen = (event: Event) => {
-      const detail = (event as CustomEvent<{ revisionId?: string; handled?: boolean }>).detail;
-      if (!detail?.revisionId || !revisionExists(detail.revisionId)) return;
+      const detail = (event as CustomEvent<{ revisionId?: string; sceneKey?: string; handled?: boolean }>).detail;
+      if (!detail?.revisionId || detail.handled || !revisionExists(detail.revisionId)) return;
+      if (detail.sceneKey && detail.sceneKey !== sceneKey && detail.sceneKey !== secondarySceneKey) return;
       detail.handled = true;
       openRevisionThread(detail.revisionId, true);
     };
     window.addEventListener('bflow:open-revision-thread', onOpen);
     return () => window.removeEventListener('bflow:open-revision-thread', onOpen);
-  }, [characterCommentKey, revisionExists, openRevisionThread]);
+  }, [characterCommentKey, revisionExists, openRevisionThread, sceneKey, secondarySceneKey]);
 
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const revisionById = useMemo(() => new Map(revisions.map((r) => [r.id, r])), [revisions]);
@@ -2488,6 +2551,20 @@ export function CommentPanel({
       } else if (action === 'reopen_mine') await store.revertAssignee(revision, currentUser.id);
       else if (action === 'resolve') await store.finalResolve(revision, currentUser.name);
       else if (action === 'reopen') await store.revertFinalResolve(revision);
+      // 스토어 명령은 실패하면 다시 읽고 끝난다(던지지 않음) — 저장된 상태로 확인한다(MyRetakesWidget 와 같은 방식).
+      const saved = useRevisionStore.getState().revisions.find((r) => r.id === revision.id);
+      const myState = saved?.assigneeStates?.[currentUser.id]?.state;
+      const resolved = !!saved?.finalResolvedAt || saved?.status === 'resolved';
+      const applied = !!saved && (
+        action === 'start' ? myState === 'in_progress'
+          : action === 'complete' ? myState === 'done'
+            : action === 'reopen_mine' ? myState === 'in_progress'
+              : action === 'resolve' ? resolved
+                : !resolved
+      );
+      if (!applied && useAuthStore.getState().currentUser?.id === currentUser.id) {
+        sonnerToast.error('리테이크 상태가 저장되지 않았어요. 현재 상태를 확인한 뒤 다시 시도해 주세요.');
+      }
     } catch (err) {
       console.error('[스레드 창 리테이크 동작 실패]', err);
       sonnerToast.error('리테이크 상태를 바꾸지 못했어요');
@@ -2523,8 +2600,8 @@ export function CommentPanel({
       menuItems.push({ id: 'copy', label: '내용 복사', icon: 'copy', onSelect: () => copyText(stripEntityTokens(comment.text), '내용을 복사했어요') });
     }
     if (isOwn) {
-      menuItems.push({ id: 'edit', label: '수정', icon: 'edit', separated: menuItems.length > 0, onSelect: () => { setEditingId(comment.id); setEditText(comment.text); } });
-      menuItems.push({ id: 'delete', label: '삭제', icon: 'delete', danger: true, onSelect: () => handleDelete(comment.id) });
+      menuItems.push({ id: 'edit', label: '수정', icon: 'edit', separated: menuItems.length > 0, movesFocus: true, onSelect: () => { setEditingId(comment.id); setEditText(comment.text); } });
+      menuItems.push({ id: 'delete', label: '삭제', icon: 'delete', danger: true, movesFocus: true, onSelect: () => handleDelete(comment.id) });
     }
     const primary = opts.surface === 'thread'
       ? (isOwn ? null : { kind: 'mention' as const, onClick: () => insertIntoComposer('thread', `@${comment.userName} `) })
@@ -2589,22 +2666,27 @@ export function CommentPanel({
               </div>
             </div>
           ) : (
-            <div className={cn('cmt-body', commentSendBubbleClass(sendStatus))}>
-              {comment.text && <div>{renderText(comment.text)}</div>}
-              {images.length > 0 && (
-                <div className={cn('cmt-images', images.length > 1 && 'is-multi')}>
-                  {images.map((url, i) => (
-                    <img
-                      key={i}
-                      src={url}
-                      alt={`${comment.userName}의 첨부 이미지 ${i + 1}`}
-                      loading="lazy"
-                      onClick={(event) => { event.stopPropagation(); openLightbox(url, comment); }}
-                    />
-                  ))}
-                </div>
-              )}
-              {opts.grouped && comment.editedAt && <span className="cmt-meta-note"> (수정됨)</span>}
+            <div className="relative">
+              <div className={cn('cmt-body', commentSendBubbleClass(sendStatus))}>
+                {comment.text && <div>{renderText(comment.text)}</div>}
+                {images.length > 0 && (
+                  <div className={cn('cmt-images', images.length > 1 && 'is-multi')}>
+                    {images.map((url, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className="cmt-image-button"
+                        aria-label={`${comment.userName}의 첨부 이미지 ${i + 1} 크게 보기`}
+                        onClick={(event) => { event.stopPropagation(); openLightbox(url, comment); }}
+                      >
+                        <img src={url} alt={`${comment.userName}의 첨부 이미지 ${i + 1}`} loading="lazy" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {opts.grouped && comment.editedAt && <span className="cmt-meta-note"> (수정됨)</span>}
+              </div>
+              {/* 느릴 때 시계 — 흐려지는 본문 밖에 그려 같이 흐려지지 않게. */}
               {sendStatus === 'slow' && <CommentSendClock />}
             </div>
           )}
@@ -2630,7 +2712,11 @@ export function CommentPanel({
             />
           )}
           {opts.replySummary && opts.onOpenThread && (
-            <CommentThreadSummaryButton summary={opts.replySummary} onOpen={opts.onOpenThread} />
+            <CommentThreadSummaryButton
+              summary={opts.replySummary}
+              onOpen={opts.onOpenThread}
+              failedCount={(opts.anchorIds ?? []).filter((id) => id !== comment.id && sendStatusById.get(id) === 'failed').length}
+            />
           )}
           {isOwn && slackDelivery.get(comment.id) && (
             <SlackDeliveryNote
@@ -2829,6 +2915,7 @@ export function CommentPanel({
                       meName={currentUser?.name ?? null}
                       activityCount={item.events.length}
                       commentSummary={item.commentSummary}
+                      failedCount={item.comments.filter((c) => sendStatusById.get(c.id) === 'failed').length}
                       onOpenThread={canOpen ? () => openRevisionThread(item.revisionId, item.comments.length === 0) : undefined}
                       onOpenDetail={canOpen && card.status !== 'deleted' ? () => openRevisionDetail(item.revisionId) : undefined}
                     />
@@ -2984,7 +3071,7 @@ export function CommentPanel({
         <div
           onPaste={handlePaste}
           // v1.23.3 (#1): flex-col + overflow-hidden — 아래 도구 줄은 늘 보이고 입력칸만 자체 스크롤.
-          className={cn('comment-input-card cmt-input-box', draggingOver && 'is-dragover dragover', focused && 'focused')}
+          className={cn('cmt-input-box', draggingOver && 'is-dragover')}
           style={{ maxHeight: inputCardMaxPx }}
         >
           {renderAttachmentStrip(attachedImages, removeAttachedImage, '첨부 이미지 제거')}
@@ -3241,6 +3328,23 @@ export function CommentPanel({
             </div>
 
             <div className="cmt-thread-foot">
+              {/* @멘션·#태그 목록 — 입력 상자(넘침 숨김) 밖에 두어 잘리지 않게(코드 리뷰). */}
+              {threadMention.active ? (
+                <MentionDropdown
+                  showSlackHint
+                  items={threadMention.items}
+                  index={threadMention.index}
+                  onPick={threadMention.select}
+                  positionClassName="left-2.5 right-2.5"
+                />
+              ) : threadHash.active ? (
+                <HashtagDropdown
+                  items={threadHash.items}
+                  index={threadHash.index}
+                  onPick={threadHash.select}
+                  positionClassName="left-2.5 right-2.5"
+                />
+              ) : null}
               <div
                 className="cmt-input-box"
                 onDragEnter={(event) => {
@@ -3255,22 +3359,6 @@ export function CommentPanel({
                 }}
                 onDrop={handleThreadDrop}
               >
-                {threadMention.active ? (
-                  <MentionDropdown
-                    showSlackHint
-                    items={threadMention.items}
-                    index={threadMention.index}
-                    onPick={threadMention.select}
-                    positionClassName="left-2 right-2"
-                  />
-                ) : threadHash.active ? (
-                  <HashtagDropdown
-                    items={threadHash.items}
-                    index={threadHash.index}
-                    onPick={threadHash.select}
-                    positionClassName="left-2 right-2"
-                  />
-                ) : null}
                 {renderAttachmentStrip(threadAttachedImages, removeThreadAttachedImage, '스레드 첨부 이미지 제거')}
                 <div className="relative">
                   <EntityHighlightOverlay

@@ -240,7 +240,8 @@ test('패널 배선: 실패 말풍선은 모든 행(본문·스레드 창)에서
   assert.match(panel, /\{sendStatus === 'failed' \? \(\s*<CommentSendFailedNotice[\s\S]{0,300}?\/>\s*\) : \(\s*<ReactionsArea/);
   // (검증 지적 acc-comments-notify-2: 보내는 중에도 지우기·수정·답글 — 행 도구 줄 — 을 띄우지 않는다)
   assert.match(panel, /\{!isEditing && !sendStatus && \(\s*<CommentRowToolbar/);
-  assert.match(panel, /\) : \(\s*<div className=\{cn\('cmt-body', commentSendBubbleClass\(sendStatus\)\)\}>[\s\S]{0,1400}?\{sendStatus === 'slow' && <CommentSendClock \/>\}/);
+  // 느릴 때 시계는 흐려지는 본문(.cmt-body) 밖 — 같은 상자 안 형제(같이 흐려지지 않게, 코드 리뷰).
+  assert.match(panel, /\) : \(\s*<div className="relative">\s*<div className=\{cn\('cmt-body', commentSendBubbleClass\(sendStatus\)\)\}>[\s\S]{0,1600}?<\/div>\s*\{\/\*[^\n]*\*\/\}\s*\{sendStatus === 'slow' && <CommentSendClock \/>\}/);
   assert.equal([...panel.matchAll(/commentSendBubbleClass\(sendStatus\)/g)].length, 1);
   assert.doesNotMatch(panel, /replySendStatus|messageSendStatus|replyIsEditing/);
 });

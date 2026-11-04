@@ -385,7 +385,8 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
   if (openInCommentPanel && !inlineOpen) {
     const summary = summarizeThread(comments, () => false);
     const openInPanel = () => {
-      const detail: { revisionId: string; handled?: boolean } = { revisionId };
+      // 이 카드의 씬 키를 같이 — 도킹한 참조 씬의 카드가 본 씬 댓글 패널에서 열리지 않게(그 패널은 자기 씬만 받는다).
+      const detail: { revisionId: string; sceneKey: string; handled?: boolean } = { revisionId, sceneKey };
       window.dispatchEvent(new CustomEvent('bflow:open-revision-thread', { detail }));
       if (!detail.handled) setInlineOpen(true);
     };
@@ -648,13 +649,15 @@ function CommentBubble({
         {(comment.images?.length ?? 0) > 0 && (
           <div className={comment.images!.length > 1 ? 'cmt-images is-multi' : 'cmt-images'}>
             {comment.images!.map((url, index) => (
-              <img
+              <button
+                type="button"
                 key={`${url}-${index}`}
-                src={url}
-                alt={`${comment.userName}의 첨부 이미지 ${index + 1}`}
-                loading="lazy"
+                className="cmt-image-button"
+                aria-label={`${comment.userName}의 첨부 이미지 ${index + 1} 크게 보기`}
                 onClick={() => onImageClick(url, comment)}
-              />
+              >
+                <img src={url} alt={`${comment.userName}의 첨부 이미지 ${index + 1}`} loading="lazy" />
+              </button>
             ))}
           </div>
         )}

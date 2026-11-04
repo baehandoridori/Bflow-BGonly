@@ -265,7 +265,7 @@ test('CommentPanel replaces the inline reply collapse toggle with a scannable re
   // v1.147.0(§5.2): 본문에 답글을 펼치고 접던 토글은 없다 — 원댓글 아래 '답글 N개 · 마지막 HH:MM · 새 N' 요약 줄이 스레드 창을 연다.
   assert.doesNotMatch(commentPanel, /threadCollapsed|collapsedThreads|toggleThread/);
   assert.doesNotMatch(commentPanel, /'펼치기' : '접기'/);
-  assert.match(commentPanel, /\{opts\.replySummary && opts\.onOpenThread && \(\s*<CommentThreadSummaryButton summary=\{opts\.replySummary\} onOpen=\{opts\.onOpenThread\} \/>/);
+  assert.match(commentPanel, /\{opts\.replySummary && opts\.onOpenThread && \(\s*<CommentThreadSummaryButton\s+summary=\{opts\.replySummary\}\s+onOpen=\{opts\.onOpenThread\}\s+failedCount=/);
   assert.match(commentPanel, /replySummary: item\.replySummary,[\s\S]{0,80}?onOpenThread: \(\) => openThreadReply\(root\),/);
   assert.match(commentFeedParts, /<span className="cmt-thread-count">\{noun\} \{summary\.count\}개<\/span>/);
   assert.match(commentFeedParts, /<span className="cmt-thread-last">마지막 \{formatTimeShort\(summary\.lastAt\)\}<\/span>/);
