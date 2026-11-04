@@ -34,6 +34,8 @@ export function useRetakeNotifications(): void {
   const retakeRequest = useAppStore((s) => s.retakeNavigationRequest);
   const localRevisions = useRevisionStore((s) => s.revisions);
   const revisionsLoading = useRevisionStore((s) => s.isLoading);
+  /** 목록을 한 번이라도 제대로 불러왔나 — 불러온 뒤의 빈 목록(마지막 리테이크를 지움)이면 0 으로 센다. */
+  const revisionsLoadedAt = useRevisionStore((s) => s.lastLoadTime);
   const seenReminders = useRef(new Set<string>());
 
   const [retryAttempt, setRetryAttempt] = useState(0);
@@ -150,8 +152,9 @@ export function useRetakeNotifications(): void {
     }
     if (revisionsLoading) return;
     if (useNotificationStore.getState().activeUserId !== currentUser.id) return;
-    if (localRevisions.length === 0) return;
+    // 아직 불러오지 못한 빈 목록은 건너뛰고(로그인 때 서버로 센 숫자를 지우지 않게), 불러온 뒤 빈 목록이면 0(코덱스 3차).
+    if (localRevisions.length === 0 && revisionsLoadedAt == null) return;
     const outstanding = localRevisions.filter((revision) => isOutstandingRetakeFor(revision, currentUser.id));
     useNotificationStore.getState().setOutstandingRetakeCount(outstanding.length, outstandingRetakeViewFor(outstanding));
-  }, [localRevisions, revisionsLoading, currentUser?.id]);
+  }, [localRevisions, revisionsLoading, revisionsLoadedAt, currentUser?.id]);
 }

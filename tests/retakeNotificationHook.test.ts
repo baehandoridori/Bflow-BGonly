@@ -243,6 +243,22 @@ test('retake catch-up and reminders respect current recipient, dedupe, read acti
   } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
 });
 
+test('outstanding count follows the loaded list and drops to zero when the last assignment is deleted', async () => {
+  const h = await hookHarness();
+  const countEffect = () => h.effects[h.effects.length - 1]();
+  // 아직 못 불러온 빈 목록 — 서버로 센 숫자를 지우지 않는다.
+  countEffect();
+  assert.deepEqual(h.outstandingCounts, []);
+  (h.revisions as any).lastLoadTime = 1;
+  h.revisions.revisions = [revision];
+  h.render(); countEffect();
+  assert.deepEqual(h.outstandingCounts, [1]);
+  // 마지막 담당 리테이크를 지웠다(불러온 뒤의 빈 목록) — 0 으로.
+  h.revisions.revisions = [];
+  h.render(); countEffect();
+  assert.deepEqual(h.outstandingCounts, [1, 0]);
+});
+
 test('new assignee broadcasts show assignment text, dedupe each event, and keep repeated assignments distinct', async () => {
   const previousWindow = (globalThis as any).window;
   const h = await hookHarness();

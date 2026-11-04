@@ -1541,7 +1541,32 @@ export async function fetchMissedMentions(
   // v1.146.0(씬 댓글 B안 §6.3): 필요한 칸만 읽고, 같은 시각 댓글이 페이지 경계에서 빠지거나 겹치지 않게
   //   (created_at, id) 복합 커서로 넘긴다(예전 offset 은 페이지 사이에 댓글이 늘면 밀려서 빠졌다).
   const COLUMNS = 'id, part_id, scene_id, scene_uuid, user_id, user_name, text, mentions, images, created_at, edited_at, revision_id, parent_comment_id';
+  // v1.146.0(코덱스 2·3차): 나를 부른 댓글은 셋 — ① 본문에 직접 @ ② 내 댓글에 달린 답글 ③ 내가 요청자·담당자·알림 대상인
+  //   리테이크의 댓글. 답글 상대·리테이크 요청자를 mentions 에 넣지 않게 되어 ②③은 관계로 찾는다.
+  //   한 번의 최신순 훑기에서 페이지마다 셋을 같이 가린다(원댓글 작성자·리테이크는 그 페이지 몫만 100개씩 읽는다) —
+  //   어느 한 종류가 자리를 먼저 다 차지해 더 새로운 다른 종류가 빠지는 일이 없다. 다 모이면 최신 limit 개만 돌려준다.
+  type RevisionTarget = { id: string; revisionNo: number | null; requesterId: string | null; assigneeIds: string[]; notifyUserIds: string[] };
   const matched: SupabaseComment[] = [];
+  const parentAuthor = new Map<string, string>();          // 원댓글 id → 작성자 id('' = 없음)
+  const revisionTarget = new Map<string, RevisionTarget | null>(); // 리테이크 id → 내가 대상이면 그 리테이크
+  const mentionsMe = (c: Record<string, any>) => Array.isArray(c.mentions) && c.mentions.includes(userName);
+  const toRow = (c: Record<string, any>, extra: Partial<SupabaseComment> = {}): SupabaseComment => ({
+    id: c.id,
+    partId: c.part_id,
+    sceneId: c.scene_id,
+    sceneUuid: c.scene_uuid ?? null,  // v1.15.9: 정확 씬 매칭용
+    userId: c.user_id,
+    userName: c.user_name,
+    text: c.text,
+    mentions: c.mentions || [],
+    images: c.images || [],            // v1.15.12: 이미지 첨부
+    createdAt: c.created_at,
+    editedAt: c.edited_at,
+    revisionId: c.revision_id ?? null, // v1.18.0: 리비전 맥락 댓글 표시용
+    parentCommentId: c.parent_comment_id ?? null,
+    ...extra,
+  });
+  const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((x): x is string => typeof x === 'string') : []);
   let cursor: { createdAt: string; id: string } | null = null;
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -1563,96 +1588,11 @@ export async function fetchMissedMentions(
     const rows = (data || []) as Array<Record<string, any>>;
     if (rows.length === 0) break;
 
-    for (const c of rows) {
-      if (!Array.isArray(c.mentions) || !c.mentions.includes(userName)) continue;
-      matched.push({
-        id: c.id,
-        partId: c.part_id,
-        sceneId: c.scene_id,
-        sceneUuid: c.scene_uuid ?? null,  // v1.15.9: 정확 씬 매칭용
-        userId: c.user_id,
-        userName: c.user_name,
-        text: c.text,
-        mentions: c.mentions || [],
-        images: c.images || [],            // v1.15.12: 이미지 첨부
-        createdAt: c.created_at,
-        editedAt: c.edited_at,
-        revisionId: c.revision_id ?? null, // v1.18.0: 리비전 맥락 댓글 표시용
-        parentCommentId: c.parent_comment_id ?? null,
-      });
-      if (matched.length >= limit) return matched;
-    }
-
-    if (rows.length < PAGE_SIZE) break;  // 더 이상 데이터 없음
-    const last = rows[rows.length - 1];
-    cursor = { createdAt: String(last.created_at), id: String(last.id) };
-  }
-
-  // v1.146.0(코덱스 2차): 내 댓글에 달린 답글 — 답글 상대를 mentions 에 넣지 않게 되어 위 멘션 조회로는 못 찾는다.
-  //   그 사이 달린 답글(최근 순 최대 REPLY_SCAN 개)의 원댓글 작성자를 100개씩 읽어 내 것만 고른다.
-  const REPLY_SCAN = 400;
-  const seenIds = new Set(matched.map((row) => row.id));
-  const { data: replyRows, error: replyErr } = await supabase
-    .from('comments')
-    .select(COLUMNS)
-    .gt('created_at', since)
-    .neq('user_id', userId)
-    .is('character_id', null)
-    .not('parent_comment_id', 'is', null)
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
-    .limit(REPLY_SCAN);
-  if (replyErr) throw new Error(`fetchMissedMentions(replies) failed: ${replyErr.message}`);
-  const replies = ((replyRows || []) as Array<Record<string, any>>).filter((row) => !seenIds.has(row.id));
-  const parentIds = [...new Set(replies.map((row) => String(row.parent_comment_id)))];
-  const myParents = new Set<string>();
-  for (let start = 0; start < parentIds.length; start += 100) {
-    const chunk = parentIds.slice(start, start + 100);
-    const { data: parents, error: parentErr } = await supabase
-      .from('comments')
-      .select('id, user_id')
-      .in('id', chunk);
-    if (parentErr) throw new Error(`fetchMissedMentions(parents) failed: ${parentErr.message}`);
-    for (const parent of parents || []) if (parent.user_id === userId) myParents.add(String(parent.id));
-  }
-  for (const c of replies) {
-    if (matched.length >= limit) break;
-    if (!myParents.has(String(c.parent_comment_id))) continue;
-    matched.push({
-      id: c.id,
-      partId: c.part_id,
-      sceneId: c.scene_id,
-      sceneUuid: c.scene_uuid ?? null,
-      userId: c.user_id,
-      userName: c.user_name,
-      text: c.text,
-      mentions: c.mentions || [],
-      images: c.images || [],
-      createdAt: c.created_at,
-      editedAt: c.edited_at,
-      revisionId: c.revision_id ?? null,
-      parentCommentId: c.parent_comment_id ?? null,
-      parentAuthorId: userId,
-    });
-  }
-  // v1.146.0(로컬 리뷰): 내가 요청자·담당자·알림 대상인 리테이크의 댓글 — 요청자 이름을 mentions 에 넣지 않게 되어
-  //   위 조회로는 못 찾는다. 그 사이 달린 리테이크 댓글(최근 순 최대 REPLY_SCAN 개)의 리테이크를 100개씩 읽어 고른다.
-  if (matched.length < limit) {
-    const seenNow = new Set(matched.map((row) => row.id));
-    const { data: retakeRows, error: retakeErr } = await supabase
-      .from('comments')
-      .select(COLUMNS)
-      .gt('created_at', since)
-      .neq('user_id', userId)
-      .is('character_id', null)
-      .not('revision_id', 'is', null)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(REPLY_SCAN);
-    if (retakeErr) throw new Error(`fetchMissedMentions(retakes) failed: ${retakeErr.message}`);
-    const retakeComments = ((retakeRows || []) as Array<Record<string, any>>).filter((row) => !seenNow.has(row.id));
-    const revisionIds = [...new Set(retakeComments.map((row) => String(row.revision_id)))];
-    const mine = new Map<string, { id: string; revisionNo: number | null; requesterId: string | null; assigneeIds: string[]; notifyUserIds: string[] }>();
+    // 판정 순서는 화면 쪽 판정 함수와 같다: 직접 @ → 리테이크 댓글 → 답글.
+    const revisionIds = [...new Set(rows
+      .filter((c) => !mentionsMe(c) && c.revision_id)
+      .map((c) => String(c.revision_id))
+      .filter((id) => !revisionTarget.has(id)))];
     for (let start = 0; start < revisionIds.length; start += 100) {
       const chunk = revisionIds.slice(start, start + 100);
       const { data: revs, error: revErr } = await supabase
@@ -1660,12 +1600,13 @@ export async function fetchMissedMentions(
         .select('id, revision_no, requester_id, assignee_ids, notify_user_ids')
         .in('id', chunk);
       if (revErr) throw new Error(`fetchMissedMentions(revisions) failed: ${revErr.message}`);
+      for (const id of chunk) revisionTarget.set(id, null);
       for (const rev of (revs || []) as Array<Record<string, any>>) {
-        const assigneeIds = Array.isArray(rev.assignee_ids) ? rev.assignee_ids.filter((x: unknown) => typeof x === 'string') : [];
-        const notifyUserIds = Array.isArray(rev.notify_user_ids) ? rev.notify_user_ids.filter((x: unknown) => typeof x === 'string') : [];
+        const assigneeIds = strings(rev.assignee_ids);
+        const notifyUserIds = strings(rev.notify_user_ids);
         const requesterId = typeof rev.requester_id === 'string' ? rev.requester_id : null;
         if (requesterId !== userId && !assigneeIds.includes(userId) && !notifyUserIds.includes(userId)) continue;
-        mine.set(String(rev.id), {
+        revisionTarget.set(String(rev.id), {
           id: String(rev.id),
           revisionNo: typeof rev.revision_no === 'number' ? rev.revision_no : null,
           requesterId,
@@ -1674,31 +1615,41 @@ export async function fetchMissedMentions(
         });
       }
     }
-    for (const c of retakeComments) {
-      if (matched.length >= limit) break;
-      const revision = mine.get(String(c.revision_id));
-      if (!revision) continue;
-      matched.push({
-        id: c.id,
-        partId: c.part_id,
-        sceneId: c.scene_id,
-        sceneUuid: c.scene_uuid ?? null,
-        userId: c.user_id,
-        userName: c.user_name,
-        text: c.text,
-        mentions: c.mentions || [],
-        images: c.images || [],
-        createdAt: c.created_at,
-        editedAt: c.edited_at,
-        revisionId: c.revision_id ?? null,
-        parentCommentId: c.parent_comment_id ?? null,
-        revision,
-      });
+    const parentIds = [...new Set(rows
+      .filter((c) => !mentionsMe(c) && !c.revision_id && c.parent_comment_id)
+      .map((c) => String(c.parent_comment_id))
+      .filter((id) => !parentAuthor.has(id)))];
+    for (let start = 0; start < parentIds.length; start += 100) {
+      const chunk = parentIds.slice(start, start + 100);
+      const { data: parents, error: parentErr } = await supabase
+        .from('comments')
+        .select('id, user_id')
+        .in('id', chunk);
+      if (parentErr) throw new Error(`fetchMissedMentions(parents) failed: ${parentErr.message}`);
+      for (const id of chunk) parentAuthor.set(id, '');
+      for (const parent of (parents || []) as Array<Record<string, any>>) parentAuthor.set(String(parent.id), String(parent.user_id ?? ''));
     }
-  }
-  matched.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || String(b.id).localeCompare(String(a.id)));
 
-  return matched;
+    for (const c of rows) {
+      if (mentionsMe(c)) {
+        matched.push(toRow(c));
+      } else if (c.revision_id) {
+        const revision = revisionTarget.get(String(c.revision_id));
+        if (revision) matched.push(toRow(c, { revision }));
+      } else if (c.parent_comment_id && parentAuthor.get(String(c.parent_comment_id)) === userId) {
+        matched.push(toRow(c, { parentAuthorId: userId }));
+      }
+    }
+
+    // 최신순으로 훑으니 다음 페이지는 모두 더 오래된 것 — limit 개가 모이면 그만 읽는다.
+    if (matched.length >= limit) break;
+    if (rows.length < PAGE_SIZE) break;  // 더 이상 데이터 없음
+    const last = rows[rows.length - 1];
+    cursor = { createdAt: String(last.created_at), id: String(last.id) };
+  }
+
+  matched.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || String(b.id).localeCompare(String(a.id)));
+  return matched.slice(0, limit);
 }
 
 /** 한 스레드(파트 또는 캐릭터)의 댓글을 전량 로드. 페이지는 고유키(id)로 끊고, 오래된 순으로 돌려준다. */
