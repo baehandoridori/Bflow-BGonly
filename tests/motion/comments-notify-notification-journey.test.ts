@@ -276,13 +276,17 @@ test('알림 창: 종 아래(오른쪽 위)에서 0.14초 피어남 — motion.t
   assert.doesNotMatch(panel, /AnimatePresence/);
 });
 
-test('알림 창 줄: 읽음 막대는 색 고정 + 클래스로 접힘, 지우기는 밀어낸 뒤 실제로 지우고 아래 줄 FLIP', () => {
+test('알림 창 줄·카드: 안 읽음은 점(왼쪽 막대 없음), 지우기는 밀어낸 뒤 실제로 지우고 아래 줄 FLIP', () => {
   const item = bodyOf(panel, 'function NotificationItem(');
   assert.match(item, /data-noti-read=\{n\.isRead \? 'true' : 'false'\}/);
-  assert.match(item, /className="bf-noti-unread-bar /);
-  assert.doesNotMatch(item, /backgroundColor: n\.isRead/, '읽음이 색을 투명으로 바꾸지 않는다(막대가 접힌다)');
-  assert.match(item, /onRemove\(n\.id, rowRef\.current\)/);
+  // v1.148.0(씬 댓글 B안 §9): 왼쪽 막대를 없앴다 — 안 읽음은 옅은 배경 + 점, 읽으면 점이 옅어진다(motion-comments-notify.css).
+  assert.match(item, /<span className="bf-noti-dot mt-\[5px\]" aria-hidden \/>/);
+  assert.doesNotMatch(panel, /bf-noti-unread-bar/);
+  assert.match(item, /onRemove\(\[n\.id\], rowRef\.current, flipKey\)/);
   assert.doesNotMatch(item, /removeNotification\(/);
+  const card = bodyOf(panel, 'function NotificationCard(');
+  assert.match(card, /data-noti-read=\{unread \? 'false' : 'true'\}/);
+  assert.match(card, /onRemove\(ids, cardRef\.current, flipKey\)/, '카드는 그 안의 알림을 한 번에');
 
   const dropdown = bodyOf(panel, 'function NotificationDropdown(');
   assert.match(dropdown, /animateEl\(\n\s*row,\n\s*NOTIFICATION_ROW_EXIT_KEYFRAMES,\n\s*\{ duration: NOTIFICATION_ROW_EXIT_MS, easing: EASE_CSS\.in, fill: 'forwards' \},\n\s*reduce,\n\s*\)/);
@@ -292,13 +296,14 @@ test('알림 창 줄: 읽음 막대는 색 고정 + 클래스로 접힘, 지우�
   assert.match(dropdown, /notificationRowShifts\(before, measureNotificationRows\(list\)\)/);
   assert.match(dropdown, /\{ duration: NOTIFICATION_ROW_SHIFT_MS, easing: EASE_CSS\.out \}/);
   assert.match(dropdown, /className="overflow-y-auto overflow-x-hidden p-1\.5 space-y-0\.5"/, '밀려나는 동안 가로 스크롤바 없음');
-  assert.match(panel, /data-noti-flip=\{`g:\$\{group\.key\}`\}/);
-  assert.match(panel, /data-noti-flip=\{`n:\$\{n\.id\}`\}/);
+  assert.match(panel, /const flipKey = `g:\$\{card\.key\}`;/);
+  assert.match(panel, /const flipKey = `n:\$\{n\.id\}`;/);
+  assert.match(panel, /data-noti-flip=\{flipKey\}/);
 });
 
-test('읽음 막대 CSS: scaleY + opacity 200ms(색 전환 아님)', () => {
-  assert.match(journeyCss, /\.bf-noti-unread-bar \{\n\s*transform-origin: 50% 50%;\n\s*transition: transform 200ms var\(--ease-std\), opacity 200ms var\(--ease-std\);/);
-  assert.match(journeyCss, /\[data-noti-read="true"\] > \.bf-noti-unread-bar \{\n\s*transform: scaleY\(0\);\n\s*opacity: 0;/);
+test('안 읽음 점 CSS: 읽으면 opacity 로만 옅어진다(왼쪽 막대 없음)', () => {
+  assert.doesNotMatch(journeyCss, /bf-noti-unread-bar/);
+  assert.match(journeyCss, /\[data-noti-read="true"\] \.bf-noti-dot \{\n\s*opacity: 0;/);
 });
 
 test('알림 카드: 흐림 없음, 움직임은 동작 줄이기가 꺼졌을 때만, 퇴장 0.2초, 종류별 색 막대·아이콘', () => {

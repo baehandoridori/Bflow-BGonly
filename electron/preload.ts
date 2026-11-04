@@ -213,8 +213,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   applyUpdateNow: () => ipcRenderer.invoke('update:apply-now') as Promise<void>,
 
   // 네이티브 알림 (OS 데스크톱 알림)
-  showNativeNotification: (title: string, body: string) =>
-    ipcRenderer.invoke('notification:show-native', title, body),
+  showNativeNotification: (title: string, body: string, jump?: unknown) =>
+    ipcRenderer.invoke('notification:show-native', title, body, jump),
+  // v1.148.0: Windows 알림을 누름 → 띄울 때 보낸 이동 묶음이 돌아온다(메인이 창을 올린 뒤).
+  onNativeNotificationClick: (callback: (jump: unknown) => void) => {
+    const handler = (_event: unknown, data: unknown) => callback(data);
+    ipcRenderer.on('notification:native-click', handler);
+    return () => ipcRenderer.removeListener('notification:native-click', handler);
+  },
 
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
   imageSave: (fileName: string, base64Data: string) =>

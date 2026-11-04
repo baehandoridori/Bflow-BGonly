@@ -53,7 +53,8 @@ test('opacity 만 전환하던 숨은 버튼도 hover 색 페이드를 잃지 �
 /* ─── 화살표 통일: 그림 바꿔 끼우기 → ▶ 하나를 90° 회전 ─── */
 
 const DISCLOSURE_SITES: [string, number][] = [
-  ['src/components/NotificationPanel.tsx', 1],
+  // v1.148.0(씬 댓글 B안 §9): 알림 창 묶음은 접지 않는 카드가 됐다 — 바꿔 끼우기 금지 검사만 남는다.
+  ['src/components/NotificationPanel.tsx', 0],
   // v1.147.0(씬 댓글 B안): 본문 답글 접기 토글이 없어졌다(답글은 요약 줄 → 스레드 창) — 바꿔 끼우기 금지 검사만 남는다.
   ['src/components/scenes/CommentPanel.tsx', 0],
   ['src/components/scenes/ThreadTodoSection.tsx', 1],

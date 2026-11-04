@@ -63,6 +63,7 @@ import { ArcadeService, arcadeExecutePayload } from './arcadeService';
 import { RetakeNotificationService } from './retakeNotificationService';
 import { SlackWorkflowTransport } from './slackWorkflowTransport';
 import { parseBflowDeepLink, type BflowDeepLink } from '../src/shared/bflowDeepLink';
+import { parseNativeNotificationJump } from '../src/shared/nativeNotificationJump';
 import { validateCharacterCommentIds } from '../src/shared/characterCommentSummary';
 import type { RetakeNotificationActor } from '../src/shared/retakeNotifications';
 import type { ArcadeExecuteCommand, ArcadeSlackRecord } from './arcadeService';
@@ -3698,17 +3699,27 @@ ipcMain.handle(
 );
 
 // ─── IPC 핸들러: 네이티브 알림 ─────────────────────────────
-ipcMain.handle('notification:show-native', (_e: unknown, title: string, body: string) => {
+// v1.148.0(씬 댓글 B안 §9): 띄운 알림을 잡아 둔다 — 참조가 없으면 눌러도 click 이 안 올 수 있다(가비지 수거). 최근 20개만.
+const retainedNativeNotifications: Notification[] = [];
+
+ipcMain.handle('notification:show-native', (_e: unknown, title: string, body: string, rawJump?: unknown) => {
   // 앱 포커스 상태면 스킵 (인앱 토스트만 표시)
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
     return;
   }
   if (Notification.isSupported()) {
+    const jump = parseNativeNotificationJump(rawJump);
     const noti = new Notification({ title, body });
+    retainedNativeNotifications.push(noti);
+    if (retainedNativeNotifications.length > 20) retainedNativeNotifications.shift();
     noti.on('click', () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show();
-        mainWindow.focus();
+      const index = retainedNativeNotifications.indexOf(noti);
+      if (index >= 0) retainedNativeNotifications.splice(index, 1);
+      // 창이 살아 있고 화면이 다 떴을 때만 이동 신호 — 창을 새로 만드는 중이면 창만 올린다.
+      const ready = !!mainWindow && !mainWindow.isDestroyed() && mainLoadedOk;
+      showMainWindow(); // 최소화·트레이 숨김도 되살린다
+      if (jump && ready && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('notification:native-click', jump);
       }
     });
     noti.show();

@@ -3916,6 +3916,7 @@ function serializeReactionNotification(row: CommentReactionNotificationRow): {
       reactionNotificationId: row.id,
       reactionEmojis: emojis,
       reactionActorId: row.actor_id,
+      reactionActorName: row.actor_name ?? undefined,
       commentId: row.comment_id,
       commentSceneId: row.scene_id ?? undefined,
       commentPartId: row.part_id ?? undefined,

@@ -6,6 +6,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   AtSign,
+  Bell,
+  BellOff,
   Check,
   Copy,
   ExternalLink,
@@ -190,7 +192,7 @@ export const QUICK_REACTIONS: Array<{ emoji: string; label: string }> = [
 export interface CommentMenuItem {
   id: string;
   label: string;
-  icon: 'todo' | 'link' | 'copy' | 'edit' | 'delete';
+  icon: 'todo' | 'link' | 'copy' | 'edit' | 'delete' | 'mute' | 'unmute';
   danger?: boolean;
   /** 이 항목 앞에 구분선. */
   separated?: boolean;
@@ -205,7 +207,43 @@ const MENU_ICONS = {
   copy: Copy,
   edit: Pencil,
   delete: Trash2,
+  mute: BellOff,
+  unmute: Bell,
 } as const;
+
+// ─── 스레드 팔로우 단추(스레드 창 머리) · 씬 알림 종(탭 줄) — §6.4 ───
+
+export function ThreadFollowButton({ preference, onChange }: { preference: 'follow' | 'mute' | null; onChange: (next: 'follow' | 'mute' | null) => void }) {
+  const muted = preference === 'mute';
+  const following = preference === 'follow';
+  return (
+    <button
+      type="button"
+      className={following ? 'cmt-follow is-on' : muted ? 'cmt-follow is-muted' : 'cmt-follow'}
+      aria-pressed={following}
+      title={following ? '이 스레드의 새 글마다 알림을 받아요 — 누르면 꺼요' : muted ? '이 스레드 자동 알림이 꺼져 있어요 — 누르면 켜요' : '이 스레드의 새 글마다 알림 받기'}
+      onClick={() => onChange(following || muted ? null : 'follow')}
+    >
+      {muted ? <BellOff size={11} aria-hidden /> : <Bell size={11} aria-hidden />}
+      {following ? '팔로우 중' : muted ? '알림 꺼짐' : '팔로우'}
+    </button>
+  );
+}
+
+export function SceneAlertBell({ muted, onToggle }: { muted: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className="cmt-icon-btn cmt-scene-bell"
+      aria-pressed={muted}
+      aria-label="이 씬 자동 알림 끄기"
+      title={muted ? '이 씬의 자동 알림(담당·참여한 씬)이 꺼져 있어요 — 누르면 켜요. 나를 부른 알림은 늘 와요.' : '이 씬의 자동 알림(담당·참여한 씬) 끄기 — 나를 부른 알림은 그대로 와요'}
+      onClick={onToggle}
+    >
+      {muted ? <BellOff size={14} aria-hidden /> : <Bell size={14} aria-hidden />}
+    </button>
+  );
+}
 
 export function CommentRowToolbar({
   userName,

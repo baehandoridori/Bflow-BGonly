@@ -208,13 +208,9 @@
    src/components/layout/Header.tsx, 값은 src/utils/notificationArrival.ts). 여기는 상태로 정해지는 전환과 등장만 둔다.
    종 주변 은은한 빛(notification-bell.css)은 그대로. */
 
-/* 알림 창 줄 — 읽으면 왼쪽 막대가 색은 그대로 둔 채 위아래로 접히듯 사라진다(scaleY + opacity 200ms). */
-.bf-noti-unread-bar {
-  transform-origin: 50% 50%;
-  transition: transform 200ms var(--ease-std), opacity 200ms var(--ease-std);
-}
-[data-noti-read="true"] > .bf-noti-unread-bar {
-  transform: scaleY(0);
+/* 알림 창 줄·카드 — v1.148.0(씬 댓글 B안 §9): 왼쪽 막대를 없앴다. 안 읽음은 옅은 배경 + 점, 읽으면 점이 0.18초에 옅어진다
+   (notification-bell.css '.bf-noti-dot'). 읽음 표시는 data-noti-read 로 남긴다(움직임·검사용). */
+[data-noti-read="true"] .bf-noti-dot {
   opacity: 0;
 }
 

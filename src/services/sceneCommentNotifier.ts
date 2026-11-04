@@ -14,7 +14,10 @@
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
-import { getCanonicalRevision } from '@/services/revisionService';
+import { buildSceneKey, getCanonicalRevision } from '@/services/revisionService';
+import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
+import { resolveThreadPreference } from '@/utils/commentThreadFollow';
+import { useCommentThreadFollowStore } from '@/stores/useCommentThreadFollowStore';
 import {
   collectCounterpartAssigneeNames,
   hasUserCommentedOnScene,
@@ -74,6 +77,30 @@ function findScene(comment: NormalizedSceneComment): Scene | null {
   return null;
 }
 
+/**
+ * 씬 대화 키(§6.4 팔로우·끄기) — 씬 상세가 댓글 패널에 넘기는 것과 같은 규칙
+ * (SceneDetailModal: buildSceneThreadKeyFromRevisionKey(buildSceneKey(시트, 씬 번호))).
+ */
+function sceneThreadKeyFor(comment: NormalizedSceneComment, scene: NotificationSceneRef | null): string | null {
+  const ds = useDataStore.getState();
+  for (const ep of ds.episodes) {
+    for (const part of ep.parts) {
+      const match = scene?.id
+        ? part.scenes.find((s) => s.id === scene.id)
+        : part.id === comment.partId && comment.sceneNo != null
+          ? part.scenes.find((s) => Number(s.no) === Number(comment.sceneNo))
+          : undefined;
+      if (!match) continue;
+      try {
+        return buildSceneThreadKeyFromRevisionKey(buildSceneKey(part.sheetName, match.sceneId)) || null;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 function sceneLabel(comment: NormalizedSceneComment, scene: NotificationSceneRef | null): string {
   const ds = useDataStore.getState();
   for (const ep of ds.episodes) {
@@ -110,6 +137,8 @@ function buildDeps(revision: NotificationRevisionRef | null): SceneCommentNotifi
     getRevision: (id) => (revision && revision.id === id ? revision : null),
     userIdByName: (name) => useAuthStore.getState().users.find((u) => u.name === name)?.id ?? null,
     plainText: stripEntityTokens,
+    sceneThreadKey: sceneThreadKeyFor,
+    threadPreference: (ref) => resolveThreadPreference(useCommentThreadFollowStore.getState().prefs, ref),
   };
 }
 
@@ -171,7 +200,7 @@ export function notifyIncomingSceneComment(
       title: decision.title,
       body: decision.body || undefined,
       metadata: decision.metadata,
-    }, settings, { quiet: decision.quiet });
+    }, settings, { quiet: decision.quiet, native: decision.native });
     // 실시간으로 받은 '나를 부른 알림'도 놓친 알림 기준 시각을 옮긴다 — 다음 로그인 때 '놓친 알림 N개'가 거짓으로 뜨지 않게(§6.3).
     if (decision.type === 'mention' && catchUpReadyUserId === me.id) {
       setLastSeenAt(me.id, comment.createdAt || new Date().toISOString());

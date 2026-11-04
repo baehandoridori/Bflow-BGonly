@@ -53,10 +53,77 @@
   box-shadow: 0 0 0 1.5px rgba(255, 107, 107, 0.30), 0 2px 10px rgba(255, 107, 107, 0.55);
 }
 
-/* 멘션 배지 (알림 항목 행 안 '@' 표기) */
-.mention-badge {
-  background: linear-gradient(135deg, rgba(108, 92, 231, 0.25), rgba(108, 92, 231, 0.12));
-  border: 1px solid rgba(108, 92, 231, 0.45);
+/* ═══ 알림 창 카드 — 씬 댓글 B안 §9 (v1.148.0), 시안 docs/superpowers/mockups/2026-11-04-scene-comments-b-plan.html '알림 센터' ═══
+ * 왼쪽 세로 막대·알약·그림자 없음. 안 읽음은 옅은 배경 + 점 하나. 색은 토큰만(라이트는 [data-color-mode="light"]).
+ * 움직임은 배경색 전환 180ms 하나(transform/opacity 외 레이아웃 속성은 움직이지 않는다). */
+:root { --noti-link-rgb: var(--color-accent-sub); }
+/* 밝은 화면은 테마의 액센트 그대로(보라 외 테마에서 버튼·멘션 글자만 보라로 남지 않게) */
+[data-color-mode="light"] { --noti-link-rgb: var(--color-accent); }
+
+.bf-noti-card,
+.bf-noti-row {
+  position: relative;
+  border-radius: 10px;
+  cursor: pointer;
+  outline: none;
+  transition: background-color 180ms var(--ease-std);
+}
+.bf-noti-card { padding: 9px 12px 10px; }
+.bf-noti-card:hover, .bf-noti-row:hover { background: rgb(var(--color-bg-border) / 0.22); }
+.bf-noti-card.is-unread, .bf-noti-row.is-unread { background: rgb(var(--color-accent) / 0.07); }
+.bf-noti-card.is-unread:hover, .bf-noti-row.is-unread:hover { background: rgb(var(--color-accent) / 0.11); }
+.bf-noti-card:focus-visible, .bf-noti-row:focus-visible { box-shadow: inset 0 0 0 2px rgb(var(--color-accent) / 0.55); }
+/* 조용한 카드(반응·읽은 카드)는 한 톤 낮게 — 글자 대비가 무너지지 않게 .8 */
+.bf-noti-card.is-quiet { opacity: 0.8; }
+.bf-noti-card.is-quiet:hover, .bf-noti-card.is-quiet:focus-visible { opacity: 1; }
+
+.bf-noti-card-head { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; font-weight: 700; color: rgb(var(--color-text-primary)); }
+.bf-noti-dot { width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--color-accent)); flex: 0 0 auto; transition: opacity 180ms var(--ease-std); }
+.bf-noti-dot.is-off { opacity: 0; }
+.bf-noti-card-icon { flex: 0 0 auto; color: rgb(var(--color-text-secondary)); display: inline-flex; }
+.bf-noti-card.is-unread .bf-noti-card-icon { color: rgb(var(--noti-link-rgb)); }
+.bf-noti-card-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bf-noti-card-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; color: rgb(var(--color-text-secondary)); }
+.bf-noti-card-meta b { font-weight: 700; color: rgb(var(--noti-link-rgb)); }
+.bf-noti-card-time { margin-left: auto; flex: 0 0 auto; padding-left: 6px; font-size: 10px; font-weight: 500; color: rgb(var(--color-text-secondary) / 0.85); }
+.bf-noti-status { font-weight: 700; color: rgb(var(--color-text-secondary)); }
+.bf-noti-status[data-status='in_progress'] { color: var(--status-combine); }
+.bf-noti-status[data-status='assignee_done'] { color: var(--status-adjust); }
+.bf-noti-status[data-status='resolved'] { color: var(--status-done); }
+.bf-noti-status[data-status='deleted'] { color: var(--status-error); }
+
+.bf-noti-card-preview { margin-top: 4px; display: grid; gap: 2px; padding-left: 13px; }
+.bf-noti-line { font-size: 11px; line-height: 1.45; color: rgb(var(--color-text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bf-noti-line b { color: rgb(var(--color-text-primary)); font-weight: 600; }
+.bf-noti-line .is-mention { color: rgb(var(--noti-link-rgb)); font-weight: 600; }
+.bf-noti-line.is-more { color: rgb(var(--color-text-secondary) / 0.85); }
+
+.bf-noti-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; padding-left: 13px; }
+.bf-noti-btn {
+  font-size: 11px; font-weight: 600; line-height: 1.2; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+  border: 1px solid rgb(var(--color-bg-border)); background: transparent; color: rgb(var(--color-text-secondary));
+  transition: background-color 120ms var(--ease-std), color 120ms var(--ease-std), border-color 120ms var(--ease-std);
+}
+.bf-noti-btn:hover, .bf-noti-btn:focus-visible { color: rgb(var(--color-text-primary)); border-color: rgb(var(--color-text-secondary) / 0.6); outline: none; }
+.bf-noti-btn.is-primary { color: rgb(var(--noti-link-rgb)); border-color: rgb(var(--color-accent) / 0.4); }
+.bf-noti-btn.is-primary:hover, .bf-noti-btn.is-primary:focus-visible { background: rgb(var(--color-accent) / 0.1); color: rgb(var(--noti-link-rgb)); }
+
+/* 지우기 — 카드·줄 오른쪽 위, 마우스를 올리거나 키보드로 들어오면 보인다 */
+.bf-noti-del {
+  position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: 0; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-secondary)); cursor: pointer;
+  opacity: 0; transition: opacity 120ms var(--ease-std), color 120ms var(--ease-std);
+}
+.bf-noti-card:hover .bf-noti-del, .bf-noti-card:focus-within .bf-noti-del,
+.bf-noti-row:hover .bf-noti-del, .bf-noti-row:focus-within .bf-noti-del { opacity: 1; }
+.bf-noti-del:hover, .bf-noti-del:focus-visible { color: var(--status-error); outline: none; }
+.bf-noti-del:focus-visible { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.55); }
+.bf-noti-btn:focus-visible { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.45); }
+/* 지우기 단추가 시각 글자를 가리지 않게 — 보일 때만 시각을 비켜 둔다(투명도만, 자리는 그대로) */
+.bf-noti-card:hover .bf-noti-card-time, .bf-noti-card:focus-within .bf-noti-card-time { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bf-noti-card, .bf-noti-row, .bf-noti-dot, .bf-noti-btn, .bf-noti-del { transition: none; }
 }
 
 /* prefers-reduced-motion — 모든 무한 애니메이션 OFF */

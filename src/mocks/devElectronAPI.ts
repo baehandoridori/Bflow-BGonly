@@ -2855,9 +2855,11 @@ export function installDevElectronAPI(): void {
     onBeforeQuitFlush: noop,
     ...previewUpdater,
 
-    showNativeNotification: async (title: string, body: string) => {
-      console.log(`[DEV 알림] ${title}: ${body}`);
+    showNativeNotification: async (title: string, body: string, jump?: unknown) => {
+      console.log(`[DEV 알림] ${title}: ${body}`, jump ?? '');
     },
+    // 미리보기에는 Windows 알림이 없어 누를 수 없다.
+    onNativeNotificationClick: noop,
 
     // v1.25.0~ 액팅 단계 토글 + 리테이크 알림 (mock — 로그만)
     supabaseUpdateScenePhase: async (sceneUuid, sceneState, workRound, feedbackRound) => {

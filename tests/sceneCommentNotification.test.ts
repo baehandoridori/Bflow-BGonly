@@ -185,3 +185,36 @@ test('놓친 리테이크 댓글 — 메인이 실어 온 리테이크로 같은
     assert.equal(notMine, null);
   });
 });
+
+test('스레드 끄기·팔로우(§6.4) — 끄면 자동 알림만 빠지고 멘션·답글은 그대로, 팔로우는 토스트만 뜨는 댓글 알림', () => {
+  const scene = { id: 's-1', sceneId: 'a001', assignee: ME.name };
+  const withPref = (pref: 'follow' | 'mute' | null, extra: Partial<SceneCommentNotificationDeps> = {}) => deps({
+    findScene: () => scene,
+    sceneThreadKey: () => 'EP05:A:a001',
+    threadPreference: () => pref,
+    ...extra,
+  });
+  // 끄기: 담당 씬 자동 알림은 사라지고
+  assert.equal(decideSceneCommentNotification(comment({}), ME, withPref('mute'), ON), null);
+  // 멘션·답글은 그대로
+  assert.equal(decideSceneCommentNotification(comment({ mentions: [ME.name] }), ME, withPref('mute'), ON)?.reason, 'mention');
+  assert.equal(decideSceneCommentNotification(comment({ parentCommentId: 'root', parentAuthorId: ME.id }), ME, withPref('mute'), ON)?.reason, 'reply');
+  // 팔로우: 대상이 아니어도(담당 아님·설정 꺼짐) 새 글마다, 토스트는 있고 Windows 알림은 없음
+  const follow = decideSceneCommentNotification(comment({}), ME, withPref('follow', { findScene: () => ({ id: 's-1', sceneId: 'a001', assignee: '다른 사람' }) }), { autoNotify: false, retakeNotify: true });
+  assert.equal(follow?.reason, 'follow');
+  assert.equal(follow?.type, 'comment');
+  assert.equal(follow?.quiet, false);
+  assert.equal(follow?.native, false);
+  assert.equal(follow?.metadata.threadKey, 'EP05:A:a001#c1');
+  assert.equal(follow?.metadata.sceneThreadKey, 'EP05:A:a001');
+  // 리테이크 댓글: 대상이 아니면 팔로우일 때만
+  const rev = { id: 'rev', revisionNo: 1, requesterId: 'u-x', assigneeIds: [], notifyUserIds: [] };
+  assert.equal(decideSceneCommentNotification(comment({ revisionId: 'rev' }), ME, withPref(null, { getRevision: () => rev }), ON), null);
+  assert.equal(decideSceneCommentNotification(comment({ revisionId: 'rev' }), ME, withPref('follow', { getRevision: () => rev }), ON)?.reason, 'follow');
+  // 나를 부른 알림은 Windows 알림까지
+  assert.equal(decideSceneCommentNotification(comment({ mentions: [ME.name] }), ME, withPref(null), ON)?.native, true);
+  // 스레드 id 규칙: 답글은 원댓글, 리테이크는 re:
+  let seen: unknown = null;
+  decideSceneCommentNotification(comment({ parentCommentId: 'root' }), ME, withPref(null, { threadPreference: (ref) => { seen = ref.threadId; return null; } }), ON);
+  assert.equal(seen, 'root');
+});
