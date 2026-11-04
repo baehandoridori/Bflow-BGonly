@@ -50,9 +50,12 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
       return true;
     },
   });
+  const outstandingCounts: number[] = [];
   const notifications = { activeUserId: 'me', addNotification: (value: any) => {
     notices.push(value); return `notice-${notices.length}`;
-  }, markAsRead: (id: string) => read.push(id) };
+  }, markAsRead: (id: string) => read.push(id),
+  // v1.146.0(§6.3): 로그인 때 담당 리테이크는 알림 목록이 아니라 알림 창 맨 위 숫자로.
+  setOutstandingRetakeCount: (count: number) => outstandingCounts.push(count) };
   let storeLoads = 0;
   let connectedRevisionMode = true;
   const loadModes: boolean[] = [];
@@ -89,7 +92,7 @@ async function hookHarness(pendingRetakeId: string | null = null, dataConnected 
     '@/utils/notificationHelper': { noteLiveNotificationArrival: () => {}, notificationToastDecor: () => ({}) },
   });
   module.useRetakeNotifications();
-  return { effects, notices, read, navigated, toasts, lookups, auth, app, notifications, revisions, api, loadModes, deliveryFailures,
+  return { effects, notices, read, navigated, toasts, lookups, auth, app, notifications, revisions, api, loadModes, deliveryFailures, outstandingCounts,
     render: () => { effects.length = 0; module.useRetakeNotifications(); },
     broadcast: (value: unknown) => onBroadcast(value), retryUpdates: () => retryUpdates, storeLoads: () => storeLoads };
 }
@@ -217,25 +220,43 @@ test('retake catch-up and reminders respect current recipient, dedupe, read acti
     h.lookups[0].resolve([revision, { ...revision, id: 'done', assigneeStates: { me: { state: 'done' } } },
       { ...revision, id: 'theirs', assigneeIds: ['other'] }, { ...revision, id: 'resolved', status: 'resolved' }]);
     await flush();
-    assert.deepEqual(h.notices.map((item) => item.metadata.revisionId), ['r1']);
+    // v1.146.0(§6.3): 끝내지 않은 내 담당 리테이크는 목록에 넣지 않고 숫자만(지워도 다음 로그인에 되살아나던 문제).
+    assert.deepEqual(h.outstandingCounts, [1]);
+    assert.equal(h.notices.length, 0);
     const reminder = { event: 'retake-reminder', payload: { eventId: 'event1', revisionId: 'r1',
       recipients: ['other'], senderName: 'Requester', description: 'Check progress', createdAt: revision.createdAt } };
     h.broadcast(reminder);
-    assert.equal(h.notices.length, 1);
+    assert.equal(h.notices.length, 0);
     reminder.payload.recipients = ['me'];
     h.broadcast(reminder); h.broadcast(reminder);
-    assert.equal(h.notices.length, 2); assert.equal(h.toasts.length, 1);
+    assert.equal(h.notices.length, 1); assert.equal(h.toasts.length, 1);
     h.toasts[0][1].action.onClick();
-    assert.deepEqual(h.read, ['notice-2']); assert.deepEqual(h.navigated, ['r1']);
+    assert.deepEqual(h.read, ['notice-1']); assert.deepEqual(h.navigated, ['r1']);
     cleanup?.(); cleanup = h.effects[0]();
     h.auth.currentUser = { id: 'second', name: 'Second' }; h.notifications.activeUserId = 'second';
     h.lookups[1].resolve([revision]); await flush();
     h.broadcast({ ...reminder, payload: { ...reminder.payload, eventId: 'event2' } });
     h.toasts[0][1].action.onClick();
-    assert.equal(h.notices.length, 2);
-    assert.deepEqual(h.read, ['notice-2'], 'old toast cannot change the next user notification state');
+    assert.equal(h.notices.length, 1);
+    assert.deepEqual(h.read, ['notice-1'], 'old toast cannot change the next user notification state');
     assert.deepEqual(h.navigated, ['r1']);
   } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
+});
+
+test('outstanding count follows the loaded list and drops to zero when the last assignment is deleted', async () => {
+  const h = await hookHarness();
+  const countEffect = () => h.effects[h.effects.length - 1]();
+  // 아직 못 불러온 빈 목록 — 서버로 센 숫자를 지우지 않는다.
+  countEffect();
+  assert.deepEqual(h.outstandingCounts, []);
+  (h.revisions as any).lastLoadTime = 1;
+  h.revisions.revisions = [revision];
+  h.render(); countEffect();
+  assert.deepEqual(h.outstandingCounts, [1]);
+  // 마지막 담당 리테이크를 지웠다(불러온 뒤의 빈 목록) — 0 으로.
+  h.revisions.revisions = [];
+  h.render(); countEffect();
+  assert.deepEqual(h.outstandingCounts, [1, 0]);
 });
 
 test('new assignee broadcasts show assignment text, dedupe each event, and keep repeated assignments distinct', async () => {
@@ -273,8 +294,9 @@ test('catch-up includes assignments beyond 1000 older revisions', async () => {
       createdAt: new Date(Date.parse(revision.createdAt) + i * 1000).toISOString() }));
     assert.equal(h.lookups[0].revisionId, undefined, 'catch-up uses the complete canonical list');
     h.lookups[0].resolve(rows); await flush();
-    assert.equal(h.notices.length, 50);
-    assert.equal(h.notices.at(-1).metadata.revisionId, 'revision-1100');
+    // 숫자는 1000개 넘는 목록도 끝까지 센다(예전 50개 자르기 없음), 목록에는 넣지 않는다.
+    assert.deepEqual(h.outstandingCounts, [1101]);
+    assert.equal(h.notices.length, 0);
   } finally { cleanup?.(); (globalThis as any).window = previousWindow; }
 });
 

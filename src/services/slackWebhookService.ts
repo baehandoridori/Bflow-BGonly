@@ -3,27 +3,15 @@
  * 댓글 @멘션 시 멘션된 팀원에게 슬랙 워크플로 알림 전송
  */
 
-export function formatKoreanTime(date: Date): string {
-  const utc = date.getTime() + date.getTimezoneOffset() * 60000;
-  const kst = new Date(utc + 9 * 3600000);
-  const days = ['일', '월', '화', '수', '목', '금', '토'];
-  return `${kst.getMonth() + 1}월 ${kst.getDate()}일 ${days[kst.getDay()]}요일 ${kst.getHours()}시 ${kst.getMinutes()}분`;
-}
+import {
+  buildMentionWebhookPayloads,
+  mergeMentionDeliveryRetry,
+  type MentionDeliveryResult,
+  type MentionWebhookUser,
+} from '../utils/mentionWebhookPayloads.ts';
 
-interface MentionWebhookParams {
-  commentText: string;
-  episodeLabel: string;
-  sceneId: string;
-  partLabel: string;
-  sheetName: string;
-  authorSlackId: string;
-  targetSlackId: string;
-}
-
-/** bflow:// 딥링크 URL 생성 */
-export function buildDeepLink(sheetName: string, sceneId: string): string {
-  return `bflow://scene/${encodeURIComponent(sheetName)}/${encodeURIComponent(sceneId)}`;
-}
+export type { MentionDeliveryResult } from '../utils/mentionWebhookPayloads.ts';
+import { stripEntityTokens } from '../utils/entityTokens.ts';
 
 interface RiggingAnnounceParams {
   /** 공지 제목(title). 템플릿 버튼으로 채우거나 직접 입력. 비우면 빈 문자열. */
@@ -88,23 +76,119 @@ export async function sendRiggingAnnounce(params: RiggingAnnounceParams): Promis
   return window.electronAPI.sendRiggingWebhook(payload);
 }
 
-export async function sendMentionWebhook(params: MentionWebhookParams): Promise<void> {
-  const { commentText, episodeLabel, sceneId, partLabel, sheetName, authorSlackId, targetSlackId } = params;
-  try {
-    const deepLink = buildDeepLink(sheetName, sceneId);
-    console.log('[SlackWebhook] 전송 시도:', { episodeLabel, sceneId, deepLink, authorSlackId, targetSlackId });
-    const result = await window.electronAPI.sendSlackWebhook({
-      comment: commentText,
-      EP: episodeLabel,
-      time: formatKoreanTime(new Date()),
-      scene: sceneId,
-      name_my: authorSlackId,
-      name_target: targetSlackId,
-      part: partLabel,
-      deep_link: deepLink,
-    });
-    console.log('[SlackWebhook] 전송 성공:', result);
-  } catch (err) {
-    console.error('[SlackWebhook] 전송 실패:', err);
+export interface NotifyMentionsInput {
+  comment: { text: string; images?: readonly string[] | null; mentions: readonly string[] };
+  /** 댓글이 저장된 시트(예 'EP05_A_BG')와 scene.no — 바로가기 주소. */
+  sheetName: string;
+  sceneNo: string;
+  /** 사람이 읽는 씬 번호('a001'). */
+  sceneLabel?: string | null;
+  me: MentionWebhookUser;
+  users: readonly MentionWebhookUser[];
+  /** 멘션 말고 더 보낼 사람(리테이크 댓글의 요청자). 답글 상대는 넣지 않는다(한솔 결정 2026-11-04). */
+  extraTargetIds?: readonly string[];
+  /** '다시 보내기' — 이 사람들에게만 보낸다(처음에 실패한 사람). */
+  onlyTargetIds?: readonly string[];
+}
+
+/**
+ * 댓글 슬랙 알림 — 본문 입력칸·스레드 창·리테이크 카드 입력칸이 모두 이것만 부른다(씬 댓글 B안 §6.2).
+ * 받는 사람: 본문에 직접 부른 @이름 + extraTargetIds. 작성자 슬랙 ID 가 없어도 받는 사람에게는 보낸다.
+ * 실패를 조용히 삼키지 않고 결과로 돌려준다.
+ */
+export async function notifyMentionsForComment(input: NotifyMentionsInput): Promise<MentionDeliveryResult> {
+  const byName = new Map(input.users.map((user) => [user.name, user]));
+  const byId = new Map(input.users.map((user) => [user.id, user]));
+  const targets: MentionWebhookUser[] = [];
+  for (const name of input.comment.mentions) {
+    const user = byName.get(name);
+    if (user) targets.push(user);
   }
+  for (const id of input.extraTargetIds ?? []) {
+    const user = byId.get(id);
+    if (user) targets.push(user);
+  }
+  const only = input.onlyTargetIds ? new Set(input.onlyTargetIds) : null;
+  const plan = buildMentionWebhookPayloads({
+    comment: input.comment,
+    sheetName: input.sheetName,
+    sceneNo: input.sceneNo,
+    sceneLabel: input.sceneLabel,
+    me: input.me,
+    targets: only ? targets.filter((user) => only.has(user.id)) : targets,
+    plainText: stripEntityTokens,
+  });
+  const result: MentionDeliveryResult = {
+    targets: plan.payloads.length + plan.missing.length,
+    sent: 0,
+    failed: 0,
+    failedIds: [],
+    missing: plan.missing,
+  };
+  const send = window.electronAPI?.sendSlackWebhook;
+  // 받는 사람 모두에게 한꺼번에 보낸다(코덱스 5차) — 메인은 요청마다 그 순간의 로그인 세션을 붙잡으므로,
+  //   한 명씩 기다리며 보내면 그 사이 로그아웃·계정 전환이 있을 때 나머지가 새 사람의 세션으로 나갔다.
+  //   모두 지금 보내면 모두 이 댓글을 쓴 사람의 세션으로 나간다(예전처럼).
+  const outcomes = await Promise.allSettled(plan.payloads.map(({ payload }) => (
+    send ? send(payload) : Promise.reject(new Error('슬랙 전송을 쓸 수 없어요'))
+  )));
+  outcomes.forEach((outcome, index) => {
+    const { target } = plan.payloads[index];
+    if (outcome.status === 'fulfilled') {
+      result.sent += 1;
+      return;
+    }
+    result.failed += 1;
+    result.failedIds.push(target.id);
+    console.error('[SlackWebhook] 댓글 알림 전송 실패', { target: target.name, err: outcome.reason });
+  });
+  return result;
+}
+
+/** 말풍선 아래 슬랙 상태 한 칸 — 결과·보내는 중·다시 보내기. */
+export interface MentionDeliveryEntry {
+  result: MentionDeliveryResult;
+  sending: boolean;
+  retry: () => void;
+}
+
+/**
+ * 슬랙 보내기 + '다시 보내기'를 한 벌로(본문 입력칸·스레드 창·리테이크 카드가 같이 쓴다).
+ * 다시 보내기는 처음에 실패한 사람에게만 보내고(받은 사람에게 두 번 가지 않게), 보내는 중에는 다시 눌러도 무시한다.
+ * 보낼 사람이 없으면 onUpdate 를 부르지 않는다.
+ */
+export function startMentionDelivery(
+  input: NotifyMentionsInput,
+  onUpdate: (entry: MentionDeliveryEntry) => void,
+): void {
+  let current: MentionDeliveryResult | null = null;
+  let sending = false;
+  const retry = () => {
+    if (sending || !current || current.failedIds.length === 0) return;
+    run(current.failedIds);
+  };
+  const run = (onlyTargetIds?: readonly string[]) => {
+    sending = true;
+    if (current) onUpdate({ result: current, sending: true, retry });
+    void notifyMentionsForComment({ ...input, onlyTargetIds }).then((result) => {
+      current = current ? mergeMentionDeliveryRetry(current, result) : result;
+    }).catch((err) => {
+      console.error('[SlackWebhook] 댓글 알림 전송 실패', err);
+    }).finally(() => {
+      sending = false;
+      if (current && current.targets > 0) onUpdate({ result: current, sending: false, retry });
+    });
+  };
+  run();
+}
+
+/** 말풍선 아래 한 줄 — 보낼 사람이 없으면 null. */
+export function describeMentionDelivery(result: MentionDeliveryResult | null | undefined): { text: string; failed: boolean } | null {
+  if (!result || result.targets === 0) return null;
+  if (result.failed > 0) return { text: '슬랙 전송 실패', failed: true };
+  if (result.sent === 0) return { text: result.missing.length === 1 ? '슬랙 ID 가 없어 슬랙으로는 못 보냈어요' : `${result.missing.length}명은 슬랙 ID 가 없어 못 보냈어요`, failed: false };
+  return {
+    text: result.missing.length > 0 ? `슬랙 전달됨 · ${result.missing.length}명은 슬랙 ID 없음` : '슬랙 전달됨',
+    failed: false,
+  };
 }

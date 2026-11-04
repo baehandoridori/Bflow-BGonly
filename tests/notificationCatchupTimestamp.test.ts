@@ -10,7 +10,8 @@ test('catch-up notifications preserve source timestamps in the notification pane
   assert.match(store, /createdAt:\s*n\.createdAt\s*\?\?\s*new Date\(\)\.toISOString\(\)/);
   assert.match(store, /addNotification:\s*\(n:\s*NotificationDraft\) => string;/);
 
-  assert.match(app, /type:\s*'mention'[\s\S]*?createdAt:\s*c\.createdAt[\s\S]*?metadata:/);
+  // v1.146.0(§6.1): 놓친 멘션도 실시간과 같은 판정 함수로 제목·종류를 만들고, 시각은 원래 댓글 시각.
+  assert.match(app, /type:\s*decision\.type[\s\S]*?createdAt:\s*c\.createdAt[\s\S]*?metadata:/);
   assert.match(app, /type:\s*'acting_feedback'[\s\S]*?createdAt:\s*m\.createdAt[\s\S]*?metadata:/);
   assert.match(app, /type:\s*'scene_assignment'[\s\S]*?createdAt:\s*m\.createdAt[\s\S]*?metadata:/);
 });

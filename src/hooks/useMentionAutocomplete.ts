@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent, RefObject } from 'react';
 import { detectMentionQuery, applyMention } from '@/utils/mentionQuery';
 
-interface MentionUser { id: string; name: string }
+interface MentionUser { id: string; name: string; slackId?: string | null }
 
 interface Params {
   /** 멘션 선택 시 부모 입력 state 를 갱신하는 콜백 */

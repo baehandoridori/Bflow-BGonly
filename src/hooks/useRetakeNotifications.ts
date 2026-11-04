@@ -9,6 +9,22 @@ import { noteLiveNotificationArrival, notificationToastDecor } from '@/utils/not
 import { toast } from 'sonner';
 import type { RetakeDeliveryEvent, RetakeReminderPayload } from '@/shared/retakeNotifications';
 
+/** 아직 끝내지 않은 내 담당 리테이크(요청자 본인 것 제외). 알림 창 맨 위 '담당 리테이크 N건' 의 기준. */
+/** '허브 열기'가 갈 화면 — 세트 없는 리테이크는 리테이크 허브에 안 보이므로 하나라도 있으면 리테이크 보드로. */
+function outstandingRetakeViewFor(revisions: ReadonlyArray<{ setId?: string | null }>): 'retake-hub' | 'compositing-revisions' {
+  return revisions.length > 0 && revisions.every((revision) => !!revision.setId) ? 'retake-hub' : 'compositing-revisions';
+}
+
+function isOutstandingRetakeFor(
+  revision: { status?: string; finalResolvedAt?: string | null; assigneeIds?: string[] | null; assigneeStates?: Record<string, { state?: string } | undefined> | null; requesterId?: string },
+  userId: string,
+): boolean {
+  return revision.status !== 'resolved' && !revision.finalResolvedAt
+    && !!revision.assigneeIds?.includes(userId)
+    && revision.assigneeStates?.[userId]?.state !== 'done'
+    && revision.requesterId !== userId;
+}
+
 /** Login catch-up reads canonical outstanding assignments; delivery events stay user-scoped. */
 export function useRetakeNotifications(): void {
   const currentUser = useAuthStore((s) => s.currentUser);
@@ -18,7 +34,10 @@ export function useRetakeNotifications(): void {
   const retakeRequest = useAppStore((s) => s.retakeNavigationRequest);
   const localRevisions = useRevisionStore((s) => s.revisions);
   const revisionsLoading = useRevisionStore((s) => s.isLoading);
+  /** 목록을 한 번이라도 제대로 불러왔나 — 불러온 뒤의 빈 목록(마지막 리테이크를 지움)이면 0 으로 센다. */
+  const revisionsLoadedAt = useRevisionStore((s) => s.lastLoadTime);
   const seenReminders = useRef(new Set<string>());
+
   const [retryAttempt, setRetryAttempt] = useState(0);
 
   useEffect(() => {
@@ -32,20 +51,9 @@ export function useRetakeNotifications(): void {
     if (dataConnected) void getCanonicalRevisions().then((revisions) => {
       if (cancelled || useAuthStore.getState().currentUser?.id !== userId
         || useNotificationStore.getState().activeUserId !== userId) return;
-      const outstanding = revisions.filter((revision) =>
-        revision.status !== 'resolved' && !revision.finalResolvedAt
-        && revision.assigneeIds?.includes(userId)
-        && revision.assigneeStates?.[userId]?.state !== 'done'
-        && revision.requesterId !== userId,
-      ).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-50);
-      for (const revision of outstanding) {
-        useNotificationStore.getState().addNotification({
-          type: 'revision', title: '담당 리테이크를 확인해주세요',
-          body: revision.description,
-          createdAt: revision.createdAt,
-          metadata: { revisionId: revision.id, revisionAction: 'add', retakeHubSetId: revision.setId ?? undefined },
-        });
-      }
+      const outstanding = revisions.filter((revision) => isOutstandingRetakeFor(revision, userId));
+      // v1.146.0(§6.3): 알림 목록에 넣지 않고 알림 창 맨 위 한 줄로만 보인다(지워도 다음 로그인에 되살아나던 문제).
+      useNotificationStore.getState().setOutstandingRetakeCount(outstanding.length, outstandingRetakeViewFor(outstanding));
     }).catch((error) => { if (!cancelled) console.warn('[retake catch-up] 조회 실패', error); });
     const unsubscribe = window.electronAPI?.onSupabaseBroadcast?.((raw: unknown) => {
       const event = raw as { event?: string; payload?: RetakeReminderPayload | RetakeDeliveryEvent } | null;
@@ -135,4 +143,18 @@ export function useRetakeNotifications(): void {
     const revision = localRevisions.find((item) => item.id === retakeRequest.revisionId);
     if (revision) useAppStore.getState().finishRetakeNavigation(retakeRequest.id, revision);
   }, [retakeRequest, localRevisions, revisionsLoading, authReady, currentUser?.id, dataConnected]);
+
+  // 담당 리테이크를 끝내거나 새로 받으면 알림 창 맨 위 숫자도 바로 맞춘다(로그인 때 서버로 한 번 센 뒤로는 스토어 기준).
+  useEffect(() => {
+    if (!currentUser?.id) {
+      useNotificationStore.getState().setOutstandingRetakeCount(0);
+      return;
+    }
+    if (revisionsLoading) return;
+    if (useNotificationStore.getState().activeUserId !== currentUser.id) return;
+    // 아직 불러오지 못한 빈 목록은 건너뛰고(로그인 때 서버로 센 숫자를 지우지 않게), 불러온 뒤 빈 목록이면 0(코덱스 3차).
+    if (localRevisions.length === 0 && revisionsLoadedAt == null) return;
+    const outstanding = localRevisions.filter((revision) => isOutstandingRetakeFor(revision, currentUser.id));
+    useNotificationStore.getState().setOutstandingRetakeCount(outstanding.length, outstandingRetakeViewFor(outstanding));
+  }, [localRevisions, revisionsLoading, revisionsLoadedAt, currentUser?.id]);
 }

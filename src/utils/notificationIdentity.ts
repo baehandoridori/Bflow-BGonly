@@ -31,6 +31,11 @@ export function getNotificationIdentity(notification: NotificationIdentityInput)
   if (calendarNotificationId) return `calendar:${calendarNotificationId}`;
 
   const commentId = asNonEmptyString(metadataField(metadata, 'commentId'));
+  // v1.146.0: 댓글을 고치면서 새로 넣은 @ 는 그 댓글의 예전 알림(예: 조용한 자동 알림)과 따로 센다 — 합쳐져 토스트가 사라지지 않게.
+  const mentionEditAt = asNonEmptyString(metadataField(metadata, 'mentionEditAt'));
+  if (type === 'mention' && commentId && mentionEditAt) {
+    return `scene_comment:${commentId}:edit:${mentionEditAt}`;
+  }
   if ((type === 'comment' || type === 'mention') && commentId) {
     return `scene_comment:${commentId}`;
   }

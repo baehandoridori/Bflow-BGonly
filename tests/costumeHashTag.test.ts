@@ -87,11 +87,14 @@ test('피드백 49: 조용한 재조회가 끝난 뒤 딥링크를 소비 + 알�
   assert.match(board, /const boardLoading = useCharacterBoardStore\(\(s\) => s\.loading\)/);
   assert.match(board, /if \(!pendingCharacterBoardRequest \|\| !loaded \|\| boardLoading\) return;/);
   // 멘션 슬랙 알림은 저장 원문이 아니라 '#라벨' 평문으로 나간다.
+  //   v1.146.0(§6.2): 슬랙 조립은 공용 함수 하나 — 태그를 뺀 글(plainText: stripEntityTokens)로 만든다.
   const panel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf8');
   assert.doesNotMatch(panel, /commentText: comment\.text,/);
-  assert.match(panel, /commentText: stripEntityTokens\(comment\.text\)/);
+  assert.match(panel, /startMentionDelivery\(\{/);
   const revisionThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
-  assert.match(revisionThread, /commentText: stripEntityTokens\(newComment\.text\)/);
+  assert.match(revisionThread, /startMentionDelivery\(\{/);
+  const slack = readFileSync('src/services/slackWebhookService.ts', 'utf8');
+  assert.match(slack, /plainText: stripEntityTokens,/);
   // 모달 안 클릭도 같은 게이트를 쓴다 — 재조회 중 클릭은 보류했다가 끝난 뒤 판정 (코덱스 6차 P2).
   const modal = readFileSync('src/components/characters/CharacterDetailModal.tsx', 'utf8');
   assert.match(modal, /const boardLoading = useCharacterBoardStore\(\(s\) => s\.loading\)/);

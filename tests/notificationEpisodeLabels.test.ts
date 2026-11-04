@@ -39,11 +39,12 @@ test('notification scene display label keeps a stable fallback when title is mis
 });
 
 test('revision comment notifications prefer uuid scene labels over numeric comment sort ids', () => {
-  const app = readFileSync('src/App.tsx', 'utf8');
-  const uuidLabelIndex = app.indexOf('if (sceneByUuid?.sceneId) return sceneByUuid.sceneId;');
-  const sceneKeyLabelIndex = app.indexOf('const sceneKeyLabel = buildNotificationSceneDisplayLabelFromSceneKey');
-
-  assert.ok(uuidLabelIndex > -1);
-  assert.ok(sceneKeyLabelIndex > -1);
-  assert.ok(uuidLabelIndex < sceneKeyLabelIndex);
+  // v1.146.0(§6.1): 씬 댓글 알림(리테이크 댓글 포함)은 씬 UUID 로 먼저 찾고, 위치는 'EP05 a001'(씬 번호, 정렬 번호 아님).
+  const notifier = readFileSync('src/services/sceneCommentNotifier.ts', 'utf8');
+  const uuidIndex = notifier.indexOf('const byUuid = ds.findSceneByUuid(comment.sceneUuid);');
+  const sortOrderIndex = notifier.indexOf('const targetNo = Number(comment.sceneNo);');
+  assert.ok(uuidIndex > -1);
+  assert.ok(sortOrderIndex > -1);
+  assert.ok(uuidIndex < sortOrderIndex);
+  assert.match(notifier, /return scene\?\.sceneId \? `\$\{epLabel\} \$\{scene\.sceneId\}` : epLabel;/);
 });

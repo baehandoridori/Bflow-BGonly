@@ -32,6 +32,9 @@ export function getNotificationSceneActionLabel(
   type: NotificationType | string,
   metadata?: Record<string, unknown> | null,
 ): string {
+  // v1.146.0(§6.1): 리테이크 댓글 알림도 '나를 부른 알림'(mention) 이다 — 리테이크 탭의 그 댓글로 간다.
+  if (type === 'mention' && asString(metadataValue(metadata, 'revisionId'))) return '리테이크 댓글';
+  if (type === 'mention' && asString(metadataValue(metadata, 'characterId'))) return '캐릭터 보기';
   if (type === 'comment' || type === 'mention' || type === 'comment_reaction') return '댓글 보기';
   if (type === 'revision' && asString(metadataValue(metadata, 'revisionAction')) === 'comment') return '리테이크 댓글';
   if (type === 'revision') return '리테이크 확인하기';
@@ -62,6 +65,16 @@ export function navigateNotificationToScene(
     } catch {
       /* 세트 스토어 미로드 — 허브 진입 후 자동 로드/선택 */
     }
+    return { attempted: true, matched: true, openedModal: false };
+  }
+
+  // v1.146.0(§6.1): 캐릭터 댓글 멘션 — 캐릭터 현황판의 그 캐릭터 상세로.
+  const characterId = asString(metadataValue(metadata, 'characterId'));
+  if (characterId && !hasSceneTargetHint(metadata)) {
+    const app = useAppStore.getState();
+    app.pushNavigationBackTarget();
+    app.setPendingCharacterBoardRequest({ characterId });
+    app.setView('character-board');
     return { attempted: true, matched: true, openedModal: false };
   }
 

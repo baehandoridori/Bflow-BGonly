@@ -153,13 +153,18 @@ export interface UserPreferences {
 
   // 알림 설정
   notifications?: {
-    sceneChange?: boolean;      // 내 씬 변경 알림 (기본 true)
-    commentNotify?: boolean;    // 내 씬 댓글 알림 (기본 true)
-    syncComplete?: boolean;     // 동기화 완료 알림 (기본 false)
-    sound?: boolean;            // 알림 소리 (추후 구현)
+    /** v1.146.0: 내 씬 자동 알림 — 담당 씬 댓글·단계 변경(조용함). 기본 true. */
+    sceneAuto?: boolean;
+    /** v1.146.0: 리테이크 알림 — 등록·진행·해결·리테이크 댓글. 기본 true. */
+    retake?: boolean;
+    /** v1.146.0: 반응 알림. 기본 false. */
+    reaction?: boolean;
+    /** @deprecated v1.146.0 — 읽을 때 sceneAuto 로 옮긴다(resolveNotificationSettings). */
+    sceneChange?: boolean;
+    /** @deprecated v1.146.0 — 읽을 때 sceneAuto 로 옮긴다(resolveNotificationSettings). */
+    commentNotify?: boolean;
     osNotification?: boolean;   // OS 네이티브 알림 (기본 true)
     toastPosition?: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
-    toastDuration?: number;     // ms (3000 | 5000 | 7000 | 10000)
     slackWebhookUrl?: string;   // Slack 웹훅 URL (추후 연동)
   };
 

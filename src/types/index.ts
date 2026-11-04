@@ -1398,6 +1398,13 @@ export interface ElectronAPI extends CalendarApiInputContract {
     mentions: string[];
     createdAt: string;
     editedAt?: string | null;
+    images?: string[];
+    revisionId?: string | null;
+    parentCommentId?: string | null;
+    /** v1.146.0: 내 댓글에 달린 답글이면 내 id(멘션이 없어도 '답글' 알림으로 복원). */
+    parentAuthorId?: string | null;
+    /** v1.146.0: 내가 요청자·담당자·알림 대상인 리테이크의 댓글이면 그 리테이크('리테이크' 알림으로 복원). */
+    revision?: { id: string; revisionNo: number | null; requesterId: string | null; assigneeIds: string[]; notifyUserIds: string[] } | null;
   }>>;
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string, images?: string[], revisionId?: string | null, parentCommentId?: string | null, characterId?: string | null, costumeId?: string | null) => Promise<void>;
   supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) => Promise<void>;
