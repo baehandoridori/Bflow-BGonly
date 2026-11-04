@@ -345,7 +345,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const next = list.filter((n) => {
       const identity = getNotificationIdentity(n);
       if (!identity) return true;
-      if (identity === `scene_comment:${commentId}`) return false;
+      if (identity === `scene_comment:${commentId}` || identity.startsWith(`scene_comment:${commentId}:edit:`)) return false;
       return !(identity.startsWith('revision_comment:') && identity.endsWith(`:${commentId}`));
     });
     if (next.length === list.length) return;

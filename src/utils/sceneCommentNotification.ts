@@ -161,7 +161,12 @@ export function decideSceneCommentNotification(
   });
 
   // 수정으로 새로 넣은 @이름 — 그 사람에게만 멘션 알림. 답글·자동 알림은 처음 쓸 때 이미 판정했다.
-  if (isEdit) return isMentioned ? decision('mention', `${author}님이 나를 태그했습니다`) : null;
+  //   알림 정체성을 따로 잡도록 수정 시각을 싣는다(utils/notificationIdentity.ts).
+  if (isEdit) {
+    return isMentioned
+      ? decision('mention', `${author}님이 나를 태그했습니다`, { mentionEditAt: comment.createdAt ?? 'edit' })
+      : null;
+  }
 
   if (comment.revisionId) {
     // 리테이크 댓글 — 일반 댓글 자동 알림(담당·참여자)과 섞지 않는다(예전과 같게).

@@ -140,3 +140,13 @@ test('세 길(실시간 행·추가 방송·수정 방송)이 같은 모양으�
   assert.equal(edit?.kind, 'edit');
   assert.deepEqual(edit?.addedMentions, ['b']);
 });
+
+test('수정으로 넣은 멘션은 그 댓글의 예전 알림과 따로 센다(정체성에 수정 시각)', async () => {
+  const { getNotificationIdentity } = await import('../src/utils/notificationIdentity.ts');
+  const add = decideSceneCommentNotification(comment({ mentions: [] }), ME, deps({ findScene: () => ({ id: 's-1', sceneId: 'a001', assignee: ME.name }) }), ON);
+  const edit = decideSceneCommentNotification(comment({ kind: 'edit', mentions: [ME.name], addedMentions: [ME.name], createdAt: '2026-11-04T02:00:00Z' }), ME, deps(), ON);
+  const a = getNotificationIdentity({ type: add!.type, metadata: add!.metadata });
+  const e = getNotificationIdentity({ type: edit!.type, metadata: edit!.metadata });
+  assert.equal(a, 'scene_comment:c1');
+  assert.equal(e, 'scene_comment:c1:edit:2026-11-04T02:00:00Z');
+});
