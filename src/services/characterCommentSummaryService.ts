@@ -1,4 +1,4 @@
-import { COMMENT_READ_STATE_EVENT, getCommentReadStateForUser, isCommentKeyUnread } from './commentReadStateService';
+import { COMMENT_READ_STATE_EVENT, getCommentReadStateForUser, isCommentKeyUnread, peekCommentReadStateForUser } from './commentReadStateService';
 import { CHARACTER_COMMENT_SUMMARY_MAX_IDS, type CharacterCommentSummaries } from '../shared/characterCommentSummary';
 
 export interface CharacterCommentBadgeState { count: number; seen: boolean }
@@ -32,6 +32,8 @@ export class CharacterCommentSummaryCache {
     private readonly readStates: (userId: string) => Promise<Record<string, string>>,
     private readonly now: () => number = Date.now,
     private readonly retryDelaysMs: readonly number[] = [1_000, 3_000],
+    /** 캐시에 있는 읽음 상태(서버에 묻지 않음) — 이 창에서 읽음 처리한 직후 신호에 쓴다. */
+    private readonly peekStates?: (userId: string) => Record<string, string>,
   ) {}
 
   subscribe(characterId: string, userId: string, connected: boolean, listener: Listener, events: EventTarget = window): () => void {
@@ -189,8 +191,9 @@ export class CharacterCommentSummaryCache {
   }
 
   private onCommentsChanged = (event: Event): void => {
-    const detail = (event as CustomEvent<{ characterId?: string; sheetName?: string }>).detail;
-    if (detail?.sheetName && !detail.characterId) return;
+    const detail = (event as CustomEvent<{ characterId?: string; sheetName?: string; sheetNames?: string[]; partIds?: string[]; unresolvedDelete?: boolean }>).detail;
+    // 씬 댓글 신호(시트·파트가 적힌 것)는 캐릭터 배지와 무관하다. 어디 것인지 모르는 삭제는 캐릭터 댓글일 수 있어 아래로(전체 다시 보기).
+    if ((detail?.sheetName || detail?.sheetNames?.length || detail?.partIds?.length) && !detail.characterId) return;
     const ids = detail?.characterId ? [detail.characterId] : [...new Set([...this.entries.keys(), ...this.listeners.keys(), ...this.inFlight])];
     for (const id of ids) {
       this.versions.set(id, (this.versions.get(id) ?? 0) + 1);
@@ -202,8 +205,16 @@ export class CharacterCommentSummaryCache {
   };
 
   private onReadStateChanged = (event: Event): void => {
-    const userId = (event as CustomEvent<{ userId?: string }>).detail?.userId;
+    const detail = (event as CustomEvent<{ userId?: string; source?: 'local' | 'server' }>).detail;
+    const userId = detail?.userId;
     if (userId && userId !== this.userId) return;
+    // 이 창에서 방금 읽음 처리했으면 새 값이 이미 캐시에 있다 — 서버에 다시 묻지 않는다(v1.145.0).
+    if (detail?.source === 'local' && this.peekStates && this.readReady && !this.reading) {
+      ++this.readVersion;
+      this.readState = this.peekStates(this.userId);
+      this.emit();
+      return;
+    }
     this.clearReadRetry();
     ++this.readVersion; this.readDirty = true;
     this.schedule(0);
@@ -217,6 +228,9 @@ const sharedCache = new CharacterCommentSummaryCache(
     return read(ids);
   },
   (userId) => getCommentReadStateForUser(userId, { throwOnReadError: true }),
+  Date.now,
+  [1_000, 3_000],
+  (userId) => peekCommentReadStateForUser(userId),
 );
 
 export function subscribeCharacterCommentSummary(characterId: string, userId: string, connected: boolean, listener: Listener): () => void {

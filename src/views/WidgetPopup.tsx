@@ -44,7 +44,7 @@ import { readAll, readAllWithMetadata, checkConnection, getSupabaseRealtimeStatu
 import { episodeLabelsFromMetadata } from '@/utils/loadedMetadata';
 import { createAutoSyncScheduler, POPUP_WINDOW_SYNC_INTERVALS } from '@/utils/autoSyncScheduler';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
-import { invalidatePartCache } from '@/services/commentService';
+import { applyCommentBroadcast, applyRealtimeCommentPayload, invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { checkVacationConnection, connectVacation, resolveVacationConnection } from '@/services/vacationService';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
@@ -694,8 +694,9 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         return;
       }
 
+      // v1.145.0: 댓글 하나 때문에 이 창의 댓글 캐시를 통째로 비우지 않는다 — 받은 행만 끼워 넣기·바꾸기·빼기.
       if (table === 'comments') {
-        invalidatePartCache();
+        applyRealtimeCommentPayload(payload);
         return;
       }
 
@@ -726,6 +727,10 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       requestReload();
     });
     const cleanupRealtimeStatus = installPopupRealtimeCalendarReconnectCatchUp();
+    // v1.145.0: 본 창과 같게 — 실시간이 끊겼다 다시 붙으면 놓친 댓글을 위해 댓글 캐시를 한 번 비운다.
+    const cleanupCommentReconnect = window.electronAPI?.onSupabaseStatus?.((status: string, metadata?: { reconnected?: boolean }) => {
+      if (status === 'SUBSCRIBED' && metadata?.reconnected === true) invalidatePartCache();
+    });
 
     // Supabase Broadcast: 즉시 동기화 (Publication 설정 불필요)
     const cleanupBroadcast = window.electronAPI?.onSupabaseBroadcast?.((raw: unknown) => {
@@ -759,8 +764,15 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         void applyIncomingSupabaseCalendarChangeInPopup(raw);
         return;
       }
+      // v1.145.0: 댓글 방송도 본 창과 같이 캐시만 고친다(실시간 이벤트와 겹쳐 와도 한 번만 바뀐다).
+      if (data.event === 'comment-added' || data.event === 'comment-updated' || data.event === 'comment-deleted') {
+        applyCommentBroadcast(data.event, data.payload);
+        return;
+      }
       if (data.event === 'data-change') {
         const table = data.payload?.table;
+        // 예전 버전이 댓글 수정·삭제 때 보내는 신호 — 씬 전체를 다시 받지 않는다(실시간 이벤트로 그 댓글만 고친다).
+        if (table === 'comments') return;
         if (table === 'comp_revisions') {
           window.dispatchEvent(new Event('bflow:revisions-invalidated'));
           return;
@@ -784,6 +796,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       cleanupSnapshot?.();
       cleanupRealtime?.();
       cleanupRealtimeStatus?.();
+      cleanupCommentReconnect?.();
       cleanupBroadcast?.();
       cleanupStatusForSync?.();
       document.removeEventListener('visibilitychange', onVisibility);

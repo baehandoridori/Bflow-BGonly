@@ -18,8 +18,10 @@ import {
   addReaction,
   removeReaction,
   fetchReactionsBulk,
+  fetchReactionsBulkResult,
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
+import { isCommentsInvalidationRelevant, type CommentsInvalidatedDetail } from '@/utils/commentRowCache';
 import type { AppUser, CommentReaction, CompRevision } from '@/types';
 import { groupReactionsByEmoji } from '@/utils/commentReactionUtils';
 import { ReactionChip } from './ReactionChip';
@@ -40,6 +42,8 @@ import { stripEntityTokens } from '@/utils/entityTokens';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
+  peekCommentReadStateForUser,
+  type CommentReadStateEventDetail,
   getLatestOtherUserCommentCreatedAt,
   isCommentKeyUnread,
   markSceneThreadReadForUser,
@@ -632,6 +636,16 @@ export function CommentPanel({
   const loadStatusRef = useRef<CommentLoadStatus>(loadStatus);
   loadStatusRef.current = loadStatus;
   const loadSeqRef = useRef(0);
+  // 반응(이모지)은 댓글 목록과 따로 순번을 센다 — 캐시만 다시 보는 조용한 새로고침이 진행 중인 반응 조회를 버리지 않게.
+  const reactionsSeqRef = useRef(0);
+  const reactionsLoadedRef = useRef(false);
+  // 목록에 아직 없는 댓글에 온 반응 신호(새 댓글이 300ms 디바운스로 아직 안 그려졌을 때) — 다음 조용한 새로고침이 그 댓글 반응만 읽는다(코덱스 1차).
+  const pendingReactionIdsRef = useRef<Set<string>>(new Set());
+  const mountedForReactionsRef = useRef(true);
+  useEffect(() => {
+    mountedForReactionsRef.current = true;
+    return () => { mountedForReactionsRef.current = false; };
+  }, []);
   const { reduce: reduceMotion } = useMotionPref();
   const reduceMotionRef = useRef(reduceMotion);
   reduceMotionRef.current = reduceMotion;
@@ -963,7 +977,7 @@ export function CommentPanel({
 
   // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직).
   // 캐릭터 스레드 모드는 character 경로로만 로드하고 secondary 는 무시한다 (씬 키 경로 미사용).
-  const loadComments = useCallback((options?: { absorbNew?: boolean }) => {
+  const loadComments = useCallback((options?: { absorbNew?: boolean; keepReactions?: boolean }) => {
     // 실패를 '댓글 없음'과 구분해 받는다. 더 새 조회가 시작됐으면 늦게 온 옛 결과는 버린다.
     const seq = ++loadSeqRef.current;
     const readOptions = { throwOnError: true };
@@ -1010,9 +1024,29 @@ export function CommentPanel({
       setLoadStatus('ready');
       onCountChange?.(list.length);
       // v1.26.0: 댓글 로드 후 리액션도 함께 fetch
+      // v1.145.0: 받은 댓글을 캐시에 끼워 넣었을 뿐이면(새 댓글·수정·삭제) 반응은 그대로다 — 다시 읽지 않는다.
+      //   반응 변경은 따로 오는 반응 신호가 그 댓글만 다시 읽는다.
+      if (options?.keepReactions && reactionsLoadedRef.current) {
+        const pendingIds = deduped.map((c) => c.id).filter((id) => pendingReactionIdsRef.current.has(id));
+        if (pendingIds.length === 0) return;
+        for (const id of pendingIds) pendingReactionIdsRef.current.delete(id);
+        void fetchReactionsBulk(pendingIds).then((refreshed) => {
+          if (!mountedForReactionsRef.current) return;
+          setReactionsByCommentId((m) => {
+            const nm = new Map(m);
+            for (const id of pendingIds) nm.set(id, refreshed.get(id) ?? []);
+            return nm;
+          });
+        });
+        return;
+      }
+      pendingReactionIdsRef.current.clear();
       const ids = deduped.map((c) => c.id);
-      fetchReactionsBulk(ids).then((map) => {
-        if (seq !== loadSeqRef.current) return;
+      const reactionsSeq = ++reactionsSeqRef.current;
+      fetchReactionsBulkResult(ids).then(({ ok, map }) => {
+        if (reactionsSeq !== reactionsSeqRef.current) return;
+        // 실패한 조회는 '다 불러옴'으로 치지 않는다 — 다음 조용한 새로고침이 다시 읽는다.
+        reactionsLoadedRef.current = ok;
         setReactionsByCommentId(map);
         setReactionsReady(true);
       });
@@ -1033,6 +1067,9 @@ export function CommentPanel({
       loadIdentityRef.current = primaryStorageKey;
       setLoadStatus('loading');
       setReactionsReady(false);
+      reactionsLoadedRef.current = false;
+      reactionsSeqRef.current += 1; // 앞 화면의 늦은 반응 결과를 버린다
+      pendingReactionIdsRef.current.clear();
       openPinStartedRef.current = false;
       openPinRef.current = null;
       setUnreadDividerSlot(UNREAD_DIVIDER_UNCAPTURED);
@@ -1057,7 +1094,15 @@ export function CommentPanel({
       if (!cid) return;
       // 현재 패널에 떠 있는 댓글에 해당할 때만 fetch (불필요한 호출 방지)
       const isMine = comments.some((c) => c.id === cid);
-      if (!isMine) return;
+      if (!isMine) {
+        // 아직 안 그려진 새 댓글일 수 있다 — 다음 새로고침이 그 댓글 반응을 읽게 기억해 둔다(작게 유지).
+        pendingReactionIdsRef.current.add(cid);
+        if (pendingReactionIdsRef.current.size > 50) {
+          const first = pendingReactionIdsRef.current.values().next().value;
+          if (first !== undefined) pendingReactionIdsRef.current.delete(first);
+        }
+        return;
+      }
       fetchReactionsBulk([cid]).then((refreshed) => {
         setReactionsByCommentId((m) => {
           const nm = new Map(m);
@@ -1153,8 +1198,13 @@ export function CommentPanel({
 
     load();
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      const detail = (event as CustomEvent<CommentReadStateEventDetail | undefined>).detail;
       if (detail?.userId && detail.userId !== currentUser.id) return;
+      // 이 창에서 방금 읽음 처리했으면 새 값이 이미 캐시에 있다 — 서버에 다시 묻지 않는다.
+      if (detail?.source === 'local') {
+        setLastReadAt(peekCommentReadStateForUser(currentUser.id)[effectiveSceneThreadKey] ?? null);
+        return;
+      }
       load();
     };
 
@@ -1179,18 +1229,33 @@ export function CommentPanel({
   }, [currentUser?.id, effectiveSceneThreadKey, latestOtherUserCommentAt]);
 
   // 다른 PC 변경 시 자동 리로드 (300ms 디바운스)
+  // v1.145.0(씬 댓글 B안 §7.2): 이 패널이 보여 주는 시트(상대 부서 포함)·캐릭터의 신호만 받는다.
+  //   받은 댓글을 캐시에 끼워 넣은 신호만 모였으면 캐시를 다시 볼 뿐 서버에 묻지 않는다(반응도 그대로).
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const handler = () => {
+    let onlyPatched = true;
+    const sheetOf = (key: string | null | undefined) => (key && key.includes(':') ? key.slice(0, key.lastIndexOf(':')) : null);
+    const target = characterId
+      ? { characterId }
+      : { sheetNames: [sheetOf(sceneKey), sheetOf(secondarySceneKey)] };
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<CommentsInvalidatedDetail | undefined>).detail;
+      const knownCommentIds = new Set(commentsRef.current.map((c) => c.id));
+      if (!isCommentsInvalidationRelevant(detail, { ...target, knownCommentIds })) return;
+      if (!detail?.patched) onlyPatched = false;
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => { loadComments(); }, 300);
+      timer = setTimeout(() => {
+        const keepReactions = onlyPatched;
+        onlyPatched = true;
+        loadComments({ keepReactions });
+      }, 300);
     };
     window.addEventListener('bflow:comments-invalidated', handler);
     return () => {
       window.removeEventListener('bflow:comments-invalidated', handler);
       if (timer) clearTimeout(timer);
     };
-  }, [loadComments]);
+  }, [loadComments, characterId, sceneKey, secondarySceneKey]);
 
   // v1.24.0: focusCommentId prop 변경 시 → 자동 스크롤 + 일시 펄스. 답글이면 부모 자동 펼침.
   // P0 #2 fix: cleanup 누수 + comments 의존성으로 인한 펄스 무한 재시작 회귀 방지.

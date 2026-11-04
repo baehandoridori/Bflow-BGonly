@@ -70,6 +70,13 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
     .on('broadcast', { event: 'comment-added' }, ({ payload }) => {
       onReceive('comment-added', payload as Record<string, unknown>);
     })
+    // v1.145.0: 댓글 수정·삭제는 '전부 다시 받기'(data-change) 대신 바뀐 댓글만 알린다. 받는 쪽이 캐시에서 그 댓글만 고친다.
+    .on('broadcast', { event: 'comment-updated' }, ({ payload }) => {
+      onReceive('comment-updated', payload as Record<string, unknown>);
+    })
+    .on('broadcast', { event: 'comment-deleted' }, ({ payload }) => {
+      onReceive('comment-deleted', payload as Record<string, unknown>);
+    })
     .on('broadcast', { event: 'comment-reaction-changed' }, ({ payload }) => {
       // 코덱스 2차 P1: 다른 클라이언트가 자체 fetch 트리거할 수 있도록.
       onReceive('comment-reaction-changed', payload as Record<string, unknown>);
@@ -400,6 +407,8 @@ export function broadcastCommentAdded(
   parentCommentId?: string | null,
   partId?: string,
   revisionId?: string | null,
+  /** v1.145.0: 받는 쪽이 다시 읽지 않고 캐시에 끼워 넣을 수 있게 댓글 나머지 칸도 싣는다. */
+  extra?: { images?: string[]; createdAt?: string; sceneUuid?: string | null; characterId?: string | null },
 ): void {
   safeSend('comment-added', {
     sceneId,
@@ -411,8 +420,45 @@ export function broadcastCommentAdded(
     parentCommentId: parentCommentId ?? null,
     partId: partId ?? null,
     revisionId: revisionId ?? null,
+    images: extra?.images ?? [],
+    createdAt: extra?.createdAt ?? null,
+    sceneUuid: extra?.sceneUuid ?? null,
+    characterId: extra?.characterId ?? null,
     ts: Date.now(),
   });
+}
+
+/** v1.145.0: 댓글 수정 방송 — 바뀐 내용과 새로 들어간 @이름(addedMentions)을 싣는다. */
+export interface CommentUpdatedPayload {
+  commentId: string;
+  partId: string | null;
+  sceneId: string | null;
+  characterId: string | null;
+  text: string;
+  mentions: string[];
+  /** 수정에서 이미지를 바꾸지 않았으면 싣지 않는다(받는 쪽이 기존 이미지를 지우지 않게). */
+  images?: string[];
+  editedAt: string;
+  /** 수정 전 mentions 에 없던 이름 — 받는 쪽이 이 사람에게만 새 멘션 알림을 만든다. */
+  addedMentions: string[];
+  userId: string | null;
+  userName: string | null;
+  ts: number;
+}
+export function broadcastCommentUpdated(payload: Omit<CommentUpdatedPayload, 'ts'>): void {
+  safeSend('comment-updated', { ...payload, ts: Date.now() });
+}
+
+/** v1.145.0: 댓글 삭제 방송. */
+export interface CommentDeletedPayload {
+  commentId: string;
+  partId: string | null;
+  sceneId: string | null;
+  characterId: string | null;
+  ts: number;
+}
+export function broadcastCommentDeleted(payload: Omit<CommentDeletedPayload, 'ts'>): void {
+  safeSend('comment-deleted', { ...payload, ts: Date.now() });
 }
 
 /** Broadcast 채널 해제 */

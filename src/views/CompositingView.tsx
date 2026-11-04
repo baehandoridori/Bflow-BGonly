@@ -8,9 +8,12 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
 import { loadPartComments } from '@/services/commentService';
+import { isCommentsInvalidationRelevant, type CommentsInvalidatedDetail } from '@/utils/commentRowCache';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
+  peekCommentReadStateForUser,
+  type CommentReadStateEventDetail,
   getLatestOtherUserCommentCreatedAt,
   isCommentKeyUnread,
 } from '@/services/commentReadStateService';
@@ -111,8 +114,13 @@ export default function CompositingView({
 
     loadReadState();
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      const detail = (event as CustomEvent<CommentReadStateEventDetail | undefined>).detail;
       if (detail?.userId && detail.userId !== currentUser?.id) return;
+      // 이 창에서 방금 읽음 처리했으면 캐시만 다시 본다(서버에 묻지 않음, v1.145.0).
+      if (detail?.source === 'local' && currentUser?.id) {
+        setCommentReadAtByThreadKey(peekCommentReadStateForUser(currentUser.id));
+        return;
+      }
       loadReadState();
     };
     window.addEventListener(COMMENT_READ_STATE_EVENT, handler);
@@ -480,12 +488,18 @@ export default function CompositingView({
   }, [sheetNamesKey, commentRefreshTick, previewMode, previewCommentCountByRev, currentUser?.id]);
 
   // 댓글 변경 이벤트 — 다른 창에서 댓글 추가/수정/삭제 시 카운트 재빌드.
-  // commentService 가 invalidate 이벤트와 함께 캐시도 비우므로 다음 fetch 는 최신 데이터를 가져옴.
+  // commentService 가 캐시를 고치거나(받은 댓글 끼워 넣기) 비운 뒤 신호를 보내므로, 재빌드는 캐시에서 끝나거나 비운 시트만 다시 읽는다.
+  // v1.145.0(씬 댓글 B안 §7.2): 허브에 보이는 시트의 신호만 받는다 — 댓글 1건마다 모든 시트를 다시 읽던 것을 끊는다.
   useEffect(() => {
-    const handler = () => setCommentRefreshTick((n) => n + 1);
+    const sheetNames = sheetNamesKey ? sheetNamesKey.split(',') : [];
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<CommentsInvalidatedDetail | undefined>).detail;
+      if (!isCommentsInvalidationRelevant(detail, { sheetNames })) return;
+      setCommentRefreshTick((n) => n + 1);
+    };
     window.addEventListener('bflow:comments-invalidated', handler);
     return () => window.removeEventListener('bflow:comments-invalidated', handler);
-  }, []);
+  }, [sheetNamesKey]);
 
   // 씬 토글
   const toggleScene = useCallback((sceneKey: string) => {

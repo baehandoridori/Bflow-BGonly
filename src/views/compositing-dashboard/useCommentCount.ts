@@ -1,94 +1,40 @@
 /**
- * 씬 카드의 댓글 카운트 hook — partUuid 단위 fetch + cache.
+ * 씬 카드의 댓글 카운트 hook — 파트(UUID) 댓글 행은 댓글 서비스의 공용 캐시를 같이 쓴다.
  *
  * 한솔 보고 (2026-05-22): "씬 카드 미리보기에 댓글 몇 개인지 안 보임" 근본 원인 추적.
  *  - `comments.scene_id` 컬럼은 `scene.no` 의 숫자 문자열 ('2', '14' 등) 으로 저장됨
  *    (UnifiedSceneDetailModal 의 `${sheetName}:${scene.no}` sceneKey 패턴 + CommentPanel
  *    addComment 의 parseSceneKey 분해 흐름과 일치).
- *  - 이전 구현은 `scene.sceneId` ('a002') 와 매칭 → 항상 0.
- *  - 이번 fix: scene.no 기반 매칭으로 변경. BG/ACT 두 시트 각각 scene.no 가 다를 수 있어 두 키 합산.
+ *  - scene.no 기반 매칭. BG/ACT 두 시트 각각 scene.no 가 다를 수 있어 두 키 합산.
+ *
+ * v1.145.0(씬 댓글 B안 §7.3): 60초마다·창으로 돌아올 때마다 다시 읽던 것을 없앴다. 카드 50장이 떠 있어도
+ *  파트마다 처음 한 번만 읽고(진행 중 요청 합치기), 그다음은 다른 PC·창의 댓글 변경이 캐시를 고친 신호
+ *  ('bflow:comments-invalidated')에만 다시 센다 — 다시 세기는 캐시에서 끝난다.
  */
 
 import { useEffect, useState } from 'react';
-import { readCommentsFromSupabase } from '@/services/supabaseService';
+import { loadPartCommentRows, peekPartCommentRows } from '@/services/commentService';
+import { countCommentRowsByScene, type CommentRow } from '@/utils/commentRowCache';
 
-interface PartCache {
-  status: 'pending' | 'done' | 'error';
-  /** scene_id (= scene.no 문자열) → count */
-  counts: Map<string, number>;
-  /** 마지막 fetch 완료 시각 (ms). stale 판정 + 자동 재시도용. */
-  fetchedAt: number;
-}
+/** 읽기 실패 뒤 한 번 더 기다리는 시간. */
+const COUNT_RETRY_MS = 5_000;
 
-const cache = new Map<string, PartCache>();
-const listeners = new Map<string, Set<() => void>>();
+/** 같은 행 배열이면 다시 세지 않는다(카드마다 렌더할 때 같은 파트를 50번 세지 않게). */
+const countsByRows = new WeakMap<readonly CommentRow[], Map<string, number>>();
+/** 파트를 다시 읽는 동안(무효화 직후) 숫자가 0 으로 깜빡이지 않게 마지막으로 센 값을 보여 준다(로컬 리뷰). */
+const lastCountsByPart = new Map<string, Map<string, number>>();
 
-/** 'done' 캐시의 stale 시간 — 이 시간 지나면 다음 mount 시 자동 재fetch (수동 invalidate 안 거쳐도 갱신). */
-const DONE_STALE_MS = 60_000;
-/** 'error' 캐시의 retry 간격 — transient error 일 가능성에 한 번 더 시도. */
-const ERROR_RETRY_MS = 5_000;
-
-function notify(partUuid: string) {
-  const set = listeners.get(partUuid);
-  if (!set) return;
-  for (const fn of set) {
-    try { fn(); } catch { /* noop */ }
+function countsFor(partUuid: string | undefined): Map<string, number> | undefined {
+  if (!partUuid) return undefined;
+  const rows = peekPartCommentRows(partUuid);
+  if (!rows) return lastCountsByPart.get(partUuid);
+  let counts = countsByRows.get(rows);
+  if (!counts) {
+    counts = countCommentRowsByScene(rows);
+    countsByRows.set(rows, counts);
   }
-}
-
-function shouldRefetch(entry: PartCache | undefined, now: number): boolean {
-  if (!entry) return true;
-  if (entry.status === 'pending') return false;
-  if (entry.status === 'error' && (now - entry.fetchedAt) >= ERROR_RETRY_MS) return true;
-  if (entry.status === 'done' && (now - entry.fetchedAt) >= DONE_STALE_MS) return true;
-  return false;
-}
-
-async function fetchPartComments(partUuid: string): Promise<void> {
-  const now = Date.now();
-  // 코덱스 3차 P2 (2026-05-22): 'error' 후 5s 재시도, 'done' 후 60s stale 갱신 허용.
-  const existing = cache.get(partUuid);
-  if (!shouldRefetch(existing, now)) return;
-  // pending 표시 — 다만 기존 counts 는 유지해서 화면 깜빡임 방지
-  cache.set(partUuid, {
-    status: 'pending',
-    counts: existing?.counts ?? new Map(),
-    fetchedAt: existing?.fetchedAt ?? 0,
-  });
-  try {
-    const rows = await readCommentsFromSupabase(partUuid) as Array<Record<string, unknown>>;
-    const counts = new Map<string, number>();
-    for (const r of rows) {
-      // comments.scene_id 는 scene.no 의 문자열. fallback 으로 scene_no / sceneId 도 검사.
-      const raw = (r.sceneId ?? r.scene_id ?? r.sceneNo ?? r.scene_no ?? '') as string | number;
-      const key = String(raw).trim();
-      if (!key) continue;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    cache.set(partUuid, { status: 'done', counts, fetchedAt: Date.now() });
-  } catch {
-    cache.set(partUuid, {
-      status: 'error',
-      counts: existing?.counts ?? new Map(),
-      fetchedAt: Date.now(),
-    });
-  } finally {
-    notify(partUuid);
-  }
-}
-
-/** 특정 partUuid 캐시만 무효화 (댓글 추가/삭제 broadcast 받았을 때 호출). */
-export function invalidateCommentCountForPart(partUuid: string): void {
-  cache.delete(partUuid);
-  notify(partUuid);
-}
-
-/** 캐시 무효화 — EP 전환 / 댓글 추가 시 호출 가능. */
-export function invalidateCommentCountCache(): void {
-  cache.clear();
-  for (const set of listeners.values()) {
-    for (const fn of set) { try { fn(); } catch { /* noop */ } }
-  }
+  lastCountsByPart.set(partUuid, counts);
+  return counts;
 }
 
 /**
@@ -108,49 +54,38 @@ export function useCommentCount(
   useEffect(() => {
     const uuids = [bgPartUuid, actPartUuid].filter((u): u is string => !!u);
     if (uuids.length === 0) return;
-    const registered: { uuid: string; fn: () => void }[] = [];
-    uuids.forEach((uuid) => {
-      // fetchPartComments 가 내부에서 shouldRefetch 판정 — stale/error 면 자동 재fetch.
-      void fetchPartComments(uuid);
-      let set = listeners.get(uuid);
-      if (!set) { set = new Set(); listeners.set(uuid, set); }
-      const fn = () => setTick((n) => n + 1);
-      set.add(fn);
-      registered.push({ uuid, fn });
-    });
-
-    // 코덱스 11차 P2 (2026-05-22): 마운트 중 stale refresh.
-    //   - 이전엔 mount 시 1회 fetch 만 — 같은 카드가 계속 떠있는 동안 댓글 추가/삭제 가 반영 안 됨.
-    //   - DONE_STALE_MS(60s) 주기 setInterval + visibilitychange 로 stale 재확인.
-    //   - fetchPartComments 가 shouldRefetch 로 dedupe — 실제 네트워크 호출은 stale 일 때만.
-    //   - visibility hidden 이면 폴링 skip (background tab 절약).
-    const refresh = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      uuids.forEach((uuid) => { void fetchPartComments(uuid); });
-    };
-    const intervalId = window.setInterval(refresh, DONE_STALE_MS);
-    const onVisibility = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') refresh();
-    };
-    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      window.clearInterval(intervalId);
-      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
-      for (const { uuid, fn } of registered) {
-        listeners.get(uuid)?.delete(fn);
+    let disposed = false;
+    const rerender = () => { if (!disposed) setTick((n) => n + 1); };
+    // 캐시에 없으면 읽는다(같은 파트를 여러 카드가 동시에 불러도 요청은 한 번). 실패하면 5초 뒤 한 번 더 —
+    // 그래도 안 되면 다음 댓글 신호나 다시 마운트될 때 다시 읽는다(주기 조회는 하지 않는다).
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const ensure = (allowRetry = true) => {
+      for (const uuid of uuids) {
+        if (peekPartCommentRows(uuid)) continue;
+        void loadPartCommentRows(uuid).then(rerender, () => {
+          if (disposed || !allowRetry || retryTimer) return;
+          retryTimer = setTimeout(() => { retryTimer = null; if (!disposed) ensure(false); }, COUNT_RETRY_MS);
+        });
       }
+    };
+    ensure();
+    const onInvalidated = (event: Event) => {
+      // 캐릭터 댓글·어디 것인지 모르는 삭제(씬 캐시에 없던 댓글)는 씬 카드와 무관하다.
+      const detail = (event as CustomEvent<{ characterId?: string; unresolvedDelete?: boolean } | undefined>).detail;
+      if (detail?.characterId || detail?.unresolvedDelete) return;
+      rerender();
+      ensure();
+    };
+    window.addEventListener('bflow:comments-invalidated', onInvalidated);
+    return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      window.removeEventListener('bflow:comments-invalidated', onInvalidated);
     };
   }, [bgPartUuid, actPartUuid]);
 
   let total = 0;
-  if (bgPartUuid && bgSceneNo !== undefined) {
-    const entry = cache.get(bgPartUuid);
-    if (entry?.status === 'done') total += entry.counts.get(String(bgSceneNo)) ?? 0;
-  }
-  if (actPartUuid && actSceneNo !== undefined) {
-    const entry = cache.get(actPartUuid);
-    if (entry?.status === 'done') total += entry.counts.get(String(actSceneNo)) ?? 0;
-  }
+  if (bgSceneNo !== undefined) total += countsFor(bgPartUuid)?.get(String(bgSceneNo)) ?? 0;
+  if (actSceneNo !== undefined) total += countsFor(actPartUuid)?.get(String(actSceneNo)) ?? 0;
   return total;
 }

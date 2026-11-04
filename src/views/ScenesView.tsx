@@ -95,9 +95,12 @@ import { AssigneeProgressStack } from '@/components/scenes/AssigneeProgressStack
 import { BulkOperationStatus } from '@/components/scenes/BulkOperationStatus';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, getCommentStoreForPart, invalidatePartCache } from '@/services/commentService';
+import { isCommentsInvalidationRelevant, type CommentsInvalidatedDetail } from '@/utils/commentRowCache';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
+  peekCommentReadStateForUser,
+  type CommentReadStateEventDetail,
   getLatestCommentCreatedAt,
   getLatestOtherUserCommentCreatedAt,
   isCommentKeyUnread,
@@ -3356,8 +3359,13 @@ export function ScenesView() {
 
     loadReadState();
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      const detail = (event as CustomEvent<CommentReadStateEventDetail | undefined>).detail;
       if (detail?.userId && detail.userId !== currentUser?.id) return;
+      // 이 창에서 방금 읽음 처리했으면 캐시만 다시 본다(서버에 묻지 않음, v1.145.0).
+      if (detail?.source === 'local' && currentUser?.id) {
+        setCommentReadAtByKey(peekCommentReadStateForUser(currentUser.id));
+        return;
+      }
       loadReadState();
     };
     window.addEventListener(COMMENT_READ_STATE_EVENT, handler);
@@ -3373,12 +3381,22 @@ export function ScenesView() {
   }, [reloadCommentCounts, detailSceneIndex, detailContext, bgPart?.scenes.length, actPart?.scenes.length, currentPart?.scenes.length]);
 
   // 이슈 F-2(2026-04-23): 댓글 추가/수정/삭제로 캐시가 무효화되면 카드 뷰 뱃지도 즉시 갱신.
-  // 이 시점에는 소스 쪽에서 이미 캐시를 비운 뒤이므로 재조회만 하면 된다 (invalidate 재호출 금지).
+  // 이 시점에는 소스 쪽에서 이미 캐시를 고치거나 비운 뒤이므로 다시 보기만 하면 된다 (invalidate 재호출 금지).
+  // v1.145.0(씬 댓글 B안 §7.2): 지금 보이는 시트(통합이면 BG·ACT 둘)의 신호만 받는다. 캐시를 고친 신호면
+  //   다시 보기는 캐시에서 끝난다(서버 요청 없음).
+  const visibleCommentSheetsKey = (selectedDepartment === 'all'
+    ? [bgPart?.sheetName, actPart?.sheetName]
+    : [currentPart?.sheetName]).filter(Boolean).join(',');
   useEffect(() => {
-    const handler = () => reloadCommentCounts();
+    const sheetNames = visibleCommentSheetsKey ? visibleCommentSheetsKey.split(',') : [];
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<CommentsInvalidatedDetail | undefined>).detail;
+      if (!isCommentsInvalidationRelevant(detail, { sheetNames })) return;
+      reloadCommentCounts();
+    };
     window.addEventListener('bflow:comments-invalidated', handler);
     return () => window.removeEventListener('bflow:comments-invalidated', handler);
-  }, [reloadCommentCounts]);
+  }, [reloadCommentCounts, visibleCommentSheetsKey]);
 
   // 에피소드 제목/메모 → App.tsx에서 병렬 로드됨 (글로벌 스토어)
 

@@ -209,7 +209,8 @@ test('새로고침: 버튼은 눌림만, 회전은 아이콘(WAAPI)만 — anima
 test('App: 버튼·단축키는 직접(manual), 폴링·실시간 재로드는 자동', () => {
   const app = read('src/App.tsx');
   assert.match(app, /const loadData = useCallback\(\(\) => syncQueue\.request\('auto'\), \[syncQueue\]\);/);
-  assert.match(app, /const refreshDataManually = useCallback\(\(\) => \{ void syncQueue\.request\('manual'\); \}, \[syncQueue\]\);/);
+  // v1.145.0: 직접 새로고침은 댓글 캐시도 비우고(서버에서 다시 보기) 같은 '직접' 길로 받는다.
+  assert.match(app, /const refreshDataManually = useCallback\(\(\) => \{\s*invalidatePartCache\(\);\s*void syncQueue\.request\('manual'\);\s*\}, \[syncQueue\]\);/);
   assert.match(app, /onRefresh=\{refreshDataManually\}/);
   assert.match(app, /useGlobalShortcuts\(\{ onReload: refreshDataManually \}\);/);
   // 자동 안전망 받기도 '자동' 길(loadData)로 돈다 — 창 상태별 간격은 autoSyncScheduler 가 정한다(2026-10-20).
