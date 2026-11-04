@@ -126,17 +126,22 @@ export async function notifyMentionsForComment(input: NotifyMentionsInput): Prom
     missing: plan.missing,
   };
   const send = window.electronAPI?.sendSlackWebhook;
-  for (const { target, payload } of plan.payloads) {
-    try {
-      if (!send) throw new Error('슬랙 전송을 쓸 수 없어요');
-      await send(payload);
+  // 받는 사람 모두에게 한꺼번에 보낸다(코덱스 5차) — 메인은 요청마다 그 순간의 로그인 세션을 붙잡으므로,
+  //   한 명씩 기다리며 보내면 그 사이 로그아웃·계정 전환이 있을 때 나머지가 새 사람의 세션으로 나갔다.
+  //   모두 지금 보내면 모두 이 댓글을 쓴 사람의 세션으로 나간다(예전처럼).
+  const outcomes = await Promise.allSettled(plan.payloads.map(({ payload }) => (
+    send ? send(payload) : Promise.reject(new Error('슬랙 전송을 쓸 수 없어요'))
+  )));
+  outcomes.forEach((outcome, index) => {
+    const { target } = plan.payloads[index];
+    if (outcome.status === 'fulfilled') {
       result.sent += 1;
-    } catch (err) {
-      result.failed += 1;
-      result.failedIds.push(target.id);
-      console.error('[SlackWebhook] 댓글 알림 전송 실패', { target: target.name, err });
+      return;
     }
-  }
+    result.failed += 1;
+    result.failedIds.push(target.id);
+    console.error('[SlackWebhook] 댓글 알림 전송 실패', { target: target.name, err: outcome.reason });
+  });
   return result;
 }
 

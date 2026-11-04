@@ -81,3 +81,30 @@ test('다시 보내기 결과 합치기 — 받은 사람은 그대로 더하고
   assert.deepEqual(again.failedIds, ['u-kim']);
   assert.equal(again.sent, 1);
 });
+
+test('슬랙은 받는 사람 모두에게 한꺼번에 보낸다 — 기다리는 사이 로그아웃해도 나머지가 새 세션으로 나가지 않게(코덱스 5차)', async () => {
+  const { notifyMentionsForComment } = await import('../src/services/slackWebhookService.ts');
+  const started: string[] = [];
+  const finish: Array<(ok: boolean) => void> = [];
+  const previous = (globalThis as any).window;
+  (globalThis as any).window = { electronAPI: { sendSlackWebhook: (payload: Record<string, string>) => {
+    started.push(payload.name_target);
+    return new Promise<void>((resolve, reject) => finish.push((ok) => (ok ? resolve() : reject(new Error('막힘')))));
+  } } };
+  try {
+    const pending = notifyMentionsForComment({
+      comment: { text: '확인 부탁', mentions: ['김어진', '이도윤'] },
+      sheetName: 'EP05_A_BG', sceneNo: '3', sceneLabel: 'a003', me,
+      users: [me, users.kim, { id: 'u-lee', name: '이도윤', slackId: 'U-LEE' }],
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(started, ['U-KIM', 'U-LEE'], '첫 요청이 끝나기 전에 모두 보냈다');
+    finish[0](true);
+    finish[1](false);
+    const result = await pending;
+    assert.equal(result.sent, 1);
+    assert.deepEqual(result.failedIds, ['u-lee']);
+  } finally {
+    (globalThis as any).window = previous;
+  }
+});
