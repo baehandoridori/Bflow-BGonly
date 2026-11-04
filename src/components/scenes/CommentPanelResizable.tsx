@@ -47,7 +47,7 @@ interface CommentPanelResizableProps {
   inlineEvents?: React.ComponentProps<typeof CommentPanel>['inlineEvents'];
   /** 댓글 입력창 /re 빠른 리테이크 등록 문맥. */
   quickRevision?: CommentPanelQuickRevisionContext;
-  /** 패널 헤더 제목 (기본: "댓글 및 활동"). */
+  /** 패널 헤더 제목 (기본: "댓글"). 옆에 '원댓글 N · 리테이크 M'. */
   headerTitle?: string;
   /** 헤더 우측 슬롯 (예: 토글, 카운터 등 — 통합 모달에서 사용). */
   headerRight?: React.ReactNode;
@@ -76,7 +76,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
     secondarySceneKey: explicitSecondaryKey,
     inlineEvents,
     quickRevision,
-    headerTitle = '댓글 및 활동',
+    headerTitle = '댓글',
     headerRight,
     onHashClick,
     extraHashCandidates,
@@ -85,6 +85,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   } = props;
 
   const { width, setWidth, isUserOverride } = useCommentPanelWidth(commentCount);
+  const [feedSummary, setFeedSummary] = useState<{ roots: number; retakes: number } | null>(null);
 
   // 드래그 중에는 disk 저장 없이 화면만 즉시 갱신할 임시 너비.
   // mousemove → setLiveWidth(px) 만 호출, mouseup → commitWidth(px) 가 setWidth 호출 (disk 저장).
@@ -275,8 +276,13 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
       <ResizeHandleParticles edge="e" active={dragging && dragEdge === 'outer'} />
 
       <div className="px-4 py-3 border-b border-bg-border shrink-0 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-text-primary">
+        <h3 className="text-sm font-semibold text-text-primary flex items-baseline gap-2 min-w-0">
           {headerTitle}
+          {feedSummary && (
+            <span className="text-[12px] font-normal text-text-secondary tabular-nums whitespace-nowrap">
+              원댓글 {feedSummary.roots}{feedSummary.retakes > 0 || !characterThread ? ` · 리테이크 ${feedSummary.retakes}` : ''}
+            </span>
+          )}
           {isUserOverride && (
             <span className="ml-2 text-[10px] text-text-secondary/50 font-normal" title="사용자 설정 너비. 더블클릭으로 자동 모드.">
               · 너비 고정
@@ -291,6 +297,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
           sceneThreadKey={sceneThreadKey}
           secondarySceneKey={secondaryKey}
           onCountChange={onCountChange}
+          onFeedSummaryChange={setFeedSummary}
           focusCommentId={focusCommentId ?? null}
           sceneLabel={sceneLabel}
           inlineEvents={inlineEvents}

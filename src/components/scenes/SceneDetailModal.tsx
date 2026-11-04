@@ -642,6 +642,8 @@ export function SceneDetailModal({
           id: a.id,
           at: a.createdAt,
           text: `${a.userName} ${deptPrefix(a.department)}${visual.text}`,
+          actorName: a.userName,
+          actionType: a.actionType,
           tone: revisionTone,
           label: revisionLabel,
           revisionId,

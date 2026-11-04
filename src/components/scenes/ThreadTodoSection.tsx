@@ -159,6 +159,45 @@ export function ThreadTodoSection({ threadKey, currentUser, onHeightGrow }: Thre
     }
   }, [load]);
 
+  /** v1.147.0(씬 댓글 B안 §5.2): 댓글 ⋯ 메뉴 '팀 할 일로 보내기' — 같은 추가 길, 실패하면 안내만(입력창은 건드리지 않음). */
+  const addFromComment = async (raw: string) => {
+    const text = sanitizeThreadTodoText(raw);
+    if (!isValidThreadTodoText(text)) return;
+    const tempId = createUuid();
+    const optimistic: ThreadTodoRow = {
+      id: tempId, thread_key: threadKey, text,
+      created_by: currentUser.id, created_by_name: currentUser.name,
+      created_at: new Date().toISOString(), done_at: null, done_by: null, done_by_name: null,
+    };
+    setItems((prev) => [...prev, optimistic]);
+    if (collapsed) {
+      setCollapsed(false);
+      try { localStorage.setItem(COLLAPSED_KEY, '0'); } catch { /* ignore */ }
+    }
+    await runMutation(tempId, async () => {
+      try {
+        const saved = await window.electronAPI.threadTodoAdd(threadKey, text);
+        setItems((prev) => prev.map((r) => (r.id === tempId ? saved : r)));
+        sonnerToast('팀 할 일에 넣었어요', { duration: 2500 });
+      } catch (err) {
+        if (isDiscardedResponse(err)) return;
+        setItems((prev) => prev.filter((r) => r.id !== tempId));
+        sonnerToast.error(cleanIpcErrorMessage(err, '팀 할 일을 추가하지 못했어요'));
+      }
+    });
+  };
+  const addFromCommentRef = useRef(addFromComment);
+  addFromCommentRef.current = addFromComment;
+  useEffect(() => {
+    const onAdd = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadKey?: string; text?: string }>).detail;
+      if (!detail || detail.threadKey !== threadKey || typeof detail.text !== 'string') return;
+      void addFromCommentRef.current(detail.text);
+    };
+    window.addEventListener('bflow:thread-todo-add', onAdd);
+    return () => window.removeEventListener('bflow:thread-todo-add', onAdd);
+  }, [threadKey]);
+
   const submitDraft = async () => {
     const text = sanitizeThreadTodoText(draft);
     if (!isValidThreadTodoText(text)) return;
