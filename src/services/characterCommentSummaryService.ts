@@ -1,4 +1,4 @@
-import { COMMENT_READ_STATE_EVENT, getCommentReadStateForUser, isCommentKeyUnread } from './commentReadStateService';
+import { COMMENT_READ_STATE_EVENT, getCommentReadStateForUser, isCommentKeyUnread, peekCommentReadStateForUser } from './commentReadStateService';
 import { CHARACTER_COMMENT_SUMMARY_MAX_IDS, type CharacterCommentSummaries } from '../shared/characterCommentSummary';
 
 export interface CharacterCommentBadgeState { count: number; seen: boolean }
@@ -32,6 +32,8 @@ export class CharacterCommentSummaryCache {
     private readonly readStates: (userId: string) => Promise<Record<string, string>>,
     private readonly now: () => number = Date.now,
     private readonly retryDelaysMs: readonly number[] = [1_000, 3_000],
+    /** 캐시에 있는 읽음 상태(서버에 묻지 않음) — 이 창에서 읽음 처리한 직후 신호에 쓴다. */
+    private readonly peekStates?: (userId: string) => Record<string, string>,
   ) {}
 
   subscribe(characterId: string, userId: string, connected: boolean, listener: Listener, events: EventTarget = window): () => void {
@@ -203,8 +205,16 @@ export class CharacterCommentSummaryCache {
   };
 
   private onReadStateChanged = (event: Event): void => {
-    const userId = (event as CustomEvent<{ userId?: string }>).detail?.userId;
+    const detail = (event as CustomEvent<{ userId?: string; source?: 'local' | 'server' }>).detail;
+    const userId = detail?.userId;
     if (userId && userId !== this.userId) return;
+    // 이 창에서 방금 읽음 처리했으면 새 값이 이미 캐시에 있다 — 서버에 다시 묻지 않는다(v1.145.0).
+    if (detail?.source === 'local' && this.peekStates && this.readReady && !this.reading) {
+      ++this.readVersion;
+      this.readState = this.peekStates(this.userId);
+      this.emit();
+      return;
+    }
     this.clearReadRetry();
     ++this.readVersion; this.readDirty = true;
     this.schedule(0);
@@ -218,6 +228,9 @@ const sharedCache = new CharacterCommentSummaryCache(
     return read(ids);
   },
   (userId) => getCommentReadStateForUser(userId, { throwOnReadError: true }),
+  Date.now,
+  [1_000, 3_000],
+  (userId) => peekCommentReadStateForUser(userId),
 );
 
 export function subscribeCharacterCommentSummary(characterId: string, userId: string, connected: boolean, listener: Listener): () => void {

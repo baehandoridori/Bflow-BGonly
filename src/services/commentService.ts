@@ -163,6 +163,18 @@ function resolveSheetParts(sheetName: string): { requestedPart?: Part; partByUui
   return { requestedPart: parts.find((p) => p.sheetName === sheetName), partByUuid, partUuids };
 }
 
+// 상대 부서 댓글을 어느 씬에 붙일지는 만들 때의 씬 구성으로 정해진다. 씬이 추가·삭제·번호 변경되면
+// 행 캐시로 만든 시트 묶음을 버려 다음에 볼 때 다시 만든다(서버 요청 없음 — 행 캐시는 그대로).
+let lastEpisodesRef: unknown = null;
+try {
+  useDataStore.subscribe((state) => {
+    if (state.episodes === lastEpisodesRef) return;
+    lastEpisodesRef = state.episodes;
+    for (const sn of [...rowBackedSheets]) sheetPartCache.delete(sn);
+    rowBackedSheets.clear();
+  });
+} catch { /* 스토어가 없는 환경 */ }
+
 /** 이 파트의 행으로 만든 시트 묶음들(자기 시트 + 상대 부서 시트). */
 function sheetNamesForPart(partUuid: string): string[] {
   const part = allLoadedParts().find((p) => p.id === partUuid);
@@ -686,16 +698,21 @@ export async function removeReaction(
  * 반환: Map<commentId, CommentReaction[]>
  */
 export async function fetchReactionsBulk(commentIds: string[]): Promise<Map<string, CommentReaction[]>> {
-  if (commentIds.length === 0) return new Map();
+  return (await fetchReactionsBulkResult(commentIds)).map;
+}
+
+/** 리액션 일괄 조회 — 실패를 빈 결과와 구분한다(댓글 패널이 '반응을 다 불러왔다'고 잘못 기억하지 않게, v1.145.0). */
+export async function fetchReactionsBulkResult(commentIds: string[]): Promise<{ ok: boolean; map: Map<string, CommentReaction[]> }> {
+  if (commentIds.length === 0) return { ok: true, map: new Map() };
   try {
     const raw = await window.electronAPI.supabaseGetCommentReactionsBulk(commentIds);
     const map = new Map<string, CommentReaction[]>();
     for (const [cid, list] of Object.entries(raw)) {
       map.set(cid, list as CommentReaction[]);
     }
-    return map;
+    return { ok: true, map };
   } catch (err) {
     console.error('[commentService] fetchReactionsBulk 실패', err);
-    return new Map();
+    return { ok: false, map: new Map() };
   }
 }

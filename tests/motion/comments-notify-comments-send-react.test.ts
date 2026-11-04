@@ -244,7 +244,8 @@ test('패널 배선: 실패 말풍선은 세 곳 모두 반응 줄 대신 안내
 
 test('패널 배선: 반응을 처음 다 불러온 뒤에만 새 칩 톡, 취소 칩은 AnimatePresence 로 쏙', () => {
   // v1.145.0: 반응 조회는 자기 순번(reactionsSeqRef)으로 늦은 결과를 버린다 — 캐시만 다시 보는 새로고침이 진행 중인 반응 조회를 버리지 않게.
-  assert.match(panel, /fetchReactionsBulk\(ids\)\.then\(\(map\) => \{\s*if \(reactionsSeq !== reactionsSeqRef\.current\) return;\s*reactionsLoadedRef\.current = true;\s*setReactionsByCommentId\(map\);\s*setReactionsReady\(true\);/);
+  // 실패한 반응 조회는 '다 불러옴'으로 치지 않는다(로컬 리뷰) — 다음 조용한 새로고침이 다시 읽는다.
+  assert.match(panel, /fetchReactionsBulkResult\(ids\)\.then\(\(\{ ok, map \}\) => \{\s*if \(reactionsSeq !== reactionsSeqRef\.current\) return;[\s\S]{0,120}reactionsLoadedRef\.current = ok;\s*setReactionsByCommentId\(map\);\s*setReactionsReady\(true\);/);
   assert.match(panel, /if \(options\?\.keepReactions && reactionsLoadedRef\.current\) \{/);
   // 코덱스 1차: 디바운스 사이에 온 반응(목록에 아직 없던 새 댓글)은 기억해 뒀다가 그 댓글 반응만 읽는다.
   assert.match(panel, /pendingReactionIdsRef\.current\.add\(cid\);/);

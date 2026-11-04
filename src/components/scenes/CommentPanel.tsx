@@ -18,6 +18,7 @@ import {
   addReaction,
   removeReaction,
   fetchReactionsBulk,
+  fetchReactionsBulkResult,
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
 import { isCommentsInvalidationRelevant, type CommentsInvalidatedDetail } from '@/utils/commentRowCache';
@@ -1042,9 +1043,10 @@ export function CommentPanel({
       pendingReactionIdsRef.current.clear();
       const ids = deduped.map((c) => c.id);
       const reactionsSeq = ++reactionsSeqRef.current;
-      fetchReactionsBulk(ids).then((map) => {
+      fetchReactionsBulkResult(ids).then(({ ok, map }) => {
         if (reactionsSeq !== reactionsSeqRef.current) return;
-        reactionsLoadedRef.current = true;
+        // 실패한 조회는 '다 불러옴'으로 치지 않는다 — 다음 조용한 새로고침이 다시 읽는다.
+        reactionsLoadedRef.current = ok;
         setReactionsByCommentId(map);
         setReactionsReady(true);
       });
@@ -1066,6 +1068,8 @@ export function CommentPanel({
       setLoadStatus('loading');
       setReactionsReady(false);
       reactionsLoadedRef.current = false;
+      reactionsSeqRef.current += 1; // 앞 화면의 늦은 반응 결과를 버린다
+      pendingReactionIdsRef.current.clear();
       openPinStartedRef.current = false;
       openPinRef.current = null;
       setUnreadDividerSlot(UNREAD_DIVIDER_UNCAPTURED);
