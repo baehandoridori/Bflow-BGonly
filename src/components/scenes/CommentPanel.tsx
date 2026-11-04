@@ -638,6 +638,13 @@ export function CommentPanel({
   // 반응(이모지)은 댓글 목록과 따로 순번을 센다 — 캐시만 다시 보는 조용한 새로고침이 진행 중인 반응 조회를 버리지 않게.
   const reactionsSeqRef = useRef(0);
   const reactionsLoadedRef = useRef(false);
+  // 목록에 아직 없는 댓글에 온 반응 신호(새 댓글이 300ms 디바운스로 아직 안 그려졌을 때) — 다음 조용한 새로고침이 그 댓글 반응만 읽는다(코덱스 1차).
+  const pendingReactionIdsRef = useRef<Set<string>>(new Set());
+  const mountedForReactionsRef = useRef(true);
+  useEffect(() => {
+    mountedForReactionsRef.current = true;
+    return () => { mountedForReactionsRef.current = false; };
+  }, []);
   const { reduce: reduceMotion } = useMotionPref();
   const reduceMotionRef = useRef(reduceMotion);
   reduceMotionRef.current = reduceMotion;
@@ -1018,7 +1025,21 @@ export function CommentPanel({
       // v1.26.0: 댓글 로드 후 리액션도 함께 fetch
       // v1.145.0: 받은 댓글을 캐시에 끼워 넣었을 뿐이면(새 댓글·수정·삭제) 반응은 그대로다 — 다시 읽지 않는다.
       //   반응 변경은 따로 오는 반응 신호가 그 댓글만 다시 읽는다.
-      if (options?.keepReactions && reactionsLoadedRef.current) return;
+      if (options?.keepReactions && reactionsLoadedRef.current) {
+        const pendingIds = deduped.map((c) => c.id).filter((id) => pendingReactionIdsRef.current.has(id));
+        if (pendingIds.length === 0) return;
+        for (const id of pendingIds) pendingReactionIdsRef.current.delete(id);
+        void fetchReactionsBulk(pendingIds).then((refreshed) => {
+          if (!mountedForReactionsRef.current) return;
+          setReactionsByCommentId((m) => {
+            const nm = new Map(m);
+            for (const id of pendingIds) nm.set(id, refreshed.get(id) ?? []);
+            return nm;
+          });
+        });
+        return;
+      }
+      pendingReactionIdsRef.current.clear();
       const ids = deduped.map((c) => c.id);
       const reactionsSeq = ++reactionsSeqRef.current;
       fetchReactionsBulk(ids).then((map) => {
@@ -1069,7 +1090,15 @@ export function CommentPanel({
       if (!cid) return;
       // 현재 패널에 떠 있는 댓글에 해당할 때만 fetch (불필요한 호출 방지)
       const isMine = comments.some((c) => c.id === cid);
-      if (!isMine) return;
+      if (!isMine) {
+        // 아직 안 그려진 새 댓글일 수 있다 — 다음 새로고침이 그 댓글 반응을 읽게 기억해 둔다(작게 유지).
+        pendingReactionIdsRef.current.add(cid);
+        if (pendingReactionIdsRef.current.size > 50) {
+          const first = pendingReactionIdsRef.current.values().next().value;
+          if (first !== undefined) pendingReactionIdsRef.current.delete(first);
+        }
+        return;
+      }
       fetchReactionsBulk([cid]).then((refreshed) => {
         setReactionsByCommentId((m) => {
           const nm = new Map(m);
@@ -1207,7 +1236,8 @@ export function CommentPanel({
       : { sheetNames: [sheetOf(sceneKey), sheetOf(secondarySceneKey)] };
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<CommentsInvalidatedDetail | undefined>).detail;
-      if (!isCommentsInvalidationRelevant(detail, target)) return;
+      const knownCommentIds = new Set(commentsRef.current.map((c) => c.id));
+      if (!isCommentsInvalidationRelevant(detail, { ...target, knownCommentIds })) return;
       if (!detail?.patched) onlyPatched = false;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {

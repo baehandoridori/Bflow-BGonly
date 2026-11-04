@@ -78,12 +78,27 @@ function sameRow(a: CommentRow, b: CommentRow): boolean {
   return sameStringList(a.mentions, b.mentions) && sameStringList(a.images, b.images);
 }
 
+/**
+ * 받은 내용이 이미 가진 것보다 오래됐는가(코덱스 1차 — 방송과 실시간은 따로 오므로 순서가 바뀔 수 있다).
+ * 수정 시각(editedAt)으로만 판단한다: 가진 행이 수정됐는데 받은 쪽이 수정 전(없음)이거나 더 이른 수정이면 오래된 것.
+ */
+function isStaleAgainst(existing: CommentRow, incomingEditedAt: string | null | undefined): boolean {
+  if (!existing.editedAt) return false;
+  if (!incomingEditedAt) return true;
+  const a = Date.parse(existing.editedAt);
+  const b = Date.parse(incomingEditedAt);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return b < a;
+}
+
 /** 행 목록에 변경 하나를 적용한다. 바뀐 게 없으면 같은 배열을 돌려준다(changed=false). */
 export function applyCommentRowOp(rows: readonly CommentRow[], op: CommentRowOp): { rows: readonly CommentRow[]; changed: boolean } {
   if (op.kind === 'upsert') {
     const index = rows.findIndex((row) => row.id === op.row.id);
     if (index < 0) return { rows: [...rows, op.row], changed: true };
     if (sameRow(rows[index], op.row)) return { rows, changed: false };
+    // 늦게 도착한 옛 스냅샷(예: 수정 뒤에 온 추가 방송)이 새 수정을 덮지 않게.
+    if (isStaleAgainst(rows[index], op.row.editedAt)) return { rows, changed: false };
     const next = rows.slice();
     next[index] = op.row;
     return { rows: next, changed: true };
@@ -91,6 +106,7 @@ export function applyCommentRowOp(rows: readonly CommentRow[], op: CommentRowOp)
   if (op.kind === 'patch') {
     const index = rows.findIndex((row) => row.id === op.id);
     if (index < 0) return { rows, changed: false };
+    if (op.fields.editedAt !== undefined && isStaleAgainst(rows[index], op.fields.editedAt)) return { rows, changed: false };
     const merged: CommentRow = { ...rows[index], ...op.fields, id: op.id };
     if (sameRow(rows[index], merged)) return { rows, changed: false };
     const next = rows.slice();
@@ -150,6 +166,21 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
   const inFlight = new Map<string, { promise: Promise<readonly CommentRow[]>; pending: CommentRowOp[] }>();
   const epochByPart = new Map<string, number>();
   let globalEpoch = 0;
+  // 지운 댓글 id(세션 동안, 상한) — 삭제 뒤에 늦게 온 추가 신호나 삭제 전에 시작한 조회 결과가 되살리지 않게(코덱스 1차).
+  const deletedIds = new Set<string>();
+  const DELETED_LIMIT = 2000;
+  const rememberDeleted = (id: string) => {
+    deletedIds.add(id);
+    if (deletedIds.size > DELETED_LIMIT) {
+      const first = deletedIds.values().next().value;
+      if (first !== undefined) deletedIds.delete(first);
+    }
+  };
+  const withoutDeleted = (rows: readonly CommentRow[]): readonly CommentRow[] => (
+    deletedIds.size > 0 && rows.some((row) => deletedIds.has(row.id))
+      ? rows.filter((row) => !deletedIds.has(row.id))
+      : rows
+  );
 
   const epochOf = (partId: string) => `${globalEpoch}:${epochByPart.get(partId) ?? 0}`;
 
@@ -169,6 +200,7 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
       const promise = deps.read(partId).then((fetched) => {
         let rows: readonly CommentRow[] = Array.isArray(fetched) ? fetched : [];
         for (const op of pending) rows = applyCommentRowOp(rows, opForPart(op, partId)).rows;
+        rows = withoutDeleted(rows);
         if (inFlight.get(partId) === entry) inFlight.delete(partId);
         if (epochOf(partId) === startedEpoch) rowsByPart.set(partId, rows);
         return rows;
@@ -182,6 +214,8 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
     },
 
     apply(op) {
+      if (op.kind === 'delete') rememberDeleted(op.id);
+      else if (op.kind === 'upsert' && deletedIds.has(op.row.id)) return [];
       const changedParts: string[] = [];
       for (const [partId, rows] of rowsByPart) {
         if (!opTouchesPart(op, partId, rows)) continue;
@@ -469,6 +503,11 @@ export interface CommentsInvalidatedDetail {
   commentAction?: 'add' | 'edit' | 'delete';
   /** 캐시를 그 자리에서 고쳤다 — 듣는 쪽은 캐시만 다시 보면 된다(반응 같은 곁 자료는 다시 읽지 않는다). */
   patched?: boolean;
+  /**
+   * 실시간 DELETE(기본 키만 실림)가 씬 캐시 어디에도 없던 댓글을 지웠다 — 캐릭터 댓글일 수 있다.
+   * 그 댓글을 지금 보여 주는 화면(knownCommentIds)과 캐릭터 배지만 반응한다.
+   */
+  unresolvedDelete?: boolean;
 }
 
 /**
@@ -477,9 +516,16 @@ export interface CommentsInvalidatedDetail {
  */
 export function isCommentsInvalidationRelevant(
   detail: CommentsInvalidatedDetail | null | undefined,
-  target: { sheetNames?: readonly (string | null | undefined)[]; characterId?: string | null; partIds?: readonly (string | null | undefined)[] },
+  target: {
+    sheetNames?: readonly (string | null | undefined)[];
+    characterId?: string | null;
+    partIds?: readonly (string | null | undefined)[];
+    /** 지금 보여 주는 댓글 id — 어디 것인지 모르는 삭제 신호에만 쓴다. */
+    knownCommentIds?: ReadonlySet<string> | null;
+  },
 ): boolean {
   if (!detail) return true;
+  if (detail.unresolvedDelete) return !!detail.commentId && !!target.knownCommentIds?.has(detail.commentId);
   const changedSheets = [
     ...(detail.sheetNames ?? []),
     ...(detail.sheetName ? [detail.sheetName] : []),

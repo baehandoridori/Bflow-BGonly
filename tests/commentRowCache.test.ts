@@ -110,6 +110,32 @@ test('다른 파트로 옮겨 간 행은 예전 파트에서 빠진다', async (
   assert.equal(cache.peek('part-act')?.length, 1);
 });
 
+test('순서가 뒤바뀐 신호: 수정 뒤에 늦게 온 추가 스냅샷은 수정을 되돌리지 않는다', async () => {
+  const cache = createCommentRowCache({ read: async () => [] });
+  await cache.load('part-bg');
+  cache.apply({ kind: 'upsert', row: row('c1', { text: '고친 글', editedAt: '2026-11-04T02:00:00.000Z' }) });
+  assert.deepEqual(cache.apply({ kind: 'upsert', row: row('c1', { text: '처음 글', editedAt: null }) }), [], '늦게 온 추가 방송');
+  assert.equal(cache.findById('c1')?.text, '고친 글');
+  assert.deepEqual(cache.apply({ kind: 'patch', id: 'c1', fields: { text: '더 이른 수정', editedAt: '2026-11-04T01:00:00.000Z' } }), []);
+  assert.equal(cache.findById('c1')?.text, '고친 글');
+  assert.deepEqual(cache.apply({ kind: 'patch', id: 'c1', fields: { text: '나중 수정', editedAt: '2026-11-04T03:00:00.000Z' } }), ['part-bg']);
+  assert.equal(cache.findById('c1')?.text, '나중 수정');
+});
+
+test('순서가 뒤바뀐 신호: 지운 댓글은 늦게 온 추가 신호나 삭제 전에 시작한 조회로 되살아나지 않는다', async () => {
+  const gate = deferred<CommentRow[]>();
+  let reads = 0;
+  const cache = createCommentRowCache({ read: () => { reads += 1; return reads === 1 ? Promise.resolve([row('c1')]) : gate.promise; } });
+  await cache.load('part-bg');
+  assert.deepEqual(cache.apply({ kind: 'delete', id: 'c1' }), ['part-bg']);
+  assert.deepEqual(cache.apply({ kind: 'upsert', row: row('c1') }), [], '삭제 뒤에 온 추가 방송');
+  assert.equal(cache.findById('c1'), undefined);
+  // 다른 파트를 읽는 중 — 삭제 전에 시작한 조회가 지운 댓글을 돌려줘도 캐시에 넣지 않는다.
+  const loading = cache.load('part-act');
+  gate.resolve([row('c1', { partId: 'part-act' }), row('c2', { partId: 'part-act' })]);
+  assert.deepEqual((await loading).map((r) => r.id), ['c2']);
+});
+
 test('applyCommentRowOp: 내용이 같으면 같은 배열을 돌려준다', () => {
   const rows = [row('c1')];
   const same = applyCommentRowOp(rows, { kind: 'upsert', row: row('c1') });
@@ -186,4 +212,11 @@ test('무효화 신호는 자기 시트(상대 부서 포함)·자기 캐릭터 
   assert.equal(isCommentsInvalidationRelevant({ sheetName: 'EP05_A_BG' }, { characterId: 'hero' }), false, '캐릭터 화면은 씬 신호를 받지 않는다');
   assert.equal(isCommentsInvalidationRelevant({ partIds: ['part-act'] }, { partIds: ['part-bg', 'part-act'] }), true);
   assert.equal(isCommentsInvalidationRelevant({ partIds: ['part-x'], sheetNames: ['EP09_A_BG'] }, { partIds: ['part-bg'] }), false);
+});
+
+test('어디 것인지 모르는 삭제 신호는 그 댓글을 보여 주는 화면만 받는다', () => {
+  const detail = { commentId: 'c9', commentAction: 'delete' as const, unresolvedDelete: true };
+  assert.equal(isCommentsInvalidationRelevant(detail, { characterId: 'hero', knownCommentIds: new Set(['c9']) }), true);
+  assert.equal(isCommentsInvalidationRelevant(detail, { characterId: 'hero', knownCommentIds: new Set(['c1']) }), false);
+  assert.equal(isCommentsInvalidationRelevant(detail, { sheetNames: ['EP05_A_BG'] }), false, '씬 목록 배지는 무관(씬 캐시에 없던 댓글)');
 });
