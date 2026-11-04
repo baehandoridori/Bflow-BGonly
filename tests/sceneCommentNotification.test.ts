@@ -92,10 +92,12 @@ test('리테이크 댓글 → 요청자·담당자·알림 대상에게 강한 �
 });
 
 test('수정으로 새로 넣은 @이름에만 멘션, 수정에서는 답글·자동 알림 없음', () => {
-  const edit = comment({ kind: 'edit', mentions: [ME.name], addedMentions: [ME.name] });
+  const edit = comment({ kind: 'edit', mentions: [ME.name], addedMentions: [ME.name], createdAt: '2026-11-04T02:00:00Z' });
   const d = decideSceneCommentNotification(edit, ME, deps(), ON);
   assert.equal(d?.reason, 'mention');
-  assert.equal(d?.dedupeKey, 'c1:mention:edit');
+  assert.equal(d?.dedupeKey, 'c1:mention:edit:2026-11-04T02:00:00Z', '수정마다 따로(코덱스 1차) — 다음 수정에서 넣은 @ 도 알린다');
+  const later = decideSceneCommentNotification({ ...edit, createdAt: '2026-11-04T03:00:00Z' }, ME, deps(), ON);
+  assert.notEqual(later?.dedupeKey, d?.dedupeKey);
   assert.equal(decideSceneCommentNotification(comment({ kind: 'edit', mentions: [ME.name], addedMentions: [] }), ME, deps(), ON), null, '원래 있던 멘션');
   assert.equal(decideSceneCommentNotification(comment({ kind: 'edit', parentCommentId: 'r', addedMentions: [] }), ME, deps({ isCommentByUser: () => true }), ON), null);
 });

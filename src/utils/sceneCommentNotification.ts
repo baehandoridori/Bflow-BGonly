@@ -131,7 +131,7 @@ export function decideSceneCommentNotification(
       body,
       quiet: false,
       metadata: { characterId: comment.characterId, commentId: comment.commentId, mentionedBy: author, reason: 'mention' },
-      dedupeKey: `${comment.commentId}:mention${isEdit ? ':edit' : ''}`,
+      dedupeKey: `${comment.commentId}:mention${isEdit ? `:edit:${comment.createdAt ?? ''}` : ''}`,
     };
   }
 
@@ -157,7 +157,7 @@ export function decideSceneCommentNotification(
     body,
     quiet: reason === 'auto',
     metadata: { ...baseMetadata, reason, ...(reason === 'auto' ? {} : { mentionedBy: author }), ...extra },
-    dedupeKey: `${comment.commentId}:${reason}${isEdit ? ':edit' : ''}`,
+    dedupeKey: `${comment.commentId}:${reason}${isEdit ? `:edit:${comment.createdAt ?? ''}` : ''}`,
   });
 
   // 수정으로 새로 넣은 @이름 — 그 사람에게만 멘션 알림. 답글·자동 알림은 처음 쓸 때 이미 판정했다.

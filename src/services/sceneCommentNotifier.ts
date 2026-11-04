@@ -134,7 +134,10 @@ export function notifyIncomingSceneComment(
   if (!comment?.commentId) return;
   const me = useAuthStore.getState().currentUser;
   if (!me || !comment.userId || comment.userId === me.id) return;
-  const arrivalKey = `${comment.commentId}:${comment.kind ?? 'add'}`;
+  // 수정은 수정마다 따로(코덱스 1차) — 같은 수정의 두 길(실시간·방송)만 겹친다.
+  const arrivalKey = comment.kind === 'edit'
+    ? `${comment.commentId}:edit:${comment.createdAt ?? ''}`
+    : `${comment.commentId}:add`;
   if (!arrivals.claim(arrivalKey)) return;
 
   const finish = (revision: NotificationRevisionRef | null) => {

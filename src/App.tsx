@@ -246,6 +246,58 @@ export async function applyIncomingSharedBflowCalendarChangeInApp(raw: unknown):
   return true;
 }
 
+/**
+ * 놓친 멘션 모아 오기 — last_seen 이후 나를 부른 댓글을 알림 목록에 넣는다(토스트는 요약 한 번).
+ * 로그인 때와 실시간이 끊겼다 다시 붙을 때 부른다(v1.146.0, 코덱스 1차): 실시간으로 받은 멘션이 기준 시각을 옮기므로,
+ * 끊긴 사이 온 멘션은 다시 붙을 때 이 함수가 그 기준 시각부터 다시 본다. 실시간·복원이 같은 판정·같은 중복 집합을 쓴다.
+ */
+async function catchUpMissedMentions(
+  me: { id: string; name: string },
+  getSettings: () => NotificationSettings,
+): Promise<'done' | 'failed' | 'skipped'> {
+  const { getLastSeenAt, setLastSeenAt, ensureLastSeenInitialized } = await import('@/utils/lastSeenTracker');
+  const lastSeen = getLastSeenAt(me.id);
+  if (!lastSeen) {
+    // 첫 로그인 — 이전 알림 catch-up 안 함, 시각만 기록
+    ensureLastSeenInitialized(me.id);
+    return 'skipped';
+  }
+  try {
+    const missed = await window.electronAPI?.supabaseFetchMissedMentions?.(me.id, me.name, lastSeen, 50);
+    if (!missed || missed.length === 0) return 'done';
+    if (useAuthStore.getState().currentUser?.id !== me.id) return 'skipped';
+    // 알림 패널에만 누적 (토스트 X — 한꺼번에 N 개 띄우면 시끄러움)
+    // v1.146.0(씬 댓글 B안 §6.1): 제목·이동 정보는 실시간과 같은 판정 함수로 만든다. 실시간으로 이미 받은 알림은 건너뛴다.
+    const store = useNotificationStore.getState();
+    let added = 0;
+    for (const c of orderCatchupRowsForPrepend(missed)) {
+      const decision = decideIncomingSceneComment(normalizeSceneCommentFromMissedRow(c), getSettings());
+      if (!decision || !claimSceneCommentDecision(decision)) continue;
+      store.addNotification({
+        type: decision.type,
+        title: decision.title,
+        body: decision.body || undefined,
+        createdAt: c.createdAt,
+        // scene_uuid 없는 오래된 댓글도 part_uuid + sort_order 로 정확히 찾아갈 수 있게 storage hint 보존.
+        metadata: decision.metadata as Record<string, string | undefined>,
+      });
+      added += 1;
+    }
+    if (missed[0]?.createdAt) setLastSeenAt(me.id, missed[0].createdAt);
+    if (added > 0) {
+      // 요약 토스트 1번 (한솔이 인지)
+      sonnerToast(`놓친 알림 ${added}개를 가져왔어요`, {
+        description: '종 모양을 클릭해 확인해주세요.',
+        duration: 6000,
+      });
+    }
+    return 'done';
+  } catch (err) {
+    console.warn('[catchup] 멘션 catch-up 실패:', err);
+    return 'failed';
+  }
+}
+
 /** 기존 일반 reload는 모든 SUBSCRIBED에서 유지하고, 공유 캘린더 정본은 재연결에만 보충한다. */
 export async function applyAppRealtimeCalendarReconnectCatchUp(
   status: string,
@@ -1071,60 +1123,9 @@ export default function App() {
     const me = currentUser;
     console.log('[catchup] 처리 시작', { id: me.id, name: me.name });
 
-    (async () => {
-      const { getLastSeenAt, setLastSeenAt, ensureLastSeenInitialized } = await import('@/utils/lastSeenTracker');
-      const lastSeen = getLastSeenAt(me.id);
-      console.log('[catchup] lastSeen', lastSeen);
-      if (!lastSeen) {
-        // 첫 로그인 — 이전 알림 catch-up 안 함, 시각만 기록
-        ensureLastSeenInitialized(me.id);
-        console.log('[catchup] 첫 로그인 — last_seen 초기화만, catch-up 스킵');
-        return;
-      }
-      try {
-        console.log('[catchup] supabaseFetchMissedMentions 호출', {
-          available: !!window.electronAPI?.supabaseFetchMissedMentions,
-          since: lastSeen,
-        });
-        const missed = await window.electronAPI?.supabaseFetchMissedMentions?.(me.id, me.name, lastSeen, 50);
-        console.log('[catchup] fetch 결과', { count: missed?.length ?? 0, missed });
-        if (!missed || missed.length === 0) {
-          console.log('[catchup] 놓친 알림 없음');
-          return;
-        }
-        // 알림 패널에만 누적 (토스트 X — 한꺼번에 N 개 띄우면 시끄러움)
-        // v1.146.0(씬 댓글 B안 §6.1): 제목·이동 정보는 실시간과 같은 판정 함수로 만든다. 실시간으로 이미 받은 알림은 건너뛴다.
-        const store = useNotificationStore.getState();
-        let added = 0;
-        for (const c of orderCatchupRowsForPrepend(missed)) {
-          const decision = decideIncomingSceneComment(normalizeSceneCommentFromMissedRow(c), notiSettingsRef.current);
-          if (!decision || !claimSceneCommentDecision(decision)) continue;
-          store.addNotification({
-            type: decision.type,
-            title: decision.title,
-            body: decision.body || undefined,
-            createdAt: c.createdAt,
-            // scene_uuid 없는 오래된 댓글도 part_uuid + sort_order 로 정확히 찾아갈 수 있게 storage hint 보존.
-            metadata: decision.metadata as Record<string, string | undefined>,
-          });
-          added += 1;
-        }
-        if (added === 0) {
-          if (missed[0]?.createdAt) setLastSeenAt(me.id, missed[0].createdAt);
-          return;
-        }
-        // 요약 토스트 1번 (한솔이 인지)
-        sonnerToast(`놓친 알림 ${added}개를 가져왔어요`, {
-          description: '종 모양을 클릭해 확인해주세요.',
-          duration: 6000,
-        });
-        if (missed[0]?.createdAt) setLastSeenAt(me.id, missed[0].createdAt);
-        console.log('[catchup] 완료', { added });
-      } catch (err) {
-        console.warn('[catchup] 멘션 catch-up 실패:', err);
-        releaseCatchupRunOnError(catchupDoneUserIdRef, me.id);
-      }
-    })();
+    void catchUpMissedMentions(me, getNotiSettings).then((result) => {
+      if (result === 'failed') releaseCatchupRunOnError(catchupDoneUserIdRef, me.id);
+    });
   }, [currentUser, authReady]);
 
   // v1.25.5 액팅 피드백 알림 catch-up — 댓글 멘션 catch-up 과 평행 구조, 별도 lastSeen 키.
@@ -2863,9 +2864,13 @@ export default function App() {
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseStatus) return;
     return onSupabaseStatusChange((status, metadata) => {
-      if (status === 'SUBSCRIBED' && metadata?.reconnected === true) invalidatePartCache();
+      if (status !== 'SUBSCRIBED' || metadata?.reconnected !== true) return;
+      invalidatePartCache();
+      // v1.146.0(코덱스 1차): 끊긴 사이 온 멘션 — 실시간 멘션이 기준 시각을 옮기기 전에 그 구간을 다시 본다.
+      const me = useAuthStore.getState().currentUser;
+      if (me) void catchUpMissedMentions({ id: me.id, name: me.name }, getNotiSettings);
     });
-  }, []);
+  }, [getNotiSettings]);
 
   // 자동 로그인: 스플래시 종료 후 시간대별 인사 표시
   // welcomeUser가 있으면 수동 로그인이므로 건너뜀 (WelcomeToast onDismiss에서 처리)
