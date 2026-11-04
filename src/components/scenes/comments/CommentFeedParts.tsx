@@ -236,7 +236,7 @@ export function SceneAlertBell({ muted, onToggle }: { muted: boolean; onToggle: 
       type="button"
       className="cmt-icon-btn cmt-scene-bell"
       aria-pressed={muted}
-      aria-label={muted ? '이 씬 자동 알림 켜기' : '이 씬 자동 알림 끄기'}
+      aria-label="이 씬 자동 알림 끄기"
       title={muted ? '이 씬의 자동 알림(담당·참여한 씬)이 꺼져 있어요 — 누르면 켜요. 나를 부른 알림은 늘 와요.' : '이 씬의 자동 알림(담당·참여한 씬) 끄기 — 나를 부른 알림은 그대로 와요'}
       onClick={onToggle}
     >

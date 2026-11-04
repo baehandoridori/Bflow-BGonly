@@ -37,15 +37,24 @@ export function sanitizeThreadPreferences(raw: unknown, limit = MAX_THREAD_PREFE
   return Object.fromEntries(entries.slice(Math.max(0, entries.length - limit)));
 }
 
-/** 하나 바꾸기(null 이면 지움). 바꾼 것은 맨 뒤로 — 넘치면 가장 오래 안 건드린 것부터 뺀다. */
+/**
+ * 하나 바꾸기(null 이면 지움). 바꾼 것은 맨 뒤로 — 넘치면 가장 오래 안 건드린 것부터 뺀다.
+ * 스레드 키(`…#스레드`)면 다른 씬 키로 저장된 같은 스레드 설정도 지운다 — 씬 상세와 통합 상세가 씬 대화 키를 조금 다르게
+ * 만들어, 한쪽에서 끈 것을 다른 쪽에서 풀 수 없던 문제(다중 리뷰). 씬 전체 키(`#` 없음)는 그 키만.
+ */
 export function setThreadPreference(
   prefs: ThreadPreferenceMap,
   key: string,
   value: ThreadPreference | null,
   limit = MAX_THREAD_PREFERENCES,
 ): ThreadPreferenceMap {
+  const threadId = threadIdOfKey(key);
   const next: ThreadPreferenceMap = {};
-  for (const [k, v] of Object.entries(prefs)) if (k !== key) next[k] = v;
+  for (const [k, v] of Object.entries(prefs)) {
+    if (k === key) continue;
+    if (threadId && threadIdOfKey(k) === threadId) continue;
+    next[k] = v;
+  }
   if (value) next[key] = value;
   const keys = Object.keys(next);
   for (const k of keys.slice(0, Math.max(0, keys.length - limit))) delete next[k];

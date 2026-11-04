@@ -195,6 +195,7 @@
 .cmt-follow.is-muted { color: rgb(var(--color-text-secondary)); border-style: dashed; }
 .cmt-scene-bell { width: 26px; height: 26px; }
 .cmt-scene-bell[aria-pressed='true'] { color: rgb(var(--color-text-primary)); }
+.cmt-scene-bell:focus-visible, .cmt-follow:focus-visible { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.55); }
 
 /* 빈 상태 */
 .cmt-empty { padding: 40px 16px; text-align: center; color: rgb(var(--color-text-secondary)); font-size: 13px; line-height: 1.55; }

@@ -156,8 +156,9 @@ interface NotificationState {
    * 움직임 폴리싱 20번: 지우기 확정(줄이 사라지는 움직임이 끝난 뒤) — 누른 순간 보이던 알림(marks)만 지우고 지운 알림을 돌려준다.
    * 그 사이 실시간으로 새로 온 알림·같은 id 로 새 내용이 온 알림은 남긴다(코덱스 2차 지적 — 보지도 못한 채 읽음 처리·삭제되던 문제).
    * 서버 쪽 읽음 처리도 지운 알림에만 한다. 누른 뒤 계정이 바뀌었으면 아무것도 하지 않는다.
+   * options.all — '전체 삭제'(반응은 받는 사람의 것 전부를 한 번에 읽음으로). 줄·카드 하나 지우기는 하나씩.
    */
-  removeShownNotifications: (marks: readonly ShownNotificationMark[], userId: string | null) => AppNotification[];
+  removeShownNotifications: (marks: readonly ShownNotificationMark[], userId: string | null, options?: { all?: boolean }) => AppNotification[];
   /**
    * 움직임 폴리싱 20번: '전체 삭제' 되돌리기 — 지운 알림을 그대로(읽음 표시까지) 되살린다.
    * 그 사이 새로 온 알림은 위에 그대로 두고, 같은 알림은 겹치지 않게 묶는다.
@@ -206,12 +207,21 @@ function syncDomainRead(notification: AppNotification) {
   );
 }
 
-/** 여러 줄의 서버 읽음 — 종류별로 모아 한 번에(v1.148.0 §9). remaining = 처리 뒤 이 PC 에 남는 목록. */
-function syncDomainReadMany(rows: readonly AppNotification[], remaining: readonly AppNotification[], recipientId: string | null) {
+/**
+ * 여러 줄의 서버 읽음 — 종류별로 모아 한 번에(v1.148.0 §9). remaining = 처리 뒤 이 PC 에 남는 목록.
+ * all: 사용자가 '모두 읽음'·'전체 삭제'를 골랐다 — 그때만(그리고 남는 안 읽은 반응이 없을 때만) 반응을 한 번에 읽음으로.
+ * includeRead: 지우기 — 이미 읽은 줄도 다시 알린다(예전 읽음 처리가 실패했어도 되살아나지 않게).
+ */
+function syncDomainReadMany(
+  rows: readonly AppNotification[],
+  remaining: readonly AppNotification[],
+  recipientId: string | null,
+  { all, includeRead = false }: { all: boolean; includeRead?: boolean },
+) {
   markNotificationsDomainReadBatch(rows, {
     recipientId,
-    // 남는 줄에 안 읽은 반응이 없을 때만 '받는 사람의 반응 전부 읽음'을 쓴다.
-    everyReaction: !remaining.some((n) => n.type === 'comment_reaction' && !n.isRead),
+    everyReaction: all && !remaining.some((n) => n.type === 'comment_reaction' && !n.isRead),
+    includeRead,
   });
 }
 
@@ -259,7 +269,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   markAllAsRead: () => {
     const current = get().notifications;
     const next = current.map((n) => ({ ...n, isRead: true }));
-    syncDomainReadMany(current.filter((n) => !n.isRead), next, get().activeUserId);
+    syncDomainReadMany(current.filter((n) => !n.isRead), next, get().activeUserId, { all: true });
     setNotifications(set, next);
     persistToDisk(get().activeUserId, next);
   },
@@ -270,7 +280,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const targets = current.filter((n) => wanted.has(n.id) && !n.isRead);
     if (targets.length === 0) return;
     const next = current.map((n) => (wanted.has(n.id) ? { ...n, isRead: true } : n));
-    syncDomainReadMany(targets, next, get().activeUserId);
+    syncDomainReadMany(targets, next, get().activeUserId, { all: false });
     setNotifications(set, next);
     persistToDisk(get().activeUserId, next);
   },
@@ -286,18 +296,18 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   clearAll: () => {
     const removed = get().notifications;
-    syncDomainReadMany(removed, [], get().activeUserId);
+    syncDomainReadMany(removed, [], get().activeUserId, { all: true, includeRead: true });
     setNotifications(set, []);
     persistToDisk(get().activeUserId, []);
     return removed;
   },
 
-  removeShownNotifications: (marks, userId) => {
+  removeShownNotifications: (marks, userId, options) => {
     const { activeUserId, notifications } = get();
     if (marks.length === 0 || activeUserId !== userId) return [];
     const { kept, removed } = splitShownNotifications(notifications, marks);
     if (removed.length === 0) return [];
-    syncDomainReadMany(removed, kept, activeUserId);
+    syncDomainReadMany(removed, kept, activeUserId, { all: options?.all === true, includeRead: true });
     setNotifications(set, kept);
     persistToDisk(activeUserId, kept);
     return removed;

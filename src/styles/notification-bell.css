@@ -57,7 +57,8 @@
  * 왼쪽 세로 막대·알약·그림자 없음. 안 읽음은 옅은 배경 + 점 하나. 색은 토큰만(라이트는 [data-color-mode="light"]).
  * 움직임은 배경색 전환 180ms 하나(transform/opacity 외 레이아웃 속성은 움직이지 않는다). */
 :root { --noti-link-rgb: var(--color-accent-sub); }
-[data-color-mode="light"] { --noti-link-rgb: 91 75 214; }
+/* 밝은 화면은 테마의 액센트 그대로(보라 외 테마에서 버튼·멘션 글자만 보라로 남지 않게) */
+[data-color-mode="light"] { --noti-link-rgb: var(--color-accent); }
 
 .bf-noti-card,
 .bf-noti-row {
@@ -116,6 +117,8 @@
 .bf-noti-card:hover .bf-noti-del, .bf-noti-card:focus-within .bf-noti-del,
 .bf-noti-row:hover .bf-noti-del, .bf-noti-row:focus-within .bf-noti-del { opacity: 1; }
 .bf-noti-del:hover, .bf-noti-del:focus-visible { color: var(--status-error); outline: none; }
+.bf-noti-del:focus-visible { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.55); }
+.bf-noti-btn:focus-visible { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.45); }
 /* 지우기 단추가 시각 글자를 가리지 않게 — 보일 때만 시각을 비켜 둔다(투명도만, 자리는 그대로) */
 .bf-noti-card:hover .bf-noti-card-time, .bf-noti-card:focus-within .bf-noti-card-time { opacity: 0; }
 

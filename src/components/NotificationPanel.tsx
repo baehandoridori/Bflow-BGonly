@@ -182,6 +182,8 @@ function NotificationCard({
   let icon: ReactNode;
   let label: string;
   let meta: ReactNode = null;
+  /** 화면 읽기 프로그램용 메타 글(카드 이름에 붙는다 — 화면의 '새 댓글 4 · 멘션 2'·상태와 같은 말). */
+  let metaText = '';
   let lines: ReactNode[];
   let openLabel: string | null;
 
@@ -190,10 +192,14 @@ function NotificationCard({
     icon = <Flag size={13} aria-hidden />;
     label = head.label;
     meta = head.status ? <span className="bf-noti-status" data-status={head.status}>{RETAKE_STATUS_LABEL[head.status]}</span> : null;
+    metaText = head.status ? RETAKE_STATUS_LABEL[head.status] : '';
     const timeline = revisionTimeline(card);
-    const commentLines = notificationPreviewLines({ ...card, notifications: card.notifications.filter((n) => n.type !== 'revision') }, 2);
+    // 상태 알림 본문(등록 설명·담당 완료 메모·'○○님의 다시 알림 · …')은 최근 것 하나만 — 예전 한 줄씩 보이던 정보를 잃지 않게.
+    const statusBody = card.notifications.find((n) => n.type === 'revision' && n.body?.trim())?.body?.trim() ?? '';
+    const commentLines = notificationPreviewLines({ ...card, notifications: card.notifications.filter((n) => n.type !== 'revision') }, statusBody ? 1 : 2);
     lines = [
       ...(timeline ? [<div key="timeline" className="bf-noti-line">{timeline}</div>] : []),
+      ...(statusBody ? [<div key="status-body" className="bf-noti-line" title={statusBody}>{statusBody}</div>] : []),
       ...commentLines.map((line) => (
         <div key={line.id} className="bf-noti-line">{line.name && <b>{line.name}</b>} {renderPreviewText(line.text, line.mention)}</div>
       )),
@@ -206,6 +212,7 @@ function NotificationCard({
     label = '반응';
     const actors = reactionActorSummary(card);
     meta = actors || null;
+    metaText = actors;
     lines = [
       <div key="reaction" className="bf-noti-line">
         {context.sceneLabelFor(latest)} 내 댓글에 {emojis.join(' ')}
@@ -219,8 +226,12 @@ function NotificationCard({
       meta = card.unreadCommentCount > 0
         ? <>새 댓글 {card.unreadCommentCount}{card.unreadMentionCount > 0 && <> · <b>멘션 {card.unreadMentionCount}</b></>}</>
         : <>댓글 {card.commentCount}</>;
+      metaText = card.unreadCommentCount > 0
+        ? `새 댓글 ${card.unreadCommentCount}${card.unreadMentionCount > 0 ? ` · 멘션 ${card.unreadMentionCount}` : ''}`
+        : `댓글 ${card.commentCount}`;
     } else {
       meta = <>알림 {card.notifications.length}</>;
+      metaText = `알림 ${card.notifications.length}`;
     }
     const preview = notificationPreviewLines(card, 3);
     lines = preview.map((line) => (
@@ -239,7 +250,7 @@ function NotificationCard({
       tabIndex={0}
       data-noti-flip={flipKey}
       data-noti-read={unread ? 'false' : 'true'}
-      aria-label={`${label}${typeof meta === 'string' ? ` · ${meta}` : ''} · ${timeAgo(card.latestCreatedAt)}`}
+      aria-label={`${label}${metaText ? ` · ${metaText}` : ''}${unread ? ' · 안 읽음' : ''} · ${timeAgo(card.latestCreatedAt)}`}
       onClick={open}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;
@@ -266,7 +277,16 @@ function NotificationCard({
             </button>
           )}
           {unread && (
-            <button type="button" className="bf-noti-btn" onClick={(e) => { e.stopPropagation(); markManyAsRead(ids); }}>
+            <button
+              type="button"
+              className="bf-noti-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                // 누른 단추는 읽으면 사라진다 — 키보드 위치가 페이지 맨 앞으로 튀지 않게 카드로 옮긴다.
+                cardRef.current?.focus();
+                markManyAsRead(ids);
+              }}
+            >
               읽음
             </button>
           )}
@@ -548,7 +568,16 @@ function NotificationDropdown() {
       rowShiftBeforeRef.current = reduce
         ? null
         : new Map(measureNotificationRows(listRef.current).map((position) => [position.key, position.top]));
-      if (useNotificationStore.getState().removeShownNotifications(marks, userId).length > 0) return;
+      if (useNotificationStore.getState().removeShownNotifications(marks, userId).length > 0) {
+        // 카드는 안의 알림을 지워도 그사이 같은 씬·리테이크에 새 알림이 오면(또는 일부만 지워지면) 같은 자리에 남는다 —
+        // 다 그린 뒤(두 프레임 뒤)에도 남아 있으면 밀려난 채 투명하게 굳지 않게 되돌린다.
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+          if (!row || !row.isConnected) return;
+          exit?.cancel();
+          row.style.pointerEvents = '';
+        }));
+        return;
+      }
       // 지우지 않았다(그사이 새 내용이 옴·이미 사라짐·계정 전환) — 목록이 그대로라 잰 위치는 버리고 밀려난 줄을 되돌린다.
       rowShiftBeforeRef.current = null;
       exit?.cancel();
@@ -606,7 +635,7 @@ function NotificationDropdown() {
       clearingRef.current = false;
       // 옅어지는 중이었으면 목록이 바뀐 다음 그림(useLayoutEffect)에서 푼다.
       clearCommittedRef.current = clearFadeRef.current !== null;
-      const removed = useNotificationStore.getState().removeShownNotifications(marks, userId);
+      const removed = useNotificationStore.getState().removeShownNotifications(marks, userId, { all: true });
       if (removed.length === 0) {
         // 지운 것이 없다(그사이 모두 사라짐·계정 전환) — 목록이 그대로라 다시 그려지지 않으니 여기서 푼다.
         clearCommittedRef.current = false;
@@ -690,7 +719,11 @@ function NotificationDropdown() {
       if (sceneName && sceneName.includes(':')) {
         return buildNotificationSceneDisplayLabelFromSceneKey(sceneName, episodeTitles, episodes) || sceneName;
       }
-      return sceneName || '씬';
+      // 씬을 못 찾으면(보관한 에피소드·아직 못 받은 목록) 씬 댓글 알림 제목 끝의 라벨('… · EP05 a001')을 쓴다.
+      const titleLabel = (n.type === 'comment' || n.type === 'mention') && n.title.includes(' · ')
+        ? n.title.slice(n.title.lastIndexOf(' · ') + 3).trim()
+        : '';
+      return titleLabel || sceneName || '씬';
     };
     const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
     const ACTION_STATUS: Record<string, RetakeCardStatus> = { add: 'open', reminder: 'open', in_progress: 'in_progress', assignee_done: 'assignee_done', resolve: 'resolved' };

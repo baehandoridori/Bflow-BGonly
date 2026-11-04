@@ -35,6 +35,16 @@ test('상한: 넘치면 읽은 것 → 단계 변경 → 오래된 댓글 순으
   assert.equal(capNotifications(list, 50).length, list.length);
 });
 
+test('상한: 같은 순위 안에서는 목록 위치가 아니라 만든 시각이 오래된 것부터(제자리에서 합쳐진 줄)', () => {
+  // 뒤쪽에 있지만 방금 합쳐져 가장 최근인 단계 변경 S, 앞쪽의 더 오래된 단계 변경 S2
+  const list = [
+    row('mention', 'mention', false, 9),
+    row('s2', 'scene_change', false, 2),
+    row('s', 'scene_change', false, 4),
+  ];
+  assert.deepEqual(capNotifications(list, 2).map((n) => n.id), ['mention', 's'], '더 오래된 s2 를 버린다');
+});
+
 test('상한: 쌓아 넣을 때(prepend)·다시 읽을 때(dedupe) 모두 위치가 아니라 순서로 자른다', () => {
   const list = Array.from({ length: 50 }, (_, i) => row(`read-${i}`, 'comment', true, i % 60));
   const oldMention = row('old-mention', 'mention', false, 0, { commentId: 'm-old' });

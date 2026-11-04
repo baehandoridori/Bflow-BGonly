@@ -51,3 +51,14 @@ test('알림 상한 — 읽은 것 → 단계 변경 → 오래된 댓글 순으
   assert.deepEqual(capNotifications(list, 2).map((x) => x.id), ['m1', 'f1'], '지키는 것끼리는 오래된 것부터');
   assert.equal(capNotifications(list, 50).length, 8);
 });
+
+test('스레드 설정은 스레드마다 하나 — 다른 씬 키(통합 상세 등)로 저장된 같은 스레드도 함께 바꾸고 지운다', () => {
+  let prefs = setThreadPreference({}, 'EP05:A:a001#root-1', 'mute');
+  prefs = setThreadPreference(prefs, 'merged-EP05:A:a001', 'mute');
+  // 통합 상세에서 같은 스레드를 '기본으로'
+  prefs = setThreadPreference(prefs, 'merged-EP05:A:a001#root-1', null);
+  assert.deepEqual(prefs, { 'merged-EP05:A:a001': 'mute' }, '씬 전체 키는 그대로, 같은 스레드 키는 모두 지운다');
+  prefs = setThreadPreference(prefs, 'EP05:A:a001#root-1', 'mute');
+  prefs = setThreadPreference(prefs, 'merged-EP05:A:a001#root-1', 'follow');
+  assert.deepEqual(Object.entries(prefs), [['merged-EP05:A:a001', 'mute'], ['merged-EP05:A:a001#root-1', 'follow']]);
+});

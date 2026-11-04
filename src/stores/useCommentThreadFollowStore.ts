@@ -55,8 +55,9 @@ export const useCommentThreadFollowStore = create<CommentThreadFollowState>((set
   setPreference: async (key, value) => {
     const userId = get().userId;
     if (!userId || !key) return false;
-    const before = get().prefs[key] ?? null;
-    set({ prefs: setThreadPreference(get().prefs, key, value) });
+    const before = get().prefs;
+    const optimistic = setThreadPreference(before, key, value);
+    set({ prefs: optimistic });
     const job = saveChain.then(async () => {
       if (get().userId !== userId) return true; // 계정이 바뀌었으면 쓰지 않는다
       try {
@@ -70,8 +71,9 @@ export const useCommentThreadFollowStore = create<CommentThreadFollowState>((set
     saveChain = job.catch(() => undefined);
     const ok = await job;
     if (!ok && get().userId === userId) {
-      // 되돌리기 — 그 사이 같은 키를 또 바꿨으면(값이 달라졌으면) 건드리지 않는다.
-      if ((get().prefs[key] ?? null) === value) set({ prefs: setThreadPreference(get().prefs, key, before) });
+      // 되돌리기 — 그 사이 아무것도 안 바뀌었으면 통째로, 다른 것이 바뀌었으면 이 키만(그 사이 같은 키를 또 바꿨으면 건드리지 않는다).
+      if (get().prefs === optimistic) set({ prefs: before });
+      else if ((get().prefs[key] ?? null) === value) set({ prefs: setThreadPreference(get().prefs, key, before[key] ?? null) });
       sonnerToast.error('알림 설정을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
     }
     return ok;
