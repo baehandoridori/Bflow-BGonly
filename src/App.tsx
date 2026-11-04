@@ -55,7 +55,7 @@ import { episodeLabelsFromMetadata } from '@/utils/loadedMetadata';
 import { createAutoSyncScheduler, MAIN_WINDOW_SYNC_INTERVALS, type AutoSyncScheduler } from '@/utils/autoSyncScheduler';
 import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
-import { applyCommentBroadcast, applyRealtimeCommentPayload } from '@/services/commentService';
+import { applyCommentBroadcast, applyRealtimeCommentPayload, invalidatePartCache } from '@/services/commentService';
 import { getCanonicalRevision, invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { keepPendingSceneFields, onSceneSaveSessionEnded } from '@/services/sceneSaveRetry';
@@ -3209,6 +3209,15 @@ export default function App() {
     const cleanup = installAppRealtimeCalendarReconnectCatchUp(reloadFromEvent);
     return () => { cleanup?.(); };
   }, [reloadFromEvent]);
+
+  // v1.145.0(씬 댓글 B안 §7): 댓글 캐시는 받은 변경만 끼워 넣는다 — 실시간이 끊겼다 다시 붙으면
+  //   그 사이 놓친 댓글을 위해 한 번만 비운다(보이는 화면만 그 파트를 다시 읽는다). 처음 연결 때는 비우지 않는다.
+  useEffect(() => {
+    if (!window.electronAPI?.onSupabaseStatus) return;
+    return onSupabaseStatusChange((status, metadata) => {
+      if (status === 'SUBSCRIBED' && metadata?.reconnected === true) invalidatePartCache();
+    });
+  }, []);
 
   // 자동 로그인: 스플래시 종료 후 시간대별 인사 표시
   // welcomeUser가 있으면 수동 로그인이므로 건너뜀 (WelcomeToast onDismiss에서 처리)

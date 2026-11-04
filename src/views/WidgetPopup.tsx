@@ -44,7 +44,7 @@ import { readAll, readAllWithMetadata, checkConnection, getSupabaseRealtimeStatu
 import { episodeLabelsFromMetadata } from '@/utils/loadedMetadata';
 import { createAutoSyncScheduler, POPUP_WINDOW_SYNC_INTERVALS } from '@/utils/autoSyncScheduler';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
-import { applyCommentBroadcast, applyRealtimeCommentPayload } from '@/services/commentService';
+import { applyCommentBroadcast, applyRealtimeCommentPayload, invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { checkVacationConnection, connectVacation, resolveVacationConnection } from '@/services/vacationService';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
@@ -727,6 +727,10 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       requestReload();
     });
     const cleanupRealtimeStatus = installPopupRealtimeCalendarReconnectCatchUp();
+    // v1.145.0: 본 창과 같게 — 실시간이 끊겼다 다시 붙으면 놓친 댓글을 위해 댓글 캐시를 한 번 비운다.
+    const cleanupCommentReconnect = window.electronAPI?.onSupabaseStatus?.((status: string, metadata?: { reconnected?: boolean }) => {
+      if (status === 'SUBSCRIBED' && metadata?.reconnected === true) invalidatePartCache();
+    });
 
     // Supabase Broadcast: 즉시 동기화 (Publication 설정 불필요)
     const cleanupBroadcast = window.electronAPI?.onSupabaseBroadcast?.((raw: unknown) => {
@@ -792,6 +796,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       cleanupSnapshot?.();
       cleanupRealtime?.();
       cleanupRealtimeStatus?.();
+      cleanupCommentReconnect?.();
       cleanupBroadcast?.();
       cleanupStatusForSync?.();
       document.removeEventListener('visibilitychange', onVisibility);
