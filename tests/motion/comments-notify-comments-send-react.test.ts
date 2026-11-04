@@ -243,7 +243,9 @@ test('패널 배선: 실패 말풍선은 세 곳 모두 반응 줄 대신 안내
 });
 
 test('패널 배선: 반응을 처음 다 불러온 뒤에만 새 칩 톡, 취소 칩은 AnimatePresence 로 쏙', () => {
-  assert.match(panel, /fetchReactionsBulk\(ids\)\.then\(\(map\) => \{\s*if \(seq !== loadSeqRef\.current\) return;\s*setReactionsByCommentId\(map\);\s*setReactionsReady\(true\);/);
+  // v1.145.0: 반응 조회는 자기 순번(reactionsSeqRef)으로 늦은 결과를 버린다 — 캐시만 다시 보는 새로고침이 진행 중인 반응 조회를 버리지 않게.
+  assert.match(panel, /fetchReactionsBulk\(ids\)\.then\(\(map\) => \{\s*if \(reactionsSeq !== reactionsSeqRef\.current\) return;\s*reactionsLoadedRef\.current = true;\s*setReactionsByCommentId\(map\);\s*setReactionsReady\(true\);/);
+  assert.match(panel, /if \(options\?\.keepReactions && reactionsLoadedRef\.current\) return;/);
   assert.match(panel, /setLoadStatus\('loading'\);\s*setReactionsReady\(false\);/);
   assert.equal([...panel.matchAll(/animateNew=\{reactionsReady\}\s*reduceMotion=\{reduceMotion\}/g)].length, 3);
   const area = bodyOf(panel, '}: ReactionsAreaProps) {');

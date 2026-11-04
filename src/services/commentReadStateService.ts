@@ -103,9 +103,24 @@ function getMutableUserCache(userId: string): CommentReadState {
   return state;
 }
 
-function dispatchReadStateChanged(userId: string): void {
+/**
+ * 읽음 상태가 바뀌었다는 창 안 신호. source='local' 은 이 창에서 방금 읽음 처리한 것 — 새 값이 이미 캐시에 있으니
+ * 듣는 쪽은 서버에 다시 묻지 않고 peekCommentReadStateForUser 로 보면 된다(v1.145.0, 씬 댓글 B안 §7).
+ */
+export interface CommentReadStateEventDetail {
+  userId?: string;
+  source?: 'local' | 'server';
+}
+
+function dispatchReadStateChanged(userId: string, source: 'local' | 'server' = 'server'): void {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent(COMMENT_READ_STATE_EVENT, { detail: { userId } }));
+  window.dispatchEvent(new CustomEvent<CommentReadStateEventDetail>(COMMENT_READ_STATE_EVENT, { detail: { userId, source } }));
+}
+
+/** 캐시에 있는 읽음 상태(서버에 묻지 않음). 이 창에서 읽음 처리한 직후 신호(source='local')에 쓴다. */
+export function peekCommentReadStateForUser(userId: string): Record<string, string> {
+  if (!userId) return {};
+  return { ...(cacheByUser.get(userId) ?? {}) };
 }
 
 function clearPendingTimer(pending: PendingWrite): void {
@@ -388,7 +403,7 @@ export async function markSceneThreadReadForUser(input: MarkSceneThreadReadInput
   );
   if (!changed) return;
 
-  dispatchReadStateChanged(normalizedInput.userId);
+  dispatchReadStateChanged(normalizedInput.userId, 'local');
 
   try {
     await saveReadState(normalizedInput);

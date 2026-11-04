@@ -189,8 +189,9 @@ export class CharacterCommentSummaryCache {
   }
 
   private onCommentsChanged = (event: Event): void => {
-    const detail = (event as CustomEvent<{ characterId?: string; sheetName?: string }>).detail;
-    if (detail?.sheetName && !detail.characterId) return;
+    const detail = (event as CustomEvent<{ characterId?: string; sheetName?: string; sheetNames?: string[]; partIds?: string[] }>).detail;
+    // 씬 댓글 신호(시트·파트가 적힌 것)는 캐릭터 배지와 무관하다.
+    if ((detail?.sheetName || detail?.sheetNames?.length || detail?.partIds?.length) && !detail.characterId) return;
     const ids = detail?.characterId ? [detail.characterId] : [...new Set([...this.entries.keys(), ...this.listeners.keys(), ...this.inFlight])];
     for (const id of ids) {
       this.versions.set(id, (this.versions.get(id) ?? 0) + 1);

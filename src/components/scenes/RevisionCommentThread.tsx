@@ -38,6 +38,7 @@ import { HashtagDropdown } from '@/components/common/HashtagDropdown';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { useHashtagAutocomplete } from '@/hooks/useHashtagAutocomplete';
 import { navigateToHashTarget } from '@/utils/hashNavigation';
+import { isCommentsInvalidationRelevant, type CommentsInvalidatedDetail } from '@/utils/commentRowCache';
 import type { HashTarget } from '@/utils/hashEntity';
 import { createUuid } from '@/utils/createUuid';
 import {
@@ -182,9 +183,13 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
   useEffect(() => { loadComments(); }, [loadComments]);
 
   // 다른 PC/창 변경 시 자동 리로드 (300ms 디바운스, CommentPanel 와 동일 패턴)
+  // v1.145.0: 이 리테이크가 달린 시트(상대 부서 포함)의 신호만 받는다. 캐시를 고친 신호면 캐시만 다시 본다.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const handler = () => {
+    const sheetName = sceneKey.includes(':') ? sceneKey.slice(0, sceneKey.lastIndexOf(':')) : sceneKey;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<CommentsInvalidatedDetail | undefined>).detail;
+      if (!isCommentsInvalidationRelevant(detail, { sheetNames: [sheetName] })) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => { loadComments(); }, 300);
     };
@@ -193,7 +198,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
       window.removeEventListener('bflow:comments-invalidated', handler);
       if (timer) clearTimeout(timer);
     };
-  }, [loadComments]);
+  }, [loadComments, sceneKey]);
 
   // 외부 트리거(알림 클릭 → 모달 → 펼침 요청) 수신
   useEffect(() => {
