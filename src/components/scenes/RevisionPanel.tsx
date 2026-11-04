@@ -578,7 +578,7 @@ const RevisionCard = memo(function RevisionCard({
       </div>
 
       {/* 카드 내 댓글 스레드 — v1.18.0 신규 */}
-      <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} onHashClick={onHashClick} onHashContextMenu={onHashContextMenu} />
+      <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} onHashClick={onHashClick} onHashContextMenu={onHashContextMenu} openInCommentPanel />
     </motion.div>
   );
 });

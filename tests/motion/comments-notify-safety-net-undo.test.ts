@@ -352,9 +352,11 @@ test('댓글 패널: 지운 자리는 다음 그림 직전에 비우고 아래 �
   assert.match(comments, /notificationRowShifts\(before, measureFlipRows\(root, 'data-comment-flip'\)\)/);
   assert.match(comments, /\{ duration: COMMENT_REFLOW_MS, easing: COMMENT_REFLOW_EASING \},\s*reduceMotionRef\.current,/);
   assert.match(comments, /reflowBeforeRef\.current = reduceMotionRef\.current\s*\? null/, '동작 줄이기면 미끄러짐 없음');
-  assert.equal([...comments.matchAll(/data-comment-flip=\{`c:\$\{(comment|reply)\.id\}`\}/g)].length, 2);
-  assert.match(comments, /data-comment-flip=\{`e:\$\{node\.event\.id\}`\}/);
-  assert.equal([...comments.matchAll(/\{\.\.\.\(restoredCommentIdsRef\.current\.has\((comment|reply)\.id\) \? commentRestore : \{\}\)\}/g)].length, 2);
+  // v1.147.0(씬 댓글 B안): 본문 목록 행만 미끄러진다 — 원댓글 줄은 c:id(스레드 창 행은 키 없음), 활동 한 줄·리테이크 카드는 목록 항목 키(e:·r:).
+  assert.match(comments, /data-comment-flip=\{opts\.surface === 'main' \? `c:\$\{comment\.id\}` : undefined\}/);
+  assert.equal([...comments.matchAll(/data-comment-flip=\{item\.key\}/g)].length, 2, '활동 한 줄·리테이크 카드');
+  // 행 하나(renderCommentRow)가 본문·스레드 창을 모두 그린다 — 되돌린 말풍선의 제자리 등장도 한 곳.
+  assert.equal([...comments.matchAll(/\{\.\.\.\(restoredCommentIdsRef\.current\.has\(comment\.id\) \? commentRestore : \{\}\)\}/g)].length, 1);
   // 보내지 못한 말풍선 '지우기'는 서버에 없는 것이라 되돌리기 대상이 아니다(그대로 바로 지운다)
   const discard = bodyOf(comments, 'const discardUnsentComment = (commentId: string) =>');
   assert.doesNotMatch(discard, /showUndoToast|pendingDeletesRef/);

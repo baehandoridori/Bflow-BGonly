@@ -47,7 +47,10 @@ import {
   type AttachmentImageLightboxEntry,
   type AttachmentImageLightboxState,
 } from './AttachmentImageLightbox';
-import { RevisionCommentBadge } from './RevisionCommentBadge';
+import { avatarColor } from '@/utils/userAvatar';
+import { summarizeThread } from '@/utils/commentFeedModel';
+import { CommentAvatar, CommentThreadSummaryButton } from './comments/CommentFeedParts';
+import '@/styles/comment-feed.css';
 
 interface Props {
   revisionId: string;
@@ -63,6 +66,12 @@ interface Props {
   sceneKey: string;
   /** 4c PR2: #씬 칩 클릭 처리 분기(도킹 참조). 없으면 기존 점프. */
   onHashClick?: (t: HashTarget) => void;
+  /**
+   * v1.147.0(씬 댓글 B안 §5.4·§12-4 기본값): 옆에 댓글 패널이 있는 화면(씬 상세의 리테이크 탭) — 카드 안에는
+   * '댓글 N개 · 마지막 시각' 요약과 '스레드 열기'만 두고, 누르면 댓글 패널의 스레드 창을 연다(같은 행·같은 입력창).
+   * 패널이 받지 못하면(접혀 있음 등) 예전처럼 카드 안에 목록·입력창을 펼친다.
+   */
+  openInCommentPanel?: boolean;
   /** 4c PR3: #씬·#파트·#화 칩 우클릭 메뉴. 없으면 기본 우클릭. */
   onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
 }
@@ -73,22 +82,9 @@ function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string }
   return { sheetName: sceneKey.substring(0, idx), sceneId: sceneKey.substring(idx + 1) };
 }
 
-// 사용자 ID 해시 → 일관된 아바타 색 (RevisionRecipientPicker 와 동일 팔레트)
-const AVATAR_COLORS = [
-  '#6C5CE7', '#74B9FF', '#FDCB6E', '#E17055',
-  '#A29BFE', '#00B894', '#FF6B6B', '#F9A8D4',
-];
-function avatarColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
 // ─── 메인 컴포넌트 ──────────────────────────────────────────────────────
 
-export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHashContextMenu }: Props) {
+export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHashContextMenu, openInCommentPanel = false }: Props) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
   const revision = useRevisionStore(s => s.revisions.find(r => r.id === revisionId));
@@ -100,6 +96,8 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
   const [slackDelivery, setSlackDelivery] = useState<Map<string, MentionDeliveryEntry>>(() => new Map());
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState(true);
+  /** 댓글 패널 스레드 창을 쓰는 화면에서 카드 안 목록을 펼쳤나(패널이 못 받았거나 알림으로 특정 댓글을 보여 줄 때). */
+  const [inlineOpen, setInlineOpen] = useState(!openInCommentPanel);
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
@@ -202,7 +200,10 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
       const detail = (e as CustomEvent<{ revisionId?: string; commentId?: string }>).detail;
       if (detail?.revisionId === revisionId) {
         setExpanded(true);
-        if (detail.commentId) setFocusedCommentId(detail.commentId);
+        if (detail.commentId) {
+          setInlineOpen(true);
+          setFocusedCommentId(detail.commentId);
+        }
       }
     }
     window.addEventListener('bflow:expand-revision', onExpand);
@@ -380,6 +381,29 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
     }
   }
 
+  // 옆 댓글 패널의 스레드 창으로 — 요약 + '스레드 열기'(§5.4). 패널이 받지 못하면 카드 안에 펼친다.
+  if (openInCommentPanel && !inlineOpen) {
+    const summary = summarizeThread(comments, () => false);
+    const openInPanel = () => {
+      // 이 카드의 씬 키를 같이 — 도킹한 참조 씬의 카드가 본 씬 댓글 패널에서 열리지 않게(그 패널은 자기 씬만 받는다).
+      const detail: { revisionId: string; sceneKey: string; handled?: boolean } = { revisionId, sceneKey };
+      window.dispatchEvent(new CustomEvent('bflow:open-revision-thread', { detail }));
+      if (!detail.handled) setInlineOpen(true);
+    };
+    return (
+      <div className="mt-3 border-t border-bg-border/40 pt-2.5 flex items-center gap-2 flex-wrap" data-revision-thread-summary>
+        {summary ? (
+          <CommentThreadSummaryButton summary={summary} noun="댓글" onOpen={openInPanel} />
+        ) : (
+          <span className="text-[11.5px] text-text-secondary">아직 댓글이 없어요</span>
+        )}
+        <button type="button" className="cmt-btn ml-auto" onClick={openInPanel}>
+          스레드 열기
+        </button>
+      </div>
+    );
+  }
+
   // 접힌 상태 — 댓글 개수 표시 + 펼치기 버튼
   if (!expanded) {
     return (
@@ -394,7 +418,7 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
   }
 
   return (
-    <div className="mt-3 border-t border-bg-border/40 pt-3 space-y-2.5">
+    <div className="mt-3 border-t border-bg-border/40 pt-2 space-y-0.5">
       {comments.map(c => (
         <div
           key={c.id}
@@ -603,62 +627,41 @@ function CommentBubble({
   onHashContextMenu?: (t: import('@/utils/hashEntity').HashTarget, e: React.MouseEvent) => void;
 }) {
   return (
-    <div
-      className={`border rounded-lg px-3 py-2 ${
-        isMe
-          ? 'bg-accent/[0.10] border-accent/30'
-          : 'bg-bg-primary/60 border-bg-border/40'
-      }`}
-    >
-      <div className="flex items-center justify-between mb-0.5">
-        <div className="flex items-center gap-1.5">
-          <span
-            className="w-4 h-4 rounded-full inline-flex items-center justify-center text-[9px] font-bold text-white"
-            style={{ background: avatarColor(comment.userId) }}
-            aria-hidden
-          >
-            {comment.userName.charAt(0)}
-          </span>
-          <span className={`text-[11px] font-bold ${isMe ? 'text-accent-sub' : 'text-text-primary'}`}>
-            {comment.userName}
-          </span>
-          <RevisionCommentBadge revisionId={revisionId} />
+    <div className="cmt-row" data-revision-comment-row data-revision-id={revisionId} data-mine={isMe ? '' : undefined}>
+      <CommentAvatar userId={comment.userId} userName={comment.userName} />
+      <div className="min-w-0">
+        <div className="cmt-head">
+          <span className="cmt-name">{comment.userName}</span>
+          <span className="cmt-time">{formatCommentTime(comment.createdAt)}</span>
+          {comment.editedAt && <span className="cmt-meta-note">(수정됨)</span>}
         </div>
-        <span className="text-[10px] text-text-secondary/50">
-          {formatCommentTime(comment.createdAt)}
-        </span>
+        {comment.text && (
+          <div className="cmt-body">
+            <EntityText
+              text={comment.text}
+              userNames={users.map(user => user.name)}
+              onMentionClick={onMentionClick}
+              onHashClick={onHashClick}
+              onHashContextMenu={onHashContextMenu}
+            />
+          </div>
+        )}
+        {(comment.images?.length ?? 0) > 0 && (
+          <div className={comment.images!.length > 1 ? 'cmt-images is-multi' : 'cmt-images'}>
+            {comment.images!.map((url, index) => (
+              <button
+                type="button"
+                key={`${url}-${index}`}
+                className="cmt-image-button"
+                aria-label={`${comment.userName}의 첨부 이미지 ${index + 1} 크게 보기`}
+                onClick={() => onImageClick(url, comment)}
+              >
+                <img src={url} alt={`${comment.userName}의 첨부 이미지 ${index + 1}`} loading="lazy" />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      {comment.text && (
-        <div className="text-[12px] text-text-primary whitespace-pre-wrap leading-relaxed">
-          <EntityText
-            text={comment.text}
-            userNames={users.map(user => user.name)}
-            onMentionClick={onMentionClick}
-            onHashClick={onHashClick}
-            onHashContextMenu={onHashContextMenu}
-          />
-        </div>
-      )}
-      {(comment.images?.length ?? 0) > 0 && (
-        <div className={`mt-2 grid gap-1.5 ${comment.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
-          {comment.images!.map((url, index) => (
-            <button
-              type="button"
-              key={`${url}-${index}`}
-              onClick={() => onImageClick(url, comment)}
-              className="block rounded-md overflow-hidden border border-bg-border/60 bg-bg-secondary/40 cursor-zoom-in hover:opacity-90 transition-opacity"
-              title="이미지 확대"
-            >
-              <img
-                src={url}
-                alt=""
-                className="w-full max-h-32 object-cover"
-                loading="lazy"
-              />
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

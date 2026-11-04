@@ -167,19 +167,25 @@ test('댓글 패널: 지울 말풍선은 본문 목록에서 직접 찾는다(�
   // 알림에서 찾아온 댓글로 데려갈 때도 본문 말풍선 먼저
   assert.match(panel, /const el = findMainListComment\(scrollRef\.current, focusCommentId\) \?\? commentRefs\.current\.get\(focusCommentId\);/);
   // 스레드 칸 메시지에는 data-comment-id 가 없다(본문 목록만 찾힌다)
-  const threadPane = panel.slice(panel.indexOf('commentRefs.current.set(message.id, el)') - 400, panel.indexOf('commentRefs.current.set(message.id, el)') + 400);
-  assert.doesNotMatch(threadPane, /data-comment-id=/);
+  //   v1.147.0: 행 한 벌(renderCommentRow) — 본문 행만 data-comment-id, 스레드 창 행은 data-comment-thread-message.
+  assert.match(panel, /data-comment-id=\{opts\.surface === 'main' \? comment\.id : undefined\}/);
+  assert.match(panel, /data-comment-thread-message=\{opts\.surface === 'thread' \? comment\.id : undefined\}/);
+  assert.ok(panel.includes("renderCommentRow(activeThreadRoot, { surface: 'thread'"), '스레드 창 원댓글은 thread 행');
+  assert.ok(panel.includes("renderCommentRow(row.comment, { surface: 'thread'"), '리테이크 스레드 댓글은 thread 행');
 });
 
-test('댓글 패널: 묶음의 마지막 답글을 지우면 답글 묶음도 같은 그림에서 숨기고, 다시 들어오면 보인다', () => {
-  assert.match(panel, /<motion\.div\s+key="replies"\s+data-reply-group=\{comment\.id\}\s+\{\.\.\.bubbleRise\}\s+\{\.\.\.\(replies\.every\(\(reply\) => restoredCommentIdsRef\.current\.has\(reply\.id\)\) \? commentRestore : \{\}\)\}/);
+test('댓글 패널: 본문에 답글 묶음이 없다 — 지운 원댓글 줄만 같은 그림에서 숨기고, 숨긴 뒤에 FLIP 을 잰다', () => {
+  // v1.147.0(씬 댓글 B안 §5.2): 본문 목록은 원댓글 줄·리테이크 카드·활동 한 줄뿐(답글은 요약 줄 → 스레드 창) —
+  //   마지막 답글과 함께 숨기던 답글 묶음(data-reply-group)은 그리지 않는다.
+  assert.doesNotMatch(panel, /data-reply-group=\{|key="replies"/);
   const collapse = panel.slice(panel.indexOf('const collapseDeletedComment = '), panel.indexOf('/** 밀려나던 말풍선을 제자리로'));
-  assert.match(collapse, /const group = element\.closest<HTMLElement>\('\[data-reply-group\]'\);/);
-  assert.match(collapse, /\.some\(\(row\) => row !== element && row\.style\.display !== 'none'\);/);
-  assert.match(collapse, /if \(group && !othersLeft\) \{\s*reflowHideRef\.current\.push\(group\);\s*hiddenReplyGroupsRef\.current\.push\(group\);\s*\}/);
-  // 숨김(다음 그림 직전) 뒤에 FLIP 을 잰다 — 숨긴 묶음은 잰 위치에 들어가지 않는다
-  const flip = panel.slice(panel.indexOf("hide.forEach((element) => { element.style.display = 'none'; });"), panel.indexOf('notificationRowShifts(before, measureFlipRows('));
-  assert.match(flip, /hiddenReplyGroupsRef\.current = hiddenReplyGroupsRef\.current\.filter\(\(group\) => \{\s*if \(!group\.isConnected\) return false;[\s\S]*?if \(!visible\) return true;\s*group\.style\.display = '';\s*return false;\s*\}\);/);
+  assert.match(collapse, /captureCommentReflow\(\);\s*(?:\/\/[^\n]*\s*)?if \(element\) reflowHideRef\.current\.push\(element\);/);
+  assert.doesNotMatch(collapse, /data-reply-group|hiddenReplyGroupsRef/);
+  assert.doesNotMatch(panel, /hiddenReplyGroupsRef/);
+  // 숨김(다음 그림 직전) 뒤에 FLIP 을 잰다 — 숨긴 줄은 잰 위치에 들어가지 않는다
+  const hideAt = panel.indexOf("hide.forEach((element) => { element.style.display = 'none'; });");
+  const measureAt = panel.indexOf('notificationRowShifts(before, measureFlipRows(');
+  assert.ok(hideAt > 0 && measureAt > hideAt, '숨긴 다음에 잰다');
 });
 
 test("댓글 패널: '새 댓글' 줄은 처음 자리를 잡을 때 한 번만 정하고, 읽음은 읽음 기록 시각으로 본다", () => {
@@ -196,6 +202,6 @@ test('19번 CSS: 동작 줄이기에서 칩 톡·숫자 굴림·툴팁·이모�
 });
 
 test('댓글 패널: 씬·캐릭터가 바뀔 때만 처음부터 다시, 상대 부서 키만 바뀌면 조용히 다시 불러온다', () => {
-  assert.match(panel, /if \(loadIdentityRef\.current !== primaryStorageKey\) \{\s*loadIdentityRef\.current = primaryStorageKey;\s*setLoadStatus\('loading'\);[\s\S]*?setUnreadDividerSlot\(UNREAD_DIVIDER_UNCAPTURED\);\s*setNewBelowCount\(0\);\s*loadComments\(\);\s*return;\s*\}\s*loadComments\(\{ absorbNew: true \}\);\s*\}, \[loadComments, primaryStorageKey\]\);/);
+  assert.match(panel, /if \(loadIdentityRef\.current !== primaryStorageKey\) \{\s*loadIdentityRef\.current = primaryStorageKey;\s*setLoadStatus\('loading'\);[\s\S]*?setUnreadDividerSlot\(UNREAD_DIVIDER_UNCAPTURED\);\s*setUnreadBaseline\(null\);\s*setNewBelowCount\(0\);\s*loadComments\(\);\s*return;\s*\}\s*loadComments\(\{ absorbNew: true \}\);\s*\}, \[loadComments, primaryStorageKey\]\);/);
   assert.match(panel, /if \(options\?\.absorbNew\) list\.forEach\(\(c\) => knownCommentIdsRef\.current\.add\(c\.id\)\);/);
 });

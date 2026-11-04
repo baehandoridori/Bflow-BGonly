@@ -14,7 +14,8 @@ const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const compositingView = readFileSync('src/views/CompositingView.tsx', 'utf8');
 const feedbackHubPreviewApp = readFileSync('src/views/FeedbackHubPreviewApp.tsx', 'utf8');
 const indexCss = readFileSync('src/index.css', 'utf8');
-const commentPanelCss = readFileSync('src/styles/comment-panel.css', 'utf8');
+const commentFeedCss = readFileSync('src/styles/comment-feed.css', 'utf8');
+const commentFeedParts = readFileSync('src/components/scenes/comments/CommentFeedParts.tsx', 'utf8');
 const electronBroadcast = readFileSync('electron/broadcast.ts', 'utf8');
 const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
 const attachmentImageLightbox = readFileSync('src/components/scenes/AttachmentImageLightbox.tsx', 'utf8');
@@ -89,13 +90,17 @@ test('quick revision recipient picker preserves manual unchecked users while typ
   assert.match(revisionRecipientPicker, /\}, \[defaultCheckedKey\]\);/);
 });
 
-test('revision activity rows use theme-aware contrast in light mode', () => {
-  assert.match(commentPanel, /comment-inline-event-resolve/);
-  assert.match(commentPanel, /comment-inline-event-label/);
+test('revision activity lines use theme-aware contrast in light mode', () => {
+  // v1.147.0(§5.3): 리테이크 활동은 색 카드(comment-inline-event-*) 대신 한 줄(CommentActivityLine) — 단계 색은 data-phase 로
+  //   상태 토큰을 쓰고, 링크 보라는 라이트 모드에서 한 단계 어두운 값으로 바뀐다(고정 밝은 글자색 없음).
+  assert.doesNotMatch(commentPanel, /comment-inline-event-/);
+  assert.match(commentPanel, /<CommentActivityLine\s+inset\s+text=\{[\s\S]{0,300}?phase=\{retakeActivityPhase\(row\.event\)\}/);
+  assert.match(commentFeedParts, /<div className=\{inset \? 'cmt-activity is-inset' : 'cmt-activity'\} data-phase=\{phase \?\? 'other'\}>/);
   assert.doesNotMatch(commentPanel, /text-emerald-100/);
   assert.doesNotMatch(commentPanel, /text-sky-100/);
-  assert.match(commentPanelCss, /\[data-color-mode="light"\] \.comment-inline-event-resolve/);
-  assert.match(commentPanelCss, /\.comment-inline-event-label/);
+  assert.match(commentFeedCss, /\.cmt-activity\[data-phase='open'\] \{ color: rgb\(var\(--comment-link-rgb\)\); \}/);
+  assert.match(commentFeedCss, /\.cmt-activity\[data-phase='resolved'\] \{ color: var\(--status-done\); \}/);
+  assert.match(commentFeedCss, /\[data-color-mode="light"\] \{[\s\S]{0,400}?--comment-link-rgb: 91 75 214;/);
 });
 
 test('quick revision can register a pasted attachment as the revision image', () => {
@@ -212,13 +217,22 @@ test('CommentPanel does not mark canonical read state while merely loading comme
 
 test('CommentPanel can place the unread divider before a nested unread reply', () => {
   assert.match(commentPanel, /orderedVisibleComments/);
-  assert.match(commentPanel, /replyShowUnreadDivider/);
   // 움직임 폴리싱 4번: 줄은 처음 잡은 자리(읽음 처리 뒤에도 유지)에, 아직 안 잡았으면 첫 안 읽은 댓글(답글 포함)에 붙는다.
   // (리뷰 반영: 처음 자리를 잡을 때 한 번만 정한다 — 정한 뒤엔 실시간으로 온 댓글에 새 줄을 만들지 않는다.)
   assert.match(commentPanel, /const dividerCommentId = listReady && readStateReady \? unreadDividerCommentId\(unreadDividerSlot, firstUnreadCommentId\) : null;/);
-  assert.match(commentPanel, /reply\.id === dividerCommentId/);
+  // v1.147.0(§5.2): 본문에는 답글을 그리지 않는다 — 안 읽은 답글·리테이크 댓글이면 그것을 품은 원댓글 줄·리테이크 카드
+  //   (항목의 anchorIds) 바로 앞에 줄을 붙인다. 접힌 답글을 펼치던 처리(collapsedThreads)는 없다.
+  assert.match(
+    commentPanel,
+    /const dividerItemKey = useMemo\(\(\) => \{\s*if \(!dividerCommentId \|\| feedFilter !== 'all'\) return null;\s*for \(const item of feed\.items\) \{\s*if \(\(item\.kind === 'comment' \|\| item\.kind === 'retake'\) && item\.anchorIds\.includes\(dividerCommentId\)\) return item\.key;/,
+  );
+  assert.match(commentPanel, /const divider = item\.key === dividerItemKey/);
+  // 읽음 감시·처음 자리도 같은 품은 항목(data-comment-anchors)을 찾는다.
+  assert.match(commentPanel, /data-comment-anchors=\{anchors\}/);
+  assert.match(commentPanel, /findMainListComment\(root, firstUnreadCommentId, true\)/);
   assert.match(commentPanel, /buildCommentReplyTarget\(comments,\s*target\)/);
-  assert.match(commentPanel, /next\.delete\(threadRootId\)/);
+  assert.doesNotMatch(commentPanel, /replyShowUnreadDivider|reply\.id === dividerCommentId/);
+  assert.doesNotMatch(commentPanel, /collapsedThreads|next\.delete\(threadRootId\)/);
 });
 
 test('CommentPanel uses a Slack-style flat thread for reply-to-reply flows', () => {
@@ -227,25 +241,37 @@ test('CommentPanel uses a Slack-style flat thread for reply-to-reply flows', () 
   assert.match(commentPanel, /parentCommentId: null,/);
   assert.match(commentPanel, /parentCommentId: activeRevisionThreadId \? null : threadRoot!\.id/);
   assert.match(commentPanel, /buildCommentReplyTarget\(comments, target\)/);
-  assert.match(commentPanel, /openContextualThreadReply\(reply\)/);
+  // v1.147.0(§5.4): 스레드 창 안에는 답글 단추가 없다 — 답글의 답글도 같은 스레드 입력창에, 특정 사람은 '@이름' 넣기(보이는 멘션)로.
+  assert.doesNotMatch(commentPanel, /openContextualThreadReply\(reply\)/);
+  assert.match(commentPanel, /kind: 'mention' as const, onClick: \(\) => insertIntoComposer\('thread', `@\$\{comment\.userName\} `\)/);
   assert.match(commentPanel, /openThreadReply\(target\)/);
   assert.doesNotMatch(commentPanel, /getReplyMentionDisplay\(reply\.text,\s*userNames\)/);
   assert.doesNotMatch(commentPanel, /<span className="text-accent">@\{replyMentionDisplay\.mentionName\}<\/span>에게/);
 });
 
-test('CommentPanel exposes reply buttons next to reaction controls for parent comments and replies', () => {
-  assert.match(commentPanel, /ThreadReplyButton/);
-  assert.match(commentPanel, /aria-label=\{`답글 달기: \$\{comment\.userName\}`\}/);
-  assert.match(commentPanel, /aria-label=\{`답글 달기: \$\{reply\.userName\}`\}/);
-  assert.match(commentPanel, /이 스레드에 답글/);
+test('CommentPanel hover toolbar puts the reply action next to quick reactions for root comments', () => {
+  // v1.147.0(§5.2): 행마다 따로 그리던 답글 단추(ThreadReplyButton) 대신 호버 도구 줄(CommentRowToolbar) —
+  //   빠른 반응 ✅👍👀 · 이모지 더보기 · '답글'(본문) / '@이름'(스레드 창) · ⋯ 메뉴.
+  assert.doesNotMatch(commentPanel, /ThreadReplyButton/);
+  assert.doesNotMatch(commentPanel, /이 스레드에 답글/);
+  assert.match(commentPanel, /onQuickReact=\{\(emoji\) => handleReactionToggle\(comment\.id, emoji\)\}/);
+  assert.match(commentFeedParts, /\{QUICK_REACTIONS\.map\(\(r\) => \(/);
+  assert.match(commentFeedParts, /aria-label=\{`답글 달기: \$\{userName\}`\}/);
   assert.match(commentPanel, /openContextualThreadReply\(comment\)/);
-  assert.match(commentPanel, /openContextualThreadReply\(reply\)/);
   assert.match(commentPanel, /openRevisionThread\(target\.revisionId, true, target\)/);
 });
 
-test('CommentPanel thread collapse control is large enough to scan', () => {
-  assert.match(commentPanel, /답글 \{replies\.length\}개 \{threadCollapsed \? '펼치기' : '접기'\}/);
-  assert.match(commentPanel, /text-\[12px\][\s\S]{0,120}font-semibold/);
+test('CommentPanel replaces the inline reply collapse toggle with a scannable reply summary that opens the thread pane', () => {
+  // v1.147.0(§5.2): 본문에 답글을 펼치고 접던 토글은 없다 — 원댓글 아래 '답글 N개 · 마지막 HH:MM · 새 N' 요약 줄이 스레드 창을 연다.
+  assert.doesNotMatch(commentPanel, /threadCollapsed|collapsedThreads|toggleThread/);
+  assert.doesNotMatch(commentPanel, /'펼치기' : '접기'/);
+  assert.match(commentPanel, /\{opts\.replySummary && opts\.onOpenThread && \(\s*<CommentThreadSummaryButton\s+summary=\{opts\.replySummary\}\s+onOpen=\{opts\.onOpenThread\}\s+failedCount=/);
+  assert.match(commentPanel, /replySummary: item\.replySummary,[\s\S]{0,80}?onOpenThread: \(\) => openThreadReply\(root\),/);
+  assert.match(commentFeedParts, /<span className="cmt-thread-count">\{noun\} \{summary\.count\}개<\/span>/);
+  assert.match(commentFeedParts, /<span className="cmt-thread-last">마지막 \{formatTimeShort\(summary\.lastAt\)\}<\/span>/);
+  assert.match(commentFeedParts, /\{summary\.newCount > 0 && <span className="cmt-thread-new">새 \{summary\.newCount\}<\/span>\}/);
+  // 훑어보기 쉬운 크기: 답글 수는 12px 굵게.
+  assert.match(commentFeedCss, /\.cmt-thread-count \{ font-size: 12px; font-weight: 700;/);
 });
 
 test('CommentPanelResizable lets users resize from both the inner divider and outer outline', () => {

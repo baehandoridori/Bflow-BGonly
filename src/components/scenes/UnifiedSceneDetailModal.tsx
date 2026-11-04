@@ -598,6 +598,8 @@ export function UnifiedSceneDetailModal({
           id: a.id,
           at: a.createdAt,
           text: `${a.userName} ${deptPrefix(a.department)}${v.text}`,
+          actorName: a.userName,
+          actionType: a.actionType,
           tone: revisionTone,
           label: revisionLabel,
           revisionId,

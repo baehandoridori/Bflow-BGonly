@@ -189,8 +189,10 @@ test('패널 배선: 불러오는 중·실패·없음 구분, 처음 자리는 �
   // 위를 읽는 중 새 댓글: 알약(누르면 바닥까지)
   assert.match(panel, /\{listReady && newBelowCount > 0 && \([\s\S]{0,300}?className="comment-new-pill[\s\S]{0,300}?\{newCommentsPillLabel\(newBelowCount\)\}/);
   // '새 댓글' 줄: 옅어져도 자리는 그대로(조건부 렌더가 아니라 클래스)
-  assert.match(panel, /\{showUnreadDivider && \(\s*<UnreadCommentsDivider nodeRef=\{setUnreadDividerNode\} fading=\{unreadDividerFading\} \/>/);
-  assert.match(panel, /\{replyShowUnreadDivider && \(\s*<UnreadCommentsDivider nodeRef=\{setUnreadDividerNode\} fading=\{unreadDividerFading\} \/>/);
+  // v1.147.0(씬 댓글 B안 §5.2): 본문에는 원댓글 줄·리테이크 카드만 그린다 — 줄은 첫 안 읽은 댓글을 품은 항목 바로 앞 한 곳에만.
+  assert.match(panel, /const divider = item\.key === dividerItemKey\s*\?\s*<UnreadCommentsDivider key=\{`\$\{item\.key\}:new`\} nodeRef=\{setUnreadDividerNode\} fading=\{unreadDividerFading\} \/>\s*:\s*null;/);
+  assert.equal([...panel.matchAll(/<UnreadCommentsDivider /g)].length, 1);
+  assert.doesNotMatch(panel, /showUnreadDivider|replyShowUnreadDivider/);
   assert.match(panel, /fading && 'comment-unread-divider--fading'/);
 });
 

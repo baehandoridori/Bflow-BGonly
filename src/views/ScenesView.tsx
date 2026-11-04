@@ -3243,7 +3243,7 @@ export function ScenesView() {
   const setPendingReq = useAppStore((s) => s.setPendingSceneModalRequest);
   useEffect(() => {
     if (!pendingDeepLink) return;
-    const { sheetName, sceneId } = pendingDeepLink;
+    const { sheetName, sceneId, commentId } = pendingDeepLink;
     console.log('[DeepLink] ScenesView 처리:', { sheetName, sceneId, episodeCount: episodes.length });
 
     for (const ep of episodes) {
@@ -3270,6 +3270,8 @@ export function ScenesView() {
               partId: part.partId,
               initialTab: 'detail',
               forceDeptFilter: 'all',
+              // 댓글 링크면 그 댓글로 이동·강조(v1.147.0).
+              ...(commentId ? { focusCommentId: commentId } : {}),
             });
             setPendingDeepLink(null);
             return;

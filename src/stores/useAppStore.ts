@@ -255,8 +255,8 @@ interface AppState {
   invalidateVacationCache: () => void;
 
   // 딥링크 (bflow://scene/... → 씬 상세 모달 자동 오픈)
-  pendingDeepLink: { sheetName: string; sceneId: string } | null;
-  setPendingDeepLink: (link: { sheetName: string; sceneId: string } | null) => void;
+  pendingDeepLink: { sheetName: string; sceneId: string; commentId?: string } | null;
+  setPendingDeepLink: (link: { sheetName: string; sceneId: string; commentId?: string } | null) => void;
   pendingRetakeId: string | null;
   pendingRetakeTarget: { requestId: number; revision: CompRevision } | null;
   setPendingRetakeId: (id: string | null) => void;

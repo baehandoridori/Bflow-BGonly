@@ -103,20 +103,21 @@ test('보내는 중(아직 서버에 없음)인 댓글은 지우기·수정·답
     assert.match(bodyOf(panel, signature), /if \(unsentCommentsRef\.current\.has\(commentId\)\) return;/, signature);
   }
   for (const signature of [
+    // v1.147.0: 스레드 창 안에는 '답글' 대신 '@이름' 넣기(replyInActiveThread 는 없어졌다).
     'const openContextualThreadReply = useCallback((target: SceneCommentWithSource) =>',
-    'const replyInActiveThread = useCallback((target: SceneCommentWithSource) =>',
   ]) {
     assert.match(bodyOf(panel, signature), /if \(unsentCommentsRef\.current\.has\(target\.id\)\) return;/, signature);
   }
-  // 반응 줄·답글 버튼: 세 곳(본문·답글·스레드 창) 모두 보내는 동안 누를 수 없다(겉모습은 그대로 — 깜빡임 없게).
-  assert.equal([...panel.matchAll(/disabled=\{!!(sendStatus|replySendStatus|messageSendStatus)\}/g)].length, 6);
+  // 반응 줄: 행 하나(renderCommentRow — 본문·스레드 창 공통)가 보내는 동안 누를 수 없게 한다(겉모습은 그대로 — 깜빡임 없게).
+  assert.equal([...panel.matchAll(/disabled=\{!!sendStatus\}/g)].length, 1);
   const area = bodyOf(panel, '}: ReactionsAreaProps) {');
   assert.match(area, /disabled=\{disabled\}/);
   assert.match(area, /'disabled:invisible'/);
   assert.match(area, /open=\{pickerOpen && !disabled\}/);
-  const replyButton = panel.slice(panel.indexOf('function ThreadReplyButton('), panel.indexOf('function CommentSendClock('));
-  assert.match(replyButton, /disabled=\{disabled\}/);
-  assert.match(replyButton, /disabled:pointer-events-none/);
+  // v1.147.0(씬 댓글 B안): 답글·수정·삭제·빠른 반응은 행 도구 줄(CommentRowToolbar) 안 — 보내는 동안엔 도구 줄을 그리지 않는다.
+  //   행마다 따로 그리던 답글 단추(ThreadReplyButton)는 없다.
+  assert.match(panel, /\{!isEditing && !sendStatus && \(\s*<CommentRowToolbar/);
+  assert.doesNotMatch(panel, /function ThreadReplyButton\(/);
 });
 
 /* ─── 저장됐는데 응답만 끊긴 댓글 (review-data-safety-6) ─── */
