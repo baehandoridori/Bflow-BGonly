@@ -1,0 +1,189 @@
+/* ═══ 씬 댓글 B안 (v1.147.0) — 시안 docs/superpowers/mockups/2026-11-04-scene-comments-b-plan.html ═══
+ * 인수인계서 docs/superpowers/specs/2026-11-04-scene-comments-b-plan-handover.md §5.
+ * 왼쪽 세로 막대·말풍선·보라 빛·그림자 카드 없음. 색은 토큰만(아래 변수 + index.css 토큰).
+ * 움직임은 transform/opacity 120ms. '움직임: 최소'·OS 동작 줄이기면 전환 없음(맨 아래). */
+:root {
+  /* 사람마다 고정 색(utils/userAvatar.ts — 같은 해시 8칸). 흰 이니셜이 읽히도록 한 단계 깊은 톤. */
+  --avatar-1: #6c5ce7;
+  --avatar-2: #3e8fe0;
+  --avatar-3: #c99224;
+  --avatar-4: #d9653f;
+  --avatar-5: #8e7cf3;
+  --avatar-6: #1fa187;
+  --avatar-7: #e0565b;
+  --avatar-8: #d45a9a;
+  /* 멘션·답글 수 같은 링크 글자. 라이트는 accent 원색 대신 한 단계 어두운 보라(시안 치수 표). */
+  --comment-link-rgb: 162 155 254;
+  --comment-float-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  --comment-menu-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+}
+[data-color-mode="light"] {
+  --avatar-1: #5b4bd6;
+  --avatar-2: #2f78c4;
+  --avatar-3: #a9781a;
+  --avatar-4: #c25530;
+  --avatar-5: #7461e0;
+  --avatar-6: #128a73;
+  --avatar-7: #c9454a;
+  --avatar-8: #bb4785;
+  --comment-link-rgb: 91 75 214;
+  --comment-float-shadow: 0 6px 18px rgba(20, 22, 30, 0.14);
+  --comment-menu-shadow: 0 12px 30px rgba(20, 22, 30, 0.16);
+}
+
+/* 필터 탭(밑줄 탭, 알약 아님) */
+.cmt-tabs { display: flex; gap: 14px; padding: 6px 14px 0; border-bottom: 1px solid rgb(var(--color-bg-border)); flex-shrink: 0; overflow-x: auto; }
+.cmt-tab { border: 0; background: none; color: rgb(var(--color-text-secondary)); font-size: 12.5px; font-weight: 600; padding: 6px 1px 8px; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
+.cmt-tab:hover { color: rgb(var(--color-text-primary)); }
+.cmt-tab[aria-selected='true'] { color: rgb(var(--color-text-primary)); box-shadow: inset 0 -2px 0 rgb(var(--color-accent)); }
+.cmt-tab-n { font-size: 10.5px; font-weight: 600; color: rgb(var(--color-text-secondary)); font-variant-numeric: tabular-nums; }
+.cmt-tab[aria-selected='true'] .cmt-tab-n { color: rgb(var(--comment-link-rgb)); }
+.cmt-tabs-extra { margin-left: auto; display: inline-flex; align-items: center; padding-bottom: 4px; }
+
+/* 날짜 줄 · '새 댓글' 줄 */
+.cmt-day { display: flex; align-items: center; gap: 10px; margin: 10px 4px 4px; font-size: 11px; font-weight: 600; color: rgb(var(--color-text-secondary)); }
+.cmt-day::before, .cmt-day::after { content: ''; flex: 1; height: 1px; background: rgb(var(--color-bg-border)); }
+.cmt-newline { display: flex; align-items: center; gap: 8px; margin: 6px 4px 2px; font-size: 10.5px; font-weight: 700; color: rgb(var(--comment-link-rgb)); }
+.cmt-newline::before, .cmt-newline::after { content: ''; flex: 1; height: 1px; background: rgb(var(--color-accent) / 0.45); }
+
+/* 한 행(원댓글·답글 공통) */
+.cmt-row { position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 10px; padding: 7px 8px; border-radius: 10px; }
+.cmt-row:hover, .cmt-row:focus-within { background: rgb(var(--color-bg-primary) / 0.55); }
+.cmt-row.is-grouped { padding-top: 1px; padding-bottom: 2px; }
+.cmt-avatar { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: rgb(var(--color-on-accent)); letter-spacing: -0.02em; user-select: none; }
+.cmt-grouped-time { font-size: 10px; color: rgb(var(--color-text-secondary)); text-align: center; padding-top: 3px; opacity: 0; font-variant-numeric: tabular-nums; transition: opacity var(--motion-fast) var(--ease-std); white-space: nowrap; }
+.cmt-row:hover .cmt-grouped-time, .cmt-row:focus-within .cmt-grouped-time { opacity: 1; }
+.cmt-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.cmt-name { font-size: 13px; font-weight: 700; color: rgb(var(--color-text-primary)); }
+.cmt-time { font-size: 11px; color: rgb(var(--color-text-secondary)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cmt-unread-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--color-accent)); margin-left: 6px; vertical-align: middle; }
+.cmt-meta-note { font-size: 11px; color: rgb(var(--color-text-secondary)); }
+.cmt-body { font-size: 13.5px; line-height: 1.55; color: rgb(var(--color-text-primary)); word-break: break-word; white-space: pre-wrap; }
+.cmt-body [data-entity-mention] { color: rgb(var(--comment-link-rgb)); background: transparent; font-weight: 600; padding: 0; }
+.cmt-body [data-entity-mention]:hover { background: transparent; text-decoration: underline; text-underline-offset: 2px; }
+.cmt-images { display: grid; gap: 4px; margin-top: 8px; max-width: 300px; }
+.cmt-images.is-multi { grid-template-columns: 1fr 1fr; }
+.cmt-images img { width: 100%; max-height: 112px; object-fit: cover; border-radius: 8px; border: 1px solid rgb(var(--color-bg-border)); cursor: zoom-in; }
+.cmt-edit-box { display: grid; gap: 6px; }
+.cmt-edit-box textarea { width: 100%; resize: none; border-radius: 8px; border: 1px solid rgb(var(--color-bg-border)); background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); font-size: 13px; line-height: 1.5; padding: 6px 8px; outline: none; }
+.cmt-edit-box textarea:focus { border-color: rgb(var(--color-text-secondary) / 0.6); }
+.cmt-edit-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* 답글 요약 줄 · 리테이크 댓글 요약 줄 */
+.cmt-thread-summary { margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; background: none; color: inherit; }
+.cmt-thread-summary:hover, .cmt-thread-summary:focus-visible { border-color: rgb(var(--color-bg-border)); background: rgb(var(--color-bg-card)); outline: none; }
+.cmt-thread-avs { display: flex; }
+.cmt-thread-avs > span { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: rgb(var(--color-on-accent)); border: 2px solid rgb(var(--color-bg-card)); margin-right: -6px; letter-spacing: -0.06em; overflow: hidden; }
+.cmt-thread-avs > span:last-child { margin-right: 0; }
+.cmt-thread-count { font-size: 12px; font-weight: 700; color: rgb(var(--comment-link-rgb)); }
+.cmt-thread-last { font-size: 11px; color: rgb(var(--color-text-secondary)); }
+.cmt-thread-new { font-size: 10px; font-weight: 700; color: rgb(var(--color-on-accent)); background: rgb(var(--color-accent)); border-radius: 999px; padding: 0 6px; }
+
+/* 호버 도구 줄(행 우상단) — 키보드 초점에도 */
+.cmt-toolbar { position: absolute; top: -12px; right: 10px; display: flex; align-items: center; gap: 1px; padding: 3px; border-radius: 9px; background: rgb(var(--color-bg-card)); border: 1px solid rgb(var(--color-bg-border)); box-shadow: var(--comment-float-shadow); opacity: 0; transform: translateY(2px); pointer-events: none; transition: opacity var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out); z-index: 3; }
+.cmt-row:hover .cmt-toolbar, .cmt-row:focus-within .cmt-toolbar, .cmt-toolbar.is-open { opacity: 1; transform: none; pointer-events: auto; }
+.cmt-toolbar button { height: 26px; min-width: 26px; padding: 0 5px; border-radius: 6px; border: 0; background: transparent; color: rgb(var(--color-text-secondary)); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: 13px; }
+.cmt-toolbar button:hover, .cmt-toolbar button:focus-visible { background: rgb(var(--color-accent) / 0.14); color: rgb(var(--color-text-primary)); outline: none; }
+.cmt-toolbar .cmt-toolbar-label { font-size: 11px; font-weight: 600; padding: 0 8px; }
+.cmt-toolbar-sep { width: 1px; height: 14px; background: rgb(var(--color-bg-border)); margin: 0 3px; }
+.cmt-menu { position: absolute; right: 10px; top: 16px; z-index: 6; background: rgb(var(--color-bg-card)); border: 1px solid rgb(var(--color-bg-border)); border-radius: 10px; box-shadow: var(--comment-menu-shadow); padding: 4px; min-width: 172px; }
+.cmt-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; border: 0; background: transparent; color: rgb(var(--color-text-primary)); font-size: 12px; cursor: pointer; text-align: left; }
+.cmt-menu button:hover, .cmt-menu button:focus-visible { background: rgb(var(--color-accent) / 0.12); outline: none; }
+.cmt-menu button.is-danger { color: var(--status-error); }
+.cmt-menu hr { border: 0; border-top: 1px solid rgb(var(--color-bg-border)); margin: 4px 0; }
+
+/* 시스템 활동 한 줄 · 리테이크 활동 줄 */
+.cmt-activity { display: flex; align-items: center; gap: 8px; padding: 3px 8px 3px 48px; font-size: 11.5px; color: rgb(var(--color-text-secondary)); min-width: 0; }
+.cmt-activity.is-inset { padding-left: 10px; }
+.cmt-activity-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.cmt-activity-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmt-activity-time { margin-left: auto; font-size: 10.5px; color: rgb(var(--color-text-secondary)); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.cmt-activity[data-phase='open'] { color: rgb(var(--comment-link-rgb)); }
+.cmt-activity[data-phase='in_progress'] { color: var(--status-combine); }
+.cmt-activity[data-phase='assignee_done'] { color: var(--status-adjust); }
+.cmt-activity[data-phase='resolved'] { color: var(--status-done); }
+.cmt-activity[data-phase='deleted'] { color: var(--status-error); }
+
+/* 리테이크 루트 카드 */
+.cmt-retake { margin: 6px 4px 2px; border-radius: 12px; border: 1px solid rgb(var(--color-bg-border)); background: rgb(var(--comment-card-elev-rgb)); padding: 10px 12px; display: grid; gap: 6px; position: relative; }
+.cmt-retake-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: rgb(var(--color-text-secondary)); }
+.cmt-retake-label { font-size: 11px; font-weight: 800; color: rgb(var(--comment-link-rgb)); }
+.cmt-status { font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 1px 8px; color: rgb(var(--color-text-secondary)); background: rgb(var(--color-text-secondary) / 0.16); }
+.cmt-status[data-status='in_progress'] { color: var(--status-combine); background: color-mix(in srgb, var(--status-combine) 16%, transparent); }
+.cmt-status[data-status='assignee_done'] { color: var(--status-adjust); background: color-mix(in srgb, var(--status-adjust) 16%, transparent); }
+.cmt-status[data-status='resolved'] { color: var(--status-done); background: color-mix(in srgb, var(--status-done) 16%, transparent); }
+.cmt-status[data-status='deleted'] { color: var(--status-error); background: color-mix(in srgb, var(--status-error) 14%, transparent); }
+.cmt-retake-desc { font-size: 13.5px; line-height: 1.5; color: rgb(var(--color-text-primary)); word-break: break-word; white-space: pre-wrap; }
+.cmt-retake-desc [data-entity-mention] { color: rgb(var(--comment-link-rgb)); background: transparent; font-weight: 600; padding: 0; }
+.cmt-retake-meta { display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: rgb(var(--color-text-secondary)); flex-wrap: wrap; }
+.cmt-retake-who { display: inline-flex; align-items: center; gap: 5px; }
+.cmt-retake-who > span { width: 18px; height: 18px; border-radius: 5px; display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; color: rgb(var(--color-on-accent)); letter-spacing: -0.06em; overflow: hidden; }
+.cmt-retake-foot { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.cmt-retake-foot .cmt-thread-summary { margin: 0; }
+.cmt-retake-open { font-size: 12px; font-weight: 600; color: rgb(var(--comment-link-rgb)); background: none; border: 0; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+.cmt-retake-open:hover, .cmt-retake-open:focus-visible { background: rgb(var(--color-bg-card)); outline: none; }
+.cmt-retake-detail { margin-left: auto; font-size: 11.5px; color: rgb(var(--color-text-secondary)); background: none; border: 0; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; border-radius: 6px; padding: 2px 4px; }
+.cmt-retake-detail:hover, .cmt-retake-detail:focus-visible { color: rgb(var(--color-text-primary)); outline: none; }
+.cmt-retake-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.cmt-btn { font-size: 11.5px; font-weight: 600; border-radius: 7px; padding: 4px 10px; border: 1px solid rgb(var(--color-bg-border)); background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); cursor: pointer; display: inline-flex; gap: 5px; align-items: center; }
+.cmt-btn:hover, .cmt-btn:focus-visible { border-color: rgb(var(--color-text-secondary) / 0.6); outline: none; }
+.cmt-btn.is-primary { background: rgb(var(--color-accent)); border-color: rgb(var(--color-accent)); color: rgb(var(--color-on-accent)); }
+.cmt-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* 입력 카드(본문·스레드 같은 모양) */
+.cmt-input-box { position: relative; border-radius: 12px; border: 1px solid rgb(var(--color-bg-border)); background: rgb(var(--comment-card-elev-rgb)); padding: 8px 10px 6px; display: flex; flex-direction: column; overflow: hidden; transition: border-color var(--motion-fast) var(--ease-std); }
+.cmt-input-box:focus-within { border-color: rgb(var(--color-text-secondary) / 0.6); }
+.cmt-input-box.is-dragover { border-color: rgb(var(--color-accent)); }
+.cmt-input-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; padding-top: 6px; border-top: 1px solid rgb(var(--color-bg-border) / 0.6); flex-shrink: 0; gap: 6px; }
+.cmt-input-tools { display: flex; gap: 1px; align-items: center; }
+.cmt-input-send { display: flex; align-items: center; min-width: 0; }
+.cmt-icon-btn { width: 28px; height: 28px; border-radius: 7px; border: 0; background: transparent; color: rgb(var(--color-text-secondary)); display: grid; place-items: center; cursor: pointer; flex: 0 0 auto; }
+.cmt-icon-btn:hover, .cmt-icon-btn:focus-visible, .cmt-icon-btn[aria-pressed='true'] { background: rgb(var(--color-text-secondary) / 0.14); color: rgb(var(--color-text-primary)); outline: none; }
+.cmt-input-hint { font-size: 10.5px; color: rgb(var(--color-text-secondary)); margin-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmt-send { width: 30px; height: 28px; border-radius: 7px; border: 0; background: rgb(var(--color-accent)); color: rgb(var(--color-on-accent)); display: grid; place-items: center; cursor: pointer; flex: 0 0 auto; }
+.cmt-send:disabled { opacity: 0.35; cursor: default; }
+.cmt-attach-strip { display: flex; gap: 8px; margin-bottom: 8px; overflow-x: auto; padding-bottom: 4px; }
+.cmt-attach { position: relative; flex: 0 0 auto; }
+.cmt-attach img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid rgb(var(--color-bg-border)); }
+.cmt-attach-state { position: absolute; inset: 0; border-radius: 8px; display: grid; place-items: center; background: rgb(var(--color-overlay) / 0.45); color: rgb(var(--color-on-accent)); }
+.cmt-attach-state.is-error { background: color-mix(in srgb, var(--status-error) 45%, transparent); }
+.cmt-attach-remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgb(var(--comment-card-elev-rgb)); background: var(--status-error); color: rgb(var(--color-on-accent)); font-size: 11px; display: grid; place-items: center; cursor: pointer; }
+
+/* 스레드 창 */
+.cmt-thread-pane { border-radius: 12px; border: 1px solid rgb(var(--color-bg-border)); background: rgb(var(--color-bg-primary) / 0.45); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.cmt-thread-head { padding: 10px 12px; border-bottom: 1px solid rgb(var(--color-bg-border)); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.cmt-thread-heading { min-width: 0; flex: 1 1 auto; }
+.cmt-thread-title { font-size: 13px; font-weight: 700; color: rgb(var(--color-text-primary)); display: block; }
+.cmt-thread-sub { font-size: 11px; color: rgb(var(--color-text-secondary)); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmt-thread-body { padding: 6px; overflow-y: auto; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 1px; }
+.cmt-thread-root-label { font-size: 10.5px; color: rgb(var(--color-text-secondary)); padding: 2px 8px 0; }
+.cmt-thread-root { padding: 2px 2px 8px; border-bottom: 1px solid rgb(var(--color-bg-border)); margin-bottom: 4px; }
+.cmt-thread-divider { font-size: 11px; color: rgb(var(--color-text-secondary)); padding: 4px 8px; display: flex; align-items: center; gap: 8px; }
+.cmt-thread-divider::after { content: ''; flex: 1; height: 1px; background: rgb(var(--color-bg-border)); }
+.cmt-thread-foot { border-top: 1px solid rgb(var(--color-bg-border)); padding: 10px; flex-shrink: 0; position: relative; }
+.cmt-thread-empty { padding: 18px 8px; text-align: center; font-size: 12px; color: rgb(var(--color-text-secondary)); }
+
+/* 반응이 없는 행 — 줄 자리를 비우고 '+' 는 감춘다(추가는 도구 줄 😊). */
+.cmt-row .cmt-reactions.is-empty { height: 0; margin-top: 0; overflow: visible; }
+.cmt-row .cmt-reactions.is-empty > button { visibility: hidden; }
+
+/* 보내는 중 동그라미 · 빠른 리테이크 칩 아바타 · 카드 설명 두 줄 · 보내지 못한 글 테두리(행 모양) */
+.cmt-spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgb(var(--color-on-accent) / 0.3); border-top-color: rgb(var(--color-on-accent)); }
+.cmt-quick-avatar { width: 16px; height: 16px; border-radius: 5px; display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; color: rgb(var(--color-on-accent)); letter-spacing: -0.06em; overflow: hidden; }
+.cmt-retake-desc.is-clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cmt-body.comment-send-bubble--failed::after { inset: -3px -6px; border-radius: 8px; }
+
+/* 불러오는 중 자리 — 행 모양(빛 띠는 motion-comments-notify.css 의 .comment-skeleton-bubble) */
+.cmt-skeleton-row { display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 10px; padding: 0 8px; }
+.cmt-skeleton-avatar { width: 30px; height: 30px; border-radius: 9px; }
+.cmt-skeleton-lines { display: grid; gap: 8px; padding-top: 3px; }
+.cmt-skeleton-line { height: 11px; border-radius: 6px; }
+
+/* 빈 상태 */
+.cmt-empty { padding: 40px 16px; text-align: center; color: rgb(var(--color-text-secondary)); font-size: 13px; line-height: 1.55; }
+.cmt-empty strong { display: block; color: rgb(var(--color-text-primary)); font-weight: 600; margin-bottom: 4px; }
+
+/* 움직임: 최소 · OS 동작 줄이기 — 전환 없이 바로(빌드 때 postcss-motion-minimal 이 reduce 규칙의 '최소' 짝을 만든다) */
+@media (prefers-reduced-motion: reduce) {
+  .cmt-toolbar, .cmt-grouped-time, .cmt-input-box { transition: none; }
+}

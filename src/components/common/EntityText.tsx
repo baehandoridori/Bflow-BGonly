@@ -36,6 +36,7 @@ export function EntityText({ text, userNames, onMentionClick, renderTextSegment,
           return (
             <span
               key={`m${i}`}
+              data-entity-mention
               className={`text-accent font-bold bg-accent/10 rounded px-0.5 transition-colors ${
                 onMentionClick ? 'cursor-pointer hover:bg-accent/20' : ''
               }`}
