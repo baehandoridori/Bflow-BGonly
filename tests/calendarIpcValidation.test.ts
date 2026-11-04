@@ -171,6 +171,8 @@ function calendarSupabasePrivateTestPlugin(): Plugin {
           'broadcastScenePhaseUpdate',
           'broadcastDataChange',
           'broadcastCommentAdded',
+          'broadcastCommentUpdated',
+          'broadcastCommentDeleted',
           'broadcastCalendarChanged',
           'broadcastCommentReactionChanged',
           'broadcastCommentReactionNotification',
