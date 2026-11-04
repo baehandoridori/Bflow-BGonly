@@ -1,7 +1,6 @@
 import { Fragment, useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, ArrowDown, CornerDownRight, Reply, MessageSquareWarning, Clock, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, ArrowDown, CornerDownRight, Reply, MessageSquareWarning, Clock } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -50,7 +49,6 @@ import {
   markSceneThreadReadForUser,
 } from '@/services/commentReadStateService';
 import * as storageService from '@/services/storageService';
-import { resizeBlob } from '@/utils/imageUtils';
 import { RevisionCommentBadge } from './RevisionCommentBadge';
 import { RevisionRecipientPicker } from './RevisionRecipientPicker';
 import { revisionNoToLabel } from '@/constants/revision';
@@ -65,6 +63,9 @@ import {
   orderCommentsForThreadedMainFlow,
 } from '@/utils/commentThreading';
 import { createUuid } from '@/utils/createUuid';
+import { createCommentDeleteLedger } from '@/utils/commentDeleteLedger';
+import { useImageAttachments, type AttachedImage } from '@/hooks/useImageAttachments';
+import { discardAttachedImages } from '@/utils/imageAttachments';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { ThreadTodoSection } from './ThreadTodoSection';
 import { COMMENT_LIST_FOLLOW_CHECK_MS, commentListScrollAfterSectionGrow, shouldFollowCommentListToBottom } from '@/utils/commentListAnchor';
@@ -214,14 +215,6 @@ interface CommentLightboxState {
 /** 내부 렌더링용 — 원본이 어느 sceneKey 에서 왔는지 추적 */
 type SceneCommentWithSource = SceneComment & { _sourceKey?: string };
 
-/** 첨부 진행 중인 이미지 — 업로드 완료 시 uploadedUrl 채워짐 */
-interface AttachedImage {
-  id: string;
-  previewUrl: string;       // blob URL — 즉시 미리보기
-  uploadedUrl?: string;     // CDN URL — 업로드 완료 후
-  uploading: boolean;
-  error?: string;
-}
 
 /**
  * 움직임 폴리싱 19번: 아직 서버에 없는 내 댓글 하나. '다시 보내기'는 같은 댓글(같은 id)을 같은 키로 다시 보내고,
@@ -273,15 +266,12 @@ function hookCommentDeleteQuitFlush() {
   commentDeleteQuitFlushHooked = typeof off === 'function';
 }
 
-function cleanupDraftImages(images: AttachedImage[], context: string) {
-  images.forEach((item) => {
-    try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
-    if (item.uploadedUrl) {
-      storageService.deleteImage(item.uploadedUrl).catch(err => {
-        console.warn(`${context} Storage 정리 실패:`, err);
-      });
-    }
-  });
+const draftImageCleanupDeps = {
+  deleteRemote: (url: string) => storageService.deleteImage(url),
+  revokePreviewUrl: (url: string) => URL.revokeObjectURL(url),
+};
+function cleanupDraftImages(images: readonly AttachedImage[], context: string) {
+  discardAttachedImages(images, draftImageCleanupDeps, context);
 }
 
 /**
@@ -706,7 +696,8 @@ export function CommentPanel({
   const unsentCommentsRef = useRef<Map<string, UnsentComment>>(new Map());
   const slowSendTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // 움직임 폴리싱 20번: 휴지통을 누른 뒤 되돌리기를 기다리거나 서버에서 지우는 중인 댓글(id → 정보).
-  const pendingDeletesRef = useRef<Map<string, PendingCommentDelete>>(new Map());
+  //   상태 흐름(기다림 → 지우는 중 → 끝·되돌림)은 utils/commentDeleteLedger, 말풍선 움직임만 여기서.
+  const pendingDeletesRef = useRef(createCommentDeleteLedger<PendingCommentDelete>());
   // 되돌린 말풍선은 떠오르지 않고 제자리에서 다시 나타난다(이 id 들만 등장 모양을 바꾼다).
   const restoredCommentIdsRef = useRef<Set<string>>(new Set());
   // 지운 자리로 아래 말풍선이 올라오는(되돌리면 비켜 주는) 미끄러짐 — 바뀌기 직전 위치와, 그때 숨길 말풍선.
@@ -727,7 +718,6 @@ export function CommentPanel({
   // v1.26.0: 이모지 리액션 — commentId → reactions
   const [reactionsByCommentId, setReactionsByCommentId] = useState<Map<string, CommentReaction[]>>(new Map());
   const [reactionPicker, setReactionPicker] = useState<CommentReactionPickerTarget | null>(null);
-  const pickerAnchorRef = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   // 입력 상태
   const [input, setInput] = useState('');
@@ -746,15 +736,11 @@ export function CommentPanel({
   const [quickRevisionAssigneeIds, setQuickRevisionAssigneeIds] = useState<string[]>([]);
 
 
-  // v1.24.0: 답글 입력 모드 — 클릭 시 입력 카드 상단에 답글 컨텍스트 헤더 노출 + parentCommentId 채워서 저장.
-  // 코덱스 P2 fix (2026-05-10): sceneKey 변경 시 reset 필수 — 안 그러면 다른 씬으로 이동 후 전송 시
-  //   cross-scene parentCommentId 가 박혀 orphan 답글 + 잘못된 부모 작성자에게 알림 발송.
-  const [replyTarget, setReplyTarget] = useState<SceneCommentWithSource | null>(null);
+  // 답글은 스레드 창(activeThreadRootId)에서만 쓴다. 씬이 바뀌면 열린 스레드를 닫는다(다른 씬 댓글에 답글이 붙지 않게).
   const [activeThreadRootId, setActiveThreadRootId] = useState<string | null>(null);
   const [activeRevisionThreadId, setActiveRevisionThreadId] = useState<string | null>(null);
   const [lastThreadRootId, setLastThreadRootId] = useState<string | null>(null);
   useEffect(() => {
-    setReplyTarget(null);
     setActiveThreadRootId(null);
     setActiveRevisionThreadId(null);
     setLastThreadRootId(null);
@@ -788,10 +774,6 @@ export function CommentPanel({
       return next;
     });
   }, []);
-  const replyDraftTarget = useMemo(
-    () => buildCommentReplyTarget(comments, replyTarget),
-    [comments, replyTarget],
-  );
   // v1.24.0: 외부 점프 시 강조할 댓글 id. focusCommentId prop 변경 또는 jump 이벤트로 set.
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(focusCommentId ?? null);
   const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -893,7 +875,6 @@ export function CommentPanel({
       next.delete(threadRootId);
       return next;
     });
-    setReplyTarget(null);
     setThreadMentionTarget(target);
     requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [comments]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -908,7 +889,6 @@ export function CommentPanel({
     if (!revisionExists(revisionId)) return;
     setActiveThreadRootId(null);
     setActiveRevisionThreadId(revisionId);
-    setReplyTarget(null);
     setThreadMentionTarget(mentionTarget);
     if (focusComposer) requestAnimationFrame(() => threadInputRef.current?.focus());
   }, [revisionExists]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -993,7 +973,6 @@ export function CommentPanel({
     }
     setQuickRevisionNotifyIds(quickRevisionDefaultRecipientIds);
     setQuickRevisionAssigneeIds([]);
-    setReplyTarget(null);
   }, [quickRevisionActive, quickRevisionDefaultRecipientKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const quickRevisionSelectedUsers = useMemo(
@@ -1356,34 +1335,6 @@ export function CommentPanel({
     }
   }, [focusCommentId, comments]);
 
-  // v1.24.0: 답글 모드 진입 시 입력창에 부모 작성자 자동 멘션 프리셋.
-  // P1 #6 fix: 비어있을 때만 prefix 추가 + *기존 입력이 다른 답글 prefix(@xxx )로 시작*하면 prefix 만 교체.
-  //   이전 코드는 사용자가 답글 버튼 누른 직후 다른 답글 버튼 누르면 첫 prefix 가 stale 하게 남았음.
-  useEffect(() => {
-    if (!replyTarget) return;
-    const replyInputThreadTarget = buildCommentReplyTarget(comments, replyTarget);
-    if (replyInputThreadTarget.isReplyToReply) {
-      setInput((prev) => (/^@\S+\s*$/.test(prev.trimStart()) ? '' : prev));
-      inputRef.current?.focus();
-      return;
-    }
-    if (currentUser && replyTarget.userName === currentUser.name) return;
-    const newPrefix = `@${replyTarget.userName} `;
-    setInput((prev) => {
-      const trimmed = prev.trimStart();
-      if (trimmed.length === 0) return newPrefix;
-      // 기존 prefix(@xxx ) 가 다른 사용자면 교체. 같은 사용자면 그대로.
-      const existingMentionMatch = trimmed.match(/^@(\S+)\s/);
-      if (existingMentionMatch) {
-        if (existingMentionMatch[1] === replyTarget.userName) return prev;
-        return newPrefix + trimmed.slice(existingMentionMatch[0].length);
-      }
-      // 사용자가 일반 텍스트 작성 중이면 건드리지 않음.
-      return prev;
-    });
-    inputRef.current?.focus();
-  }, [replyTarget, comments]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // v1.24.0: 라이트박스 키보드 — Escape 닫기 + ArrowLeft/Right 로 한 댓글 내 이미지 이동.
   // stopPropagation 으로 모달 prev/next (← →) 와 충돌 차단 — 라이트박스 활성 시 화살표는 *이미지만* 이동.
   useEffect(() => {
@@ -1416,12 +1367,10 @@ export function CommentPanel({
   const attachedImagesRef = useRef<AttachedImage[]>([]);
   useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
   useEffect(() => { threadAttachedImagesRef.current = threadAttachedImages; }, [threadAttachedImages]);
-  const inputValueRef = useRef('');
-  useEffect(() => { inputValueRef.current = input; }, [input]);
 
   // 3단계: @멘션 자동완성 공통 훅(caret 기반 중간 멘션 + DOM 직접 읽기)
   const mention = useMentionAutocomplete({
-    onChange: (next) => { setInput(next); inputValueRef.current = next; },
+    onChange: setInput,
     users,
     inputRef,
   });
@@ -1432,7 +1381,7 @@ export function CommentPanel({
   });
   // 4c: #태그 자동완성 — @멘션 옆에 나란히 공존(EntityAwareInput 패턴). users 불필요(episodes 자체 구독).
   const hash = useHashtagAutocomplete({
-    onChange: (next) => { setInput(next); inputValueRef.current = next; },
+    onChange: setInput,
     inputRef,
     extraCandidates: extraHashCandidates,
   });
@@ -1443,10 +1392,6 @@ export function CommentPanel({
     inputRef: threadInputRef,
     extraCandidates: extraHashCandidates,
   });
-  // 답글 진입(replyTarget 설정) 시 멘션·태그 드롭다운 닫기 — 답글 프리셋 setInput+focus 가 stale 드롭다운을 남기지 않게.
-  useEffect(() => {
-    if (replyTarget) { mention.close(); hash.close(); }
-  }, [replyTarget, mention.close, hash.close]);
   useEffect(() => {
     threadMention.close();
     threadHash.close();
@@ -1545,96 +1490,20 @@ export function CommentPanel({
   };
   useEffect(() => () => forgetUnsentComments('[보내지 못한 댓글 패널 unmount]'), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── 이미지 업로드 ──
-  const uploadAttachedImage = useCallback(async (id: string, file: File | Blob) => {
-    try {
-      const base64 = await resizeBlob(file, 800, 0.8);
-      const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
-      if (result.ok && result.url) {
-        const url = result.url;
-        // Codex P2 8차(2026-04-29): unmount 후 upload 완료 시 React 가 setState drop → orphan.
-        if (!mountedRef.current) {
-          storageService.deleteImage(url).catch(err => {
-            console.warn('[댓글 이미지 unmount race] 정리 실패:', err);
-          });
-          return;
-        }
-        // Codex P2 13차(2026-04-30): attachedImagesRef 가 useEffect 로 동기화되어 한 렌더 늦을 수 있어 race —
-        // 사용자 X 클릭 직후 ref 가 stale 한 상태에서 도착한 upload 가 stillExists=true 로 인식되면
-        // 이후 setAttachedImages.map 이 no-op 이 되어 uploadedUrl 이 어디에도 안 남고 orphan 발생.
-        // 해결: setAttachedImages functional updater 안에서 latest prev 로 직접 검사 (React 가 latest state 보장).
-        setAttachedImages(prev => {
-          const exists = prev.some(a => a.id === id);
-          if (!exists) {
-            // 사용자 X 클릭으로 이미 제거 → 도착한 upload 객체 정리
-            storageService.deleteImage(url).catch(err => {
-              console.warn('[댓글 이미지 race] 사용자 제거 후 도착한 업로드 객체 정리 실패:', err);
-            });
-            return prev;
-          }
-          return prev.map(a =>
-            a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a
-          );
-        });
-      } else {
-        throw new Error(result.error || '업로드 실패');
-      }
-    } catch (err) {
-      console.error('[댓글 이미지 업로드 실패]', err);
-      if (!mountedRef.current) return;       // unmount 후 setState drop 방지
-      const msg = err instanceof Error ? err.message : String(err);
-      setAttachedImages(prev => prev.map(a =>
-        a.id === id ? { ...a, uploading: false, error: msg } : a
-      ));
-    }
-  }, [sheetName, sceneId]);
-
-  const addAttachedImageFromBlob = useCallback((file: File | Blob) => {
-    const id = createUuid();
-    const previewUrl = URL.createObjectURL(file);
-    setAttachedImages(prev => {
-      if (!quickRevisionActive) return [...prev, { id, previewUrl, uploading: true }];
-
-      prev.forEach((item) => {
-        try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
-        if (item.uploadedUrl) {
-          storageService.deleteImage(item.uploadedUrl).catch(err => {
-            console.warn('[빠른 리테이크 첨부 교체] 이전 업로드 객체 정리 실패:', err);
-          });
-        }
-      });
-      return [{ id, previewUrl, uploading: true }];
-    });
-    void uploadAttachedImage(id, file);
-  }, [quickRevisionActive, uploadAttachedImage]);
-
-  const removeAttachedImage = (id: string) => {
-    setAttachedImages(prev => {
-      const target = prev.find(a => a.id === id);
-      if (target?.previewUrl) {
-        try { URL.revokeObjectURL(target.previewUrl); } catch { /* ignore */ }
-      }
-      // Codex P2 4차(2026-04-29): 백그라운드 업로드가 이미 완료된 항목을 사용자가 X 로 제거하면
-      // Storage 의 객체도 함께 삭제 (orphan 파일 방지). fire-and-forget — 실패해도 UI 흐름 안 막음.
-      if (target?.uploadedUrl) {
-        storageService.deleteImage(target.uploadedUrl).catch(err => {
-          console.warn('[댓글 첨부 제거] Storage 삭제 실패:', err);
-        });
-      }
-      return prev.filter(a => a.id !== id);
-    });
-  };
+  // ── 이미지 첨부 — 본문·스레드가 같은 한 벌(hooks/useImageAttachments, 규칙은 utils/imageAttachments) ──
+  //   빠른 리테이크는 한 장만(새로 넣으면 바꾼다). 올리는 중 빼거나 패널이 닫히면 올라온 파일을 지운다.
+  const mainAttachments = useImageAttachments({
+    setImages: setAttachedImages, sheetName, sceneId, mountedRef, single: quickRevisionActive, label: '[댓글 이미지]',
+  });
+  const threadAttachments = useImageAttachments({
+    setImages: setThreadAttachedImages, sheetName, sceneId, mountedRef, label: '[스레드 댓글 이미지]',
+  });
+  const removeAttachedImage = mainAttachments.remove;
+  const removeThreadAttachedImage = threadAttachments.remove;
 
   // 클립보드 paste
   const handlePaste = (e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData?.items || []);
-    const imageItems = items.filter(it => it.type.startsWith('image/'));
-    if (imageItems.length === 0) return;
-    e.preventDefault();
-    (quickRevisionActive ? imageItems.slice(0, 1) : imageItems).forEach(it => {
-      const f = it.getAsFile();
-      if (f) addAttachedImageFromBlob(f);
-    });
+    if (mainAttachments.addFromClipboard(e.clipboardData?.items)) e.preventDefault();
   };
 
   // 드래그 카운터 패턴 — 자식 위 이동 시 깜빡임 방지
@@ -1655,77 +1524,16 @@ export function CommentPanel({
     e.preventDefault();
     dragCounter.current = 0;
     setDraggingOver(false);
-    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
-    (quickRevisionActive ? files.slice(0, 1) : files).forEach(addAttachedImageFromBlob);
+    mainAttachments.addFiles(e.dataTransfer.files);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
-    (quickRevisionActive ? files.slice(0, 1) : files).forEach(addAttachedImageFromBlob);
+    mainAttachments.addFiles(e.target.files);
     e.target.value = '';
   };
 
-  const uploadThreadAttachedImage = useCallback(async (id: string, file: File | Blob) => {
-    try {
-      const base64 = await resizeBlob(file, 800, 0.8);
-      const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
-      if (result.ok && result.url) {
-        const url = result.url;
-        if (!mountedRef.current) {
-          storageService.deleteImage(url).catch(err => {
-            console.warn('[스레드 댓글 이미지 unmount race] 정리 실패:', err);
-          });
-          return;
-        }
-        setThreadAttachedImages(prev => {
-          const exists = prev.some(a => a.id === id);
-          if (!exists) {
-            storageService.deleteImage(url).catch(err => {
-              console.warn('[스레드 댓글 이미지 race] 사용자 제거 후 도착한 업로드 객체 정리 실패:', err);
-            });
-            return prev;
-          }
-          return prev.map(a =>
-            a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a
-          );
-        });
-      } else {
-        throw new Error(result.error || '업로드 실패');
-      }
-    } catch (err) {
-      console.error('[스레드 댓글 이미지 업로드 실패]', err);
-      if (!mountedRef.current) return;
-      const msg = err instanceof Error ? err.message : String(err);
-      setThreadAttachedImages(prev => prev.map(a =>
-        a.id === id ? { ...a, uploading: false, error: msg } : a
-      ));
-    }
-  }, [sheetName, sceneId]);
-
-  const addThreadAttachedImageFromBlob = useCallback((file: File | Blob) => {
-    const id = createUuid();
-    const previewUrl = URL.createObjectURL(file);
-    setThreadAttachedImages(prev => [...prev, { id, previewUrl, uploading: true }]);
-    void uploadThreadAttachedImage(id, file);
-  }, [uploadThreadAttachedImage]);
-
-  const removeThreadAttachedImage = (id: string) => {
-    setThreadAttachedImages(prev => {
-      const target = prev.find(a => a.id === id);
-      cleanupDraftImages(target ? [target] : [], '[스레드 댓글 첨부 제거]');
-      return prev.filter(a => a.id !== id);
-    });
-  };
-
   const handleThreadPaste = (e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData?.items || []);
-    const imageItems = items.filter(it => it.type.startsWith('image/'));
-    if (imageItems.length === 0) return;
-    e.preventDefault();
-    imageItems.forEach(it => {
-      const f = it.getAsFile();
-      if (f) addThreadAttachedImageFromBlob(f);
-    });
+    if (threadAttachments.addFromClipboard(e.clipboardData?.items)) e.preventDefault();
   };
 
   const handleThreadDrop = (e: React.DragEvent) => {
@@ -1733,13 +1541,11 @@ export function CommentPanel({
     e.stopPropagation();
     dragCounter.current = 0;
     setDraggingOver(false);
-    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
-    files.forEach(addThreadAttachedImageFromBlob);
+    threadAttachments.addFiles(e.dataTransfer.files);
   };
 
   const handleThreadFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
-    files.forEach(addThreadAttachedImageFromBlob);
+    threadAttachments.addFiles(e.target.files);
     e.target.value = '';
   };
 
@@ -1860,12 +1666,10 @@ export function CommentPanel({
           assigneeIds: quickRevisionAssigneeIds,
         });
         setInput('');
-        inputValueRef.current = '';
         setQuickRevisionPickerOpen(false);
         setQuickRevisionAssigneeIds([]);
         mention.close();
         hash.close();
-        setReplyTarget(null);
         prevAttached.forEach((item) => {
           try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
         });
@@ -1922,22 +1726,9 @@ export function CommentPanel({
 
     setSubmitting(true);
 
-    const replyThreadTarget = buildCommentReplyTarget(comments, replyTarget);
-    const replyParent = replyThreadTarget.rootComment;
-    const isReplyToReply = replyThreadTarget.isReplyToReply;
-
+    // 본문 입력칸은 항상 최상위 댓글(답글은 스레드 창 — handleThreadSubmit). 사용자가 친 @만 멘션(§6.1).
     const mentions = extractMentions(input, userNames);
-    // v1.146.0(§6.1): 답글 상대를 mentions 에 넣지 않는다 — 답글 알림은 parent_comment_id 로 판정한다(사용자가 친 @만 멘션).
-    // v1.24.0 코덱스 P1 fix (2026-05-10 round 2): 답글은 부모 댓글의 *진짜 storage sheet* 에 저장.
-    //   _sourceKey 는 UI dedup 의 첫 발견 sceneKey 라 unified 뷰에서 *secondary 댓글이 primary key 로 stamp* 되는
-    //   케이스가 있어 신뢰 불가. raw row 기반 storageKey (partId → sheetName + scene.no) 를 우선 사용.
-    //   둘 다 없으면 (Sheets fallback 으로 partId 비어있음) primary sceneKey 로 fallback.
-    const targetSceneKey =
-      replyParent?.storageKey
-      ?? replyParent?._sourceKey
-      ?? replyTarget?.storageKey
-      ?? replyTarget?._sourceKey
-      ?? primaryStorageKey;
+    const targetSceneKey = primaryStorageKey;
     const comment: SceneCommentWithSource = {
       id: createUuid(),
       userId: currentUser.id,
@@ -1946,8 +1737,7 @@ export function CommentPanel({
       mentions,
       images: uploadedImageUrls,
       createdAt: new Date().toISOString(),
-      // Slack-style: 답글의 답글도 최상위 댓글 스레드 아래에 저장한다.
-      parentCommentId: replyThreadTarget.parentCommentId,
+      parentCommentId: null,
       _sourceKey: targetSceneKey,
     };
 
@@ -1955,16 +1745,6 @@ export function CommentPanel({
     const next = [...comments, comment];
     setComments(next);
     onCountChange?.(next.length);
-    if (replyThreadTarget.parentCommentId) {
-      setActiveThreadRootId(replyThreadTarget.parentCommentId);
-      setLastThreadRootId(replyThreadTarget.parentCommentId);
-      setCollapsedThreads((prev) => {
-        if (!prev.has(replyThreadTarget.parentCommentId!)) return prev;
-        const opened = new Set(prev);
-        opened.delete(replyThreadTarget.parentCommentId!);
-        return opened;
-      });
-    }
 
     // Codex P2(2026-04-29): blob URL revoke 와 attachedImages 초기화는 전송 성공 *후* 에 수행.
     // 실패 시 사용자가 같은 페이로드(텍스트 + 첨부)로 재시도할 수 있어야 새 이미지 첨부 흐름의 신뢰성이 보장된다.
@@ -1972,27 +1752,22 @@ export function CommentPanel({
     // unmount cleanup 이 pre-submit 첨부물을 보고 in-flight 댓글의 이미지를 삭제하는 race 발생 가능.
     // setState 와 동시에 ref 도 즉시 동기화하여 cleanup 이 항상 최신 상태(빈 배열) 를 본다.
     const prevAttached = attachedImages;
-    const prevReplyTarget = replyTarget;
     setInput('');
-    inputValueRef.current = '';
     mention.close();
     hash.close();
     setAttachedImages([]);
     attachedImagesRef.current = [];
-    // v1.24.0: 답글 전송 후 답글 모드 해제 (성공/실패 무관 — 실패하면 말풍선이 그 스레드에 남는다).
-    setReplyTarget(null);
     // 움직임 폴리싱 19번: 0.4초 넘게 걸리면 말풍선에 '보내는 중', 실패하면 말풍선을 남겨 다시 보내기·지우기.
     const sendDraft: UnsentCommentDraft = {
       comment,
       targetSceneKey,
       webhookSceneKey: primaryStorageKey,
       attached: prevAttached,
-      markReadOnSuccess: !!prevReplyTarget,
+      markReadOnSuccess: false,
     };
     beginCommentSend(sendDraft);
 
     try {
-      // v1.24.0: 답글이면 targetSceneKey (부모 sourceKey) 로 저장 → 부모/답글이 같은 sheet 에 모임.
       await addComment(targetSceneKey, comment);
       finishCommentSend(comment.id);
       // 저장 뒤 할 일(목록 다시 불러오기·읽음·미리보기 정리·슬랙 멘션)은 '다시 보내기'와 같은 길로.
@@ -2118,23 +1893,21 @@ export function CommentPanel({
 
   /** '되돌리기' — 서버에는 아직 그대로라 화면에만 다시 넣는다. */
   const restoreDeletedComment = (commentId: string) => {
-    const entry = pendingDeletesRef.current.get(commentId);
-    if (!entry || entry.phase !== 'waiting') return;
-    pendingDeletesRef.current.delete(commentId);
+    const entry = pendingDeletesRef.current.takeForUndo(commentId);
+    if (!entry) return;
     settleDeleteVisual(entry);
     reinsertComment(entry.comment);
   };
 
   /** 5초가 지났거나 바로 확정할 때 — 서버에서 지운다. 실패하면 말풍선을 제자리에 되돌려 놓고 알린다. */
   const commitDeletedComment = (commentId: string) => {
-    const entry = pendingDeletesRef.current.get(commentId);
-    if (!entry || entry.phase !== 'waiting') return;
-    entry.phase = 'deleting';
+    const entry = pendingDeletesRef.current.beginCommit(commentId);
+    if (!entry) return;
     // 앱 종료가 이 요청을 기다린다(hookCommentDeleteQuitFlush).
     const deletion: Promise<void> = deleteComment(entry.targetKey, commentId).then(() => {
-      pendingDeletesRef.current.delete(commentId);
+      pendingDeletesRef.current.finish(commentId);
     }).catch((err) => {
-      pendingDeletesRef.current.delete(commentId);
+      pendingDeletesRef.current.finish(commentId);
       console.error('[댓글 삭제 실패]', err);
       sonnerToast.error('댓글을 지우지 못했어요 · 인터넷 연결을 확인해 주세요');
       settleDeleteVisual(entry);
@@ -2173,7 +1946,7 @@ export function CommentPanel({
       phase: 'waiting',
       undoWindow: null,
     };
-    pendingDeletesRef.current.set(commentId, entry);
+    if (!pendingDeletesRef.current.begin(commentId, entry)) return;
     if (exit) entry.collapseTimer = setTimeout(() => collapseDeletedComment(commentId, element), COMMENT_DELETE_EXIT_MS);
     else collapseDeletedComment(commentId, element);
     entry.undoWindow = showUndoToast({
@@ -2188,9 +1961,7 @@ export function CommentPanel({
   // 종료를 잠시(최대 몇 초) 미룬다 — 예전처럼 신호가 대기 작업이 있을 때만 오면 지운 댓글이 남았다.
   useEffect(() => {
     const pending = pendingDeletesRef.current;
-    const flushAll = () => {
-      for (const entry of [...pending.values()]) entry.undoWindow?.expire();
-    };
+    const flushAll = () => pending.expireAll();
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') flushAll();
     };
@@ -2211,7 +1982,7 @@ export function CommentPanel({
   useEffect(() => {
     const pending = pendingDeletesRef.current;
     return () => {
-      for (const entry of [...pending.values()]) {
+      for (const entry of pending.values()) {
         if (entry.collapseTimer) {
           clearTimeout(entry.collapseTimer);
           entry.collapseTimer = null;
@@ -2691,7 +2462,7 @@ export function CommentPanel({
   const activeThreadMessagesForPanel = activeRevisionThreadId ? activeRevisionThreadComments : activeThreadMessages;
 
   // 4c: 댓글 본문 #태그 칩 클릭/우클릭 → 해당 씬/파트/화로 점프 또는 메뉴.
-  const renderText = (text: string, _sourceKey?: string) => (
+  const renderText = (text: string) => (
     <EntityText text={text} userNames={userNames} onMentionClick={handleMentionClick} onHashClick={onHashClick ?? navigateToHashTarget} onHashContextMenu={onHashContextMenu} />
   );
 
@@ -3050,7 +2821,7 @@ export function CommentPanel({
                           isOwn ? 'bg-accent/20 border border-accent/30' : 'bg-bg-border/70',
                         )}
                       >
-                        {comment.text && <div>{renderText(comment.text, comment.storageKey ?? comment._sourceKey)}</div>}
+                        {comment.text && <div>{renderText(comment.text)}</div>}
                         {hasImages && (
                           <div
                             className={`grid gap-1 ${comment.text ? 'mt-2' : ''} ${
@@ -3261,7 +3032,7 @@ export function CommentPanel({
                                   replyIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50',
                                 )}
                               >
-                                {reply.text && <div>{renderText(reply.text, reply.storageKey ?? reply._sourceKey)}</div>}
+                                {reply.text && <div>{renderText(reply.text)}</div>}
                                 {replyHasImages && (
                                   <div className={`grid gap-1 ${reply.text ? 'mt-1.5' : ''} ${reply.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                                     {reply.images!.map((url, i) => (
@@ -3505,38 +3276,10 @@ export function CommentPanel({
             // 한솔 리테이크(2026-05-02): focus 시 accent-sub(보라)가 박혀서 "보라색 고정"으로 보임 → 중립 흰색 알파로 변경
             borderColor: draggingOver
               ? 'rgb(var(--color-accent))'
-              : replyTarget
-              ? 'rgba(108,92,231,0.6)' // v1.24.0: 답글 모드 시 보라 강조
               : (focused ? 'rgba(255,255,255,0.16)' : 'rgb(var(--color-bg-border))'),
             maxHeight: inputCardMaxPx,
           }}
         >
-          {/* v1.24.0: 답글 컨텍스트 헤더 — 답글 모드일 때만 카드 상단에 노출 */}
-          {replyTarget && (
-            <div className="flex items-start gap-2 mb-2 px-2 py-1.5 -mx-2.5 -mt-2 border-b border-accent/30 bg-accent/[0.06] rounded-t-xl">
-              <CornerDownRight size={12} className="text-accent mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-[10.5px] text-accent font-medium">
-                  {(replyDraftTarget.rootComment ?? replyTarget).userName}의 스레드에 댓글 추가
-                </div>
-                {replyDraftTarget.isReplyToReply && (
-                  <div className="text-[10.5px] text-text-secondary/60 truncate mt-0.5">
-                    선택한 메시지 · {replyTarget.userName}: {replyTarget.text || '(이미지 첨부)'}
-                  </div>
-                )}
-                {!replyDraftTarget.isReplyToReply && (
-                  <div className="text-[11px] text-text-secondary/70 truncate mt-0.5">{replyTarget.text || '(이미지 첨부)'}</div>
-                )}
-              </div>
-              <button
-                onClick={() => setReplyTarget(null)}
-                className="w-5 h-5 rounded hover:bg-bg-border/50 flex items-center justify-center text-text-secondary hover:text-text-primary cursor-pointer flex-shrink-0"
-                title="답글 취소"
-              >
-                <X size={11} />
-              </button>
-            </div>
-          )}
           {/* 이미지 썸네일 줄 */}
           {attachedImages.length > 0 && (
             <div className="flex gap-2 mb-2 overflow-x-auto pb-1" style={{ height: 76 }}>
@@ -3815,7 +3558,7 @@ export function CommentPanel({
                       'rounded-lg px-2.5 py-2 text-[11.5px] leading-relaxed break-words text-text-primary',
                       messageIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50',
                     )}>
-                      {message.text && <div>{renderText(message.text, message.storageKey ?? message._sourceKey)}</div>}
+                      {message.text && <div>{renderText(message.text)}</div>}
                       {messageHasImages && (
                         <div className={`grid gap-1 ${message.text ? 'mt-1.5' : ''} ${message.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                           {message.images!.map((url, i) => (
@@ -4044,168 +3787,6 @@ export function CommentPanel({
         />
       )}
     </div>
-  );
-}
-
-/**
- * v1.24.2 한솔 보고 fix: 씬 안 모든 댓글의 모든 이미지를 한 갤러리로 순회 + 이미지 *아래* 에
- *   현재 이미지의 작성자/시간/본문 표시 (씬 상세 모달 ImageModal UX 와 일관). createPortal 로
- *   body 직속 렌더 → z-index 99999 로 항상 위.
- *
- * 레이아웃:
- *   ┌─────────────────────────────────────┐
- *   │ [씬 라벨]            n/m       [X]  │  ← 헤더 (얇음)
- *   │                                       │
- *   │  ◀     [    메인 이미지    ]     ▶   │  ← 메인 이미지 + 좌우 화살표
- *   │                                       │
- *   │  배한솔 · 14:02                      │  ← 이미지 아래 작성자+시간
- *   │  옥상 씬 LO 일단 올렸어요...         │  ← 본문 full text
- *   │                                       │
- *   │  [▢][▢][▢][▢][▢]   ←/→ 이동        │  ← 썸네일 strip + 키보드 안내
- *   └─────────────────────────────────────┘
- */
-function CommentLightboxPortal({
-  lightbox,
-  setLightbox,
-  closeLightbox,
-  lightboxStep,
-  sceneLabel,
-}: {
-  lightbox: CommentLightboxState;
-  setLightbox: (next: CommentLightboxState | null | ((prev: CommentLightboxState | null) => CommentLightboxState | null)) => void;
-  closeLightbox: () => void;
-  lightboxStep: (dir: 1 | -1) => void;
-  sceneLabel?: string;
-}) {
-  if (typeof document === 'undefined') return null;
-  const current = lightbox.entries[lightbox.index];
-  if (!current) return null;
-  const totalCount = lightbox.entries.length;
-  const showNav = totalCount > 1;
-
-  return createPortal(
-    <div
-      className="comment-lightbox-backdrop cursor-zoom-out"
-      onClick={closeLightbox}
-      role="dialog"
-      aria-modal="true"
-      aria-label="댓글 이미지 확대 보기"
-    >
-      {/* 라이트박스 컨텐츠 — flex column 으로 헤더/이미지/본문/썸네일 구획 */}
-      <div
-        className="relative w-full h-full flex flex-col cursor-default"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 상단 헤더 — 씬 라벨 + N/M + 닫기 (얇게, 본문은 이미지 아래로 이동) */}
-        <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 pt-4 pb-2">
-          <div className="flex items-center gap-2 text-[12px] text-white/80 flex-wrap min-w-0">
-            {sceneLabel && (
-              <>
-                <span className="px-2 py-1 rounded bg-white/10 font-medium">{sceneLabel}</span>
-                <span className="text-white/40">·</span>
-              </>
-            )}
-            <span className="tabular-nums text-white/70">{lightbox.index + 1} / {totalCount}</span>
-          </div>
-          <button
-            onClick={closeLightbox}
-            className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer flex-shrink-0"
-            title="닫기 (ESC)"
-            aria-label="닫기"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* 메인 이미지 영역 — flex-grow + 좌우 화살표 absolute */}
-        <div className="flex-1 relative flex items-center justify-center px-6 min-h-0">
-          {showNav && (
-            <button
-              onClick={() => lightboxStep(-1)}
-              className="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer"
-              title="이전 이미지 (←)"
-              aria-label="이전 이미지"
-            >
-              <ChevronLeftIcon size={26} />
-            </button>
-          )}
-
-          <img
-            src={current.url}
-            alt={`${current.userName}의 댓글 이미지 ${lightbox.index + 1}/${totalCount}`}
-            className="comment-lightbox-image"
-            key={`${lightbox.index}-${current.url}`}
-          />
-
-          {showNav && (
-            <button
-              onClick={() => lightboxStep(1)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer"
-              title="다음 이미지 (→)"
-              aria-label="다음 이미지"
-            >
-              <ChevronRightIcon size={26} />
-            </button>
-          )}
-        </div>
-
-        {/* 이미지 *바로 아래* — 현재 이미지의 작성자 + 시간 + 본문 (씬 상세 모달 ImageModal UX 와 일관) */}
-        <div className="flex-shrink-0 px-6 pt-3 pb-2 max-w-3xl mx-auto w-full">
-          <div className="flex items-baseline gap-2 text-[12.5px] mb-1">
-            <span className="font-semibold text-white">{current.userName}</span>
-            <span className="text-white/50 text-[11px]">{formatCommentTime(current.createdAt)}</span>
-          </div>
-          {current.commentText && (
-            <p className="text-[13.5px] text-white/95 leading-relaxed whitespace-pre-wrap break-words max-h-24 overflow-y-auto comment-lightbox-thumb-strip">
-              {current.commentText}
-            </p>
-          )}
-        </div>
-
-        {/* 하단 썸네일 strip — 이미지 2장 이상 + 키보드 안내 */}
-        {showNav && (
-          <div
-            className="flex-shrink-0 px-6 py-3"
-            style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7), rgba(0,0,0,0.2))' }}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-white/60 font-medium">이미지 {totalCount}장</span>
-              <span className="text-[11px] text-white/60">
-                <span className="px-1.5 py-0.5 rounded bg-white/10 mr-1">←</span>
-                <span className="px-1.5 py-0.5 rounded bg-white/10">→</span>
-                <span className="ml-2">키보드 이동</span>
-                <span className="mx-2 text-white/30">·</span>
-                <span className="px-1.5 py-0.5 rounded bg-white/10">ESC</span>
-                <span className="ml-1">닫기</span>
-              </span>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-1 comment-lightbox-thumb-strip">
-              {lightbox.entries.map((entry, i) => {
-                const isActive = i === lightbox.index;
-                return (
-                  <button
-                    key={`${i}-${entry.commentId}-${entry.url}`}
-                    type="button"
-                    onClick={() => setLightbox((prev) => prev ? { ...prev, index: i } : prev)}
-                    className={cn(
-                      'flex-shrink-0 rounded-md overflow-hidden transition-all cursor-pointer',
-                      isActive ? 'comment-lightbox-thumb-active' : 'opacity-60 hover:opacity-100',
-                    )}
-                    style={{ width: 72, height: 72 }}
-                    aria-label={`${i + 1}번 이미지로 이동 (${entry.userName})`}
-                    aria-current={isActive ? 'true' : undefined}
-                    title={`${entry.userName}: ${entry.commentText.slice(0, 30)}`}
-                  >
-                    <img src={entry.url} alt="" className="w-full h-full object-cover" loading="lazy" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>,
-    document.body,
   );
 }
 
