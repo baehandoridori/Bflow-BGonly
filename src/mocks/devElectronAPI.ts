@@ -3145,17 +3145,27 @@ export function installDevElectronAPI(): void {
       localStore.__commentReadStateRows = stateRows;
     },
     // v1.146.1(§8): 시드·다른 탭이 쓴 댓글 중 나를 부른 것 — 놓친 알림 모으기가 미리보기에서도 돈다.
-    supabaseFetchMissedMentions: async (userId, userName, since, limit = 50) => getMockCommentRows()
-      .filter((row) => !row.characterId && row.userId !== userId && row.createdAt > since
-        && Array.isArray(row.mentions) && row.mentions.includes(userName))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
-      .slice(0, limit)
-      .map((row) => ({
-        id: row.id, partId: row.partId, sceneId: row.sceneId, sceneUuid: null,
-        userId: row.userId, userName: row.userName, text: row.text, mentions: row.mentions,
-        images: row.images ?? [], createdAt: row.createdAt, editedAt: row.editedAt,
-        revisionId: row.revisionId ?? null, parentCommentId: row.parentCommentId ?? null,
-      })),
+    supabaseFetchMissedMentions: async (userId, userName, since, limit = 50) => {
+      const rows = getMockCommentRows();
+      const authorById = new Map(rows.map((row) => [row.id, row.userId]));
+      return rows
+        .filter((row) => !row.characterId && row.userId !== userId && row.createdAt > since)
+        .map((row) => {
+          const mentioned = Array.isArray(row.mentions) && row.mentions.includes(userName);
+          const replyToMe = !mentioned && !row.revisionId && !!row.parentCommentId && authorById.get(row.parentCommentId) === userId;
+          return { row, keep: mentioned || replyToMe, parentAuthorId: replyToMe ? userId : null };
+        })
+        .filter((item) => item.keep)
+        .sort((a, b) => b.row.createdAt.localeCompare(a.row.createdAt) || b.row.id.localeCompare(a.row.id))
+        .slice(0, limit)
+        .map(({ row, parentAuthorId }) => ({
+          id: row.id, partId: row.partId, sceneId: row.sceneId, sceneUuid: null,
+          userId: row.userId, userName: row.userName, text: row.text, mentions: row.mentions,
+          images: row.images ?? [], createdAt: row.createdAt, editedAt: row.editedAt,
+          revisionId: row.revisionId ?? null, parentCommentId: row.parentCommentId ?? null,
+          parentAuthorId,
+        }));
+    },
     supabaseAddComment: async (commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId) => {
       const comments = getMockCommentRows();
       // 라이브 DB 처럼 id 는 기본 키 — 같은 id 를 다시 넣으면 거절한다('다시 보내기'가 저장된 댓글을 알아보는 길).
@@ -3189,6 +3199,7 @@ export function installDevElectronAPI(): void {
         payload: {
           sceneId: characterId ? `char:${characterId}` : sceneId, userName, userId, text, mentions: mentions ?? [],
           commentId, parentCommentId: parentCommentId ?? null, partId: characterId ? null : partUuid,
+          parentAuthorId: parentCommentId ? comments.find((row) => row.id === parentCommentId)?.userId ?? null : null,
           revisionId: revisionId ?? null, images: images ?? [], createdAt, sceneUuid: null, characterId: characterId ?? null,
           ts: Date.now(),
         },
