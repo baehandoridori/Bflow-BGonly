@@ -339,10 +339,22 @@ export function applyRemoteCommentChange(change: RemoteCommentChange): CommentsI
     return detail;
   }
   if (change.kind === 'invalidate') {
+    // 예전 버전이 보낸 추가 방송(이미지·시각 없음)이라도 실시간 이벤트가 이미 그 행을 넣었으면 다시 읽지 않는다.
+    if (change.action === 'add' && change.commentId && rowCache.findById(change.commentId)) return null;
     invalidateCommentsForPart(change.partId);
     return { partIds: change.partId ? [change.partId] : [], commentAction: change.action };
   }
-  return applyCommentOpToCaches(change.op, { commentId: change.commentId, action: change.action });
+  const detail = applyCommentOpToCaches(change.op, { commentId: change.commentId, action: change.action });
+  if (!detail && change.op.kind === 'delete' && !change.partId) {
+    // 실시간 DELETE 는 id 만 싣는다 — 씬 캐시에 없던 댓글이면 캐릭터 댓글일 수 있다(예전 버전이 지웠거나 방송이 빠졌을 때).
+    //   그 댓글을 보여 주는 화면과 캐릭터 배지만 다시 본다.
+    const unresolved: CommentsInvalidatedDetail = {
+      commentId: change.commentId, commentAction: 'delete', unresolvedDelete: true,
+    };
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: unresolved }));
+    return unresolved;
+  }
+  return detail;
 }
 
 /** Supabase 실시간 comments 이벤트(payload = postgres_changes) → 캐시. */

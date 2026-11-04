@@ -189,8 +189,8 @@ export class CharacterCommentSummaryCache {
   }
 
   private onCommentsChanged = (event: Event): void => {
-    const detail = (event as CustomEvent<{ characterId?: string; sheetName?: string; sheetNames?: string[]; partIds?: string[] }>).detail;
-    // 씬 댓글 신호(시트·파트가 적힌 것)는 캐릭터 배지와 무관하다.
+    const detail = (event as CustomEvent<{ characterId?: string; sheetName?: string; sheetNames?: string[]; partIds?: string[]; unresolvedDelete?: boolean }>).detail;
+    // 씬 댓글 신호(시트·파트가 적힌 것)는 캐릭터 배지와 무관하다. 어디 것인지 모르는 삭제는 캐릭터 댓글일 수 있어 아래로(전체 다시 보기).
     if ((detail?.sheetName || detail?.sheetNames?.length || detail?.partIds?.length) && !detail.characterId) return;
     const ids = detail?.characterId ? [detail.characterId] : [...new Set([...this.entries.keys(), ...this.listeners.keys(), ...this.inFlight])];
     for (const id of ids) {

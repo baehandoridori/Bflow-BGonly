@@ -617,9 +617,13 @@ export default function App() {
     import('@/stores/useRevisionStore').then(async ({ useRevisionStore }) => {
       let rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
       // 리테이크 store 에 없으면(새 세션·방금 만든 리테이크) 그 리테이크 하나만 서버에서 확인한다.
+      //   못 읽으면 중복 키를 놓아 같은 댓글의 다른 길(실시간/방송)이 다시 시도하게 한다.
       if (!rev) {
-        rev = (await getCanonicalRevision(newComment.revision_id!)) ?? undefined;
-        if (!rev) return;
+        rev = (await getCanonicalRevision(newComment.revision_id!).catch(() => null)) ?? undefined;
+        if (!rev) {
+          recentNotiKeysRef.current.delete(dedupeKey);
+          return;
+        }
       }
 
       const revisionNotifyIds = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
@@ -783,7 +787,11 @@ export default function App() {
     ({ syncing, kind }) => useDataStore.getState().setSyncState(syncing, kind),
   ));
   const loadData = useCallback(() => syncQueue.request('auto'), [syncQueue]);
-  const refreshDataManually = useCallback(() => { void syncQueue.request('manual'); }, [syncQueue]);
+  // 직접 새로고침은 댓글도 서버에서 다시 본다(v1.145.0 — 댓글 캐시는 받은 변경만 끼워 넣으므로, 이상해 보일 때의 탈출구).
+  const refreshDataManually = useCallback(() => {
+    invalidatePartCache();
+    void syncQueue.request('manual');
+  }, [syncQueue]);
   // 실시간 변경·재연결로 전부 다시 받아야 할 때. 창이 트레이·최소화로 숨어 있으면 미뤄 두었다가
   // 다시 보일 때 받는다(autoSyncScheduler). 로그인 전처럼 스케줄러가 없으면 예전처럼 바로 받는다.
   const autoSyncRef = useRef<AutoSyncScheduler | null>(null);

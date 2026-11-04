@@ -16,6 +16,9 @@ import { useEffect, useState } from 'react';
 import { loadPartCommentRows, peekPartCommentRows } from '@/services/commentService';
 import { countCommentRowsByScene, type CommentRow } from '@/utils/commentRowCache';
 
+/** 읽기 실패 뒤 한 번 더 기다리는 시간. */
+const COUNT_RETRY_MS = 5_000;
+
 /** 같은 행 배열이면 다시 세지 않는다(카드마다 렌더할 때 같은 파트를 50번 세지 않게). */
 const countsByRows = new WeakMap<readonly CommentRow[], Map<string, number>>();
 
@@ -50,24 +53,30 @@ export function useCommentCount(
     if (uuids.length === 0) return;
     let disposed = false;
     const rerender = () => { if (!disposed) setTick((n) => n + 1); };
-    // 캐시에 없으면 읽는다(같은 파트를 여러 카드가 동시에 불러도 요청은 한 번). 실패하면 0 으로 두고
-    // 다음 댓글 신호나 다시 마운트될 때 다시 읽는다.
-    const ensure = () => {
+    // 캐시에 없으면 읽는다(같은 파트를 여러 카드가 동시에 불러도 요청은 한 번). 실패하면 5초 뒤 한 번 더 —
+    // 그래도 안 되면 다음 댓글 신호나 다시 마운트될 때 다시 읽는다(주기 조회는 하지 않는다).
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const ensure = (allowRetry = true) => {
       for (const uuid of uuids) {
         if (peekPartCommentRows(uuid)) continue;
-        void loadPartCommentRows(uuid).then(rerender, () => { /* 0 으로 둔다 */ });
+        void loadPartCommentRows(uuid).then(rerender, () => {
+          if (disposed || !allowRetry || retryTimer) return;
+          retryTimer = setTimeout(() => { retryTimer = null; if (!disposed) ensure(false); }, COUNT_RETRY_MS);
+        });
       }
     };
     ensure();
     const onInvalidated = (event: Event) => {
-      // 캐릭터 댓글은 씬 카드와 무관하다.
-      if ((event as CustomEvent<{ characterId?: string } | undefined>).detail?.characterId) return;
+      // 캐릭터 댓글·어디 것인지 모르는 삭제(씬 캐시에 없던 댓글)는 씬 카드와 무관하다.
+      const detail = (event as CustomEvent<{ characterId?: string; unresolvedDelete?: boolean } | undefined>).detail;
+      if (detail?.characterId || detail?.unresolvedDelete) return;
       rerender();
       ensure();
     };
     window.addEventListener('bflow:comments-invalidated', onInvalidated);
     return () => {
       disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       window.removeEventListener('bflow:comments-invalidated', onInvalidated);
     };
   }, [bgPartUuid, actPartUuid]);
