@@ -2248,6 +2248,38 @@ function getMockActivityRows(): MockActivityRow[] {
     ?? (localStore.__activityRows = buildInitialMockActivityRows()) as MockActivityRow[];
 }
 
+/**
+ * v1.145.0(씬 댓글 B안 §7·§13 동등성): 실제 앱은 자기가 쓴 댓글도 실시간 comments 이벤트(postgres_changes)로
+ * 다시 받는다. 미리보기도 저장 뒤 같은 모양의 메아리를 같은 창에 보내 수신 경로(캐시 끼워 넣기)가 돌게 한다.
+ * 다른 PC 로 가는 댓글 방송(comment-added/updated/deleted)은 보낸 창에는 오지 않으므로 여기서 내보내지 않는다.
+ */
+function emitMockCommentRealtime(eventType: 'INSERT' | 'UPDATE' | 'DELETE', row: DevPreviewCommentRow): void {
+  const record: Record<string, unknown> = {
+    id: row.id,
+    part_id: row.partId || null,
+    scene_id: row.sceneId || null,
+    character_id: row.characterId ?? null,
+    user_id: row.userId,
+    user_name: row.userName,
+    text: row.text,
+    mentions: row.mentions ?? [],
+    images: row.images ?? [],
+    created_at: row.createdAt,
+    edited_at: row.editedAt ?? null,
+    revision_id: row.revisionId ?? null,
+    parent_comment_id: row.parentCommentId ?? null,
+  };
+  setTimeout(() => {
+    previewCalendarNotificationRealtime.emitCommentChange({
+      table: 'comments',
+      // 실제 DELETE 메아리는 기본 키만 싣는다(replica identity 기본값).
+      payload: eventType === 'DELETE'
+        ? { eventType, new: {}, old: { id: row.id } }
+        : { eventType, new: record, old: eventType === 'UPDATE' ? { id: row.id } : {} },
+    });
+  }, 40);
+}
+
 function getMockCommentRows(): DevPreviewCommentRow[] {
   return (localStore.__commentRows as DevPreviewCommentRow[] | undefined)
     ?? (localStore.__commentRows = buildDevPreviewCommentRows(MOCK_EPISODES)) as DevPreviewCommentRow[];
@@ -3057,6 +3089,7 @@ export function installDevElectronAPI(): void {
         parentCommentId: parentCommentId ?? null,
       });
       localStore.__commentRows = comments;
+      emitMockCommentRealtime('INSERT', comments[comments.length - 1]);
       // 댓글(일반·리테이크·캐릭터 보드 전부) 적립(spec §, 프로덕션 main.ts 와 동일).
       maybeAwardPreviewActivity('comment', commentId);
     },
@@ -3069,12 +3102,15 @@ export function installDevElectronAPI(): void {
       if (images !== undefined) target.images = images;
       target.editedAt = new Date().toISOString();
       localStore.__commentRows = comments;
+      emitMockCommentRealtime('UPDATE', target);
     },
     supabaseDeleteComment: async (commentId) => {
+      const removed = getMockCommentRows().find((comment) => comment.id === commentId);
       const comments = getMockCommentRows()
         .filter((comment) => comment.id !== commentId)
         .map((comment) => comment.parentCommentId === commentId ? { ...comment, parentCommentId: null } : comment);
       localStore.__commentRows = comments;
+      if (removed) emitMockCommentRealtime('DELETE', removed);
     },
     // v1.26.0 mocks
     supabaseAddCommentReaction: async () => {},
