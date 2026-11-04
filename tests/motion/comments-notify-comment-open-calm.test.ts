@@ -142,11 +142,13 @@ test('댓글 조회: 패널만 실패를 예외로 받고(다른 호출자는 �
   assert.match(service, /export async function getComments\(sceneKey: string, options: CommentReadOptions = \{\}\)[\s\S]{0,200}loadPartComments\(sheetName, options\)/);
   assert.match(service, /export async function getCommentsForCharacter\(characterId: string, options: CommentReadOptions = \{\}\)/);
   assert.match(service, /if \(options\.throwOnError\) throw new CommentLoadError\(\);\s*return \[\];/);
-  const failAt = service.indexOf('if (supabaseFailed && !fallbackLoaded) {');
-  const cacheAt = service.indexOf('sheetPartCache.set(sheetName, store);');
+  const failAt = service.indexOf('if (supabaseFailed && !fallbackRows) {');
+  const cacheAt = service.indexOf('sheetPartCache.set(sheetName, store);', failAt);
   assert.ok(failAt > 0 && cacheAt > failAt, '실패 판정이 캐시 저장보다 먼저');
   assert.match(service.slice(failAt, failAt + 160), /if \(options\.throwOnError\) throw new CommentLoadError\(\);\s*return \{\};/);
-  assert.match(service, /if \(result\.ok\) \{\s*fallbackLoaded = true;/);
+  assert.match(service, /if \(result\.ok\) \{\s*fallbackRows = /);
+  // v1.145.0: 서버 조회가 실패하면 파트 행 캐시에도 남지 않는다(utils/commentRowCache.ts — 실패 결과는 저장하지 않음).
+  assert.match(service, /fetched = await Promise\.all\(partUuids\.map\(\(uuid\) => rowCache\.load\(uuid\)\)\);/);
 });
 
 test('패널 배선: 불러오는 중·실패·없음 구분, 처음 자리는 그리기 전에, 부드러운 스크롤은 동작 줄이기 분기', () => {

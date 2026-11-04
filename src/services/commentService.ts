@@ -9,7 +9,18 @@
  */
 
 import type { Part } from '../types';
-import { normalizeSceneIdKey } from '../utils/sceneIdKey';
+import { useDataStore } from '../stores/useDataStore';
+import {
+  buildSheetCommentStore,
+  createCommentRowCache,
+  getRelatedSheetNames,
+  normalizeCommentBroadcastChange,
+  normalizeRealtimeCommentChange,
+  type CommentRow,
+  type CommentRowOp,
+  type CommentsInvalidatedDetail,
+  type RemoteCommentChange,
+} from '../utils/commentRowCache';
 
 const COMMENTS_FILE = 'comments.json';
 
@@ -70,7 +81,11 @@ let sheetsMode = false;
 
 export function setCommentsSheetsMode(enabled: boolean): void {
   sheetsMode = enabled;
-  if (!enabled) sheetPartCache.clear();
+  if (!enabled) {
+    sheetPartCache.clear();
+    rowBackedSheets.clear();
+    rowCache.invalidate();
+  }
 }
 
 // ─── 로컬 파일 ──────────────────────────────────
@@ -103,192 +118,251 @@ function dispatchLocalCommentInvalidated(sceneKey: string, commentAction?: 'add'
 }
 
 // ─── 시트 캐시 (파트별 지연 로딩) ───────────────
+//
+// 씬 댓글 B안 §7(2026-11-04): 서버에서 받은 행은 파트(UUID)마다 한 벌만 들고(rowCache), 시트별 묶음은 그 행으로
+// 만든다. 같은 장면의 BG·ACT 두 시트가 같은 두 파트를 읽으므로 '통합' 화면에서도 파트마다 한 번만 읽는다.
+// 실시간·방송으로 받은 댓글 변경은 행 캐시를 고치고(재조회 없음) 그 파트로 만든 시트 묶음만 버린다.
+
+const rowCache = createCommentRowCache({
+  read: async (partUuid) => {
+    const rows = await window.electronAPI.supabaseReadComments(partUuid);
+    return (Array.isArray(rows) ? rows : []) as CommentRow[];
+  },
+});
 
 // sheetName → { sceneKey → SceneComment[] }
 const sheetPartCache = new Map<string, CommentsStore>();
+/** 행 캐시로 만든 시트 묶음. 나머지(예전 시트 대체 경로 결과)는 댓글이 바뀌면 그냥 버린다. */
+const rowBackedSheets = new Set<string>();
 
 function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string } {
   const idx = sceneKey.lastIndexOf(':');
   return { sheetName: sceneKey.substring(0, idx), sceneId: sceneKey.substring(idx + 1) };
 }
 
-/** BG↔ACT 상대 sheetName. 같은 장면의 댓글을 양쪽 탭에서 공유하기 위해 사용. */
-function getCounterpartSheetName(sheetName: string): string | null {
-  if (sheetName.endsWith('_BG')) return sheetName.slice(0, -3) + '_ACT';
-  if (sheetName.endsWith('_ACT')) return sheetName.slice(0, -4) + '_BG';
-  return null;
+function allLoadedParts(): Part[] {
+  try {
+    return useDataStore.getState().episodes.flatMap((ep) => ep.parts);
+  } catch {
+    return [];
+  }
 }
 
-function getRelatedSheetNames(sheetName: string): string[] {
-  const cp = getCounterpartSheetName(sheetName);
-  return cp ? [sheetName, cp] : [sheetName];
+/** 시트가 읽어야 할 파트들(BG·ACT 같은 장면). 데이터가 아직 없으면 빈 목록. */
+function resolveSheetParts(sheetName: string): { requestedPart?: Part; partByUuid: Map<string, Part>; partUuids: string[] } {
+  const parts = allLoadedParts();
+  const partByUuid = new Map<string, Part>();
+  const partUuids: string[] = [];
+  for (const sn of getRelatedSheetNames(sheetName)) {
+    const part = parts.find((p) => p.sheetName === sn);
+    if (part?.id) {
+      partUuids.push(part.id);
+      partByUuid.set(part.id, part);
+    }
+  }
+  return { requestedPart: parts.find((p) => p.sheetName === sheetName), partByUuid, partUuids };
+}
+
+/** 이 파트의 행으로 만든 시트 묶음들(자기 시트 + 상대 부서 시트). */
+function sheetNamesForPart(partUuid: string): string[] {
+  const part = allLoadedParts().find((p) => p.id === partUuid);
+  return part?.sheetName ? getRelatedSheetNames(part.sheetName) : [];
+}
+
+/** 관련 파트 행이 모두 캐시에 있으면 그 자리에서 시트 묶음을 만든다(서버 요청 없음). */
+function buildSheetStoreFromCachedRows(sheetName: string): CommentsStore | null {
+  const { requestedPart, partByUuid, partUuids } = resolveSheetParts(sheetName);
+  if (partUuids.length === 0) return null;
+  const rowLists = partUuids.map((uuid) => rowCache.peek(uuid));
+  if (rowLists.some((rows) => !rows)) return null;
+  const store = buildSheetCommentStore(sheetName, rowLists as CommentRow[][], requestedPart, partByUuid) as CommentsStore;
+  sheetPartCache.set(sheetName, store);
+  rowBackedSheets.add(sheetName);
+  return store;
 }
 
 /**
- * 특정 파트의 댓글을 시트에서 로드 (캐시).
+ * 댓글 변경 하나를 캐시에 적용하고, 바뀐 시트를 알린다. 캐시에 아무 변화가 없으면 알리지 않는다
+ * (실시간과 방송이 같은 변경을 두 번 줘도 듣는 쪽은 한 번만 다시 그린다).
+ */
+function applyCommentOpToCaches(
+  op: CommentRowOp,
+  meta: { commentId: string; action: 'add' | 'edit' | 'delete'; sceneId?: string; alsoSheet?: string },
+): CommentsInvalidatedDetail | null {
+  const changedParts = rowCache.apply(op);
+  const sheets = new Set<string>();
+  for (const partUuid of changedParts) for (const sn of sheetNamesForPart(partUuid)) sheets.add(sn);
+  // 예전 시트 대체 경로로 만든 묶음은 고칠 수 없으니 버린다(드묾 — 파트 정보를 못 얻었을 때만 생긴다).
+  for (const sn of [...sheetPartCache.keys()]) {
+    if (!rowBackedSheets.has(sn)) sheets.add(sn);
+  }
+  // 이 창에서 바꾼 댓글이면(alsoSheet) 캐시에 없던 시트라도 알린다 — 보고 있는 화면이 다시 읽게.
+  if (meta.alsoSheet) for (const sn of getRelatedSheetNames(meta.alsoSheet)) sheets.add(sn);
+  if (sheets.size === 0) return null;
+  for (const sn of sheets) {
+    sheetPartCache.delete(sn);
+    rowBackedSheets.delete(sn);
+  }
+  const sheetNames = [...sheets];
+  const detail: CommentsInvalidatedDetail = {
+    sheetName: meta.alsoSheet ?? sheetNames[0],
+    sheetNames,
+    partIds: changedParts,
+    commentId: meta.commentId,
+    commentAction: meta.action,
+    patched: true,
+    ...(meta.sceneId ? { sceneId: meta.sceneId } : {}),
+  };
+  window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail }));
+  return detail;
+}
+
+/**
+ * 특정 파트의 댓글을 로드 (캐시).
  * 이슈 F-2(2026-04-23): 같은 장면의 BG·ACT 댓글을 함께 조회해 한쪽에서 작성한 댓글이
  * 반대 부서 탭·카드 뷰 뱃지에서도 보이게 함. 저장은 그대로 원본 파트에만 한다.
- *
- * Codex P1(2026-04-23): 상대 부서 댓글을 요청된 sheet 키로 재매핑할 때 단순히
- * `${sheetName}:${c.sceneId}`로 작성하면 BG·ACT scene.no 가 비대칭(삭제/추가로 어긋난 경우)
- * 일 때 엉뚱한 카드에 매핑된다. 댓글이 달린 "장면"의 scene_number 를 정규화하여 요청 파트에서
- * 같은 정규화 값을 가진 씬의 scene.no 로 키를 재구성한다. 매칭 씬이 없으면 안전하게 skip.
+ * 상대 부서 댓글을 요청 시트의 씬 번호로 옮기는 규칙은 utils/commentRowCache.ts mapCommentRowToRequestedSceneNo.
  */
 export async function loadPartComments(sheetName: string, options: CommentReadOptions = {}): Promise<CommentsStore> {
-  if (sheetPartCache.has(sheetName)) return sheetPartCache.get(sheetName)!;
+  const cachedStore = sheetPartCache.get(sheetName);
+  if (cachedStore) return cachedStore;
 
-  const related = getRelatedSheetNames(sheetName);
-  let requestedPart: Part | undefined;
-  const partByUuid = new Map<string, Part>();
-  const partUuids: string[] = [];
-  try {
-    const { useDataStore } = await import('../stores/useDataStore');
-    const allParts: Part[] = useDataStore.getState().episodes.flatMap((ep) => ep.parts);
-    requestedPart = allParts.find((p) => p.sheetName === sheetName);
-    for (const sn of related) {
-      const p = allParts.find((pp) => pp.sheetName === sn);
-      if (p?.id) {
-        partUuids.push(p.id);
-        partByUuid.set(p.id, p);
-      }
-    }
-  } catch { /* 무시 */ }
-
-  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; images?: string[]; createdAt: string; editedAt: string | null; revisionId?: string | null; parentCommentId?: string | null }[] = [];
+  const { requestedPart, partByUuid, partUuids } = resolveSheetParts(sheetName);
 
   let supabaseFailed = false;
-  let fallbackLoaded = false;
   if (partUuids.length > 0) {
-    // Supabase 경로 — 관련 파트(BG·ACT) UUID 모두에서 조회
+    // Supabase 경로 — 관련 파트(BG·ACT) UUID 모두에서 조회. 같은 파트를 이미 누가 읽는 중이면 그 요청을 같이 기다린다.
+    let fetched: (readonly CommentRow[])[] | null = null;
     try {
-      const results = await Promise.all(
-        partUuids.map((uuid) => window.electronAPI.supabaseReadComments(uuid) as Promise<typeof rawComments>),
-      );
-      rawComments = results.flat();
+      fetched = await Promise.all(partUuids.map((uuid) => rowCache.load(uuid)));
     } catch (err) {
       console.warn('[댓글] Supabase 로드 실패, Sheets fallback:', err);
       supabaseFailed = true;
     }
+    if (fetched) {
+      const raced = sheetPartCache.get(sheetName);
+      if (raced) return raced;
+      // 기다리는 사이 들어온 변경까지 반영된 캐시 행을 쓴다. 그 사이 누가 캐시를 버렸으면 받은 결과로 만들되 저장하지 않는다.
+      const current = partUuids.map((uuid, index) => rowCache.peek(uuid) ?? fetched![index]);
+      const allCached = partUuids.every((uuid) => !!rowCache.peek(uuid));
+      const store = buildSheetCommentStore(sheetName, current, requestedPart, partByUuid) as CommentsStore;
+      if (allCached) {
+        sheetPartCache.set(sheetName, store);
+        rowBackedSheets.add(sheetName);
+      }
+      return store;
+    }
   }
 
   // Supabase 실패 또는 partUuid 없을 때 Sheets fallback
-  if (rawComments.length === 0 && (partUuids.length === 0 || supabaseFailed)) {
-    try {
-      const result = await window.electronAPI.sheetsReadComments(sheetName);
-      if (result.ok) {
-        fallbackLoaded = true;
-        rawComments = (result.data ?? []).map((c) => ({
-          id: c.commentId, partId: '', sceneId: c.sceneId,
-          userId: c.userId, userName: c.userName, text: c.text,
-          mentions: c.mentions ?? [],
-          // Codex P1(2026-04-29): images 를 undefined 로 둔다. Sheets fallback 은 attachment 정보를 모름 →
-          // 빈 배열로 채우면 그 댓글을 수정할 때 supabaseEditComment 가 실 이미지 URL 들을 빈 배열로 덮어쓰는 사고 발생.
-          createdAt: c.createdAt, editedAt: c.editedAt || null,
-        }));
-      }
-    } catch { /* fallback도 실패 */ }
-  }
+  let fallbackRows: CommentRow[] | null = null;
+  try {
+    const result = await window.electronAPI.sheetsReadComments(sheetName);
+    if (result.ok) {
+      fallbackRows = (result.data ?? []).map((c) => ({
+        id: c.commentId, partId: '', sceneId: c.sceneId,
+        userId: c.userId, userName: c.userName, text: c.text,
+        mentions: c.mentions ?? [],
+        // Codex P1(2026-04-29): images 를 undefined 로 둔다. Sheets fallback 은 attachment 정보를 모름 →
+        // 빈 배열로 채우면 그 댓글을 수정할 때 supabaseEditComment 가 실 이미지 URL 들을 빈 배열로 덮어쓰는 사고 발생.
+        images: undefined,
+        createdAt: c.createdAt, editedAt: c.editedAt || null,
+      }));
+    }
+  } catch { /* fallback도 실패 */ }
 
   // 서버 조회가 실패했고 대체 경로도 못 읽었으면 '댓글 없음'이 아니라 '불러오지 못함'이다.
   // 빈 결과를 캐시하지 않아야 '다시 불러오기'가 서버를 다시 본다(배지 등 기본 호출자는 예전처럼 빈 목록).
-  if (supabaseFailed && !fallbackLoaded) {
+  if (supabaseFailed && !fallbackRows) {
     if (options.throwOnError) throw new CommentLoadError();
     return {};
   }
 
-  /**
-   * 댓글 row를 요청된 sheet 기준 scene.no 문자열로 변환. 매칭 씬이 없으면 null 반환(skip).
-   *
-   * Codex P1 3차(2026-04-23): 정규화만으로 매칭하면 alias-collision (예: `a001`·`ac001` 이
-   * 같은 키로 정규화) 상황에서 상대 부서 댓글이 다른 물리 씬에 붙을 수 있다. 순서:
-   *   1) 원본 scene_number(lowercase) 정확 매칭 — collision 영향 없음, 일반 케이스 대부분 해결
-   *   2) 정규화 매칭 — 단 requested part 에 같은 정규화 씬이 "유일"할 때만. 2개 이상이면 skip.
-   */
-  const mapToRequestedSceneNo = (row: typeof rawComments[number]): string | null => {
-    // 요청 파트 메타를 못 얻었거나 fallback 경로 등은 원본 scene_id 를 그대로 사용(이전 동작과 호환).
-    if (!requestedPart) return row.sceneId;
-    const sourcePart = row.partId ? partByUuid.get(row.partId) : undefined;
-
-    // 자기 파트 댓글이면 그대로
-    if (!sourcePart || sourcePart.id === requestedPart.id) return row.sceneId;
-
-    const sourceScene = sourcePart.scenes.find((s) => String(s.no) === String(row.sceneId));
-    if (!sourceScene) return null;
-
-    // 1차: 원본 scene_number 정확 매칭 (lowercase + trim). collision 안전.
-    const sourceSceneNumber = (sourceScene.sceneId || '').trim().toLowerCase();
-    if (sourceSceneNumber) {
-      const exactMatch = requestedPart.scenes.find(
-        (s) => (s.sceneId || '').trim().toLowerCase() === sourceSceneNumber,
-      );
-      if (exactMatch) return String(exactMatch.no);
-    }
-
-    // 2차: 정규화 매칭 — 유일한 매칭일 때만 허용. 2개 이상이면 alias-collision 이므로 skip.
-    const normalizedSource = normalizeSceneIdKey(sourceScene.sceneId, sourcePart.partId);
-    if (!normalizedSource) return null;
-    const normalizedMatches = requestedPart.scenes.filter(
-      (s) => normalizeSceneIdKey(s.sceneId, requestedPart!.partId) === normalizedSource,
-    );
-    if (normalizedMatches.length === 1) return String(normalizedMatches[0].no);
-    return null;
-  };
-
-  const store: CommentsStore = {};
-  const seenIds = new Set<string>();
-  for (const c of rawComments) {
-    // 통합 조회 중복 제거 (안전장치)
-    if (seenIds.has(c.id)) continue;
-    seenIds.add(c.id);
-
-    const targetSceneNo = mapToRequestedSceneNo(c);
-    if (targetSceneNo == null) continue; // 비대칭으로 대응 씬이 없으면 안전하게 skip
-
-    const key = `${sheetName}:${targetSceneNo}`;
-    if (!store[key]) store[key] = [];
-    // v1.24.0 코덱스 P1: 답글 저장 시 부모와 같은 sheet 에 쓰기 위해 storage origin 도 함께 stamp.
-    //   raw row 의 partId(UUID) → sourcePart.sheetName, scene_id (sort_order) 그대로 사용.
-    //   Sheets fallback 은 partId 가 비어있어 storageKey undefined → 호출자 fallback to sceneKey.
-    const sourcePart = c.partId ? partByUuid.get(c.partId) : undefined;
-    const storageKey = sourcePart?.sheetName
-      ? `${sourcePart.sheetName}:${c.sceneId}`
-      : undefined;
-    store[key].push({
-      id: c.id,
-      userId: c.userId,
-      userName: c.userName,
-      text: c.text,
-      mentions: c.mentions ?? [],
-      // images: c.images 가 undefined 면 그대로 undefined (Sheets fallback) — 수정 시 덮어쓰지 않게.
-      images: c.images,
-      createdAt: c.createdAt,
-      editedAt: c.editedAt || undefined,
-      // v1.18.0: 리테이크 맥락 댓글 식별용 — Supabase 경로만 채워지고 Sheets fallback 은 undefined.
-      revisionId: c.revisionId ?? null,
-      // v1.24.0: 1단계 대댓글 부모 참조 — Supabase 만 채워짐.
-      parentCommentId: c.parentCommentId ?? null,
-      // v1.24.0 코덱스 P1: 실제 storage origin (UI dedup 의 _sourceKey 보다 신뢰).
-      storageKey,
-    });
-  }
-
+  const store = buildSheetCommentStore(sheetName, [fallbackRows ?? []], requestedPart, partByUuid) as CommentsStore;
   sheetPartCache.set(sheetName, store);
+  rowBackedSheets.delete(sheetName);
   return store;
 }
 
 /**
  * 파트 캐시 무효화 + 컴포넌트에 리로드 신호 전달.
  * BG↔ACT 양쪽 캐시를 함께 비워 한쪽 갱신이 다른 쪽 뷰에도 반영되게 함.
+ * 시트를 주지 않으면 전부 비운다 — 댓글 변경 하나로는 부르지 않는다(받은 변경은 applyRemoteCommentChange 로 끼워 넣는다).
  */
 export function invalidatePartCache(sheetName?: string): void {
   if (sheetName) {
-    sheetPartCache.delete(sheetName);
-    const cp = getCounterpartSheetName(sheetName);
-    if (cp) sheetPartCache.delete(cp);
-  } else {
-    sheetPartCache.clear();
+    const related = getRelatedSheetNames(sheetName);
+    for (const sn of related) {
+      sheetPartCache.delete(sn);
+      rowBackedSheets.delete(sn);
+    }
+    for (const partUuid of resolveSheetParts(sheetName).partUuids) rowCache.invalidate(partUuid);
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', {
+      detail: { sheetName, sheetNames: related } satisfies CommentsInvalidatedDetail,
+    }));
+    return;
   }
+  sheetPartCache.clear();
+  rowBackedSheets.clear();
+  rowCache.invalidate();
   window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
+}
+
+/** 파트 UUID 로 무효화(받은 변경의 내용이 모자랄 때). 파트를 모르면 전체. */
+function invalidateCommentsForPart(partUuid: string | null): void {
+  if (!partUuid) {
+    invalidatePartCache();
+    return;
+  }
+  const sheets = sheetNamesForPart(partUuid);
+  rowCache.invalidate(partUuid);
+  if (sheets.length === 0) {
+    // 아직 모르는 파트 — 행만 버린다. 그 파트를 보여 주는 화면이 없으니 알릴 곳도 없다.
+    return;
+  }
+  invalidatePartCache(sheets[0]);
+}
+
+/**
+ * 다른 PC·창에서 온 댓글 변경(실시간 comments 이벤트 / comment-added·updated·deleted 방송)을 캐시에 반영한다.
+ * 끼워 넣을 만큼 내용을 알면 캐시만 고친다(서버 재조회 없음). 모자라면 그 파트만 다시 읽게 한다.
+ */
+export function applyRemoteCommentChange(change: RemoteCommentChange): CommentsInvalidatedDetail | null {
+  if (change.kind === 'ignore') return null;
+  if (change.kind === 'character') {
+    const detail: CommentsInvalidatedDetail = {
+      characterId: change.characterId,
+      commentAction: change.action,
+      ...(change.commentId ? { commentId: change.commentId } : {}),
+    };
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail }));
+    return detail;
+  }
+  if (change.kind === 'invalidate') {
+    invalidateCommentsForPart(change.partId);
+    return { partIds: change.partId ? [change.partId] : [], commentAction: change.action };
+  }
+  return applyCommentOpToCaches(change.op, { commentId: change.commentId, action: change.action });
+}
+
+/** Supabase 실시간 comments 이벤트(payload = postgres_changes) → 캐시. */
+export function applyRealtimeCommentPayload(payload: unknown): CommentsInvalidatedDetail | null {
+  return applyRemoteCommentChange(normalizeRealtimeCommentChange(payload));
+}
+
+/** 댓글 방송(comment-added / comment-updated / comment-deleted) → 캐시. */
+export function applyCommentBroadcast(event: string, payload: unknown): CommentsInvalidatedDetail | null {
+  return applyRemoteCommentChange(normalizeCommentBroadcastChange(event, payload));
+}
+
+/** 컴포지팅 카드 배지 — 파트 행(캐시 → 진행 중 요청 → 새 요청). */
+export function loadPartCommentRows(partUuid: string): Promise<readonly CommentRow[]> {
+  return rowCache.load(partUuid);
+}
+
+/** 컴포지팅 카드 배지 — 캐시에 있는 파트 행만(없으면 undefined, 요청하지 않음). */
+export function peekPartCommentRows(partUuid: string): readonly CommentRow[] | undefined {
+  return rowCache.peek(partUuid);
 }
 
 /**
@@ -409,14 +483,7 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     // Supabase: sheetName → part UUID 해석
-    let partUuid = '';
-    try {
-      const { useDataStore } = await import('../stores/useDataStore');
-      const part = useDataStore.getState().episodes
-        .flatMap((ep) => ep.parts)
-        .find((p) => p.sheetName === sheetName);
-      partUuid = part?.id || '';
-    } catch { /* 무시 */ }
+    const partUuid = allLoadedParts().find((p) => p.sheetName === sheetName)?.id || '';
 
     await window.electronAPI.supabaseAddComment(
       comment.id, partUuid, sceneId,
@@ -427,22 +494,19 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
       // v1.24.0: 1단계 대댓글 부모 id 정식 전달.
       comment.parentCommentId ?? null,
     );
-    // 캐시 업데이트 — 원본 sheet 캐시에만 낙관적 반영.
-    // 반대 부서 sheet 캐시는 invalidate해서 다음 조회 시 통합 재조회로 반영 (중복 삽입 방지).
-    const ownStore = sheetPartCache.get(sheetName);
-    if (ownStore) {
-      if (!ownStore[sceneKey]) ownStore[sceneKey] = [];
-      ownStore[sceneKey].push(comment);
-    }
-    const counterpart = getCounterpartSheetName(sheetName);
-    if (counterpart) sheetPartCache.delete(counterpart);
-    // 자기 창 카드 뷰 뱃지 즉시 갱신 (ScenesView 리스너 트리거).
-    // 주의: 이벤트만 발화. 캐시 비우기는 이미 위에서 처리했음 (invalidatePartCache 호출 금지 — 무한 루프 방지).
-    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
-    // 다른 창에 댓글 변경 알림
-    window.electronAPI?.dataNotifyChange?.({
-      type: 'comment', sheetName, sceneId, commentAction: 'add',
-    });
+    // 캐시 업데이트 — 파트 행 캐시에 끼워 넣는다(BG·ACT 양쪽 시트 묶음이 같은 행에서 다시 만들어진다, 재조회 없음).
+    // 자기 창 카드 뷰 뱃지·패널은 이 신호로 캐시를 다시 본다(invalidatePartCache 호출 금지 — 캐시를 버리면 다시 읽는다).
+    // 다른 창·다른 PC 는 실시간 comments 이벤트와 comment-added 방송으로 같은 행을 받는다.
+    applyCommentOpToCaches(
+      { kind: 'upsert', row: {
+        id: comment.id, partId: partUuid, sceneId,
+        userId: comment.userId, userName: comment.userName, text: comment.text,
+        mentions: comment.mentions ?? [], images: comment.images ?? [],
+        createdAt: comment.createdAt, editedAt: null,
+        revisionId: comment.revisionId ?? null, parentCommentId: comment.parentCommentId ?? null,
+      } },
+      { commentId: comment.id, action: 'add', sceneId, alsoSheet: sheetName },
+    );
     return;
   }
   const all = await loadLocalAll();
@@ -473,16 +537,11 @@ export async function updateComment(
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.supabaseEditComment(commentId, text, mentions, images);
-    sheetPartCache.forEach((store) => {
-      for (const list of Object.values(store)) {
-        const idx = list.findIndex(c => c.id === commentId);
-        if (idx >= 0) list[idx] = { ...list[idx], text, mentions, ...imagesPatch, editedAt };
-      }
-    });
-    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
-    window.electronAPI?.dataNotifyChange?.({
-      type: 'comment', sheetName, sceneId, commentAction: 'edit',
-    });
+    // 파트 행 캐시의 그 댓글만 바꾼다(BG·ACT 양쪽 반영, 재조회 없음). 다른 PC 는 comment-updated 방송·실시간으로 받는다.
+    applyCommentOpToCaches(
+      { kind: 'patch', id: commentId, fields: { text, mentions, ...imagesPatch, editedAt } },
+      { commentId, action: 'edit', sceneId, alsoSheet: sheetName },
+    );
     return;
   }
 
@@ -506,27 +565,13 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.supabaseDeleteComment(commentId);
-    // 캐시에서 제거 — commentId 기준으로 모든 캐시/리스트 순회 (BG·ACT 양쪽 반영)
+    // 캐시에서 제거 — 파트 행 캐시에서 빼면 BG·ACT 양쪽 시트 묶음이 같이 바뀐다.
     // v1.24.0 P1 #5: 부모 삭제 시 답글의 parentCommentId 도 NULL 갱신 (DB ON DELETE SET NULL 과 일관).
     //   안 그러면 답글이 stale 한 parentCommentId 를 들고 있어 "원답글이 삭제된 답글" orphan 배지가 잘못 노출됨.
-    sheetPartCache.forEach((store) => {
-      for (const key of Object.keys(store)) {
-        const list = store[key];
-        const filtered = list.filter(c => c.id !== commentId).map((c) =>
-          c.parentCommentId === commentId ? { ...c, parentCommentId: null } : c,
-        );
-        if (filtered.length !== list.length || filtered.some((c, i) => c !== list[i])) {
-          if (filtered.length === 0) delete store[key];
-          else store[key] = filtered;
-        }
-      }
-    });
-    // 자기 창 뱃지/패널 즉시 갱신
-    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
-    // 다른 창에 댓글 변경 알림
-    window.electronAPI?.dataNotifyChange?.({
-      type: 'comment', sheetName, sceneId, commentAction: 'delete',
-    });
+    applyCommentOpToCaches(
+      { kind: 'delete', id: commentId },
+      { commentId, action: 'delete', sceneId, alsoSheet: sheetName },
+    );
     return;
   }
 
@@ -550,7 +595,8 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
 export function peekCachedComments(sceneKey: string): SceneComment[] | null {
   if (sheetsMode) {
     const { sheetName } = parseSceneKey(sceneKey);
-    const store = sheetPartCache.get(sheetName);
+    // 시트 묶음이 아직 없어도 파트 행이 캐시에 있으면 그 자리에서 만든다(서버 요청 없음).
+    const store = sheetPartCache.get(sheetName) ?? buildSheetStoreFromCachedRows(sheetName);
     if (!store) return null;
     return store[sceneKey] ? [...store[sceneKey]] : [];
   }
@@ -563,6 +609,15 @@ export function peekCachedComments(sceneKey: string): SceneComment[] | null {
  */
 export function findCommentInCache(commentId: string): SceneComment | null {
   if (sheetsMode) {
+    const row = rowCache.findById(commentId);
+    if (row) {
+      return {
+        id: row.id, userId: row.userId, userName: row.userName, text: row.text,
+        mentions: row.mentions ?? [], images: row.images, createdAt: row.createdAt,
+        editedAt: row.editedAt || undefined, revisionId: row.revisionId ?? null,
+        parentCommentId: row.parentCommentId ?? null,
+      };
+    }
     for (const store of sheetPartCache.values()) {
       for (const list of Object.values(store)) {
         const found = list.find((c) => c.id === commentId);
