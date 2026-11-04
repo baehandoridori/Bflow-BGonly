@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { SlidingIndicator } from '@/components/ui/SlidingIndicator';
 import { revealInList } from '@/utils/slidingIndicator';
 
-interface MentionUser { id: string; name: string }
+interface MentionUser { id: string; name: string; slackId?: string | null }
 
 interface Props {
   items: readonly MentionUser[];
@@ -10,6 +10,8 @@ interface Props {
   onPick: (name: string) => void;
   /** 컨테이너 좌우 위치 클래스 — 입력창마다 offset 이 달라 호출 측이 지정 */
   positionClassName?: string;
+  /** 댓글 입력칸 — 슬랙 ID 가 없는 사람은 흐리게 + '슬랙 없음'(멘션해도 슬랙은 안 간다, v1.146.0 §6.2). */
+  showSlackHint?: boolean;
 }
 
 /**
@@ -17,7 +19,7 @@ interface Props {
  * 활성 항목 스크롤은 내부에서 처리(드롭다운 UI 책임 응집).
  * z-40: 입력 영역의 다른 오버레이(예: CommentPanel 드래그 오버레이 z-20) 위에 확실히 표시.
  */
-export function MentionDropdown({ items, index, onPick, positionClassName }: Props) {
+export function MentionDropdown({ items, index, onPick, positionClassName, showSlackHint = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 고른 줄이 보이게 드롭다운 상자 하나만 즉시 스크롤한다(브라우저 기본 '보이게 스크롤'은 바깥 상자까지 움직인다).
@@ -54,7 +56,10 @@ export function MentionDropdown({ items, index, onPick, positionClassName }: Pro
           }`}
         >
           <span className="text-accent text-[11px]">@</span>
-          <span>{user.name}</span>
+          <span className={showSlackHint && !user.slackId ? 'text-text-secondary' : undefined}>{user.name}</span>
+          {showSlackHint && !user.slackId && (
+            <span className="ml-auto shrink-0 text-[10px] text-text-secondary/70">슬랙 없음</span>
+          )}
         </button>
       ))}
     </div>

@@ -27,7 +27,8 @@ import { groupReactionsByEmoji } from '@/utils/commentReactionUtils';
 import { ReactionChip } from './ReactionChip';
 import { EmojiPicker } from './EmojiPicker';
 import { SmilePlus } from 'lucide-react';
-import { sendMentionWebhook } from '@/services/slackWebhookService';
+import { describeMentionDelivery, notifyMentionsForComment, type MentionDeliveryResult } from '@/services/slackWebhookService';
+import { useDataStore } from '@/stores/useDataStore';
 import { formatCommentTime } from '@/utils/formatTime';
 import { EntityText } from '@/components/common/EntityText';
 import { EntityHighlightOverlay } from '@/components/common/EntityHighlightOverlay';
@@ -468,6 +469,37 @@ function CommentSendClock() {
   );
 }
 
+/** 내 댓글의 슬랙 전달 결과 — 말풍선 아래 작은 글(씬 댓글 B안 §6.2). 실패면 '다시 보내기'. */
+function SlackDeliveryNote({ result, align = 'start', onRetry }: {
+  result: MentionDeliveryResult;
+  align?: 'start' | 'end';
+  onRetry: () => void;
+}) {
+  const note = describeMentionDelivery(result);
+  if (!note) return null;
+  return (
+    <div
+      data-comment-slack-delivery
+      role={note.failed ? 'alert' : undefined}
+      className={cn('mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px]', align === 'end' ? 'justify-end' : 'justify-start')}
+    >
+      <span className={note.failed ? 'font-semibold text-status-low' : 'text-text-secondary/70'}>{note.text}</span>
+      {note.failed && (
+        <>
+          <span className="text-text-secondary/60" aria-hidden>·</span>
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); onRetry(); }}
+            className="font-semibold text-accent underline-offset-2 hover:underline cursor-pointer"
+          >
+            다시 보내기
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** 보내지 못한 내 댓글 — 말풍선 아래 작은 글. '다시 보내기'는 처음과 같은 저장 길로 같은 댓글을 다시 보낸다. */
 function CommentSendFailedNotice({
   align = 'start',
@@ -846,6 +878,27 @@ export function CommentPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
+  /**
+   * 스레드에서 특정 사람에게 답글 — 입력창에 '@이름 ' 을 보이게 넣는다(사용자가 지울 수 있다, v1.146.0 §6.1).
+   * 원댓글 작성자(답글 알림을 따로 받는다)·나 자신이면 넣지 않는다. 이미 다른 '@이름 ' 으로 시작하면 바꾸고, 쓰던 글은 건드리지 않는다.
+   */
+  const prefillThreadMention = (target: SceneCommentWithSource, rootId: string | null) => {
+    if (!target?.userName || target.userName === currentUser?.name) return;
+    if (rootId && target.id === rootId) return;
+    const prefix = `@${target.userName} `;
+    const apply = (prev: string) => {
+      const trimmed = prev.trimStart();
+      if (!trimmed) return prefix;
+      const existing = trimmed.match(/^@(\S+)\s/);
+      if (existing) return existing[1] === target.userName ? prev : prefix + trimmed.slice(existing[0].length);
+      return prev;
+    };
+    setThreadInput((prev) => {
+      const next = apply(prev);
+      threadInputValueRef.current = next;
+      return next;
+    });
+  };
   const openThreadReply = useCallback((target: SceneCommentWithSource) => {
     const threadTarget = buildCommentReplyTarget(comments, target);
     const threadRootId = threadTarget.parentCommentId ?? threadTarget.rootComment?.id ?? target.id;
@@ -860,8 +913,9 @@ export function CommentPanel({
     });
     setReplyTarget(null);
     setThreadMentionTarget(target);
+    prefillThreadMention(target, threadTarget.rootComment?.id ?? threadRootId);
     requestAnimationFrame(() => threadInputRef.current?.focus());
-  }, [comments]);
+  }, [comments]); // eslint-disable-line react-hooks/exhaustive-deps
   const revisionExists = useCallback((revisionId?: string | null): revisionId is string => {
     return !!revisionId && revisions.some((revision) => revision.id === revisionId);
   }, [revisions]);
@@ -875,8 +929,9 @@ export function CommentPanel({
     setActiveRevisionThreadId(revisionId);
     setReplyTarget(null);
     setThreadMentionTarget(mentionTarget);
+    if (mentionTarget) prefillThreadMention(mentionTarget, null);
     if (focusComposer) requestAnimationFrame(() => threadInputRef.current?.focus());
-  }, [revisionExists]);
+  }, [revisionExists]); // eslint-disable-line react-hooks/exhaustive-deps
   const openContextualThreadReply = useCallback((target: SceneCommentWithSource) => {
     // 아직 서버에 없는 내 댓글(보내는 중·보내지 못함)에는 답글을 달 수 없다 — 부모가 저장되기 전이다.
     if (unsentCommentsRef.current.has(target.id)) return;
@@ -1721,29 +1776,35 @@ export function CommentPanel({
       && !hasUploadingImage
       && (input.trim().length > 0 || uploadedImageUrls.length > 0);
 
-  // 슬랙 멘션 웹훅 (기존 로직 보존) — 캐릭터 댓글은 씬 deeplink 가 없으므로 스킵.
-  // 본문 입력칸·스레드 창·다시 보내기가 함께 쓴다(webhookSceneKey 로 예전과 같은 씬 표기).
-  const notifyCommentMentions = (comment: SceneComment, webhookSceneKey: string) => {
-    if (!currentUser || characterCommentKey || comment.mentions.length === 0 || !currentUser.slackId) return;
+  // 슬랙 알림 — 본문 입력칸·스레드 창·다시 보내기·수정이 함께 쓴다(webhookSceneKey 로 예전과 같은 씬 표기).
+  // v1.146.0(씬 댓글 B안 §6.2): 본문에 직접 부른 @이름 + 리테이크 댓글이면 요청자. 답글 상대에게는 보내지 않는다(한솔 결정).
+  //   작성자 슬랙 ID 가 없어도 받는 사람에게는 보낸다. 결과(전달됨·슬랙 ID 없음·실패)는 말풍선 아래에 보인다.
+  //   캐릭터 댓글은 슬랙 바로가기 주소가 없어 앱 알림만 간다.
+  const [slackDelivery, setSlackDelivery] = useState<Map<string, { result: MentionDeliveryResult; retry: () => void }>>(() => new Map());
+  const notifyCommentMentions = (comment: SceneComment, webhookSceneKey: string, onlyNames?: readonly string[]) => {
+    if (!currentUser || characterCommentKey) return;
+    const names = onlyNames ?? comment.mentions;
+    const revision = !onlyNames && comment.revisionId ? revisions.find((r) => r.id === comment.revisionId) : null;
+    const extraTargetIds = revision?.requesterId && revision.requesterId !== currentUser.id ? [revision.requesterId] : [];
+    if (names.length === 0 && extraTargetIds.length === 0) return;
     const { sheetName: hookSheetName, sceneId: hookSceneId } = parseSceneKey(webhookSceneKey);
-    const parts = hookSheetName.match(/^EP(\d+)_([A-Z])_/);
-    const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : hookSheetName;
-    const partLabel = parts ? `${parts[2]}파트` : '';
-    for (const mentionedName of comment.mentions) {
-      const target = users.find(u => u.name === mentionedName);
-      if (target?.slackId && target.slackId !== currentUser.slackId) {
-        sendMentionWebhook({
-          // 슬랙 알림에는 저장 원문 대신 사람이 읽는 형태로 — 태그가 '[#라벨](b…:UUID…)' 로 노출되지 않게 한다 (코덱스 5차 P2).
-          commentText: stripEntityTokens(comment.text),
-          episodeLabel: epLabel,
-          sceneId: hookSceneId,
-          partLabel,
-          sheetName: hookSheetName,
-          authorSlackId: currentUser.slackId,
-          targetSlackId: target.slackId,
-        });
-      }
-    }
+    const hookPart = useDataStore.getState().episodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === hookSheetName);
+    const hookScene = hookPart?.scenes.find((sc) => String(sc.no) === String(hookSceneId));
+    const send = () => {
+      void notifyMentionsForComment({
+        comment: { text: comment.text, images: comment.images, mentions: names },
+        sheetName: hookSheetName,
+        sceneNo: hookSceneId,
+        sceneLabel: hookScene?.sceneId ?? null,
+        me: currentUser,
+        users,
+        extraTargetIds,
+      }).then((result) => {
+        if (result.targets === 0) return;
+        setSlackDelivery((prev) => new Map(prev).set(comment.id, { result, retry: send }));
+      });
+    };
+    send();
   };
 
   /** 저장된 뒤 할 일 — 처음 보낼 때와 '다시 보내기'가 같은 길로. */
@@ -1892,14 +1953,7 @@ export function CommentPanel({
     const isReplyToReply = replyThreadTarget.isReplyToReply;
 
     const mentions = extractMentions(input, userNames);
-    // v1.24.0: 답글이면 부모 작성자도 mentions 에 포함 (자동 멘션 — 슬랙 알림/멘션 알림 트리거).
-    if (
-      replyThreadTarget.replyToComment &&
-      replyThreadTarget.replyToComment.userName !== currentUser.name &&
-      !mentions.includes(replyThreadTarget.replyToComment.userName)
-    ) {
-      mentions.push(replyThreadTarget.replyToComment.userName);
-    }
+    // v1.146.0(§6.1): 답글 상대를 mentions 에 넣지 않는다 — 답글 알림은 parent_comment_id 로 판정한다(사용자가 친 @만 멘션).
     // v1.24.0 코덱스 P1 fix (2026-05-10 round 2): 답글은 부모 댓글의 *진짜 storage sheet* 에 저장.
     //   _sourceKey 는 UI dedup 의 첫 발견 sceneKey 라 unified 뷰에서 *secondary 댓글이 primary key 로 stamp* 되는
     //   케이스가 있어 신뢰 불가. raw row 기반 storageKey (partId → sheetName + scene.no) 를 우선 사용.
@@ -2012,6 +2066,11 @@ export function CommentPanel({
 
     try {
       await updateComment(targetKey, commentId, editText.trim(), mentions, existingImages);
+      // v1.146.0(§6.1): 수정으로 새로 들어간 @이름에게만 슬랙(앱 알림은 받는 쪽이 수정 방송으로 만든다).
+      const addedMentions = mentions.filter((name) => !(target?.mentions ?? []).includes(name));
+      if (target && addedMentions.length > 0) {
+        notifyCommentMentions({ ...target, text: editText.trim(), mentions }, targetKey, addedMentions);
+      }
     } catch (err) {
       console.error('[댓글 수정 실패]', err);
       setComments(prevComments);
@@ -2289,20 +2348,9 @@ export function CommentPanel({
     const submittedThreadAttached = threadAttachedImages;
     const submittedThreadImageUrls = threadUploadedImageUrls;
     const targetSceneKey = threadRoot?.storageKey ?? threadRoot?._sourceKey ?? primaryStorageKey;
+    // v1.146.0(§6.1): 사용자가 친 @이름만 멘션이다. 원댓글 작성자는 답글 알림(parent_comment_id), 리테이크 요청자는
+    //   리테이크 댓글 알림(revision) 으로 받는다 — 보이지 않는 자동 멘션은 넣지 않는다(답글마다 슬랙이 가던 문제).
     const mentions = extractMentions(text, userNames);
-    const threadMentionReplyTarget = buildCommentReplyTarget(comments, threadMentionTarget);
-    const threadMentionTargetInCurrentThread =
-      revisionThreadId
-        ? threadMentionTarget?.revisionId === revisionThreadId
-        : threadMentionTarget?.id === threadRoot?.id || threadMentionReplyTarget.parentCommentId === threadRoot?.id;
-    const mentionTargetName = threadMentionTargetInCurrentThread
-      ? threadMentionTarget!.userName
-      : revisionThreadId
-        ? activeRevisionThread?.requesterName ?? threadMentionTarget?.userName ?? currentUser.name
-        : threadRoot!.userName;
-    if (mentionTargetName !== currentUser.name && !mentions.includes(mentionTargetName)) {
-      mentions.push(mentionTargetName);
-    }
     const comment: SceneCommentWithSource = {
       id: createUuid(),
       userId: currentUser.id,
@@ -3122,6 +3170,13 @@ export function CommentPanel({
                   </div>
                 </div>
                 )}
+                {isOwn && slackDelivery.get(comment.id) && (
+                  <SlackDeliveryNote
+                    align="end"
+                    result={slackDelivery.get(comment.id)!.result}
+                    onRetry={slackDelivery.get(comment.id)!.retry}
+                  />
+                )}
 
                 {/* v1.24.0: 답글 스레드 — 부모 댓글 아래 인라인 들여쓰기 + 좌측 라인 + 토글
                     움직임 폴리싱 19번: 첫 답글이 생기면 답글 묶음째 아래에서 떠오른다(처음 불러온 목록은 그대로). */}
@@ -3353,6 +3408,7 @@ export function CommentPanel({
         {/* @멘션·#태그 자동완성 (멘션 우선) */}
         {mention.active ? (
           <MentionDropdown
+            showSlackHint
             items={mention.items}
             index={mention.index}
             onPick={mention.select}
@@ -3832,6 +3888,12 @@ export function CommentPanel({
                       />
                     </div>
                     )}
+                    {message.userId === currentUser?.id && slackDelivery.get(message.id) && (
+                      <SlackDeliveryNote
+                        result={slackDelivery.get(message.id)!.result}
+                        onRetry={slackDelivery.get(message.id)!.retry}
+                      />
+                    )}
                   </motion.div>
                 );
               })}
@@ -3855,6 +3917,7 @@ export function CommentPanel({
               >
                 {threadMention.active ? (
                   <MentionDropdown
+                    showSlackHint
                     items={threadMention.items}
                     index={threadMention.index}
                     onPick={threadMention.select}
@@ -3868,12 +3931,6 @@ export function CommentPanel({
                     positionClassName="left-2 right-2"
                   />
                 ) : null}
-                {threadMentionTarget && (!activeThreadRoot || threadMentionTarget.id !== activeThreadRoot.id) && (
-                  <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10.5px] font-medium text-accent">
-                    <CornerDownRight size={11} />
-                    <span className="min-w-0 truncate">{threadMentionTarget.userName}에게 답글</span>
-                  </div>
-                )}
                 {threadAttachedImages.length > 0 && (
                   <div data-comment-thread-attachments className="mb-2 flex gap-2 overflow-x-auto pb-1">
                     {threadAttachedImages.map((img) => (
