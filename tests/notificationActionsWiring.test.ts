@@ -89,12 +89,14 @@ test('calendar catch-up keeps IPC rows snake_case and filters by recipient, acto
 });
 
 test('manual read and deletion paths also sync durable domain read state', () => {
-  assert.match(notificationStore, /import \{ markNotificationDomainRead \} from '\.\.\/utils\/notificationDomainRead'/);
+  assert.match(notificationStore, /import \{ markNotificationDomainRead, markNotificationsDomainReadBatch \} from '\.\.\/utils\/notificationDomainRead'/);
   assert.match(notificationStore, /function syncDomainRead\(notification: AppNotification\)/);
   assert.match(notificationStore, /markAsRead: \(id\) => \{[\s\S]*if \(target && !target\.isRead\) syncDomainRead\(target\)/);
-  assert.match(notificationStore, /markAllAsRead: \(\) => \{[\s\S]*current\.filter\(\(n\) => !n\.isRead\)\.forEach\(syncDomainRead\)/);
+  // v1.148.0(§9): '모두 읽음'·'전체 삭제'·카드 '읽음'은 종류별로 모아 한 번에(syncDomainReadMany → markNotificationsDomainReadBatch).
+  assert.match(notificationStore, /markAllAsRead: \(\) => \{[\s\S]*syncDomainReadMany\(current\.filter\(\(n\) => !n\.isRead\), next, get\(\)\.activeUserId\)/);
+  assert.match(notificationStore, /markManyAsRead: \(ids\) => \{[\s\S]*syncDomainReadMany\(targets, next, get\(\)\.activeUserId\)/);
   assert.match(notificationStore, /removeNotification: \(id\) => \{[\s\S]*if \(target\) syncDomainRead\(target\)/);
-  assert.match(notificationStore, /clearAll: \(\) => \{[\s\S]*get\(\)\.notifications\.forEach\(syncDomainRead\)/);
+  assert.match(notificationStore, /clearAll: \(\) => \{[\s\S]*syncDomainReadMany\(removed, \[\], get\(\)\.activeUserId\)/);
   assert.doesNotMatch(notificationPanel, /markCommentReactionRead/);
 });
 

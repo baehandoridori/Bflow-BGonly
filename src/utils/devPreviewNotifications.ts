@@ -70,6 +70,7 @@ export function buildDevPreviewNotifications(
         commentSceneId: String(bgContext.scene.no),
         commentPartId: bgContext.part.id,
         mentionedBy: '테스트',
+        authorName: '테스트',
       },
     },
     {
@@ -83,6 +84,7 @@ export function buildDevPreviewNotifications(
         commentPartId: bgContext.part.id,
         reactionNotificationId: 'dev-preview-reaction',
         reactionEmojis: ['✅'],
+        reactionActorName: '테스트',
       },
     },
     {

@@ -50,8 +50,12 @@ import {
   CommentRowToolbar,
   CommentThreadSummaryButton,
   RetakeRootCard,
+  SceneAlertBell,
+  ThreadFollowButton,
   type CommentMenuItem,
 } from './comments/CommentFeedParts';
+import { useCommentThreadFollowStore } from '@/stores/useCommentThreadFollowStore';
+import { buildCommentThreadKey, commentThreadIdOf, resolveThreadPreference, type ThreadPreference } from '@/utils/commentThreadFollow';
 import { buildCommentDeepLink } from '@/shared/bflowDeepLink';
 import { canFinalResolveRevision } from '@/utils/revisionWorkflow';
 import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
@@ -2519,6 +2523,33 @@ export function CommentPanel({
     return () => window.removeEventListener('bflow:open-revision-thread', onOpen);
   }, [characterCommentKey, revisionExists, openRevisionThread, sceneKey, secondarySceneKey]);
 
+  // ── §6.4 스레드 팔로우·알림 끄기(이 PC·이 계정, stores/useCommentThreadFollowStore) ──
+  const threadPrefs = useCommentThreadFollowStore((s) => s.prefs);
+  const followSceneKey = !characterCommentKey && effectiveSceneThreadKey ? effectiveSceneThreadKey : null;
+  const threadPrefFor = (threadId: string | null): ThreadPreference | null =>
+    followSceneKey && threadId ? resolveThreadPreference(threadPrefs, { threadId, sceneThreadKey: null }) ?? (threadPrefs[buildCommentThreadKey(followSceneKey, threadId)] ?? null) : null;
+  const setThreadPref = (threadId: string, next: ThreadPreference | null) => {
+    if (!followSceneKey) return;
+    const key = buildCommentThreadKey(followSceneKey, threadId);
+    void useCommentThreadFollowStore.getState().setPreference(key, next).then((ok) => {
+      if (!ok) return;
+      sonnerToast(
+        next === 'follow' ? '이 스레드의 새 글마다 알려 드려요'
+          : next === 'mute' ? '이 스레드 자동 알림을 껐어요 · 나를 부른 알림은 그대로 와요'
+            : '이 스레드 알림을 기본으로 돌렸어요',
+        { duration: 2500 },
+      );
+    });
+  };
+  const sceneMuted = !!followSceneKey && threadPrefs[followSceneKey] === 'mute';
+  const toggleSceneMute = () => {
+    if (!followSceneKey) return;
+    const next = sceneMuted ? null : 'mute';
+    void useCommentThreadFollowStore.getState().setPreference(followSceneKey, next).then((ok) => {
+      if (ok) sonnerToast(next ? '이 씬 자동 알림을 껐어요 · 나를 부른 알림은 그대로 와요' : '이 씬 자동 알림을 다시 켰어요', { duration: 2500 });
+    });
+  };
+
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const revisionById = useMemo(() => new Map(revisions.map((r) => [r.id, r])), [revisions]);
 
@@ -2602,6 +2633,19 @@ export function CommentPanel({
     if (isOwn) {
       menuItems.push({ id: 'edit', label: '수정', icon: 'edit', separated: menuItems.length > 0, movesFocus: true, onSelect: () => { setEditingId(comment.id); setEditText(comment.text); } });
       menuItems.push({ id: 'delete', label: '삭제', icon: 'delete', danger: true, movesFocus: true, onSelect: () => handleDelete(comment.id) });
+    } else if (followSceneKey) {
+      // §6.4: 남의 글 — 이 스레드 자동 알림 끄기/켜기(나를 부른 알림은 그대로).
+      const threadId = commentThreadIdOf({ id: comment.id, parentCommentId: comment.parentCommentId, revisionId: comment.revisionId });
+      if (threadId) {
+        const muted = threadPrefFor(threadId) === 'mute';
+        menuItems.push({
+          id: 'mute',
+          label: muted ? '이 스레드 알림 켜기' : '이 스레드 알림 끄기',
+          icon: muted ? 'unmute' : 'mute',
+          separated: menuItems.length > 0,
+          onSelect: () => setThreadPref(threadId, muted ? null : 'mute'),
+        });
+      }
     }
     const primary = opts.surface === 'thread'
       ? (isOwn ? null : { kind: 'mention' as const, onClick: () => insertIntoComposer('thread', `@${comment.userName} `) })
@@ -2793,19 +2837,24 @@ export function CommentPanel({
         filter={feedFilter}
         counts={feedCounts}
         onChange={setFeedFilter}
-        extra={canReopenLastThread ? (
-          <button
-            type="button"
-            onClick={() => {
-              setThreadMentionTarget(null);
-              setActiveRevisionThreadId(null);
-              setActiveThreadRootId(lastThreadRootId);
-            }}
-            title="마지막으로 보던 스레드 다시 열기"
-            className="cmt-retake-open"
-          >
-            스레드 다시 열기
-          </button>
+        extra={(canReopenLastThread || followSceneKey) ? (
+          <>
+            {canReopenLastThread && (
+              <button
+                type="button"
+                onClick={() => {
+                  setThreadMentionTarget(null);
+                  setActiveRevisionThreadId(null);
+                  setActiveThreadRootId(lastThreadRootId);
+                }}
+                title="마지막으로 보던 스레드 다시 열기"
+                className="cmt-retake-open"
+              >
+                스레드 다시 열기
+              </button>
+            )}
+            {followSceneKey && <SceneAlertBell muted={sceneMuted} onToggle={toggleSceneMute} />}
+          </>
         ) : null}
       />
 
@@ -3235,6 +3284,15 @@ export function CommentPanel({
                     : `${activeThreadRoot?.userName ?? '댓글'}${sceneLabel ? ` · ${sceneLabel.split('#').pop()?.trim()}` : ''}`}
                 </span>
               </div>
+              {followSceneKey && (activeRevisionThreadId || activeThreadRoot) && (() => {
+                const threadId = activeRevisionThreadId ? `re:${activeRevisionThreadId}` : activeThreadRoot!.id;
+                return (
+                  <ThreadFollowButton
+                    preference={threadPrefFor(threadId)}
+                    onChange={(next) => setThreadPref(threadId, next)}
+                  />
+                );
+              })()}
               <button
                 type="button"
                 onClick={closeThreadPane}

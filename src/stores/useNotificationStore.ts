@@ -4,7 +4,8 @@ import {
   getNotificationIdentity,
   prependNotificationDeduped,
 } from '../utils/notificationIdentity';
-import { markNotificationDomainRead } from '../utils/notificationDomainRead';
+import { markNotificationDomainRead, markNotificationsDomainReadBatch } from '../utils/notificationDomainRead';
+import { capNotifications } from '../utils/notificationCap';
 import { notificationFileNameForUser } from '../utils/notificationPersistence';
 import { mergeRestoredList, splitShownNotifications, type ShownNotificationMark } from '../utils/undoDelete';
 
@@ -71,6 +72,23 @@ export interface AppNotification {
     calendarId?: string;
     /** PR4: 캘린더 알림 클릭 시 이동할 날짜 (YYYY-MM-DD) */
     eventDate?: string;
+    /** v1.146.0: 씬 댓글 알림 판정 이유(mention·reply·retake·auto·follow). */
+    reason?: string;
+    /** 캐릭터 댓글 알림 — 캐릭터 상세로 이동. */
+    characterId?: string;
+    /** 씬 부서 힌트(bg·acting). */
+    department?: string;
+    /** v1.146.0: 댓글 수정으로 새로 넣은 @ — 같은 댓글의 예전 알림과 따로 센다. */
+    mentionEditAt?: string;
+    /** v1.148.0(§9): 알림 창 카드 미리보기 '이름 본문'. */
+    authorName?: string;
+    /** v1.148.0(§9): 반응 카드 머리 '박정인 외 1명'. */
+    reactionActorName?: string;
+    /** v1.148.0(§6.4): 씬 대화 키·스레드 키 — '이 씬 알림 끄기'·팔로우. */
+    sceneThreadKey?: string;
+    threadKey?: string;
+    /** v1.148.0(§9): 같은 사람의 5분 안 단계 변경을 한 줄로 합친 수. */
+    changeCount?: number;
   };
   isRead: boolean;
   createdAt: string; // ISO 8601
@@ -129,6 +147,8 @@ interface NotificationState {
   addNotification: (n: NotificationDraft) => string;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
+  /** v1.148.0(§9): 알림 창 카드의 '읽음' — 여러 줄을 한 번에(서버 읽음도 종류별로 모아서). */
+  markManyAsRead: (ids: readonly string[]) => void;
   removeNotification: (id: string) => void;
   /** 목록을 지금 바로 비우고 지운 알림을 돌려준다. (알림 창의 '전체 삭제'는 움직임 뒤에 지우므로 removeShownNotifications 를 쓴다.) */
   clearAll: () => AppNotification[];
@@ -186,6 +206,15 @@ function syncDomainRead(notification: AppNotification) {
   );
 }
 
+/** 여러 줄의 서버 읽음 — 종류별로 모아 한 번에(v1.148.0 §9). remaining = 처리 뒤 이 PC 에 남는 목록. */
+function syncDomainReadMany(rows: readonly AppNotification[], remaining: readonly AppNotification[], recipientId: string | null) {
+  markNotificationsDomainReadBatch(rows, {
+    recipientId,
+    // 남는 줄에 안 읽은 반응이 없을 때만 '받는 사람의 반응 전부 읽음'을 쓴다.
+    everyReaction: !remaining.some((n) => n.type === 'comment_reaction' && !n.isRead),
+  });
+}
+
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   activeUserId: null,
   notifications: [],
@@ -229,8 +258,19 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   markAllAsRead: () => {
     const current = get().notifications;
-    current.filter((n) => !n.isRead).forEach(syncDomainRead);
     const next = current.map((n) => ({ ...n, isRead: true }));
+    syncDomainReadMany(current.filter((n) => !n.isRead), next, get().activeUserId);
+    setNotifications(set, next);
+    persistToDisk(get().activeUserId, next);
+  },
+
+  markManyAsRead: (ids) => {
+    const wanted = new Set(ids);
+    const current = get().notifications;
+    const targets = current.filter((n) => wanted.has(n.id) && !n.isRead);
+    if (targets.length === 0) return;
+    const next = current.map((n) => (wanted.has(n.id) ? { ...n, isRead: true } : n));
+    syncDomainReadMany(targets, next, get().activeUserId);
     setNotifications(set, next);
     persistToDisk(get().activeUserId, next);
   },
@@ -246,7 +286,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   clearAll: () => {
     const removed = get().notifications;
-    get().notifications.forEach(syncDomainRead);
+    syncDomainReadMany(removed, [], get().activeUserId);
     setNotifications(set, []);
     persistToDisk(get().activeUserId, []);
     return removed;
@@ -257,7 +297,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     if (marks.length === 0 || activeUserId !== userId) return [];
     const { kept, removed } = splitShownNotifications(notifications, marks);
     if (removed.length === 0) return [];
-    removed.forEach(syncDomainRead);
+    syncDomainReadMany(removed, kept, activeUserId);
     setNotifications(set, kept);
     persistToDisk(activeUserId, kept);
     return removed;
@@ -330,9 +370,11 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const next = [
       { ...n, isRead: existingRead },
       ...list.filter((x) => x.id !== n.id && (!identity || getNotificationIdentity(x) !== identity)),
-    ].slice(0, MAX_NOTIFICATIONS);
-    setNotifications(set, next);
-    persistToDisk(get().activeUserId, next);
+    ];
+    // v1.148.0(§9): 상한은 버리는 순서대로 — 방금 온 반응도 안 읽은 멘션보다 먼저 밀린다.
+    const capped = capNotifications(next, MAX_NOTIFICATIONS);
+    setNotifications(set, capped);
+    persistToDisk(get().activeUserId, capped);
   },
 
   // v1.29.0: 알림 행 단일 제거. id 없으면 no-op. removeNotification 과 동일 시맨틱이지만
@@ -387,7 +429,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
     if (!deduped.length && survivors.length === list.length) return;  // 변경 없음
 
-    const merged: AppNotification[] = [...deduped, ...survivors].slice(0, MAX_NOTIFICATIONS);
+    const merged: AppNotification[] = capNotifications([...deduped, ...survivors], MAX_NOTIFICATIONS);
     setNotifications(set, merged);
     persistToDisk(get().activeUserId, merged);
   },

@@ -1122,7 +1122,9 @@ export interface ElectronAPI extends CalendarApiInputContract {
   onUpdateReady?: (callback: (version: string, state?: UpdateInfo) => void) => () => void;
   applyUpdateNow?: () => Promise<void>;
   // 네이티브 알림
-  showNativeNotification?: (title: string, body: string) => Promise<void>;
+  /** v1.148.0: jump 를 주면 Windows 알림을 눌렀을 때 그대로 돌려받는다(onNativeNotificationClick). */
+  showNativeNotification?: (title: string, body: string, jump?: import('../shared/nativeNotificationJump').NativeNotificationJump) => Promise<void>;
+  onNativeNotificationClick?: (callback: (jump: unknown) => void) => () => void;
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
   imageSave: (fileName: string, base64Data: string) => Promise<string>;
   imageDelete: (fileName: string) => Promise<boolean>;

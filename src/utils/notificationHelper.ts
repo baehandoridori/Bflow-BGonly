@@ -9,6 +9,7 @@ import {
 import { markLiveNotificationArrival, notificationToastClassName } from '@/utils/notificationArrival';
 import { notificationTypeVisual } from '@/utils/notificationTypeVisual';
 import { getNotificationIdentity } from '@/utils/notificationIdentity';
+import { parseNativeNotificationJump, type NativeNotificationJump } from '@/shared/nativeNotificationJump';
 
 /**
  * 실시간으로 방금 받은 알림이 안 읽은 수를 늘렸으면 헤더 종·배지에 알린다(움직임 폴리싱 18번).
@@ -69,6 +70,8 @@ export function hasNotificationActionTarget(
 export interface DispatchNotificationOptions {
   /** 조용한 알림 — 종 배지만(토스트·Windows 알림 없음). 담당 씬 자동 알림 등. */
   quiet?: boolean;
+  /** false 면 토스트만(Windows 알림 없음) — 팔로우한 스레드 알림(§6.4, 나를 부른 알림보다 약하게). 기본 true. */
+  native?: boolean;
 }
 
 export function dispatchNotification(payload: NotifyPayload, settings?: NotificationSettings, options: DispatchNotificationOptions = {}) {
@@ -106,8 +109,33 @@ export function dispatchNotification(payload: NotifyPayload, settings?: Notifica
     }),
   });
 
-  // 3. OS 네이티브 알림 (앱 비활성 시)
-  if (settings?.osNotification !== false) {
-    window.electronAPI?.showNativeNotification?.(payload.title, payload.body || '');
+  // 3. OS 네이티브 알림 (앱 비활성 시) — v1.148.0: 누르면 토스트의 '댓글 보기'와 같은 곳으로(§9).
+  if (settings?.osNotification !== false && options.native !== false) {
+    const jump: NativeNotificationJump | undefined = canNavigate
+      ? {
+          notificationId,
+          userId: useNotificationStore.getState().activeUserId ?? null,
+          type: payload.type,
+          metadata: (parseNativeNotificationJump({ notificationId, type: payload.type, metadata: payload.metadata })?.metadata) ?? {},
+        }
+      : undefined;
+    window.electronAPI?.showNativeNotification?.(payload.title, payload.body || '', jump);
   }
+}
+
+/**
+ * Windows 알림을 눌렀다(메인이 창을 올린 뒤 이동 묶음을 돌려줌) — 그 알림을 읽음으로 하고 씬·댓글로 간다.
+ * 그사이 계정이 바뀌었으면 이동하지 않는다(창만 올라온 상태). 목록에서 지워졌어도 받은 값으로 간다.
+ */
+export function handleNativeNotificationClick(raw: unknown): void {
+  const jump = parseNativeNotificationJump(raw);
+  if (!jump) return;
+  const store = useNotificationStore.getState();
+  if (jump.userId && store.activeUserId !== jump.userId) return;
+  const target = store.notifications.find((n) => n.id === jump.notificationId);
+  if (target && !target.isRead) store.markAsRead(target.id);
+  const type = (target?.type ?? jump.type) as NotificationType;
+  const metadata = (target?.metadata ?? jump.metadata) as Record<string, unknown>;
+  if (type === 'calendar') return;
+  navigateNotificationToScene(type, metadata);
 }

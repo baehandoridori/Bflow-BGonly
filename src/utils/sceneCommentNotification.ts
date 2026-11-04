@@ -11,13 +11,15 @@
  * | 리테이크 댓글의 요청자·담당자·알림 대상   | retake  | mention      | 강함                        |
  * | 씬 BG/ACT 담당자·상대 부서·스레드 참여자  | auto    | comment      | 조용함(토스트·소리 없음)     |
  * | 캐릭터 댓글의 직접 멘션                   | mention | mention      | 강함(캐릭터 상세로 이동)     |
+ * | 팔로우한 스레드의 새 글(v1.148.0 §6.4)    | follow  | comment      | 토스트만(Windows 알림 없음)  |
  * | 작성자 본인                              | —       | 없음         |                             |
  *
  * 자동 대상(답글 상대·리테이크 요청자)은 mentions 배열이 아니라 parent_comment_id·revision 으로 판정한다.
+ * 스레드 '알림 끄기'(mute)는 자동 알림만 뺀다 — 나를 직접 부른 알림(멘션·답글·리테이크)은 그대로 온다.
  * node --test 로 바로 검사하도록 런타임 의존이 없다(@/ 별칭·스토어 X).
  */
 
-export type SceneCommentNotificationReason = 'mention' | 'reply' | 'retake' | 'auto';
+export type SceneCommentNotificationReason = 'mention' | 'reply' | 'retake' | 'auto' | 'follow';
 
 /** 실시간·방송·복원 어느 길로 왔든 같은 모양으로 맞춘 댓글. */
 export interface NormalizedSceneComment {
@@ -70,6 +72,10 @@ export interface SceneCommentNotificationDeps {
   userIdByName(name: string): string | null;
   /** 저장 원문 → 사람이 읽는 글(태그 토큰 제거). */
   plainText(text: string): string;
+  /** CommentPanel 의 씬 대화 키와 같은 규칙('EP05:A:a001'). 모르면 null(§6.4 팔로우·끄기 키). */
+  sceneThreadKey?(comment: NormalizedSceneComment, scene: NotificationSceneRef | null): string | null;
+  /** 이 PC 의 스레드 팔로우·끄기(스레드 → 씬 순). 없으면 null. */
+  threadPreference?(ref: { threadId: string | null; sceneThreadKey: string | null }): 'follow' | 'mute' | null;
 }
 
 export interface SceneCommentNotificationSettings {
@@ -86,6 +92,8 @@ export interface SceneCommentNotificationDecision {
   body: string;
   /** 조용한 알림 — 토스트·Windows 알림 없이 종 배지만. */
   quiet: boolean;
+  /** Windows 알림까지 — 팔로우 알림은 토스트만(나를 부른 알림보다 약하게). */
+  native: boolean;
   metadata: Record<string, unknown>;
   /** 같은 댓글이 두 길로 와도 한 번만(세션 동안). */
   dedupeKey: string;
@@ -132,6 +140,7 @@ export function decideSceneCommentNotification(
       title: `${author}님이 나를 태그했습니다`,
       body,
       quiet: false,
+      native: true,
       metadata: {
         characterId: comment.characterId,
         commentId: comment.commentId,
@@ -146,9 +155,16 @@ export function decideSceneCommentNotification(
 
   const scene = deps.findScene(comment);
   const label = deps.sceneLabel(comment, scene);
+  const sceneThreadKey = deps.sceneThreadKey?.(comment, scene) ?? null;
+  // 스레드 id — 리테이크 댓글은 're:{id}', 답글은 원댓글, 원댓글은 자기 id(utils/commentThreadFollow 와 같은 규칙).
+  const threadId = comment.revisionId ? `re:${comment.revisionId}` : (comment.parentCommentId || comment.commentId);
+  const pref = deps.threadPreference?.({ threadId, sceneThreadKey }) ?? null;
   const baseMetadata: Record<string, unknown> = {
     sceneId: scene?.id ?? comment.sceneUuid ?? undefined,
     sceneName: scene?.sceneId ?? undefined,
+    // 알림 센터의 씬 묶음 미리보기('김어진 …')·'이 씬 알림 끄기'·팔로우 키.
+    authorName: comment.userName ?? undefined,
+    ...(sceneThreadKey ? { sceneThreadKey, threadKey: `${sceneThreadKey}#${threadId}` } : {}),
     commentId: comment.commentId,
     commentSceneId: comment.sceneNo ?? undefined,
     commentPartId: comment.partId ?? undefined,
@@ -160,12 +176,13 @@ export function decideSceneCommentNotification(
     title: string,
     extra: Record<string, unknown> = {},
   ): SceneCommentNotificationDecision => ({
-    type: reason === 'auto' ? 'comment' : 'mention',
+    type: reason === 'auto' || reason === 'follow' ? 'comment' : 'mention',
     reason,
     title: withLabel(title, label),
     body,
     quiet: reason === 'auto',
-    metadata: { ...baseMetadata, reason, ...(reason === 'auto' ? {} : { mentionedBy: author }), ...extra },
+    native: reason !== 'auto' && reason !== 'follow',
+    metadata: { ...baseMetadata, reason, ...(reason === 'auto' || reason === 'follow' ? {} : { mentionedBy: author }), ...extra },
     dedupeKey: `${comment.commentId}:${reason}${isEdit ? `:edit:${comment.createdAt ?? ''}` : ''}`,
   });
 
@@ -181,13 +198,14 @@ export function decideSceneCommentNotification(
     // 리테이크 댓글 — 일반 댓글 자동 알림(담당·참여자)과 섞지 않는다(예전과 같게).
     if (isMentioned) return decision('mention', `${author}님이 나를 태그했습니다`);
     const revision = deps.getRevision(comment.revisionId);
-    if (!revision || !settings.retakeNotify) return null;
+    const followDecision = () => (pref === 'follow' ? decision('follow', `${author}님이 팔로우 중인 리테이크에 댓글을 남겼습니다`) : null);
+    if (!revision || !settings.retakeNotify) return followDecision();
     const targets = new Set<string>([
       ...(revision.requesterId ? [revision.requesterId] : []),
       ...(revision.assigneeIds ?? []),
       ...(revision.notifyUserIds ?? []),
     ]);
-    if (!targets.has(me.id)) return null;
+    if (!targets.has(me.id)) return followDecision();
     const reLabel = revision.revisionNo != null ? `re#${revision.revisionNo}` : '리테이크';
     return decision('retake', `${author}님이 ${reLabel} 에 댓글을 남겼습니다`);
   }
@@ -196,6 +214,9 @@ export function decideSceneCommentNotification(
   if (comment.parentCommentId && (comment.parentAuthorId === me.id || deps.isCommentByUser(comment.parentCommentId, me.id))) {
     return decision('reply', `${author}님이 내 댓글에 답글을 남겼습니다`);
   }
+  // §6.4: 끈 스레드·씬은 자동 알림을 빼고(멘션·답글은 위에서 이미), 팔로우한 스레드는 새 글마다 알린다(설정 '내 씬 자동 알림'과 무관).
+  if (pref === 'mute') return null;
+  if (pref === 'follow') return decision('follow', `${author}님이 팔로우 중인 스레드에 댓글을 남겼습니다`);
   if (!settings.autoNotify || !scene) return null;
   const isAssignee = parseAssigneeNames(scene.assignee).includes(me.name);
   const isCounterpart = !isAssignee && deps.counterpartAssigneeNames(scene).includes(me.name);

@@ -74,7 +74,11 @@ const domainReadStub: Plugin = {
     builder.onResolve({ filter: /notificationDomainRead$/ }, () => ({ path: 'domain-read', namespace: 'fx3-stub' }));
     builder.onLoad({ filter: /.*/, namespace: 'fx3-stub' }, () => ({
       loader: 'js',
-      contents: 'export function markNotificationDomainRead(type, metadata) { (globalThis.__fx3DomainReads ??= []).push({ type, id: metadata && metadata.__id }); }',
+      // v1.148.0: 여러 줄은 종류별로 모아 한 번에(markNotificationsDomainReadBatch) — 이미 읽은 줄은 부르지 않는다.
+      contents: [
+        'export function markNotificationDomainRead(type, metadata) { (globalThis.__fx3DomainReads ??= []).push({ type, id: metadata && metadata.__id }); }',
+        'export function markNotificationsDomainReadBatch(rows) { for (const row of rows) { if (row.isRead === true) continue; (globalThis.__fx3DomainReads ??= []).push({ type: row.type, id: row.metadata && row.metadata.__id }); } }',
+      ].join('\n'),
     }));
   },
 };
@@ -166,7 +170,8 @@ test('저장소: 전체 삭제 확정은 누른 순간 보이던 알림만 지�
   assert.deepEqual(store.getState().notifications.map((n) => n.id), ['r', lateId], '새로 온 알림·새 내용이 온 반응 알림은 남는다');
   assert.equal(store.getState().notifications.find((n) => n.id === 'r')?.title, '반응이 하나 더');
   assert.equal(store.getState().unreadCount, 2, '남은 두 알림은 안 읽음 그대로');
-  assert.deepEqual(domainReads(), ['a', 'c'], '서버 쪽 읽음 처리도 지운 알림에만');
+  // 'a' 는 지우기 전에 읽음 처리하며 이미 서버에 알렸다 — 지울 때는 안 읽은 'c' 만(v1.148.0).
+  assert.deepEqual(domainReads(), ['c'], '서버 쪽 읽음 처리도 지운 알림에만(이미 읽은 것은 다시 부르지 않는다)');
   assert.deepEqual(writes.at(-1)?.map((n) => n.id), ['r', lateId], '파일에도 남은 알림만');
 
   // 되돌리기 — 실제로 지운 알림만, 그사이 온 알림 아래에 원래 순서대로
@@ -236,8 +241,9 @@ test('알림 창 전체 삭제: 옅어짐은 비우기를 마치면 푼다 — �
 });
 
 test('알림 창 한 줄 지우기: 누른 순간의 그 알림만 — 지우지 않았으면 잰 위치를 버리고 밀려난 줄을 되돌린다', () => {
-  const remove = bodyOf(panel, 'const handleRemove = useCallback<RemoveNotificationRow>((id, row) =>');
-  assert.match(remove, /const \{ notifications: shown, activeUserId: userId \} = useNotificationStore\.getState\(\);\s*const marks = shownNotificationMarks\(shown\.filter\(\(n\) => n\.id === id\)\);\s*if \(marks\.length === 0\) return;/);
+  // v1.148.0: 카드 하나(묶인 알림 여러 개)도 같은 길 — 그 안의 id 들만.
+  const remove = bodyOf(panel, 'const handleRemove = useCallback<RemoveNotificationRow>((ids, row, flipKey) =>');
+  assert.match(remove, /const \{ notifications: shown, activeUserId: userId \} = useNotificationStore\.getState\(\);\s*const wanted = new Set\(ids\);\s*const marks = shownNotificationMarks\(shown\.filter\(\(n\) => wanted\.has\(n\.id\)\)\);\s*if \(marks\.length === 0\) return;/);
   const commit = bodyOf(remove, 'const commit = () =>');
   assert.match(commit, /if \(useNotificationStore\.getState\(\)\.removeShownNotifications\(marks, userId\)\.length > 0\) return;\s*\/\/[^\n]*\n\s*rowShiftBeforeRef\.current = null;\s*exit\?\.cancel\(\);\s*if \(row\) row\.style\.pointerEvents = '';/);
   assert.doesNotMatch(remove, /removeNotification\(/);

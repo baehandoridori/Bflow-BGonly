@@ -57,6 +57,7 @@ import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { applyCommentBroadcast, applyRealtimeCommentPayload, invalidatePartCache } from '@/services/commentService';
 import { claimSceneCommentDecision, decideIncomingSceneComment, markSceneCommentCatchUpReady, notifyIncomingSceneComment, resetSceneCommentNotifier } from '@/services/sceneCommentNotifier';
+import { useCommentThreadFollowStore } from '@/stores/useCommentThreadFollowStore';
 import {
   normalizeSceneCommentFromAddedBroadcast,
   normalizeSceneCommentFromMissedRow,
@@ -108,7 +109,7 @@ import { useNotificationStore, type AppNotification } from '@/stores/useNotifica
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
-import { dispatchNotification, noteLiveNotificationArrival, resolveNotificationSettings, type NotificationSettings } from '@/utils/notificationHelper';
+import { dispatchNotification, handleNativeNotificationClick, noteLiveNotificationArrival, resolveNotificationSettings, type NotificationSettings } from '@/utils/notificationHelper';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
@@ -1145,6 +1146,11 @@ export default function App() {
     void useNotificationStore.getState().loadFromDisk(notificationUserId);
   }, [notificationUserId]);
 
+  // v1.148.0(씬 댓글 B안 §6.4): 이 계정의 스레드 팔로우·끄기(이 PC 로컬 파일)를 읽는다 — 알림 판정이 바로 쓴다.
+  useEffect(() => {
+    void useCommentThreadFollowStore.getState().hydrate(authReady ? currentUser?.id ?? null : null);
+  }, [authReady, currentUser?.id]);
+
   // 한솔 결정 (v1.15.5): 로그인 catch-up — last_seen_at 이후 받은 멘션 댓글을 알림 패널에 누적.
   // v1.15.6 진단 로그: 한솔 보고 "catch-up 실행 안 됨" — 단계별 콘솔 로그로 정확한 원인 파악.
   const catchupDoneUserIdRef = useRef<string | null>(null);
@@ -1153,6 +1159,7 @@ export default function App() {
     if (!currentUser) {
       resetCatchupRun(catchupDoneUserIdRef);
       resetSceneCommentNotifier();
+      void useCommentThreadFollowStore.getState().hydrate(null);
       console.log('[catchup] currentUser 없음 — skip');
       return;
     }
@@ -2361,6 +2368,9 @@ export default function App() {
       });
     });
 
+    // v1.148.0(§9): 멘션·답글·리테이크 댓글의 Windows 알림을 누름 → 그 댓글로(토스트의 '댓글 보기'와 같은 길).
+    const offNativeClick = window.electronAPI.onNativeNotificationClick?.(handleNativeNotificationClick);
+
     // 위젯 팝업의 씬 행 → 본체 씬 상세 열기 (detail 탭으로 모달 오픈)
     // 코덱스 4차 P2: 자동 복원된 팝업이 막 떠서 아직 로딩 전인 본체 창에 이동을 보내면
     // 즉시 해석(현재 비어 있는 episodes 기준) 시 대상 씬을 못 찾아 뷰만 전환되고 상세 모달이 안 열린다.
@@ -2423,6 +2433,7 @@ export default function App() {
     return () => {
       offBroadcast?.();
       offJump?.();
+      offNativeClick?.();
       offWidgetNavigate?.();
       offWidgetNavigateDate?.();
       offWidgetNavigateView?.();
@@ -2642,6 +2653,7 @@ export default function App() {
               reactionNotificationId: n.id,
               reactionEmojis: n.emojis,
               reactionActorId: n.actorId,
+              reactionActorName: n.actorName,
               commentId: n.commentId,
               commentSceneId: n.sceneId,
               commentPartId: n.partId,

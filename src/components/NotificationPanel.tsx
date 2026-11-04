@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { Bell, Check, Trash2, ExternalLink } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
+import { Bell, Check, Clapperboard, ExternalLink, Flag, MessageSquare, Trash2 } from 'lucide-react';
 import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
+import { useRevisionStore } from '@/stores/useRevisionStore';
+import { useCommentThreadFollowStore } from '@/stores/useCommentThreadFollowStore';
+import { RETAKE_STATUS_LABEL, retakeCardStatus, type RetakeCardStatus } from '@/utils/commentFeedModel';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
 import { useMotionPref } from '@/hooks/useMotionPref';
@@ -32,9 +37,13 @@ import { useNotificationPanelSize, useNotificationPanelResizer } from '@/hooks/u
 import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
 import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles';
 import {
-  getSceneShortcutVisibilityClass,
+  resolveNotificationSceneTarget,
   shouldShowSceneShortcut,
 } from '@/utils/notificationSceneNavigation';
+import {
+  buildNotificationSceneDisplayLabel,
+  buildNotificationSceneDisplayLabelFromSceneKey,
+} from '@/utils/notificationEpisodeLabels';
 import {
   getNotificationSceneActionLabel,
   navigateNotificationToScene,
@@ -47,11 +56,15 @@ import {
 } from '@/utils/devPreviewNotifications';
 import {
   buildNotificationDisplayGroups,
-  type NotificationDisplayItem,
+  latestRevisionAction,
+  notificationPreviewLines,
+  reactionActorSummary,
+  reactionEmojis,
+  revisionTimeline,
+  type NotificationCardGroup,
 } from '@/utils/notificationGrouping';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { tokenizeGPaths } from '@/utils/pathLink';
-import { DisclosureChevron } from '@/components/ui/DisclosureChevron';
 import { UNDO_TOAST_CLASS, showUndoToast } from '@/components/common/UndoToast';
 import {
   NOTIFICATION_CLEAR_FADE_MS,
@@ -79,8 +92,8 @@ function timeAgo(iso: string): string {
 // ─── 움직임 (움직임 폴리싱 18번 notification-journey) ─────────
 // 타입별 아이콘/색상은 알림 카드와 같은 표(@/utils/notificationTypeVisual)를 쓴다.
 
-/** 지운 줄을 내보낼 때 부르는 함수 — 줄 요소를 넘겨 받아 밀어낸 뒤 실제로 지운다. */
-type RemoveNotificationRow = (id: string, row: HTMLElement | null) => void;
+/** 지운 줄·카드를 내보낼 때 부르는 함수 — 요소를 넘겨 받아 밀어낸 뒤 그 안의 알림(ids)을 실제로 지운다. */
+type RemoveNotificationRow = (ids: readonly string[], row: HTMLElement | null, flipKey: string) => void;
 
 /** 알림 창 — 종 아래(오른쪽 위 모서리)에서 0.14초 만에 피어난다(작은 메뉴 박자, popup-rhythm 과 같은 값). 닫힘은 바로. */
 const PANEL_POP_FROM = 'translateY(-4px) scale(0.97)';
@@ -113,63 +126,193 @@ function measureNotificationRows(list: HTMLElement | null): NotificationRowPosit
   }));
 }
 
-function NotificationGroupItem({
-  group,
-  collapsed,
-  onToggle,
-  onNavigate,
+/** 카드 머리에 보일 이름·상태 — 알림 창이 데이터·리테이크 저장소로 푼다(묶음 함수는 순수하게 둔다). */
+interface NotificationCardContext {
+  sceneLabelFor: (n: AppNotification) => string;
+  revisionHeadFor: (card: NotificationCardGroup) => { label: string; status: RetakeCardStatus | null };
+}
+
+/** 본문 안 '@이름' 만 링크 색으로(멘션 줄). */
+function renderPreviewText(text: string, mention: boolean) {
+  if (!mention) return text;
+  const parts = text.split(/(@[^\s@]+)/g);
+  return parts.map((part, index) => (part.startsWith('@') ? <span key={index} className="is-mention">{part}</span> : part));
+}
+
+/** 카드에서 '열기'로 갈 줄 — 나를 부른 안 읽은 줄 → 안 읽은 줄 → 가장 최근 줄. */
+function cardOpenTarget(card: NotificationCardGroup): AppNotification {
+  return card.notifications.find((n) => !n.isRead && n.type === 'mention')
+    ?? card.notifications.find((n) => !n.isRead)
+    ?? card.notifications[0]!;
+}
+
+/** 카드의 '이 씬 알림 끄기' 열쇠 — 최근 줄부터 씬 대화 키를 찾는다(예전 알림엔 없다). */
+function cardSceneThreadKey(card: NotificationCardGroup): string | null {
+  for (const n of card.notifications) {
+    const key = n.metadata?.sceneThreadKey;
+    if (typeof key === 'string' && key) return key;
+  }
+  return null;
+}
+
+function NotificationCard({
+  card,
+  context,
+  sceneMuted,
+  onOpen,
+  onToggleSceneMute,
   onRemove,
 }: {
-  group: Extract<NotificationDisplayItem, { kind: 'group' }>;
-  collapsed: boolean;
-  onToggle: () => void;
-  onNavigate: (n: AppNotification) => void;
+  card: NotificationCardGroup;
+  context: NotificationCardContext;
+  sceneMuted: boolean;
+  onOpen: (card: NotificationCardGroup) => void;
+  onToggleSceneMute: (sceneThreadKey: string, muted: boolean) => void;
   onRemove: RemoveNotificationRow;
 }) {
+  const markManyAsRead = useNotificationStore((s) => s.markManyAsRead);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const unread = card.unreadCount > 0;
+  const latest = card.notifications[0]!;
+  const flipKey = `g:${card.key}`;
+  const ids = card.notifications.map((n) => n.id);
+  const sceneThreadKey = card.variant === 'thread' ? cardSceneThreadKey(card) : null;
+  const quiet = card.variant === 'reaction' || !unread;
+
+  let icon: ReactNode;
+  let label: string;
+  let meta: ReactNode = null;
+  let lines: ReactNode[];
+  let openLabel: string | null;
+
+  if (card.variant === 'revision') {
+    const head = context.revisionHeadFor(card);
+    icon = <Flag size={13} aria-hidden />;
+    label = head.label;
+    meta = head.status ? <span className="bf-noti-status" data-status={head.status}>{RETAKE_STATUS_LABEL[head.status]}</span> : null;
+    const timeline = revisionTimeline(card);
+    const commentLines = notificationPreviewLines({ ...card, notifications: card.notifications.filter((n) => n.type !== 'revision') }, 2);
+    lines = [
+      ...(timeline ? [<div key="timeline" className="bf-noti-line">{timeline}</div>] : []),
+      ...commentLines.map((line) => (
+        <div key={line.id} className="bf-noti-line">{line.name && <b>{line.name}</b>} {renderPreviewText(line.text, line.mention)}</div>
+      )),
+    ];
+    if (lines.length === 0) lines = [<div key="title" className="bf-noti-line">{latest.title}</div>];
+    openLabel = '리테이크 열기';
+  } else if (card.variant === 'reaction') {
+    const emojis = reactionEmojis(card);
+    icon = <span className="text-[13px] leading-none" aria-hidden>{emojis[0] ?? '👍'}</span>;
+    label = '반응';
+    const actors = reactionActorSummary(card);
+    meta = actors || null;
+    lines = [
+      <div key="reaction" className="bf-noti-line">
+        {context.sceneLabelFor(latest)} 내 댓글에 {emojis.join(' ')}
+      </div>,
+    ];
+    openLabel = null;
+  } else {
+    icon = card.variant === 'thread' ? <MessageSquare size={13} aria-hidden /> : <Clapperboard size={13} aria-hidden />;
+    label = context.sceneLabelFor(latest);
+    if (card.variant === 'thread') {
+      meta = card.unreadCommentCount > 0
+        ? <>새 댓글 {card.unreadCommentCount}{card.unreadMentionCount > 0 && <> · <b>멘션 {card.unreadMentionCount}</b></>}</>
+        : <>댓글 {card.commentCount}</>;
+    } else {
+      meta = <>알림 {card.notifications.length}</>;
+    }
+    const preview = notificationPreviewLines(card, 3);
+    lines = preview.map((line) => (
+      <div key={line.id} className="bf-noti-line">{line.name && <b>{line.name}</b>} {renderPreviewText(line.text, line.mention)}</div>
+    ));
+    openLabel = card.variant === 'thread' ? '댓글 열기' : '씬 열기';
+  }
+  const more = card.variant === 'revision' || card.variant === 'reaction' ? 0 : Math.max(0, card.notifications.length - 3);
+
+  const open = () => onOpen(card);
+
   return (
-    <div data-noti-flip={`g:${group.key}`} className="rounded-lg border border-bg-border/35 bg-bg-primary/20 overflow-hidden">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-bg-border/20 transition-colors"
-        title={collapsed ? '묶음 펼치기' : '묶음 접기'}
-      >
-        <DisclosureChevron expanded={!collapsed} size={13} className="text-text-secondary/70" />
-        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-text-primary">{group.title}</span>
-        {group.unreadCount > 0 && (
-          <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[9px] font-bold text-accent">
-            {group.unreadCount}
-          </span>
-        )}
-        <span className="text-[10px] text-text-secondary/50">{timeAgo(group.latestCreatedAt)}</span>
-      </button>
-      {!collapsed && (
-        <div className="space-y-0.5 border-t border-bg-border/25 p-1">
-          {group.notifications.map((notification) => (
-            <NotificationItem key={notification.id} n={notification} onNavigate={onNavigate} onRemove={onRemove} />
-          ))}
+    <div
+      ref={cardRef}
+      role="button"
+      tabIndex={0}
+      data-noti-flip={flipKey}
+      data-noti-read={unread ? 'false' : 'true'}
+      aria-label={`${label}${typeof meta === 'string' ? ` · ${meta}` : ''} · ${timeAgo(card.latestCreatedAt)}`}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      }}
+      className={cn('bf-noti-card', unread && 'is-unread', quiet && 'is-quiet')}
+    >
+      <div className="bf-noti-card-head">
+        <span className="bf-noti-dot" aria-hidden />
+        <span className="bf-noti-card-icon">{icon}</span>
+        <span className="bf-noti-card-label" title={label}>{label}</span>
+        {meta && <span className="bf-noti-card-meta">{meta}</span>}
+        <span className="bf-noti-card-time">{timeAgo(card.latestCreatedAt)}</span>
+      </div>
+      <div className="bf-noti-card-preview">
+        {lines}
+        {more > 0 && <div className="bf-noti-line is-more">외 {more}건</div>}
+      </div>
+      {(openLabel || unread || sceneThreadKey) && (
+        <div className="bf-noti-card-actions">
+          {openLabel && (
+            <button type="button" className="bf-noti-btn is-primary" onClick={(e) => { e.stopPropagation(); open(); }}>
+              {openLabel}
+            </button>
+          )}
+          {unread && (
+            <button type="button" className="bf-noti-btn" onClick={(e) => { e.stopPropagation(); markManyAsRead(ids); }}>
+              읽음
+            </button>
+          )}
+          {sceneThreadKey && (
+            <button
+              type="button"
+              className="bf-noti-btn"
+              title={sceneMuted
+                ? '이 씬의 자동 알림(담당·참여한 씬)을 다시 받아요'
+                : '이 씬의 자동 알림(담당·참여한 씬)을 끕니다 — 나를 부른 알림은 그대로 와요'}
+              onClick={(e) => { e.stopPropagation(); onToggleSceneMute(sceneThreadKey, sceneMuted); }}
+            >
+              {sceneMuted ? '이 씬 알림 켜기' : '이 씬 알림 끄기'}
+            </button>
+          )}
         </div>
       )}
+      <button
+        type="button"
+        className="bf-noti-del"
+        title="이 알림 지우기"
+        aria-label={`${label} 알림 지우기`}
+        onClick={(e) => { e.stopPropagation(); onRemove(ids, cardRef.current, flipKey); }}
+      >
+        <Trash2 size={12} aria-hidden />
+      </button>
     </div>
   );
 }
 
-// ─── 알림 항목 ───────────────────────────────────────
+// ─── 알림 항목(묶이지 않는 줄 — 캘린더·캐릭터 댓글·단계 변경 하나 등) ─────
 function NotificationItem({ n, onNavigate, onRemove }: { n: AppNotification; onNavigate: (n: AppNotification) => void; onRemove: RemoveNotificationRow }) {
   const markAsRead = useNotificationStore((s) => s.markAsRead);
   const rowRef = useRef<HTMLDivElement>(null);
   const cfg = notificationTypeVisual(n.type);
   const Icon = cfg.icon;
   // 멘션·댓글 알림은 metadata 가 부족해도 이동 버튼을 만든다.
-  // 노출 방식은 기존 알림 액션과 동일하게 hover/focus 때만 보여준다.
   const hasNavigateTarget = shouldShowSceneShortcut(n.type, n.metadata);
   const actionLabel = getNotificationSceneActionLabel(n.type, n.metadata);
-  // v1.24.0: 멘션 알림 — 더 강한 시각 신호 (액센트 좌측 바 + @ 배지 + 카드 배경 진한 alpha).
-  // v1.25.5: acting_feedback 도 멘션과 동일한 강한 톤 (검수 요청은 즉시 인지 필요).
-  // v1.25.8: scene_assignment 도 동일 — 담당자 배정은 즉시 인지 필요.
+  // 나를 부른 알림(멘션·검수 요청·담당 배정·일정)은 제목을 굵게. v1.148.0: 왼쪽 막대·'@' 알약은 없앴다(§9).
   const isMention = n.type === 'mention' || n.type === 'acting_feedback' || n.type === 'scene_assignment';
-  const actionVisibilityClass = getSceneShortcutVisibilityClass();
   const bodyHasPath = n.body ? tokenizeGPaths(n.body).some((token) => token.type === 'path') : false;
+  const flipKey = `n:${n.id}`;
+  const changeCount = n.type === 'scene_change' && typeof n.metadata?.changeCount === 'number' && n.metadata.changeCount > 1
+    ? n.metadata.changeCount
+    : 0;
 
   const handleItemClick = () => {
     if (!n.isRead) markAsRead(n.id);
@@ -181,40 +324,22 @@ function NotificationItem({ n, onNavigate, onRemove }: { n: AppNotification; onN
       ref={rowRef}
       role="button"
       tabIndex={0}
-      data-noti-flip={`n:${n.id}`}
+      data-noti-flip={flipKey}
       data-noti-read={n.isRead ? 'true' : 'false'}
       onClick={handleItemClick}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleItemClick(); } }}
-      className={cn(
-        // 읽음 처리: 배경·글자색이 0.2초에 걸쳐 차분해진다(굵기 차이는 안 읽음 구분용이라 바로 바뀜).
-        'group/noti relative w-full text-left px-3 py-2.5 flex gap-2.5 transition-colors duration-200 cursor-pointer rounded-lg',
-        n.isRead
-          ? 'hover:bg-bg-border/15'
-          // v1.24.0: 멘션은 카드 배경 더 진하게, 자동 알림은 차분.
-          : isMention
-            ? 'bg-accent/[0.13] hover:bg-accent/[0.18]'
-            : 'bg-accent/[0.04] hover:bg-accent/[0.08]',
-      )}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleItemClick(); }
+      }}
+      className={cn('bf-noti-row w-full text-left px-3 py-2.5 flex gap-2.5', !n.isRead && 'is-unread')}
     >
-      {/* 미읽 바 — v1.24.0: 멘션은 액센트 색, 자동은 회색 (시각 차별화).
-          읽으면 색은 그대로 둔 채 위아래로 접히듯 사라진다(scaleY + opacity 200ms, motion-comments-notify.css). */}
-      <div
-        aria-hidden
-        className="bf-noti-unread-bar flex-shrink-0 w-[3px] self-stretch rounded-full"
-        style={{
-          backgroundColor: isMention
-            ? 'rgb(var(--color-accent))'
-            : 'rgb(var(--color-bg-border) / 1.4)',
-        }}
-      />
+      {/* 안 읽음 점 — 읽으면 옅어진다(motion-comments-notify.css). */}
+      <span className="bf-noti-dot mt-[5px]" aria-hidden />
 
-      {/* 아이콘 — v1.29.0: comment_reaction 은 마지막 이모지 자체를 아이콘으로 표시(시각 hook). */}
+      {/* 아이콘 — 반응은 마지막 이모지 자체. */}
       <div className="flex-shrink-0 mt-0.5">
         {n.type === 'comment_reaction' && n.metadata?.reactionEmojis?.length ? (
-          <span
-            className="text-[14px] leading-none transition-opacity duration-200"
-            style={{ opacity: n.isRead ? 0.55 : 1 }}
-          >
+          <span className="text-[14px] leading-none transition-opacity duration-200" style={{ opacity: n.isRead ? 0.55 : 1 }}>
             {lastReactionEmoji(n.metadata.reactionEmojis)}
           </span>
         ) : (
@@ -223,71 +348,62 @@ function NotificationItem({ n, onNavigate, onRemove }: { n: AppNotification; onN
       </div>
 
       {/* 내용 — truncate 된 텍스트는 호버 시 GlobalTooltip 으로 전체 노출 */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <p
-            title={n.title}
-            className={cn(
-              'text-[12px] leading-tight truncate flex-1 min-w-0 transition-colors duration-200',
-              n.isRead ? 'text-text-secondary/80' : isMention ? 'text-text-primary font-semibold' : 'text-text-primary font-medium',
-            )}
-          >
-            {n.title}
-          </p>
-          {/* v1.24.0: 멘션 배지 — '@' 표기로 일반 댓글 알림과 즉시 구분 */}
-          {isMention && !n.isRead && (
-            <span className="flex-shrink-0 text-[9px] font-bold text-accent px-1.5 py-0.5 rounded mention-badge">@</span>
+      <div className="flex-1 min-w-0 pr-5">
+        <p
+          title={n.title}
+          className={cn(
+            'text-[12px] leading-tight truncate transition-colors duration-200',
+            n.isRead ? 'text-text-secondary/80' : isMention ? 'text-text-primary font-semibold' : 'text-text-primary font-medium',
           )}
-        </div>
+        >
+          {n.title}
+          {changeCount > 0 && <span className="ml-1 font-normal text-text-secondary">외 {changeCount - 1}건</span>}
+        </p>
         {n.body && (
           <p
             title={n.body}
             className={cn(
-              'text-[11px] text-text-secondary/65 mt-0.5',
+              'text-[11px] text-text-secondary/80 mt-0.5',
               bodyHasPath ? 'whitespace-normal leading-relaxed' : 'truncate',
             )}
           >
             <PathLinkifiedText text={n.body} />
           </p>
         )}
-        <span className="text-[10px] text-text-secondary/50 mt-1 block">{timeAgo(n.createdAt)}</span>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] text-text-secondary/85">{timeAgo(n.createdAt)}</span>
+          {hasNavigateTarget && (
+            <button
+              type="button"
+              className="bf-noti-btn is-primary inline-flex items-center gap-1"
+              onClick={(e) => { e.stopPropagation(); handleItemClick(); }}
+            >
+              <ExternalLink size={10} aria-hidden />
+              {actionLabel}
+            </button>
+          )}
+          {!n.isRead && (
+            <button
+              type="button"
+              className="bf-noti-btn inline-flex items-center gap-1"
+              onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
+            >
+              <Check size={10} aria-hidden />
+              읽음
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* 본문 클릭은 그대로 자동 (씬 이동 + 읽음). 액션 버튼은 stopPropagation 으로 분리. */}
-      <div className={cn('flex items-center gap-1 self-start mt-0.5 flex-shrink-0 transition-opacity', actionVisibilityClass)}>
-        {hasNavigateTarget && (
-          <button
-            type="button"
-            title={actionLabel}
-            onClick={(e) => { e.stopPropagation(); handleItemClick(); }}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-medium bg-accent/15 text-accent-sub border border-accent/30 hover:bg-accent/25"
-          >
-            <ExternalLink size={10} />
-            <span>{actionLabel}</span>
-          </button>
-        )}
-        {!n.isRead && (
-          <button
-            type="button"
-            title="읽음 처리"
-            onClick={(e) => {
-              e.stopPropagation();
-              markAsRead(n.id);
-            }}
-            className="inline-flex items-center justify-center w-5 h-5 rounded text-[#00D9A0] bg-[#00D9A0]/10 border border-[#00D9A0]/30 hover:bg-[#00D9A0]/20"
-          >
-            <Check size={11} />
-          </button>
-        )}
-        <button
-          type="button"
-          title="삭제"
-          onClick={(e) => { e.stopPropagation(); onRemove(n.id, rowRef.current); }}
-          className="inline-flex items-center justify-center w-5 h-5 rounded text-[#FF7675] bg-[#FF7675]/10 border border-[#FF7675]/30 hover:bg-[#FF7675]/20"
-        >
-          <Trash2 size={11} />
-        </button>
-      </div>
+      <button
+        type="button"
+        className="bf-noti-del"
+        title="이 알림 지우기"
+        aria-label="이 알림 지우기"
+        onClick={(e) => { e.stopPropagation(); onRemove([n.id], rowRef.current, flipKey); }}
+      >
+        <Trash2 size={12} aria-hidden />
+      </button>
     </div>
   );
 }
@@ -384,7 +500,7 @@ export function NotificationBell() {
           <span
             ref={badgeRef}
             className={cn(
-              'absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center overflow-hidden rounded-full text-white text-[9px] font-bold leading-none',
+              'absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center overflow-hidden rounded-full text-white text-[10px] font-bold leading-none',
               hasMention ? 'badge-grad-strong' : 'badge-grad',
             )}
           >
@@ -412,13 +528,14 @@ function NotificationDropdown() {
   const listRef = useRef<HTMLDivElement>(null);
   const rowShiftBeforeRef = useRef<Map<string, number> | null>(null);
   const removingIdsRef = useRef(new Set<string>());
-  const handleRemove = useCallback<RemoveNotificationRow>((id, row) => {
-    if (removingIdsRef.current.has(id)) return;
+  const handleRemove = useCallback<RemoveNotificationRow>((ids, row, flipKey) => {
+    if (removingIdsRef.current.has(flipKey)) return;
     // 누른 순간 보이던 그 알림만 지운다 — 밀려나는 사이 같은 알림에 새 내용이 오면(만든 시각이 바뀜) 지우지 않는다.
     const { notifications: shown, activeUserId: userId } = useNotificationStore.getState();
-    const marks = shownNotificationMarks(shown.filter((n) => n.id === id));
+    const wanted = new Set(ids);
+    const marks = shownNotificationMarks(shown.filter((n) => wanted.has(n.id)));
     if (marks.length === 0) return;
-    removingIdsRef.current.add(id);
+    removingIdsRef.current.add(flipKey);
     const exit = animateEl(
       row,
       NOTIFICATION_ROW_EXIT_KEYFRAMES,
@@ -426,7 +543,7 @@ function NotificationDropdown() {
       reduce,
     );
     const commit = () => {
-      removingIdsRef.current.delete(id);
+      removingIdsRef.current.delete(flipKey);
       // 지우기 직전 위치를 잰다 — 지운 뒤(useLayoutEffect) 새 위치와 비교해 아래 줄을 되돌렸다 푼다.
       rowShiftBeforeRef.current = reduce
         ? null
@@ -460,7 +577,7 @@ function NotificationDropdown() {
       const key = row.dataset.notiFlip ?? '';
       const shift = shifts.get(key);
       // 밀려나는 중인 줄은 그대로 사라지게 둔다.
-      if (!shift || removingIdsRef.current.has(key.slice(2))) return;
+      if (!shift || removingIdsRef.current.has(key)) return;
       const animation = animateEl(
         row,
         [{ transform: `translateY(${shift}px)` }, { transform: 'translateY(0)' }],
@@ -548,8 +665,50 @@ function NotificationDropdown() {
   const [liveSize, setLiveSize] = useState<{ width?: number; height?: number } | null>(null);
   const [hoverAxis, setHoverAxis] = useState<'w' | 's' | 'sw' | null>(null);
   const [dragAxis, setDragAxis] = useState<'w' | 's' | 'sw' | null>(null);
-  const [groupCollapsedKeys, setGroupCollapsedKeys] = useState<Set<string>>(new Set());
   const displayGroups = useMemo(() => buildNotificationDisplayGroups(notifications), [notifications]);
+  // v1.148.0(§9): 카드 머리 이름('EP05 · A · a001', 're#2 · …')과 리테이크 상태, '이 씬 알림 끄기'.
+  const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const revisions = useRevisionStore((s) => s.revisions);
+  const threadPrefs = useCommentThreadFollowStore((s) => s.prefs);
+  const cardContext = useMemo<NotificationCardContext>(() => {
+    const targetLabelFor = (n: AppNotification): string | null => {
+      const target = resolveNotificationSceneTarget(n.metadata, episodes);
+      if (!target) return null;
+      return buildNotificationSceneDisplayLabel({
+        episodeNumber: target.episodeNumber,
+        partId: target.partId,
+        sceneId: target.sceneName,
+        episodeTitles,
+        episodes,
+      }) || null;
+    };
+    const sceneLabelFor = (n: AppNotification): string => {
+      const label = targetLabelFor(n);
+      if (label) return label;
+      const sceneName = n.metadata?.sceneName;
+      if (sceneName && sceneName.includes(':')) {
+        return buildNotificationSceneDisplayLabelFromSceneKey(sceneName, episodeTitles, episodes) || sceneName;
+      }
+      return sceneName || '씬';
+    };
+    const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
+    const ACTION_STATUS: Record<string, RetakeCardStatus> = { add: 'open', reminder: 'open', in_progress: 'in_progress', assignee_done: 'assignee_done', resolve: 'resolved' };
+    const revisionHeadFor = (card: NotificationCardGroup) => {
+      const revision = card.revisionId ? revisionById.get(card.revisionId) : undefined;
+      const latest = card.notifications.find((n) => n.type === 'revision') ?? card.notifications[0]!;
+      // 씬을 찾으면 씬 이름('a001'), 못 찾으면 리테이크의 씬 키('EP05 · A · 1'), 그것도 없으면('전반' 항목) 제목 끝.
+      const sceneLabel = card.notifications.map(targetLabelFor).find(Boolean)
+        ?? (revision ? buildNotificationSceneDisplayLabelFromSceneKey(revision.sceneKey, episodeTitles, episodes) : '')
+        ?? '';
+      const fallbackLabel = sceneLabel || (latest.title.split(' — ').pop() ?? '');
+      const label = [revision ? `re#${revision.revisionNo}` : '리테이크', fallbackLabel].filter(Boolean).join(' · ');
+      const action = latestRevisionAction(card);
+      const status = revision ? retakeCardStatus(revision, false) : (action ? ACTION_STATUS[action] ?? null : null);
+      return { label, status };
+    };
+    return { sceneLabelFor, revisionHeadFor };
+  }, [episodes, episodeTitles, revisions]);
 
   const { startDrag } = useNotificationPanelResizer({
     liveSetSize: (size) => setLiveSize((prev) => ({ ...(prev ?? {}), ...size })),
@@ -598,12 +757,18 @@ function NotificationDropdown() {
     setPanelOpen(false);
   };
 
-  const toggleGroup = (key: string) => {
-    setGroupCollapsedKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
+  // 카드 '열기' — 카드의 안 읽은 줄을 모두 읽음으로 하고, 나를 부른 줄(없으면 가장 최근 줄)로 간다.
+  const handleOpenCard = (card: NotificationCardGroup) => {
+    const target = cardOpenTarget(card);
+    useNotificationStore.getState().markManyAsRead(card.notifications.map((n) => n.id));
+    handleNavigate(target);
+  };
+
+  // §6.4: '이 씬 알림 끄기' — 씬 전체(자동 알림만, 나를 부른 알림은 그대로). 이 PC·이 계정에만.
+  const handleToggleSceneMute = (sceneThreadKey: string, muted: boolean) => {
+    void useCommentThreadFollowStore.getState().setPreference(sceneThreadKey, muted ? null : 'mute').then((ok) => {
+      if (!ok) return;
+      sonnerToast(muted ? '이 씬 자동 알림을 다시 켰어요' : '이 씬 자동 알림을 껐어요 · 나를 부른 알림은 그대로 와요', { duration: 2500 });
     });
   };
 
@@ -637,7 +802,7 @@ function NotificationDropdown() {
             알림
             {isUserOverride && (
               <span
-                className="ml-2 text-[9px] text-text-secondary/45 font-normal"
+                className="ml-2 text-[10px] text-text-secondary/70 font-normal"
                 title="사용자 조정 크기. 더블클릭 핸들로 기본 크기 복귀."
               >
                 · 크기 고정
@@ -710,20 +875,23 @@ function NotificationDropdown() {
               <p className="text-[12px] text-text-secondary/50">알림이 없습니다</p>
             </div>
           ) : (
-            displayGroups.map((item) => (
-              item.kind === 'group' ? (
-                <NotificationGroupItem
+            displayGroups.map((item) => {
+              if (item.kind !== 'group') {
+                return <NotificationItem key={item.notification.id} n={item.notification} onNavigate={handleNavigate} onRemove={handleRemove} />;
+              }
+              const sceneKey = cardSceneThreadKey(item);
+              return (
+                <NotificationCard
                   key={item.key}
-                  group={item}
-                  collapsed={groupCollapsedKeys.has(item.key)}
-                  onToggle={() => toggleGroup(item.key)}
-                  onNavigate={handleNavigate}
+                  card={item}
+                  context={cardContext}
+                  sceneMuted={!!sceneKey && threadPrefs[sceneKey] === 'mute'}
+                  onOpen={handleOpenCard}
+                  onToggleSceneMute={handleToggleSceneMute}
                   onRemove={handleRemove}
                 />
-              ) : (
-                <NotificationItem key={item.notification.id} n={item.notification} onNavigate={handleNavigate} onRemove={handleRemove} />
-              )
-            ))
+              );
+            })
           )}
         </div>
       </div>

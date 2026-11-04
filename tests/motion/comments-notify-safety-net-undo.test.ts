@@ -281,7 +281,7 @@ test('저장소: 전체 삭제는 지운 알림을 돌려주고, 되돌리기는
   assert.match(store, /clearAll: \(\) => AppNotification\[\];/);
   const clear = bodyOf(store, 'clearAll: () => {');
   assert.match(clear, /const removed = get\(\)\.notifications;/);
-  assert.match(clear, /get\(\)\.notifications\.forEach\(syncDomainRead\);/, '서버 쪽 읽음 처리는 지금처럼 지울 때');
+  assert.match(clear, /syncDomainReadMany\(removed, \[\], get\(\)\.activeUserId\);/, '서버 쪽 읽음 처리는 지금처럼 지울 때(v1.148.0 부터 종류별로 모아 한 번에)');
   assert.match(clear, /return removed;/);
   const restore = bodyOf(store, 'restoreNotifications: (snapshot, userId) =>');
   assert.match(restore, /if \(snapshot\.length === 0 \|\| !userId \|\| activeUserId !== userId\) return false;/);
