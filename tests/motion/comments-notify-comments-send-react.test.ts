@@ -165,20 +165,21 @@ test('이모지 창 자리: 버튼 위가 기본, 펼쳐도 아래 가장자리(
   assert.equal(emojiPickerPlacement({ anchor: null, viewportWidth: 1600, viewportHeight: 900, width: 220 }).side, 'below');
 });
 
-test('패널 배선: 본문·답글·스레드 창 모두 아래에서 떠오르고, 처음 불러온 목록·펼칠 때는 그대로', () => {
+test('패널 배선: 본문·스레드 창 모두 아래에서 떠오르고, 처음 불러온 목록·스레드 창을 열 때는 그대로', () => {
   assert.doesNotMatch(panel, /y: -6/, '위에서 내려오던 등장(framer 개별 y 값) 제거');
   assert.match(panel, /const bubbleRise = commentBubbleRise\(reduceMotion\);/);
-  // 활동 줄·본문 댓글·답글 묶음(첫 답글)·답글·스레드 창 메시지
-  assert.equal([...panel.matchAll(/\{\.\.\.bubbleRise\}/g)].length, 5);
-  // (20번 리뷰 반영: 답글 묶음에 data-reply-group 이 붙었다 — 마지막 답글을 지울 때 묶음도 함께 숨긴다)
-  assert.match(panel, /<AnimatePresence initial=\{false\}>\s*\{replies\.length > 0 && \(\s*<motion\.div\s+key="replies"\s+data-reply-group=\{comment\.id\}\s+\{\.\.\.bubbleRise\}/);
-  assert.match(panel, /<motion\.div\s+key=\{`evt:\$\{node\.event\.id\}`\}[\s\S]{0,200}?\{\.\.\.bubbleRise\}/);
-  // 답글: 접힘 조건 안의 AnimatePresence initial={false} — 펼칠 때·처음 그릴 때는 움직이지 않음
-  assert.match(panel, /\{!threadCollapsed && \(\s*<AnimatePresence initial=\{false\}>\s*\{replies\.map\(\(reply, ri\) => \{/);
-  assert.match(panel, /<motion\.div\s+ref=\{\(el\) => \{ commentRefs\.current\.set\(reply\.id, el\); \}\}[\s\S]{0,160}?\{\.\.\.bubbleRise\}/);
-  // 스레드 창
-  assert.match(panel, /<AnimatePresence initial=\{false\}>\s*\{activeThreadMessagesForPanel\.map\(\(message, index\) => \{/);
-  assert.match(panel, /<motion\.div\s+key=\{message\.id\}[\s\S]{0,200}?\{\.\.\.bubbleRise\}/);
+  // v1.147.0(씬 댓글 B안): 댓글 행 하나(renderCommentRow — 본문 원댓글·스레드 창 원댓글·답글·리테이크 댓글)·활동 한 줄·리테이크 카드·스레드 창 활동 줄
+  assert.equal([...panel.matchAll(/\{\.\.\.bubbleRise\}/g)].length, 4);
+  assert.match(panel, /<motion\.div\s+key=\{comment\.id\}\s+ref=\{\(el\) => \{ commentRefs\.current\.set\(comment\.id, el\); \}\}[\s\S]{0,700}?\{\.\.\.bubbleRise\}/);
+  assert.match(panel, /<motion\.div key=\{item\.key\} \{\.\.\.bubbleRise\} data-comment-flip=\{item\.key\}>\s*<CommentActivityLine/);
+  assert.match(panel, /<motion\.div\s+\{\.\.\.bubbleRise\}\s+data-comment-flip=\{item\.key\}[\s\S]{0,200}?data-retake-root=\{item\.revisionId\}/);
+  assert.match(panel, /<motion\.div key=\{`evt:\$\{row\.event\.id\}`\} \{\.\.\.bubbleRise\}>/);
+  // 목록마다 AnimatePresence initial={false} — 처음 그릴 때·스레드 창을 열 때는 움직이지 않고 새로 생긴 것만
+  assert.match(panel, /<AnimatePresence initial=\{false\}>\s*\{feed\.items\.map\(\(item\) => \{/);
+  assert.match(panel, /<AnimatePresence initial=\{false\}>\s*\{activeRevisionTimeline\.map\(\(row, index\) => \{/);
+  assert.match(panel, /<AnimatePresence initial=\{false\}>\s*\{activeThreadReplies\.map\(\(reply, index\) => renderCommentRow\(reply, \{/);
+  // 본문 답글 묶음·접기는 없다(답글은 요약 줄 → 스레드 창)
+  assert.doesNotMatch(panel, /data-reply-group=\{|key="replies"|threadCollapsed/);
 });
 
 test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 유지 + 다시 보내기(같은 저장 길)·지우기', () => {
@@ -228,20 +229,20 @@ test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 
   assert.match(panel, /useEffect\(\(\) => \(\) => forgetUnsentComments\('\[보내지 못한 댓글 패널 unmount\]'\), \[\]\);/);
 });
 
-test('패널 배선: 실패 말풍선은 세 곳 모두 반응 줄 대신 안내, 수정·삭제 버튼 숨김, 느릴 때만 시계', () => {
+test('패널 배선: 실패 말풍선은 모든 행(본문·스레드 창)에서 반응 줄 대신 안내, 수정·삭제 도구 숨김, 느릴 때만 시계', () => {
   assert.match(panel, /<span className="comment-send-failed-label font-semibold text-status-low">보내지 못했어요<\/span>/);
   assert.match(panel, />\s*다시 보내기\s*</);
   assert.match(panel, />\s*지우기\s*</);
-  assert.equal([...panel.matchAll(/<CommentSendFailedNotice/g)].length, 3, '본문·답글·스레드 창');
-  assert.equal([...panel.matchAll(/onRetry=\{\(\) => \{ void retryUnsentComment\((comment|reply|message)\.id\); \}\}/g)].length, 3);
-  assert.equal([...panel.matchAll(/onDiscard=\{\(\) => discardUnsentComment\((comment|reply|message)\.id\)\}/g)].length, 3);
-  // (검증 지적 acc-comments-notify-2: 보내는 중에도 지우기·수정·답글 줄을 띄우지 않는다)
-  assert.match(panel, /\{!isEditing && !sendStatus && \(/);
-  assert.match(panel, /\{!replyIsEditing && !replySendStatus && \(/);
-  assert.match(panel, /\{!isEditing && sendStatus === 'slow' && <CommentSendClock \/>\}/);
-  assert.match(panel, /\{!replyIsEditing && replySendStatus === 'slow' && <CommentSendClock \/>\}/);
-  assert.match(panel, /\{messageSendStatus === 'slow' && <CommentSendClock \/>\}/);
-  assert.equal([...panel.matchAll(/commentSendBubbleClass\((sendStatus|replySendStatus|messageSendStatus)\)/g)].length, 3);
+  // v1.147.0(씬 댓글 B안): 행 하나(renderCommentRow)가 본문·스레드 창을 모두 그린다 — 안내·다시 보내기·지우기도 한 곳.
+  assert.equal([...panel.matchAll(/<CommentSendFailedNotice/g)].length, 1, '행 하나가 본문·스레드 창 공통');
+  assert.equal([...panel.matchAll(/onRetry=\{\(\) => \{ void retryUnsentComment\(comment\.id\); \}\}/g)].length, 1);
+  assert.equal([...panel.matchAll(/onDiscard=\{\(\) => discardUnsentComment\(comment\.id\)\}/g)].length, 1);
+  assert.match(panel, /\{sendStatus === 'failed' \? \(\s*<CommentSendFailedNotice[\s\S]{0,300}?\/>\s*\) : \(\s*<ReactionsArea/);
+  // (검증 지적 acc-comments-notify-2: 보내는 중에도 지우기·수정·답글 — 행 도구 줄 — 을 띄우지 않는다)
+  assert.match(panel, /\{!isEditing && !sendStatus && \(\s*<CommentRowToolbar/);
+  assert.match(panel, /\) : \(\s*<div className=\{cn\('cmt-body', commentSendBubbleClass\(sendStatus\)\)\}>[\s\S]{0,1400}?\{sendStatus === 'slow' && <CommentSendClock \/>\}/);
+  assert.equal([...panel.matchAll(/commentSendBubbleClass\(sendStatus\)/g)].length, 1);
+  assert.doesNotMatch(panel, /replySendStatus|messageSendStatus|replyIsEditing/);
 });
 
 test('패널 배선: 반응을 처음 다 불러온 뒤에만 새 칩 톡, 취소 칩은 AnimatePresence 로 쏙', () => {
@@ -252,7 +253,8 @@ test('패널 배선: 반응을 처음 다 불러온 뒤에만 새 칩 톡, 취�
   // 코덱스 1차: 디바운스 사이에 온 반응(목록에 아직 없던 새 댓글)은 기억해 뒀다가 그 댓글 반응만 읽는다.
   assert.match(panel, /pendingReactionIdsRef\.current\.add\(cid\);/);
   assert.match(panel, /setLoadStatus\('loading'\);\s*setReactionsReady\(false\);/);
-  assert.equal([...panel.matchAll(/animateNew=\{reactionsReady\}\s*reduceMotion=\{reduceMotion\}/g)].length, 3);
+  // v1.147.0: 반응 줄은 행 하나(renderCommentRow — 본문·스레드 창 공통)에서만 그린다.
+  assert.equal([...panel.matchAll(/animateNew=\{reactionsReady\}\s*reduceMotion=\{reduceMotion\}/g)].length, 1);
   const area = bodyOf(panel, '}: ReactionsAreaProps) {');
   assert.match(area, /const freshEmojis = freshReactionEmojis\(armedRef\.current, seenEmojisRef\.current, emojis\);/);
   assert.match(area, /useEffect\(\(\) => \{\s*seenEmojisRef\.current = new Set\(emojis\);\s*armedRef\.current = animateNew;\s*\}\);/);

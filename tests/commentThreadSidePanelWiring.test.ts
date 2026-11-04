@@ -8,6 +8,7 @@ const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.ts
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
 const revisionCommentThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
 const settingsService = readFileSync('src/services/settingsService.ts', 'utf8');
+const commentFeedParts = readFileSync('src/components/scenes/comments/CommentFeedParts.tsx', 'utf8');
 
 test('CommentPanel opens a separate side thread when replying', () => {
   assert.match(commentPanel, /const \[activeThreadRootId, setActiveThreadRootId\] = useState<string \| null>\(null\)/);
@@ -29,11 +30,15 @@ test('CommentPanel opens a separate side thread when replying', () => {
 test('main list and side thread reaction pickers are surface-specific', () => {
   assert.match(commentPanel, /type CommentReactionPickerSurface = 'main' \| 'thread'/);
   assert.match(commentPanel, /const \[reactionPicker, setReactionPicker\] = useState<CommentReactionPickerTarget \| null>\(null\)/);
-  assert.match(commentPanel, /reactionPicker\?\.surface === 'main' && reactionPicker\.commentId === comment\.id/);
-  assert.match(commentPanel, /reactionPicker\?\.surface === 'main' && reactionPicker\.commentId === reply\.id/);
-  assert.match(commentPanel, /reactionPicker\?\.surface === 'thread' && reactionPicker\.commentId === message\.id/);
-  assert.match(commentPanel, /setReactionPicker\(\{ commentId: comment\.id, surface: 'main' \}\)/);
-  assert.match(commentPanel, /setReactionPicker\(\{ commentId: message\.id, surface: 'thread' \}\)/);
+  // v1.147.0(씬 댓글 B안 §5.2·§5.4): 본문·스레드 창의 모든 행을 renderCommentRow 하나가 그린다 —
+  //   이모지 창은 그 행의 surface 와 id 가 모두 같을 때만 열린다(같은 댓글이 양쪽에 보여도 한쪽만).
+  assert.match(commentPanel, /pickerOpen=\{reactionPicker\?\.surface === opts\.surface && reactionPicker\.commentId === comment\.id\}/);
+  assert.match(commentPanel, /onPickerOpen=\{\(\) => setReactionPicker\(\{ commentId: comment\.id, surface: opts\.surface \}\)\}/);
+  assert.match(commentPanel, /onOpenEmoji=\{\(\) => setReactionPicker\(\{ commentId: comment\.id, surface: opts\.surface \}\)\}/);
+  assert.match(commentPanel, /renderCommentRow\(root, \{\s*surface: 'main',/);
+  assert.match(commentPanel, /renderCommentRow\(activeThreadRoot, \{ surface: 'thread', grouped: false \}\)/);
+  assert.match(commentPanel, /renderCommentRow\(reply, \{\s*surface: 'thread',/);
+  assert.match(commentPanel, /renderCommentRow\(row\.comment, \{ surface: 'thread', grouped \}\)/);
   assert.doesNotMatch(commentPanel, /pickerForCommentId/);
 });
 
@@ -69,12 +74,20 @@ test('CommentPanelResizable persists the last thread split width', () => {
   assert.match(commentPanelResizable, /setThreadWidthPersistent\(null\)/);
 });
 
-test('reply buttons use the context-aware side thread opener for parent comments and replies', () => {
+test('main list reply action uses the context-aware side thread opener; the thread pane offers @name instead of reply', () => {
   assert.match(commentPanel, /const openContextualThreadReply = useCallback/);
   assert.match(commentPanel, /if \(target\.revisionId\) \{/);
   assert.match(commentPanel, /openRevisionThread\(target\.revisionId, true, target\)/);
-  assert.match(commentPanel, /onClick=\{\(\) => openContextualThreadReply\(comment\)\}/);
-  assert.match(commentPanel, /onClick=\{\(\) => openContextualThreadReply\(reply\)\}/);
+  // v1.147.0(§5.2·§5.4): 행 도구 줄의 첫 단추 — 본문은 '답글'(문맥 맞춘 스레드 열기), 스레드 창은 답글 단추 없이 남의 글에 '@이름' 넣기.
+  assert.match(
+    commentPanel,
+    /const primary = opts\.surface === 'thread'\s*\?\s*\(isOwn \? null : \{ kind: 'mention' as const, onClick: \(\) => insertIntoComposer\('thread', `@\$\{comment\.userName\} `\) \}\)\s*:\s*\{ kind: 'reply' as const, onClick: \(\) => openContextualThreadReply\(comment\) \}/,
+  );
+  assert.match(commentPanel, /<CommentRowToolbar\s+userName=\{comment\.userName\}\s+primary=\{primary\}/);
+  assert.match(commentFeedParts, /primary\?\.kind === 'reply' && \(/);
+  assert.match(commentFeedParts, /primary\?\.kind === 'mention' && \(/);
+  // 답글 줄이 본문에서 사라졌다 — 답글마다 따로 달던 답글 단추도 없다.
+  assert.doesNotMatch(commentPanel, /openContextualThreadReply\(reply\)/);
   assert.doesNotMatch(commentPanel, /onClick=\{\(\) => setReplyTarget\(comment\)\}/);
   assert.doesNotMatch(commentPanel, /onClick=\{\(\) => setReplyTarget\(reply\)\}/);
 });
@@ -128,7 +141,8 @@ test('side thread has its own composer and main composer stays top-level', () =>
   assert.match(commentPanel, /data-comment-thread-input/);
   assert.match(commentPanel, /onPaste=\{handleThreadPaste\}/);
   assert.match(commentPanel, /onDrop=\{handleThreadDrop\}/);
-  assert.match(commentPanel, /placeholder=\{activeRevisionThreadId \? '리테이크에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)' : '스레드에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)'\}/);
+  // v1.147.0(§5.4): 짧은 안내 — 이미지 첨부는 아래 도구 줄의 📎(Ctrl+V·끌어 놓기도 그대로).
+  assert.match(commentPanel, /placeholder=\{activeRevisionThreadId \? '리테이크에 댓글…' : '답글 남기기…'\}/);
   assert.match(commentPanel, /onChange=\{handleThreadFileChange\}/);
   assert.match(commentPanel, /threadFileInputRef\.current\?\.click\(\)/);
   assert.match(commentPanel, /onClick=\{handleThreadSubmit\}/);
@@ -162,7 +176,7 @@ test('CommentPanel mounted ref is restored after development remount checks', ()
   assert.doesNotMatch(commentPanel, /useEffect\(\(\) => \(\) => \{ mountedRef\.current = false; \}, \[\]\)/);
 });
 
-test('retake activity rows can open the detail card or the comment-side retake thread', () => {
+test('retake root cards can open the detail card or the comment-side retake thread', () => {
   assert.match(commentPanel, /revisionId\?: string/);
   assert.match(commentPanel, /revisionAction\?: 'add' \| 'status' \| 'delete'/);
   assert.match(commentPanel, /const \[activeRevisionThreadId, setActiveRevisionThreadId\] = useState<string \| null>\(null\)/);
@@ -173,10 +187,14 @@ test('retake activity rows can open the detail card or the comment-side retake t
   assert.match(commentPanel, /if \(!revisionExists\(revisionId\)\) return/);
   assert.match(commentPanel, /setActiveRevisionThreadId\(revisionId\)/);
   assert.match(commentPanel, /setActiveThreadRootId\(null\)/);
-  assert.match(commentPanel, /const canOpenRevision = revisionExists\(node\.event\.revisionId\) && node\.event\.revisionAction !== 'delete'/);
-  assert.match(commentPanel, /상세모달에서 열기/);
-  assert.match(commentPanel, /댓글에서 열기/);
-  assert.match(commentPanel, /openRevisionThread\(node\.event\.revisionId, true\)/);
+  // v1.147.0(§5.3): 리테이크는 본문에 카드 하나(RetakeRootCard). 카드에서 리테이크 스레드(댓글이 없으면 입력창에 바로)와
+  //   상세 모달을 연다 — 지운 리테이크는 상세를 열지 않는다. 활동 한 줄 아래 따로 붙던 '상세모달에서 열기/댓글에서 열기'는 없다.
+  assert.match(commentPanel, /const canOpen = !!card\.revision;/);
+  assert.match(commentPanel, /onOpenThread=\{canOpen \? \(\) => openRevisionThread\(item\.revisionId, item\.comments\.length === 0\) : undefined\}/);
+  assert.match(commentPanel, /onOpenDetail=\{canOpen && card\.status !== 'deleted' \? \(\) => openRevisionDetail\(item\.revisionId\) : undefined\}/);
+  assert.match(commentPanel, /onOpenDetail=\{revision \? \(\) => openRevisionDetail\(activeRevisionThreadId\) : undefined\}/);
+  assert.doesNotMatch(commentPanel, /상세모달에서 열기|댓글에서 열기/);
+  assert.doesNotMatch(commentPanel, /canOpenRevision/);
 });
 
 test('retake side thread stores replies as revision comments instead of fake parent comments', () => {
@@ -189,32 +207,37 @@ test('retake side thread stores replies as revision comments instead of fake par
   assert.match(commentPanel, /parentCommentId: activeRevisionThreadId \? null : threadRoot!\.id/);
   assert.match(commentPanel, /data-retake-thread-root/);
   assert.match(commentPanel, /리테이크 스레드/);
-  assert.match(commentPanel, /placeholder=\{activeRevisionThreadId \? '리테이크에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)' : '스레드에 댓글 입력\.\.\. \(Ctrl\+V \/ 드래그로 이미지\)'\}/);
+  assert.match(commentPanel, /placeholder=\{activeRevisionThreadId \? '리테이크에 댓글…' : '답글 남기기…'\}/);
 });
 
-test('retake comments always keep their re badge in main and side thread views', () => {
-  assert.match(commentPanel, /let prevRevisionId: string \| null = null/);
-  assert.match(commentPanel, /prevRevisionId = null/);
-  assert.match(commentPanel, /const commentRevisionId = comment\.revisionId \?\? null/);
-  assert.match(commentPanel, /const isGroupedWithPrev = prevUserId === comment\.userId && !prevRevisionId && !commentRevisionId/);
-  assert.match(commentPanel, /const replyRevisionId = reply\.revisionId \?\? commentRevisionId/);
-  assert.match(commentPanel, /const replyIsGrouped = ri > 0 && replies\[ri - 1\]\.userId === reply\.userId && !prevReplyRevisionId && !replyRevisionId/);
-  assert.match(commentPanel, /revisionId=\{commentRevisionId\}/);
-  assert.match(commentPanel, /revisionId=\{replyRevisionId\}/);
-  assert.match(commentPanel, /onJump=\{openRevisionDetail\}/);
-  assert.match(commentPanel, /const messageRevisionId = message\.revisionId \?\? activeRevisionThreadId/);
-  assert.match(commentPanel, /revisionId=\{messageRevisionId\}/);
-  assert.match(revisionCommentThread, /import \{ RevisionCommentBadge \} from '\.\/RevisionCommentBadge';/);
+test('retake comments live under their retake card — one card in the main list, the same card heads the side thread (no per-row re badge)', () => {
+  // v1.147.0(§5.3·§5.4): 리테이크 댓글은 본문에 행으로 따로 그리지 않고 revision_id 마다 카드 하나에 모인다 —
+  //   어느 리테이크인지는 카드가 말해 주므로 행마다 붙던 re 배지(RevisionCommentBadge)는 없다.
+  assert.doesNotMatch(commentPanel, /<RevisionCommentBadge/);
+  assert.doesNotMatch(commentPanel, /prevRevisionId|commentRevisionId|replyRevisionId|messageRevisionId/);
+  assert.match(commentPanel, /if \(item\.kind === 'retake'\) \{\s*const card = retakeCardData\(item\.revisionId, item\.events\);/);
+  assert.match(commentPanel, /data-retake-root=\{item\.revisionId\}/);
+  // 스레드 창: 같은 카드(동작 단추 포함)가 맨 위, 아래는 활동 줄과 리테이크 댓글 행이 시간순.
+  assert.match(commentPanel, /<div className="cmt-thread-root" data-retake-thread-root>\s*<RetakeRootCard\s+inThread/);
+  assert.match(commentPanel, /availableRetakeActions\(\{ status: card\.status, myState, canFinal: canFinalResolveRevision\(currentUser, revision\) \}\)/);
+  assert.match(commentPanel, /\.map\(\(id\) => \(\{ id, busy: retakeActionBusy, onClick: \(\) => \{ void runRetakeAction\(id, revision\); \} \}\)\)/);
+  assert.match(commentPanel, /\{activeRevisionTimeline\.map\(\(row, index\) => \{/);
+  // 리테이크 탭 카드의 댓글도 행마다 배지 대신 카드가 맥락 — '스레드 열기'는 이 패널의 스레드 창으로.
+  assert.doesNotMatch(revisionCommentThread, /RevisionCommentBadge/);
   assert.match(revisionCommentThread, /revisionId=\{c\.revisionId \?\? revisionId\}/);
-  assert.match(revisionCommentThread, /<RevisionCommentBadge revisionId=\{revisionId\} \/>/);
+  assert.match(revisionCommentThread, /window\.dispatchEvent\(new CustomEvent\('bflow:open-revision-thread', \{ detail \}\)\)/);
+  assert.match(commentPanel, /window\.addEventListener\('bflow:open-revision-thread', onOpen\)/);
 });
 
-test('main comment flow keeps comments from the same retake thread visually adjacent', () => {
-  assert.match(commentPanel, /orderCommentsForThreadedMainFlow/);
-  assert.match(commentPanel, /const isRetakeThreadFollowup = !!commentRevisionId && prevRevisionId === commentRevisionId/);
-  assert.match(commentPanel, /isRetakeThreadFollowup && 'comment-retake-thread-followup'/);
-  assert.match(commentPanel, /const commentSortKeys = buildThreadedCommentMainFlowKeys\(comments\)/);
-  assert.match(commentPanel, /commentSortKeys\.get\(a\.comment\.id\)/);
+test('main comment flow folds comments from the same retake thread into one retake card', () => {
+  // v1.147.0(§5.2·§5.3): 목록은 순수 함수 buildCommentFeed 가 만든다(동작은 tests/commentFeedModel.test.ts) —
+  //   같은 리테이크 댓글을 나란히 붙이던 'followup' 줄 모양·정렬 키 대신 카드 하나.
+  assert.match(commentPanel, /const feed = useMemo\(\(\) => buildCommentFeed\(\{/);
+  assert.match(commentPanel, /\{feed\.items\.map\(\(item\) => \{/);
+  assert.doesNotMatch(commentPanel, /isRetakeThreadFollowup|comment-retake-thread-followup/);
+  assert.doesNotMatch(commentPanel, /commentSortKeys/);
+  // 첫 안 읽은 댓글은 여전히 본문 흐름 순서로 찾는다.
+  assert.match(commentPanel, /orderCommentsForThreadedMainFlow\(comments\)/);
 });
 
 test('side thread submit state is released by request id', () => {
@@ -235,17 +258,25 @@ test('retake card thread submit keeps optimistic work inside the loading guard',
   assert.match(revisionCommentThread, /finally\s*\{\s*if \(mountedRef\.current\) \{\s*setSubmitting\(false\);/);
 });
 
-test('retake-only filter keeps retake activity cards visible', () => {
-  assert.match(commentPanel, /const visibleInlineEvents = useMemo/);
-  assert.match(commentPanel, /isRetakeInlineEvent/);
-  assert.match(commentPanel, /reOnly \? \(inlineEvents \?\? \[\]\)\.filter\(isRetakeInlineEvent\)/);
-  assert.match(commentPanel, /mergeFeed\(mainFlowComments, visibleInlineEvents\)/);
+test("the retake filter tab replaces the 're만' toggle — the feed model keeps retake cards for it", () => {
+  // v1.147.0(§5.1): '전체 · 안 읽음 · 리테이크 · @나' 탭(feedFilter) 하나가 're만'·'활동 감추기' 토글을 대신한다.
+  //   어떤 항목이 남는지는 buildCommentFeed 가 정한다(tests/commentFeedModel.test.ts).
+  assert.match(commentPanel, /const \[feedFilter, setFeedFilter\] = useState<CommentFeedFilter>\('all'\)/);
+  assert.match(commentPanel, /<CommentFilterTabs\s+filter=\{feedFilter\}\s+counts=\{feedCounts\}\s+onChange=\{setFeedFilter\}/);
+  assert.match(commentPanel, /buildCommentFeed\(\{\s*comments,\s*events: inlineEvents \?\? \[\],\s*filter: feedFilter,/);
+  assert.match(commentPanel, /feedFilter === 'retake' \? '리테이크가 없어요'/);
+  assert.doesNotMatch(commentPanel, /reOnly|hideActivity|visibleInlineEvents|isRetakeInlineEvent|mergeFeed\(/);
+  assert.doesNotMatch(commentPanel, /re만\s*<\/button>|활동 감추기\s*<\/button>/);
 });
 
 test('comment feed avoids layout-measure animations while thread composer is typing', () => {
-  assert.match(commentPanel, /const mainFeedNodes = useMemo\(/);
-  assert.match(commentPanel, /mergeFeed\(mainFlowComments, visibleInlineEvents\)/);
-  assert.match(commentPanel, /return mainFeedNodes\.map\(\(node\) =>/);
+  // 목록 항목은 댓글·활동·탭·읽음이 바뀔 때만 다시 만든다 — 스레드 입력창 글자는 의존에 없다.
+  assert.match(
+    commentPanel,
+    /const feed = useMemo\(\(\) => buildCommentFeed\(\{[\s\S]{0,200}?\}\), \[comments, inlineEvents, feedFilter, isCommentUnread, currentUser\?\.name\]\);/,
+  );
+  assert.match(commentPanel, /\{feed\.items\.map\(\(item\) => \{/);
+  assert.doesNotMatch(commentPanel, /mainFeedNodes/);
   assert.doesNotMatch(commentPanel, /layout="position"/);
 });
 

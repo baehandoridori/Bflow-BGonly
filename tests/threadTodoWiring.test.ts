@@ -135,14 +135,20 @@ test('미리보기 mock: 5 메서드 + 공유 검증기·삭제 권한 재사용
   assert.doesNotMatch(mock, /previewThreadTodos\b/);
 });
 
-test('댓글 패널: 섹션은 툴바 바로 아래·댓글 목록 바로 위, 스레드 키로 리마운트, 스레드 키가 비면 숨긴다', () => {
+test('댓글 패널: 섹션은 필터 탭 바로 아래·댓글 목록 바로 위, 스레드 키로 리마운트, 스레드 키가 비면 숨긴다', () => {
   assert.match(commentPanel, /import \{ ThreadTodoSection \} from '\.\/ThreadTodoSection';/);
+  // v1.147.0(씬 댓글 B안 §5.1): 맨 위 줄이 're만'·'활동 감추기' 툴바에서 필터 탭(CommentFilterTabs)으로 바뀌었다.
   assert.match(
     commentPanel,
-    /re만\s*<\/button>\s*<\/div>\s*\{\/\* 피드백 58[\s\S]{0,300}\{effectiveSceneThreadKey && currentUser \? \(\s*<ThreadTodoSection\s+key=\{effectiveSceneThreadKey\}\s+threadKey=\{effectiveSceneThreadKey\}\s+currentUser=\{currentUser\}\s+onHeightGrow=\{\(grewBy, firstLoadAfterMs\) => \{[\s\S]{0,2000}?\}\}\s*\/>\s*\) : null\}\s*\{\/\* 댓글 목록/,
+    /<CommentFilterTabs\s+filter=\{feedFilter\}[\s\S]{0,1200}?\) : null\}\s*\/>\s*\{\/\* 피드백 58[\s\S]{0,300}\{effectiveSceneThreadKey && currentUser \? \(\s*<ThreadTodoSection\s+key=\{effectiveSceneThreadKey\}\s+threadKey=\{effectiveSceneThreadKey\}\s+currentUser=\{currentUser\}\s+onHeightGrow=\{\(grewBy, firstLoadAfterMs\) => \{[\s\S]{0,2000}?\}\}\s*\/>\s*\) : null\}\s*\{\/\* 댓글 목록/,
   );
+  assert.doesNotMatch(commentPanel, /re만\s*<\/button>/);
+  assert.ok(commentPanel.indexOf('<CommentFilterTabs') < commentPanel.indexOf('<ThreadTodoSection'));
   assert.ok(commentPanel.indexOf('<ThreadTodoSection') < commentPanel.indexOf('ref={scrollRef}'));
   assert.equal((commentPanel.match(/<ThreadTodoSection/g) ?? []).length, 1);
+  // 댓글 ⋯ 메뉴 '팀 할 일로 보내기'는 IPC 를 직접 부르지 않고 섹션에 신호만 보낸다(섹션의 낙관적 추가 길을 그대로 탄다).
+  assert.match(commentPanel, /window\.dispatchEvent\(new CustomEvent\('bflow:thread-todo-add', \{ detail: \{ threadKey: effectiveSceneThreadKey, text \} \}\)\);/);
+  assert.doesNotMatch(commentPanel, /threadTodoAdd\(/);
 });
 
 test('섹션: IPC 직접 호출·변경 신호 구독·재로그인 재조회·낙관적 롤백·응답 폐기 처리·금지 문자열 없음', () => {
@@ -160,9 +166,13 @@ test('섹션: IPC 직접 호출·변경 신호 구독·재로그인 재조회·�
   assert.equal((section.match(/if \(inFlightRef\.current === 0\) void load\(\);/g) ?? []).length, 2);
   assert.match(section, /if \(inFlightRef\.current > 0\) return;/);
   assert.doesNotMatch(section, /dirtyRef/);
-  // 서버엔 저장됐지만 응답만 폐기된 경우: 세 뮤테이션 모두 롤백·토스트 없이 재조회에 맡긴다
+  // 서버엔 저장됐지만 응답만 폐기된 경우: 네 뮤테이션 길(입력창 추가·댓글에서 추가·완료·삭제) 모두 롤백·토스트 없이 재조회에 맡긴다
+  // (v1.147.0: 댓글 ⋯ 메뉴 '팀 할 일로 보내기'가 bflow:thread-todo-add 신호 → addFromComment 로 같은 추가 길을 하나 더 탄다)
   assert.match(section, /=== THREAD_TODO_RESPONSE_DISCARDED/);
-  assert.equal((section.match(/if \(isDiscardedResponse\(err\)\) return;/g) ?? []).length, 3);
+  assert.equal((section.match(/if \(isDiscardedResponse\(err\)\) return;/g) ?? []).length, 4);
+  assert.equal((section.match(/await window\.electronAPI\.threadTodoAdd\(threadKey, text\)/g) ?? []).length, 2);
+  assert.match(section, /if \(!detail \|\| detail\.threadKey !== threadKey \|\| typeof detail\.text !== 'string'\) return;/);
+  assert.match(section, /window\.addEventListener\('bflow:thread-todo-add', onAdd\);\s*return \(\) => window\.removeEventListener\('bflow:thread-todo-add', onAdd\);/);
   assert.match(section, /setItems\(\(prev\) => prev\.filter\(\(r\) => r\.id !== tempId\)\);/);
   assert.match(section, /setItems\(\(prev\) => prev\.map\(\(r\) => \(r\.id === item\.id \? item : r\)\)\);/);
   assert.doesNotMatch(section, /layout="position"/);
