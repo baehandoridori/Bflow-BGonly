@@ -132,7 +132,14 @@ export function decideSceneCommentNotification(
       title: `${author}님이 나를 태그했습니다`,
       body,
       quiet: false,
-      metadata: { characterId: comment.characterId, commentId: comment.commentId, mentionedBy: author, reason: 'mention' },
+      metadata: {
+        characterId: comment.characterId,
+        commentId: comment.commentId,
+        mentionedBy: author,
+        reason: 'mention',
+        // 수정으로 다시 넣은 @ 는 그 댓글의 예전 알림과 따로 센다(씬 댓글과 같게 — 코덱스 4차).
+        ...(isEdit ? { mentionEditAt: comment.createdAt ?? 'edit' } : {}),
+      },
       dedupeKey: `${comment.commentId}:mention${isEdit ? `:edit:${comment.createdAt ?? ''}` : ''}`,
     };
   }

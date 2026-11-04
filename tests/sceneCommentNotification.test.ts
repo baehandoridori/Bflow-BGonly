@@ -155,6 +155,12 @@ test('수정으로 넣은 멘션은 그 댓글의 예전 알림과 따로 센다
   const e = getNotificationIdentity({ type: edit!.type, metadata: edit!.metadata });
   assert.equal(a, 'scene_comment:c1');
   assert.equal(e, 'scene_comment:c1:edit:2026-11-04T02:00:00Z');
+  // 캐릭터 댓글도 같게 — @ 를 뺐다 다시 넣으면 새 알림(코덱스 4차).
+  const charAdd = decideSceneCommentNotification(comment({ characterId: 'hero', mentions: [ME.name] }), ME, deps(), ON);
+  const charEdit = decideSceneCommentNotification(comment({ characterId: 'hero', kind: 'edit', mentions: [ME.name], addedMentions: [ME.name], createdAt: '2026-11-04T03:00:00Z' }), ME, deps(), ON);
+  assert.equal(getNotificationIdentity({ type: charAdd!.type, metadata: charAdd!.metadata }), 'scene_comment:c1');
+  assert.equal(getNotificationIdentity({ type: charEdit!.type, metadata: charEdit!.metadata }), 'scene_comment:c1:edit:2026-11-04T03:00:00Z');
+  assert.equal(charEdit!.metadata.characterId, 'hero', '누르면 여전히 캐릭터로');
 });
 
 test('원댓글이 내 캐시에 없어도 보낸 쪽이 실어 준 원댓글 작성자로 답글을 안다(코덱스 2차)', async () => {
