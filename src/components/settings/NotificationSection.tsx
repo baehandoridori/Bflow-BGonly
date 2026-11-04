@@ -1,24 +1,34 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Bell, Volume2, MapPin, Eye, MessageSquare, RefreshCw } from 'lucide-react';
+import { Bell, MapPin, Eye, MessageSquare, RefreshCw } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { SettingsSection } from './SettingsSection';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
+import { resolveNotificationSettings } from '@/utils/notificationHelper';
 import { cn } from '@/utils/cn';
 
 /** 알림 토글 행 */
-function NotiToggle({ label, description, checked, onChange }: {
+function NotiToggle({ label, description, checked, onChange, locked = false }: {
   label: string; description: string; checked: boolean; onChange: (v: boolean) => void;
+  /** 끌 수 없는 항목(나를 부른 알림) — 켜진 채로 흐리게, 누를 수 없다. */
+  locked?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between">
       <div className="min-w-0">
         <p className="text-[12px] font-medium text-text-primary">{label}</p>
-        <p className="text-[10px] text-text-secondary/40">{description}</p>
+        <p className="text-[11px] text-text-secondary/60">{description}</p>
       </div>
       <button
-        onClick={() => onChange(!checked)}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        aria-disabled={locked || undefined}
+        disabled={locked}
+        onClick={() => { if (!locked) onChange(!checked); }}
         className={cn(
-          'relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer shrink-0 ml-3',
+          'relative w-9 h-5 rounded-full transition-colors duration-200 shrink-0 ml-3',
+          locked ? 'cursor-default opacity-50' : 'cursor-pointer',
           checked ? 'bg-accent' : 'bg-bg-border/50',
         )}
       >
@@ -51,28 +61,25 @@ function ToastPreviewCard({ title, description, actionLabel }: {
 }
 
 export function NotificationSection() {
-  const [notiSceneChange, setNotiSceneChange] = useState(true);
-  const [notiCommentNotify, setNotiCommentNotify] = useState(true);
-  const [notiSyncComplete, setNotiSyncComplete] = useState(false);
-  const [notiSound, setNotiSound] = useState(true);
+  // v1.146.0(씬 댓글 B안 §6.4): 알림 유형 4개 — 나를 부른 알림(항상) / 내 씬 자동 알림 / 리테이크 알림 / 반응 알림.
+  //   '알림 소리'·'동기화 완료 알림'·'표시 시간'은 실제로 동작하지 않아 뺐다(예전 저장값은 무시).
+  const [notiSceneAuto, setNotiSceneAuto] = useState(true);
+  const [notiRetake, setNotiRetake] = useState(true);
+  const [notiReaction, setNotiReaction] = useState(false);
   const [notiOsNotification, setNotiOsNotification] = useState(true);
   const [toastPosition, setToastPosition] = useState<string>('bottom-right');
-  const [toastDuration, setToastDuration] = useState<number>(3000);
   const prefsLoaded = useRef(false);
 
   useEffect(() => {
     if (prefsLoaded.current) return;
     prefsLoaded.current = true;
     loadPreferences().then((prefs) => {
-      if (prefs?.notifications) {
-        setNotiSceneChange(prefs.notifications.sceneChange ?? true);
-        setNotiCommentNotify(prefs.notifications.commentNotify ?? true);
-        setNotiSyncComplete(prefs.notifications.syncComplete ?? false);
-        setNotiSound(prefs.notifications.sound ?? true);
-        setNotiOsNotification(prefs.notifications.osNotification ?? true);
-        if (prefs.notifications.toastPosition) setToastPosition(prefs.notifications.toastPosition);
-        if (prefs.notifications.toastDuration) setToastDuration(prefs.notifications.toastDuration);
-      }
+      const resolved = resolveNotificationSettings(prefs?.notifications as Record<string, unknown> | undefined);
+      setNotiSceneAuto(resolved.sceneAuto);
+      setNotiRetake(resolved.retake);
+      setNotiReaction(resolved.reaction);
+      setNotiOsNotification(resolved.osNotification);
+      if (prefs?.notifications?.toastPosition) setToastPosition(prefs.notifications.toastPosition);
     });
   }, []);
 
@@ -83,23 +90,21 @@ export function NotificationSection() {
 
   const persistNoti = useCallback((patch: Record<string, unknown>) => {
     const next = {
-      sceneChange: notiSceneChange, commentNotify: notiCommentNotify,
-      syncComplete: notiSyncComplete, sound: notiSound,
-      osNotification: notiOsNotification, toastPosition, toastDuration,
+      sceneAuto: notiSceneAuto, retake: notiRetake, reaction: notiReaction,
+      osNotification: notiOsNotification, toastPosition,
       ...patch,
     };
     persistPref({ notifications: next });
     // notiSettingsRef 업데이트 이벤트
     window.dispatchEvent(new CustomEvent('bflow:noti-settings-changed', {
-      detail: { sceneChange: next.sceneChange, commentNotify: next.commentNotify, osNotification: next.osNotification, sound: next.sound },
+      detail: { sceneAuto: next.sceneAuto, retake: next.retake, reaction: next.reaction, osNotification: next.osNotification },
     }));
-  }, [persistPref, notiSceneChange, notiCommentNotify, notiSyncComplete, notiSound, notiOsNotification, toastPosition, toastDuration]);
+  }, [persistPref, notiSceneAuto, notiRetake, notiReaction, notiOsNotification, toastPosition]);
 
-  const handleNotiToggle = useCallback((key: string, value: boolean) => {
-    if (key === 'sceneChange') setNotiSceneChange(value);
-    else if (key === 'commentNotify') setNotiCommentNotify(value);
-    else if (key === 'syncComplete') setNotiSyncComplete(value);
-    else if (key === 'sound') setNotiSound(value);
+  const handleNotiToggle = useCallback((key: 'sceneAuto' | 'retake' | 'reaction' | 'osNotification', value: boolean) => {
+    if (key === 'sceneAuto') setNotiSceneAuto(value);
+    else if (key === 'retake') setNotiRetake(value);
+    else if (key === 'reaction') setNotiReaction(value);
     else if (key === 'osNotification') setNotiOsNotification(value);
     persistNoti({ [key]: value });
   }, [persistNoti]);
@@ -117,48 +122,37 @@ export function NotificationSection() {
         </div>
         <div className="space-y-2.5">
           <NotiToggle
-            label="내 씬 변경 알림"
-            description="배정된 씬의 단계가 변경되면 알려줍니다"
-            checked={notiSceneChange}
-            onChange={(v) => handleNotiToggle('sceneChange', v)}
+            label="나를 부른 알림"
+            description="@멘션, 내 댓글에 달린 답글, 담당 배정, 피드백 요청 — 항상 받아요"
+            checked
+            locked
+            onChange={() => {}}
           />
           <NotiToggle
-            label="내 씬 댓글 알림"
-            description="배정된 씬에 댓글이 달리면 알려줍니다"
-            checked={notiCommentNotify}
-            onChange={(v) => handleNotiToggle('commentNotify', v)}
+            label="내 씬 자동 알림"
+            description="담당 씬에 달린 댓글, 단계 변경 — 소리·팝업 없이 종 숫자만 올라가요"
+            checked={notiSceneAuto}
+            onChange={(v) => handleNotiToggle('sceneAuto', v)}
           />
           <NotiToggle
-            label="동기화 완료 알림"
-            description="데이터 동기화가 완료되면 알려줍니다"
-            checked={notiSyncComplete}
-            onChange={(v) => handleNotiToggle('syncComplete', v)}
+            label="리테이크 알림"
+            description="리테이크 등록·진행·해결과 리테이크에 달린 댓글"
+            checked={notiRetake}
+            onChange={(v) => handleNotiToggle('retake', v)}
           />
           <NotiToggle
-            label="OS 데스크톱 알림"
-            description="앱이 백그라운드일 때 시스템 알림을 표시합니다"
-            checked={notiOsNotification}
-            onChange={(v) => handleNotiToggle('osNotification', v)}
+            label="반응 알림"
+            description="누가 내 댓글에 이모지를 달았을 때"
+            checked={notiReaction}
+            onChange={(v) => handleNotiToggle('reaction', v)}
           />
-
-          {/* 알림 소리 토글 */}
-          <div className="flex items-center justify-between pt-1 border-t border-bg-border/15">
-            <div className="flex items-center gap-2">
-              <Volume2 size={13} className="text-text-secondary/50" />
-              <span className="text-[12px] text-text-secondary/70">알림 소리</span>
-            </div>
-            <button
-              onClick={() => handleNotiToggle('sound', !notiSound)}
-              className={cn(
-                'relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer',
-                notiSound ? 'bg-accent' : 'bg-bg-border/50',
-              )}
-            >
-              <div className={cn(
-                'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200',
-                notiSound ? 'translate-x-4' : 'translate-x-0.5',
-              )} />
-            </button>
+          <div className="pt-1 border-t border-bg-border/15">
+            <NotiToggle
+              label="Windows 알림"
+              description="앱이 뒤에 있을 때 화면 구석에 알림을 띄워요"
+              checked={notiOsNotification}
+              onChange={(v) => handleNotiToggle('osNotification', v)}
+            />
           </div>
         </div>
       </div>
@@ -197,36 +191,6 @@ export function NotificationSection() {
                 )}
               >
                 {pos.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 토스트 표시 시간 */}
-        <div className="mb-3">
-          <span className="text-[11px] text-text-secondary/50 mb-2 block">표시 시간</span>
-          <div className="flex gap-1.5">
-            {([
-              { value: 3000, label: '3초' },
-              { value: 5000, label: '5초' },
-              { value: 7000, label: '7초' },
-              { value: 10000, label: '10초' },
-            ] as const).map((dur) => (
-              <button
-                key={dur.value}
-                onClick={() => {
-                  setToastDuration(dur.value);
-                  persistNoti({ toastDuration: dur.value });
-                  window.dispatchEvent(new CustomEvent('bflow:toast-settings-changed', { detail: { toastDuration: dur.value } }));
-                }}
-                className={cn(
-                  'flex-1 text-[11px] px-2 py-1.5 rounded-lg border transition-all duration-200 cursor-pointer',
-                  toastDuration === dur.value
-                    ? 'bg-accent/20 border-accent/40 text-accent font-semibold'
-                    : 'bg-bg-card/30 border-bg-border/20 text-text-secondary/60 hover:border-bg-border/40',
-                )}
-              >
-                {dur.label}
               </button>
             ))}
           </div>
