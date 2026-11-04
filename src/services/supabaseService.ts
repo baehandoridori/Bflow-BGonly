@@ -30,7 +30,8 @@ export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
 
 // ─── 연결 ───────────────────────────────────────
 
-export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: string }> {
+/** quotaBlocked: 서버 업체가 사용량 한도로 막았다(402) — 상단 표시가 '연결 안 됨'과 구분한다. */
+export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: string; quotaBlocked?: boolean }> {
   return window.electronAPI.supabaseTestConnection();
 }
 

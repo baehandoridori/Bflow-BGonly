@@ -48,12 +48,11 @@ const PasswordChangeModal = lazy(() => import('@/components/auth/PasswordChangeM
 const UserManagerModal = lazy(() => import('@/components/auth/UserManagerModal').then(m => ({ default: m.UserManagerModal })));
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { GradientBackdrop } from '@/components/common/GradientBackdrop';
-import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
-import { readAll, readAllWithMetadata, getSupabaseRealtimeStatus } from '@/services/supabaseService';
+import { loadGasConfig, connectGas } from '@/services/gasConfigService';
+import { readAllWithMetadata, getSupabaseRealtimeStatus } from '@/services/supabaseService';
 import { testSupabaseConnection, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
 import { episodeLabelsFromMetadata } from '@/utils/loadedMetadata';
 import { createAutoSyncScheduler, MAIN_WINDOW_SYNC_INTERVALS, type AutoSyncScheduler } from '@/utils/autoSyncScheduler';
-import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
@@ -708,7 +707,7 @@ export default function App() {
   // 시간대별 인사말 토스트 (WelcomeToast 스타일로 하단 표시)
   const [greetingToast, setGreetingToast] = useState<string | null>(null);
 
-  // 데이터 로드 본체 — Supabase에서 데이터 읽기 (Sheets fallback).
+  // 데이터 로드 본체 — Supabase에서 데이터 읽기. 닿지 못하면 상단에 그 까닭을 표시한다.
   // '동기화 중' 표시는 아래 syncQueue 가 맡는다(겹친 실행 수를 세고, 직접/자동을 구분).
   const fetchAllData = useCallback(async (options: { force?: boolean } = {}) => {
     setSyncError(null);
@@ -728,49 +727,17 @@ export default function App() {
         return;
       }
 
-      // Supabase 실패 → Sheets fallback
-      setActiveDataSource('sheets');
-      console.warn('[Supabase] 연결 실패, Sheets fallback 시도');
-      const connected = await checkGasConnection();
-      if (!connected) {
-        const cfg = await loadGasConfig();
-        const url = cfg?.webAppUrl || DEFAULT_GAS_IMAGE_URL;
-        if (url) {
-          const result = await connectGas(url);
-          if (!result.ok) throw new Error('시트 연결 실패');
-          setDataConnected(true);
-        } else {
-          throw new Error('데이터 소스 연결 실패');
-        }
-      }
-
-      const loadedEpisodes = await readAll();
-      let episodes = loadedEpisodes;
-      setLastSyncTime(Date.now());
-
-      // 메타데이터 로드 (Sheets)
-      try {
-        if (window.electronAPI?.sheetsReadAllMetadata) {
-          const metaRes = await window.electronAPI.sheetsReadAllMetadata();
-          if (metaRes.ok && metaRes.data) {
-            const titles: Record<number, string> = {};
-            const memos: Record<number, string> = {};
-            for (const m of metaRes.data) {
-              if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
-              if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
-            }
-            episodes = applyAssigneeProgressMetadata(loadedEpisodes, metaRes.data);
-            setEpisodeTitles(titles);
-            setEpisodeMemos(memos);
-          }
-        }
-      } catch { /* 메타데이터 로드 실패는 무시 */ }
-      setEpisodes(episodes);
+      // 서버에 닿지 못하면 받지 않고 지금 화면을 그대로 둔다(다음 받기 때 다시 확인).
+      // 예전엔 여기서 상단을 'sheets' 로 바꾸고 시트를 거쳤지만 씬은 어차피 같은 서버에서 읽어 받아지는 것이 없었다 —
+      // 2026-10-21 사용량 한도 차단(402) 때 그 표시가 원인을 가렸다. 이제 '연결 안 됨'과 '한도로 막힘'을 나눠 보인다.
+      setActiveDataSource(sbConn.quotaBlocked ? 'quota-blocked' : 'offline');
+      console.warn('[Supabase] 연결 실패', sbConn.quotaBlocked ? '(사용량 한도로 막힘)' : '', sbConn.error ?? '');
+      setSyncError(sbConn.error ?? '서버 연결 실패');
     } catch (err) {
       console.error('[동기화 실패]', err);
       setSyncError(String(err));
     }
-  }, [setEpisodes, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setDataConnected, setActiveDataSource]);
+  }, [setEpisodes, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setActiveDataSource]);
 
   // 받아오기 조율 (움직임 폴리싱 3번): 자동(폴링·실시간 재로드·재연결)은 예전처럼 바로 돌고,
   // 직접(새로고침 버튼·단축키)은 자동이 도는 중이면 무시하지 않고 끝난 뒤 한 번 더 받아온다.

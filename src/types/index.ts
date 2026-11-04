@@ -1192,7 +1192,7 @@ export interface ElectronAPI extends CalendarApiInputContract {
   whiteboardWriteShared: (data: import('./whiteboard').WhiteboardData) => Promise<{ ok: boolean; error?: string }>;
 
   // ─── Supabase ──────────────────────────────────
-  supabaseTestConnection: () => Promise<{ ok: boolean; error?: string }>;
+  supabaseTestConnection: () => Promise<{ ok: boolean; error?: string; quotaBlocked?: boolean }>;
   /** force: 바뀐 것만 받기 캐시를 건너뛰고 전부 다시 받는다(직접 새로고침). */
   supabaseReadAll: (options?: { force?: boolean }) => Promise<unknown[]>;
   supabaseAddEpisode: (episodeNumber: number, department?: string) => Promise<void>;

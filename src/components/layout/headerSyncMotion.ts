@@ -36,7 +36,7 @@ const MIN_STOP_TRAVEL_DEG = 60;
 const STOP_MIN_MS = 240;
 const STOP_MAX_MS = 800;
 
-export type SyncLabel = 'syncing' | 'fresh';
+export type SyncLabel = 'syncing' | 'fresh' | 'stale';
 
 export function normalizeDeg(deg: number): number {
   if (!Number.isFinite(deg)) return 0;
@@ -97,6 +97,7 @@ export function planSpinStop(angleDeg: number, periodMs: number = SPIN_PERIOD_MS
  * 상태 칸에 보일 문구.
  * - 직접 새로고침이 돌거나 예약돼 있거나, 아이콘이 아직 멈추는 중이면 '동기화 중'.
  * - 앱을 막 열어 아직 한 번도 받아오지 못했으면(lastSyncTime 없음) 자동이라도 '동기화 중' — '최신 상태'는 거짓말이다.
+ * - 서버에 닿지 못하면(offline) '최신 상태' 대신 마지막으로 받은 시각('14:05 기준') — 옆의 '서버 연결 안 됨'과 어긋나지 않게(2026-10-21).
  * - 그 외(자동 받아오기 포함)는 '최신 상태' 그대로.
  */
 export function resolveSyncLabel(input: {
@@ -104,9 +105,11 @@ export function resolveSyncLabel(input: {
   syncKind: SyncKind | null;
   lastSyncTime: number | null;
   spinning: boolean;
+  offline?: boolean;
 }): SyncLabel {
   if (input.syncKind === 'manual' || input.spinning) return 'syncing';
   if (input.isSyncing && input.lastSyncTime === null) return 'syncing';
+  if (input.offline) return 'stale';
   return 'fresh';
 }
 
