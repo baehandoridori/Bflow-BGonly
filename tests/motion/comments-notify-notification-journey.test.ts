@@ -233,7 +233,9 @@ test('알림 카드 클래스는 종류별(bflow-toast--<종류>)', () => {
 
 test('실시간 수신 경로만 종·배지에 신호를 준다 — 쌓인 알림 불러오기·놓친 알림 모으기는 신호 없음', () => {
   const dispatch = bodyOf(helper, 'export function dispatchNotification(');
-  assert.match(dispatch, /const unreadBefore = store\.unreadCount;\n\s*const notificationId = store\.addNotification\(/);
+  // v1.146.0: 같은 알림이 이미 목록에 있는지 먼저 본다(합쳐지면 토스트 없음) — 그 사이 몇 줄이 들어간다.
+  assert.match(dispatch, /const unreadBefore = store\.unreadCount;[\s\S]{0,500}?const notificationId = store\.addNotification\(/);
+  assert.match(dispatch, /if \(alreadyListed \|\| options\.quiet\) return;/);
   // 리테이크 알림은 metadata(revisionAction)로 나를 부른 것인지 가린다(검증 지적 acc-comments-notify-9).
   assert.match(dispatch, /\}\);\n\s*noteLiveNotificationArrival\(payload\.type, unreadBefore, payload\.metadata\);/);
   const note = bodyOf(helper, 'export function noteLiveNotificationArrival(');

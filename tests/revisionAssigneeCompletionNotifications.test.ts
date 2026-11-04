@@ -215,7 +215,8 @@ test('retake completion notifications use a selected-recipient broadcast path', 
   assert.match(main, /supabase:dispatch-retake-assignee-completion-notification/);
   assert.match(broadcast, /retake-assignee-completion/);
   assert.match(app, /retake-assignee-completion/);
-  assert.match(app, /if \(notiSettings\.commentNotify === false\) return/);
+  // v1.146.0(§6.4): 설정 '리테이크 알림'.
+  assert.match(app, /if \(notiSettings\.retake === false\) return/);
   assert.match(app, /const dedupeKey = `revision:\$\{p\.revisionId \?\? ''\}:assignee_done:\$\{p\.updatedAt \?\? ''\}`/);
   assert.match(app, /isGeneralRevisionSceneKey/);
   assert.match(app, /const sceneKey = p\.sceneKey;/);

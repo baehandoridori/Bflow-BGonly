@@ -15,8 +15,9 @@ test('revision comment notifications include the retake requester even if the re
   assert.match(helper, /notifyUserIds/);
   assert.match(helper, /mentionedUserIds/);
   assert.match(helper, /new Set<string>/);
-  assert.match(app, /buildRevisionNotificationUserIds\(\{/);
-  assert.match(app, /requesterId:\s*rev\.requesterId/);
+  // v1.146.0(§6.1): 리테이크 댓글 알림 대상(요청자·담당자·알림 대상)은 판정 함수 하나가 정한다.
+  const decision = readFileSync('src/utils/sceneCommentNotification.ts', 'utf8');
+  assert.match(decision, /\.\.\.\(revision\.requesterId \? \[revision\.requesterId\] : \[\]\),\s*\.\.\.\(revision\.assigneeIds \?\? \[\]\),\s*\.\.\.\(revision\.notifyUserIds \?\? \[\]\),/);
 });
 
 test('revision notification recipient helper merges requester, notify users, and mentions without duplicates', async () => {

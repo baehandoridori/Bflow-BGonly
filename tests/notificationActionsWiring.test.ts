@@ -119,7 +119,11 @@ test('notification action labels describe the actual destination', () => {
 });
 
 test('revision comment notification routes into the revision comment thread', () => {
-  assert.match(app, /commentId: newComment\.id \?\? undefined/);
+  // v1.146.0(§6.1): 리테이크 댓글 알림은 'mention'(강함)으로 오고, 이동은 예전처럼 리테이크 탭의 그 댓글로.
+  const decision = readFileSync('src/utils/sceneCommentNotification.ts', 'utf8');
+  const navigation = readFileSync('src/utils/notificationSceneNavigation.ts', 'utf8');
+  assert.match(decision, /commentId: comment\.commentId,/);
+  assert.match(navigation, /if \(type === 'mention' && asString\(metadata\?\.revisionId\)\) \{\s*return \{\s*\.\.\.base,\s*initialTab: 'revisions',\s*focusRevisionId: asString\(metadata\?\.revisionId\),\s*focusRevisionCommentId: asString\(metadata\?\.commentId\),/);
   assert.match(appStore, /focusRevisionCommentId\?: string/);
   assert.match(scenesView, /focusRevisionCommentId: detail\.focusRevisionCommentId/);
   assert.match(sceneDetailModal, /commentId: focusRevisionCommentId/);
