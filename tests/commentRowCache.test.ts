@@ -154,6 +154,27 @@ test('순서가 뒤바뀐 신호: 지운 댓글은 늦게 온 추가 신호나 �
   assert.deepEqual((await loading).map((r) => r.id), ['c2']);
 });
 
+test('서버 조회로 받은 수정도 기록 — 그 뒤 실시간 수정 다음에 온 옛 방송이 되돌리지 않는다(코덱스 4차)', async () => {
+  const A = '2026-11-04T01:00:00+00:00';
+  const cache = createCommentRowCache({ read: async () => [row('c1', { text: '수정 A', editedAt: A })] });
+  await cache.load('part-bg');
+  cache.apply({ kind: 'upsert', source: 'realtime', row: row('c1', { text: '수정 B', editedAt: '2026-11-04T01:03:00+00:00' }) });
+  assert.deepEqual(cache.apply({ kind: 'patch', source: 'broadcast', id: 'c1', fields: { text: '수정 A', editedAt: '2026-11-04T01:00:00.000Z' } }), []);
+  assert.equal(cache.findById('c1')?.text, '수정 B');
+});
+
+test('읽는 도중 온 실시간 수정이 조회 결과보다 새것이고, 그 사이 온 옛 방송은 덧씌우지 않는다', async () => {
+  const gate = deferred<CommentRow[]>();
+  const cache = createCommentRowCache({ read: () => gate.promise });
+  const loading = cache.load('part-bg');
+  cache.apply({ kind: 'upsert', source: 'realtime', row: row('c1', { text: '수정 B', editedAt: '2026-11-04T01:03:00+00:00' }) });
+  cache.apply({ kind: 'patch', source: 'broadcast', id: 'c1', fields: { text: '수정 A', editedAt: '2026-11-04T01:00:00.000Z' } });
+  // 조회는 수정 B 전에 시작돼 수정 A 를 돌려준다
+  gate.resolve([row('c1', { text: '수정 A', editedAt: '2026-11-04T01:00:00+00:00' })]);
+  const rows = await loading;
+  assert.equal(rows.find((r) => r.id === 'c1')?.text, '수정 B');
+});
+
 test('applyCommentRowOp: 내용이 같으면 같은 배열을 돌려준다', () => {
   const rows = [row('c1')];
   const same = applyCommentRowOp(rows, { kind: 'upsert', row: row('c1') });

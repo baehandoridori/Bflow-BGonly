@@ -187,28 +187,47 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
       ? rows.filter((row) => !deletedIds.has(row.id))
       : rows
   );
-  // 실시간(커밋 순서)으로 이미 지나간 수정 — 그 수정의 방송이 늦게 와도 그 뒤 수정을 되돌리지 않게(코덱스 2차).
-  //   수정 시각은 PC 시계라 크기 비교를 하지 않고 '실시간으로 이미 보고 지나간 값인가'만 본다.
-  const realtimeEdits = new Map<string, { latest: string | null; seen: Set<string> }>();
-  const REALTIME_EDIT_LIMIT = 2000;
-  const noteRealtimeEdit = (id: string, rawEditedAt: string | null) => {
-    const editedAt = canonicalTimestamp(rawEditedAt);
-    let record = realtimeEdits.get(id);
+  // 서버 순서로 이미 지나간 수정 — 그 수정의 방송이 늦게 와도 그 뒤 수정을 되돌리지 않게(코덱스 2·4차).
+  //   수정 시각은 PC 시계라 크기 비교를 하지 않고 '서버 순서(실시간 이벤트·서버 조회 결과)로 이미 보고 지나간 값인가'만 본다.
+  //   tick 은 이 창에서 기록한 순서 — 조회를 시작한 뒤에 기록된 실시간 수정이 조회 결과보다 새것이다.
+  const serverEdits = new Map<string, { latest: string | null; seen: Set<string>; tick: number }>();
+  const SERVER_EDIT_LIMIT = 2000;
+  let editTick = 0;
+  const editRecord = (id: string) => {
+    let record = serverEdits.get(id);
     if (!record) {
-      record = { latest: null, seen: new Set() };
-      realtimeEdits.set(id, record);
-      if (realtimeEdits.size > REALTIME_EDIT_LIMIT) {
-        const first = realtimeEdits.keys().next().value;
-        if (first !== undefined) realtimeEdits.delete(first);
+      record = { latest: null, seen: new Set(), tick: 0 };
+      serverEdits.set(id, record);
+      if (serverEdits.size > SERVER_EDIT_LIMIT) {
+        const first = serverEdits.keys().next().value;
+        if (first !== undefined) serverEdits.delete(first);
       }
     }
+    return record;
+  };
+  /** 실시간 이벤트(커밋 순서) — 지금 가장 새 수정이다. */
+  const noteRealtimeEdit = (id: string, rawEditedAt: string | null) => {
+    const editedAt = canonicalTimestamp(rawEditedAt);
+    const record = editRecord(id);
     record.latest = editedAt;
     if (editedAt) record.seen.add(editedAt);
+    record.tick = ++editTick;
+  };
+  /** 서버 조회 결과 — 조회를 시작한 뒤에 실시간으로 받은 수정이 없을 때만 가장 새 수정이다(코덱스 4차). */
+  const noteFetchedEdit = (id: string, rawEditedAt: string | null, fetchStartedTick: number) => {
+    const editedAt = canonicalTimestamp(rawEditedAt);
+    if (!editedAt) return;
+    const record = editRecord(id);
+    record.seen.add(editedAt);
+    if (record.tick <= fetchStartedTick) {
+      record.latest = editedAt;
+      record.tick = ++editTick;
+    }
   };
   /** 방송으로 온 수정이 실시간으로 이미 지나간 옛 수정인가. */
   const isSupersededBroadcastPatch = (op: CommentRowOp): boolean => {
     if (op.kind !== 'patch' || op.source !== 'broadcast' || !op.fields.editedAt) return false;
-    const record = realtimeEdits.get(op.id);
+    const record = serverEdits.get(op.id);
     const editedAt = canonicalTimestamp(op.fields.editedAt);
     return !!record && !!editedAt && record.seen.has(editedAt) && record.latest !== editedAt;
   };
@@ -226,11 +245,17 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
       const running = inFlight.get(partId);
       if (running) return running.promise;
       const startedEpoch = epochOf(partId);
+      const startedTick = editTick;
       const pending: CommentRowOp[] = [];
       let entry: { promise: Promise<readonly CommentRow[]>; pending: CommentRowOp[] } | null = null;
       const promise = deps.read(partId).then((fetched) => {
         let rows: readonly CommentRow[] = Array.isArray(fetched) ? fetched : [];
-        for (const op of pending) rows = applyCommentRowOp(rows, opForPart(op, partId)).rows;
+        for (const row of rows) noteFetchedEdit(row.id, row.editedAt ?? null, startedTick);
+        for (const op of pending) {
+          // 읽는 동안 온 방송 수정이 조회 결과(또는 그 뒤 실시간 수정)보다 옛것이면 덧씌우지 않는다.
+          if (isSupersededBroadcastPatch(op)) continue;
+          rows = applyCommentRowOp(rows, opForPart(op, partId)).rows;
+        }
         rows = withoutDeleted(rows);
         if (inFlight.get(partId) === entry) inFlight.delete(partId);
         if (epochOf(partId) === startedEpoch) rowsByPart.set(partId, rows);
