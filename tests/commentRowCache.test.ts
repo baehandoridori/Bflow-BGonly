@@ -113,13 +113,26 @@ test('다른 파트로 옮겨 간 행은 예전 파트에서 빠진다', async (
 test('순서가 뒤바뀐 신호: 수정 뒤에 늦게 온 추가 스냅샷은 수정을 되돌리지 않는다', async () => {
   const cache = createCommentRowCache({ read: async () => [] });
   await cache.load('part-bg');
-  cache.apply({ kind: 'upsert', row: row('c1', { text: '고친 글', editedAt: '2026-11-04T02:00:00.000Z' }) });
-  assert.deepEqual(cache.apply({ kind: 'upsert', row: row('c1', { text: '처음 글', editedAt: null }) }), [], '늦게 온 추가 방송');
+  cache.apply({ kind: 'upsert', source: 'realtime', row: row('c1', { text: '고친 글', editedAt: '2026-11-04T02:00:00.000Z' }) });
+  assert.deepEqual(cache.apply({ kind: 'upsert', source: 'broadcast', row: row('c1', { text: '처음 글', editedAt: null }) }), [], '늦게 온 추가 방송');
   assert.equal(cache.findById('c1')?.text, '고친 글');
-  assert.deepEqual(cache.apply({ kind: 'patch', id: 'c1', fields: { text: '더 이른 수정', editedAt: '2026-11-04T01:00:00.000Z' } }), []);
-  assert.equal(cache.findById('c1')?.text, '고친 글');
-  assert.deepEqual(cache.apply({ kind: 'patch', id: 'c1', fields: { text: '나중 수정', editedAt: '2026-11-04T03:00:00.000Z' } }), ['part-bg']);
-  assert.equal(cache.findById('c1')?.text, '나중 수정');
+});
+
+test('PC 시계가 달라도 실시간(커밋 순서)을 따르고, 이미 지나간 수정의 늦은 방송은 버린다', async () => {
+  const cache = createCommentRowCache({ read: async () => [] });
+  await cache.load('part-bg');
+  // 시계가 2분 빠른 PC 의 수정 → 정확한 시계 PC 의 수정(수정 시각은 더 '이르게' 찍힘)
+  const fast = '2026-11-04T03:02:00.000Z';
+  const correct = '2026-11-04T03:00:30.000Z';
+  cache.apply({ kind: 'upsert', source: 'realtime', row: row('c1', { text: '빠른 시계 수정', editedAt: fast }) });
+  assert.deepEqual(cache.apply({ kind: 'upsert', source: 'realtime', row: row('c1', { text: '정확한 시계 수정', editedAt: correct }) }), ['part-bg'], '나중 커밋이 이긴다');
+  assert.equal(cache.findById('c1')?.text, '정확한 시계 수정');
+  // 첫 수정의 방송이 늦게 도착 — 실시간으로 이미 지나간 값이라 버린다
+  assert.deepEqual(cache.apply({ kind: 'patch', source: 'broadcast', id: 'c1', fields: { text: '빠른 시계 수정', editedAt: fast } }), []);
+  assert.equal(cache.findById('c1')?.text, '정확한 시계 수정');
+  // 실시간보다 먼저 온 새 수정 방송은 바로 반영(빠른 길)
+  assert.deepEqual(cache.apply({ kind: 'patch', source: 'broadcast', id: 'c1', fields: { text: '세 번째 수정', editedAt: '2026-11-04T02:00:00.000Z' } }), ['part-bg']);
+  assert.equal(cache.findById('c1')?.text, '세 번째 수정');
 });
 
 test('순서가 뒤바뀐 신호: 지운 댓글은 늦게 온 추가 신호나 삭제 전에 시작한 조회로 되살아나지 않는다', async () => {
@@ -179,7 +192,7 @@ test('실시간 이벤트 정리: 추가·수정은 행 전체로, 삭제는 id 
     if (insert.op.kind === 'upsert') assert.equal(insert.op.row.parentCommentId, 'root');
   }
   const del = normalizeRealtimeCommentChange({ eventType: 'DELETE', old: { id: 'c1' } });
-  assert.deepEqual(del, { kind: 'op', op: { kind: 'delete', id: 'c1' }, partId: null, commentId: 'c1', action: 'delete' });
+  assert.deepEqual(del, { kind: 'op', op: { kind: 'delete', id: 'c1', source: 'realtime' }, partId: null, commentId: 'c1', action: 'delete' });
   const character = normalizeRealtimeCommentChange({ eventType: 'UPDATE', new: { id: 'c2', character_id: 'hero' } });
   assert.deepEqual(character, { kind: 'character', characterId: 'hero', commentId: 'c2', action: 'edit' });
   const partial = normalizeRealtimeCommentChange({ eventType: 'UPDATE', new: { id: 'c3', part_id: 'p' } });
@@ -194,9 +207,9 @@ test('방송 정리: 예전 버전의 추가 방송(이미지·시각 없음)은
   const characterAdd = normalizeCommentBroadcastChange('comment-added', { sceneId: 'char:hero', commentId: 'c9' });
   assert.deepEqual(characterAdd, { kind: 'character', characterId: 'hero', commentId: 'c9', action: 'add' });
   const updated = normalizeCommentBroadcastChange('comment-updated', { commentId: 'c1', partId: 'p', text: '새', mentions: ['a'], editedAt: '2026-11-04T01:00:00Z' });
-  assert.deepEqual(updated, { kind: 'op', op: { kind: 'patch', id: 'c1', fields: { text: '새', mentions: ['a'], editedAt: '2026-11-04T01:00:00Z' } }, partId: 'p', commentId: 'c1', action: 'edit' });
+  assert.deepEqual(updated, { kind: 'op', op: { kind: 'patch', id: 'c1', fields: { text: '새', mentions: ['a'], editedAt: '2026-11-04T01:00:00Z' }, source: 'broadcast' }, partId: 'p', commentId: 'c1', action: 'edit' });
   const deleted = normalizeCommentBroadcastChange('comment-deleted', { commentId: 'c1', partId: 'p' });
-  assert.deepEqual(deleted, { kind: 'op', op: { kind: 'delete', id: 'c1' }, partId: 'p', commentId: 'c1', action: 'delete' });
+  assert.deepEqual(deleted, { kind: 'op', op: { kind: 'delete', id: 'c1', source: 'broadcast' }, partId: 'p', commentId: 'c1', action: 'delete' });
   assert.deepEqual(normalizeCommentBroadcastChange('comment-deleted', { characterId: 'hero', commentId: 'c1' }), { kind: 'character', characterId: 'hero', commentId: 'c1', action: 'delete' });
 });
 

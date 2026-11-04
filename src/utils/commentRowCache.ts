@@ -50,13 +50,22 @@ export interface CommentStoreItem {
 
 export type CommentStoreMap = Record<string, CommentStoreItem[]>;
 
+/**
+ * 변경이 어디서 왔나.
+ * - realtime: Supabase 실시간(postgres_changes) — DB 가 커밋한 순서대로 온다. 이 순서를 기준으로 삼는다.
+ * - broadcast: 댓글 방송 — 빠르지만 실시간과 따로 와서 순서가 바뀔 수 있다.
+ * - local: 이 창에서 방금 저장한 것.
+ * 수정 시각(editedAt)은 각 PC 시계로 찍히므로 앞뒤 비교에 쓰지 않는다(코덱스 2차).
+ */
+export type CommentRowSource = 'realtime' | 'broadcast' | 'local';
+
 export type CommentRowOp =
   /** 전체 행을 안다 — 없으면 넣고, 있으면 바꾼다. */
-  | { kind: 'upsert'; row: CommentRow }
+  | { kind: 'upsert'; row: CommentRow; source?: CommentRowSource }
   /** 일부 칸만 안다(수정 방송) — 있을 때만 바꾼다. */
-  | { kind: 'patch'; id: string; fields: Partial<Omit<CommentRow, 'id'>> }
+  | { kind: 'patch'; id: string; fields: Partial<Omit<CommentRow, 'id'>>; source?: CommentRowSource }
   /** 지운다. 답글의 부모 참조는 비운다(DB ON DELETE SET NULL 과 같게). */
-  | { kind: 'delete'; id: string };
+  | { kind: 'delete'; id: string; source?: CommentRowSource };
 
 const COMPARED_FIELDS: readonly (keyof CommentRow)[] = [
   'partId', 'sceneId', 'userId', 'userName', 'text', 'createdAt', 'editedAt', 'revisionId', 'parentCommentId',
@@ -78,27 +87,15 @@ function sameRow(a: CommentRow, b: CommentRow): boolean {
   return sameStringList(a.mentions, b.mentions) && sameStringList(a.images, b.images);
 }
 
-/**
- * 받은 내용이 이미 가진 것보다 오래됐는가(코덱스 1차 — 방송과 실시간은 따로 오므로 순서가 바뀔 수 있다).
- * 수정 시각(editedAt)으로만 판단한다: 가진 행이 수정됐는데 받은 쪽이 수정 전(없음)이거나 더 이른 수정이면 오래된 것.
- */
-function isStaleAgainst(existing: CommentRow, incomingEditedAt: string | null | undefined): boolean {
-  if (!existing.editedAt) return false;
-  if (!incomingEditedAt) return true;
-  const a = Date.parse(existing.editedAt);
-  const b = Date.parse(incomingEditedAt);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
-  return b < a;
-}
-
 /** 행 목록에 변경 하나를 적용한다. 바뀐 게 없으면 같은 배열을 돌려준다(changed=false). */
 export function applyCommentRowOp(rows: readonly CommentRow[], op: CommentRowOp): { rows: readonly CommentRow[]; changed: boolean } {
   if (op.kind === 'upsert') {
     const index = rows.findIndex((row) => row.id === op.row.id);
     if (index < 0) return { rows: [...rows, op.row], changed: true };
     if (sameRow(rows[index], op.row)) return { rows, changed: false };
-    // 늦게 도착한 옛 스냅샷(예: 수정 뒤에 온 추가 방송)이 새 수정을 덮지 않게.
-    if (isStaleAgainst(rows[index], op.row.editedAt)) return { rows, changed: false };
+    // 늦게 도착한 추가 방송(수정 전 스냅샷)이 이미 받은 수정을 덮지 않게(코덱스 1차). 시계 비교 없이 '수정됨 ↔ 수정 전'만 본다.
+    //   실시간은 커밋 순서대로 오므로 그대로 따른다.
+    if (op.source !== 'realtime' && rows[index].editedAt && !op.row.editedAt) return { rows, changed: false };
     const next = rows.slice();
     next[index] = op.row;
     return { rows: next, changed: true };
@@ -106,7 +103,6 @@ export function applyCommentRowOp(rows: readonly CommentRow[], op: CommentRowOp)
   if (op.kind === 'patch') {
     const index = rows.findIndex((row) => row.id === op.id);
     if (index < 0) return { rows, changed: false };
-    if (op.fields.editedAt !== undefined && isStaleAgainst(rows[index], op.fields.editedAt)) return { rows, changed: false };
     const merged: CommentRow = { ...rows[index], ...op.fields, id: op.id };
     if (sameRow(rows[index], merged)) return { rows, changed: false };
     const next = rows.slice();
@@ -181,6 +177,29 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
       ? rows.filter((row) => !deletedIds.has(row.id))
       : rows
   );
+  // 실시간(커밋 순서)으로 이미 지나간 수정 — 그 수정의 방송이 늦게 와도 그 뒤 수정을 되돌리지 않게(코덱스 2차).
+  //   수정 시각은 PC 시계라 크기 비교를 하지 않고 '실시간으로 이미 보고 지나간 값인가'만 본다.
+  const realtimeEdits = new Map<string, { latest: string | null; seen: Set<string> }>();
+  const REALTIME_EDIT_LIMIT = 2000;
+  const noteRealtimeEdit = (id: string, editedAt: string | null) => {
+    let record = realtimeEdits.get(id);
+    if (!record) {
+      record = { latest: null, seen: new Set() };
+      realtimeEdits.set(id, record);
+      if (realtimeEdits.size > REALTIME_EDIT_LIMIT) {
+        const first = realtimeEdits.keys().next().value;
+        if (first !== undefined) realtimeEdits.delete(first);
+      }
+    }
+    record.latest = editedAt;
+    if (editedAt) record.seen.add(editedAt);
+  };
+  /** 방송으로 온 수정이 실시간으로 이미 지나간 옛 수정인가. */
+  const isSupersededBroadcastPatch = (op: CommentRowOp): boolean => {
+    if (op.kind !== 'patch' || op.source !== 'broadcast' || !op.fields.editedAt) return false;
+    const record = realtimeEdits.get(op.id);
+    return !!record && record.seen.has(op.fields.editedAt) && record.latest !== op.fields.editedAt;
+  };
 
   const epochOf = (partId: string) => `${globalEpoch}:${epochByPart.get(partId) ?? 0}`;
 
@@ -216,6 +235,8 @@ export function createCommentRowCache(deps: CommentRowCacheDeps): CommentRowCach
     apply(op) {
       if (op.kind === 'delete') rememberDeleted(op.id);
       else if (op.kind === 'upsert' && deletedIds.has(op.row.id)) return [];
+      if (isSupersededBroadcastPatch(op)) return [];
+      if (op.kind === 'upsert' && op.source === 'realtime') noteRealtimeEdit(op.row.id, op.row.editedAt ?? null);
       const changedParts: string[] = [];
       for (const [partId, rows] of rowsByPart) {
         if (!opTouchesPart(op, partId, rows)) continue;
@@ -412,11 +433,11 @@ export function normalizeRealtimeCommentChange(payload: unknown): RemoteCommentC
   if (characterId) return { kind: 'character', characterId, commentId, action };
   if (action === 'delete') {
     if (!commentId) return { kind: 'invalidate', partId: str(old?.part_id), commentId: null, action };
-    return { kind: 'op', op: { kind: 'delete', id: commentId }, partId: str(old?.part_id), commentId, action };
+    return { kind: 'op', op: { kind: 'delete', id: commentId, source: 'realtime' }, partId: str(old?.part_id), commentId, action };
   }
   const row = commentRowFromDbRecord(next);
   if (!row) return { kind: 'invalidate', partId: str(next?.part_id), commentId, action };
-  return { kind: 'op', op: { kind: 'upsert', row }, partId: row.partId, commentId: row.id, action };
+  return { kind: 'op', op: { kind: 'upsert', row, source: 'realtime' }, partId: row.partId, commentId: row.id, action };
 }
 
 /**
@@ -457,6 +478,7 @@ export function normalizeCommentBroadcastChange(event: string, payload: unknown)
           revisionId: str(p.revisionId),
           parentCommentId: str(p.parentCommentId),
         },
+        source: 'broadcast',
       },
       partId,
       commentId,
@@ -476,13 +498,13 @@ export function normalizeCommentBroadcastChange(event: string, payload: unknown)
     const editedAt = str(p.editedAt);
     if (editedAt) fields.editedAt = editedAt;
     if (fields.text === undefined) return { kind: 'invalidate', partId, commentId, action: 'edit' };
-    return { kind: 'op', op: { kind: 'patch', id: commentId, fields }, partId, commentId, action: 'edit' };
+    return { kind: 'op', op: { kind: 'patch', id: commentId, fields, source: 'broadcast' }, partId, commentId, action: 'edit' };
   }
 
   if (event === 'comment-deleted') {
     if (characterId) return { kind: 'character', characterId, commentId, action: 'delete' };
     if (!commentId) return { kind: 'invalidate', partId, commentId: null, action: 'delete' };
-    return { kind: 'op', op: { kind: 'delete', id: commentId }, partId, commentId, action: 'delete' };
+    return { kind: 'op', op: { kind: 'delete', id: commentId, source: 'broadcast' }, partId, commentId, action: 'delete' };
   }
 
   return { kind: 'ignore' };

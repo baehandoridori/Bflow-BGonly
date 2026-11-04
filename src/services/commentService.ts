@@ -531,7 +531,7 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
     // 자기 창 카드 뷰 뱃지·패널은 이 신호로 캐시를 다시 본다(invalidatePartCache 호출 금지 — 캐시를 버리면 다시 읽는다).
     // 다른 창·다른 PC 는 실시간 comments 이벤트와 comment-added 방송으로 같은 행을 받는다.
     applyCommentOpToCaches(
-      { kind: 'upsert', row: {
+      { kind: 'upsert', source: 'local', row: {
         id: comment.id, partId: partUuid, sceneId,
         userId: comment.userId, userName: comment.userName, text: comment.text,
         mentions: comment.mentions ?? [], images: comment.images ?? [],
@@ -572,7 +572,7 @@ export async function updateComment(
     await window.electronAPI.supabaseEditComment(commentId, text, mentions, images);
     // 파트 행 캐시의 그 댓글만 바꾼다(BG·ACT 양쪽 반영, 재조회 없음). 다른 PC 는 comment-updated 방송·실시간으로 받는다.
     applyCommentOpToCaches(
-      { kind: 'patch', id: commentId, fields: { text, mentions, ...imagesPatch, editedAt } },
+      { kind: 'patch', id: commentId, fields: { text, mentions, ...imagesPatch, editedAt }, source: 'local' },
       { commentId, action: 'edit', sceneId, alsoSheet: sheetName },
     );
     return;
@@ -602,7 +602,7 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
     // v1.24.0 P1 #5: 부모 삭제 시 답글의 parentCommentId 도 NULL 갱신 (DB ON DELETE SET NULL 과 일관).
     //   안 그러면 답글이 stale 한 parentCommentId 를 들고 있어 "원답글이 삭제된 답글" orphan 배지가 잘못 노출됨.
     applyCommentOpToCaches(
-      { kind: 'delete', id: commentId },
+      { kind: 'delete', id: commentId, source: 'local' },
       { commentId, action: 'delete', sceneId, alsoSheet: sheetName },
     );
     return;
