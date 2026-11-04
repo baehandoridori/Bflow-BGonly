@@ -238,6 +238,16 @@ export function buildNotificationSceneModalRequest(
     partId: target.partId,
   };
 
+  // v1.146.0(§6.1): 리테이크 댓글 알림은 'mention' 으로 오지만(강한 알림) 이동은 예전처럼 리테이크 탭의 그 댓글로.
+  if (type === 'mention' && asString(metadata?.revisionId)) {
+    return {
+      ...base,
+      initialTab: 'revisions',
+      focusRevisionId: asString(metadata?.revisionId),
+      focusRevisionCommentId: asString(metadata?.commentId),
+    };
+  }
+
   if (type === 'comment' || type === 'mention' || type === 'comment_reaction') {
     // v1.29.0: comment_reaction 도 동일한 점프 시맨틱 — 댓글 패널 자동 펼치고 해당 댓글로 스크롤.
     return {

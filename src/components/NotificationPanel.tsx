@@ -403,7 +403,7 @@ export function NotificationBell() {
 
 // ─── 드롭다운 패널 ───────────────────────────────────
 function NotificationDropdown() {
-  const { notifications, markAllAsRead, setPanelOpen, unreadCount } = useNotificationStore();
+  const { notifications, markAllAsRead, setPanelOpen, unreadCount, outstandingRetakeCount } = useNotificationStore();
   const ref = useRef<HTMLDivElement>(null);
   const showDevTools = isDevPreviewNotificationToolsEnabled();
   const { reduce } = useMotionPref();
@@ -677,6 +677,25 @@ function NotificationDropdown() {
             )}
           </div>
         </div>
+
+        {/* v1.146.0(§6.3): 끝내지 않은 내 담당 리테이크 — 목록에 쌓지 않고 맨 위 한 줄로. */}
+        {outstandingRetakeCount > 0 && (
+          <div className="flex items-center justify-between gap-2 border-b border-bg-border/40 px-3 py-2 text-[12px]">
+            <span className="text-text-primary">담당 리테이크 <span className="font-semibold tabular-nums">{outstandingRetakeCount}</span>건</span>
+            <button
+              type="button"
+              onClick={() => {
+                const app = useAppStore.getState();
+                app.pushNavigationBackTarget();
+                app.setView('retake-hub');
+                setPanelOpen(false);
+              }}
+              className="text-[12px] font-medium text-accent hover:underline underline-offset-2 cursor-pointer"
+            >
+              허브 열기
+            </button>
+          </div>
+        )}
 
         {/* 알림 목록 */}
         <div
