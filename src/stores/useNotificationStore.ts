@@ -142,6 +142,8 @@ interface NotificationState {
   // v1.29.0: 이모지 반응 알림 — 묶음 UPSERT / 행 삭제 / catch-up
   upsertCommentReaction: (n: AppNotification) => void;
   removeNotificationById: (id: string) => void;
+  /** v1.145.0: 지워진 댓글의 알림(씬 댓글·멘션·리테이크 댓글)을 뺀다. 없으면 아무것도 하지 않는다. */
+  removeNotificationsForComment: (commentId: string) => void;
   /** v1.29.0: catch-up 결과 머지.
    *  - sinceISO: catch-up 시작 시점의 lastSeen. 이 이전 알림은 보존 (이미 정합).
    *  - fetchStartedISO: fetch loop 진입 직전 시각. 이 이후 store 에 들어온 알림은
@@ -325,6 +327,20 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const list = get().notifications;
     if (!list.some((x) => x.id === id)) return;
     const next = list.filter((x) => x.id !== id);
+    setNotifications(set, next);
+    persistToDisk(get().activeUserId, next);
+  },
+
+  removeNotificationsForComment: (commentId) => {
+    if (!commentId) return;
+    const list = get().notifications;
+    const next = list.filter((n) => {
+      const identity = getNotificationIdentity(n);
+      if (!identity) return true;
+      if (identity === `scene_comment:${commentId}`) return false;
+      return !(identity.startsWith('revision_comment:') && identity.endsWith(`:${commentId}`));
+    });
+    if (next.length === list.length) return;
     setNotifications(set, next);
     persistToDisk(get().activeUserId, next);
   },

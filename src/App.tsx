@@ -55,8 +55,8 @@ import { episodeLabelsFromMetadata } from '@/utils/loadedMetadata';
 import { createAutoSyncScheduler, MAIN_WINDOW_SYNC_INTERVALS, type AutoSyncScheduler } from '@/utils/autoSyncScheduler';
 import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
-import { invalidatePartCache } from '@/services/commentService';
-import { invalidateRevisionsCache } from '@/services/revisionService';
+import { applyCommentBroadcast, applyRealtimeCommentPayload } from '@/services/commentService';
+import { getCanonicalRevision, invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { keepPendingSceneFields, onSceneSaveSessionEnded } from '@/services/sceneSaveRetry';
 import { remotePhaseFlash, remoteStageFlash, type RemoteSceneFlashContext, type RemoteSceneFlashSignal } from '@/utils/remoteSceneFlash';
@@ -609,12 +609,16 @@ export default function App() {
     const notiSettings = notiSettingsRef.current;
     if (notiSettings.commentNotify === false) return true;
 
+    // v1.145.0(씬 댓글 B안 §7.5): 같은 댓글이 실시간·방송 두 길로 오면 두 번째는 조회 전에 거른다.
+    //   예전엔 리테이크가 스토어에 없을 때마다 리테이크 전체를 다시 읽었다 — 이제 그 리테이크 하나만 읽는다.
+    const dedupeKey = `revcomment:${newComment.id ?? ''}:${newComment.revision_id}`;
+    if (!dedupeNotification(dedupeKey)) return true;
+
     import('@/stores/useRevisionStore').then(async ({ useRevisionStore }) => {
       let rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
-      // 리테이크 store 가 비어있으면 fresh 세션에서도 알림이 빠지지 않게 lazy load 후 재시도.
+      // 리테이크 store 에 없으면(새 세션·방금 만든 리테이크) 그 리테이크 하나만 서버에서 확인한다.
       if (!rev) {
-        await useRevisionStore.getState().loadRevisions();
-        rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
+        rev = (await getCanonicalRevision(newComment.revision_id!)) ?? undefined;
         if (!rev) return;
       }
 
@@ -630,9 +634,6 @@ export default function App() {
       }));
       const isMentioned = mentionedNames.includes(me.name);
       if (!targets.has(me.id)) return;
-
-      const dedupeKey = `revcomment:${newComment.id ?? ''}:${newComment.revision_id}`;
-      if (!dedupeNotification(dedupeKey)) return;
 
       const dataState = useDataStore.getState();
       const sceneByUuid = newComment.scene_uuid
@@ -1770,7 +1771,7 @@ export default function App() {
         const characterId = (payload?.new as { character_id?: string } | undefined)?.character_id
           ?? (payload?.old as { character_id?: string } | undefined)?.character_id;
         if (characterId) {
-          window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { characterId } }));
+          applyRealtimeCommentPayload(payload);
           return;
         }
         // INSERT 이벤트: 다른 사용자가 내 씬에 댓글 / @멘션 시 알림
@@ -1798,9 +1799,10 @@ export default function App() {
           // 조건: revision_id 있음 + 그 리테이크 notifyUserIds 에 나 포함 + 내가 작성자 아님.
           if (dispatchRevisionCommentNotification(newComment)) {
             // 리테이크 맥락 댓글은 일반 댓글 알림 경로 스킵.
-            // 코덱스 P2 fix (2026-05-10): early return *전* 캐시 무효화. 안 그러면 리테이크 댓글이
-            //   캐시에 stale 한 상태로 남아 일반 댓글 뷰에서 누락됨 (broadcast 가 늦거나 끊긴 케이스).
-            invalidatePartCache();
+            // 코덱스 P2 fix (2026-05-10): early return *전* 캐시 반영. 안 그러면 리테이크 댓글이
+            //   캐시에 없는 채로 남아 일반 댓글 뷰에서 누락됨 (broadcast 가 늦거나 끊긴 케이스).
+            //   v1.145.0: 캐시를 비우지 않고 받은 행을 끼워 넣는다(재조회 없음).
+            applyRealtimeCommentPayload(payload);
             return;
           }
 
@@ -1923,10 +1925,15 @@ export default function App() {
             }
           }
         }
-        // 코덱스 P1 fix (2026-05-10): 알림 분기 평가가 끝난 *후* 캐시 무효화 →
-        //   isCommentByUser/hasUserCommentedOnScene 가 fresh 한 cache 를 사용해 답글-자동멘션·스레드 참여자
-        //   알림을 정확히 발송. invalidate 는 다음 조회 시점에 fresh load 트리거.
-        invalidatePartCache();
+        // 코덱스 P1 fix (2026-05-10): 알림 분기 평가가 끝난 *후* 캐시 반영 →
+        //   isCommentByUser/hasUserCommentedOnScene 가 평가 시점의 캐시를 본다.
+        // v1.145.0(씬 댓글 B안 §7): 캐시를 통째로 비우던 것을 받은 행만 끼워 넣기·바꾸기·빼기로 바꿨다 —
+        //   댓글 하나에 모든 화면이 댓글을 다시 읽던 일이 없다. 행이 모자라면 그 파트만 다시 읽는다.
+        if (payload?.eventType === 'DELETE') {
+          const deletedId = (payload?.old as { id?: string } | undefined)?.id;
+          if (deletedId) useNotificationStore.getState().removeNotificationsForComment(deletedId);
+        }
+        applyRealtimeCommentPayload(payload);
         return;
       }
 
@@ -2775,9 +2782,7 @@ export default function App() {
         // 캐릭터 댓글 broadcast(sceneId='char:{id}') 는 씬 알림 네비게이션이 없음 → 멘션/답글 알림 스킵, 캐시만 무효화.
         //   (캐릭터 현황판 상세에서 직접 확인. 씬 알림으로 잘못 흘러가 깨진 이동 링크가 뜨던 문제 차단.)
         if (typeof commentSceneNumber === 'string' && commentSceneNumber.startsWith('char:')) {
-          window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', {
-            detail: { characterId: commentSceneNumber.slice('char:'.length) },
-          }));
+          applyCommentBroadcast('comment-added', data.payload);
           return;
         }
         if (commentRevisionId) {
@@ -2791,8 +2796,7 @@ export default function App() {
             mentions: commentMentions,
             revision_id: commentRevisionId,
           });
-          invalidatePartCache();
-          window.dispatchEvent(new Event('bflow:comments-invalidated'));
+          applyCommentBroadcast('comment-added', data.payload);
           return;
         }
         if (me && commentUserId && commentUserId !== me.id && commentSceneNumber) {
@@ -2869,9 +2873,19 @@ export default function App() {
             }
           }
         }
-        // 코덱스 P1 fix: 알림 분기 *후* 캐시 무효화 + 댓글 패널 리로드 신호.
-        invalidatePartCache();
-        window.dispatchEvent(new Event('bflow:comments-invalidated'));
+        // 코덱스 P1 fix: 알림 분기 *후* 캐시 반영. v1.145.0: 받은 댓글을 캐시에 끼워 넣고(재조회 없음) 그 시트만 알린다.
+        applyCommentBroadcast('comment-added', data.payload);
+        return;
+      }
+
+      // v1.145.0(씬 댓글 B안 §7.1): 댓글 수정·삭제 — 예전엔 '전부 다시 받기'(data-change comments)였다.
+      //   이제 바뀐 댓글만 캐시에서 고친다. 지운 댓글의 알림도 같이 뺀다.
+      if (data.event === 'comment-updated' || data.event === 'comment-deleted') {
+        if (data.event === 'comment-deleted') {
+          const deletedId = (data.payload as { commentId?: string } | undefined)?.commentId;
+          if (deletedId) useNotificationStore.getState().removeNotificationsForComment(deletedId);
+        }
+        applyCommentBroadcast(data.event, data.payload);
         return;
       }
 
@@ -2896,6 +2910,9 @@ export default function App() {
         // 캘린더 계열은 전용 정본 재조회/알림 경로로만 반영한다.
         // 구버전 나만 보기 쓰기(private_calendar_events)도 일반 전체 reload를 유발하지 않는다.
         if (changedTable?.startsWith('gantt_')) return;
+        // v1.145.0: 댓글은 실시간 comments 이벤트·댓글 방송으로 그 댓글만 고친다. 예전 버전이 수정·삭제 때 보내는
+        //   'comments' 변경 신호로 씬·메타데이터 전체를 다시 받지 않는다(그 변경은 실시간 이벤트가 같이 온다).
+        if (changedTable === 'comments') return;
         if (changedTable && (changedTable.startsWith('calendar') || changedTable === 'private_calendar_events')) {
           return;
         }
