@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 import {
   broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastScenePhaseUpdate, broadcastDataChange,
-  broadcastCommentAdded, broadcastCalendarChanged, broadcastCommentReactionChanged,
+  broadcastCommentAdded, broadcastCommentUpdated, broadcastCommentDeleted, broadcastCalendarChanged, broadcastCommentReactionChanged,
   broadcastCommentReactionNotification, broadcastCommentReactionNotificationRemoved, broadcastActivityRemoved,
 } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
@@ -1829,7 +1829,7 @@ export async function addComment(
     const { error: charError } = await supabase.from('comments').insert(characterPayload);
     throwIfError(charError);
     // 캐릭터 댓글도 다른 창이 즉시 반응하도록 broadcast — sceneId 자리에 char:{id} 식별자 전달.
-    broadcastCommentAdded(`char:${characterId}`, userName, userId, text, mentions, commentId, safeParent, undefined, revisionId);
+    broadcastCommentAdded(`char:${characterId}`, userName, userId, text, mentions, commentId, safeParent, undefined, revisionId, { images, createdAt, characterId });
     return;
   }
 
@@ -1862,7 +1862,8 @@ export async function addComment(
   throwIfError(error);
   // v1.24.0 P0 #1: broadcast 페이로드에 commentId/parentCommentId/partId 추가 →
   //   렌더러가 realtime/broadcast 어느 쪽에서 먼저 도착하든 같은 알림 분기 호출 가능.
-  broadcastCommentAdded(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId);
+  //   v1.145.0: images·createdAt 도 실어 받는 쪽이 다시 읽지 않고 캐시에 끼워 넣는다.
+  broadcastCommentAdded(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId, { images, createdAt, sceneUuid });
 }
 
 /** 댓글 수정.
@@ -1875,8 +1876,18 @@ export async function editComment(
   mentions: string[],
   images?: string[],
 ): Promise<void> {
+  // v1.145.0: 위치(파트·씬·캐릭터)와 수정 전 멘션을 먼저 읽는다 — 다른 PC 가 '전부 다시 받기' 없이 그 댓글만 고치고,
+  //   수정으로 새로 들어간 @이름에만 알림을 만들 수 있게(수정은 드물어 작은 조회 한 번은 괜찮다).
+  //   못 읽어도 수정은 진행한다(받는 쪽은 id 로 찾아 고친다, 새 멘션 알림만 빠진다).
+  const { data: before, error: beforeErr } = await supabase
+    .from('comments')
+    .select('part_id, scene_id, character_id, mentions, user_id, user_name')
+    .eq('id', commentId)
+    .maybeSingle();
+  if (beforeErr) console.warn('[editComment] 수정 전 댓글 조회 실패 — 새 멘션 알림 생략:', beforeErr.message);
+  const editedAt = new Date().toISOString();
   const updates: Record<string, unknown> = {
-    text, mentions, edited_at: new Date().toISOString(),
+    text, mentions, edited_at: editedAt,
   };
   if (images !== undefined) updates.images = images;
   const { error } = await supabase
@@ -1884,7 +1895,20 @@ export async function editComment(
     .update(updates)
     .eq('id', commentId);
   throwIfError(error);
-  broadcastDataChange('comments', 'UPDATE');
+  const previousMentions = Array.isArray(before?.mentions) ? (before!.mentions as string[]) : null;
+  broadcastCommentUpdated({
+    commentId,
+    partId: (before?.part_id as string | null | undefined) ?? null,
+    sceneId: before?.scene_id == null ? null : String(before.scene_id),
+    characterId: (before?.character_id as string | null | undefined) ?? null,
+    text,
+    mentions,
+    ...(images !== undefined ? { images } : {}),
+    editedAt,
+    addedMentions: previousMentions ? mentions.filter((name) => !previousMentions.includes(name)) : [],
+    userId: (before?.user_id as string | null | undefined) ?? null,
+    userName: (before?.user_name as string | null | undefined) ?? null,
+  });
 }
 
 /** 댓글 삭제.
@@ -1895,9 +1919,10 @@ export async function deleteComment(commentId: string): Promise<void> {
   // 1) 행 삭제 전에 attached image URL 조회.
   // Codex P2 12차(2026-04-30): maybeSingle 의 error 도 명시 체크 — 일시적 네트워크/PostgREST 에러로
   // images 가 [] 로 silent fallback 되면 storage 객체가 정리되지 않은 채 row 만 삭제되어 orphan.
+  // v1.145.0: 위치(파트·씬·캐릭터)도 같이 읽어 삭제 방송에 싣는다.
   const { data: row, error: fetchErr } = await supabase
     .from('comments')
-    .select('images')
+    .select('images, part_id, scene_id, character_id')
     .eq('id', commentId)
     .maybeSingle();
   if (fetchErr) {
@@ -2007,7 +2032,13 @@ export async function deleteComment(commentId: string): Promise<void> {
     console.warn('[deleteComment] activity_log cleanup 예외:', e);
   }
 
-  broadcastDataChange('comments', 'DELETE');
+  // v1.145.0: '전부 다시 받기'(data-change) 대신 지운 댓글만 알린다. 받는 쪽은 캐시에서 그 댓글과 그 댓글 알림만 뺀다.
+  broadcastCommentDeleted({
+    commentId,
+    partId: (row?.part_id as string | null | undefined) ?? null,
+    sceneId: row?.scene_id == null ? null : String(row.scene_id),
+    characterId: (row?.character_id as string | null | undefined) ?? null,
+  });
 }
 
 // ═══════════════════════════════════════════════

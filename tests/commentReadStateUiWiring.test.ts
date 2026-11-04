@@ -154,11 +154,13 @@ test('revision comment notifications include explicitly mentioned users', () => 
 test('revision comment broadcasts keep revision context and avoid general comment notification fallback', () => {
   assert.match(electronBroadcast, /revisionId\?: string \| null/);
   assert.match(electronBroadcast, /revisionId: revisionId \?\? null/);
-  assert.match(electronSupabase, /broadcastCommentAdded\(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId\)/);
+  assert.match(electronSupabase, /broadcastCommentAdded\(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId, \{ images, createdAt, sceneUuid \}\)/);
   assert.match(app, /const dispatchRevisionCommentNotification = useCallback/);
   assert.match(app, /revisionId: commentRevisionId/);
   assert.match(app, /if \(commentRevisionId\) \{/);
-  assert.match(app, /window\.dispatchEvent\(new Event\('bflow:comments-invalidated'\)\)/);
+  // v1.145.0: 받은 댓글은 캐시에 끼워 넣고 그 시트만 알린다(전체 무효화 신호 없음).
+  assert.match(app, /applyCommentBroadcast\('comment-added', data\.payload\)/);
+  assert.doesNotMatch(app, /window\.dispatchEvent\(new Event\('bflow:comments-invalidated'\)\)/);
 });
 
 test('single scene detail comment panel exposes the same activity inline events as unified detail', () => {
