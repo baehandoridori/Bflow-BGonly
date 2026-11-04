@@ -111,15 +111,3 @@ export function dispatchNotification(payload: NotifyPayload, settings?: Notifica
     window.electronAPI?.showNativeNotification?.(payload.title, payload.body || '');
   }
 }
-
-// ─── Slack 웹훅 인터페이스 (추후 구현) ─────────────────
-export interface SlackNotifyPayload {
-  webhookUrl: string;
-  channel?: string;
-  text: string;
-  blocks?: unknown[];
-}
-
-export async function sendSlackNotification(_payload: SlackNotifyPayload): Promise<void> {
-  // TODO: Slack 연동 Phase에서 구현
-}

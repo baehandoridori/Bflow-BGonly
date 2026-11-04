@@ -195,7 +195,8 @@ test('패널 배선: 0.4초 넘을 때만 보내는 중, 실패하면 말풍선 
   assert.doesNotMatch(submit, /setComments\(comments\)/, '실패해도 말풍선을 지우지 않는다');
   assert.doesNotMatch(submit, /setInput\(prevInput\)/, '같은 글이 입력칸과 말풍선에 두 번 보이지 않게');
   assert.match(submit, /webhookSceneKey: primaryStorageKey,/);
-  assert.match(submit, /markReadOnSuccess: !!prevReplyTarget,/);
+  // 본문 입력칸은 항상 최상위 댓글(답글 모드 제거, v1.146.1) — 읽음 처리는 스레드 답글만.
+  assert.match(submit, /markReadOnSuccess: false,/);
   // 스레드 창: 같은 방식
   const threadSubmit = bodyOf(panel, 'const handleThreadSubmit = async () =>');
   assert.match(threadSubmit, /beginCommentSend\(sendDraft\);[\s\S]*?await addComment\(targetSceneKey, comment\);\s*finishCommentSend\(comment\.id\);[\s\S]*?afterCommentDelivered\(sendDraft\);/);

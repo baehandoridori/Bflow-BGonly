@@ -28,7 +28,6 @@ import {
 import { revisionNoToLabel } from '@/constants/revision';
 import { formatCommentTime } from '@/utils/formatTime';
 import * as storageService from '@/services/storageService';
-import { resizeBlob } from '@/utils/imageUtils';
 import { describeMentionDelivery, startMentionDelivery, type MentionDeliveryEntry } from '@/services/slackWebhookService';
 import { useDataStore } from '@/stores/useDataStore';
 import { stripEntityTokens } from '@/utils/entityTokens';
@@ -42,6 +41,7 @@ import { navigateToHashTarget } from '@/utils/hashNavigation';
 import { isCommentsInvalidationRelevant, type CommentsInvalidatedDetail } from '@/utils/commentRowCache';
 import type { HashTarget } from '@/utils/hashEntity';
 import { createUuid } from '@/utils/createUuid';
+import { useImageAttachments, type AttachedImage } from '@/hooks/useImageAttachments';
 import {
   AttachmentImageLightbox,
   type AttachmentImageLightboxEntry,
@@ -67,13 +67,6 @@ interface Props {
   onHashContextMenu?: (t: HashTarget, e: React.MouseEvent) => void;
 }
 
-interface AttachedImage {
-  id: string;
-  previewUrl: string;
-  uploadedUrl?: string;
-  uploading: boolean;
-  error?: string;
-}
 
 function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string } {
   const idx = sceneKey.lastIndexOf(':');
@@ -245,81 +238,20 @@ export function RevisionCommentThread({ revisionId, sceneKey, onHashClick, onHas
     };
   }, [focusedCommentId, expanded, comments.length]);
 
-  const uploadAttachedImage = useCallback(async (id: string, file: File | Blob) => {
-    try {
-      const base64 = await resizeBlob(file, 800, 0.8);
-      const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
-      if (!result.ok || !result.url) throw new Error(result.error || '업로드 실패');
-
-      const url = result.url;
-      if (!mountedRef.current) {
-        storageService.deleteImage(url).catch(err => {
-          console.warn('[리테이크 댓글 첨부 unmount race] 정리 실패:', err);
-        });
-        return;
-      }
-
-      setAttachedImages(prev => {
-        const exists = prev.some(item => item.id === id);
-        if (!exists) {
-          storageService.deleteImage(url).catch(err => {
-            console.warn('[리테이크 댓글 첨부 race] 제거 후 도착한 업로드 객체 정리 실패:', err);
-          });
-          return prev;
-        }
-        return prev.map(item =>
-          item.id === id ? { ...item, uploadedUrl: url, uploading: false } : item
-        );
-      });
-    } catch (err) {
-      console.error('[리테이크 댓글 이미지 업로드 실패]', err);
-      if (!mountedRef.current) return;
-      const message = err instanceof Error ? err.message : String(err);
-      setAttachedImages(prev => prev.map(item =>
-        item.id === id ? { ...item, uploading: false, error: message } : item
-      ));
-    }
-  }, [sceneId, sheetName]);
-
-  const addAttachedImageFromBlob = useCallback((file: File | Blob) => {
-    const id = createUuid();
-    const previewUrl = URL.createObjectURL(file);
-    setAttachedImages(prev => [...prev, { id, previewUrl, uploading: true }]);
-    void uploadAttachedImage(id, file);
-  }, [uploadAttachedImage]);
-
-  const removeAttachedImage = useCallback((id: string) => {
-    setAttachedImages(prev => {
-      const target = prev.find(item => item.id === id);
-      if (target?.previewUrl) {
-        try { URL.revokeObjectURL(target.previewUrl); } catch { /* ignore */ }
-      }
-      if (target?.uploadedUrl) {
-        storageService.deleteImage(target.uploadedUrl).catch(err => {
-          console.warn('[리테이크 댓글 첨부 제거] Storage 삭제 실패:', err);
-        });
-      }
-      return prev.filter(item => item.id !== id);
-    });
-  }, []);
+  // 첨부 그림 — 댓글 패널과 같은 한 벌(hooks/useImageAttachments).
+  const attachments = useImageAttachments({
+    setImages: setAttachedImages, sheetName, sceneId, mountedRef, label: '[리테이크 댓글 이미지]',
+  });
+  const removeAttachedImage = attachments.remove;
 
   const handlePaste = useCallback((e: ClipboardEvent<HTMLElement>) => {
-    const imageItems = Array.from(e.clipboardData?.items || [])
-      .filter(item => item.type.startsWith('image/'));
-    if (imageItems.length === 0) return;
-
-    e.preventDefault();
-    imageItems.forEach((item) => {
-      const file = item.getAsFile();
-      if (file) addAttachedImageFromBlob(file);
-    });
-  }, [addAttachedImageFromBlob]);
+    if (attachments.addFromClipboard(e.clipboardData?.items)) e.preventDefault();
+  }, [attachments]);
 
   const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(file => file.type.startsWith('image/'));
-    files.forEach(addAttachedImageFromBlob);
+    attachments.addFiles(e.target.files);
     e.target.value = '';
-  }, [addAttachedImageFromBlob]);
+  }, [attachments]);
 
   const mention = useMentionAutocomplete({
     onChange: (next) => { setDraft(next); draftRef.current = next; },

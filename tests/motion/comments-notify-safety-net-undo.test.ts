@@ -324,7 +324,8 @@ test('댓글 패널: 휴지통은 바로 지우지 않고 5초 되돌리기, 확
   assert.match(del, /message: '댓글을 지웠어요',\s*onUndo: \(\) => restoreDeletedComment\(commentId\),\s*onExpire: \(\) => commitDeletedComment\(commentId\),/);
   const commit = bodyOf(comments, 'const commitDeletedComment = (commentId: string) =>');
   // (리뷰 반영: 앱 종료가 기다릴 수 있게 요청을 모아 둔다 — comments-notify-review-fix.test.ts)
-  assert.match(commit, /if \(!entry \|\| entry\.phase !== 'waiting'\) return;\s*entry\.phase = 'deleting';\s*\/\/[^\n]*\s*const deletion: Promise<void> = deleteComment\(entry\.targetKey, commentId\)/);
+  // v1.146.1(§8): '기다림 → 지우는 중'은 장부(utils/commentDeleteLedger — tests/commentDeleteLedger.test.ts)가 한 번만 바꾼다.
+  assert.match(commit, /const entry = pendingDeletesRef\.current\.beginCommit\(commentId\);\s*if \(!entry\) return;\s*\/\/[^\n]*\s*const deletion: Promise<void> = deleteComment\(entry\.targetKey, commentId\)/);
   assert.match(commit, /sonnerToast\.error\('댓글을 지우지 못했어요/);
   assert.match(commit, /settleDeleteVisual\(entry\);\s*reinsertComment\(entry\.comment\);/, '실패하면 제자리로');
   const restore = bodyOf(comments, 'const restoreDeletedComment = (commentId: string) =>');

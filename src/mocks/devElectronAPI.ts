@@ -2280,6 +2280,84 @@ function emitMockCommentRealtime(eventType: 'INSERT' | 'UPDATE' | 'DELETE', row:
   }, 40);
 }
 
+/**
+ * v1.146.1(씬 댓글 B안 §8): 미리보기의 '다른 PC' — 같은 주소의 다른 탭.
+ * 실제 앱이 다른 PC 에 보내는 댓글 방송(comment-added/updated/deleted)과 반응 신호를 같은 모양으로 다른 탭에 보낸다.
+ * 받은 탭은 자기 댓글 행도 고친 뒤 그 탭의 방송·실시간 수신 경로로 넘긴다 — 알림·캐시 끼워 넣기가 미리보기에서도 돈다.
+ * 보낸 탭에는 방송이 가지 않는다(실제 Supabase 방송도 보낸 쪽에는 안 온다). 팀 할 일 미리보기 저장소와 같은 방식.
+ */
+type MockCommentChannelMessage =
+  | { kind: 'comment'; event: 'comment-added' | 'comment-updated' | 'comment-deleted'; payload: Record<string, unknown>; row?: DevPreviewCommentRow }
+  | { kind: 'reaction'; payload: Record<string, unknown> };
+let mockCommentChannel: BroadcastChannel | null | undefined;
+function getMockCommentChannel(): BroadcastChannel | null {
+  if (mockCommentChannel !== undefined) return mockCommentChannel;
+  if (typeof BroadcastChannel === 'undefined') {
+    mockCommentChannel = null;
+    return null;
+  }
+  const channel = new BroadcastChannel('bflow-dev-comment-broadcast');
+  (channel as BroadcastChannel & { unref?: () => void }).unref?.();
+  channel.onmessage = (message: MessageEvent<MockCommentChannelMessage>) => {
+    const data = message.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.kind === 'reaction') {
+      emitMockSupabaseBroadcast({ event: 'comment-reaction-changed', payload: data.payload });
+      return;
+    }
+    // 이 탭의 '서버' 행도 같게 — 다시 불러와도 받은 댓글이 사라지지 않게.
+    const rows = getMockCommentRows();
+    const id = String(data.payload.commentId ?? '');
+    if (data.event === 'comment-added' && data.row && !rows.some((row) => row.id === data.row!.id)) {
+      rows.push({ ...data.row });
+      emitMockCommentRealtime('INSERT', data.row);
+    } else if (data.event === 'comment-updated') {
+      const target = rows.find((row) => row.id === id);
+      if (target && data.row) {
+        Object.assign(target, data.row);
+        emitMockCommentRealtime('UPDATE', target);
+      }
+    } else if (data.event === 'comment-deleted') {
+      const removed = rows.find((row) => row.id === id);
+      localStore.__commentRows = rows
+        .filter((row) => row.id !== id)
+        .map((row) => (row.parentCommentId === id ? { ...row, parentCommentId: null } : row));
+      if (removed) emitMockCommentRealtime('DELETE', removed);
+    }
+    emitMockSupabaseBroadcast({ event: data.event, payload: data.payload });
+  };
+  mockCommentChannel = channel;
+  return channel;
+}
+
+function postMockCommentChannel(message: MockCommentChannelMessage): void {
+  try {
+    getMockCommentChannel()?.postMessage(message);
+  } catch (err) {
+    console.warn('[dev preview comments] 다른 탭으로 보내지 못했어요:', err);
+  }
+}
+
+/** 미리보기 반응 — 탭끼리 나눠 쓰도록 localStorage 에(쓸 수 없으면 이 탭 메모리). */
+type MockCommentReaction = { id: string; commentId: string; userId: string; userName: string; emoji: string; createdAt: string };
+const MOCK_REACTIONS_KEY = 'bflow-dev-comment-reactions';
+function readMockReactions(): MockCommentReaction[] {
+  try {
+    const raw = window.localStorage?.getItem(MOCK_REACTIONS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as MockCommentReaction[];
+    }
+  } catch { /* 저장소를 못 쓰면 메모리 */ }
+  return (localStore.__commentReactions as MockCommentReaction[] | undefined) ?? [];
+}
+function writeMockReactions(rows: MockCommentReaction[]): void {
+  localStore.__commentReactions = rows;
+  try {
+    window.localStorage?.setItem(MOCK_REACTIONS_KEY, JSON.stringify(rows));
+  } catch { /* 메모리만 */ }
+}
+
 function getMockCommentRows(): DevPreviewCommentRow[] {
   return (localStore.__commentRows as DevPreviewCommentRow[] | undefined)
     ?? (localStore.__commentRows = buildDevPreviewCommentRows(MOCK_EPISODES)) as DevPreviewCommentRow[];
@@ -2657,6 +2735,8 @@ export function installDevElectronAPI(): void {
   // 창 사이 로그인 상태 맞추기 — 이 창이 새 창인지는 창이 사는 동안 바뀌지 않으므로 여기서 한 번 정한다.
   // 누가 열었는지(자기를 연 본 창의 id)는 적어 두지 않고 쓸 때마다 읽는다 — readMockOwnerWindowId 참고.
   mockWindowIsPopup = isWidgetPopupWindow();
+  // 다른 탭(미리보기의 '다른 PC')이 보내는 댓글 방송을 받을 수 있게 처음부터 연다.
+  getMockCommentChannel();
   mockSelfWindow = window;
   (window as unknown as { __bflowPreviewWindowId?: string }).__bflowPreviewWindowId = mockPreviewWindowId;
   getMockSessionChannel(); // 본 창은 새 창의 물음에 답하려고, 새 창은 답을 받으려고 미리 연다
@@ -3064,7 +3144,28 @@ export function installDevElectronAPI(): void {
       }
       localStore.__commentReadStateRows = stateRows;
     },
-    supabaseFetchMissedMentions: async () => [],
+    // v1.146.1(§8): 시드·다른 탭이 쓴 댓글 중 나를 부른 것 — 놓친 알림 모으기가 미리보기에서도 돈다.
+    supabaseFetchMissedMentions: async (userId, userName, since, limit = 50) => {
+      const rows = getMockCommentRows();
+      const authorById = new Map(rows.map((row) => [row.id, row.userId]));
+      return rows
+        .filter((row) => !row.characterId && row.userId !== userId && row.createdAt > since)
+        .map((row) => {
+          const mentioned = Array.isArray(row.mentions) && row.mentions.includes(userName);
+          const replyToMe = !mentioned && !row.revisionId && !!row.parentCommentId && authorById.get(row.parentCommentId) === userId;
+          return { row, keep: mentioned || replyToMe, parentAuthorId: replyToMe ? userId : null };
+        })
+        .filter((item) => item.keep)
+        .sort((a, b) => b.row.createdAt.localeCompare(a.row.createdAt) || b.row.id.localeCompare(a.row.id))
+        .slice(0, limit)
+        .map(({ row, parentAuthorId }) => ({
+          id: row.id, partId: row.partId, sceneId: row.sceneId, sceneUuid: null,
+          userId: row.userId, userName: row.userName, text: row.text, mentions: row.mentions,
+          images: row.images ?? [], createdAt: row.createdAt, editedAt: row.editedAt,
+          revisionId: row.revisionId ?? null, parentCommentId: row.parentCommentId ?? null,
+          parentAuthorId,
+        }));
+    },
     supabaseAddComment: async (commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId, characterId, costumeId) => {
       const comments = getMockCommentRows();
       // 라이브 DB 처럼 id 는 기본 키 — 같은 id 를 다시 넣으면 거절한다('다시 보내기'가 저장된 댓글을 알아보는 길).
@@ -3089,7 +3190,20 @@ export function installDevElectronAPI(): void {
         parentCommentId: parentCommentId ?? null,
       });
       localStore.__commentRows = comments;
-      emitMockCommentRealtime('INSERT', comments[comments.length - 1]);
+      const added = comments[comments.length - 1];
+      emitMockCommentRealtime('INSERT', added);
+      postMockCommentChannel({
+        kind: 'comment',
+        event: 'comment-added',
+        row: added,
+        payload: {
+          sceneId: characterId ? `char:${characterId}` : sceneId, userName, userId, text, mentions: mentions ?? [],
+          commentId, parentCommentId: parentCommentId ?? null, partId: characterId ? null : partUuid,
+          parentAuthorId: parentCommentId ? comments.find((row) => row.id === parentCommentId)?.userId ?? null : null,
+          revisionId: revisionId ?? null, images: images ?? [], createdAt, sceneUuid: null, characterId: characterId ?? null,
+          ts: Date.now(),
+        },
+      });
       // 댓글(일반·리테이크·캐릭터 보드 전부) 적립(spec §, 프로덕션 main.ts 와 동일).
       maybeAwardPreviewActivity('comment', commentId);
     },
@@ -3097,12 +3211,24 @@ export function installDevElectronAPI(): void {
       const comments = getMockCommentRows();
       const target = comments.find((comment) => comment.id === commentId);
       if (!target) return;
+      const previousMentions = [...(target.mentions ?? [])];
       target.text = text;
       target.mentions = mentions;
       if (images !== undefined) target.images = images;
       target.editedAt = new Date().toISOString();
       localStore.__commentRows = comments;
       emitMockCommentRealtime('UPDATE', target);
+      postMockCommentChannel({
+        kind: 'comment',
+        event: 'comment-updated',
+        row: { ...target },
+        payload: {
+          commentId, partId: target.partId || null, sceneId: target.sceneId || null, characterId: target.characterId ?? null,
+          text, mentions, ...(images !== undefined ? { images } : {}), editedAt: target.editedAt,
+          addedMentions: mentions.filter((name) => !previousMentions.includes(name)),
+          userId: target.userId, userName: target.userName, ts: Date.now(),
+        },
+      });
     },
     supabaseDeleteComment: async (commentId) => {
       const removed = getMockCommentRows().find((comment) => comment.id === commentId);
@@ -3110,12 +3236,40 @@ export function installDevElectronAPI(): void {
         .filter((comment) => comment.id !== commentId)
         .map((comment) => comment.parentCommentId === commentId ? { ...comment, parentCommentId: null } : comment);
       localStore.__commentRows = comments;
-      if (removed) emitMockCommentRealtime('DELETE', removed);
+      if (removed) {
+        emitMockCommentRealtime('DELETE', removed);
+        postMockCommentChannel({
+          kind: 'comment',
+          event: 'comment-deleted',
+          payload: {
+            commentId, partId: removed.partId || null, sceneId: removed.sceneId || null,
+            characterId: removed.characterId ?? null, ts: Date.now(),
+          },
+        });
+      }
     },
     // v1.26.0 mocks
-    supabaseAddCommentReaction: async () => {},
-    supabaseRemoveCommentReaction: async () => {},
-    supabaseGetCommentReactionsBulk: async () => ({}),
+    // v1.146.1(§8): 반응도 실제처럼 저장·조회한다(예전엔 아무것도 안 해서 미리보기에서 반응이 남지 않았다).
+    supabaseAddCommentReaction: async (commentId, emoji, userId, userName) => {
+      const rows = readMockReactions();
+      if (rows.some((row) => row.commentId === commentId && row.emoji === emoji && row.userId === userId)) return;
+      rows.push({ id: createUuid(), commentId, emoji, userId, userName, createdAt: new Date().toISOString() });
+      writeMockReactions(rows);
+      postMockCommentChannel({ kind: 'reaction', payload: { commentId, action: 'add', emoji, senderId: userId, ts: Date.now() } });
+    },
+    supabaseRemoveCommentReaction: async (commentId, emoji, userId) => {
+      writeMockReactions(readMockReactions().filter((row) => !(row.commentId === commentId && row.emoji === emoji && row.userId === userId)));
+      postMockCommentChannel({ kind: 'reaction', payload: { commentId, action: 'remove', emoji, senderId: userId, ts: Date.now() } });
+    },
+    supabaseGetCommentReactionsBulk: async (commentIds) => {
+      const wanted = new Set(commentIds);
+      const out: Record<string, MockCommentReaction[]> = {};
+      for (const row of readMockReactions()) {
+        if (!wanted.has(row.commentId)) continue;
+        (out[row.commentId] ??= []).push(row);
+      }
+      return out;
+    },
     supabaseListImageVersions: async () => [],
     supabaseAddImageVersion: async (params: {
       sceneId: string;

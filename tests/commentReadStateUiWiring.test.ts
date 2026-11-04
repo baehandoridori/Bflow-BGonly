@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf8');
 const revisionCommentThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
+const useImageAttachmentsHook = readFileSync('src/hooks/useImageAttachments.ts', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
 const notificationDecision = readFileSync('src/utils/sceneCommentNotification.ts', 'utf8');
 const resizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
@@ -103,7 +104,8 @@ test('quick revision can register a pasted attachment as the revision image', ()
   assert.match(commentPanel, /\[리테이크 빠른 등록 실패 \+ unmount\]/);
   assert.match(commentPanel, /setAttachedImages\(prevAttached\);[\s\S]*attachedImagesRef\.current = prevAttached/);
   assert.match(commentPanel, /첨부 이미지가 리테이크 이미지로 함께 등록됩니다/);
-  assert.match(commentPanel, /quickRevisionActive \? files\.slice\(0, 1\) : files/);
+  // v1.146.1(§8): 첨부는 공용 한 벌 — 빠른 리테이크는 '한 장만'(새로 넣으면 바꾼다, 규칙은 tests/imageAttachments.test.ts).
+  assert.match(commentPanel, /useImageAttachments\(\{\s*setImages: setAttachedImages, sheetName, sceneId, mountedRef, single: quickRevisionActive/);
   assert.doesNotMatch(commentPanel, /빠른 리테이크는 텍스트만 등록합니다/);
   assert.doesNotMatch(commentPanel, /disabled=\{quickRevisionActive\}/);
   assert.doesNotMatch(commentPanel, /&& !quickRevisionHasAttachments/);
@@ -111,8 +113,10 @@ test('quick revision can register a pasted attachment as the revision image', ()
 
 test('revision comment thread supports image paste and file attachments', () => {
   assert.match(revisionCommentThread, /attachedImages/);
-  assert.match(revisionCommentThread, /storageService\.uploadImage/);
-  assert.match(revisionCommentThread, /resizeBlob/);
+  // v1.146.1(§8): 올리기·줄이기는 댓글 패널과 같은 공용 훅(hooks/useImageAttachments).
+  assert.match(revisionCommentThread, /useImageAttachments\(\{\s*setImages: setAttachedImages, sheetName, sceneId, mountedRef/);
+  assert.match(useImageAttachmentsHook, /storageService\.uploadImage/);
+  assert.match(useImageAttachmentsHook, /resizeBlob\(file, 800, 0\.8\)/);
   assert.match(revisionCommentThread, /onPaste=\{handlePaste\}/);
   assert.match(revisionCommentThread, /images:\s*uploadedImageUrls/);
   assert.match(revisionCommentThread, /comment\.images/);
@@ -218,13 +222,13 @@ test('CommentPanel can place the unread divider before a nested unread reply', (
 });
 
 test('CommentPanel uses a Slack-style flat thread for reply-to-reply flows', () => {
-  assert.match(commentPanel, /buildCommentReplyTarget\(comments,\s*replyTarget\)/);
-  assert.match(commentPanel, /parentCommentId:\s*replyThreadTarget\.parentCommentId/);
+  // v1.146.1(§8): 본문 입력칸의 '답글 모드'는 켜는 곳이 없어 지웠다 — 답글은 스레드 창에서만, 답글의 답글도 루트 아래로.
+  assert.doesNotMatch(commentPanel, /replyTarget|replyDraftTarget|isReplyToReply/);
+  assert.match(commentPanel, /parentCommentId: null,/);
+  assert.match(commentPanel, /parentCommentId: activeRevisionThreadId \? null : threadRoot!\.id/);
+  assert.match(commentPanel, /buildCommentReplyTarget\(comments, target\)/);
   assert.match(commentPanel, /openContextualThreadReply\(reply\)/);
   assert.match(commentPanel, /openThreadReply\(target\)/);
-  assert.match(commentPanel, /replyInputThreadTarget\.isReplyToReply/);
-  assert.match(commentPanel, /스레드에 댓글 추가/);
-  assert.match(commentPanel, /선택한 메시지/);
   assert.doesNotMatch(commentPanel, /getReplyMentionDisplay\(reply\.text,\s*userNames\)/);
   assert.doesNotMatch(commentPanel, /<span className="text-accent">@\{replyMentionDisplay\.mentionName\}<\/span>에게/);
 });
@@ -237,7 +241,6 @@ test('CommentPanel exposes reply buttons next to reaction controls for parent co
   assert.match(commentPanel, /openContextualThreadReply\(comment\)/);
   assert.match(commentPanel, /openContextualThreadReply\(reply\)/);
   assert.match(commentPanel, /openRevisionThread\(target\.revisionId, true, target\)/);
-  assert.match(commentPanel, /replyThreadTarget\.isReplyToReply/);
 });
 
 test('CommentPanel thread collapse control is large enough to scan', () => {

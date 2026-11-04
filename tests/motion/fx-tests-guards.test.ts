@@ -109,14 +109,16 @@ test('두 상세 창: 가라앉는 중에는 Esc·화살표 단축키와 그림 
 test('댓글 되돌리기: 기다리는 중(waiting)일 때만 — 서버 삭제가 시작된 뒤에는 화면에 되살리지 않는다', () => {
   const comments = code('src/components/scenes/CommentPanel.tsx');
   const restore = blockAfter(comments, 'const restoreDeletedComment = (commentId: string) => {');
-  assert.match(restore, /^\s*const entry = pendingDeletesRef\.current\.get\(commentId\);\s*if \(!entry \|\| entry\.phase !== 'waiting'\) return;/);
-  const guard = restore.indexOf("entry.phase !== 'waiting'");
-  for (const action of ['pendingDeletesRef.current.delete(commentId)', 'settleDeleteVisual(entry)', 'reinsertComment(entry.comment)']) {
+  // v1.146.1(§8): 기다리는 중인지 확인·장부에서 빼기는 장부의 takeForUndo 가 한 번에(동작은 tests/commentDeleteLedger.test.ts).
+  assert.match(restore, /^\s*const entry = pendingDeletesRef\.current\.takeForUndo\(commentId\);\s*if \(!entry\) return;/);
+  const guard = restore.indexOf('if (!entry) return;');
+  for (const action of ['settleDeleteVisual(entry)', 'reinsertComment(entry.comment)']) {
     assert.ok(restore.indexOf(action) > guard, `${action} 는 가드 뒤에`);
   }
-  // 서버 삭제를 시작하는 쪽이 phase 를 바꿔야 위 가드가 의미가 있다.
+  // 서버 삭제를 시작하는 쪽이 '지우는 중'으로 바꿔야(beginCommit) 위 가드가 의미가 있다.
   const commit = blockAfter(comments, 'const commitDeletedComment = (commentId: string) => {');
-  assert.ok(commit.indexOf("entry.phase = 'deleting';") >= 0 && commit.indexOf("entry.phase = 'deleting';") < commit.indexOf('deleteComment('));
+  assert.ok(commit.indexOf('pendingDeletesRef.current.beginCommit(commentId)') >= 0
+    && commit.indexOf('pendingDeletesRef.current.beginCommit(commentId)') < commit.indexOf('deleteComment('));
 });
 
 /* ─── 동작 줄이기: MotionConfig 밖(WAAPI·FLIP) ─── */
