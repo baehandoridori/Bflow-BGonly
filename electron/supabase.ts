@@ -1534,21 +1534,29 @@ export async function fetchMissedMentions(
   // 케이스에서 누락. limit (50개 매치) 찾을 때까지 또는 데이터 끝까지 페이지네이션.
   const PAGE_SIZE = 200;
   const MAX_PAGES = 10;  // 안전 cap — 최대 2000개까지 스캔
+  // v1.146.0(씬 댓글 B안 §6.3): 필요한 칸만 읽고, 같은 시각 댓글이 페이지 경계에서 빠지거나 겹치지 않게
+  //   (created_at, id) 복합 커서로 넘긴다(예전 offset 은 페이지 사이에 댓글이 늘면 밀려서 빠졌다).
+  const COLUMNS = 'id, part_id, scene_id, scene_uuid, user_id, user_name, text, mentions, images, created_at, edited_at, revision_id, parent_comment_id';
   const matched: SupabaseComment[] = [];
-  let pageOffset = 0;
+  let cursor: { createdAt: string; id: string } | null = null;
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, error } = await supabase
+    let query = supabase
       .from('comments')
-      .select('*')
+      .select(COLUMNS)
       .gt('created_at', since)
       .neq('user_id', userId)
       .is('character_id', null)  // 캐릭터 댓글은 씬 멘션 catch-up 에서 제외(씬 네비게이션이 없어 깨진 알림 방지).
       .order('created_at', { ascending: false })
-      .range(pageOffset, pageOffset + PAGE_SIZE - 1);
+      .order('id', { ascending: false })
+      .limit(PAGE_SIZE);
+    if (cursor) {
+      query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+    }
+    const { data, error } = await query;
     if (error) throw new Error(`fetchMissedMentions failed: ${error.message}`);
 
-    const rows = data || [];
+    const rows = (data || []) as Array<Record<string, any>>;
     if (rows.length === 0) break;
 
     for (const c of rows) {
@@ -1566,12 +1574,14 @@ export async function fetchMissedMentions(
         createdAt: c.created_at,
         editedAt: c.edited_at,
         revisionId: c.revision_id ?? null, // v1.18.0: 리비전 맥락 댓글 표시용
+        parentCommentId: c.parent_comment_id ?? null,
       });
       if (matched.length >= limit) return matched;
     }
 
     if (rows.length < PAGE_SIZE) break;  // 더 이상 데이터 없음
-    pageOffset += PAGE_SIZE;
+    const last = rows[rows.length - 1];
+    cursor = { createdAt: String(last.created_at), id: String(last.id) };
   }
 
   return matched;

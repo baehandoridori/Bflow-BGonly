@@ -56,6 +56,13 @@ import { createAutoSyncScheduler, MAIN_WINDOW_SYNC_INTERVALS, type AutoSyncSched
 import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { applyCommentBroadcast, applyRealtimeCommentPayload, invalidatePartCache } from '@/services/commentService';
+import { claimSceneCommentDecision, decideIncomingSceneComment, notifyIncomingSceneComment, resetSceneCommentNotifier } from '@/services/sceneCommentNotifier';
+import {
+  normalizeSceneCommentFromAddedBroadcast,
+  normalizeSceneCommentFromMissedRow,
+  normalizeSceneCommentFromRealtimeRow,
+  normalizeSceneCommentFromUpdatedBroadcast,
+} from '@/utils/sceneCommentNotification';
 import { getCanonicalRevision, invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { keepPendingSceneFields, onSceneSaveSessionEnded } from '@/services/sceneSaveRetry';
@@ -101,7 +108,7 @@ import { useNotificationStore, type AppNotification } from '@/stores/useNotifica
 import { useCalendarStore } from '@/stores/useCalendarStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { useSceneWorkLinkStore } from '@/stores/useSceneWorkLinkStore';
-import { dispatchNotification, noteLiveNotificationArrival, type NotificationSettings } from '@/utils/notificationHelper';
+import { dispatchNotification, noteLiveNotificationArrival, resolveNotificationSettings, type NotificationSettings } from '@/utils/notificationHelper';
 import { useRevisionSetStore } from '@/stores/useRevisionSetStore';
 import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
@@ -517,7 +524,8 @@ export default function App() {
 
   // 토스트 설정 (위치/시간) — 설정에서 로드
   const [toastPosition, setToastPosition] = useState<'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right'>('bottom-right');
-  const [toastDuration, setToastDuration] = useState(3000);
+  // v1.146.0: '표시 시간' 설정은 뺐다(알림 토스트는 8초 고정, 나머지 토스트는 3초).
+  const toastDuration = 3000;
   // Sonner 토스트 — 대화상자가 #root를 inert 처리해도 알림은 body에서 유지.
   // App 은 앱 가게 전체를 구독해 씬을 넘길 때마다 다시 그려진다. 토스트 상자는 설정이 바뀔 때만 다시 그린다 —
   // sonner 는 그릴 때마다 문서 방향을 계산된 스타일로 읽어, 화면을 그리는 도중 스타일 재계산을 강제한다(최종 측정 지적).
@@ -550,7 +558,6 @@ export default function App() {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.toastPosition) setToastPosition(detail.toastPosition);
-      if (detail?.toastDuration) setToastDuration(detail.toastDuration);
     };
     window.addEventListener('bflow:toast-settings-changed', handler);
     return () => window.removeEventListener('bflow:toast-settings-changed', handler);
@@ -572,7 +579,9 @@ export default function App() {
   }, []);
 
   // 알림 설정 ref (broadcast 핸들러에서 최신값 참조용)
-  const notiSettingsRef = useRef<NotificationSettings>({ sceneChange: true, commentNotify: true, osNotification: true });
+  // v1.146.0(씬 댓글 B안 §6.4): 설정은 resolveNotificationSettings 로만 만든다(예전 키 옮기기 포함). 불러오기 전 기본값도 같은 함수.
+  const notiSettingsRef = useRef<NotificationSettings>(resolveNotificationSettings(null));
+  const getNotiSettings = useCallback(() => notiSettingsRef.current, []);
 
   // 알림 중복 방지 (broadcast + postgres_changes 동시 도착 시)
   const MAX_DEDUP_KEYS = 200;
@@ -590,91 +599,6 @@ export default function App() {
     return true; // 처리 가능
   }, []);
 
-  const dispatchRevisionCommentNotification = useCallback((newComment: {
-    id?: string | null;
-    scene_id?: string | null;
-    scene_uuid?: string | null;
-    part_id?: string | null;
-    user_name?: string | null;
-    user_id?: string | null;
-    text?: string | null;
-    mentions?: string[] | null;
-    revision_id?: string | null;
-  }): boolean => {
-    if (!newComment.revision_id) return false;
-
-    const me = useAuthStore.getState().currentUser;
-    if (!me || newComment.user_id === me.id) return true;
-
-    const notiSettings = notiSettingsRef.current;
-    if (notiSettings.commentNotify === false) return true;
-
-    // v1.145.0(씬 댓글 B안 §7.5): 같은 댓글이 실시간·방송 두 길로 오면 두 번째는 조회 전에 거른다.
-    //   예전엔 리테이크가 스토어에 없을 때마다 리테이크 전체를 다시 읽었다 — 이제 그 리테이크 하나만 읽는다.
-    const dedupeKey = `revcomment:${newComment.id ?? ''}:${newComment.revision_id}`;
-    if (!dedupeNotification(dedupeKey)) return true;
-
-    import('@/stores/useRevisionStore').then(async ({ useRevisionStore }) => {
-      let rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
-      // 리테이크 store 에 없으면(새 세션·방금 만든 리테이크) 그 리테이크 하나만 서버에서 확인한다.
-      //   못 읽으면 중복 키를 놓아 같은 댓글의 다른 길(실시간/방송)이 다시 시도하게 한다.
-      if (!rev) {
-        rev = (await getCanonicalRevision(newComment.revision_id!).catch(() => null)) ?? undefined;
-        if (!rev) {
-          recentNotiKeysRef.current.delete(dedupeKey);
-          return;
-        }
-      }
-
-      const revisionNotifyIds = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
-      const mentionedNames = Array.isArray(newComment.mentions) ? newComment.mentions : [];
-      const mentionedUserIds = useAuthStore.getState().users
-        .filter((user) => mentionedNames.includes(user.name))
-        .map((user) => user.id);
-      const targets = new Set(buildRevisionNotificationUserIds({
-        notifyUserIds: revisionNotifyIds,
-        requesterId: rev.requesterId,
-        mentionedUserIds,
-      }));
-      const isMentioned = mentionedNames.includes(me.name);
-      if (!targets.has(me.id)) return;
-
-      const dataState = useDataStore.getState();
-      const sceneByUuid = newComment.scene_uuid
-        ? dataState.findSceneByUuid(newComment.scene_uuid)
-        : null;
-      const sceneLabel = (() => {
-        if (sceneByUuid?.sceneId) return sceneByUuid.sceneId;
-        const sceneKeyLabel = buildNotificationSceneDisplayLabelFromSceneKey(
-          newComment.scene_id,
-          dataState.episodeTitles,
-          dataState.episodes,
-        );
-        if (sceneKeyLabel) return sceneKeyLabel;
-        return newComment.scene_id || '';
-      })();
-      const body = newComment.text
-        ? (newComment.text.length > 60 ? newComment.text.slice(0, 60) + '...' : newComment.text)
-        : `${newComment.user_name || '누군가'}님 댓글`;
-
-      dispatchNotification({
-        type: 'revision',
-        title: `${isMentioned ? '리테이크 댓글 멘션' : '리테이크 댓글'} — ${sceneLabel}`,
-        body,
-        metadata: {
-          sceneId: sceneByUuid?.id ?? newComment.scene_uuid ?? undefined,
-          sceneName: sceneByUuid?.sceneId,
-          commentId: newComment.id ?? undefined,
-          commentSceneId: newComment.scene_id ?? undefined,
-          commentPartId: newComment.part_id ?? undefined,
-          revisionId: newComment.revision_id,
-          revisionAction: 'comment',
-        } as Record<string, unknown>,
-      }, notiSettings);
-    }).catch(() => { /* 무시 */ });
-
-    return true;
-  }, [dedupeNotification]);
 
   // 테마 초기화 완료 가드 (init에서 로드 전까지 저장 방지)
   const themeInitRef = useRef(false);
@@ -903,9 +827,6 @@ export default function App() {
         if (savedPrefs?.notifications?.toastPosition) {
           setToastPosition(savedPrefs.notifications.toastPosition);
         }
-        if (savedPrefs?.notifications?.toastDuration) {
-          setToastDuration(savedPrefs.notifications.toastDuration);
-        }
 
         useAppStore.getState().setCompletionTintEnabled(savedPrefs?.sceneUi?.completionTintEnabled ?? true);
 
@@ -914,14 +835,7 @@ export default function App() {
         // lastSeenVersion 은 갱신되어 다음 실행에도 안 보임 — 한솔 v1.27.0 1차 보고.
 
         // 알림 설정 ref 업데이트
-        if (savedPrefs?.notifications) {
-          notiSettingsRef.current = {
-            sceneChange: savedPrefs.notifications.sceneChange ?? true,
-            commentNotify: savedPrefs.notifications.commentNotify ?? true,
-            osNotification: savedPrefs.notifications.osNotification ?? true,
-            sound: savedPrefs.notifications.sound ?? true,
-          };
-        }
+        notiSettingsRef.current = resolveNotificationSettings(savedPrefs?.notifications as Record<string, unknown> | undefined);
 
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)
         const savedTheme = await loadTheme();
@@ -1144,6 +1058,7 @@ export default function App() {
     console.log('[catchup] effect 진입', { currentUser: currentUser?.id, authReady, doneRef: catchupDoneUserIdRef.current });
     if (!currentUser) {
       resetCatchupRun(catchupDoneUserIdRef);
+      resetSceneCommentNotifier();
       console.log('[catchup] currentUser 없음 — skip');
       return;
     }
@@ -1178,49 +1093,33 @@ export default function App() {
           return;
         }
         // 알림 패널에만 누적 (토스트 X — 한꺼번에 N 개 띄우면 시끄러움)
-        // 한솔 보고 (v1.15.9): catch-up 알림에서 씬 매칭이 안 됨. Realtime 분기와 동일 패턴으로
-        // scene_uuid 우선 + part_id+sceneNo fallback 으로 정확한 scene 찾아 metadata 채움.
-        const ds = useDataStore.getState();
+        // v1.146.0(씬 댓글 B안 §6.1): 제목·이동 정보는 실시간과 같은 판정 함수로 만든다. 실시간으로 이미 받은 알림은 건너뛴다.
         const store = useNotificationStore.getState();
+        let added = 0;
         for (const c of orderCatchupRowsForPrepend(missed)) {
-          // 1) scene_uuid 로 정확 매칭
-          let scene = c.sceneUuid ? ds.findSceneByUuid(c.sceneUuid) : null;
-          // 2) part_id + sceneNo 조합으로 fallback
-          if (!scene && c.partId && c.sceneId) {
-            const targetNo = Number(c.sceneId);
-            if (Number.isFinite(targetNo)) {
-              for (const ep of ds.episodes) {
-                for (const part of ep.parts) {
-                  if (part.id !== c.partId) continue;
-                  const found = part.scenes.find((s) => Number(s.no) === targetNo);
-                  if (found) { scene = found; break; }
-                }
-                if (scene) break;
-              }
-            }
-          }
+          const decision = decideIncomingSceneComment(normalizeSceneCommentFromMissedRow(c), notiSettingsRef.current);
+          if (!decision || !claimSceneCommentDecision(decision)) continue;
           store.addNotification({
-            type: 'mention',
-            title: `${c.userName || '누군가'}님이 나를 태그했습니다`,
-            body: c.text ? (c.text.length > 50 ? c.text.slice(0, 50) + '...' : c.text) : undefined,
+            type: decision.type,
+            title: decision.title,
+            body: decision.body || undefined,
             createdAt: c.createdAt,
             // scene_uuid 없는 오래된 댓글도 part_uuid + sort_order 로 정확히 찾아갈 수 있게 storage hint 보존.
-            metadata: {
-              sceneId: scene?.id ?? c.sceneUuid ?? undefined,
-              sceneName: scene?.sceneId,
-              commentId: c.id,
-              commentSceneId: c.sceneId,
-              commentPartId: c.partId,
-            },
+            metadata: decision.metadata as Record<string, string | undefined>,
           });
+          added += 1;
+        }
+        if (added === 0) {
+          if (missed[0]?.createdAt) setLastSeenAt(me.id, missed[0].createdAt);
+          return;
         }
         // 요약 토스트 1번 (한솔이 인지)
-        sonnerToast(`놓친 알림 ${missed.length}개를 가져왔어요`, {
+        sonnerToast(`놓친 알림 ${added}개를 가져왔어요`, {
           description: '종 모양을 클릭해 확인해주세요.',
           duration: 6000,
         });
         if (missed[0]?.createdAt) setLastSeenAt(me.id, missed[0].createdAt);
-        console.log('[catchup] 완료', { added: missed.length });
+        console.log('[catchup] 완료', { added });
       } catch (err) {
         console.warn('[catchup] 멘션 catch-up 실패:', err);
         releaseCatchupRunOnError(catchupDoneUserIdRef, me.id);
@@ -1493,6 +1392,14 @@ export default function App() {
       if (!lastSeen) {
         ensureCommentReactionLastSeenInitialized(me.id);
         console.log('[reaction-catchup] 첫 로그인 — last_seen 초기화만');
+        return;
+      }
+      // v1.146.0(§6.4): 설정 '반응 알림'(기본 꺼짐). 로그인 때는 설정을 아직 안 불러왔을 수 있어 저장값을 직접 본다.
+      //   꺼져 있으면 모아 오지 않고(서버 조회 없음) 기준 시각만 옮긴다 — 나중에 켜도 옛 반응이 한꺼번에 오지 않게.
+      const { loadPreferences } = await import('@/services/settingsService');
+      const savedNoti = (await loadPreferences().catch(() => null))?.notifications as Record<string, unknown> | undefined;
+      if (!resolveNotificationSettings(savedNoti).reaction) {
+        setCommentReactionLastSeenAt(me.id, new Date().toISOString());
         return;
       }
       try {
@@ -1771,172 +1678,13 @@ export default function App() {
         return;
       }
 
-      // 댓글 변경 → 알림 분기 평가 → 캐시 무효화
-      // 코덱스 P1 fix (2026-05-10): invalidatePartCache() 가 알림 분기 *전*에 있으면 isCommentByUser/
-      //   hasUserCommentedOnScene 가 캐시 비어진 상태에서 호출되어 false 반환 → 답글-자동멘션·스레드 참여자
-      //   알림이 silent skip. invalidate 는 분기 평가 *후* 로 옮기고, 호출 시점도 try/finally 로 보장.
+      // 댓글 변경 → 알림 판정(함수 하나) → 캐시 반영
+      //   판정은 캐시를 고치기 *전*에 한다 — isCommentByUser/hasUserCommentedOnScene 가 받기 전 상태를 본다(코덱스 P1 2026-05-10).
+      //   v1.146.0(씬 댓글 B안 §6.1): 멘션·답글·리테이크·담당 자동 알림 판정은 decideSceneCommentNotification 하나.
       if (table === 'comments') {
-        const characterId = (payload?.new as { character_id?: string } | undefined)?.character_id
-          ?? (payload?.old as { character_id?: string } | undefined)?.character_id;
-        if (characterId) {
-          applyRealtimeCommentPayload(payload);
-          return;
-        }
-        // INSERT 이벤트: 다른 사용자가 내 씬에 댓글 / @멘션 시 알림
         if (payload?.eventType === 'INSERT' && payload?.new) {
-          // comments 테이블 컬럼: scene_id 는 사실 scene.no(sort_order, 예: '1', '2'...).
-          // 정확한 씬 매칭은 scene_uuid 컬럼 사용 (electron/supabase.ts:872 참고).
-          const newComment = payload.new as {
-            id?: string;
-            scene_id?: string;
-            scene_uuid?: string;
-            part_id?: string;
-            user_name?: string;
-            user_id?: string;
-            text?: string;
-            mentions?: string[];
-            // v1.18.0: 리테이크 맥락 댓글 식별 — 값 있으면 'revision' 알림 경로로 분기.
-            revision_id?: string | null;
-            // v1.24.0: 1단계 대댓글이면 부모 댓글 id. 답글 알림 분기에 사용.
-            parent_comment_id?: string | null;
-          };
-          const me = useAuthStore.getState().currentUser;
-
-          // v1.18.0: 리테이크 맥락 댓글 → 'revision' 알림 (revisionAction='comment').
-          // 일반 댓글 알림 경로(isMentioned/isAssignee) 와 *분리* 해 중복 알림 방지.
-          // 조건: revision_id 있음 + 그 리테이크 notifyUserIds 에 나 포함 + 내가 작성자 아님.
-          if (dispatchRevisionCommentNotification(newComment)) {
-            // 리테이크 맥락 댓글은 일반 댓글 알림 경로 스킵.
-            // 코덱스 P2 fix (2026-05-10): early return *전* 캐시 반영. 안 그러면 리테이크 댓글이
-            //   캐시에 없는 채로 남아 일반 댓글 뷰에서 누락됨 (broadcast 가 늦거나 끊긴 케이스).
-            //   v1.145.0: 캐시를 비우지 않고 받은 행을 끼워 넣는다(재조회 없음).
-            applyRealtimeCommentPayload(payload);
-            return;
-          }
-
-          // v1.24.0: 본인 댓글 알림 차단 — 같은 PC에서 작성한 댓글에 본인이 알림받는 건 노이즈.
-          // (한솔 테스트용 v1.15.0 의 user_id !== me.id 제거를 본 PR 에서 복원.)
-          if (me && newComment.user_id && newComment.user_id !== me.id && newComment.scene_id) {
-            // v1.24.0: dedupeKey 에 commentId 포함 → 같은 사용자가 같은 씬에 짧은 시간 내 여러 댓글 작성 시
-            //   broadcast/realtime dedupe 가 두 번째부터 충돌해 silent drop 되던 문제 방지.
-            const dedupeKey = `comment:${newComment.user_id}:${newComment.scene_id}:${newComment.id ?? ''}`;
-            if (!dedupeNotification(dedupeKey)) { /* 이미 broadcast로 처리됨 */ }
-            else {
-              const notiSettings = notiSettingsRef.current;
-              if (notiSettings.commentNotify !== false) {
-                // 한솔 보고 (2026-04-28): comments.scene_id='1' 같은 sort_order 라 기존 sceneId/UUID 매칭 모두 실패.
-                // 정확한 씬은 scene_uuid 우선. fallback 으로 part_id + sceneNo 매칭.
-                const sceneByUuid = newComment.scene_uuid
-                  ? useDataStore.getState().findSceneByUuid(newComment.scene_uuid)
-                  : null;
-                const sceneByPartAndNo = (() => {
-                  if (sceneByUuid) return null;
-                  if (!newComment.part_id || !newComment.scene_id) return null;
-                  const targetNo = Number(newComment.scene_id);
-                  if (!Number.isFinite(targetNo)) return null;
-                  for (const ep of useDataStore.getState().episodes) {
-                    for (const part of ep.parts) {
-                      if (part.id !== newComment.part_id) continue;
-                      const found = part.scenes.find((s) => Number(s.no) === targetNo);
-                      if (found) return found;
-                    }
-                  }
-                  return null;
-                })();
-                const scene = sceneByUuid ?? sceneByPartAndNo ?? null;
-                const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
-                // v1.24.0: assignee 가 콤마 구분 다중 담당자면 split → 자기 이름 포함 여부 매칭.
-                // 동일 sceneNo 의 BG↔ACT counterpart 부서 assignee 도 함께 검사 (한 댓글이 양쪽 공유 → 양쪽 작업자 모두 알림).
-                const assigneeNames = scene ? parseAssigneeList(scene.assignee) : [];
-                const isAssignee = assigneeNames.includes(me.name);
-                const counterpartAssigneeNames = scene
-                  ? collectCounterpartAssigneeNames(scene)
-                  : [];
-                const isCounterpartAssignee = counterpartAssigneeNames.includes(me.name);
-                // v1.24.0: 답글 부모 작성자 → 자동 멘션 (자기 댓글에 답글 받음).
-                let isReplyToMe = false;
-                if (newComment.parent_comment_id) {
-                  isReplyToMe = isCommentByUser(newComment.parent_comment_id, me.id);
-                }
-                // v1.24.0: 스레드 참여자 — 해당 씬 댓글 캐시에 자기 userId 댓글이 있는지.
-                const isThreadParticipant = scene
-                  ? hasUserCommentedOnScene(newComment.part_id, scene, me.id)
-                  : false;
-
-                // 한솔 진단용 (v1.15.4): scene 매칭 실패 원인을 콘솔에서 정확히 파악하기 위한 로그.
-                // 강선영 PC 등 다른 사용자에서 멘션 알림 받을 때 scene 못 찾는 케이스 진단.
-                if (!scene) {
-                  const ds = useDataStore.getState();
-                  console.warn('[댓글알림진단] scene 매칭 실패', {
-                    payload: {
-                      scene_id: newComment.scene_id,
-                      scene_uuid: newComment.scene_uuid,
-                      part_id: newComment.part_id,
-                      user_name: newComment.user_name,
-                      mentions: newComment.mentions,
-                    },
-                    me: { id: me.id, name: me.name },
-                    storeStats: {
-                      episodeCount: ds.episodes.length,
-                      partCount: ds.episodes.reduce((s, e) => s + e.parts.length, 0),
-                      sceneCount: ds.episodes.reduce((s, e) => s + e.parts.reduce((ss, p) => ss + p.scenes.length, 0), 0),
-                    },
-                    samplePartIds: ds.episodes.flatMap((e) => e.parts.map((p) => p.id)).slice(0, 5),
-                    matchedPart: newComment.part_id ? ds.episodes.flatMap((e) => e.parts).find((p) => p.id === newComment.part_id) : null,
-                  });
-                }
-
-                // v1.24.0: 알림 분기 — 강한 시각 신호(mention) > 차분한 자동 알림(comment) 우선순위.
-                // mention 조건: 명시 @멘션 OR 자기 댓글에 답글 (자동 멘션).
-                // comment 조건: 씬 담당자(BG/ACT 모두) OR 스레드 참여자. mention 이 우선이면 comment 는 발송 안 함.
-                const baseMetadata: Record<string, unknown> = {
-                  sceneId: scene?.id ?? newComment.scene_uuid,
-                  sceneName: scene?.sceneId,
-                  commentId: newComment.id,
-                  commentSceneId: newComment.scene_id,
-                  commentPartId: newComment.part_id,
-                };
-                if (newComment.parent_comment_id) {
-                  baseMetadata.parentCommentId = newComment.parent_comment_id;
-                }
-                const bodyShort = newComment.text
-                  ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text)
-                  : undefined;
-                const author = newComment.user_name || '누군가';
-
-                if (isMentioned || isReplyToMe) {
-                  const title = isMentioned
-                    ? `${author}님이 나를 태그했습니다`
-                    : `${author}님이 내 댓글에 답글을 남겼습니다`;
-                  dispatchNotification({
-                    type: 'mention',
-                    title,
-                    body: bodyShort,
-                    metadata: { ...baseMetadata, mentionedBy: author },
-                  }, notiSettings);
-                } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
-                  const reason = isAssignee
-                    ? '내 씬에 댓글'
-                    : isCounterpartAssignee
-                    ? '함께 작업 중인 씬에 댓글'
-                    : '내가 댓글 단 씬에 새 댓글';
-                  // v1.24.0 P1 #10: 더블스페이스 방지 — sceneId 가 비면 prefix 자체 생략.
-                  const sceneIdLabel = scene?.sceneId ? `${scene.sceneId} ` : '';
-                  dispatchNotification({
-                    type: 'comment',
-                    title: `${author}님이 ${sceneIdLabel}${reason}`,
-                    body: bodyShort,
-                    metadata: baseMetadata,
-                  }, notiSettings);
-                }
-              }
-            }
-          }
+          notifyIncomingSceneComment(normalizeSceneCommentFromRealtimeRow(payload.new), getNotiSettings);
         }
-        // 코덱스 P1 fix (2026-05-10): 알림 분기 평가가 끝난 *후* 캐시 반영 →
-        //   isCommentByUser/hasUserCommentedOnScene 가 평가 시점의 캐시를 본다.
-        // v1.145.0(씬 댓글 B안 §7): 캐시를 통째로 비우던 것을 받은 행만 끼워 넣기·바꾸기·빼기로 바꿨다 —
-        //   댓글 하나에 모든 화면이 댓글을 다시 읽던 일이 없다. 행이 모자라면 그 파트만 다시 읽는다.
         if (payload?.eventType === 'DELETE') {
           const deletedId = (payload?.old as { id?: string } | undefined)?.id;
           if (deletedId) useNotificationStore.getState().removeNotificationsForComment(deletedId);
@@ -1944,6 +1692,7 @@ export default function App() {
         applyRealtimeCommentPayload(payload);
         return;
       }
+
 
       // scenes UPDATE → delta 직접 적용 (full reload 없이 즉시)
       // 주의: bulk op 확정은 여기서 처리하지 않는다. IPC 응답(runBulkOp)만을 확정 경로로 사용.
@@ -1995,8 +1744,8 @@ export default function App() {
         if (!me) return;
 
         const notiSettings = notiSettingsRef.current;
-        // 댓글 알림과 같은 settings flag 재사용 (별도 토글 없음 — 추후 분리 가능)
-        if (notiSettings.commentNotify === false) return;
+        // v1.146.0: 설정 '리테이크 알림'(등록·진행·해결). 예전엔 '내 씬 댓글 알림'을 같이 썼다.
+        if (notiSettings.retake === false) return;
 
         if (payload?.eventType === 'INSERT' && payload?.new) {
           const row = payload.new as {
@@ -2430,7 +2179,7 @@ export default function App() {
         const me = useAuthStore.getState().currentUser;
         if (!p || !me?.id) return;
         const notiSettings = notiSettingsRef.current;
-        if (notiSettings.commentNotify === false) return;
+        if (notiSettings.retake === false) return;
         if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
         if (p.senderId === me.id) return;
         const dedupeKey = `revision:${p.revisionId ?? ''}:assignee_done:${p.updatedAt ?? ''}`;
@@ -2665,7 +2414,7 @@ export default function App() {
             const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
             if (isSceneAssignedToUser(scene, me.name)) {
               const notiSettings = notiSettingsRef.current;
-              if (notiSettings.sceneChange !== false) {
+              if (notiSettings.sceneAuto !== false) {
                 const stageLabel = stage === 'lo' ? 'LO' : stage === 'done' ? '완료' : stage === 'review' ? '검수' : stage === 'png' ? 'PNG' : stage;
                 // v1.23.1 (#7): 누가 변경했는지 명시 — senderId 로 user 이름 조회.
                 const senderName = useAuthStore.getState().users.find((u) => u.id === senderId)?.name ?? '다른 사용자';
@@ -2674,7 +2423,7 @@ export default function App() {
                   title: `${senderName}님이 ${scene.sceneId || sceneUuid} ${stageLabel} ${value ? '✓ 완료' : '✗ 해제'}`,
                   body: `${stageLabel} 단계가 ${value ? '완료' : '해제'} 처리되었습니다`,
                   metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, fromStage: stage, toStage: value ? 'on' : 'off', changedBy: senderName },
-                }, notiSettings);
+                }, notiSettings, { quiet: true }); // '내 씬 자동 알림'은 조용히(배지만, v1.146.0)
               }
             }
           }
@@ -2710,7 +2459,7 @@ export default function App() {
             const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
             if (isSceneAssignedToUser(scene, me.name)) {
               const notiSettings = notiSettingsRef.current;
-              if (notiSettings.sceneChange !== false) {
+              if (notiSettings.sceneAuto !== false) {
                 const senderName = useAuthStore.getState().users.find((u) => u.id === senderId)?.name ?? '다른 사용자';
                 const stateLabel = sceneState === 'wait' ? '대기'
                   : sceneState === 'work' ? `작업중 ${workRound}차`
@@ -2721,7 +2470,7 @@ export default function App() {
                   title: `${senderName}님이 ${scene.sceneId || sceneUuid} → ${stateLabel}`,
                   body: `액팅 씬 단계가 ${stateLabel} 로 변경되었습니다`,
                   metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, toStage: sceneState, changedBy: senderName },
-                }, notiSettings);
+                }, notiSettings, { quiet: true }); // '내 씬 자동 알림'은 조용히(배지만, v1.146.0)
               }
             }
           }
@@ -2743,7 +2492,7 @@ export default function App() {
             const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
             if (isSceneAssignedToUser(scene, me.name)) {
               const notiSettings = notiSettingsRef.current;
-              if (notiSettings.sceneChange !== false) {
+              if (notiSettings.sceneAuto !== false) {
                 // v1.23.1 (#7): 누가 변경했는지 명시.
                 const senderName = useAuthStore.getState().users.find((u) => u.id === senderId)?.name ?? '다른 사용자';
                 dispatchNotification({
@@ -2751,7 +2500,7 @@ export default function App() {
                   title: `${senderName}님이 ${scene.sceneId || sceneUuid} 정보를 수정`,
                   body: `${field} 항목이 변경되었습니다`,
                   metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, changedBy: senderName },
-                }, notiSettings);
+                }, notiSettings, { quiet: true }); // '내 씬 자동 알림'은 조용히(배지만, v1.146.0)
               }
             }
           }
@@ -2759,129 +2508,11 @@ export default function App() {
         }
       }
 
+
+
       if (data.event === 'comment-added') {
-        // 댓글 추가 broadcast → 알림 분기 평가 → 캐시 무효화
-        // 코덱스 P1 fix (2026-05-10): invalidate 를 알림 분기 *후* 로 이동. 이전엔 cache miss 로
-        //   isCommentByUser/hasUserCommentedOnScene 가 false 반환 → 답글/스레드 알림 누락.
-        // v1.24.0 P0 #1: realtime INSERT 분기와 동일한 mention/comment 분기 적용.
-        //   broadcast 페이로드에 commentId/parentCommentId/partId 가 포함되어 두 경로 어느 쪽이든 같은 분기 가능.
-        const {
-          sceneId: commentSceneNumber,  // sort_order text — findSceneBySceneId 매칭용
-          userName: commentUserName,
-          userId: commentUserId,
-          text: commentText,
-          mentions: commentMentions,
-          commentId: commentCid,
-          parentCommentId: commentParent,
-          partId: commentPartId,
-          revisionId: commentRevisionId,
-        } = data.payload as {
-          sceneId?: string;
-          userName?: string;
-          userId?: string;
-          text?: string;
-          mentions?: string[];
-          commentId?: string | null;
-          parentCommentId?: string | null;
-          partId?: string | null;
-          revisionId?: string | null;
-        };
-        const me = useAuthStore.getState().currentUser;
-        // 캐릭터 댓글 broadcast(sceneId='char:{id}') 는 씬 알림 네비게이션이 없음 → 멘션/답글 알림 스킵, 캐시만 무효화.
-        //   (캐릭터 현황판 상세에서 직접 확인. 씬 알림으로 잘못 흘러가 깨진 이동 링크가 뜨던 문제 차단.)
-        if (typeof commentSceneNumber === 'string' && commentSceneNumber.startsWith('char:')) {
-          applyCommentBroadcast('comment-added', data.payload);
-          return;
-        }
-        if (commentRevisionId) {
-          dispatchRevisionCommentNotification({
-            id: commentCid,
-            scene_id: commentSceneNumber,
-            part_id: commentPartId,
-            user_name: commentUserName,
-            user_id: commentUserId,
-            text: commentText,
-            mentions: commentMentions,
-            revision_id: commentRevisionId,
-          });
-          applyCommentBroadcast('comment-added', data.payload);
-          return;
-        }
-        if (me && commentUserId && commentUserId !== me.id && commentSceneNumber) {
-          const dedupeKey = `comment:${commentUserId}:${commentSceneNumber}:${commentCid ?? ''}`;
-          if (!dedupeNotification(dedupeKey)) { /* 이미 Realtime으로 처리됨 */ }
-          else if (notiSettingsRef.current.commentNotify === false) { /* 알림 끔 */ }
-          else {
-            const notiSettings = notiSettingsRef.current;
-            // partId 있으면 정확 매칭, 없으면 fallback (alias collision 위험 있지만 단일 데이터인 경우 OK)
-            let scene: ReturnType<typeof useDataStore.getState>['episodes'][number]['parts'][number]['scenes'][number] | null = null;
-            if (commentPartId) {
-              const targetNo = Number(commentSceneNumber);
-              if (Number.isFinite(targetNo)) {
-                for (const ep of useDataStore.getState().episodes) {
-                  for (const part of ep.parts) {
-                    if (part.id !== commentPartId) continue;
-                    const found = part.scenes.find((s) => Number(s.no) === targetNo);
-                    if (found) { scene = found; break; }
-                  }
-                  if (scene) break;
-                }
-              }
-            }
-            if (!scene) {
-              scene = useDataStore.getState().findSceneBySceneId(commentSceneNumber!) ?? null;
-            }
-
-            const isMentioned = Array.isArray(commentMentions) && commentMentions.includes(me.name);
-            const assigneeNames = scene ? parseAssigneeList(scene.assignee) : [];
-            const isAssignee = assigneeNames.includes(me.name);
-            const counterpartNames = scene ? collectCounterpartAssigneeNames(scene) : [];
-            const isCounterpartAssignee = counterpartNames.includes(me.name);
-            const isReplyToMe = commentParent ? isCommentByUser(commentParent, me.id) : false;
-            const isThreadParticipant = scene
-              ? hasUserCommentedOnScene(commentPartId ?? null, scene, me.id)
-              : false;
-
-            const baseMetadata: Record<string, unknown> = {
-              sceneId: scene?.id,
-              sceneName: scene?.sceneId,
-              commentId: commentCid ?? undefined,
-              commentSceneId: commentSceneNumber,
-              commentPartId: commentPartId ?? undefined,
-              ...(commentParent ? { parentCommentId: commentParent } : {}),
-            };
-            const bodyShort = commentText
-              ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText)
-              : undefined;
-            const author = commentUserName || '누군가';
-            const sceneIdLabel = scene?.sceneId ? `${scene.sceneId} ` : '';
-
-            if (isMentioned || isReplyToMe) {
-              const title = isMentioned
-                ? `${author}님이 나를 태그했습니다`
-                : `${author}님이 내 댓글에 답글을 남겼습니다`;
-              dispatchNotification({
-                type: 'mention',
-                title,
-                body: bodyShort,
-                metadata: { ...baseMetadata, mentionedBy: author },
-              }, notiSettings);
-            } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
-              const reason = isAssignee
-                ? '내 씬에 댓글'
-                : isCounterpartAssignee
-                ? '함께 작업 중인 씬에 댓글'
-                : '내가 댓글 단 씬에 새 댓글';
-              dispatchNotification({
-                type: 'comment',
-                title: `${author}님이 ${sceneIdLabel}${reason}`,
-                body: bodyShort,
-                metadata: baseMetadata,
-              }, notiSettings);
-            }
-          }
-        }
-        // 코덱스 P1 fix: 알림 분기 *후* 캐시 반영. v1.145.0: 받은 댓글을 캐시에 끼워 넣고(재조회 없음) 그 시트만 알린다.
+        // 댓글 추가 방송 — 실시간 INSERT 와 같은 판정 함수(어느 쪽이 먼저 와도 알림은 한 번). 판정 *후* 캐시에 끼워 넣는다.
+        notifyIncomingSceneComment(normalizeSceneCommentFromAddedBroadcast(data.payload), getNotiSettings);
         applyCommentBroadcast('comment-added', data.payload);
         return;
       }
@@ -2892,6 +2523,9 @@ export default function App() {
         if (data.event === 'comment-deleted') {
           const deletedId = (data.payload as { commentId?: string } | undefined)?.commentId;
           if (deletedId) useNotificationStore.getState().removeNotificationsForComment(deletedId);
+        } else {
+          // v1.146.0(§6.1): 수정으로 새로 들어간 @이름에게만 멘션 알림.
+          notifyIncomingSceneComment(normalizeSceneCommentFromUpdatedBroadcast(data.payload), getNotiSettings);
         }
         applyCommentBroadcast(data.event, data.payload);
         return;
@@ -2954,8 +2588,10 @@ export default function App() {
         const me = useAuthStore.getState().currentUser;
         const n = payload?.notification;
         if (n && me && n.recipientId === me.id && n.actorId !== me.id) {
+          // v1.146.0(§6.4): '반응 알림'이 꺼져 있으면(기본) 목록에 넣지 않는다 — 기준 시각만 옮긴다(아래).
+          const reactionOn = notiSettingsRef.current.reaction !== false;
           const unreadBefore = useNotificationStore.getState().unreadCount;
-          useNotificationStore.getState().upsertCommentReaction({
+          if (reactionOn) useNotificationStore.getState().upsertCommentReaction({
             id: n.id,
             type: 'comment_reaction',
             title: buildReactionNotificationTitle(n.actorName, n.emojis ?? []),
@@ -2971,7 +2607,7 @@ export default function App() {
             createdAt: n.lastActionAt,
           });
           // 움직임 폴리싱 18번: 실시간 반응 알림은 종 배지만 '톡'(나를 부른 알림이 아니라 종은 흔들지 않는다).
-          noteLiveNotificationArrival('comment_reaction', unreadBefore);
+          if (reactionOn) noteLiveNotificationArrival('comment_reaction', unreadBefore);
           // 코덱스 2차 P1: 실시간으로 받은 알림은 lastSeen 갱신.
           // 코덱스 6차 P2: monotonic max() 로 out-of-order broadcast 의 cursor 후퇴 차단.
           // 코덱스 15차 P2: lastSeen 을 composite "<lastActionAt>|<id>" 로 저장 → 같은 ts 행이
@@ -2995,7 +2631,11 @@ export default function App() {
         if (payload?.recipientId && me && payload.recipientId === me.id && payload.notificationId) {
           if (payload.deleted) {
             useNotificationStore.getState().removeNotificationById(payload.notificationId);
-          } else {
+          } else if (
+            // v1.146.0: '반응 알림'이 꺼져 있고 목록에 없는 알림이면 다시 읽어 넣지 않는다.
+            notiSettingsRef.current.reaction !== false
+            || useNotificationStore.getState().notifications.some((x) => x.id === payload.notificationId)
+          ) {
             // 축소 — 단일 행 refetch 로 emojis 배열 정합화
             void (async () => {
               try {

@@ -8,6 +8,7 @@ import {
 } from '@/utils/notificationSceneAction';
 import { markLiveNotificationArrival, notificationToastClassName } from '@/utils/notificationArrival';
 import { notificationTypeVisual } from '@/utils/notificationTypeVisual';
+import { getNotificationIdentity } from '@/utils/notificationIdentity';
 
 /**
  * 실시간으로 방금 받은 알림이 안 읽은 수를 늘렸으면 헤더 종·배지에 알린다(움직임 폴리싱 18번).
@@ -39,12 +40,8 @@ export interface NotifyPayload {
   metadata?: Record<string, unknown>;
 }
 
-export interface NotificationSettings {
-  sceneChange?: boolean;
-  commentNotify?: boolean;
-  osNotification?: boolean;
-  sound?: boolean;
-}
+export { resolveNotificationSettings, type NotificationSettings } from '@/utils/notificationSettings';
+import type { NotificationSettings } from '@/utils/notificationSettings';
 
 function metadataString(
   metadata: Record<string, unknown> | undefined | null,
@@ -59,6 +56,7 @@ export function hasNotificationActionTarget(
   metadata?: Record<string, unknown> | null,
 ): boolean {
   return hasSceneTargetHint(metadata) ||
+    (type === 'mention' && Boolean(metadataString(metadata, 'characterId'))) ||
     (type === 'revision' && Boolean(metadataString(metadata, 'retakeHubSetId') || metadataString(metadata, 'revisionId')));
 }
 
@@ -68,9 +66,17 @@ export function hasNotificationActionTarget(
  * 2. 기본 Sonner 토스트 (info 스타일 + 알림 타입별 이동 액션)
  * 3. OS 네이티브 알림 (앱 비활성 시)
  */
-export function dispatchNotification(payload: NotifyPayload, settings?: NotificationSettings) {
+export interface DispatchNotificationOptions {
+  /** 조용한 알림 — 종 배지만(토스트·Windows 알림 없음). 담당 씬 자동 알림 등. */
+  quiet?: boolean;
+}
+
+export function dispatchNotification(payload: NotifyPayload, settings?: NotificationSettings, options: DispatchNotificationOptions = {}) {
   const store = useNotificationStore.getState();
   const unreadBefore = store.unreadCount;
+  // 같은 알림(같은 댓글·같은 리테이크 동작)이 이미 목록에 있으면 스토어가 합친다 — 그때는 토스트를 다시 띄우지 않는다(§6.1).
+  const identity = getNotificationIdentity({ type: payload.type, metadata: payload.metadata });
+  const alreadyListed = !!identity && store.notifications.some((n) => getNotificationIdentity(n) === identity);
   const notificationId = store.addNotification({
     type: payload.type,
     title: payload.title,
@@ -78,6 +84,7 @@ export function dispatchNotification(payload: NotifyPayload, settings?: Notifica
     metadata: payload.metadata as Record<string, string | undefined>,
   });
   noteLiveNotificationArrival(payload.type, unreadBefore, payload.metadata);
+  if (alreadyListed || options.quiet) return;
   const canNavigate = hasNotificationActionTarget(payload.type, payload.metadata);
 
   // 1. Sonner 토스트 (기본 스타일 + 종류별 왼쪽 색 막대·아이콘)
