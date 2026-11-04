@@ -1,0 +1,539 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body style="margin:0"><title>B flow 댓글 B안 시안</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* 레이아웃: 위 설명 띠 + 장면 선택 탭 + 실제 앱 모달 프레임(가운데) + 아래 스펙 표. 앱 프레임은 B flow 토큰을 그대로 쓴다. */
+:root {
+  --bg: #0F1117; --card: #1A1D27; --card2: #292C3C; --border: #2D3041; --fg: #E8E8EE; --fg2: #8B8DA3;
+  --accent: #6C5CE7; --accent2: #A29BFE; --on-accent: #fff;
+  --blue: #74B9FF; --green: #00B894; --yellow: #FDCB6E; --red: #FF7675; --orange: #E17055;
+  --page-bg: #0B0D13; --page-card: #13151D; --page-border: #232636; --page-fg: #E6E7EE; --page-fg2: #9A9DB5; --page-accent: #8F83F4;
+  --font: 'Pretendard Variable', Pretendard, 'Noto Sans KR', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #F3F4F9; --card: #FFFFFF; --card2: #F6F7FC; --border: #DADDE9; --fg: #1B1E2B; --fg2: #5F6378;
+    --page-bg: #F3F4F9; --page-card: #FFFFFF; --page-border: #DDE0EC; --page-fg: #1A1D27; --page-fg2: #5D6178; --page-accent: #5B4BD6;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #F3F4F9; --card: #FFFFFF; --card2: #F6F7FC; --border: #DADDE9; --fg: #1B1E2B; --fg2: #5F6378;
+  --page-bg: #F3F4F9; --page-card: #FFFFFF; --page-border: #DDE0EC; --page-fg: #1A1D27; --page-fg2: #5D6178; --page-accent: #5B4BD6;
+  color-scheme: light;
+}
+.stage[data-mode="dark"] { --bg: #0F1117; --card: #1A1D27; --card2: #292C3C; --border: #2D3041; --fg: #E8E8EE; --fg2: #8B8DA3; color-scheme: dark; }
+.stage[data-mode="light"] { --bg: #F3F4F9; --card: #FFFFFF; --card2: #F6F7FC; --border: #DADDE9; --fg: #1B1E2B; --fg2: #5F6378; color-scheme: light; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--page-bg); color: var(--page-fg); font-family: var(--font); font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--page-bg); }
+main { padding-block: 24px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); max-width: 1320px; margin: 0 auto; }
+h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.01em; text-wrap: balance; }
+h2 { font-size: 18px; margin: 34px 0 10px; }
+p.lead { color: var(--page-fg2); margin: 0 0 14px; max-width: 76ch; }
+p { max-width: 76ch; }
+a { color: var(--page-accent); }
+button { font-family: inherit; }
+.eyebrow { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--page-accent); font-weight: 700; margin-bottom: 6px; }
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 12px 0 12px; }
+.seg { display: inline-flex; border: 1px solid var(--page-border); border-radius: 10px; overflow: hidden; background: var(--page-card); }
+.seg button { border: 0; background: transparent; color: var(--page-fg2); padding: 8px 13px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.seg button.on { background: color-mix(in srgb, var(--page-accent) 18%, transparent); color: var(--page-fg); }
+.hint { font-size: 12px; color: var(--page-fg2); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.card { background: var(--page-card); border: 1px solid var(--page-border); border-radius: 12px; padding: 14px 16px; }
+.card h4 { margin: 0 0 6px; font-size: 14px; }
+.card p, .card li { color: var(--page-fg2); font-size: 13px; margin: 0; }
+.card ul { padding-left: 18px; margin: 4px 0; }
+.card li { margin: 3px 0; }
+.card li b, .card p b { color: var(--page-fg); font-weight: 600; }
+table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.t th, table.t td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--page-border); vertical-align: top; }
+table.t th { font-size: 11.5px; color: var(--page-fg2); font-weight: 600; }
+.tablewrap { overflow-x: auto; }
+code { font-family: var(--mono); font-size: 11.5px; background: color-mix(in srgb, var(--page-fg2) 12%, transparent); padding: 1px 5px; border-radius: 4px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* ─── 앱 프레임 ─── */
+.stage { position: relative; background: var(--bg); border: 1px solid var(--page-border); border-radius: 14px; padding: 18px; overflow-x: auto; color: var(--fg); font-size: 13px; line-height: 1.5; }
+.stage .dim { position: absolute; inset: 0; pointer-events: none; opacity: .35; background:
+  repeating-linear-gradient(90deg, transparent 0 24px, color-mix(in srgb, var(--card) 70%, transparent) 24px 160px, transparent 160px 184px);
+  mask-image: linear-gradient(180deg, #000 0, transparent 70%); }
+.modal { position: relative; display: flex; gap: 12px; width: max-content; margin: 0 auto; }
+.detail { width: 560px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; height: 760px; overflow: hidden; }
+.detail .top { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--fg2); }
+.detail .top b { color: var(--fg); font-size: 15px; }
+.detail .top .pct { color: var(--accent2); font-weight: 700; }
+.detail .top .segs { margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.detail .top .segs span { padding: 3px 9px; font-size: 11px; }
+.detail .top .segs span.on { background: var(--accent); color: #fff; }
+.detail .tabs { display: flex; gap: 18px; padding: 8px 16px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--fg2); }
+.detail .tabs span { padding: 6px 2px 9px; }
+.detail .tabs span.on { color: var(--fg); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.detail .tabs span .n { margin-left: 4px; font-size: 10px; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent2); border-radius: 999px; padding: 0 5px; }
+.detail .body { padding: 14px 16px; display: grid; gap: 12px; overflow: hidden; }
+.detail .imgs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.detail .imgs div { height: 128px; border-radius: 10px; border: 1px solid var(--border); background: linear-gradient(135deg, #2a2f45, #1d2030 60%, #3a3f5c); position: relative; }
+.stage[data-mode="light"] .detail .imgs div, :root[data-theme="light"] .stage:not([data-mode]) .detail .imgs div { background: linear-gradient(135deg, #cfd4e6, #e6e9f3 60%, #b9bfd8); }
+.detail .imgs div small { position: absolute; left: 8px; top: 6px; font-size: 10px; color: var(--fg2); }
+.detail .depts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dept { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--bg) 40%, transparent); }
+.dept .hd { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12.5px; margin-bottom: 8px; }
+.dept .hd i { width: 7px; height: 7px; border-radius: 50%; }
+.dept .hd .pct { margin-left: auto; font-weight: 600; color: var(--fg2); font-size: 11px; }
+.dept .lbl { font-size: 10.5px; color: var(--fg2); margin: 8px 0 4px; }
+.dept .who { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.dept .who i { width: 6px; height: 6px; border-radius: 50%; }
+.dept .stages { display: flex; gap: 4px; }
+.dept .stages span { flex: 1; text-align: center; font-size: 10px; padding: 4px 0; border-radius: 6px; border: 1px solid var(--border); color: var(--fg2); }
+.dept .stages span.on { color: #fff; border-color: transparent; }
+.dept .memo { font-size: 11px; color: color-mix(in srgb, var(--fg2) 70%, transparent); padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--bg) 50%, transparent); }
+
+/* ─── 댓글 패널(B안) ─── */
+.cp { width: 460px; height: 760px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; color: var(--fg); position: relative; flex: 0 0 auto; }
+.cp.open { width: 820px; }
+.cp-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px 0; }
+.cp-head h5 { margin: 0; font-size: 14px; font-weight: 600; }
+.cp-head .cnt { font-size: 12px; color: var(--fg2); font-variant-numeric: tabular-nums; }
+.cp-head .ic-btn { margin-left: auto; }
+.tabs2 { display: flex; gap: 14px; padding: 8px 16px 0; border-bottom: 1px solid var(--border); }
+.tabs2 button { border: 0; background: none; color: var(--fg2); font-size: 12.5px; font-weight: 600; padding: 6px 1px 8px; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; }
+.tabs2 button.on { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+.tabs2 button .n { font-size: 10.5px; color: var(--fg2); font-weight: 600; }
+.tabs2 button.on .n { color: var(--accent2); }
+.cp-body { display: flex; flex: 1 1 auto; min-height: 0; }
+.cp-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.todo { border-bottom: 1px solid var(--border); padding: 6px 12px 8px; }
+.todo .hd { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--fg2); padding: 4px 4px; cursor: pointer; }
+.todo .hd .n { margin-left: auto; font-weight: 500; color: var(--fg2); }
+.todo .it { display: flex; align-items: flex-start; gap: 8px; padding: 3px 4px; font-size: 12.5px; border-radius: 6px; }
+.todo .it:hover { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.todo .it .cb { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--fg2); margin-top: 3px; flex: 0 0 auto; display: grid; place-items: center; }
+.todo .it.done .cb { background: var(--green); border-color: var(--green); color: #fff; font-size: 9px; }
+.todo .it.done .tx { text-decoration: line-through; color: var(--fg2); }
+.todo .it small { display: block; font-size: 10.5px; color: var(--fg2); }
+.todo .add { font-size: 12px; color: var(--fg2); padding: 4px 4px 0; display: flex; gap: 6px; align-items: center; }
+.list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 1px; }
+.ic { width: 1em; height: 1em; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+.ic-btn { width: 28px; height: 28px; border-radius: 7px; border: 0; background: transparent; color: var(--fg2); display: grid; place-items: center; cursor: pointer; font-size: 14px; }
+.ic-btn:hover { background: color-mix(in srgb, var(--fg2) 14%, transparent); color: var(--fg); }
+.day { display: flex; align-items: center; gap: 10px; margin: 10px 4px 4px; font-size: 11px; color: var(--fg2); font-weight: 600; }
+.day i { flex: 1; height: 1px; background: var(--border); }
+.newline { display: flex; align-items: center; gap: 8px; margin: 6px 4px 2px; font-size: 10.5px; color: var(--accent2); font-weight: 700; }
+.newline i { flex: 1; height: 1px; background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.m { position: relative; display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 7px 8px; border-radius: 10px; }
+.m:hover, .m:focus-within { background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.m.grouped { padding-top: 1px; padding-bottom: 2px; }
+.av { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; }
+.m.grouped .av { visibility: hidden; height: 0; }
+.m .gt { grid-column: 1; font-size: 10px; color: var(--fg2); text-align: center; align-self: start; padding-top: 3px; opacity: 0; font-variant-numeric: tabular-nums; }
+.m.grouped:hover .gt { opacity: 1; }
+.m .hd { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.m .nm { font-size: 13px; font-weight: 700; }
+.m .tm { font-size: 11px; color: var(--fg2); font-variant-numeric: tabular-nums; }
+.m .tm .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 6px; vertical-align: middle; }
+.m .re { font-size: 10px; font-weight: 700; color: var(--accent2); background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 4px; padding: 1px 6px; }
+.m .tx { font-size: 13.5px; line-height: 1.55; word-break: break-word; }
+.mention { color: var(--accent2); font-weight: 600; }
+.stage[data-mode="light"] .mention, :root[data-theme="light"] .stage:not([data-mode]) .mention { color: #5B4BD6; }
+.hashtag { color: #3FB3A5; font-weight: 600; }
+.imgph { margin-top: 8px; height: 112px; max-width: 300px; border-radius: 8px; border: 1px solid var(--border); background: linear-gradient(135deg, #2a2f45, #1d2030 60%, #3a3f5c); display: grid; place-items: center; color: var(--fg2); font-size: 10.5px; }
+.stage[data-mode="light"] .imgph, :root[data-theme="light"] .stage:not([data-mode]) .imgph { background: linear-gradient(135deg, #cfd4e6, #e6e9f3 60%, #b9bfd8); }
+.rxrow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+.rx { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); background: var(--card); color: var(--fg2); cursor: pointer; }
+.rx.me { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--fg); }
+.rx b { font-variant-numeric: tabular-nums; font-weight: 600; }
+.rx.add { opacity: 0; border-style: dashed; padding: 1px 7px; }
+.m:hover .rx.add { opacity: .8; }
+.thr { margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; background: none; color: inherit; }
+.thr:hover { border-color: var(--border); background: var(--card); }
+.thr .avs { display: flex; }
+.thr .avs i { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 8px; font-weight: 700; color: #fff; border: 2px solid var(--card); margin-right: -5px; font-style: normal; }
+.thr b { font-size: 12px; font-weight: 700; color: var(--accent2); }
+.stage[data-mode="light"] .thr b, :root[data-theme="light"] .stage:not([data-mode]) .thr b { color: #5B4BD6; }
+.thr small { font-size: 11px; color: var(--fg2); }
+.thr .new { font-size: 10px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px; padding: 0 6px; }
+.actions { position: absolute; top: -12px; right: 10px; display: flex; align-items: center; gap: 1px; padding: 3px; border-radius: 9px; background: var(--card); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,.28); opacity: 0; transform: translateY(2px); transition: opacity .12s, transform .12s; z-index: 3; }
+.m:hover .actions, .m:focus-within .actions { opacity: 1; transform: none; }
+.actions button { height: 26px; min-width: 26px; padding: 0 5px; border-radius: 6px; border: 0; background: transparent; color: var(--fg2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: 13px; }
+.actions button:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--fg); }
+.actions .sep { width: 1px; height: 14px; background: var(--border); margin: 0 3px; }
+.actions button.lbl { font-size: 11px; font-weight: 600; padding: 0 8px; }
+.popmenu { position: absolute; right: 10px; top: 16px; z-index: 6; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.3); padding: 4px; min-width: 172px; display: none; }
+.popmenu.on { display: block; }
+.popmenu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; border: 0; background: transparent; color: var(--fg); font-size: 12px; cursor: pointer; text-align: left; }
+.popmenu button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.popmenu button.danger { color: var(--red); }
+.popmenu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+/* 리테이크 루트 */
+.rt { margin: 6px 4px 2px 4px; border-radius: 12px; border: 1px solid var(--border); background: var(--card2); padding: 10px 12px; display: grid; gap: 6px; position: relative; }
+.rt .hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--fg2); }
+.rt .re { font-size: 11px; font-weight: 800; color: var(--accent2); }
+.stage[data-mode="light"] .rt .re, :root[data-theme="light"] .stage:not([data-mode]) .rt .re { color: #5B4BD6; }
+.st { font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 1px 8px; }
+.st.open { color: var(--fg2); background: color-mix(in srgb, var(--fg2) 16%, transparent); }
+.st.in_progress { color: var(--blue); background: color-mix(in srgb, var(--blue) 16%, transparent); }
+.st.assignee_done { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 16%, transparent); }
+.st.resolved { color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); }
+.rt .desc { font-size: 13.5px; color: var(--fg); }
+.rt .meta { display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: var(--fg2); flex-wrap: wrap; }
+.rt .meta .who { display: inline-flex; align-items: center; gap: 5px; }
+.rt .meta .who i { width: 16px; height: 16px; border-radius: 5px; display: inline-grid; place-items: center; font-size: 7.5px; color: #fff; font-style: normal; font-weight: 700; }
+.rt .foot { display: flex; align-items: center; gap: 10px; }
+.rt .foot .thr { margin: 0; }
+.rt .foot .lnk { margin-left: auto; font-size: 11.5px; color: var(--fg2); background: none; border: 0; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+.rt .foot .lnk:hover { color: var(--fg); }
+.sys { display: flex; align-items: center; gap: 8px; padding: 3px 8px 3px 48px; font-size: 11.5px; color: var(--fg2); }
+.sys .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.sys.in_progress { color: var(--blue); } .sys.resolved { color: var(--green); } .sys.open { color: var(--accent2); } .sys.assignee_done { color: var(--yellow); }
+.sys .tm { margin-left: auto; font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--fg2); }
+/* 입력 */
+.composer { padding: 10px 12px 12px; }
+.ibox { border-radius: 12px; border: 1px solid var(--border); background: var(--card2); padding: 8px 10px 6px; }
+.ibox:focus-within { border-color: color-mix(in srgb, var(--fg2) 60%, transparent); }
+.ibox .ta { font-size: 13px; color: var(--fg2); min-height: 36px; padding: 4px 6px; outline: none; }
+.ibox .ta[contenteditable]:focus { color: var(--fg); }
+.ibox .bar { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.ibox .bar .lt { display: flex; gap: 1px; }
+.ibox .bar .hint2 { font-size: 10.5px; color: var(--fg2); margin-right: 8px; }
+.ibox .bar .send { width: 30px; height: 28px; border-radius: 7px; border: 0; background: var(--accent); color: #fff; display: grid; place-items: center; cursor: pointer; }
+.ibox .bar .send[disabled] { opacity: .35; cursor: default; }
+.quickre { margin-bottom: 8px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 7%, transparent); padding: 10px 12px; display: grid; gap: 8px; font-size: 12px; }
+.quickre .hd { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 12.5px; }
+.quickre .hd .x { margin-left: auto; }
+.quickre .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; color: var(--fg2); }
+.quickre .chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 8px 2px 4px; border: 1px solid var(--border); font-size: 11.5px; color: var(--fg); background: var(--card); }
+.quickre .chip i { width: 16px; height: 16px; border-radius: 5px; display: inline-grid; place-items: center; font-size: 7.5px; color: #fff; font-style: normal; font-weight: 700; }
+.quickre .chip.need { border-color: color-mix(in srgb, var(--yellow) 60%, transparent); color: var(--yellow); background: transparent; }
+.quickre .chip.add { border-style: dashed; color: var(--fg2); background: transparent; cursor: pointer; }
+/* 스레드 패널 */
+.tp { width: 348px; flex: 0 0 auto; margin: 10px 10px 10px 0; border-radius: 12px; border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 45%, transparent); display: flex; flex-direction: column; min-height: 0; }
+.tp .hd { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.tp .hd b { font-size: 13px; display: block; }
+.tp .hd small { color: var(--fg2); font-size: 11px; }
+.tp .hd .r { margin-left: auto; display: flex; gap: 2px; align-items: center; }
+.tp .follow { font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 3px 9px; border: 1px solid var(--border); color: var(--fg2); background: transparent; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+.tp .follow.on { color: var(--accent2); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.tp .bd { padding: 6px; overflow: auto; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 1px; }
+.tp .rootwrap { padding: 2px 2px 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.tp .root-lbl { font-size: 10.5px; color: var(--fg2); padding: 2px 8px 0; }
+.tp .cnt { font-size: 11px; color: var(--fg2); padding: 4px 8px; display: flex; align-items: center; gap: 8px; }
+.tp .cnt i { flex: 1; height: 1px; background: var(--border); }
+.tp .ft { border-top: 1px solid var(--border); padding: 10px 10px; }
+.tp .ft .ibox .ta { min-height: 34px; }
+.tp .rt { margin: 2px 2px 0; }
+.tp .rt .acts { display: flex; gap: 6px; margin-top: 2px; }
+.btn { font-size: 11.5px; font-weight: 600; border-radius: 7px; padding: 4px 10px; border: 1px solid var(--border); background: var(--card); color: var(--fg); cursor: pointer; display: inline-flex; gap: 5px; align-items: center; }
+.btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn:hover { border-color: color-mix(in srgb, var(--fg2) 60%, transparent); }
+.toast { position: absolute; left: 50%; bottom: 86px; transform: translateX(-50%); background: var(--card); border: 1px solid var(--border); color: var(--fg); font-size: 12px; padding: 8px 12px; border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.3); opacity: 0; pointer-events: none; transition: opacity .18s; white-space: nowrap; z-index: 7; }
+.toast.on { opacity: 1; }
+.empty { padding: 40px 16px; text-align: center; color: var(--fg2); font-size: 13px; }
+.empty b { display: block; color: var(--fg); font-weight: 600; margin-bottom: 4px; }
+/* 알림 센터 */
+.bell { width: 340px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; color: var(--fg); overflow: hidden; }
+.bell .hd { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; }
+.bell .hd .r { margin-left: auto; display: flex; gap: 10px; font-size: 11px; font-weight: 600; color: var(--fg2); }
+.bell .it { padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.bell .it.un { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.bell .it .t { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; }
+.bell .it .t .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.bell .it .t .tm { margin-left: auto; font-size: 10.5px; color: var(--fg2); font-weight: 500; }
+.bell .it .pre { margin-top: 4px; display: grid; gap: 2px; }
+.bell .it .pre div { font-size: 11.5px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bell .it .pre div b { color: var(--fg); font-weight: 600; }
+.bell .it .acts { display: flex; gap: 6px; margin-top: 7px; }
+.bell .it .acts button { font-size: 10.5px; font-weight: 600; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--fg2); padding: 3px 8px; cursor: pointer; }
+.bell .it .acts button.acc { color: var(--accent2); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.bell .it.quiet { opacity: .75; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (max-width: 760px) { .modal { width: auto; } .detail { display: none; } .cp { width: 100%; } .cp.open { width: 100%; } .tp { display: none; } }
+</style>
+
+<main>
+<div class="eyebrow">B flow · 씬 댓글 · B안</div>
+<h1>댓글 B안 시안 — 실제 씬 상세 화면 안에서</h1>
+<p class="lead">왼쪽은 지금 앱의 씬 상세(상세·리테이크·파일·히스토리 탭, 보드/가이드 이미지, BG·ACT 카드)이고 오른쪽이 새 댓글 패널입니다. 위 탭으로 장면을 바꿔 보세요. 댓글 위에 마우스를 올리면 도구가 뜨고, 반응·답글·더보기·필터·팔로우가 실제로 동작합니다. 왼쪽 세로 막대는 모두 뺐고 안 읽은 댓글은 시각 옆 점 하나와 '새 댓글' 선으로만 표시합니다.</p>
+
+<div class="toolbar" role="tablist" aria-label="장면">
+  <div class="seg" id="scn">
+    <button class="on" data-s="base">기본</button>
+    <button data-s="thread">스레드 열림</button>
+    <button data-s="retake">리테이크 스레드</button>
+    <button data-s="quick">/re 빠른 리테이크</button>
+    <button data-s="unreadonly">안 읽음 필터</button>
+    <button data-s="empty">댓글 없음</button>
+  </div>
+  <div class="seg" id="mode"><button class="on" data-m="auto">화면 테마</button><button data-m="dark">다크</button><button data-m="light">라이트</button></div>
+  <span class="hint" id="scn-hint"></span>
+</div>
+
+<div class="stage" id="stage">
+  <div class="dim" aria-hidden="true"></div>
+  <div class="modal">
+    <div class="detail" aria-label="씬 상세(참고용)">
+      <div class="top"><span>‹</span><b>a001</b><span>sc_000~099</span><span class="pct">13%</span><span class="segs"><span class="on">통합</span><span>BG</span><span>액팅</span></span><span style="margin-left:8px">✕</span></div>
+      <div class="tabs"><span class="on">상세</span><span>리테이크 <span class="n">1</span></span><span>파일</span><span>히스토리</span></div>
+      <div class="body">
+        <div class="imgs"><div><small>스토리보드</small></div><div><small>가이드</small></div></div>
+        <div class="depts">
+          <div class="dept"><div class="hd"><i style="background:var(--accent)"></i>BG <span style="font-weight:500;color:var(--fg2)">배경</span><span class="pct">0%</span></div>
+            <div class="lbl">담당자</div><span class="who" style="background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)"><i style="background:var(--green)"></i>원동우</span>
+            <div class="lbl">진행 단계</div><div class="stages"><span>LO</span><span>완료</span><span>검수</span><span>PNG</span></div>
+            <div class="lbl">메모</div><div class="memo">메모 없음</div>
+            <div class="lbl">작업 링크</div><div class="memo">작업 폴더 · 아직 연결 안 됨</div></div>
+          <div class="dept"><div class="hd"><i style="background:var(--orange)"></i>ACT <span style="font-weight:500;color:var(--fg2)">액팅</span><span class="pct">25%</span></div>
+            <div class="lbl">담당자</div><span class="who" style="background:color-mix(in srgb,var(--yellow) 16%,transparent);color:var(--yellow)"><i style="background:var(--yellow)"></i>이혜민</span> <span class="who" style="background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)"><i style="background:var(--red)"></i>강선영</span>
+            <div class="lbl">진행 단계</div><div class="stages"><span class="on" style="background:var(--blue)">1차</span><span>작업</span><span>피드백</span><span>완료</span></div>
+            <div class="lbl">메모</div><div class="memo">메모 없음</div>
+            <div class="lbl">작업 링크</div><div class="memo">작업 폴더 · 아직 연결 안 됨</div></div>
+        </div>
+      </div>
+    </div>
+    <div id="panel"></div>
+  </div>
+</div>
+
+<h2>장면별로 바뀌는 것</h2>
+<div class="grid2" id="legend"></div>
+
+<h2>지금과 달라지는 점 (구현 기준)</h2>
+<div class="tablewrap"><table class="t">
+<thead><tr><th>요소</th><th>지금</th><th>B안</th></tr></thead>
+<tbody>
+<tr><td>댓글 한 줄</td><td>이름·시간 → 말풍선(내 글은 오른쪽·보라) → 호버 아이콘 + 상시 '답글' 알약</td><td>아바타(30px 이니셜) + 이름·시간 한 줄 + 본문 13.5px. 전부 왼쪽. 말풍선 없음. 호버 시 우상단 툴바 한 줄(✅ 👍 👀 · 😊 · 답글 · ⋯)</td></tr>
+<tr><td>답글</td><td>본문 들여쓰기 블록에 전부 펼침 + 오른쪽 스레드 창에도 또</td><td>본문에는 '답글 N개 · 아바타 · 마지막 시각 · 새 N' 한 줄. 누르면 오른쪽 스레드 창. 인라인 블록 제거</td></tr>
+<tr><td>스레드 창</td><td>메시지마다 '답글' 알약, 'X에게 답글' 라벨만 붙음</td><td>원댓글 고정 + 답글 목록 + 입력창 하나. 답글 버튼 없음. 사람 지목은 툴바의 @ 로 입력창에 삽입. 헤더에 팔로우 토글</td></tr>
+<tr><td>리테이크</td><td>댓글이 최상위 말풍선으로 나열, 활동은 그림자 카드 + 버튼 3개</td><td>리테이크 카드 하나가 루트(re# · 상태 · 요청·담당 · 설명 · 활동/댓글 수). 활동은 한 줄 시스템 행. 스레드 창에서 담당 완료·해결 버튼</td></tr>
+<tr><td>안 읽음</td><td>왼쪽 4px 보라 막대 + '새 댓글' 알약</td><td>시각 옆 점 + 얇은 '새 댓글' 선. 막대 없음</td></tr>
+<tr><td>필터</td><td>'활동 감추기' · 're만' 텍스트 버튼</td><td>탭: 전체 · 안 읽음 N · 리테이크 N · @나 N (밑줄 탭)</td></tr>
+<tr><td>연속 댓글 · 날짜</td><td>이름·시간 둘 다 사라짐, 날짜 구분 없음</td><td>같은 사람 5분 안 연속은 아바타 자리 비우고 호버 시 시간. '11월 3일 월요일' / '오늘' 구분선</td></tr>
+<tr><td>입력창</td><td>'댓글 입력...' + 📎 + ↑</td><td>'a001에 댓글 남기기' + 📎 @ 😊 /re + 'Enter 보내기 · Shift+Enter 줄바꿈' + ↑. /re 는 기존 빠른 리테이크 카드를 그대로 씀</td></tr>
+<tr><td>더보기 ⋯</td><td>수정·삭제 아이콘 노출</td><td>팀 할 일로 보내기 · 링크 복사 · 내용 복사 · (내 글) 수정 · 삭제 · (남의 글) 이 스레드 알림 끄기</td></tr>
+<tr><td>데이터</td><td>—</td><td>변경 없음. 리테이크 루트는 revision_id 묶음을 화면에서 접는 것. 팔로우/끄기만 선택적으로 preferences 또는 1표</td></tr>
+</tbody></table></div>
+
+<h2>알림 센터(같은 PR 묶음 5단계)</h2>
+<p class="lead">종류별 묶음을 씬·스레드 묶음으로. 왼쪽 막대 대신 안 읽음은 배경 톤과 점 하나.</p>
+<div class="stage" style="padding:18px;display:flex;justify-content:center"><div id="bell"></div></div>
+
+<h2>치수·토큰 (구현 참고)</h2>
+<div class="tablewrap"><table class="t">
+<thead><tr><th>항목</th><th>값</th></tr></thead>
+<tbody>
+<tr><td>패널 폭</td><td>기존 자동 폭 유지(320~600), 스레드 열리면 +348+12</td></tr>
+<tr><td>아바타</td><td>30px, radius 9px, 이니셜 2글자(이름 뒤 두 글자), 사용자별 고정 색(기존 RevisionCommentThread avatarColor 재사용)</td></tr>
+<tr><td>글자</td><td>본문 13.5px/1.55 · 이름 13px 700 · 시각 11px · 시스템 행 11.5px · 칩 10~10.5px. 9px·9.5px 없음</td></tr>
+<tr><td>색</td><td>토큰만: bg-card, bg-border, text-primary, text-secondary, accent, accent-sub, status-combine(진행), status-done(해결), 노랑(담당 완료). 라이트 모드에서 멘션·링크는 accent 원색(#6C5CE7) 대신 한 단계 어두운 보라</td></tr>
+<tr><td>호버 툴바</td><td>행 우상단(-12px, right 10px), card 배경 + border + 그림자 0 6px 18px/.28, opacity 120ms. focus-within 에도 표시(키보드)</td></tr>
+<tr><td>스레드 창</td><td>348px(260~560 리사이즈 유지), bg-primary 45% 섞음, 원댓글 아래 구분선, 입력창은 본문과 같은 모양</td></tr>
+<tr><td>리테이크 카드</td><td>card2(입력 카드 배경 토큰 --comment-card-elev-rgb) + border, radius 12. 상태 칩 색: 대기 회색 / 진행중 status-combine / 담당 완료 노랑 / 해결 status-done</td></tr>
+<tr><td>움직임</td><td>툴바·메뉴 opacity/transform 120ms, 새 댓글 떠오름은 기존 bubbleRise 유지, '움직임: 최소'면 전환 없음</td></tr>
+</tbody></table></div>
+</main>
+
+<script>
+const I = {
+  reply: '<svg class="ic" viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>',
+  smile: '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>',
+  clip: '<svg class="ic" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+  up: '<svg class="ic" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>',
+  chev: '<svg class="ic" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>',
+  todo: '<svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="6" height="6" rx="1"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>',
+  plus: '<svg class="ic" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+  x: '<svg class="ic" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+  more: '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>',
+  check: '<svg class="ic" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+  pencil: '<svg class="ic" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',
+  trash: '<svg class="ic" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>',
+  at: '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg>',
+  bell: '<svg class="ic" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  belloff: '<svg class="ic" viewBox="0 0 24 24"><path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="m2 2 20 20"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  link: '<svg class="ic" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>',
+  copy: '<svg class="ic" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>',
+  flag: '<svg class="ic" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>',
+  msg: '<svg class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  settings: '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+};
+const P = { '배한솔': '#6C5CE7', '이혜민': '#D97A3A', '강선영': '#2BA393', '김어진': '#3E8FE0', '박정인': '#D9558A', '이다은': '#C79A2C', '원동우': '#8E7CF3' };
+const ME = '배한솔';
+const av = (n, cls) => `<span class="${cls || 'av'}" style="background:${P[n] || '#777'}" aria-hidden="true">${n.slice(1)}</span>`;
+const txt = (s) => s.replace(/@([가-힣]{2,4})/g, '<span class="mention">@$1</span>').replace(/#([A-Za-z0-9가-힣]+)/g, '<span class="hashtag">#$1</span>');
+
+const FEED = [
+  { id: 'c1', day: '11월 3일 월요일', user: '원동우', time: '오전 9:05', text: '초기 톤은 이 방향으로 맞춰두었습니다. 골목 안쪽은 가이드보다 한 톤 어둡게 갔어요.', rx: [{ e: '👍', n: 2 }] },
+  { id: 'c1b', day: '11월 3일 월요일', user: '원동우', time: '오전 9:07', text: '컬러 스크립트는 #a001 폴더 안 v2 기준이에요.', grouped: true },
+  { id: 'c2', day: '오늘', user: '이혜민', time: '오전 10:05', text: '@배한솔 캐릭터 발밑 그림자가 살짝 떠 보여요. LO 기준으로 2px 정도 내리면 붙을 것 같아요.', unread: true, img: true, mentionsMe: true },
+  { id: 'c3', day: '오늘', user: '강선영', time: '오전 10:12', text: '가이드 이미지 기준으로 골목 안쪽 채도만 조금 낮추면 컷 연결이 자연스러울 것 같습니다.', replies: [
+    { id: 'r1', user: '김어진', time: '오전 10:18', text: '위 코멘트에 이어서, 수정 후에는 액팅 #a001 도 같이 확인해 주세요.' },
+    { id: 'r2', user: '박정인', time: '오전 10:20', text: '@김어진 네, 액팅 손 위치도 같이 체크해둘게요.', unread: true },
+  ] },
+  { id: 'retake', kind: 'retake' },
+  { id: 'c4', day: '오늘', user: '이다은', time: '오전 11:10', text: '@배한솔 액팅 a001은 리테이크 1차 기준으로 손 위치만 다시 확인하면 될 것 같습니다.', unread: true, mentionsMe: true, rx: [{ e: '👀', n: 1, me: true }] },
+];
+const RETAKE = { re: 1, status: 'in_progress', by: '강선영', assignee: '배한솔', time: '오전 10:24', desc: '발밑 그림자 2px 내리고 골목 채도 -10. 수정본은 LO 폴더에 v3 로 올려 주세요.',
+  items: [
+    { k: 'sys', st: 'open', user: '강선영', text: '리테이크를 등록했어요', time: '오전 10:24' },
+    { k: 'sys', st: 'in_progress', user: '배한솔', text: '작업을 시작했어요', time: '오전 10:26' },
+    { k: 'c', id: 'rc1', user: '박정인', time: '오전 10:27', text: '그림자는 붙었고 채도는 한 번 더 볼게요.' },
+    { k: 'c', id: 'rc2', user: '배한솔', time: '오전 10:40', text: '채도 -10 적용본 올렸습니다. 확인 부탁드려요.', img: true },
+  ] };
+
+const SCENES = {
+  base: { hint: '기본 — 원댓글 5개, 리테이크 1개, 팀 할 일 2개. 댓글 위에 마우스를 올려 보세요.', legend: [['본문은 원댓글만', '답글은 "답글 2개 · 아바타 · 마지막 10:20 · 새 1" 한 줄로. 누르면 오른쪽 스레드 창.'], ['리테이크 카드가 루트', 're#1 · 진행중 · 요청·담당 · 설명 · 활동 2 · 댓글 2. 등록/진행/해결은 카드 안 한 줄 요약.'], ['안 읽음', '시각 옆 보라 점 + "새 댓글" 선. 막대 없음.'], ['연속 댓글', '원동우 두 번째 댓글은 아바타 자리를 비우고, 호버하면 왼쪽에 시간.']] },
+  thread: { hint: '스레드 열림 — 강선영 댓글의 답글 2개. 스레드 안에는 답글 버튼이 없습니다.', legend: [['원댓글 고정', '스레드 창 맨 위에 원댓글, 아래 구분선, 답글 2개.'], ['사람 지목', '툴바의 @ 를 누르면 입력창에 @이름 이 들어갑니다(자동 멘션 없음).'], ['팔로우', '헤더의 팔로우를 켜면 이 스레드 새 답글마다 알림. 끄면 멘션만.'], ['입력창 하나', '"답글 남기기…" 하나. Esc 로 닫힘.']] },
+  retake: { hint: '리테이크 스레드 — 카드 + 활동 줄 + 댓글이 시간순 한 줄기. 담당자(나)에게 "담당 완료" 버튼.', legend: [['상태 버튼', '내가 담당이면 "담당 완료", 요청자면 "해결". 상세 모달 리테이크 탭까지 가지 않아도 됨.'], ['활동 줄', '등록 → 작업 시작 → (담당 완료 → 해결)이 댓글 사이에 얇은 줄로.'], ['같은 스레드', '리테이크 탭 카드 안 입력과 이 창이 같은 스레드를 봅니다. 요청자 자동 멘션 규칙도 하나.'], ['댓글 작성', '"리테이크에 댓글…" 입력창. @ 는 툴바로.']] },
+  quick: { hint: '/re 빠른 리테이크 — 입력창에 /re 를 치면 기존 빠른 등록 카드가 뜹니다(지금 기능 유지).', legend: [['기존 기능 유지', '알림 받을 사람·담당자 칩, 선택 필요 표시, 이미지 1장 제한 그대로.'], ['모양만 통일', '카드 배경·칩·버튼을 새 패널 토큰에 맞춤.']] },
+  unreadonly: { hint: '안 읽음 필터 — 새 댓글이 있는 원댓글과 스레드만.', legend: [['필터 탭', '전체 · 안 읽음 3 · 리테이크 1 · @나 2. 밑줄 탭, 숫자는 흐린 글자.'], ['스레드도 포함', '답글에만 새 글이 있으면 원댓글이 "새 1" 표시로 남음.']] },
+  empty: { hint: '댓글 없음 — 첫 댓글 안내와 입력창.', legend: [['빈 상태', '"아직 댓글이 없어요 / 첫 댓글을 남겨 보세요" — 용어는 댓글 하나로.']] },
+};
+
+const state = { scene: 'base', mode: 'auto', filter: 'all', follow: false, thread: null, quick: false, retakeStatus: 'in_progress' };
+
+function actions(c, opts) {
+  opts = opts || {};
+  return `<div class="actions" role="toolbar" aria-label="댓글 동작">
+    <button type="button" data-quick="✅" title="확인">✅</button><button type="button" data-quick="👍" title="좋아요">👍</button><button type="button" data-quick="👀" title="보는 중">👀</button>
+    <button type="button" aria-label="이모지 더보기">${I.smile}</button><span class="sep"></span>
+    ${opts.inThread ? `<button type="button" class="lbl" data-ins="${c.user}" title="@${c.user} 넣기">${I.at}<span>${c.user.slice(1)}</span></button>` : `<button type="button" class="lbl" data-open="${c.id}">${I.reply}<span>답글</span></button>`}
+    <button type="button" aria-label="더보기" data-more>${I.more}</button>
+  </div>
+  <div class="popmenu" role="menu"><button type="button">${I.todo} 팀 할 일로 보내기</button><button type="button">${I.link} 댓글 링크 복사</button><button type="button">${I.copy} 내용 복사</button><hr>${c.user === ME ? `<button type="button">${I.pencil} 수정</button><button type="button" class="danger">${I.trash} 삭제</button>` : `<button type="button">${I.belloff} 이 스레드 알림 끄기</button>`}</div>`;
+}
+function rxHtml(rx) { return (rx || []).map(r => `<button class="rx ${r.me ? 'me' : ''}" data-rx type="button" aria-pressed="${!!r.me}"><span>${r.e}</span><b>${r.n}</b></button>`).join(''); }
+function msg(c, opts) {
+  opts = opts || {};
+  const hasT = !!(c.replies && c.replies.length) && !opts.inThread;
+  const newN = hasT ? c.replies.filter(r => r.unread).length : 0;
+  const unread = c.unread && !opts.inThread;
+  return `<div class="m ${c.grouped ? 'grouped' : ''}" data-id="${c.id}" tabindex="0">
+    ${c.grouped ? `<span class="gt">${c.time.replace(/^오[전후] /, '')}</span>` : av(c.user)}
+    <div style="min-width:0">
+      ${c.grouped ? '' : `<div class="hd"><span class="nm">${c.user}</span><span class="tm">${c.time}${unread ? '<span class="dot" title="안 읽음"></span>' : ''}</span></div>`}
+      <div class="tx">${txt(c.text)}${c.img ? '<div class="imgph">첨부 이미지</div>' : ''}</div>
+      <div class="rxrow" ${!(c.rx && c.rx.length) ? 'data-empty' : ''}>${rxHtml(c.rx)}<button class="rx add" type="button" aria-label="이모지 추가">${I.smile}</button></div>
+      ${hasT ? `<button type="button" class="thr" data-open="${c.id}"><span class="avs">${[...new Set(c.replies.map(r => r.user))].map(u => `<i style="background:${P[u]}">${u.slice(1)}</i>`).join('')}</span><b>답글 ${c.replies.length}개</b><small>마지막 ${c.replies[c.replies.length - 1].time}</small>${newN ? `<span class="new">새 ${newN}</span>` : ''}</button>` : ''}
+    </div>
+    ${actions(c, opts)}
+  </div>`;
+}
+function stLabel(s) { return { open: '대기', in_progress: '진행중', assignee_done: '담당 완료', resolved: '해결됨' }[s]; }
+function retakeCard(opts) {
+  opts = opts || {};
+  const st = state.retakeStatus;
+  const cs = RETAKE.items.filter(i => i.k === 'c');
+  const ss = RETAKE.items.filter(i => i.k === 'sys');
+  const acts = opts.inThread ? `<div class="acts">${st === 'in_progress' ? `<button class="btn pri" type="button" data-rt="assignee_done">${I.check} 담당 완료</button>` : ''}${st === 'assignee_done' ? `<button class="btn pri" type="button" data-rt="resolved">${I.check} 해결</button><button class="btn" type="button" data-rt="in_progress">다시 진행</button>` : ''}${st === 'resolved' ? `<button class="btn" type="button" data-rt="in_progress">다시 열기</button>` : ''}<button class="btn" type="button">상세 열기</button></div>` : '';
+  return `<div class="rt" data-id="retake">
+    <div class="hd"><span class="re">re#${RETAKE.re}</span><span class="st ${st}">${stLabel(st)}</span><span>요청 ${RETAKE.by} · ${RETAKE.time}</span></div>
+    <div class="desc">${RETAKE.desc}</div>
+    <div class="meta"><span class="who"><i style="background:${P[RETAKE.assignee]}">${RETAKE.assignee.slice(1)}</i> 담당 ${RETAKE.assignee === ME ? '나(배한솔)' : RETAKE.assignee}</span><span>활동 ${ss.length}건</span></div>
+    ${opts.inThread ? acts : `<div class="foot"><button type="button" class="thr" data-open="retake"><span class="avs">${[...new Set(cs.map(r => r.user))].map(u => `<i style="background:${P[u]}">${u.slice(1)}</i>`).join('')}</span><b>댓글 ${cs.length}개</b><small>마지막 ${cs[cs.length - 1].time}</small></button><button type="button" class="lnk">${I.link} 상세</button></div>`}
+  </div>`;
+}
+function listHtml() {
+  if (state.scene === 'empty') return `<div class="empty"><b>아직 댓글이 없어요</b>첫 댓글을 남겨 보세요. @로 사람을 부르고, /re 로 리테이크를 등록할 수 있어요.</div>`;
+  let out = ''; let day = null; let newShown = false;
+  FEED.forEach(c => {
+    if (c.kind === 'retake') { if (state.filter === 'all' || state.filter === 'retake') out += retakeCard(); return; }
+    if (state.filter === 'retake') return;
+    if (state.filter === 'unread' && !(c.unread || (c.replies || []).some(r => r.unread))) return;
+    if (state.filter === 'me' && !c.mentionsMe) return;
+    if (c.day !== day && state.filter === 'all') { day = c.day; out += `<div class="day"><i></i><span>${day}</span><i></i></div>`; }
+    if (c.unread && !newShown && state.filter === 'all') { out += `<div class="newline"><i></i><span>새 댓글</span><i></i></div>`; newShown = true; }
+    out += msg(c);
+  });
+  return out;
+}
+function threadHtml() {
+  if (!state.thread) return '';
+  const isRe = state.thread === 'retake';
+  let body, title, sub;
+  if (isRe) {
+    title = `리테이크 re#1`; sub = 'EP05 · A파트 · a001 · 요청 강선영';
+    body = `<div class="rootwrap">${retakeCard({ inThread: true })}</div><div class="cnt"><span>활동 ${RETAKE.items.filter(i => i.k === 'sys').length}건 · 댓글 ${RETAKE.items.filter(i => i.k === 'c').length}개</span><i></i></div>` +
+      RETAKE.items.map(i => i.k === 'sys' ? `<div class="sys ${i.st}" style="padding-left:10px"><span class="d"></span>${i.user} 님이 ${i.text}<span class="tm">${i.time}</span></div>` : msg(i, { inThread: true })).join('') +
+      (state.retakeStatus === 'assignee_done' ? `<div class="sys assignee_done" style="padding-left:10px"><span class="d"></span>배한솔 님이 담당 작업을 끝냈어요<span class="tm">방금</span></div>` : '') +
+      (state.retakeStatus === 'resolved' ? `<div class="sys resolved" style="padding-left:10px"><span class="d"></span>해결로 표시했어요<span class="tm">방금</span></div>` : '');
+  } else {
+    const root = FEED.find(c => c.id === state.thread);
+    title = '스레드'; sub = `${root.user} · a001`;
+    body = `<div class="root-lbl">원댓글</div><div class="rootwrap">${msg(root, { inThread: true })}</div><div class="cnt"><span>답글 ${root.replies.length}개</span><i></i></div>` + root.replies.map(r => msg(r, { inThread: true })).join('');
+  }
+  return `<div class="tp" role="complementary" aria-label="스레드">
+    <div class="hd"><div><b>${title}</b><small>${sub}</small></div><div class="r"><button type="button" class="follow ${state.follow ? 'on' : ''}" data-follow aria-pressed="${state.follow}">${I.bell}${state.follow ? '팔로우 중' : '팔로우'}</button><button type="button" class="ic-btn" data-close aria-label="닫기 (Esc)">${I.x}</button></div></div>
+    <div class="bd">${body}</div>
+    <div class="ft"><div class="ibox"><div class="ta" contenteditable="true" data-th-ta>${isRe ? '리테이크에 댓글…' : '답글 남기기…'}</div><div class="bar"><div class="lt"><button class="ic-btn" type="button" aria-label="이미지 첨부">${I.clip}</button><button class="ic-btn" type="button" aria-label="멘션">${I.at}</button><button class="ic-btn" type="button" aria-label="이모지">${I.smile}</button></div><button type="button" class="send" aria-label="보내기" disabled>${I.up}</button></div></div></div>
+  </div>`;
+}
+function quickHtml() {
+  if (!state.quick) return '';
+  return `<div class="quickre"><div class="hd">${I.flag} 리테이크 빠른 등록 <span class="hint" style="font-weight:500">본문이 설명이 돼요</span><button type="button" class="ic-btn x" data-quick-close aria-label="취소">${I.x}</button></div>
+    <div class="row">알림 받을 사람 <span class="chip"><i style="background:${P['강선영']}">선영</i>강선영</span><span class="chip"><i style="background:${P['이혜민']}">혜민</i>이혜민</span><button type="button" class="chip add">${I.plus} 추가</button></div>
+    <div class="row">리테이크 담당자 <span class="chip need">선택 필요</span><button type="button" class="chip add">${I.plus} 담당자</button></div></div>`;
+}
+function render() {
+  const host = document.getElementById('panel');
+  const unreadN = FEED.filter(c => c.unread || (c.replies || []).some(r => r.unread)).length;
+  const meN = FEED.filter(c => c.mentionsMe).length;
+  host.innerHTML = `<div class="cp ${state.thread ? 'open' : ''}">
+    <div class="cp-head"><h5>댓글</h5><span class="cnt">원댓글 ${state.scene === 'empty' ? 0 : 5} · 리테이크 ${state.scene === 'empty' ? 0 : 1}</span><button class="ic-btn" type="button" aria-label="알림 설정">${I.bell}</button></div>
+    <div class="tabs2" role="tablist">${[['all', '전체', ''], ['unread', '안 읽음', unreadN], ['retake', '리테이크', 1], ['me', '@나', meN]].map(f => `<button type="button" role="tab" data-filter="${f[0]}" class="${state.filter === f[0] ? 'on' : ''}" aria-selected="${state.filter === f[0]}">${f[1]}${f[2] !== '' ? `<span class="n">${f[2]}</span>` : ''}</button>`).join('')}</div>
+    <div class="cp-body"><div class="cp-main">
+      <div class="todo"><div class="hd"><span style="display:inline-block;transform:rotate(90deg)">${I.chev}</span>${I.todo}<span>팀 할 일</span><span class="n">1/2</span></div>
+        ${state.scene === 'empty' ? '' : `<div class="it done"><span class="cb">${I.check}</span><div><span class="tx">골목 채도 -10 적용</span><small>배한솔 · 완료</small></div></div><div class="it"><span class="cb"></span><div><span class="tx">액팅 a001 손 위치 확인</span><small>박정인이 댓글에서 보냄</small></div></div>`}
+        <div class="add">${I.plus} 팀 할 일 추가</div></div>
+      <div class="list" data-list>${listHtml()}</div>
+      <div class="composer">${quickHtml()}<div class="ibox"><div class="ta" contenteditable="true" data-ta>${state.quick ? '/re 발밑 그림자 2px 내리고…' : 'a001에 댓글 남기기'}</div><div class="bar"><div class="lt"><button class="ic-btn" type="button" aria-label="이미지 첨부" title="이미지 첨부 (Ctrl+V · 끌어 놓기)">${I.clip}</button><button class="ic-btn" type="button" aria-label="멘션" title="@ 멘션">${I.at}</button><button class="ic-btn" type="button" aria-label="이모지">${I.smile}</button><button class="ic-btn" type="button" aria-label="리테이크 등록" title="/re 리테이크" data-quick-open>${I.flag}</button></div><div style="display:flex;align-items:center"><span class="hint2">Enter 보내기 · Shift+Enter 줄바꿈</span><button type="button" class="send" aria-label="보내기" ${state.quick ? '' : 'disabled'}>${I.up}</button></div></div></div></div>
+    </div>${threadHtml()}</div>
+    <div class="toast" data-toast></div>
+  </div>`;
+}
+function toast(m) { const t = document.querySelector('[data-toast]'); if (!t) return; t.textContent = m; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 1800); }
+function toggleRx(btn) { const me = btn.classList.toggle('me'); const b = btn.querySelector('b'); b.textContent = (+b.textContent) + (me ? 1 : -1); btn.setAttribute('aria-pressed', me); if (+b.textContent <= 0) btn.remove(); }
+
+document.getElementById('panel').addEventListener('click', (ev) => {
+  const q = ev.target.closest('[data-quick]');
+  if (q) { const row = q.closest('.m').querySelector('.rxrow'); const ex = [...row.querySelectorAll('.rx:not(.add)')].find(r => r.querySelector('span').textContent === q.dataset.quick); if (ex) toggleRx(ex); else row.insertAdjacentHTML('afterbegin', `<button class="rx me" data-rx type="button" aria-pressed="true"><span>${q.dataset.quick}</span><b>1</b></button>`); return; }
+  const r = ev.target.closest('[data-rx]'); if (r) { toggleRx(r); return; }
+  const o = ev.target.closest('[data-open]'); if (o) { state.thread = o.dataset.open; render(); return; }
+  const more = ev.target.closest('[data-more]'); if (more) { document.querySelectorAll('.popmenu.on').forEach(p => p.classList.remove('on')); more.closest('.m').querySelector('.popmenu').classList.toggle('on'); return; }
+  const pm = ev.target.closest('.popmenu button'); if (pm) { toast(pm.textContent.trim() + ' — 예시 동작'); pm.closest('.popmenu').classList.remove('on'); return; }
+  document.querySelectorAll('.popmenu.on').forEach(p => p.classList.remove('on'));
+  const f = ev.target.closest('[data-filter]'); if (f) { state.filter = f.dataset.filter; render(); return; }
+  const fo = ev.target.closest('[data-follow]'); if (fo) { state.follow = !state.follow; render(); toast(state.follow ? '이 스레드의 새 답글마다 알림을 받아요' : '팔로우를 껐어요'); return; }
+  const ins = ev.target.closest('[data-ins]'); if (ins) { const ta = document.querySelector('[data-th-ta]'); if (ta) { ta.innerHTML = `<span class="mention">@${ins.dataset.ins}</span> `; ta.style.color = 'var(--fg)'; ta.focus(); } return; }
+  const rt = ev.target.closest('[data-rt]'); if (rt) { state.retakeStatus = rt.dataset.rt; render(); toast({ assignee_done: '담당 작업을 끝냈어요 · 요청자에게 알림', resolved: '해결로 표시했어요', in_progress: '다시 진행중으로 바꿨어요' }[state.retakeStatus]); return; }
+  if (ev.target.closest('[data-quick-open]')) { state.quick = true; render(); return; }
+  if (ev.target.closest('[data-quick-close]')) { state.quick = false; render(); return; }
+  if (ev.target.closest('[data-close]')) { state.thread = null; render(); }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.thread) { state.thread = null; render(); } });
+document.getElementById('panel').addEventListener('focusin', (e) => { const ta = e.target.closest('[data-ta],[data-th-ta]'); if (ta && !ta.dataset.cleared) { ta.dataset.cleared = '1'; if (!state.quick) ta.textContent = ''; } });
+
+function setScene(s) {
+  state.scene = s; state.filter = s === 'unreadonly' ? 'unread' : 'all'; state.thread = s === 'thread' ? 'c3' : s === 'retake' ? 'retake' : null; state.quick = s === 'quick'; state.retakeStatus = 'in_progress';
+  document.querySelectorAll('#scn button').forEach(b => b.classList.toggle('on', b.dataset.s === s));
+  document.getElementById('scn-hint').textContent = SCENES[s].hint;
+  document.getElementById('legend').innerHTML = SCENES[s].legend.map(l => `<div class="card"><h4>${l[0]}</h4><p>${l[1]}</p></div>`).join('');
+  render();
+}
+document.querySelectorAll('#scn button').forEach(b => b.addEventListener('click', () => setScene(b.dataset.s)));
+document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => { state.mode = b.dataset.m; document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b)); const st = document.getElementById('stage'); if (state.mode === 'auto') st.removeAttribute('data-mode'); else st.setAttribute('data-mode', state.mode); document.querySelectorAll('.stage').forEach(s => { if (s !== st) { if (state.mode === 'auto') s.removeAttribute('data-mode'); else s.setAttribute('data-mode', state.mode); } }); }));
+setScene('base');
+
+document.getElementById('bell').innerHTML = `<div class="bell"><div class="hd">${I.bell} 알림 <span class="r"><span>모두 읽음</span><span>${I.settings}</span></span></div>
+  <div class="it un"><div class="t"><span class="dot"></span>${I.msg} EP05 · a001 <span style="font-weight:500;color:var(--fg2);font-size:11px">새 댓글 4 · 멘션 2</span><span class="tm">방금</span></div>
+    <div class="pre"><div><b>이혜민</b> <span class="mention">@배한솔</span> 캐릭터 발밑 그림자가 살짝 떠 보여요…</div><div><b>강선영</b> 골목 안쪽 채도만 조금 낮추면… <span style="color:var(--accent2)">답글 2</span></div><div><b>이다은</b> <span class="mention">@배한솔</span> 액팅 a001은 리테이크 1차 기준으로…</div></div>
+    <div class="acts"><button type="button" class="acc">댓글 열기</button><button type="button">읽음</button><button type="button">이 씬 알림 끄기</button></div></div>
+  <div class="it"><div class="t">${I.flag} re#1 · a001 <span class="st in_progress">진행중</span><span class="tm">35분 전</span></div>
+    <div class="pre"><div><b>강선영</b> 등록 → <b>배한솔</b> 작업 시작 · 댓글 2</div></div>
+    <div class="acts"><button type="button" class="acc">리테이크 열기</button><button type="button">읽음</button></div></div>
+  <div class="it quiet"><div class="t">👍 반응 <span style="font-weight:500;color:var(--fg2);font-size:11px">박정인 외 1명</span><span class="tm">40분 전</span></div><div class="pre"><div>a001 내 댓글에 👍 👀</div></div></div>
+  <div class="it quiet"><div class="t">${I.msg} EP05 · b014 <span class="tm">1시간 전</span></div><div class="pre"><div><b>원동우</b> <span class="mention">@배한솔</span> 배경 하늘 톤 확인 부탁…</div><div><b>이혜민</b> b014 LO 올렸습니다</div></div><div class="acts"><button type="button" class="acc">댓글 열기</button><button type="button">읽음</button></div></div>
+</div>`;
+</script>
+</body></html>
