@@ -204,6 +204,13 @@ function applyCommentOpToCaches(
   const changedParts = rowCache.apply(op);
   const sheets = new Set<string>();
   for (const partUuid of changedParts) for (const sn of sheetNamesForPart(partUuid)) sheets.add(sn);
+  // 캐시에 없는 파트의 새 댓글·수정이면(아직 아무도 안 봤거나, 읽기가 실패했던 파트) 그 시트를 알려
+  // 지금 그 시트를 보여 주는 화면만 읽게 한다 — 실패했던 화면이 다음 댓글 신호에 스스로 다시 시도한다(로컬 리뷰).
+  //   보여 주는 화면이 없으면 듣는 쪽이 걸러 아무도 읽지 않는다.
+  const targetPart = op.kind === 'upsert' ? op.row.partId : null;
+  if (changedParts.length === 0 && targetPart && !rowCache.peek(targetPart)) {
+    for (const sn of sheetNamesForPart(targetPart)) sheets.add(sn);
+  }
   // 예전 시트 대체 경로로 만든 묶음은 고칠 수 없으니 버린다(드묾 — 파트 정보를 못 얻었을 때만 생긴다).
   for (const sn of [...sheetPartCache.keys()]) {
     if (!rowBackedSheets.has(sn)) sheets.add(sn);

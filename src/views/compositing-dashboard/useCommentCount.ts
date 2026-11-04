@@ -21,16 +21,19 @@ const COUNT_RETRY_MS = 5_000;
 
 /** 같은 행 배열이면 다시 세지 않는다(카드마다 렌더할 때 같은 파트를 50번 세지 않게). */
 const countsByRows = new WeakMap<readonly CommentRow[], Map<string, number>>();
+/** 파트를 다시 읽는 동안(무효화 직후) 숫자가 0 으로 깜빡이지 않게 마지막으로 센 값을 보여 준다(로컬 리뷰). */
+const lastCountsByPart = new Map<string, Map<string, number>>();
 
 function countsFor(partUuid: string | undefined): Map<string, number> | undefined {
   if (!partUuid) return undefined;
   const rows = peekPartCommentRows(partUuid);
-  if (!rows) return undefined;
+  if (!rows) return lastCountsByPart.get(partUuid);
   let counts = countsByRows.get(rows);
   if (!counts) {
     counts = countCommentRowsByScene(rows);
     countsByRows.set(rows, counts);
   }
+  lastCountsByPart.set(partUuid, counts);
   return counts;
 }
 
