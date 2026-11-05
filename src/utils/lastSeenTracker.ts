@@ -110,6 +110,8 @@ export function ensureAssignmentLastSeenInitialized(userId: string): void {
 //   서버에 줄이 없어지면(되돌리기) 예전 길이 자기 기준 시각으로 계속 돈다.
 
 const COMMENT_NOTIFICATION_INBOX_PREFIX = 'bflow_comment_notification_inbox_';
+/** 본 줄 개수는 받기함이 다시 읽는 구간(2분)만큼으로 이미 줄여 둔다 — 여기서 작게 자르면 지운 알림이 되살아난다(코덱스 2차). 안전 상한만. */
+const SEEN_SAFETY_CAP = 20000;
 
 export interface CommentNotificationInboxSaved {
   cursor: { at: string; id: string | null } | null;
@@ -123,7 +125,7 @@ export function getCommentNotificationInboxState(userId: string): CommentNotific
     const parsed = JSON.parse(raw) as { cursor?: { at?: unknown; id?: unknown } | null; seen?: unknown };
     const at = typeof parsed?.cursor?.at === 'string' && Number.isFinite(Date.parse(parsed.cursor.at)) ? parsed.cursor.at : null;
     const id = typeof parsed?.cursor?.id === 'string' ? parsed.cursor.id : null;
-    const seen = Array.isArray(parsed?.seen) ? parsed.seen.filter((key): key is string => typeof key === 'string').slice(-300) : [];
+    const seen = Array.isArray(parsed?.seen) ? parsed.seen.filter((key): key is string => typeof key === 'string').slice(-SEEN_SAFETY_CAP) : [];
     return { cursor: at ? { at, id } : null, seen };
   } catch {
     return null;
@@ -132,7 +134,7 @@ export function getCommentNotificationInboxState(userId: string): CommentNotific
 
 export function setCommentNotificationInboxState(userId: string, state: CommentNotificationInboxSaved): void {
   try {
-    localStorage.setItem(COMMENT_NOTIFICATION_INBOX_PREFIX + userId, JSON.stringify({ cursor: state.cursor, seen: state.seen.slice(-300) }));
+    localStorage.setItem(COMMENT_NOTIFICATION_INBOX_PREFIX + userId, JSON.stringify({ cursor: state.cursor, seen: state.seen.slice(-SEEN_SAFETY_CAP) }));
   } catch { /* 개인정보보호 모드 등 — 이 세션은 메모리로 계속 */ }
 }
 

@@ -70,14 +70,49 @@ test('수정으로 다시 고쳐진 줄(같은 id, 새 시각)은 새 줄로 본
   assert.deepEqual(h.presented.map((p) => p.ids), [['c1'], ['c1']]);
 });
 
-test('쪽 넘기기는 마지막 줄의 (시각, id) 로, 쪽 수 한도에서 멈추고 다음 읽기가 이어 받는다', async () => {
+test('쪽 넘기기는 마지막 줄의 (시각, id) 로, 쪽 수 한도에 닿으면 저장하고 같은 읽기 안에서 끝까지 이어 받는다', async () => {
   const server = Array.from({ length: 8 }, (_, i) => row(i + 1, 10, { eventAt: at(10, i) }));
   const h = harness(server);
-  await h.inbox.pull('catchup', { at: at(9), id: null });
-  assert.deepEqual(h.calls.slice(1), [{ at: at(10, 1), id: id(2) }, { at: at(10, 3), id: id(4) }]);
-  assert.deepEqual(h.presented[0]!.ids, ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']);
+  const result = await h.inbox.pull('catchup', { at: at(9), id: null });
+  assert.deepEqual(h.calls.slice(1, 3), [{ at: at(10, 1), id: id(2) }, { at: at(10, 3), id: id(4) }]);
+  assert.deepEqual(h.presented.map((p) => p.ids), [['c1', 'c2', 'c3', 'c4', 'c5', 'c6'], ['c7', 'c8']], '코덱스 2차: 한도에서 멈추지 않고 최근 줄까지');
+  assert.equal(result.presented, 8);
+  assert.deepEqual(h.saved()?.cursor, { at: at(10, 7), id: id(8) });
   await h.inbox.pull('catchup');
-  assert.deepEqual(h.presented[1]!.ids, ['c7', 'c8']);
+  assert.equal(h.presented.length, 2, '다시 읽어도 새 줄 없음');
+});
+
+test('live 에서 한도를 넘게 쌓여 있으면 이어 받는 몫까지 조용히 넣고 수를 알린다', async () => {
+  const server = [row(1, 10)];
+  const h = harness(server);
+  await h.inbox.pull('catchup', { at: at(9), id: null });
+  for (let i = 0; i < 7; i++) server.push(row(10 + i, 11, { eventAt: at(11, i) }));
+  const result = await h.inbox.pull('live');
+  assert.ok(h.presented.slice(1).every((p) => p.quiet), '한꺼번에 온 것은 조용히');
+  assert.deepEqual(h.presented.slice(1).flatMap((p) => p.ids), ['c10', 'c11', 'c12', 'c13', 'c14', 'c15', 'c16']);
+  assert.deepEqual([result.presented, result.quieted], [7, true]);
+});
+
+test('다시 읽는 구간의 본 줄은 개수와 상관없이 남긴다 — 다시 켜도 지운 알림이 되살아나지 않는다', async () => {
+  const server = Array.from({ length: 6 }, (_, i) => row(i + 1, 10, { eventAt: at(10, i) }));
+  const first = createCommentNotificationInbox({
+    list: async (cursor, limit) => ({ available: true, rows: server.filter((r) => !cursor || Date.parse(r.eventAt) > Date.parse(cursor.at) || (cursor.id !== null && Date.parse(r.eventAt) === Date.parse(cursor.at) && r.id > cursor.id)).slice(0, limit) }),
+    present: (rows) => rows.length,
+    loadState: () => null,
+    saveState: (state) => { saved = JSON.parse(JSON.stringify(state)); },
+  }, { seenLimit: 2, pageSize: 200 });
+  let saved: CommentNotificationInboxState | null = null;
+  await first.pull('catchup', { at: at(9), id: null });
+  assert.equal(saved!.seen.length, 6, '2분 안쪽 줄 여섯 모두');
+  const presented: string[] = [];
+  const restarted = createCommentNotificationInbox({
+    list: async (cursor, limit) => ({ available: true, rows: server.filter((r) => !cursor || Date.parse(r.eventAt) > Date.parse(cursor.at)).slice(0, limit) }),
+    present: (rows) => { presented.push(...rows.map((r) => r.commentId)); return rows.length; },
+    loadState: () => saved,
+    saveState: () => undefined,
+  }, { seenLimit: 2 });
+  await restarted.pull('catchup');
+  assert.deepEqual(presented, []);
 });
 
 test('live 에서 한꺼번에 많이 오면 조용히 넣고 그 수를 알린다', async () => {
@@ -108,6 +143,38 @@ test('서버에 줄이 없으면 unavailable, 실패하면 failed — 커서는 
   const broken = harness([row(1, 10)], { fail: true });
   assert.equal((await broken.inbox.pull('catchup', { at: at(9), id: null })).status, 'failed');
   assert.equal(broken.saved(), null);
+});
+
+test('읽는 중에 온 요청들은 아직 시작 안 한 다음 읽기 하나로 합친다 — 하나라도 catchup 이면 조용히', async () => {
+  let release!: () => void;
+  let gate = new Promise<void>((resolve) => { release = resolve; });
+  let lists = 0;
+  const presented: boolean[] = [];
+  const server = [row(1, 10)];
+  const inbox = createCommentNotificationInbox({
+    list: async () => { lists += 1; const snapshot = [...server]; await gate; return { available: true, rows: snapshot }; },
+    present: (rows, quiet) => { presented.push(quiet); return rows.length; },
+    loadState: () => null,
+    saveState: () => undefined,
+  });
+  const first = inbox.pull('live', { at: at(9), id: null });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  server.push(row(2, 11));
+  const second = inbox.pull('live');
+  const third = inbox.pull('catchup');
+  assert.equal(second, third, '같은 다음 읽기');
+  release();
+  await first;
+  gate = Promise.resolve();
+  const merged = await second;
+  assert.equal(lists, 2, '읽기는 두 번뿐(세 번째 요청은 합쳐짐)');
+  assert.deepEqual(presented, [false, true], '합친 읽기는 catchup 이라 조용히');
+  assert.deepEqual([merged.status, merged.presented, merged.quieted], ['done', 1, false]);
+  // 첫 실행 거르기(show)가 있는 요청은 합치지 않고 따로 선다.
+  const filtered = inbox.pull('catchup', null, { show: () => true });
+  const plain = inbox.pull('live');
+  assert.notEqual(filtered, plain);
+  await Promise.all([filtered, plain]);
 });
 
 test('요청은 한 줄로 서고, 버린(dispose) 받기함은 응답을 넘기지 않는다', async () => {
