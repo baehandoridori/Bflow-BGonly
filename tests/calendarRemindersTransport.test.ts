@@ -22,7 +22,7 @@ async function harness(rows:any[]){
  const quit=()=>{quitCallbacks.splice(0).forEach(fn=>fn());};
  let handle:{invalidate():void};
  const register=()=>{handle=module.exports.registerCalendarReminders(()=>{if(!origin)throw new Error('로그인 필요');return origin;},()=>{},timerApi);};register();
- return {shown,files,poll:(muted:string[]=[])=>handler({},muted),restart:()=>{quit();register();},defer:(value:Promise<void>)=>{gate=value;},switchSession:(userId='other',epoch=2)=>{origin={userId,epoch};},logout:()=>{origin=null;},time:(value:number)=>{currentNow=value;},tick:async()=>{currentNow+=30000;await Promise.all([...timers.values()].map(fn=>fn()));},reads:()=>readCount,unrefs:()=>unrefs,timers:()=>timers.size,quit,invalidate:()=>handle.invalidate()};
+ return {shown,files,poll:(muted:string[]=[])=>handler({},muted),restart:()=>{quit();register();},defer:(value:Promise<void>)=>{gate=value;},switchSession:(userId='other',epoch=2)=>{origin={userId,epoch};},logout:()=>{origin=null;},time:(value:number)=>{currentNow=value;},tick:async()=>{currentNow+=30000;await Promise.all([...timers.values()].map(fn=>fn()));},reads:()=>readCount,unrefs:()=>unrefs,timers:()=>timers.size,quit,invalidate:()=>handle.invalidate(),maxAge:module.exports.REMINDER_EVENTS_MAX_AGE_MS as number};
 }
 test('main reminder transport excludes private overview and muted calendars and persists dedupe before delivery',async()=>{
  const h=await harness([row('shared'),row('private-event','private')]);
@@ -68,14 +68,21 @@ test('main timer survives a failed read and stops pending delivery when the app 
  assert.equal(quitting.shown.length,0);assert.equal(quitting.files.size,0);assert.equal(quitting.timers(),0);
 });
 
-test('30초 확인은 받아 둔 일정으로 하고, 바뀜 신호나 5분이 지나야 다시 읽는다',async()=>{
+test('30초 확인은 받아 둔 일정으로 하고, 바뀜 신호나 30분이 지나야 다시 읽는다',async()=>{
  const h=await harness([row('cached')]);h.time(now-10*60000);await h.poll();assert.equal(h.reads(),1);
- for(let i=0;i<9;i++)await h.tick();
- assert.equal(h.reads(),1,'4분 30초 동안은 받아 둔 목록을 쓴다');
- await h.tick();assert.equal(h.reads(),2,'5분이 지나면 다시 읽는다');
+ for(let i=0;i<59;i++)await h.tick();
+ assert.equal(h.reads(),1,'29분 30초 동안은 받아 둔 목록을 쓴다');
+ await h.tick();assert.equal(h.reads(),2,'30분이 지나면 다시 읽는다');
  h.invalidate();await h.tick();assert.equal(h.reads(),3,'일정이 바뀌었다는 신호 뒤 첫 확인에서 다시 읽는다');
  await h.tick();assert.equal(h.reads(),3);
  h.switchSession('viewer',2);await h.poll();assert.equal(h.reads(),4,'다른 로그인은 받아 둔 목록을 같이 쓰지 않는다');
+});
+test('받아 둔 일정의 유효 시간은 다시 켤 때 따라잡는 구간(30분)을 넘지 않는다',async()=>{
+ const shared=await build({entryPoints:['src/shared/calendarReminders.ts'],bundle:true,platform:'node',format:'esm',write:false});
+ const {REMINDER_CATCHUP_MS}=await import('data:text/javascript;base64,'+Buffer.from(shared.outputFiles[0].text).toString('base64'));
+ const h=await harness([row('limit')]);
+ assert.equal(h.maxAge,30*60000);
+ assert.ok(h.maxAge<=REMINDER_CATCHUP_MS,'유효 시간을 따라잡는 구간보다 길게 잡지 않는다');
 });
 test('읽는 중에 바뀜 신호가 오면 그 결과를 다음 확인에 다시 쓰지 않는다',async()=>{
  const h=await harness([row('racing')]);h.time(now-10*60000);let release!:()=>void;h.defer(new Promise<void>(resolve=>release=resolve));
