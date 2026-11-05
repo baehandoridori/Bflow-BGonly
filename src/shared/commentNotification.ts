@@ -56,11 +56,17 @@ export interface CommentNotificationListResult {
   rows: CommentNotificationRow[];
 }
 
+/** 수정으로 넣은 @ 알림 하나 — 댓글 id 와 그 수정 시각(같은 댓글에서 다시 불려 새로 고쳐진 줄은 읽음이 되지 않게). */
+export interface CommentNotificationEditReadTarget {
+  commentId: string;
+  editAt: string;
+}
+
 export interface CommentNotificationReadTarget {
   /** 새 댓글 알림의 댓글 id. */
   addCommentIds: string[];
-  /** 수정으로 넣은 @ 알림의 댓글 id. */
-  editCommentIds: string[];
+  /** 수정으로 넣은 @ 알림(댓글 id + 그 수정 시각). */
+  editTargets: CommentNotificationEditReadTarget[];
 }
 
 export interface CommentNotificationReadResult {
@@ -155,16 +161,29 @@ export function validateCommentNotificationCursor(raw: unknown): CommentNotifica
   return { at, id };
 }
 
-/** IPC 로 온 읽음 대상 — 댓글 id 만, 합쳐 500개까지. 이상하면 던진다. */
+/** IPC 로 온 읽음 대상 — 댓글 id 와 (댓글 id, 수정 시각) 짝만, 합쳐 500개까지. 이상하면 던진다. */
 export function validateCommentNotificationReadTarget(raw: unknown): CommentNotificationReadTarget {
   if (!isRecord(raw)) throw new Error('읽음 대상이 올바르지 않습니다.');
-  const list = (value: unknown): string[] => {
+  const bad = () => new Error('읽음 대상이 올바르지 않습니다.');
+  const ids = (value: unknown): string[] => {
     if (value == null) return [];
-    if (!Array.isArray(value) || !value.every(isCommentNotificationCommentId)) throw new Error('읽음 대상이 올바르지 않습니다.');
+    if (!Array.isArray(value) || !value.every(isCommentNotificationCommentId)) throw bad();
     return [...new Set(value as string[])];
   };
-  const target = { addCommentIds: list(raw.addCommentIds), editCommentIds: list(raw.editCommentIds) };
-  if (target.addCommentIds.length + target.editCommentIds.length > COMMENT_NOTIFICATION_READ_LIMIT) {
+  const edits = (value: unknown): CommentNotificationEditReadTarget[] => {
+    if (value == null) return [];
+    if (!Array.isArray(value)) throw bad();
+    const seen = new Map<string, CommentNotificationEditReadTarget>();
+    for (const item of value) {
+      if (!isRecord(item) || !isCommentNotificationCommentId(item.commentId)) throw bad();
+      const editAt = isoText(item.editAt);
+      if (!editAt || editAt.length > 64) throw bad();
+      seen.set(`${item.commentId}|${Date.parse(editAt)}`, { commentId: item.commentId, editAt });
+    }
+    return [...seen.values()];
+  };
+  const target = { addCommentIds: ids(raw.addCommentIds), editTargets: edits(raw.editTargets) };
+  if (target.addCommentIds.length + target.editTargets.length > COMMENT_NOTIFICATION_READ_LIMIT) {
     throw new Error('한 번에 읽음으로 바꿀 수 있는 알림은 500개까지예요.');
   }
   return target;

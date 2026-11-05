@@ -207,8 +207,11 @@ export function createCommentNotificationPreviewStore(options: CommentNotificati
         let count = 0;
         for (const row of rows) {
           if (row.recipientId !== recipientId || row.readAt) continue;
-          const ids = row.kind === 'add' ? target.addCommentIds : target.editCommentIds;
-          if (!ids.includes(row.commentId)) continue;
+          // 수정 줄은 그 수정 시각까지 같아야(실서버 래퍼와 같게 — 다시 고쳐진 줄은 읽음이 되지 않는다).
+          const matches = row.kind === 'add'
+            ? target.addCommentIds.includes(row.commentId)
+            : target.editTargets.some((edit) => edit.commentId === row.commentId && row.editAt !== null && Date.parse(edit.editAt) === Date.parse(row.editAt));
+          if (!matches) continue;
           row.readAt = at;
           count += 1;
         }

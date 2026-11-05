@@ -53,8 +53,9 @@ test('store: 목록·읽음 RPC 는 세션 토큰만 보내고 actor id 는 싣�
   assert.equal(listed.available, true);
   assert.deepEqual(listed.rows.map((row: { id: string }) => row.id), [ROW_ID], '자동 줄에 종류가 없으면 버린다');
   assert.deepEqual(calls[0], { name: 'comment_notifications_session_list', args: { p_session_token: 'token-alice', p_after_at: '2026-11-05T01:00:00.000Z', p_after_id: null, p_limit: 50 } });
-  assert.deepEqual(await store.markRead('alice', { addCommentIds: ['c1', 'c1', 'c2'], editCommentIds: ['c3'] }), { available: true, updated: 2 });
-  assert.deepEqual(calls[1], { name: 'comment_notifications_session_mark_read', args: { p_session_token: 'token-alice', p_add_comment_ids: ['c1', 'c2'], p_edit_comment_ids: ['c3'] } });
+  const edit = { commentId: 'c3', editAt: '2026-11-05T01:05:00.456Z' };
+  assert.deepEqual(await store.markRead('alice', { addCommentIds: ['c1', 'c1', 'c2'], editTargets: [edit, { ...edit }] }), { available: true, updated: 2 });
+  assert.deepEqual(calls[1], { name: 'comment_notifications_session_mark_read', args: { p_session_token: 'token-alice', p_add_comment_ids: ['c1', 'c2'], p_edit_targets: [edit] } });
   for (const call of calls) {
     assert.ok(!Object.values(call.args).includes('alice'), '사람 id 를 싣지 않는다');
     assert.doesNotMatch(Object.keys(call.args).join(','), /p_actor|p_user_id|p_recipient/);
@@ -69,7 +70,7 @@ test('store: 래퍼가 없으면(DB 적용 전) available:false, 다른 오류�
   for (const code of ['42883', 'PGRST202', '42P01', 'PGRST205']) {
     const store = createCommentNotificationStore({ rpc: async () => ({ data: null, error: { code, message: 'missing' } }) }, sessions);
     assert.deepEqual(await store.list('alice', null), { available: false, rows: [] }, code);
-    assert.deepEqual(await store.markRead('alice', { addCommentIds: ['c1'], editCommentIds: [] }), { available: false, updated: 0 }, code);
+    assert.deepEqual(await store.markRead('alice', { addCommentIds: ['c1'], editTargets: [] }), { available: false, updated: 0 }, code);
   }
   const expired = createCommentNotificationStore({ rpc: async () => ({ data: null, error: { code: '42501', message: '로그인 세션이 만료되었습니다.' } }) }, sessions);
   await assert.rejects(expired.list('alice', null), (error: { code?: string }) => error.code === '42501');
@@ -78,11 +79,13 @@ test('store: 래퍼가 없으면(DB 적용 전) available:false, 다른 오류�
   await assert.rejects(guarded.list('alice', null), /로그인 세션/);
   assert.equal(called, 0);
   // 비어 있는 읽음 요청은 서버에 가지 않는다. 이상한 커서·id 는 토큰을 꺼내기 전에 거절한다.
-  assert.deepEqual(await guarded.markRead('alice', { addCommentIds: [], editCommentIds: [] }), { available: true, updated: 0 });
+  assert.deepEqual(await guarded.markRead('alice', { addCommentIds: [], editTargets: [] }), { available: true, updated: 0 });
   await assert.rejects(guarded.list('alice', { at: 'not-a-date', id: null }), /커서/);
   await assert.rejects(guarded.list('alice', { at: '2026-11-05T00:00:00Z', id: 'x' }), /커서/);
   await assert.rejects(guarded.markRead('alice', { addCommentIds: ['bad id!'] }), /읽음 대상/);
   await assert.rejects(guarded.markRead('alice', { addCommentIds: Array.from({ length: 501 }, (_, i) => `c${i}`) }), /500/);
+  await assert.rejects(guarded.markRead('alice', { editTargets: [{ commentId: 'c1' }] }), /읽음 대상/, '수정 시각 없는 수정 대상은 거절');
+  await assert.rejects(guarded.markRead('alice', { editTargets: [{ commentId: 'c1', editAt: 'later' }] }), /읽음 대상/);
   assert.equal(called, 0);
 });
 

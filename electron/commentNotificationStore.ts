@@ -62,12 +62,12 @@ export function createCommentNotificationStore(
 
   async function markRead(actorId: string, rawTarget: unknown): Promise<CommentNotificationReadResult> {
     const target = validateCommentNotificationReadTarget(rawTarget);
-    if (target.addCommentIds.length === 0 && target.editCommentIds.length === 0) return { available: true, updated: 0 };
+    if (target.addCommentIds.length === 0 && target.editTargets.length === 0) return { available: true, updated: 0 };
     const token = session.tokenFor(actorId);
     const { data, error } = await client.rpc('comment_notifications_session_mark_read', {
       p_session_token: token,
       p_add_comment_ids: target.addCommentIds,
-      p_edit_comment_ids: target.editCommentIds,
+      p_edit_targets: target.editTargets,
     });
     if (error) {
       if (missingMigration(error)) return { available: false, updated: 0 };

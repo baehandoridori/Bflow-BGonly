@@ -149,7 +149,7 @@ test('N-2b: 머리말의 되돌리기 문장은 그대로 실행할 수 있는 S
 
 test('N-3: 공개 래퍼 두 개만 실행 권한, 둘 다 세션 토큰으로 호출자를 확정한다', () => {
   const grants = [...code(sql).matchAll(/GRANT EXECUTE ON FUNCTION([^%]+)TO %I/g)].map((m) => m[1].replace(/\s+/g, ' ').trim());
-  assert.deepEqual(grants, ['public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER), public.comment_notifications_session_mark_read(TEXT, TEXT[], TEXT[])']);
+  assert.deepEqual(grants, ['public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER), public.comment_notifications_session_mark_read(TEXT, TEXT[], JSONB)']);
   for (const name of ['comment_notifications_session_list', 'comment_notifications_session_mark_read']) {
     const body = fn(name);
     assert.match(body, /v_user := public\.app_session_user_id\(p_session_token\);/, name);
@@ -223,8 +223,8 @@ const rowsFor = async (db: Db, commentId: string) => asSuper(db, async () => (aw
 const signals = async (db: Db) => asSuper(db, async () => (await db.query("SELECT count(*)::int AS n FROM realtime.messages WHERE event = 'comment-notifications-changed'")).rows[0] as { n: number });
 const list = async (db: Db, who: string, afterAt: string | null = null, afterId: string | null = null, limit = 200) =>
   parseCommentNotificationRows((await db.query('SELECT comment_notifications_session_list($1, $2, $3, $4) AS value', [tokens[who], afterAt, afterId, limit])).rows[0].value);
-const markRead = async (db: Db, who: string, add: string[], edit: string[] = []) =>
-  ((await db.query('SELECT comment_notifications_session_mark_read($1, $2, $3) AS value', [tokens[who], add, edit])).rows[0] as { value: { updated: number } }).value.updated;
+const markRead = async (db: Db, who: string, add: string[], edit: Array<{ commentId: string; editAt: string }> = []) =>
+  ((await db.query('SELECT comment_notifications_session_mark_read($1, $2, $3::jsonb) AS value', [tokens[who], add, JSON.stringify(edit)])).rows[0] as { value: { updated: number } }).value.updated;
 
 test('N-5: 두 번 적용해도 같고, 댓글마다 서버 줄이 미리보기 짝·기대와 같다(신호는 줄이 생길 때만 한 번)', { skip: !runtime }, async () => {
   const db = await boot();
@@ -251,15 +251,21 @@ test('N-5: 두 번 적용해도 같고, 댓글마다 서버 줄이 미리보기 
     assert.equal(new Date(parkEdit.editAt!).toISOString(), '2026-11-05T01:05:00.456Z');
     assert.equal(new Date(parkEdit.comment.editedAt!).toISOString(), '2026-11-05T01:06:00.000Z');
     assert.equal((await list(db, U.lee)).find((r) => r.commentId === 'c1' && r.kind === 'add')?.editAt, null, '새 댓글 줄은 수정 시각이 없다');
-    assert.equal(await markRead(db, U.park, [], ['c1']), 1);
+    assert.equal(await markRead(db, U.park, [], [{ commentId: 'c1', editAt: '2026-11-05T01:06:00.000Z' }]), 0, '다른 수정 시각으로는 읽음이 되지 않는다');
+    assert.equal(await markRead(db, U.park, [], [{ commentId: 'c1', editAt: '2026-11-05T01:05:00.456Z' }]), 1);
     const quiet = (await signals(db)).n;
     await db.query(`UPDATE comments SET mentions = '["김어진"]' WHERE id = 'c1'`);
-    await db.query(`UPDATE comments SET text = '글만 고침' WHERE id = 'c1'`);
+    await db.query(`UPDATE comments SET text = '글만 고침', edited_at = '2026-11-05T01:07:00.000Z' WHERE id = 'c1'`);
     assert.equal((await signals(db)).n, quiet, '빼기·글만 고친 수정은 신호가 없다');
-    await db.query(`UPDATE comments SET mentions = '["박정인"]' WHERE id = 'c1'`);
+    await db.query(`UPDATE comments SET mentions = '["박정인"]', edited_at = '2026-11-05T01:08:00.000Z' WHERE id = 'c1'`);
     const again = (await rowsFor(db, 'c1')).find((r) => r.kind === 'edit' && r.recipient_id === U.park)!;
     assert.equal(again.read_at, null, '다시 넣으면 안 읽음으로');
     assert.equal((await signals(db)).n, quiet + 1);
+    // 코덱스 1차: 다시 불린 새 수정 줄은 이 PC 가 아직 못 받았다 — 앞의 수정 알림을 읽어도(옛 수정 시각) 새 줄은 안 읽음으로 남는다.
+    assert.equal(await markRead(db, U.park, [], [{ commentId: 'c1', editAt: '2026-11-05T01:05:00.456Z' }]), 0);
+    assert.equal((await list(db, U.park)).find((r) => r.commentId === 'c1' && r.kind === 'edit')?.readAt, null);
+    assert.equal(await markRead(db, U.park, [], [{ commentId: 'c1', editAt: '2026-11-05T01:08:00.000Z' }]), 1);
+    await assert.rejects(db.query(`SELECT comment_notifications_session_mark_read($1, '{}'::TEXT[], '{"a":1}'::jsonb)`, [tokens[U.park]]), { code: '22023' }, '배열이 아닌 수정 대상은 거절');
     // 배열이 아닌 mentions 도 저장은 막지 않는다.
     await db.query(`INSERT INTO comments(id, user_id, user_name, text, mentions) VALUES('odd', $1, '배한솔', 'x', '{"a":1}')`, [U.han]);
     await db.query(`UPDATE comments SET mentions = '"이혜민"' WHERE id = 'odd'`);

@@ -37,7 +37,7 @@
 --   DROP TRIGGER IF EXISTS comment_notifications_after_mentions ON public.comments;
 --   DROP TRIGGER IF EXISTS comment_notifications_after_delete ON public.comments;
 --   DROP FUNCTION IF EXISTS public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER);
---   DROP FUNCTION IF EXISTS public.comment_notifications_session_mark_read(TEXT, TEXT[], TEXT[]);
+--   DROP FUNCTION IF EXISTS public.comment_notifications_session_mark_read(TEXT, TEXT[], JSONB);
 --   NOTIFY pgrst, 'reload schema';
 --   COMMIT;
 -- 운영 적용: (적용 뒤 번호를 여기에 적는다)
@@ -320,17 +320,22 @@ BEGIN
   ), '[]'::JSONB);
 END $$;
 
--- 내 줄 읽음. 화면에 있던 알림의 댓글 id 를 종류별로(새 댓글 / 수정으로 넣은 @) 보낸다. 이미 읽은 줄은 그대로.
--- '전부' 는 받지 않는다 — 아직 이 PC 가 받지 못한 줄까지 읽음이 되지 않게.
+-- 내 줄 읽음. 화면에 있던 알림만 보낸다 — 새 댓글 줄은 댓글 id, 수정으로 넣은 @ 줄은 (댓글 id, 그 수정 시각) 짝.
+-- 같은 댓글에서 빠졌다가 다시 불려 새로 고쳐진 수정 줄은 시각이 달라 읽음이 되지 않는다(아직 이 PC 가 못 받은 알림 — 코덱스 1차).
+-- '전부' 는 받지 않는다 — 아직 이 PC 가 받지 못한 줄까지 읽음이 되지 않게. 이미 읽은 줄은 그대로.
 CREATE OR REPLACE FUNCTION public.comment_notifications_session_mark_read(
-  p_session_token TEXT, p_add_comment_ids TEXT[], p_edit_comment_ids TEXT[]
+  p_session_token TEXT, p_add_comment_ids TEXT[], p_edit_targets JSONB
 ) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE v_user TEXT; v_count INTEGER := 0; v_more INTEGER := 0;
+DECLARE v_user TEXT; v_count INTEGER := 0; v_more INTEGER := 0; v_edits INTEGER;
 BEGIN
   v_user := public.app_session_user_id(p_session_token);
   PERFORM 1 FROM public.users u WHERE u.id = v_user;
   IF NOT FOUND THEN RAISE EXCEPTION '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' USING ERRCODE = '42501'; END IF;
-  IF COALESCE(cardinality(p_add_comment_ids), 0) + COALESCE(cardinality(p_edit_comment_ids), 0) > 500 THEN
+  IF p_edit_targets IS NOT NULL AND jsonb_typeof(p_edit_targets) <> 'array' THEN
+    RAISE EXCEPTION '읽음 대상이 올바르지 않습니다.' USING ERRCODE = '22023';
+  END IF;
+  v_edits := COALESCE(jsonb_array_length(p_edit_targets), 0);
+  IF COALESCE(cardinality(p_add_comment_ids), 0) + v_edits > 500 THEN
     RAISE EXCEPTION '한 번에 읽음으로 바꿀 수 있는 알림은 500개까지예요.' USING ERRCODE = '22023';
   END IF;
   IF COALESCE(cardinality(p_add_comment_ids), 0) > 0 THEN
@@ -338,9 +343,11 @@ BEGIN
      WHERE recipient_id = v_user AND kind = 'add' AND read_at IS NULL AND comment_id = ANY (p_add_comment_ids);
     GET DIAGNOSTICS v_count = ROW_COUNT;
   END IF;
-  IF COALESCE(cardinality(p_edit_comment_ids), 0) > 0 THEN
-    UPDATE public.comment_notifications SET read_at = now()
-     WHERE recipient_id = v_user AND kind = 'edit' AND read_at IS NULL AND comment_id = ANY (p_edit_comment_ids);
+  IF v_edits > 0 THEN
+    UPDATE public.comment_notifications n SET read_at = now()
+      FROM jsonb_to_recordset(p_edit_targets) AS t("commentId" TEXT, "editAt" TIMESTAMPTZ)
+     WHERE n.recipient_id = v_user AND n.kind = 'edit' AND n.read_at IS NULL
+       AND n.comment_id = t."commentId" AND n.edit_at = t."editAt";
     GET DIAGNOSTICS v_more = ROW_COUNT;
   END IF;
   RETURN jsonb_build_object('updated', v_count + v_more);
@@ -351,7 +358,7 @@ COMMENT ON TABLE public.comment_notifications IS
 COMMENT ON FUNCTION public.comment_notifications_recipients(TEXT) IS '내부 전용: 새 댓글의 받는 사람(이유·자동 종류). 화면 판정 함수와 같은 순서.';
 COMMENT ON FUNCTION public.comment_notifications_fanout(TEXT, TEXT, TEXT[], TIMESTAMPTZ, BOOLEAN) IS '내부 전용: 알림 줄을 넣고 새 줄이 있으면 내용 없는 신호를 보낸다.';
 COMMENT ON FUNCTION public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER) IS '세션 토큰으로 호출자를 확정한 뒤 내 댓글 알림 줄을 커서 뒤로 돌려주는 공개 래퍼.';
-COMMENT ON FUNCTION public.comment_notifications_session_mark_read(TEXT, TEXT[], TEXT[]) IS '세션 토큰으로 호출자를 확정한 뒤 내 댓글 알림 줄을 읽음으로 바꾸는 공개 래퍼.';
+COMMENT ON FUNCTION public.comment_notifications_session_mark_read(TEXT, TEXT[], JSONB) IS '세션 토큰으로 호출자를 확정한 뒤 내 댓글 알림 줄을 읽음으로 바꾸는 공개 래퍼.';
 
 -- ── 5) 권한: 내부 함수는 아무도, 래퍼 두 개만 anon/authenticated/service_role ──
 
@@ -364,7 +371,7 @@ DO $$ DECLARE role_name TEXT; BEGIN
     public.comment_notifications_on_mentions(),
     public.comment_notifications_on_delete(),
     public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER),
-    public.comment_notifications_session_mark_read(TEXT, TEXT[], TEXT[])
+    public.comment_notifications_session_mark_read(TEXT, TEXT[], JSONB)
   FROM PUBLIC;
   FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
@@ -381,7 +388,7 @@ DO $$ DECLARE role_name TEXT; BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
       EXECUTE format($g$GRANT EXECUTE ON FUNCTION
         public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER),
-        public.comment_notifications_session_mark_read(TEXT, TEXT[], TEXT[]) TO %I$g$, role_name);
+        public.comment_notifications_session_mark_read(TEXT, TEXT[], JSONB) TO %I$g$, role_name);
     END IF;
   END LOOP;
 END $$;

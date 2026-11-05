@@ -58,9 +58,9 @@ BEGIN
   IF result <> '[]'::JSONB THEN RAISE EXCEPTION 'author got own notification: %', result; END IF;
 
   -- 4) 읽음: 내 줄만, 다시 하면 0.
-  result := public.comment_notifications_session_mark_read(reader_token, ARRAY[comment_id], ARRAY[]::TEXT[]);
+  result := public.comment_notifications_session_mark_read(reader_token, ARRAY[comment_id], '[]'::JSONB);
   IF (result->>'updated')::INT <> 1 THEN RAISE EXCEPTION 'mark read wrong: %', result; END IF;
-  result := public.comment_notifications_session_mark_read(reader_token, ARRAY[comment_id], ARRAY[]::TEXT[]);
+  result := public.comment_notifications_session_mark_read(reader_token, ARRAY[comment_id], '[]'::JSONB);
   IF (result->>'updated')::INT <> 0 THEN RAISE EXCEPTION 'mark read twice: %', result; END IF;
 
   -- 5) 수정으로 다시 부르면 수정 줄(안 읽음), 지우면 줄도 사라진다.

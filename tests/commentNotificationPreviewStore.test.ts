@@ -67,8 +67,8 @@ test('쓴 창이 받는 사람별 줄을 만들고, 다른 창은 신호를 받�
   const after = await reader.list('8', { at: now(), id: null });
   assert.deepEqual(after.rows, []);
   assert.deepEqual((await reader.list('8', { at: new Date(clock - 2000).toISOString(), id: null })).rows.map((row) => row.commentId), ['c2']);
-  assert.deepEqual(await reader.markRead('1', { addCommentIds: ['c1', 'c2'], editCommentIds: [] }), { available: true, updated: 1 });
-  assert.deepEqual(await reader.markRead('1', { addCommentIds: ['c1'], editCommentIds: [] }), { available: true, updated: 0 });
+  assert.deepEqual(await reader.markRead('1', { addCommentIds: ['c1', 'c2'], editTargets: [] }), { available: true, updated: 1 });
+  assert.deepEqual(await reader.markRead('1', { addCommentIds: ['c1'], editTargets: [] }), { available: true, updated: 0 });
   assert.ok((await reader.list('1', null)).rows[0]!.readAt);
   assert.equal((await reader.list('7', null)).rows[0]!.readAt, null);
 
@@ -83,9 +83,10 @@ test('쓴 창이 받는 사람별 줄을 만들고, 다른 창은 신호를 받�
   assert.equal(wonRows[0]!.editAt, null);
   // 실서버 래퍼처럼 댓글이 아직 있는 줄만 돌려줄 수 있다.
   assert.deepEqual((await reader.list('7', null, 200, (commentId) => commentId !== 'c1')).rows, []);
-  await reader.markRead('7', { addCommentIds: [], editCommentIds: ['c1'] });
+  assert.deepEqual(await reader.markRead('7', { addCommentIds: [], editTargets: [{ commentId: 'c1', editAt: new Date(clock - 1).toISOString() }] }), { available: true, updated: 0 }, '다른 수정 시각으로는 읽음이 되지 않는다');
+  assert.deepEqual(await reader.markRead('7', { addCommentIds: [], editTargets: [{ commentId: 'c1', editAt: editedAt }] }), { available: true, updated: 1 });
   clock += 1000;
-  await writer.fanoutEdit(world, 'c1', ['배한솔'], snapshot('8', ['배한솔', '원동우']));
+  await writer.fanoutEdit(world, 'c1', ['배한솔'], { ...snapshot('8', ['배한솔', '원동우']), editedAt: now() });
   const again = (await reader.list('7', null)).rows.find((row) => row.kind === 'edit')!;
   assert.equal(again.readAt, null);
   assert.equal(again.eventAt, now());

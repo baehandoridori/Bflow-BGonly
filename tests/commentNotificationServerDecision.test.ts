@@ -130,13 +130,16 @@ test('서버 읽음 대상: 씬·캐릭터 댓글 알림만, 수정 멘션은 �
     { type: 'revision', metadata: { commentId: 'c4' } },
     { type: 'mention', metadata: { commentId: 'bad id!' } },
   ]);
-  assert.deepEqual(target, { addCommentIds: ['c1', 'c2'], editCommentIds: ['c1'] });
-  const sent: Array<{ addCommentIds: string[]; editCommentIds: string[] }> = [];
-  const send = async (part: { addCommentIds: string[]; editCommentIds: string[] }) => { sent.push(part); };
+  assert.deepEqual(target, { addCommentIds: ['c1', 'c2'], editTargets: [{ commentId: 'c1', editAt: '2026-11-05T01:05:00.456Z' }] });
+  // 수정 시각을 모르는 옛 수정 알림('edit')은 보내지 않는다 — 서버 줄은 안 읽음으로 남는다(안전한 쪽).
+  assert.deepEqual(commentNotificationReadTarget([{ type: 'mention', metadata: { commentId: 'c9', mentionEditAt: 'edit' } }]), { addCommentIds: [], editTargets: [] });
+  type Part = { addCommentIds: string[]; editTargets: Array<{ commentId: string; editAt: string }> };
+  const sent: Part[] = [];
+  const send = async (part: Part) => { sent.push(part); };
   setServerCommentNotificationsAvailable(null);
-  markServerCommentNotificationsRead({ addCommentIds: Array.from({ length: 700 }, (_, i) => `a${i}`), editCommentIds: ['e1'] }, send);
+  markServerCommentNotificationsRead({ addCommentIds: Array.from({ length: 700 }, (_, i) => `a${i}`), editTargets: [{ commentId: 'e1', editAt: '2026-11-05T01:05:00.456Z' }] }, send);
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(sent.map((part) => [part.addCommentIds.length, part.editCommentIds.length]), [[500, 0], [200, 1]]);
+  assert.deepEqual(sent.map((part) => [part.addCommentIds.length, part.editTargets.length]), [[500, 0], [200, 1]]);
   for (const part of sent) assert.doesNotThrow(() => validateCommentNotificationReadTarget(part));
   setServerCommentNotificationsAvailable(false);
   markServerCommentNotificationsRead(target, send);
