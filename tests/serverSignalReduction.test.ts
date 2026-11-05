@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { build, type Plugin } from 'esbuild';
 
 import {
   applySceneCompletionMetadata,
@@ -116,4 +117,55 @@ test('캘린더 알림은 일정이 바뀌었다는 신호에 맞춰 다시 읽�
   assert.match(realtime, /callbacks\.onCalendarDataMaybeChanged\?\.\(\);\s*callbacks\.onCalendarChange\(table/);
   assert.match(realtime, /event: 'gantt-changed' \}, \(\) => \{\s*callbacks\.onCalendarDataMaybeChanged\?\.\(\);\s*callbacks\.onGanttChange\?\.\(\);/);
   assert.match(realtime, /if \(reconnected\) callbacks\.onCalendarDataMaybeChanged\?\.\(\);/);
+});
+
+// ─── v1.149.1 서버 사용량 점검(2026-11-05) 후속 ───
+
+const CLIENT_HARNESS = '__supabaseClientInfoHarness';
+
+function supabaseClientStub(): Plugin {
+  const stubs: Record<string, string> = {
+    'supabase-client': `export const createClient = (url, key, options) => { globalThis.${CLIENT_HARNESS}.options = options; return { channel: () => ({}) }; };`,
+    ws: 'export default class WebSocket {}',
+    broadcast: ['broadcastSceneUpdate', 'broadcastSceneFieldUpdate', 'broadcastScenePhaseUpdate', 'broadcastDataChange',
+      'broadcastCommentAdded', 'broadcastCommentUpdated', 'broadcastCommentDeleted', 'broadcastCalendarChanged',
+      'broadcastCommentReactionChanged', 'broadcastCommentReactionNotification', 'broadcastCommentReactionNotificationRemoved',
+      'broadcastActivityRemoved'].map((name) => `export const ${name} = () => {};`).join('\n'),
+    storage: 'export const deleteImage = async () => {};',
+    'retry-utils': 'export const createRetryManager = () => ({ schedule: () => true, reset() {}, clear() {} });',
+  };
+  const routes: Array<[RegExp, string]> = [
+    [/^@supabase\/supabase-js$/, 'supabase-client'], [/^ws$/, 'ws'], [/^\.\/broadcast$/, 'broadcast'],
+    [/^\.\/storage$/, 'storage'], [/^\.\/retry-utils$/, 'retry-utils'],
+  ];
+  return {
+    name: 'supabase-client-info-stub',
+    setup(builder) {
+      for (const [filter, name] of routes) builder.onResolve({ filter }, () => ({ path: name, namespace: 'client-info-stub' }));
+      builder.onLoad({ filter: /.*/, namespace: 'client-info-stub' }, (args) => ({ contents: stubs[args.path] }));
+    },
+  };
+}
+
+async function clientInfoHeader(define?: Record<string, string>): Promise<unknown> {
+  const result = await build({
+    stdin: { contents: "export * from './electron/supabase.ts';", resolveDir: process.cwd(), sourcefile: 'client-info-entry.ts' },
+    bundle: true, format: 'esm', platform: 'node', target: 'node22', write: false, plugins: [supabaseClientStub()], define,
+  });
+  const harness: { options?: { global?: { headers?: Record<string, string> } } } = {};
+  (globalThis as Record<string, unknown>)[CLIENT_HARNESS] = harness;
+  try {
+    await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}#client-info-${define ? 'defined' : 'plain'}`);
+    return harness.options?.global?.headers?.['X-Client-Info'];
+  } finally {
+    delete (globalThis as Record<string, unknown>)[CLIENT_HARNESS];
+  }
+}
+
+test('서버 요청 머리글에 앱 버전을 싣는다 — 서버 기록에서 버전별로 가를 수 있게', async () => {
+  assert.equal(await clientInfoHeader({ __APP_VERSION__: JSON.stringify('9.8.7') }), 'bflow-electron/9.8.7');
+  assert.equal(await clientInfoHeader(), 'bflow-electron/unknown', '빌드 값이 없는 테스트 묶음에서도 깨지지 않는다');
+  // 메인 묶음은 최상위 define 을 물려받지 않는다 — electron/main.ts 묶음에 직접 넣어야 한다.
+  const vite = read('vite.config.ts');
+  assert.match(vite, /entry: 'electron\/main\.ts',\s*vite: \{[\s\S]*?define: \{\s*__APP_VERSION__: JSON\.stringify\(pkg\.version\),/);
 });

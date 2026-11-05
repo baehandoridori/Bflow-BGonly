@@ -92,6 +92,13 @@ const SUPABASE_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wcWlma3B4YWx3eGdjcmRkY2h2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0ODEzNjIsImV4cCI6MjA4OTA1NzM2Mn0.vkaColwt60z1fpxFP2FDSDSdomLSgpGK44xwZe-Gvio';
 
+// 서버 기록에서 앱 버전별 요청을 구분할 수 있게 버전을 함께 보낸다(v1.149.1, 'bflow-electron/1.149.1').
+// 값은 빌드가 메인 묶음에 넣는다(vite.config.ts 의 electron/main.ts define). 넣지 않은 테스트 묶음에서는 'unknown'.
+declare const __APP_VERSION__: string | undefined;
+export const SUPABASE_CLIENT_INFO = `bflow-electron/${
+  typeof __APP_VERSION__ === 'string' && __APP_VERSION__ ? __APP_VERSION__ : 'unknown'
+}`;
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   realtime: {
     params: {
@@ -99,7 +106,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     },
   },
   global: {
-    headers: { 'X-Client-Info': 'bflow-electron' },
+    headers: { 'X-Client-Info': SUPABASE_CLIENT_INFO },
   },
 });
 
