@@ -183,7 +183,7 @@ function calendarSupabasePrivateTestPlugin(): Plugin {
         )).join('\n'),
       }));
       builder.onLoad({ filter: /^storage$/, namespace: 'calendar-supabase-private-test' }, () => ({
-        contents: 'export const deleteImage = async () => {};',
+        contents: 'export const deleteImage = async () => {}; export const uploadRevisionImage = async () => { throw new Error("not used"); };',
       }));
       builder.onLoad({ filter: /^retry-utils$/, namespace: 'calendar-supabase-private-test' }, () => ({
         contents: 'export const createRetryManager = () => ({ run: async (fn) => fn(), reset: () => {} });',

@@ -5,7 +5,7 @@ import {
   broadcastCommentAdded, broadcastCommentUpdated, broadcastCommentDeleted, broadcastCalendarChanged, broadcastCommentReactionChanged,
   broadcastCommentReactionNotification, broadcastCommentReactionNotificationRemoved, broadcastActivityRemoved,
 } from './broadcast';
-import { deleteImage as storageDeleteImage } from './storage';
+import { deleteImage as storageDeleteImage, uploadRevisionImage as storageUploadRevisionImage } from './storage';
 import { withCharacterOriginalPaths } from '../src/shared/characterImageOriginal';
 import { createRetryManager } from './retry-utils';
 import { createIncrementalRowCache } from './incrementalRowCache';
@@ -2368,17 +2368,31 @@ export async function deleteRevision(id: string, requesterUserId: string): Promi
     throw new Error('리비전 삭제 권한이 없습니다. (요청자 본인 또는 관리자만)');
   }
 
-  // 2) Storage 이미지 삭제 (실패해도 DB 삭제 계속)
+  // 2) DB row 삭제
+  const { error } = await supabase.from('comp_revisions').delete().eq('id', id);
+  throwIfError(error);
+  broadcastDataChange('comp_revisions', 'DELETE');
+
+  // 3) Storage 이미지 삭제 — 줄을 먼저 지운 뒤에. 저장소는 DB 가 아직 가리키는 파일은 지우지 않으므로
+  //    (storage 정책 scene_images_delete_only_unreferenced) 순서가 반대면 파일이 조용히 남는다.
+  //    실패해도 리테이크 삭제는 이미 끝났다.
   const imageUrl = (rev as { image_url?: string }).image_url;
   if (imageUrl) {
     await storageDeleteImage(imageUrl).catch((err) =>
       console.warn('[Storage] revision 이미지 삭제 실패:', err));
   }
+}
 
-  // 3) DB row 삭제
-  const { error } = await supabase.from('comp_revisions').delete().eq('id', id);
-  throwIfError(error);
-  broadcastDataChange('comp_revisions', 'DELETE');
+/** 등록 창이 넘긴 그림이 data URL 이면 저장소에 올리고 그 주소를 쓴다(리테이크 목록에 그림을 통째로 담지 않게).
+ *  올리지 못하면 예전처럼 data URL 을 그대로 담는다 — 그림 때문에 리테이크 등록이 막히면 안 된다. */
+async function prepareRevisionImage(revisionId: string, imageUrl: string): Promise<{ url: string; uploaded: boolean }> {
+  if (!/^data:image\//i.test(imageUrl)) return { url: imageUrl, uploaded: false };
+  try {
+    return { url: await storageUploadRevisionImage(revisionId, imageUrl), uploaded: true };
+  } catch (err) {
+    console.warn('[addRevision] 리테이크 그림을 저장소에 올리지 못해 그림을 줄에 그대로 담습니다:', err);
+    return { url: imageUrl, uploaded: false };
+  }
 }
 
 /** ID 단건 조회: 서버 오류와 실제 삭제(null)를 구분한다. */
@@ -2527,6 +2541,7 @@ export async function addRevision(
   const assigneeStates: Record<string, { state: string }> = {};
   for (const id of assigneeIds) assigneeStates[id] = { state: 'pending' };
 
+  const image = await prepareRevisionImage(id, imageUrl);
   const { error } = await supabase.from('comp_revisions').insert({
     id,
     part_id: resolvedPartUuid,             // 전반이면 null
@@ -2537,7 +2552,7 @@ export async function addRevision(
     priority,
     description,
     frame_no: frameNo,
-    image_url: imageUrl,
+    image_url: image.url,
     department,
     requester_id: requesterId,
     requester_name: requesterName,
@@ -2548,6 +2563,11 @@ export async function addRevision(
     assignee_states: assigneeStates,
     set_id: setId ?? null,                 // 리테이크 세트 소속(허브 항목)
   });
+  if (error && image.uploaded) {
+    // 줄이 안 생겼으니 방금 올린 그림도 치운다(아무도 가리키지 않는 파일이라 지워진다).
+    await storageDeleteImage(image.url).catch((err) =>
+      console.warn('[Storage] 저장 못 한 리테이크 그림 정리 실패:', err));
+  }
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'INSERT');
 }

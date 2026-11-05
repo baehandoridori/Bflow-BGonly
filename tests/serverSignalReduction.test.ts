@@ -131,7 +131,7 @@ function supabaseClientStub(): Plugin {
       'broadcastCommentAdded', 'broadcastCommentUpdated', 'broadcastCommentDeleted', 'broadcastCalendarChanged',
       'broadcastCommentReactionChanged', 'broadcastCommentReactionNotification', 'broadcastCommentReactionNotificationRemoved',
       'broadcastActivityRemoved'].map((name) => `export const ${name} = () => {};`).join('\n'),
-    storage: 'export const deleteImage = async () => {};',
+    storage: 'export const deleteImage = async () => {}; export const uploadRevisionImage = async () => { throw new Error("not used"); };',
     'retry-utils': 'export const createRetryManager = () => ({ schedule: () => true, reset() {}, clear() {} });',
   };
   const routes: Array<[RegExp, string]> = [
