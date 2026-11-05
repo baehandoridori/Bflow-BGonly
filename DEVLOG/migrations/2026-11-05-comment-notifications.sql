@@ -40,7 +40,9 @@
 --   DROP FUNCTION IF EXISTS public.comment_notifications_session_mark_read(TEXT, TEXT[], JSONB);
 --   NOTIFY pgrst, 'reload schema';
 --   COMMIT;
--- 운영 적용: (적용 뒤 번호를 여기에 적는다)
+-- 운영 적용: 2026-11-05 13:51 KST, 20261105045120(apply_migration 'comment_notifications'). 적용 전 같은 본문 + 확인 SQL 을
+--   한 묶음으로 돌려 끝에서 일부러 되돌리는 예행연습 통과(채울 줄 36개), 적용 뒤 확인 SQL 도 같은 방식으로 통과 — 채운 줄 40개
+--   (멘션 39·답글 1), anon 은 래퍼 두 개만 실행, 표 권한 없음, publication 밖, 트리거 셋.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
