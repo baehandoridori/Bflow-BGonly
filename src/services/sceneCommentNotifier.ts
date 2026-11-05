@@ -25,17 +25,30 @@ import {
 } from '@/utils/sceneNotificationRecipients';
 import { stripEntityTokens } from '@/utils/entityTokens';
 import { findCommentInCache } from '@/services/commentService';
-import { setLastSeenAt } from '@/utils/lastSeenTracker';
+import { getCommentNotificationInboxState, getLastSeenAt, setCommentNotificationInboxState, setLastSeenAt } from '@/utils/lastSeenTracker';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import { getNotificationIdentity } from '@/utils/notificationIdentity';
+import { getServerCommentNotificationsAvailable, setServerCommentNotificationsAvailable } from '@/utils/commentNotificationServer';
+import { useNotificationStore } from '@/stores/useNotificationStore';
 import {
   createNotificationDedupe,
   decideSceneCommentNotification,
+  decideSceneCommentNotificationFromServer,
+  normalizeSceneCommentFromServerRow,
   type NormalizedSceneComment,
   type NotificationRevisionRef,
   type NotificationSceneRef,
   type SceneCommentNotificationDeps,
   type SceneCommentNotificationDecision,
 } from '@/utils/sceneCommentNotification';
+import { firstRunServerRowFilter, presentServerCommentRows } from '@/utils/commentNotificationPresent';
+import {
+  createCommentNotificationInbox,
+  type CommentNotificationInbox,
+  type CommentNotificationPullMode,
+  type CommentNotificationPullResult,
+} from '@/utils/commentNotificationInbox';
+import type { CommentNotificationCursor, CommentNotificationRow } from '@/shared/commentNotification';
 import type { Scene } from '@/types';
 
 const arrivals = createNotificationDedupe(500);
@@ -57,6 +70,167 @@ export function resetSceneCommentNotifier(): void {
   arrivals.clear();
   decisions.clear();
   catchUpReadyUserId = null;
+  inbox?.dispose();
+  inbox = null;
+  inboxUserId = null;
+  setServerCommentNotificationsAvailable(null);
+}
+
+// ─── 서버 알림 줄(씬 댓글 B안 PR 6) ─────────────────────────────────────
+// 서버가 댓글 저장 순간에 받는 사람을 정해 줄을 만든다(DEVLOG/migrations/2026-11-05-comment-notifications.sql).
+// 실시간 판정(아래 notifyIncomingSceneComment)은 그대로 두어 바로 뜨게 하고, 서버 줄은 그 PC 캐시에 없어 놓친 것과
+// 꺼져 있던 동안 온 것을 채운다. 두 길은 같은 중복 키(decisions)·같은 알림 정체성이라 한 댓글이 두 번 뜨지 않는다.
+
+let inbox: CommentNotificationInbox | null = null;
+let inboxUserId: string | null = null;
+let settingsSource: () => NotificationSettings = () => ({}) as NotificationSettings;
+
+/** null = 아직 모름, false = 서버에 줄이 없다(DB 적용 전) → 예전 길(놓친 멘션 훑기). */
+export function serverCommentNotificationsAvailable(): boolean | null {
+  return getServerCommentNotificationsAvailable();
+}
+
+/** 서버 줄 묶음을 화면 알림으로. quiet 면 목록에만(로그인·재연결·한꺼번에 여러 줄). 새로 알린 안 읽은 수를 돌려준다. */
+function presentServerRows(me: { id: string; name: string }, rows: readonly CommentNotificationRow[], quiet: boolean): number {
+  const settings = settingsSource();
+  const deps = buildDeps(null);
+  return presentServerCommentRows(rows, quiet, {
+    isCurrent: () => useAuthStore.getState().currentUser?.id === me.id,
+    decide: (row) => {
+      const comment = normalizeSceneCommentFromServerRow(row);
+      const decision = decideSceneCommentNotificationFromServer(
+        comment,
+        { reason: row.reason, detail: row.detail, revisionNo: row.revisionNo },
+        me,
+        deps,
+        sceneCommentSettings(settings),
+      );
+      return decision ? { ...decision, createdAt: comment.createdAt ?? null } : null;
+    },
+    claim: (key) => decisions.claim(key),
+    identityOf: (type, metadata) => getNotificationIdentity({ type, metadata }),
+    isListed: (identity) => useNotificationStore.getState().notifications.some((n) => getNotificationIdentity(n) === identity),
+    add: (draft) => useNotificationStore.getState().addNotification({ ...draft, metadata: draft.metadata as Record<string, string | undefined> }),
+    dispatch: (payload, options) => dispatchNotification(payload, settings, options),
+    // 예전 길(서버 줄이 없어진 경우의 놓친 멘션 훑기)의 기준 시각도 함께 옮긴다.
+    onMention: (createdAt) => { if (catchUpReadyUserId === me.id) setLastSeenAt(me.id, createdAt); },
+  });
+}
+
+/**
+ * 서버 줄을 판정하기 전에 씬 목록(위치 이름·씬 대화 키)과 이 계정의 팔로우·끄기를 다 읽었는지 기다린다(리뷰 지적) —
+ * 로그인 직후 씬 목록보다 먼저 판정하면 '이 씬 알림 끄기'가 무시되고 제목에 위치가 빠진 채로 본 줄이 된다.
+ * 끝내 준비되지 않으면(오프라인 등) 정해 둔 시간 뒤 그대로 간다 — 알림이 아예 빠지는 것보다 낫다.
+ */
+const PRESENT_CONTEXT_WAIT_MS = 20_000;
+function waitForPresentationContext(userId: string, timeoutMs = PRESENT_CONTEXT_WAIT_MS): Promise<void> {
+  const ready = () => {
+    const follow = useCommentThreadFollowStore.getState();
+    return useDataStore.getState().lastSyncTime !== null && follow.loaded && follow.userId === userId;
+  };
+  if (ready()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const offData = useDataStore.subscribe(check);
+    const offFollow = useCommentThreadFollowStore.subscribe(check);
+    const timer = setTimeout(done, timeoutMs);
+    function check() { if (ready()) done(); }
+    function done() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      offData();
+      offFollow();
+      resolve();
+    }
+  });
+}
+
+/** 받기함이 서버 줄을 처음 고를 때(업데이트 뒤 첫 실행) 직전 몇 분의 자동 알림만 — 예전 버전이 이미 실시간으로 보여 준 것. */
+const FIRST_RUN_AUTO_WINDOW_MS = 2 * 60 * 1000;
+
+function inboxFor(me: { id: string; name: string }): CommentNotificationInbox {
+  if (inbox && inboxUserId === me.id) return inbox;
+  inbox?.dispose();
+  inboxUserId = me.id;
+  const userId = me.id;
+  inbox = createCommentNotificationInbox({
+    list: async (cursor, limit) => {
+      const api = window.electronAPI;
+      if (!api?.commentNotificationsList) return { available: false, rows: [] };
+      return api.commentNotificationsList(cursor, limit);
+    },
+    present: (rows, quiet) => presentServerRows(me, rows, quiet),
+    loadState: () => getCommentNotificationInboxState(userId),
+    saveState: (state) => setCommentNotificationInboxState(userId, state),
+  });
+  return inbox;
+}
+
+/** 저장된 받기함 커서가 있는가 — 없으면 첫 실행(예전 놓친 알림 기준 시각에서 시작). */
+export function hasServerCommentNotificationCursor(userId: string): boolean {
+  return !!getCommentNotificationInboxState(userId)?.cursor;
+}
+
+/**
+ * 내 서버 줄을 커서 뒤로 읽어 알림으로(catchup = 조용히, live = 실시간처럼). initial 은 저장된 커서가 없을 때 시작점.
+ * 'unavailable' 이면 서버에 줄이 없다 — 호출자가 예전 길로 간다.
+ */
+export async function pullServerCommentNotifications(
+  me: { id: string; name: string },
+  getSettings: () => NotificationSettings,
+  mode: CommentNotificationPullMode,
+  initial: CommentNotificationCursor | null,
+  overlapForFirstRun = 10 * 60 * 1000,
+): Promise<CommentNotificationPullResult & { stale: boolean }> {
+  settingsSource = getSettings;
+  await waitForPresentationContext(me.id);
+  if (useAuthStore.getState().currentUser?.id !== me.id) return { status: 'failed', presented: 0, quieted: false, stale: true };
+  const box = inboxFor(me);
+  // 업데이트 뒤 첫 실행: 예전 버전이 이미 보여 준(지웠을 수도 있는) 줄은 다시 넘기지 않는다.
+  const show = box.hasCursor()
+    ? undefined
+    : firstRunServerRowFilter({
+      lastSeenAt: getLastSeenAt(me.id),
+      startedAt: Date.now(),
+      autoWindowMs: FIRST_RUN_AUTO_WINDOW_MS,
+      mentionWindowMs: Math.max(overlapForFirstRun, FIRST_RUN_AUTO_WINDOW_MS),
+    });
+  const result = await box.pull(mode, initial, { show });
+  const stale = useAuthStore.getState().currentUser?.id !== me.id;
+  if (!stale) {
+    if (result.status === 'done') setServerCommentNotificationsAvailable(true);
+    else if (result.status === 'unavailable') setServerCommentNotificationsAvailable(false);
+  }
+  return { ...result, stale };
+}
+
+/** 커서가 처음일 때 시작점 — 예전 놓친 알림 기준 시각(없으면 지금)에서 겹침 몫만큼 앞. */
+export function initialServerCommentNotificationCursor(userId: string, overlapMs: number, now = Date.now()): CommentNotificationCursor | null {
+  if (hasServerCommentNotificationCursor(userId)) return null;
+  const lastSeen = getLastSeenAt(userId);
+  const base = lastSeen && Number.isFinite(Date.parse(lastSeen)) ? Date.parse(lastSeen) : now;
+  return { at: new Date(base - overlapMs).toISOString(), id: null };
+}
+
+/**
+ * 서버 신호를 받았을 때 — 놓친 알림 모으기가 끝난 사용자만 내 줄을 다시 읽는다(실시간처럼 띄운다).
+ * 한꺼번에 여러 줄이면 조용히 넣고 그 수를 돌려준다(호출자가 요약 한 번).
+ */
+export async function pullLiveServerCommentNotifications(
+  getSettings: () => NotificationSettings,
+  overlapMs: number,
+): Promise<number> {
+  const me = useAuthStore.getState().currentUser;
+  if (!me || catchUpReadyUserId !== me.id) return 0;
+  const result = await pullServerCommentNotifications(
+    { id: me.id, name: me.name },
+    getSettings,
+    'live',
+    initialServerCommentNotificationCursor(me.id, overlapMs),
+    overlapMs,
+  );
+  return !result.stale && result.status === 'done' && result.quieted ? result.presented : 0;
 }
 
 function findScene(comment: NormalizedSceneComment): Scene | null {

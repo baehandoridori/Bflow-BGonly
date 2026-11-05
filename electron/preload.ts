@@ -530,6 +530,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('thread-todos:changed', listener);
     return () => ipcRenderer.removeListener('thread-todos:changed', listener);
   },
+  // 씬 댓글 서버 알림(씬 댓글 B안 PR 6) — 호출자는 main 세션이 정한다. 렌더러는 커서·댓글 id 만.
+  commentNotificationsList: (cursor: import('../src/shared/commentNotification').CommentNotificationCursor | null, limit?: number) =>
+    ipcRenderer.invoke('comment-notifications:list', cursor, limit, canonicalSessionEpoch),
+  commentNotificationsMarkRead: (target: import('../src/shared/commentNotification').CommentNotificationReadTarget) =>
+    ipcRenderer.invoke('comment-notifications:mark-read', target, canonicalSessionEpoch),
+  onCommentNotificationsChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('comment-notifications:changed', listener);
+    return () => ipcRenderer.removeListener('comment-notifications:changed', listener);
+  },
   readPersonalTodoLabels: () => ipcRenderer.invoke('personal-todo:read-labels', canonicalSessionEpoch),
   createPersonalTodo: (input: PersonalTodoCreateInput) => ipcRenderer.invoke('personal-todo:create', input, canonicalSessionEpoch),
   patchPersonalTodo: (todoId: string, patch: PersonalTodoPatch) => ipcRenderer.invoke('personal-todo:patch', todoId, patch, canonicalSessionEpoch),

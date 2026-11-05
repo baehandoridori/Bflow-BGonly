@@ -116,43 +116,37 @@ function withLabel(title: string, label: string): string {
   return label ? `${title} · ${label}` : title;
 }
 
-export function decideSceneCommentNotification(
-  comment: NormalizedSceneComment,
-  me: { id: string; name: string } | null | undefined,
-  deps: SceneCommentNotificationDeps,
-  settings: SceneCommentNotificationSettings,
-): SceneCommentNotificationDecision | null {
-  if (!me?.id || !comment.commentId) return null;
-  if (!comment.userId || comment.userId === me.id) return null;
-
-  const author = comment.userName || '누군가';
+/** 캐릭터 댓글의 직접 멘션 — 씬 담당·스레드 개념 없음. 누르면 캐릭터 상세로. */
+function characterMentionDecision(comment: NormalizedSceneComment & { commentId: string; characterId: string }, author: string, body: string): SceneCommentNotificationDecision {
   const isEdit = comment.kind === 'edit';
-  const mentionNames = isEdit ? (comment.addedMentions ?? []) : comment.mentions;
-  const isMentioned = mentionNames.includes(me.name);
-  const body = buildNotificationBody(comment, deps.plainText);
-
-  // 캐릭터 댓글 — 직접 멘션만(씬 담당·스레드 개념 없음). 누르면 캐릭터 상세로.
-  if (comment.characterId) {
-    if (!isMentioned) return null;
-    return {
-      type: 'mention',
+  return {
+    type: 'mention',
+    reason: 'mention',
+    title: `${author}님이 나를 태그했습니다`,
+    body,
+    quiet: false,
+    native: true,
+    metadata: {
+      characterId: comment.characterId,
+      commentId: comment.commentId,
+      mentionedBy: author,
       reason: 'mention',
-      title: `${author}님이 나를 태그했습니다`,
-      body,
-      quiet: false,
-      native: true,
-      metadata: {
-        characterId: comment.characterId,
-        commentId: comment.commentId,
-        mentionedBy: author,
-        reason: 'mention',
-        // 수정으로 다시 넣은 @ 는 그 댓글의 예전 알림과 따로 센다(씬 댓글과 같게 — 코덱스 4차).
-        ...(isEdit ? { mentionEditAt: comment.createdAt ?? 'edit' } : {}),
-      },
-      dedupeKey: `${comment.commentId}:mention${isEdit ? `:edit:${comment.createdAt ?? ''}` : ''}`,
-    };
-  }
+      // 수정으로 다시 넣은 @ 는 그 댓글의 예전 알림과 따로 센다(씬 댓글과 같게 — 코덱스 4차).
+      ...(isEdit ? { mentionEditAt: comment.createdAt ?? 'edit' } : {}),
+    },
+    dedupeKey: `${comment.commentId}:mention${isEdit ? `:edit:${comment.createdAt ?? ''}` : ''}`,
+  };
+}
 
+type DecisionBuilder = (reason: SceneCommentNotificationReason, title: string, extra?: Record<string, unknown>) => SceneCommentNotificationDecision;
+
+/** 씬 댓글 판정의 공통 바탕 — 씬·위치 이름·팔로우 상태와, 같은 모양의 결정을 만드는 함수(실시간 판정·서버 줄 둘 다 쓴다). */
+function sceneDecisionContext(comment: NormalizedSceneComment & { commentId: string }, deps: SceneCommentNotificationDeps, author: string, body: string): {
+  scene: NotificationSceneRef | null;
+  pref: 'follow' | 'mute' | null;
+  decision: DecisionBuilder;
+} {
+  const isEdit = comment.kind === 'edit';
   const scene = deps.findScene(comment);
   const label = deps.sceneLabel(comment, scene);
   const sceneThreadKey = deps.sceneThreadKey?.(comment, scene) ?? null;
@@ -171,11 +165,7 @@ export function decideSceneCommentNotification(
     ...(comment.parentCommentId ? { parentCommentId: comment.parentCommentId } : {}),
     ...(comment.revisionId ? { revisionId: comment.revisionId } : {}),
   };
-  const decision = (
-    reason: SceneCommentNotificationReason,
-    title: string,
-    extra: Record<string, unknown> = {},
-  ): SceneCommentNotificationDecision => ({
+  const decision: DecisionBuilder = (reason, title, extra = {}) => ({
     type: reason === 'auto' || reason === 'follow' ? 'comment' : 'mention',
     reason,
     title: withLabel(title, label),
@@ -185,6 +175,36 @@ export function decideSceneCommentNotification(
     metadata: { ...baseMetadata, reason, ...(reason === 'auto' || reason === 'follow' ? {} : { mentionedBy: author }), ...extra },
     dedupeKey: `${comment.commentId}:${reason}${isEdit ? `:edit:${comment.createdAt ?? ''}` : ''}`,
   });
+  return { scene, pref, decision };
+}
+
+const AUTO_PHRASE: Record<'assignee' | 'counterpart' | 'participant', string> = {
+  assignee: '내 씬에 댓글을 남겼습니다',
+  counterpart: '함께 작업 중인 씬에 댓글을 남겼습니다',
+  participant: '내가 댓글 단 씬에 새 댓글을 남겼습니다',
+};
+
+export function decideSceneCommentNotification(
+  comment: NormalizedSceneComment,
+  me: { id: string; name: string } | null | undefined,
+  deps: SceneCommentNotificationDeps,
+  settings: SceneCommentNotificationSettings,
+): SceneCommentNotificationDecision | null {
+  if (!me?.id || !comment.commentId) return null;
+  if (!comment.userId || comment.userId === me.id) return null;
+  const commentWithId = comment as NormalizedSceneComment & { commentId: string };
+
+  const author = comment.userName || '누군가';
+  const isEdit = comment.kind === 'edit';
+  const mentionNames = isEdit ? (comment.addedMentions ?? []) : comment.mentions;
+  const isMentioned = mentionNames.includes(me.name);
+  const body = buildNotificationBody(comment, deps.plainText);
+
+  if (comment.characterId) {
+    return isMentioned ? characterMentionDecision({ ...commentWithId, characterId: comment.characterId }, author, body) : null;
+  }
+
+  const { scene, pref, decision } = sceneDecisionContext(commentWithId, deps, author, body);
 
   // 수정으로 새로 넣은 @이름 — 그 사람에게만 멘션 알림. 답글·자동 알림은 처음 쓸 때 이미 판정했다.
   //   알림 정체성을 따로 잡도록 수정 시각을 싣는다(utils/notificationIdentity.ts).
@@ -222,8 +242,67 @@ export function decideSceneCommentNotification(
   const isCounterpart = !isAssignee && deps.counterpartAssigneeNames(scene).includes(me.name);
   const isParticipant = !isAssignee && !isCounterpart && deps.hasUserCommentedOnScene(comment.partId, scene, me.id);
   if (!isAssignee && !isCounterpart && !isParticipant) return null;
-  const phrase = isAssignee ? '내 씬에 댓글을 남겼습니다' : isCounterpart ? '함께 작업 중인 씬에 댓글을 남겼습니다' : '내가 댓글 단 씬에 새 댓글을 남겼습니다';
+  const phrase = AUTO_PHRASE[isAssignee ? 'assignee' : isCounterpart ? 'counterpart' : 'participant'];
   return decision('auto', `${author}님이 ${phrase}`);
+}
+
+/** 서버가 정한 '나를 왜 받나'(comment_notifications 한 줄 — src/shared/commentNotification.ts). */
+export interface ServerSceneCommentFacts {
+  reason: 'mention' | 'reply' | 'retake' | 'auto';
+  detail: 'assignee' | 'counterpart' | 'participant' | null;
+  revisionNo: number | null;
+}
+
+/**
+ * 서버 줄을 화면 알림으로(씬 댓글 B안 PR 6). 받는 사람은 서버가 이미 정했고, 여기서는 이 PC 의 설정·팔로우·끄기만 본다 —
+ * 실시간 판정(decideSceneCommentNotification)과 같은 순서·같은 제목·같은 중복 키라 두 길이 같은 댓글에 겹쳐도 한 번만 뜬다.
+ *   mention·reply: 늘. retake: 설정 '리테이크 알림'이 꺼졌으면 팔로우한 리테이크만 팔로우 알림으로.
+ *   auto: 끈 스레드·씬이면 없음, 팔로우면 팔로우 알림, 아니면 설정 '내 씬 자동 알림'이 켜졌을 때 조용한 알림.
+ */
+export function decideSceneCommentNotificationFromServer(
+  comment: NormalizedSceneComment,
+  server: ServerSceneCommentFacts,
+  me: { id: string; name: string } | null | undefined,
+  deps: SceneCommentNotificationDeps,
+  settings: SceneCommentNotificationSettings,
+): SceneCommentNotificationDecision | null {
+  if (!me?.id || !comment.commentId) return null;
+  if (!comment.userId || comment.userId === me.id) return null;
+  const commentWithId = comment as NormalizedSceneComment & { commentId: string };
+  const author = comment.userName || '누군가';
+  const body = buildNotificationBody(comment, deps.plainText);
+  const isEdit = comment.kind === 'edit';
+
+  if (comment.characterId) {
+    return server.reason === 'mention' ? characterMentionDecision({ ...commentWithId, characterId: comment.characterId }, author, body) : null;
+  }
+  const { pref, decision } = sceneDecisionContext(commentWithId, deps, author, body);
+  if (isEdit) {
+    return server.reason === 'mention'
+      ? decision('mention', `${author}님이 나를 태그했습니다`, { mentionEditAt: comment.createdAt ?? 'edit' })
+      : null;
+  }
+  switch (server.reason) {
+    case 'mention':
+      return decision('mention', `${author}님이 나를 태그했습니다`);
+    case 'reply':
+      return decision('reply', `${author}님이 내 댓글에 답글을 남겼습니다`);
+    case 'retake': {
+      if (!settings.retakeNotify) {
+        return pref === 'follow' ? decision('follow', `${author}님이 팔로우 중인 리테이크에 댓글을 남겼습니다`) : null;
+      }
+      const reLabel = server.revisionNo != null ? `re#${server.revisionNo}` : '리테이크';
+      return decision('retake', `${author}님이 ${reLabel} 에 댓글을 남겼습니다`);
+    }
+    case 'auto': {
+      if (pref === 'mute') return null;
+      if (pref === 'follow') return decision('follow', `${author}님이 팔로우 중인 스레드에 댓글을 남겼습니다`);
+      if (!settings.autoNotify || !server.detail) return null;
+      return decision('auto', `${author}님이 ${AUTO_PHRASE[server.detail]}`);
+    }
+    default:
+      return null;
+  }
 }
 
 /** 세션 동안 같은 알림을 한 번만 — 상한을 넘으면 가장 오래된 것부터 잊는다. */
@@ -342,6 +421,51 @@ export function normalizeSceneCommentFromUpdatedBroadcast(payload: unknown): Nor
     createdAt: asText(p.editedAt),
     kind: 'edit',
     addedMentions,
+  };
+}
+
+/** 시각 글자를 한 모양으로 — 서버(PostgreSQL)는 '…123+00:00', 보낸 PC 는 '…123Z' 로 같은 시각을 적는다. */
+function canonicalIso(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : value;
+}
+
+/**
+ * 서버 알림 줄(comment_notifications 래퍼가 돌려준 줄의 댓글 부분). 수정 줄은 그 수정의 시각을 '쓴 시각'으로 —
+ * 수정 방송(comment-updated)의 editedAt 과 같은 글자가 되게 맞춘다(같은 수정이 두 길로 와도 한 번만).
+ */
+export function normalizeSceneCommentFromServerRow(row: {
+  commentId: string;
+  kind: 'add' | 'edit';
+  eventAt: string;
+  editAt?: string | null;
+  comment: {
+    partId: string | null; sceneId: string | null; sceneUuid: string | null; userId: string; userName: string; text: string;
+    mentions: readonly string[]; imageCount: number; parentCommentId: string | null; revisionId: string | null;
+    characterId: string | null; createdAt: string | null; editedAt: string | null;
+  };
+}): NormalizedSceneComment {
+  const c = row.comment;
+  const isEdit = row.kind === 'edit';
+  return {
+    commentId: row.commentId,
+    partId: c.characterId ? null : c.partId,
+    sceneNo: c.characterId ? null : c.sceneId,
+    sceneUuid: c.sceneUuid,
+    userId: c.userId,
+    userName: c.userName || null,
+    text: c.text,
+    mentions: c.mentions,
+    imageCount: c.imageCount,
+    parentCommentId: c.parentCommentId,
+    parentAuthorId: null,
+    revisionId: c.revisionId,
+    characterId: c.characterId,
+    // 수정 줄은 그 수정의 시각(줄에 저장된 값) — 그 뒤 또 고쳐 바뀐 지금 edited_at 이 아니라(리뷰 지적: 같은 수정이 두 번 뜸).
+    createdAt: isEdit ? canonicalIso(row.editAt ?? c.editedAt ?? row.eventAt) : canonicalIso(c.createdAt ?? row.eventAt),
+    kind: row.kind,
+    ...(isEdit ? { addedMentions: [] } : {}),
   };
 }
 

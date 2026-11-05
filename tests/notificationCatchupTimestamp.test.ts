@@ -6,8 +6,15 @@ const app = readFileSync('src/App.tsx', 'utf8');
 const store = readFileSync('src/stores/useNotificationStore.ts', 'utf8');
 
 test('catch-up notifications preserve source timestamps in the notification panel', () => {
-  assert.match(store, /type NotificationDraft = Omit<AppNotification,\s*'id'\s*\|\s*'createdAt'\s*\|\s*'isRead'> & \{ createdAt\?: string \};/);
+  // v1.149.0(PR 6): 다른 PC 에서 이미 읽은 서버 알림은 읽은 채로 넣을 수 있다(기본은 안 읽음).
+  assert.match(store, /type NotificationDraft = Omit<AppNotification,\s*'id'\s*\|\s*'createdAt'\s*\|\s*'isRead'> & \{ createdAt\?: string; isRead\?: boolean \};/);
+  assert.match(store, /isRead:\s*n\.isRead === true,/);
   assert.match(store, /createdAt:\s*n\.createdAt\s*\?\?\s*new Date\(\)\.toISOString\(\)/);
+  // 서버 알림 줄(놓친 알림 모으기)도 원래 댓글 시각.
+  const present = readFileSync('src/utils/commentNotificationPresent.ts', 'utf8');
+  assert.match(present, /deps\.add\(\{[\s\S]*?createdAt:\s*decision\.createdAt \?\? row\.eventAt,/);
+  const notifier = readFileSync('src/services/sceneCommentNotifier.ts', 'utf8');
+  assert.match(notifier, /return decision \? \{ \.\.\.decision, createdAt: comment\.createdAt \?\? null \} : null;/);
   assert.match(store, /addNotification:\s*\(n:\s*NotificationDraft\) => string;/);
 
   // v1.146.0(§6.1): 놓친 멘션도 실시간과 같은 판정 함수로 제목·종류를 만들고, 시각은 원래 댓글 시각.

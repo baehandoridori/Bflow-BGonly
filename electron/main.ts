@@ -34,6 +34,8 @@ import { createCalendarSubscriptionService } from './calendarSubscriptionService
 import { setGanttSessionTokenResolver } from './ganttStore';
 import { registerThreadTodoIpc } from './threadTodoIpc';
 import { setThreadTodoSessionTokenResolver } from './threadTodoStore';
+import { registerCommentNotificationIpc } from './commentNotificationIpc';
+import { setCommentNotificationSessionTokenResolver } from './commentNotificationStore';
 import {
   createIcsSubscriptionStore,
   createIcsTextFetcher,
@@ -2600,6 +2602,10 @@ registerGanttIpc({
 setThreadTodoSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
 registerThreadTodoIpc({ getSessionOriginOrThrow, onChanged: () => broadcastToAllWindows('thread-todos:changed', {}) });
 
+// 씬 댓글 서버 알림(씬 댓글 B안 PR 6)도 같은 세션 토큰 경계 — 렌더러는 커서·댓글 id 만 보내고 '내 줄'만 받는다.
+setCommentNotificationSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
+registerCommentNotificationIpc({ getSessionOriginOrThrow });
+
 registerLegacyPrivateEventIpc(ipcMain, {
   getSessionUserIdOrThrow,
   assertLiveUser: async (userId) => {
@@ -3389,6 +3395,10 @@ function startSupabaseRealtime() {
       broadcastToAllWindows('calendar:changed', { action: 'UPDATE' });
     },
     onThreadTodosChange: () => broadcastToAllWindows('thread-todos:changed', {}),
+    // 알림은 본 창만 만든다(위젯 창은 댓글 캐시만 고친다) — 본 창에만 '내 줄을 다시 읽어라'.
+    onCommentNotificationsChange: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('comment-notifications:changed');
+    },
     onVacationChange: () => broadcastToAllWindows('vacation:changed', {}),
     onCalendarNotificationInsert: (payload) => broadcastSupabaseCalendarNotification(payload),
     onSceneWorkLinkChange: (payload) => {

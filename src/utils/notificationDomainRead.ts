@@ -1,3 +1,7 @@
+import { commentNotificationReadTarget, markServerCommentNotificationsRead } from './commentNotificationServer.ts';
+
+const sendServerCommentRead = () => (typeof window !== 'undefined' ? window.electronAPI?.commentNotificationsMarkRead : undefined);
+
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -35,6 +39,12 @@ export function markNotificationDomainRead(
   if (type === 'calendar' && calendarNotificationId) {
     Promise.resolve(window.electronAPI?.calendarNotificationsMarkRead?.([calendarNotificationId]))
       .catch((err) => console.warn('[notificationDomainRead] 캘린더 알림 read 실패:', err));
+  }
+
+  // v1.149.0(씬 댓글 B안 PR 6): 씬·캐릭터 댓글 알림은 서버 줄도 읽음으로 — 다른 PC 의 놓친 알림 모으기에서 읽은 채로 온다.
+  const commentTarget = commentNotificationReadTarget([{ type, metadata }]);
+  if (commentTarget.addCommentIds.length + commentTarget.editTargets.length > 0) {
+    markServerCommentNotificationsRead(commentTarget, sendServerCommentRead());
   }
 }
 
@@ -88,4 +98,10 @@ export function markNotificationsDomainReadBatch(
   unread
     .filter((row) => row.type === 'acting_feedback' || row.type === 'scene_assignment')
     .forEach((row) => markNotificationDomainRead(row.type, meta(row)));
+
+  // v1.149.0(씬 댓글 B안 PR 6): 씬·캐릭터 댓글 알림의 서버 줄 — 댓글 id 를 모아 한 번(500개씩).
+  const commentTarget = commentNotificationReadTarget(unread);
+  if (commentTarget.addCommentIds.length + commentTarget.editTargets.length > 0) {
+    markServerCommentNotificationsRead(commentTarget, sendServerCommentRead());
+  }
 }
