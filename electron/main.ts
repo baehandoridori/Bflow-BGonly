@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog, safeStorage } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog, safeStorage, powerMonitor } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
@@ -99,7 +99,7 @@ import {
   localSwapAttemptedMarker,
   localSwapSuppressedMarker,
 } from './autoUpdate/paths';
-import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
+import { formatSuppressionMarker, isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
 import { compareVersions, readManifest } from './autoUpdate/manifest';
 import { resolveChildFolderPath } from './pathCreateFolder';
 import { parseFileNameWBuffer, imageMimeForPath, clipboardImageFilePath } from './clipboardFiles';
@@ -1058,8 +1058,10 @@ ipcMain.handle('update:check-now', () => runManualUpdateCheck());
  * v1.44.2 — '자동 중단' 상태 수동 복구.
  *
  * 이전 업데이트 적용 실패로 `.swap-suppressed`(content=own version)가 남으면 checker가 같은
- * 버전에선 fetch를 영구 skip한다(suppressed). 이 상태는 다른 버전을 직접 설치하기 전엔
- * 자동으로 풀리지 않아, 비개발자 사용자가 앱 안에서 빠져나올 길이 없었다. 이 핸들러는
+ * 버전에선 fetch를 skip한다(suppressed). 이 상태는 다른 버전을 직접 설치하기 전엔
+ * 자동으로 풀리지 않아, 비개발자 사용자가 앱 안에서 빠져나올 길이 없었다. (v1.149.1부터는
+ * 실패한 새 버전도 적어 두어 배포 쪽이 더 새 버전을 내놓으면 저절로 한 번 더 시도한다 — 예전
+ * 형식 표시와 같은 새 버전은 그대로 멈춘다.) 이 핸들러는
  * 사용자가 '다시 시도'를 눌렀을 때 suppression/attempted 흔적을 지우고 즉시 재확인하여
  * 자동 업데이트를 재개시킨다. (installer-pending stale 잔여물은 prepareUpdate의 fresh
  * download 경로가 정리하므로 별도 처리 불필요.)
@@ -1474,7 +1476,7 @@ import {
   deleteCharacterBoardTab as sbDeleteCharacterBoardTab,
 } from './supabase';
 import type { BulkStageUpdate, BulkFieldUpdate } from './supabase';
-import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
+import { reconnectRealtimeIfDisconnected, setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
 import { mapCalendarNotificationRow } from '../src/shared/calendarNotifications';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
@@ -2630,10 +2632,18 @@ setCalendarChangedLocalListener((payload) => {
     widgetWindows.values(),
     payload,
   );
+  // 이 PC 에서 고친 일정은 실시간이 끊겨 있어도 알림용 목록에 바로 반영한다(v1.149.1 리뷰).
+  calendarReminders.invalidate();
 });
 
-// 알림용 일정 목록은 바뀜 신호(실시간 캘린더·간트 변경, 재연결)가 올 때나 5분마다만 다시 읽는다.
-const calendarReminders = registerCalendarReminders(getSessionOriginOrThrow, () => { mainWindow?.show(); mainWindow?.focus(); });
+// 알림용 일정 목록은 바뀜 신호(실시간 캘린더·간트 변경, 재연결, 이 PC 의 일정 저장)가 올 때나 29분마다만 다시 읽는다.
+// 실시간이 끊겨 신호를 못 받는 동안은 5분마다(놓친 신호 때문에 알림이 따라잡기 구간을 벗어나지 않게).
+const calendarReminders = registerCalendarReminders(
+  getSessionOriginOrThrow,
+  () => { mainWindow?.show(); mainWindow?.focus(); },
+  undefined,
+  () => currentRealtimeStatus === 'SUBSCRIBED',
+);
 calendarNotificationDrain = registerCalendarIpc({
   getSessionUserIdOrThrow,
   getSessionOriginOrThrow,
@@ -3388,7 +3398,7 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onCalendarChange: (table, payload) => broadcastSupabaseCalendarEvent(table, payload),
-    // 알림용 일정 목록은 캘린더·간트가 바뀌었거나 재연결됐을 때만 다시 읽는다(나머지는 5분마다).
+    // 알림용 일정 목록은 캘린더·간트가 바뀌었거나 재연결됐을 때만 다시 읽는다(나머지는 29분, 끊긴 동안 5분마다).
     onCalendarDataMaybeChanged: () => calendarReminders.invalidate(),
     onGanttChange: () => {
       broadcastToAllWindows('gantt:changed', {});
@@ -5277,11 +5287,12 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
       buttons: ['확인'],
     });
 
-    // P2 #2: suppression marker 작성 — checker가 own version과 같으면 fetch skip → 자동
-    // 재시도 영구 중단. 사용자가 NSIS Setup으로 다른 version 설치하면 own 갱신 → marker
+    // P2 #2: suppression marker 작성 — checker가 own version과 같으면 fetch skip → 같은 새 버전
+    // 자동 재시도 중단. 사용자가 NSIS Setup으로 다른 version 설치하면 own 갱신 → marker
     // version과 다르면 marker 자동 정리하여 자동업데이트 재개.
+    // v1.149.1: 실패한 새 버전도 적는다 — 배포 쪽이 그보다 더 새 버전을 내놓으면 한 번 더 시도한다.
     try {
-      await fs.promises.writeFile(localSwapSuppressedMarker(), currentVersion, 'utf-8');
+      await fs.promises.writeFile(localSwapSuppressedMarker(), formatSuppressionMarker(currentVersion, pendingVersion), 'utf-8');
     } catch (err) {
       console.warn('[main] suppression marker 작성 실패 (무시):', err);
     }
@@ -5318,8 +5329,9 @@ async function notifyAndCleanupOnInstallerFailure(): Promise<void> {
       buttons: ['확인'],
     });
 
+    // 실패한 새 버전을 함께 적는다(v1.149.1) — 같은 버전은 계속 멈추고, 더 새 버전이 나오면 한 번 더 시도한다.
     try {
-      await fs.promises.writeFile(localSwapSuppressedMarker(), currentVersion, 'utf-8');
+      await fs.promises.writeFile(localSwapSuppressedMarker(), formatSuppressionMarker(currentVersion, pendingVersion), 'utf-8');
     } catch (err) {
       console.warn('[main] installer suppression marker 작성 실패 (무시):', err);
     }
@@ -5523,6 +5535,10 @@ app.whenReady().then(async () => {
 
   // Supabase Realtime 구독 시작
   startSupabaseRealtime();
+  // 절전에서 깨어나면 끊긴 실시간 연결을 재시도 간격(최대 5분)까지 기다리지 않고 바로 다시 붙인다(v1.149.1).
+  powerMonitor.on('resume', () => {
+    if (reconnectRealtimeIfDisconnected()) console.log('[Realtime] 절전 복귀 — 끊긴 연결 바로 다시 시도');
+  });
 
   // 저장된 위젯 자동 복원 (Phase 0-6)
   // .once: 렌더러 재로드(Ctrl+Shift+R, 크래시 복구) 시 사용자가 닫은 위젯 재등장 방지

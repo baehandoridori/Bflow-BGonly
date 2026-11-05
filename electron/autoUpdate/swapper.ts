@@ -27,6 +27,7 @@ import {
 } from './paths';
 import { copyDirMirror } from './copy';
 import { compareVersions } from './manifest';
+import { decideSuppression, parseSuppressionMarker } from './failurePolicy';
 
 /**
  * v1.22.2 swap 단계별 진단 로그 — `%LOCALAPPDATA%\Bflow-BGonly\swap.log`.
@@ -105,10 +106,16 @@ async function isSwapSuppressedForCurrentVersion(currentVersion: string): Promis
   const marker = localSwapSuppressedMarker();
   if (!existsSync(marker)) return false;
   try {
-    const recordedVersion = (await fsp.readFile(marker, 'utf-8')).trim();
-    if (recordedVersion === currentVersion) return true;
+    const parsed = parseSuppressionMarker(await fsp.readFile(marker, 'utf-8'));
+    const pendingVersion = parsed.ownVersion === currentVersion && parsed.failedTarget
+      ? await readPendingPackageVersion()
+      : null;
+    const decision = decideSuppression(parsed, currentVersion, pendingVersion);
+    if (decision === 'suppress') return true;
+    // 실패했던 것보다 더 새 버전이면 멈추지 않되 표시는 업데이트 확인 쪽이 지운다.
+    if (decision === 'retry-newer-target') return false;
     await fsp.unlink(marker);
-    logSwap(`  stale suppression marker 정리 (recorded=${recordedVersion}, current=${currentVersion})`);
+    logSwap(`  stale suppression marker 정리 (recorded=${parsed.ownVersion}, current=${currentVersion})`);
   } catch (err) {
     logSwap(`  suppression marker 확인 실패 — ${(err as Error).message}`);
   }

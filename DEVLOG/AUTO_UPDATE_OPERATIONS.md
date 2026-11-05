@@ -116,7 +116,7 @@ electron-builder 는 `package.json` `dependencies` 에 적힌 것을 앱의 `nod
 - 새로고침 중에는 기존 표시 내용을 고정해 모달 레이아웃이 흔들리지 않게 한다.
 - 최신 3개 업데이트 내역은 기본 표시하고, 이전 내역은 `이전 업데이트 내역 N개 보기`로 펼친다.
 - `DEVLOG/update-notes.json`의 과거 항목은 사용자에게 보이는 기록이므로 삭제하지 않는다.
-- (v1.44.2) 이전 적용 실패로 `자동 중단`(suppressed) 상태가 되면 모달 푸터의 주 버튼이 `다시 시도`로 바뀐다. 누르면 `update:retry` IPC가 `.swap-suppressed`/`.installer-attempted` 표식을 지우고 즉시 재확인해 자동 업데이트를 재개시킨다. `새로고침`만으로는 같은 버전에서 suppression이 풀리지 않으므로, 사용자가 앱 안에서 빠져나오는 경로는 `다시 시도`다.
+- (v1.44.2) 이전 적용 실패로 `자동 중단`(suppressed) 상태가 되면 모달 푸터의 주 버튼이 `다시 시도`로 바뀐다. 누르면 `update:retry` IPC가 `.swap-suppressed`/`.installer-attempted` 표식을 지우고 즉시 재확인해 자동 업데이트를 재개시킨다. 예전 형식 표시(한 줄)이거나 실패했던 그 새 버전이 그대로 최신이면 `새로고침`만으로는 suppression이 풀리지 않으므로, 사용자가 앱 안에서 빠져나오는 경로는 `다시 시도`다. (v1.149.1~) 표시 둘째 줄에 `target=<실패한 새 버전>`이 있고 배포 쪽이 그보다 더 새 버전을 내면, `새로고침`·5분 주기 확인이 실패했던 설치 파일과 `.installer-attempted`를 먼저 치운 뒤 한 번 더 자동으로 시도한다(못 치우면 멈춤 유지).
 
 ---
 
@@ -242,7 +242,7 @@ Get-Content -LiteralPath $log -Tail 40
 | `npm run build` 가 `휴가 연동 토큰을 찾지 못했습니다`·`읽을 수 없습니다`로 멈춤 | 메인 체크아웃 `.env.local` 의 `BFLOW_VACATION_TOKEN` 줄 | 파일·줄이 없으면 한솔에게 토큰을 받아 넣는다. `읽을 수 없습니다`면 값을 그대로 한 줄로 다시 적는다. 확인을 끄지 않는다 |
 | `BFLOW-Setup.exe` 가 갑자기 커짐(약 115MB → 190MB 이상), 또는 `npm run build` 가 `화면 폴더에 빌드 산출물이 섞여 있습니다`로 멈춤 | `dist\win-unpacked\resources\app\dist` 안에 `index.html`·`assets`·`splash` 말고 다른 것(`win-unpacked`, `*.exe`, `*.yml` 등)이 있는지. `package.json` `build.files` 의 `!dist/…` 세 줄과 순서 | 제외 규칙이 빠졌거나 순서가 바뀐 것이다 — 되돌리고 `npm run build` 를 처음부터 다시 돌린다. 확인을 끄지 않는다 |
 | 앱에서만 화면이 깨지고 미리보기(Chrome)에서는 멀쩡함 | `npm run preview:electron` 으로 같은 화면을 앱 엔진에서 열어 비교 | 앱은 Electron 33(Chromium 130)이라 최신 Chrome 과 기본 레이아웃이 다를 수 있다. v1.128.0 캐릭터 카드 그림이 이 경우였다(tasks/lessons.md 2026-10-06) |
-| 업데이트가 `자동 중단`(suppressed)으로 멈춤 | `%LOCALAPPDATA%\Bflow-BGonly\.swap-suppressed`(content=설치 버전) 존재 여부 | 적용 실패 후 영구 suppression. 모달 `다시 시도`(v1.44.2~) 또는 설치 파일 직접 실행으로 해제. 다른 버전 설치 시 own 버전이 바뀌면 자동 정리 |
+| 업데이트가 `자동 중단`(suppressed)으로 멈춤 | `%LOCALAPPDATA%\Bflow-BGonly\.swap-suppressed` 존재 여부와 내용 — 첫 줄 = 실패 당시 설치 버전, (v1.149.1~) 둘째 줄 `target=<실패한 새 버전>` | 같은 새 버전(이하)에서는 계속 멈춘다. 배포 쪽이 실패한 버전보다 더 새 버전을 내면 정리 후 한 번 더 자동 시도한다. 둘째 줄이 없는 예전 형식(v1.149.0 이하가 적은 것)은 같은 앱 버전 동안 계속 멈춘다 — 모달 `다시 시도`(v1.44.2~) 또는 설치 파일 직접 실행으로 해제. 다른 버전 설치 시 own 버전이 바뀌면 자동 정리 |
 
 ---
 

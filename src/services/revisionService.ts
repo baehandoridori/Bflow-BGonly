@@ -357,9 +357,26 @@ function rowToRevision(row: {
   };
 }
 
+/**
+ * 리테이크 전체 목록(약 1.6MB)을 같은 순간 두 번 읽지 않는다(v1.149.1).
+ * 로그인 직후 목록 불러오기(loadAllRevisions)와 '담당 리테이크' 확인(getCanonicalRevisions)이 같은 틱에
+ * 따로 읽던 것을 진행 중인 한 번으로 합친다. 진행 중인 읽기는 '아직 다 받지 못한 캐시'로 본다 —
+ * invalidateRevisionsCache() 가 캐시와 함께 버리므로, 바뀜 신호 뒤에 시작한 읽기는 그 전에 시작한
+ * 읽기에 끼지 않고 새로 읽는다. 끝난 결과는 여기 남기지 않는다(정본 확인은 늘 서버에서 새로 읽는다).
+ */
+let revisionRowsInFlight: Promise<unknown> | null = null;
+function readRevisionRowsShared(): Promise<unknown> {
+  if (revisionRowsInFlight) return revisionRowsInFlight;
+  const request: Promise<unknown> = window.electronAPI.supabaseReadRevisions();
+  revisionRowsInFlight = request;
+  const forget = () => { if (revisionRowsInFlight === request) revisionRowsInFlight = null; };
+  request.then(forget, forget);
+  return request;
+}
+
 /** Authoritative reads for notifications/navigation must distinguish an unavailable server from no rows. */
 export async function getCanonicalRevisions(): Promise<CompRevision[]> {
-  const rows = await window.electronAPI.supabaseReadRevisions();
+  const rows = await readRevisionRowsShared();
   if (!Array.isArray(rows)) throw new Error('리테이크 응답을 확인하지 못했어요.');
   return (rows as Parameters<typeof rowToRevision>[0][]).map(rowToRevision);
 }
@@ -394,8 +411,8 @@ export async function loadAllRevisions(): Promise<RevisionsStore> {
   }[] = [];
 
   try {
-    // Supabase 우선
-    const rawData = await window.electronAPI.supabaseReadRevisions();
+    // Supabase 우선 (같은 순간의 정본 확인과 한 번의 읽기를 나눠 쓴다)
+    const rawData = await readRevisionRowsShared();
     rows = (rawData as typeof rows) ?? [];
   } catch {
     // Sheets fallback
@@ -419,9 +436,10 @@ export async function loadAllRevisions(): Promise<RevisionsStore> {
   return sheetsCache;
 }
 
-/** 시트 캐시 무효화 */
+/** 시트 캐시 무효화 — 진행 중인 읽기도 버려 다음 읽기는 서버에서 새로 시작한다. */
 export function invalidateRevisionsCache(): void {
   sheetsCache = null;
+  revisionRowsInFlight = null;
 }
 
 // ─── 통합 API ───────────────────────────────────

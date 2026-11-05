@@ -196,6 +196,43 @@ test('preview returns the same missing/affected receipt and never awards or noti
   assert.deepEqual(effects, ['invalidate', 'award']);
 });
 
+test('로그인 직후 목록 불러오기와 담당 리테이크 확인은 리테이크 전체 목록을 한 번만 읽는다', async () => {
+  const h = await workflowHarness();
+  try {
+    // useRetakeNotifications 가 같은 틱에 부르는 두 읽기.
+    const load = h.store.getState().loadRevisions();
+    const canonical = h.service.getCanonicalRevisions();
+    const [, outstanding] = await Promise.all([load, canonical]);
+    assert.equal(h.listReads(), 1, '진행 중인 읽기 하나를 같이 쓴다');
+    assert.equal(outstanding.length, 1);
+    assert.equal(h.store.getState().revisions.length, 1);
+
+    // 끝난 결과는 다시 쓰지 않는다 — 정본 확인은 늘 서버에서 새로 읽는다.
+    await h.service.getCanonicalRevisions();
+    assert.equal(h.listReads(), 2);
+
+    // 바뀜 신호(캐시 무효화) 뒤에 시작한 읽기는 그 전에 시작한 읽기에 끼지 않는다.
+    const before = h.service.getCanonicalRevisions();
+    h.service.invalidateRevisionsCache();
+    h.deleteCanonical();
+    const after = h.service.getCanonicalRevisions();
+    const [beforeRows, afterRows] = await Promise.all([before, after]);
+    assert.equal(h.listReads(), 4);
+    assert.equal(beforeRows.length, 1);
+    assert.deepEqual(afterRows, [], '무효화 뒤의 읽기는 새 서버 상태를 본다');
+
+    // 실패도 같이 받고, 실패한 읽기는 다음 읽기를 막지 않는다.
+    let failNext = true;
+    const original = h.api.supabaseReadRevisions;
+    h.api.supabaseReadRevisions = async () => { if (failNext) { failNext = false; throw new Error('offline'); } return original(); };
+    const failedA = h.service.getCanonicalRevisions();
+    const failedB = h.service.getCanonicalRevisions();
+    await assert.rejects(failedA, /offline/);
+    await assert.rejects(failedB, /offline/);
+    assert.deepEqual(await h.service.getCanonicalRevisions(), []);
+  } finally { h.cleanup(); }
+});
+
 test('the generic renderer update wrapper also refuses a missing-row success', async () => {
   const source = readFileSync('src/services/supabaseService.ts', 'utf8');
   const ast = ts.createSourceFile('service.ts', source, ts.ScriptTarget.Latest, true);

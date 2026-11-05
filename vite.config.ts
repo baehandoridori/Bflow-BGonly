@@ -43,6 +43,10 @@ export default defineConfig(({ mode }) => ({
             {
               entry: 'electron/main.ts',
               vite: {
+                // 메인 묶음은 위 define 을 물려받지 않는다(configFile: false) — 서버 요청 머리글의 앱 버전용.
+                define: {
+                  __APP_VERSION__: JSON.stringify(pkg.version),
+                },
                 build: {
                   outDir: 'dist-electron',
                   rollupOptions: {
