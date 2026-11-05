@@ -1081,6 +1081,15 @@ export interface ElectronAPI extends CalendarApiInputContract {
   threadTodoSetDone: (id: string, done: boolean) => Promise<import('../shared/threadTodo').ThreadTodoRow>;
   threadTodoDelete: (id: string) => Promise<{ ok: boolean; deleted: boolean }>;
   onThreadTodosChanged: (callback: () => void) => () => void;
+  // 씬 댓글 서버 알림(씬 댓글 B안 PR 6) — 줄 모양은 src/shared/commentNotification.ts 한 벌. available=false 면 서버 준비 전.
+  commentNotificationsList: (
+    cursor: import('../shared/commentNotification').CommentNotificationCursor | null,
+    limit?: number,
+  ) => Promise<import('../shared/commentNotification').CommentNotificationListResult>;
+  commentNotificationsMarkRead: (
+    target: import('../shared/commentNotification').CommentNotificationReadTarget,
+  ) => Promise<import('../shared/commentNotification').CommentNotificationReadResult>;
+  onCommentNotificationsChanged: (callback: () => void) => () => void;
   getDataPath: () => Promise<string>;
   shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   shellOpenPath?: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
