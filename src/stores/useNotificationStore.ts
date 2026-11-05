@@ -96,7 +96,8 @@ export interface AppNotification {
 
 const MAX_NOTIFICATIONS = 50;
 
-type NotificationDraft = Omit<AppNotification, 'id' | 'createdAt' | 'isRead'> & { createdAt?: string };
+/** isRead: 다른 PC 에서 이미 읽은 서버 알림을 읽은 채로 넣을 때만(씬 댓글 B안 PR 6). 기본은 안 읽음. */
+type NotificationDraft = Omit<AppNotification, 'id' | 'createdAt' | 'isRead'> & { createdAt?: string; isRead?: boolean };
 
 /** notifications 배열에서 unreadCount 파생 */
 function countUnread(notifications: AppNotification[]): number {
@@ -242,7 +243,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const notification: AppNotification = {
       ...n,
       id: generateId(),
-      isRead: false,
+      isRead: n.isRead === true,
       createdAt: n.createdAt ?? new Date().toISOString(),
     };
     const next = prependNotificationDeduped(get().notifications, notification, MAX_NOTIFICATIONS);

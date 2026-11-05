@@ -105,6 +105,37 @@ export function ensureAssignmentLastSeenInitialized(userId: string): void {
   }
 }
 
+// ─── v1.149.0(씬 댓글 B안 PR 6): 서버 알림 받기함 커서 ──────────
+//   '내 줄'을 어디까지 읽었는지((서버 시각, 줄 id))와 커서 근처에서 이미 본 줄. 예전 기준 시각(위)과 따로 둔다 —
+//   서버에 줄이 없어지면(되돌리기) 예전 길이 자기 기준 시각으로 계속 돈다.
+
+const COMMENT_NOTIFICATION_INBOX_PREFIX = 'bflow_comment_notification_inbox_';
+
+export interface CommentNotificationInboxSaved {
+  cursor: { at: string; id: string | null } | null;
+  seen: string[];
+}
+
+export function getCommentNotificationInboxState(userId: string): CommentNotificationInboxSaved | null {
+  try {
+    const raw = localStorage.getItem(COMMENT_NOTIFICATION_INBOX_PREFIX + userId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { cursor?: { at?: unknown; id?: unknown } | null; seen?: unknown };
+    const at = typeof parsed?.cursor?.at === 'string' && Number.isFinite(Date.parse(parsed.cursor.at)) ? parsed.cursor.at : null;
+    const id = typeof parsed?.cursor?.id === 'string' ? parsed.cursor.id : null;
+    const seen = Array.isArray(parsed?.seen) ? parsed.seen.filter((key): key is string => typeof key === 'string').slice(-300) : [];
+    return { cursor: at ? { at, id } : null, seen };
+  } catch {
+    return null;
+  }
+}
+
+export function setCommentNotificationInboxState(userId: string, state: CommentNotificationInboxSaved): void {
+  try {
+    localStorage.setItem(COMMENT_NOTIFICATION_INBOX_PREFIX + userId, JSON.stringify({ cursor: state.cursor, seen: state.seen.slice(-300) }));
+  } catch { /* 개인정보보호 모드 등 — 이 세션은 메모리로 계속 */ }
+}
+
 // ─── v1.29.0: 댓글 이모지 반응 catch-up 전용 별도 키 ───────
 //   다른 알림 도메인과 격리. 새 알림이라 첫 도입 시 lastSeen=now() 로 초기화 →
 //   업데이트 이전의 누적 데이터는 표시하지 않음 (의도).

@@ -56,7 +56,17 @@ import { createAutoSyncScheduler, MAIN_WINDOW_SYNC_INTERVALS, type AutoSyncSched
 import { applyAssigneeProgressMetadata } from '@/utils/assigneeProgress';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { applyCommentBroadcast, applyRealtimeCommentPayload, invalidatePartCache } from '@/services/commentService';
-import { claimSceneCommentDecision, decideIncomingSceneComment, markSceneCommentCatchUpReady, notifyIncomingSceneComment, resetSceneCommentNotifier } from '@/services/sceneCommentNotifier';
+import {
+  claimSceneCommentDecision,
+  decideIncomingSceneComment,
+  initialServerCommentNotificationCursor,
+  markSceneCommentCatchUpReady,
+  notifyIncomingSceneComment,
+  pullLiveServerCommentNotifications,
+  pullServerCommentNotifications,
+  resetSceneCommentNotifier,
+  serverCommentNotificationsAvailable,
+} from '@/services/sceneCommentNotifier';
 import { useCommentThreadFollowStore } from '@/stores/useCommentThreadFollowStore';
 import {
   normalizeSceneCommentFromAddedBroadcast,
@@ -296,6 +306,32 @@ async function runMentionCatchUp(
 ): Promise<MentionCatchUpResult> {
   const { getLastSeenAt, setLastSeenAt, ensureLastSeenInitialized } = await import('@/utils/lastSeenTracker');
   const lastSeen = getLastSeenAt(me.id);
+  // v1.149.0(씬 댓글 B안 PR 6): 서버가 저장 순간에 만든 '내 줄'을 커서 뒤로 읽는다 — 최근 댓글 최대 2,000줄 훑기 대신.
+  //   그 PC 가 씬을 열어 보지 않아 빠졌던 자동 알림·캐릭터 멘션·수정으로 넣은 @ 도 여기서 온다. 다른 PC 에서 읽은 것은 읽은 채로.
+  //   서버에 줄이 없거나(DB 적용 전) 읽지 못하면(세션 없음 등) 아래 예전 길로 간다.
+  if (serverCommentNotificationsAvailable() !== false) {
+    const serverStartedAt = Date.now();
+    const server = await pullServerCommentNotifications(
+      me,
+      getSettings,
+      'catchup',
+      initialServerCommentNotificationCursor(me.id, MENTION_CATCHUP_OVERLAP_MS, serverStartedAt),
+    );
+    if (server.stale) return 'stale';
+    if (server.status === 'done') {
+      if (!lastSeen) ensureLastSeenInitialized(me.id);
+      // 예전 길의 기준 시각도 옮겨 둔다 — 서버 줄을 되돌리면(DB 되돌리기) 같은 구간을 다시 훑지 않게.
+      setLastSeenAt(me.id, new Date(serverStartedAt - MENTION_CATCHUP_OVERLAP_MS).toISOString());
+      markSceneCommentCatchUpReady(me.id);
+      if (server.presented > 0 && lastSeen) {
+        sonnerToast(`놓친 알림 ${server.presented}개를 가져왔어요`, {
+          description: '종 모양을 클릭해 확인해주세요.',
+          duration: 6000,
+        });
+      }
+      return 'done';
+    }
+  }
   if (!lastSeen) {
     // 첫 로그인 — 이전 알림 catch-up 안 함, 시각만 기록
     ensureLastSeenInitialized(me.id);
@@ -2924,6 +2960,30 @@ export default function App() {
       const me = useAuthStore.getState().currentUser;
       if (me) void catchUpMissedMentions({ id: me.id, name: me.name }, getNotiSettings, 'reconnect');
     });
+  }, [getNotiSettings]);
+
+  // v1.149.0(씬 댓글 B안 PR 6): 서버가 알림 줄을 만들면 내용 없는 신호가 온다 — 0.3초 묶어 내 줄을 다시 읽는다.
+  //   실시간 판정이 이미 띄운 댓글은 같은 중복 키라 다시 뜨지 않고, 이 PC 캐시에 없어 놓친 것만 새로 뜬다.
+  //   끊겼다 붙은 직후처럼 한꺼번에 여러 줄이면 조용히 넣고 요약 한 번.
+  useEffect(() => {
+    const subscribe = window.electronAPI?.onCommentNotificationsChanged;
+    if (!subscribe) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const off = subscribe(() => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        void pullLiveServerCommentNotifications(getNotiSettings, MENTION_CATCHUP_OVERLAP_MS).then((quietCount) => {
+          if (quietCount > 0) {
+            sonnerToast(`새 알림 ${quietCount}개가 왔어요`, { description: '종 모양을 클릭해 확인해주세요.', duration: 6000 });
+          }
+        }).catch((err) => console.warn('[comment-notifications] 서버 알림 읽기 실패:', err));
+      }, 300);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      off?.();
+    };
   }, [getNotiSettings]);
 
   // 자동 로그인: 스플래시 종료 후 시간대별 인사 표시
