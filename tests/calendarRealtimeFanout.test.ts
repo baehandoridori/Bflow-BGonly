@@ -344,18 +344,25 @@ function realtimePluginWithRealRetry(): Plugin {
 async function realRetryRealtimeHarness() {
   const statusCallbacks: Array<(status: string) => void> = [];
   const subscribed: boolean[] = [];
+  // 실제 SDK 처럼 removeChannel 은 그 채널의 구독 콜백을 CLOSED 로 바로 부른다(@supabase/realtime-js unsubscribe →
+  //   leavePush 'ok' 동기 → onClose). 예전 가짜는 아무것도 안 해서, 갈아 끼울 때의 CLOSED 가 재시도를 또 거는 것을 숨겼다.
+  type FakeChannel = { callback: ((status: string) => void) | null };
   (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY] = {
     supabase: {
-      channel: () => ({
-        on() { return this; },
-        subscribe(callback?: (status: string) => void) {
-          if (callback) statusCallbacks.push(callback);
-          return this;
-        },
-        presenceState: () => ({}),
-        track: async () => 'ok',
-      }),
-      removeChannel: () => {},
+      channel: () => {
+        const fake = {
+          callback: null as ((status: string) => void) | null,
+          on() { return this; },
+          subscribe(callback?: (status: string) => void) {
+            if (callback) { fake.callback = callback; statusCallbacks.push(callback); }
+            return this;
+          },
+          presenceState: () => ({}),
+          track: async () => 'ok',
+        };
+        return fake;
+      },
+      removeChannel: (removed: FakeChannel) => { removed.callback?.('CLOSED'); },
     },
   };
   const module = await bundleModule("export * from './electron/realtime.ts';", realtimePluginWithRealRetry());

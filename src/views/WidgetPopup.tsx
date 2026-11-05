@@ -777,6 +777,8 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           window.dispatchEvent(new Event('bflow:revisions-invalidated'));
           return;
         }
+        // v1.149.1: 리테이크 세트는 실시간 comp_revision_sets 이벤트가 세트 목록만 다시 읽는다 — 씬·사용자 전부 다시 받기를 부르지 않는다(본 창과 같게).
+        if (table === 'comp_revision_sets') return;
         if (table === 'users') {
           void reconcilePopupUserDirectory()
             .then((result) => { if (result !== 'deleted') requestReload(); })

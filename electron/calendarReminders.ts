@@ -13,9 +13,12 @@ const sameOrigin = (a: ReminderOrigin, b: ReminderOrigin): boolean => a.userId =
 
 // 알림 시각 확인은 30초마다 하지만, 일정 목록은 바뀌었다는 신호가 올 때나 30분이 지났을 때만 다시 읽는다.
 // 예전에는 30초마다 일정 전체와 캘린더 목록을 다시 받아 켜진 PC 마다 하루 약 8,600건이 나갔다 (2026-10-20 서버 신호 줄이기).
-// 바뀜 신호(실시간 캘린더 행·간트 연결·재연결)가 이미 목록을 버리므로 시간 기준은 놓친 신호용 안전망이다(v1.149.1, 5분 → 30분).
-// 30분보다 늘리지 않는다 — 앱을 다시 켰을 때 지난 알림을 따라잡는 구간(REMINDER_CATCHUP_MS)이 30분이다.
-export const REMINDER_EVENTS_MAX_AGE_MS = 30 * 60_000;
+// 바뀜 신호(실시간 캘린더 행·간트 연결·재연결)가 이미 목록을 버리므로 시간 기준은 놓친 신호용 안전망이다(v1.149.1, 5분 → 29분).
+// 유효 시간 + 30초 확인 간격 + 읽는 시간이 지난 알림을 따라잡는 구간(REMINDER_CATCHUP_MS, 30분)보다 짧아야 한다 —
+//   같거나 길면 신호를 놓친 동안 만든 일정의 알림이 따라잡기 구간을 벗어나 아예 뜨지 않는다(리뷰 지적). 그래서 29분.
+export const REMINDER_EVENTS_MAX_AGE_MS = 29 * 60_000;
+// 실시간이 끊겨 바뀜 신호를 받지 못할 때는 예전처럼 5분마다 다시 읽는다.
+export const REMINDER_EVENTS_MAX_AGE_OFFLINE_MS = 5 * 60_000;
 
 export interface CalendarReminderHandle {
   /** 일정·캘린더·간트 연결이 바뀌었을 수 있다 — 다음 확인 때 일정 목록을 다시 읽는다. */
@@ -23,7 +26,9 @@ export interface CalendarReminderHandle {
 }
 
 export function registerCalendarReminders(getOrigin: () => ReminderOrigin, onClick: () => void,
-  timers: ReminderTimers = { setInterval, clearInterval }): CalendarReminderHandle {
+  timers: ReminderTimers = { setInterval, clearInterval },
+  /** 실시간이 붙어 있어 바뀜 신호를 받는가(main 의 Realtime 상태). 아니면 짧은 유효 시간을 쓴다. */
+  isRealtimeLive: () => boolean = () => true): CalendarReminderHandle {
   let busy = false;
   let stopped = false;
   let preferences: { origin: ReminderOrigin; muted: string[] } | null = null;
@@ -38,8 +43,11 @@ export function registerCalendarReminders(getOrigin: () => ReminderOrigin, onCli
   };
   const readVisibleEvents = async (origin: ReminderOrigin): Promise<CalendarEvent[] | null> => {
     const cached = eventsCache;
+    let live = true;
+    try { live = isRealtimeLive(); } catch { live = false; }
+    const maxAge = live ? REMINDER_EVENTS_MAX_AGE_MS : REMINDER_EVENTS_MAX_AGE_OFFLINE_MS;
     if (cached && sameOrigin(cached.origin, origin) && cached.generation === eventsGeneration
-      && Date.now() - cached.at < REMINDER_EVENTS_MAX_AGE_MS) return cached.events;
+      && Date.now() - cached.at < maxAge) return cached.events;
     const generation = eventsGeneration;
     const [rows, authority] = await Promise.all([store.listRecurrenceEvents(origin.userId), store.listCalendarsWithMembers(origin.userId)]);
     if (!isCurrent(origin)) return null;

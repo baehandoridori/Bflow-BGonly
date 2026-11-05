@@ -176,6 +176,11 @@ test('리테이크 변경 방송은 씬·메타데이터 전체 받기를 부르
   assert.match(app, /useRevisionSetStore\.getState\(\)\.reload\(\);[\s\S]{0,200}window\.addEventListener\('bflow:revision-sets-invalidated', handler\)/);
   const fetchAll = app.slice(app.indexOf('const fetchAllData = useCallback('), app.indexOf('const fetchAllDataRef = useRef('));
   assert.doesNotMatch(fetchAll, /loadRevisions|getAllRevisions|supabaseReadRevisions/, '전체 받기가 리테이크를 다시 읽게 됐다면 이 판단을 다시 본다');
+  // 위젯 새 창도 같다 — 리테이크 세트 방송은 씬·사용자 전부 다시 받기를 부르지 않고, 세트는 실시간 이벤트가 다시 읽는다.
+  const popup = read('src/views/WidgetPopup.tsx');
+  const popupBlock = popup.slice(popup.indexOf("if (data.event === 'data-change') {"), popup.indexOf('requestReload();\n      }\n    });'));
+  assert.match(popupBlock, /if \(table === 'comp_revision_sets'\) return;/);
+  assert.match(popup, /if \(table === 'comp_revision_sets'\) \{\s*window\.dispatchEvent\(new Event\('bflow:revision-sets-invalidated'\)\);/);
 });
 
 test('서버 요청 머리글에 앱 버전을 싣는다 — 서버 기록에서 버전별로 가를 수 있게', async () => {

@@ -2632,10 +2632,18 @@ setCalendarChangedLocalListener((payload) => {
     widgetWindows.values(),
     payload,
   );
+  // 이 PC 에서 고친 일정은 실시간이 끊겨 있어도 알림용 목록에 바로 반영한다(v1.149.1 리뷰).
+  calendarReminders.invalidate();
 });
 
-// 알림용 일정 목록은 바뀜 신호(실시간 캘린더·간트 변경, 재연결)가 올 때나 30분마다만 다시 읽는다.
-const calendarReminders = registerCalendarReminders(getSessionOriginOrThrow, () => { mainWindow?.show(); mainWindow?.focus(); });
+// 알림용 일정 목록은 바뀜 신호(실시간 캘린더·간트 변경, 재연결, 이 PC 의 일정 저장)가 올 때나 29분마다만 다시 읽는다.
+// 실시간이 끊겨 신호를 못 받는 동안은 5분마다(놓친 신호 때문에 알림이 따라잡기 구간을 벗어나지 않게).
+const calendarReminders = registerCalendarReminders(
+  getSessionOriginOrThrow,
+  () => { mainWindow?.show(); mainWindow?.focus(); },
+  undefined,
+  () => currentRealtimeStatus === 'SUBSCRIBED',
+);
 calendarNotificationDrain = registerCalendarIpc({
   getSessionUserIdOrThrow,
   getSessionOriginOrThrow,
@@ -3390,7 +3398,7 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onCalendarChange: (table, payload) => broadcastSupabaseCalendarEvent(table, payload),
-    // 알림용 일정 목록은 캘린더·간트가 바뀌었거나 재연결됐을 때만 다시 읽는다(나머지는 30분마다).
+    // 알림용 일정 목록은 캘린더·간트가 바뀌었거나 재연결됐을 때만 다시 읽는다(나머지는 29분, 끊긴 동안 5분마다).
     onCalendarDataMaybeChanged: () => calendarReminders.invalidate(),
     onGanttChange: () => {
       broadcastToAllWindows('gantt:changed', {});

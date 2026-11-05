@@ -85,7 +85,10 @@ function scheduleGaveUpRetry(): void {
   console.log(`[Realtime] 재시도 한도 초과 — ${REALTIME_GAVE_UP_RETRY_MS / 60_000}분 뒤 다시 연결 시도`);
   gaveUpRetryTimer = setTimeout(() => {
     gaveUpRetryTimer = null;
-    if (savedCallbacks) reconnect(savedCallbacks, true);
+    if (!savedCallbacks) return;
+    reconnect(savedCallbacks, true);
+    // 새 채널이 끊김을 알려 오지 않은 채 멈춰도 5분 뒤 또 시도한다(붙으면 SUBSCRIBED 가 이 예약을 지운다).
+    scheduleGaveUpRetry();
   }, REALTIME_GAVE_UP_RETRY_MS);
 }
 
@@ -254,10 +257,13 @@ export function reconnectRealtimeIfDisconnected(): boolean {
 }
 
 function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
-  // 기존 채널 정리
+  // 기존 채널 정리 — 먼저 떼어 둔다. SDK 의 removeChannel 은 그 채널의 구독 콜백을 CLOSED 로 바로 부르는데,
+  //   그때 아직 '지금 채널'이면 끊김으로 보고 평소 재시도를 또 걸어, 방금 만든 새 채널이 몇 초 뒤 다시 갈아 끼워졌다
+  //   (v1.149.1 리뷰). 떼어 둔 뒤라 그 CLOSED 는 아래 '교체된 채널' 확인에 걸려 무시된다.
   if (channel) {
-    supabase.removeChannel(channel);
+    const previous = channel;
     channel = null;
+    supabase.removeChannel(previous);
   }
 
   const newChannel = createChannel(callbacks);

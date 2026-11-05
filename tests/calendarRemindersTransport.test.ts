@@ -6,7 +6,7 @@ const require=createRequire(import.meta.url),now=Date.parse('2026-09-20T00:45:00
 const bundle=build({entryPoints:['electron/calendarReminders.ts'],bundle:true,platform:'node',format:'cjs',write:false,external:['electron','node:fs','node:path','./calendarStore']});
 const row=(id:string,calendar='team')=>({id,calendar_id:calendar,title:id,memo:'',all_day:false,start_date:'2026-09-20',end_date:'2026-09-20',start_time:'10:00',end_time:'11:00',created_by:'owner',created_at:'2026-09-01',reminder_minutes:15});
 async function harness(rows:any[]){
- let origin:{userId:string;epoch:number}|null={userId:'viewer',epoch:1},handler:any,gate:Promise<void>|undefined,currentNow=now,readCount=0,unrefs=0;
+ let origin:{userId:string;epoch:number}|null={userId:'viewer',epoch:1},handler:any,gate:Promise<void>|undefined,currentNow=now,readCount=0,unrefs=0,live=true;
  const shown:any[]=[],files=new Map<string,string>(),timers=new Map<any,()=>Promise<unknown>>(),quitCallbacks:Array<()=>void>=[];
  const calendars=[{id:'team',owner_id:'owner',visibility:'team',is_personal:false},{id:'private',owner_id:'owner',visibility:'private',is_personal:true}];
  const module={exports:{} as any};
@@ -21,8 +21,8 @@ async function harness(rows:any[]){
  const timerApi={setInterval:(callback:()=>Promise<unknown>,ms:number)=>{assert.equal(ms,30000);const timer={unref:()=>{unrefs++;}};timers.set(timer,callback);return timer;},clearInterval:(timer:any)=>timers.delete(timer)};
  const quit=()=>{quitCallbacks.splice(0).forEach(fn=>fn());};
  let handle:{invalidate():void};
- const register=()=>{handle=module.exports.registerCalendarReminders(()=>{if(!origin)throw new Error('로그인 필요');return origin;},()=>{},timerApi);};register();
- return {shown,files,poll:(muted:string[]=[])=>handler({},muted),restart:()=>{quit();register();},defer:(value:Promise<void>)=>{gate=value;},switchSession:(userId='other',epoch=2)=>{origin={userId,epoch};},logout:()=>{origin=null;},time:(value:number)=>{currentNow=value;},tick:async()=>{currentNow+=30000;await Promise.all([...timers.values()].map(fn=>fn()));},reads:()=>readCount,unrefs:()=>unrefs,timers:()=>timers.size,quit,invalidate:()=>handle.invalidate(),maxAge:module.exports.REMINDER_EVENTS_MAX_AGE_MS as number};
+ const register=()=>{handle=module.exports.registerCalendarReminders(()=>{if(!origin)throw new Error('로그인 필요');return origin;},()=>{},timerApi,()=>live);};register();
+ return {shown,files,poll:(muted:string[]=[])=>handler({},muted),restart:()=>{quit();register();},defer:(value:Promise<void>)=>{gate=value;},switchSession:(userId='other',epoch=2)=>{origin={userId,epoch};},logout:()=>{origin=null;},time:(value:number)=>{currentNow=value;},tick:async()=>{currentNow+=30000;await Promise.all([...timers.values()].map(fn=>fn()));},reads:()=>readCount,unrefs:()=>unrefs,timers:()=>timers.size,quit,invalidate:()=>handle.invalidate(),setLive:(value:boolean)=>{live=value;},maxAge:module.exports.REMINDER_EVENTS_MAX_AGE_MS as number,maxAgeOffline:module.exports.REMINDER_EVENTS_MAX_AGE_OFFLINE_MS as number};
 }
 test('main reminder transport excludes private overview and muted calendars and persists dedupe before delivery',async()=>{
  const h=await harness([row('shared'),row('private-event','private')]);
@@ -68,21 +68,28 @@ test('main timer survives a failed read and stops pending delivery when the app 
  assert.equal(quitting.shown.length,0);assert.equal(quitting.files.size,0);assert.equal(quitting.timers(),0);
 });
 
-test('30초 확인은 받아 둔 일정으로 하고, 바뀜 신호나 30분이 지나야 다시 읽는다',async()=>{
+test('30초 확인은 받아 둔 일정으로 하고, 바뀜 신호나 29분이 지나야 다시 읽는다',async()=>{
  const h=await harness([row('cached')]);h.time(now-10*60000);await h.poll();assert.equal(h.reads(),1);
- for(let i=0;i<59;i++)await h.tick();
- assert.equal(h.reads(),1,'29분 30초 동안은 받아 둔 목록을 쓴다');
- await h.tick();assert.equal(h.reads(),2,'30분이 지나면 다시 읽는다');
+ for(let i=0;i<57;i++)await h.tick();
+ assert.equal(h.reads(),1,'28분 30초 동안은 받아 둔 목록을 쓴다');
+ await h.tick();assert.equal(h.reads(),2,'29분이 지나면 다시 읽는다');
  h.invalidate();await h.tick();assert.equal(h.reads(),3,'일정이 바뀌었다는 신호 뒤 첫 확인에서 다시 읽는다');
  await h.tick();assert.equal(h.reads(),3);
  h.switchSession('viewer',2);await h.poll();assert.equal(h.reads(),4,'다른 로그인은 받아 둔 목록을 같이 쓰지 않는다');
 });
-test('받아 둔 일정의 유효 시간은 다시 켤 때 따라잡는 구간(30분)을 넘지 않는다',async()=>{
+test('실시간이 끊겨 바뀜 신호를 못 받는 동안은 5분마다 다시 읽는다',async()=>{
+ const h=await harness([row('offline')]);h.time(now-10*60000);h.setLive(false);await h.poll();assert.equal(h.reads(),1);
+ for(let i=0;i<9;i++)await h.tick();
+ assert.equal(h.reads(),1,'4분 30초 동안은 받아 둔 목록');
+ await h.tick();assert.equal(h.reads(),2,'끊긴 동안은 5분이 지나면 다시 읽는다');
+ assert.equal(h.maxAgeOffline,5*60000);
+});
+test('받아 둔 일정의 유효 시간 + 30초 확인 간격은 다시 켤 때 따라잡는 구간(30분)보다 짧다',async()=>{
  const shared=await build({entryPoints:['src/shared/calendarReminders.ts'],bundle:true,platform:'node',format:'esm',write:false});
  const {REMINDER_CATCHUP_MS}=await import('data:text/javascript;base64,'+Buffer.from(shared.outputFiles[0].text).toString('base64'));
  const h=await harness([row('limit')]);
- assert.equal(h.maxAge,30*60000);
- assert.ok(h.maxAge<=REMINDER_CATCHUP_MS,'유효 시간을 따라잡는 구간보다 길게 잡지 않는다');
+ assert.equal(h.maxAge,29*60000);
+ assert.ok(h.maxAge+30000<REMINDER_CATCHUP_MS,'유효 시간 + 확인 간격이 따라잡는 구간보다 짧다(같으면 신호를 놓친 동안 만든 일정의 알림이 버려진다)');
 });
 test('읽는 중에 바뀜 신호가 오면 그 결과를 다음 확인에 다시 쓰지 않는다',async()=>{
  const h=await harness([row('racing')]);h.time(now-10*60000);let release!:()=>void;h.defer(new Promise<void>(resolve=>release=resolve));
