@@ -2646,6 +2646,9 @@ export default function App() {
         // v1.145.0: 댓글은 실시간 comments 이벤트·댓글 방송으로 그 댓글만 고친다. 예전 버전이 수정·삭제 때 보내는
         //   'comments' 변경 신호로 씬·메타데이터 전체를 다시 받지 않는다(그 변경은 실시간 이벤트가 같이 온다).
         if (changedTable === 'comments') return;
+        // v1.149.1: 리테이크·리테이크 세트는 실시간 comp_revisions·comp_revision_sets 이벤트가 리테이크 목록만 다시 읽는다.
+        //   씬·메타데이터 전체 받기는 리테이크를 다시 읽지도 않으므로 여기서 부르지 않는다.
+        if (changedTable === 'comp_revisions' || changedTable === 'comp_revision_sets') return;
         if (changedTable && (changedTable.startsWith('calendar') || changedTable === 'private_calendar_events')) {
           return;
         }

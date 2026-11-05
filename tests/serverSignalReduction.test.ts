@@ -162,6 +162,22 @@ async function clientInfoHeader(define?: Record<string, string>): Promise<unknow
   }
 }
 
+test('리테이크 변경 방송은 씬·메타데이터 전체 받기를 부르지 않고, 리테이크는 자기 실시간 길로 다시 읽는다', () => {
+  const app = read('src/App.tsx');
+  const start = app.indexOf("if (data.event === 'data-change') {");
+  assert.ok(start >= 0);
+  const block = app.slice(start, app.indexOf("console.log('[Broadcast] 구조 변경 감지 → reload');", start));
+  assert.match(block, /if \(changedTable === 'comp_revisions' \|\| changedTable === 'comp_revision_sets'\) return;/,
+    '리테이크 방송마다 씬 전체를 다시 받던 길로 되돌아갔습니다');
+  // 리테이크 목록·세트는 실시간 이벤트가 각자 다시 읽는다(전체 받기는 리테이크를 읽지 않는다).
+  assert.match(app, /if \(table === 'comp_revisions'\) \{\s*invalidateRevisionsCache\(\);\s*window\.dispatchEvent\(new Event\('bflow:revisions-invalidated'\)\);/);
+  assert.match(app, /if \(table === 'comp_revision_sets'\) \{\s*window\.dispatchEvent\(new Event\('bflow:revision-sets-invalidated'\)\);\s*return;/);
+  assert.match(app, /useRevisionStore\.getState\(\)\.loadRevisions\(\);[\s\S]{0,200}window\.addEventListener\('bflow:revisions-invalidated', handler\)/);
+  assert.match(app, /useRevisionSetStore\.getState\(\)\.reload\(\);[\s\S]{0,200}window\.addEventListener\('bflow:revision-sets-invalidated', handler\)/);
+  const fetchAll = app.slice(app.indexOf('const fetchAllData = useCallback('), app.indexOf('const fetchAllDataRef = useRef('));
+  assert.doesNotMatch(fetchAll, /loadRevisions|getAllRevisions|supabaseReadRevisions/, '전체 받기가 리테이크를 다시 읽게 됐다면 이 판단을 다시 본다');
+});
+
 test('서버 요청 머리글에 앱 버전을 싣는다 — 서버 기록에서 버전별로 가를 수 있게', async () => {
   assert.equal(await clientInfoHeader({ __APP_VERSION__: JSON.stringify('9.8.7') }), 'bflow-electron/9.8.7');
   assert.equal(await clientInfoHeader(), 'bflow-electron/unknown', '빌드 값이 없는 테스트 묶음에서도 깨지지 않는다');
