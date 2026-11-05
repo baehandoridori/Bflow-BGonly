@@ -106,6 +106,24 @@ export async function uploadImage(
   }
 }
 
+/**
+ * 리테이크 첨부 그림 업로드 — 등록 창이 넘긴 data URL 을 저장소에 올리고 공개 주소를 돌려준다.
+ * 예전에는 data URL 을 comp_revisions.image_url 에 그대로 담아, 리테이크 목록을 받을 때마다 그림까지 통째로 받았다
+ * (2026-11-05 기준 31장·1.5MB — 그 줄들은 같은 날 revisions/{id}/legacy_*.jpg 로 옮김).
+ * 경로: revisions/{revisionId}/{uniq}.{ext}. 실패하면 throw — 호출자가 그림을 줄에 담을지 정한다.
+ */
+export async function uploadRevisionImage(revisionId: string, dataUrl: string): Promise<string> {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(revisionId)) throw new Error('리테이크 ID가 올바르지 않아요.');
+  const processed = toBuffer(dataUrl);
+  const uniq = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const path = `revisions/${revisionId}/${uniq}.${processed.ext}`;
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, processed.buffer, { contentType: processed.mime, upsert: false });
+  if (error) throw error;
+  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
 export async function deleteImage(url: string): Promise<void> {
   const path = extractPathFromPublicUrl(url);
   if (!path) return; // 비-Supabase URL은 무시 (legacy drive URL 등)
