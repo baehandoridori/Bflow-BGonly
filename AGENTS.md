@@ -77,6 +77,17 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - preview: `src/mocks/threadTodoPreviewStore.ts`가 같은 규칙·문구로 localStorage에 저장하고 Web Locks로 쓰기를 직렬화하며, BroadcastChannel로 다른 창에 재조회 신호만 보낸다. 저장소 읽기·쓰기가 실패하면 그 창 메모리로 전환한다. preview의 `widgetOpenPopup`은 Electron과 같은 `#widget-popup/{widgetId}` 경로를 브라우저 새 창으로 연다.
 - 새 DB에는 `DEVLOG/migrations/2026-09-14-comment-thread-todos.sql`을 적용하고 `DEVLOG/verification/2026-09-14-comment-thread-todos-smoke.sql`(BEGIN…ROLLBACK)로 확인한다.
 
+### 씬 댓글 알림 경계 (v1.149.0)
+
+- 씬·캐릭터 댓글 알림의 '받는 사람'은 서버가 댓글 저장 순간에 정한다. `comments` 의 AFTER INSERT·AFTER UPDATE OF mentions·AFTER DELETE 트리거가 `comment_notifications`(받는 사람·댓글·`kind` add|edit·`reason` mention|reply|retake|auto·`detail` assignee|counterpart|participant·서버 시각 `event_at`·`read_at`)에 한 사람 한 줄을 넣고 지운다. 규칙은 화면 판정 함수(`src/utils/sceneCommentNotification.ts`)와 같은 순서이고, TypeScript 짝 `src/shared/commentNotificationRecipients.ts` 를 `tests/commentNotificationsDatabase.test.ts` 가 같은 예제로 SQL 과 대조한다 — 규칙을 바꾸면 둘을 함께 바꾼다.
+- 트리거 함수는 SECURITY DEFINER 이고 **모든 예외를 삼킨다**(알림을 못 만들어도 댓글 저장·수정·삭제는 막지 않는다 — PR #265 회귀). `users`·`comments` FK 는 두지 않는다. 자동 알림(auto)은 활성 에피소드·활성 파트의 씬만, 씬 번호는 대소문자·앞뒤 공백을 무시해 상대 부서와 맞춘다.
+- 테이블은 RLS on·정책 0개·anon/authenticated 권한 회수, publication 에 넣지 않는다. 앱은 세션 토큰 래퍼 `comment_notifications_session_list(token, after_at, after_id, limit)`·`comment_notifications_session_mark_read(token, add_ids, edit_ids)` 만 쓴다(renderer → preload(요청 epoch) → `electron/commentNotificationIpc.ts` → `electron/commentNotificationStore.ts`, 토큰은 main 밖으로 나가지 않는다). '전부 읽음' 래퍼는 두지 않는다 — 아직 이 PC 가 받지 못한 줄까지 읽음이 되지 않게 화면에 있던 댓글 id 만 보낸다.
+- 실시간: 새 줄이 생기면 트리거가 공개 채널 `bflow-realtime` 에 내용 없는 `comment-notifications-changed` 신호를 한 번 보낸다(받는 사람 id 도 싣지 않는다). main 은 신호와 Realtime 재연결 성공 때 **본 창에만** `comment-notifications:changed` 를 보내고, 본 창은 0.3초 묶어 내 줄을 다시 읽는다. 커서는 (서버 시각, 줄 id) 이고 2분 앞당겨 다시 읽되 '본 줄'(id@시각)을 커서와 함께 이 PC 에 저장해 거른다 — 지운 알림이 되살아나지 않게.
+- 화면: 실시간 판정(실시간 행·`comment-added`·`comment-updated`)은 그대로 두어 바로 뜨고, 서버 줄은 그 PC 캐시에 없어 놓친 것·꺼져 있던 동안 온 것을 채운다. 두 길은 같은 중복 키·같은 알림 정체성(`scene_comment:{id}`, 수정 멘션은 `:edit:{수정 시각}` — 서버 시각 표기를 `toISOString` 으로 맞춘다)이라 한 번만 뜬다. 이 PC 의 설정(`sceneAuto`·`retake`)·팔로우·끄기는 서버가 모르므로 보여 줄 때 거른다(`decideSceneCommentNotificationFromServer`). 다른 PC 에서 읽은 줄은 읽은 채로 들어간다.
+- 놓친 알림 모으기(로그인·재연결)는 서버 줄이 있으면 내 줄 목록, 래퍼가 없거나(DB 적용 전 — `available:false`) 읽지 못하면 예전 `fetchMissedMentions` 훑기로 간다. 예전 기준 시각도 계속 옮겨 둔다(되돌리기 대비).
+- preview: `src/mocks/commentNotificationPreviewStore.ts` 가 댓글을 쓴 창에서 같은 규칙의 짝으로 줄을 만들고(localStorage + Web Locks), 이 창과 다른 탭에 신호를 보낸다. 실서버처럼 로그인한 사람의 줄만 돌려준다.
+- 새 DB·재적용: `DEVLOG/migrations/2026-11-05-comment-notifications.sql`(멱등, 최근 30일 댓글을 신호 없이 채움) → `DEVLOG/verification/2026-11-05-comment-notifications-smoke.sql` 로 확인. 되돌리기는 트리거 셋과 래퍼 두 개를 지우면 새 앱이 예전 길로 돌아간다(파일 머리말).
+
 ### 씬 작업 링크 한꺼번에 연결 (v1.134.0)
 
 - 제안은 `saveWorkLinkPathGuarded`의 성공 줄 뒤 한 곳에서만, 대표 파일일 때만, 기다리지 않고 시작한다.
