@@ -36,6 +36,8 @@ export interface CommentNotificationRow {
   detail: CommentNotificationDetail | null;
   /** 서버 시각 — 목록 커서. */
   eventAt: string;
+  /** 수정 줄: 그 수정의 시각(수정 방송의 editedAt 과 같은 값). 새 댓글 줄은 null. */
+  editAt: string | null;
   /** 다른 PC 에서 읽었으면 그 시각. */
   readAt: string | null;
   revisionNo: number | null;
@@ -111,6 +113,7 @@ export function parseCommentNotificationRow(raw: unknown): CommentNotificationRo
     reason: raw.reason as CommentNotificationReason,
     detail: detail as CommentNotificationDetail | null,
     eventAt,
+    editAt: isoText(raw.editAt),
     readAt: isoText(raw.readAt),
     revisionNo: typeof raw.revisionNo === 'number' && Number.isFinite(raw.revisionNo) ? raw.revisionNo : null,
     comment: {

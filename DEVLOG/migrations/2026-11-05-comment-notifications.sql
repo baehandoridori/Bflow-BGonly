@@ -26,12 +26,20 @@
 --   users·comments FK 는 두지 않는다(사용자 삭제·댓글 삭제 경로를 새 테이블이 막지 않게). 댓글이 지워지면 삭제 트리거가 줄을 지우고,
 --   목록 래퍼는 comments 와 INNER JOIN 해 남은 줄을 감춘다.
 -- 호환성: 추가 전용. comments 에는 트리거 셋만 붙고 칸·권한은 그대로다. v1.148.0 앱은 이 객체를 모르고 그대로 동작한다.
--- 멱등: 반복 실행해도 안전하다(마지막 채우기는 이미 있는 줄을 건너뛴다. 단 최근 30일 댓글에 새로 해당되는 사람이 생겼으면
---   그 사람 줄이 신호 없이 추가된다). 이 프로젝트의 default privileges 가 새 테이블·함수에 anon 권한을 자동으로 주므로 명시 회수한다.
--- 되돌리기: 트리거 셋과 래퍼 두 개를 지우면 새 앱은 '서버 알림 없음'으로 보고 예전 길(렌더러 판정 + 놓친 멘션 훑기)로 돌아간다.
---   DROP TRIGGER comment_notifications_after_insert / _after_mentions / _after_delete ON public.comments;
---   DROP FUNCTION public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER),
---                 public.comment_notifications_session_mark_read(TEXT, TEXT[], TEXT[]);
+-- 멱등: 반복 실행해도 안전하다(마지막 채우기는 이미 있는 줄을 건너뛴다). 이 프로젝트의 default privileges 가 새 테이블·함수에
+--   anon 권한을 자동으로 주므로 명시 회수한다.
+-- 채우기(6절): 최근 30일 댓글 중 '나를 직접 부른' 줄(멘션·답글·리테이크)만 신호 없이 채운다. 자동 알림(담당·상대 부서·참여자)은
+--   채우지 않는다 — 지금 담당자·지금까지의 댓글로 계산하면 그때는 받지 않았을 사람에게도 줄이 생기고, v1.148.0 이 이미 보여 준
+--   자동 알림이 업데이트 뒤 다시 들어온다(리뷰 지적). 줄 시각은 댓글 시각이되 서버 시각보다 늦지 않게 자른다(시계가 앞선 PC·위조 댓글).
+-- 되돌리기(그대로 실행): 트리거 셋과 래퍼 두 개를 지우면 새 앱은 '서버 알림 없음'으로 보고 예전 길(렌더러 판정 + 놓친 멘션 훑기)로 돌아간다.
+--   BEGIN;
+--   DROP TRIGGER IF EXISTS comment_notifications_after_insert ON public.comments;
+--   DROP TRIGGER IF EXISTS comment_notifications_after_mentions ON public.comments;
+--   DROP TRIGGER IF EXISTS comment_notifications_after_delete ON public.comments;
+--   DROP FUNCTION IF EXISTS public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER);
+--   DROP FUNCTION IF EXISTS public.comment_notifications_session_mark_read(TEXT, TEXT[], TEXT[]);
+--   NOTIFY pgrst, 'reload schema';
+--   COMMIT;
 -- 운영 적용: (적용 뒤 번호를 여기에 적는다)
 
 BEGIN;
@@ -50,6 +58,8 @@ CREATE TABLE IF NOT EXISTS public.comment_notifications (
   actor_id     TEXT NOT NULL,
   -- 서버 시각(목록 커서). comments.created_at 은 보낸 PC 의 시계라 커서로 쓰지 않는다.
   event_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- 수정 줄: 그 수정의 comments.edited_at(앱의 수정 방송 editedAt 과 같은 값 — 같은 수정이 두 길로 와도 한 번만).
+  edit_at      TIMESTAMPTZ,
   read_at      TIMESTAMPTZ,
   CONSTRAINT comment_notifications_once UNIQUE (recipient_id, comment_id, kind),
   CONSTRAINT comment_notifications_auto_detail CHECK ((reason = 'auto') = (detail IS NOT NULL)),
@@ -178,9 +188,9 @@ $$;
 CREATE OR REPLACE FUNCTION public.comment_notifications_fanout(
   p_comment_id TEXT, p_kind TEXT, p_added_names TEXT[], p_event_at TIMESTAMPTZ, p_signal BOOLEAN
 ) RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE v_actor TEXT; v_count INTEGER := 0;
+DECLARE v_actor TEXT; v_edit_at TIMESTAMPTZ; v_count INTEGER := 0;
 BEGIN
-  SELECT cm.user_id INTO v_actor FROM public.comments cm WHERE cm.id = p_comment_id;
+  SELECT cm.user_id, cm.edited_at INTO v_actor, v_edit_at FROM public.comments cm WHERE cm.id = p_comment_id;
   IF NOT FOUND OR v_actor IS NULL THEN RETURN 0; END IF;
   IF p_kind = 'add' THEN
     INSERT INTO public.comment_notifications (recipient_id, comment_id, kind, reason, detail, actor_id, event_at)
@@ -188,12 +198,13 @@ BEGIN
       FROM public.comment_notifications_recipients(p_comment_id) r
     ON CONFLICT ON CONSTRAINT comment_notifications_once DO NOTHING;
   ELSIF p_kind = 'edit' THEN
-    INSERT INTO public.comment_notifications (recipient_id, comment_id, kind, reason, detail, actor_id, event_at)
-    SELECT DISTINCT u.id, p_comment_id, 'edit', 'mention', NULL, v_actor, COALESCE(p_event_at, now())
+    INSERT INTO public.comment_notifications (recipient_id, comment_id, kind, reason, detail, actor_id, event_at, edit_at)
+    SELECT DISTINCT u.id, p_comment_id, 'edit', 'mention', NULL, v_actor, COALESCE(p_event_at, now()), v_edit_at
       FROM public.users u
      WHERE u.name = ANY (COALESCE(p_added_names, ARRAY[]::TEXT[])) AND u.id <> v_actor
     ON CONFLICT ON CONSTRAINT comment_notifications_once
-      DO UPDATE SET reason = 'mention', detail = NULL, actor_id = EXCLUDED.actor_id, event_at = EXCLUDED.event_at, read_at = NULL;
+      DO UPDATE SET reason = 'mention', detail = NULL, actor_id = EXCLUDED.actor_id, event_at = EXCLUDED.event_at,
+                    edit_at = EXCLUDED.edit_at, read_at = NULL;
   ELSE
     RETURN 0;
   END IF;
@@ -287,7 +298,7 @@ BEGIN
       FROM (
         SELECT n.event_at, n.id, jsonb_build_object(
                  'id', n.id, 'commentId', n.comment_id, 'kind', n.kind, 'reason', n.reason, 'detail', n.detail,
-                 'eventAt', n.event_at, 'readAt', n.read_at, 'revisionNo', r.revision_no,
+                 'eventAt', n.event_at, 'editAt', n.edit_at, 'readAt', n.read_at, 'revisionNo', r.revision_no,
                  'comment', jsonb_build_object(
                    'partId', c.part_id, 'sceneId', c.scene_id, 'sceneUuid', c.scene_uuid,
                    'userId', c.user_id, 'userName', c.user_name, 'text', c.text,
@@ -383,17 +394,15 @@ DO $$ BEGIN
 END $$;
 
 -- ── 6) 최근 30일 댓글로 한 번 채우기 (신호 없음) ─────────────────────────────
--- 새 앱의 첫 '놓친 알림 모으기'는 예전 기준 시각부터 내 줄을 읽는다 — 이 파일을 적용하기 전에 온 댓글도 빠지지 않게.
--- 줄 시각은 댓글을 쓴 시각으로 둔다(그 뒤 커서 비교가 예전 기준 시각과 맞도록).
-DO $$ DECLARE v_comment RECORD; BEGIN
-  FOR v_comment IN
-    SELECT cm.id, cm.created_at FROM public.comments cm
-     WHERE cm.created_at > now() - interval '30 days'
-     ORDER BY cm.created_at, cm.id
-  LOOP
-    PERFORM public.comment_notifications_fanout(v_comment.id, 'add', NULL, v_comment.created_at, false);
-  END LOOP;
-END $$;
+-- 새 앱의 첫 '놓친 알림 모으기'는 예전 기준 시각부터 내 줄을 읽는다 — 이 파일을 적용하기 전에 온 '나를 부른' 댓글도 빠지지 않게.
+-- 자동 알림은 채우지 않는다(머리말). 줄 시각은 댓글을 쓴 시각(예전 기준 시각과 같은 시계)이되 서버 시각보다 늦지 않게.
+INSERT INTO public.comment_notifications (recipient_id, comment_id, kind, reason, detail, actor_id, event_at)
+SELECT r.recipient_id, cm.id, 'add', r.reason, r.detail, cm.user_id, LEAST(COALESCE(cm.created_at, now()), now())
+  FROM public.comments cm
+ CROSS JOIN LATERAL public.comment_notifications_recipients(cm.id) r
+ WHERE cm.created_at > now() - interval '30 days'
+   AND r.reason <> 'auto'
+ON CONFLICT ON CONSTRAINT comment_notifications_once DO NOTHING;
 
 NOTIFY pgrst, 'reload schema';
 

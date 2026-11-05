@@ -432,13 +432,14 @@ function canonicalIso(value: string | null | undefined): string | null {
 }
 
 /**
- * 서버 알림 줄(comment_notifications 래퍼가 돌려준 줄의 댓글 부분). 수정 줄은 그 댓글의 수정 시각을 '쓴 시각'으로 —
+ * 서버 알림 줄(comment_notifications 래퍼가 돌려준 줄의 댓글 부분). 수정 줄은 그 수정의 시각을 '쓴 시각'으로 —
  * 수정 방송(comment-updated)의 editedAt 과 같은 글자가 되게 맞춘다(같은 수정이 두 길로 와도 한 번만).
  */
 export function normalizeSceneCommentFromServerRow(row: {
   commentId: string;
   kind: 'add' | 'edit';
   eventAt: string;
+  editAt?: string | null;
   comment: {
     partId: string | null; sceneId: string | null; sceneUuid: string | null; userId: string; userName: string; text: string;
     mentions: readonly string[]; imageCount: number; parentCommentId: string | null; revisionId: string | null;
@@ -461,7 +462,8 @@ export function normalizeSceneCommentFromServerRow(row: {
     parentAuthorId: null,
     revisionId: c.revisionId,
     characterId: c.characterId,
-    createdAt: isEdit ? canonicalIso(c.editedAt ?? row.eventAt) : canonicalIso(c.createdAt ?? row.eventAt),
+    // 수정 줄은 그 수정의 시각(줄에 저장된 값) — 그 뒤 또 고쳐 바뀐 지금 edited_at 이 아니라(리뷰 지적: 같은 수정이 두 번 뜸).
+    createdAt: isEdit ? canonicalIso(row.editAt ?? c.editedAt ?? row.eventAt) : canonicalIso(c.createdAt ?? row.eventAt),
     kind: row.kind,
     ...(isEdit ? { addedMentions: [] } : {}),
   };

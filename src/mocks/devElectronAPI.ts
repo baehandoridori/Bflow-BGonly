@@ -4157,7 +4157,11 @@ export function installDevElectronAPI(): void {
     threadTodoDelete: async (id) => threadTodoPreviewStore().remove(requireMockCalendarUser(), id),
     onThreadTodosChanged: (callback) => threadTodoPreviewStore().subscribe(callback),
     // 씬 댓글 서버 알림(씬 댓글 B안 PR 6) — 실서버 래퍼처럼 로그인한 사람의 줄만.
-    commentNotificationsList: async (cursor, limit) => commentNotificationPreviewStore().list(requireMockCalendarUser().id, cursor, limit),
+    commentNotificationsList: async (cursor, limit) => {
+      const user = requireMockCalendarUser();
+      const existing = new Set(getMockCommentRows().map((row) => row.id));
+      return commentNotificationPreviewStore().list(user.id, cursor, limit, (commentId) => existing.has(commentId));
+    },
     commentNotificationsMarkRead: async (target) => commentNotificationPreviewStore().markRead(requireMockCalendarUser().id, target),
     onCommentNotificationsChanged: (callback) => commentNotificationPreviewStore().subscribe(callback),
     // 미리보기 새 창 — Electron main 과 같은 #widget-popup/{widgetId} 해시로 같은 앱을 브라우저 창에 연다(코덱스 4차).

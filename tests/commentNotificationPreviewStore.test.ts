@@ -74,10 +74,15 @@ test('쓴 창이 받는 사람별 줄을 만들고, 다른 창은 신호를 받�
 
   // 수정으로 넣은 @: 그 사람에게 수정 줄, 다시 넣으면 안 읽음으로. 댓글 내용도 모든 줄에서 고친다.
   clock += 1000;
-  assert.equal(await writer.fanoutEdit(world, 'c1', ['배한솔'], { ...snapshot('8', ['배한솔', '원동우']), text: '고친 본문' }), 1);
+  const editedAt = now();
+  assert.equal(await writer.fanoutEdit(world, 'c1', ['배한솔'], { ...snapshot('8', ['배한솔', '원동우']), text: '고친 본문', editedAt }), 1);
   const wonRows = (await reader.list('7', null)).rows;
   assert.deepEqual(wonRows.map((row) => [row.kind, row.reason]), [['add', 'auto'], ['edit', 'mention']]);
   assert.ok(wonRows.every((row) => row.comment.text === '고친 본문'));
+  assert.equal(wonRows[1]!.editAt, editedAt, '수정 줄은 그 수정의 시각');
+  assert.equal(wonRows[0]!.editAt, null);
+  // 실서버 래퍼처럼 댓글이 아직 있는 줄만 돌려줄 수 있다.
+  assert.deepEqual((await reader.list('7', null, 200, (commentId) => commentId !== 'c1')).rows, []);
   await reader.markRead('7', { addCommentIds: [], editCommentIds: ['c1'] });
   clock += 1000;
   await writer.fanoutEdit(world, 'c1', ['배한솔'], snapshot('8', ['배한솔', '원동우']));

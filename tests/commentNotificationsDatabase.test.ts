@@ -130,6 +130,23 @@ test('N-2: 트리거 셋은 모든 예외를 삼키고, 신호는 내용 없이 
   assert.match(code(sql), /AFTER UPDATE OF mentions ON public\.comments\n\s+FOR EACH ROW WHEN \(OLD\.mentions IS DISTINCT FROM NEW\.mentions\)/);
 });
 
+test('N-2b: 머리말의 되돌리기 문장은 그대로 실행할 수 있는 SQL 이다', { skip: !runtime }, async () => {
+  const db = await boot();
+  try {
+    await db.exec(sql);
+    const header = sql.slice(0, sql.indexOf('\nBEGIN;\n'));
+    const start = header.indexOf('되돌리기(그대로 실행)');
+    const lines = header.slice(start).split('\n').slice(1).filter((line) => line.startsWith('--   ')).map((line) => line.slice(5));
+    const rollback = lines.slice(0, lines.indexOf('COMMIT;') + 1).join('\n');
+    assert.match(rollback, /^BEGIN;[\s\S]*COMMIT;$/);
+    await db.exec(rollback);
+    const left = (await db.query("SELECT count(*)::int AS n FROM pg_trigger WHERE tgname LIKE 'comment_notifications_after_%'")).rows[0] as { n: number };
+    assert.equal(left.n, 0);
+    await assert.rejects(db.query('SELECT comment_notifications_session_list($1, NULL, NULL, 1)', [tokens[U.han]]), { code: '42883' }, '앱은 함수 없음(42883)으로 예전 길로 간다');
+    await db.query(`INSERT INTO comments(id, user_id, user_name, text) VALUES('after-rollback', $1, '배한솔', 'x')`, [U.han]);
+  } finally { await db.close(); }
+});
+
 test('N-3: 공개 래퍼 두 개만 실행 권한, 둘 다 세션 토큰으로 호출자를 확정한다', () => {
   const grants = [...code(sql).matchAll(/GRANT EXECUTE ON FUNCTION([^%]+)TO %I/g)].map((m) => m[1].replace(/\s+/g, ' ').trim());
   assert.deepEqual(grants, ['public.comment_notifications_session_list(TEXT, TIMESTAMPTZ, UUID, INTEGER), public.comment_notifications_session_mark_read(TEXT, TEXT[], TEXT[])']);
@@ -226,8 +243,14 @@ test('N-5: 두 번 적용해도 같고, 댓글마다 서버 줄이 미리보기 
     }
 
     // 수정으로 새로 넣은 @: 그 사람에게만 'edit' 멘션 줄. 빼기만 한 수정은 아무것도 없다. 다시 넣으면 그 줄을 안 읽음으로 새로.
-    await db.query(`UPDATE comments SET mentions = '["이혜민","박정인","김어진"]', edited_at = now() WHERE id = 'c1'`);
+    await db.query(`UPDATE comments SET mentions = '["이혜민","박정인","김어진"]', edited_at = '2026-11-05T01:05:00.456Z' WHERE id = 'c1'`);
     assert.deepEqual((await rowsFor(db, 'c1')).filter((r) => r.kind === 'edit').map((r) => [r.recipient_id, r.reason]), [[U.park, 'mention']]);
+    // 수정 줄은 그 수정의 시각을 지닌다 — 그 뒤 글만 고쳐 edited_at 이 바뀌어도 줄의 시각은 그대로(같은 수정이 두 번 뜨지 않게).
+    await db.query(`UPDATE comments SET text = '오타만 고침', edited_at = '2026-11-05T01:06:00.000Z' WHERE id = 'c1'`);
+    const parkEdit = (await list(db, U.park)).find((r) => r.commentId === 'c1' && r.kind === 'edit')!;
+    assert.equal(new Date(parkEdit.editAt!).toISOString(), '2026-11-05T01:05:00.456Z');
+    assert.equal(new Date(parkEdit.comment.editedAt!).toISOString(), '2026-11-05T01:06:00.000Z');
+    assert.equal((await list(db, U.lee)).find((r) => r.commentId === 'c1' && r.kind === 'add')?.editAt, null, '새 댓글 줄은 수정 시각이 없다');
     assert.equal(await markRead(db, U.park, [], ['c1']), 1);
     const quiet = (await signals(db)).n;
     await db.query(`UPDATE comments SET mentions = '["김어진"]' WHERE id = 'c1'`);
@@ -295,7 +318,7 @@ test('N-6: 앱이 닿는 길은 래퍼 둘 — 내 줄만, 커서·읽음, 표·
   } finally { await db.close(); }
 });
 
-test('N-7: 알림 만들기가 실패해도 댓글은 저장·수정·삭제되고, 다시 적용하면 최근 30일 댓글을 신호 없이 채운다', { skip: !runtime }, async () => {
+test('N-7: 알림 만들기가 실패해도 댓글은 저장·수정·삭제되고, 다시 적용하면 최근 30일 댓글의 나를 부른 줄만 신호 없이 채운다', { skip: !runtime }, async () => {
   const db = await boot();
   try {
     // 적용 전에 있던 댓글: 5일 전 것은 채우고, 40일 전 것은 채우지 않는다.
@@ -304,10 +327,19 @@ test('N-7: 알림 만들기가 실패해도 댓글은 저장·수정·삭제되�
     const fiveDaysAgo = new Date(Date.now() - 5 * 86400000).toISOString();
     await insertComment(db, recent, fiveDaysAgo);
     await insertComment(db, old, new Date(Date.now() - 40 * 86400000).toISOString());
+    // 시계가 크게 앞선 PC(또는 위조)가 쓴 미래 시각 댓글 — 채운 줄 시각이 서버 시각을 넘지 않아야 받는 사람의 커서가 미래로 가지 않는다.
+    await insertComment(db, comment('pre-future', U.kim, { characterId: CHARACTER, mentions: ['이혜민'] }), '2099-01-01T00:00:00.000Z');
+    // 나중에 처음 댓글 단 사람(참여자)·지금 담당자에게 앞 댓글의 자동 줄을 소급해 만들지 않는다 — 자동 알림은 채우지 않는다.
+    await insertComment(db, comment('pre-later', U.park, { partId: P.aBg, sceneId: '1', sceneUuid: S.a1 }), new Date(Date.now() - 4 * 86400000).toISOString());
+    const appliedAt = Date.now();
     await db.exec(sql);
     await db.exec('SET ROLE anon');
-    assert.deepEqual((await rowsFor(db, 'pre-recent')).map((r) => [r.recipient_id, r.reason]), [[U.act, 'auto'], [U.dup1, 'auto'], [U.dup2, 'auto'], [U.han, 'auto'], [U.lee, 'mention']]);
+    assert.deepEqual((await rowsFor(db, 'pre-recent')).map((r) => [r.recipient_id, r.reason]), [[U.lee, 'mention']], '나를 부른 줄만(자동 줄 없음)');
+    assert.deepEqual(await rowsFor(db, 'pre-later'), [], '자동 알림만 해당되는 댓글은 채우지 않는다');
     assert.deepEqual(await rowsFor(db, 'pre-old'), []);
+    const future = (await list(db, U.lee)).find((r) => r.commentId === 'pre-future')!;
+    assert.ok(future, '미래 시각 댓글도 채운다');
+    assert.ok(Date.parse(future.eventAt) <= Date.now() && Date.parse(future.eventAt) >= appliedAt - 1000, '줄 시각은 적용 시각으로 자른다');
     assert.equal((await signals(db)).n, 0, '채우기는 신호를 보내지 않는다');
     const filled = (await list(db, U.lee)).find((r) => r.commentId === 'pre-recent')!;
     assert.equal(Date.parse(filled.eventAt), Date.parse(fiveDaysAgo), '채운 줄의 시각은 댓글을 쓴 시각');
@@ -332,9 +364,9 @@ test('N-7: 알림 만들기가 실패해도 댓글은 저장·수정·삭제되�
 
     // 다시 적용하면 고쳐지고, 놓친 새 댓글도 채운다(신호 없음). 있던 줄은 겹치지 않는다.
     await asSuper(db, async () => { await db.exec(sql); });
-    assert.deepEqual((await rowsFor(db, 'broken')).map((r) => [r.recipient_id, r.reason]), [[U.act, 'auto'], [U.dup1, 'auto'], [U.dup2, 'auto'], [U.han, 'auto'], [U.park, 'mention']]);
-    assert.deepEqual((await rowsFor(db, 'lost')).map((r) => [r.recipient_id, r.reason, r.detail]), [[U.park, 'auto', 'assignee']]);
-    assert.equal((await rowsFor(db, 'pre-recent')).length, 5);
+    assert.deepEqual((await rowsFor(db, 'broken')).map((r) => [r.recipient_id, r.reason]), [[U.park, 'mention']], '다시 채우면 나를 부른 줄만');
+    assert.deepEqual(await rowsFor(db, 'lost'), [], '자동 알림만 해당되는 놓친 댓글은 채우지 않는다');
+    assert.equal((await rowsFor(db, 'pre-recent')).length, 1);
     assert.equal((await signals(db)).n, 0);
   } finally { await db.close(); }
 });

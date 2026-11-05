@@ -90,6 +90,17 @@ test('live 에서 한꺼번에 많이 오면 조용히 넣고 그 수를 알린�
   assert.deepEqual(result, { status: 'done', presented: 3, quieted: true });
 });
 
+test('show 로 고르지 않은 줄도 본 줄·커서에는 들어가 다음 읽기에서 다시 나오지 않는다', async () => {
+  const server = [row(1, 10, { reason: 'auto', detail: 'assignee' }), row(2, 11)];
+  const h = harness(server);
+  const first = await h.inbox.pull('catchup', { at: at(9), id: null }, { show: (r) => r.reason !== 'auto' });
+  assert.deepEqual(h.presented, [{ ids: ['c2'], quiet: true }]);
+  assert.equal(first.presented, 1);
+  assert.deepEqual(h.saved()?.cursor, { at: at(11), id: id(2) });
+  await h.inbox.pull('live');
+  assert.equal(h.presented.length, 1, '고르지 않은 줄(c1)도 다시 넘기지 않는다');
+});
+
 test('서버에 줄이 없으면 unavailable, 실패하면 failed — 커서는 그대로', async () => {
   const none = harness([row(1, 10)], { available: false });
   assert.equal((await none.inbox.pull('catchup', { at: at(9), id: null })).status, 'unavailable');

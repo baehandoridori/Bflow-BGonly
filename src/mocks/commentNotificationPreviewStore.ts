@@ -138,7 +138,7 @@ export function createCommentNotificationPreviewStore(options: CommentNotificati
           if (rows.some((row) => row.recipientId === recipient.recipientId && row.commentId === commentId && row.kind === 'add')) continue;
           rows.push({
             id: newId(), recipientId: recipient.recipientId, commentId, kind: 'add', reason: recipient.reason, detail: recipient.detail,
-            eventAt: at, readAt: null, revisionNo, comment: { ...comment, mentions: [...comment.mentions] },
+            eventAt: at, editAt: null, readAt: null, revisionNo, comment: { ...comment, mentions: [...comment.mentions] },
           });
           count += 1;
         }
@@ -160,12 +160,13 @@ export function createCommentNotificationPreviewStore(options: CommentNotificati
           const existing = rows.find((row) => row.recipientId === recipientId && row.commentId === commentId && row.kind === 'edit');
           if (existing) {
             existing.eventAt = at;
+            existing.editAt = comment.editedAt;
             existing.readAt = null;
           } else {
             const sample = rows.find((row) => row.commentId === commentId);
             rows.push({
               id: newId(), recipientId, commentId, kind: 'edit', reason: 'mention', detail: null,
-              eventAt: at, readAt: null, revisionNo: sample?.revisionNo ?? null, comment: { ...comment, mentions: [...comment.mentions] },
+              eventAt: at, editAt: comment.editedAt, readAt: null, revisionNo: sample?.revisionNo ?? null, comment: { ...comment, mentions: [...comment.mentions] },
             });
           }
           count += 1;
@@ -184,13 +185,15 @@ export function createCommentNotificationPreviewStore(options: CommentNotificati
         if (kept.length !== rows.length) writeRows(kept);
       });
     },
-    async list(recipientId: string, rawCursor: unknown, rawLimit?: unknown): Promise<CommentNotificationListResult> {
+    /** commentExists: 실서버 래퍼처럼 댓글이 아직 있는 줄만(comments INNER JOIN). 없으면 모두. */
+    async list(recipientId: string, rawCursor: unknown, rawLimit?: unknown, commentExists?: (commentId: string) => boolean): Promise<CommentNotificationListResult> {
       const cursor = validateCommentNotificationCursor(rawCursor);
       const limit = typeof rawLimit === 'number' && Number.isInteger(rawLimit) && rawLimit > 0
         ? Math.min(rawLimit, COMMENT_NOTIFICATION_LIST_LIMIT)
         : COMMENT_NOTIFICATION_LIST_LIMIT;
       const rows = readRows()
         .filter((row) => row.recipientId === recipientId && (!cursor || cursorAfter(row, cursor.at, cursor.id)))
+        .filter((row) => !commentExists || commentExists(row.commentId))
         .sort((a, b) => (Date.parse(a.eventAt) - Date.parse(b.eventAt)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
         .slice(0, limit)
         .map(({ recipientId: _recipient, ...row }) => row);

@@ -85,8 +85,11 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - 실시간: 새 줄이 생기면 트리거가 공개 채널 `bflow-realtime` 에 내용 없는 `comment-notifications-changed` 신호를 한 번 보낸다(받는 사람 id 도 싣지 않는다). main 은 신호와 Realtime 재연결 성공 때 **본 창에만** `comment-notifications:changed` 를 보내고, 본 창은 0.3초 묶어 내 줄을 다시 읽는다. 커서는 (서버 시각, 줄 id) 이고 2분 앞당겨 다시 읽되 '본 줄'(id@시각)을 커서와 함께 이 PC 에 저장해 거른다 — 지운 알림이 되살아나지 않게.
 - 화면: 실시간 판정(실시간 행·`comment-added`·`comment-updated`)은 그대로 두어 바로 뜨고, 서버 줄은 그 PC 캐시에 없어 놓친 것·꺼져 있던 동안 온 것을 채운다. 두 길은 같은 중복 키·같은 알림 정체성(`scene_comment:{id}`, 수정 멘션은 `:edit:{수정 시각}` — 서버 시각 표기를 `toISOString` 으로 맞춘다)이라 한 번만 뜬다. 이 PC 의 설정(`sceneAuto`·`retake`)·팔로우·끄기는 서버가 모르므로 보여 줄 때 거른다(`decideSceneCommentNotificationFromServer`). 다른 PC 에서 읽은 줄은 읽은 채로 들어간다.
 - 놓친 알림 모으기(로그인·재연결)는 서버 줄이 있으면 내 줄 목록, 래퍼가 없거나(DB 적용 전 — `available:false`) 읽지 못하면 예전 `fetchMissedMentions` 훑기로 간다. 예전 기준 시각도 계속 옮겨 둔다(되돌리기 대비).
+- 서버 줄은 첫 데이터 읽기(`useDataStore.lastSyncTime`)와 이 계정의 팔로우·끄기(`useCommentThreadFollowStore.loaded`)가 끝난 뒤 판정한다(최대 20초 기다림) — 씬 목록보다 먼저 판정하면 '이 씬 알림 끄기'가 무시되고 위치 이름이 빠진 채 본 줄이 된다.
+- 업데이트 뒤 첫 실행(받기함 커서 없음)은 예전 버전이 이미 보여 준 줄을 다시 넘기지 않는다: 자동 알림은 직전 2분 것만, 나를 부른 알림은 예전 기준 시각보다 뒤의 것만(`firstRunServerRowFilter`). 거른 줄도 본 줄·커서에는 넣는다.
+- 수정 멘션 줄은 그 수정의 `edited_at` 을 `edit_at` 에 지닌다(지금 `edited_at` 이 아니라) — 그 뒤 글만 또 고쳐도 같은 수정 알림이 두 번 뜨지 않게.
 - preview: `src/mocks/commentNotificationPreviewStore.ts` 가 댓글을 쓴 창에서 같은 규칙의 짝으로 줄을 만들고(localStorage + Web Locks), 이 창과 다른 탭에 신호를 보낸다. 실서버처럼 로그인한 사람의 줄만 돌려준다.
-- 새 DB·재적용: `DEVLOG/migrations/2026-11-05-comment-notifications.sql`(멱등, 최근 30일 댓글을 신호 없이 채움) → `DEVLOG/verification/2026-11-05-comment-notifications-smoke.sql` 로 확인. 되돌리기는 트리거 셋과 래퍼 두 개를 지우면 새 앱이 예전 길로 돌아간다(파일 머리말).
+- 새 DB·재적용: `DEVLOG/migrations/2026-11-05-comment-notifications.sql`(멱등, 최근 30일 댓글 중 나를 부른 줄(멘션·답글·리테이크)만 신호 없이 채움 — 자동 알림은 지금 데이터로 소급하면 그때 받지 않았을 사람에게도 생기므로 채우지 않는다, 줄 시각은 서버 시각을 넘지 않게) → `DEVLOG/verification/2026-11-05-comment-notifications-smoke.sql` 로 확인. 되돌리기는 머리말의 '그대로 실행' 묶음(트리거 셋·래퍼 두 개)이고, 그러면 새 앱이 예전 길로 돌아간다.
 
 ### 씬 작업 링크 한꺼번에 연결 (v1.134.0)
 

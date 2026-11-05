@@ -7,6 +7,8 @@
  *    다시 읽은 줄은 '본 줄'(줄 id@시각) 기억으로 거른다. 본 줄은 커서와 같이 이 PC 에 저장해, 앱을 다시 켜도
  *    지운 알림이 되살아나지 않는다(수정으로 다시 고쳐진 줄은 시각이 바뀌어 새 줄로 본다).
  *  - 요청은 한 줄로 세운다(겹쳐 읽지 않게). 서버에 래퍼가 없으면(DB 적용 전) 'unavailable' — 호출자가 예전 길로 간다.
+ *  - show 로 이번 읽기에서 화면에 넘길 줄을 고를 수 있다(업데이트 뒤 첫 실행 — 예전 버전이 이미 보여 준 줄). 고르지 않은 줄도
+ *    본 줄·커서에는 넣는다(다음 읽기에서 다시 나오지 않게).
  * 런타임 import 가 없어 node --test 가 바로 불러 쓴다.
  */
 
@@ -36,6 +38,11 @@ export interface CommentNotificationInboxOptions {
   /** live 한 번에 이보다 많으면 조용히(요약은 호출자 몫). */
   liveBurst?: number;
   seenLimit?: number;
+}
+
+export interface CommentNotificationPullOptions {
+  /** 화면에 넘길 줄만 참. 없으면 모두. */
+  show?: (row: CommentNotificationRow) => boolean;
 }
 
 export interface CommentNotificationPullResult {
@@ -73,7 +80,7 @@ export function createCommentNotificationInbox(deps: CommentNotificationInboxDep
     return state;
   }
 
-  async function run(mode: CommentNotificationPullMode, initial: CommentNotificationCursor | null): Promise<CommentNotificationPullResult> {
+  async function run(mode: CommentNotificationPullMode, initial: CommentNotificationCursor | null, options: CommentNotificationPullOptions): Promise<CommentNotificationPullResult> {
     if (disposed) return { status: 'failed', presented: 0, quieted: false };
     const st = current(initial);
     const start = st.cursor;
@@ -104,10 +111,11 @@ export function createCommentNotificationInbox(deps: CommentNotificationInboxDep
     } catch {
       return { status: 'failed', presented: 0, quieted: false };
     }
-    const quiet = mode === 'catchup' || fresh.length > liveBurst;
+    const shown = options.show ? fresh.filter((row) => { try { return options.show!(row); } catch { return false; } }) : fresh;
+    const quiet = mode === 'catchup' || shown.length > liveBurst;
     let presented = 0;
-    if (fresh.length > 0) {
-      try { presented = deps.present(fresh, quiet); } catch { /* 화면 오류가 커서를 막지 않는다 — 다시 읽어도 본 줄로 거른다 */ }
+    if (shown.length > 0) {
+      try { presented = deps.present(shown, quiet); } catch { /* 화면 오류가 커서를 막지 않는다 — 다시 읽어도 본 줄로 거른다 */ }
     }
     // 본 줄은 새 커서에서 OVERLAP 의 두 배 안쪽 것만 남긴다(그보다 오래된 줄은 다시 읽히지 않는다).
     const floor = newest ? timeOf(newest.at) - overlapMs * 2 : -Infinity;
@@ -121,8 +129,8 @@ export function createCommentNotificationInbox(deps: CommentNotificationInboxDep
 
   return {
     /** 한 줄로 세워 읽는다. initial 은 저장된 커서가 없을 때 시작점(예전 놓친 알림 기준 시각에서). */
-    pull(mode: CommentNotificationPullMode, initial: CommentNotificationCursor | null = null): Promise<CommentNotificationPullResult> {
-      const job = tail.then(() => run(mode, initial), () => run(mode, initial));
+    pull(mode: CommentNotificationPullMode, initial: CommentNotificationCursor | null = null, options: CommentNotificationPullOptions = {}): Promise<CommentNotificationPullResult> {
+      const job = tail.then(() => run(mode, initial, options), () => run(mode, initial, options));
       tail = job.catch(() => undefined);
       return job;
     },

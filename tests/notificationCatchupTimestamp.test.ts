@@ -11,8 +11,10 @@ test('catch-up notifications preserve source timestamps in the notification pane
   assert.match(store, /isRead:\s*n\.isRead === true,/);
   assert.match(store, /createdAt:\s*n\.createdAt\s*\?\?\s*new Date\(\)\.toISOString\(\)/);
   // 서버 알림 줄(놓친 알림 모으기)도 원래 댓글 시각.
+  const present = readFileSync('src/utils/commentNotificationPresent.ts', 'utf8');
+  assert.match(present, /deps\.add\(\{[\s\S]*?createdAt:\s*decision\.createdAt \?\? row\.eventAt,/);
   const notifier = readFileSync('src/services/sceneCommentNotifier.ts', 'utf8');
-  assert.match(notifier, /store\.addNotification\(\{[\s\S]*?createdAt:\s*comment\.createdAt \?\? row\.eventAt,/);
+  assert.match(notifier, /return decision \? \{ \.\.\.decision, createdAt: comment\.createdAt \?\? null \} : null;/);
   assert.match(store, /addNotification:\s*\(n:\s*NotificationDraft\) => string;/);
 
   // v1.146.0(§6.1): 놓친 멘션도 실시간과 같은 판정 함수로 제목·종류를 만들고, 시각은 원래 댓글 시각.

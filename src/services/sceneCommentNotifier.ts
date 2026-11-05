@@ -41,6 +41,7 @@ import {
   type SceneCommentNotificationDeps,
   type SceneCommentNotificationDecision,
 } from '@/utils/sceneCommentNotification';
+import { firstRunServerRowFilter, presentServerCommentRows } from '@/utils/commentNotificationPresent';
 import {
   createCommentNotificationInbox,
   type CommentNotificationInbox,
@@ -92,47 +93,61 @@ export function serverCommentNotificationsAvailable(): boolean | null {
 /** 서버 줄 묶음을 화면 알림으로. quiet 면 목록에만(로그인·재연결·한꺼번에 여러 줄). 새로 알린 안 읽은 수를 돌려준다. */
 function presentServerRows(me: { id: string; name: string }, rows: readonly CommentNotificationRow[], quiet: boolean): number {
   const settings = settingsSource();
-  const store = useNotificationStore.getState();
-  let added = 0;
-  for (const row of rows) {
-    if (useAuthStore.getState().currentUser?.id !== me.id) break;
-    const comment = normalizeSceneCommentFromServerRow(row);
-    const decision = decideSceneCommentNotificationFromServer(
-      comment,
-      { reason: row.reason, detail: row.detail, revisionNo: row.revisionNo },
-      me,
-      buildDeps(null),
-      sceneCommentSettings(settings),
-    );
-    if (!decision || !decisions.claim(decision.dedupeKey)) continue;
-    const metadata = { ...decision.metadata, serverNotificationId: row.id };
-    const identity = getNotificationIdentity({ type: decision.type, metadata });
-    const listed = !!identity && useNotificationStore.getState().notifications.some((n) => getNotificationIdentity(n) === identity);
-    if (quiet || row.readAt) {
-      store.addNotification({
-        type: decision.type,
-        title: decision.title,
-        body: decision.body || undefined,
-        createdAt: comment.createdAt ?? row.eventAt,
-        metadata: metadata as Record<string, string | undefined>,
-        // 다른 PC 에서 이미 읽었으면 읽은 채로(배지·토스트 없이).
-        ...(row.readAt ? { isRead: true } : {}),
-      });
-      if (!listed && !row.readAt) added += 1;
-    } else {
-      dispatchNotification({ type: decision.type, title: decision.title, body: decision.body || undefined, metadata }, settings, {
-        quiet: decision.quiet,
-        native: decision.native,
-      });
-      if (!listed) added += 1;
-    }
+  const deps = buildDeps(null);
+  return presentServerCommentRows(rows, quiet, {
+    isCurrent: () => useAuthStore.getState().currentUser?.id === me.id,
+    decide: (row) => {
+      const comment = normalizeSceneCommentFromServerRow(row);
+      const decision = decideSceneCommentNotificationFromServer(
+        comment,
+        { reason: row.reason, detail: row.detail, revisionNo: row.revisionNo },
+        me,
+        deps,
+        sceneCommentSettings(settings),
+      );
+      return decision ? { ...decision, createdAt: comment.createdAt ?? null } : null;
+    },
+    claim: (key) => decisions.claim(key),
+    identityOf: (type, metadata) => getNotificationIdentity({ type, metadata }),
+    isListed: (identity) => useNotificationStore.getState().notifications.some((n) => getNotificationIdentity(n) === identity),
+    add: (draft) => useNotificationStore.getState().addNotification({ ...draft, metadata: draft.metadata as Record<string, string | undefined> }),
+    dispatch: (payload, options) => dispatchNotification(payload, settings, options),
     // 예전 길(서버 줄이 없어진 경우의 놓친 멘션 훑기)의 기준 시각도 함께 옮긴다.
-    if (decision.type === 'mention' && !row.readAt && catchUpReadyUserId === me.id && comment.createdAt) {
-      setLastSeenAt(me.id, comment.createdAt);
-    }
-  }
-  return added;
+    onMention: (createdAt) => { if (catchUpReadyUserId === me.id) setLastSeenAt(me.id, createdAt); },
+  });
 }
+
+/**
+ * 서버 줄을 판정하기 전에 씬 목록(위치 이름·씬 대화 키)과 이 계정의 팔로우·끄기를 다 읽었는지 기다린다(리뷰 지적) —
+ * 로그인 직후 씬 목록보다 먼저 판정하면 '이 씬 알림 끄기'가 무시되고 제목에 위치가 빠진 채로 본 줄이 된다.
+ * 끝내 준비되지 않으면(오프라인 등) 정해 둔 시간 뒤 그대로 간다 — 알림이 아예 빠지는 것보다 낫다.
+ */
+const PRESENT_CONTEXT_WAIT_MS = 20_000;
+function waitForPresentationContext(userId: string, timeoutMs = PRESENT_CONTEXT_WAIT_MS): Promise<void> {
+  const ready = () => {
+    const follow = useCommentThreadFollowStore.getState();
+    return useDataStore.getState().lastSyncTime !== null && follow.loaded && follow.userId === userId;
+  };
+  if (ready()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const offData = useDataStore.subscribe(check);
+    const offFollow = useCommentThreadFollowStore.subscribe(check);
+    const timer = setTimeout(done, timeoutMs);
+    function check() { if (ready()) done(); }
+    function done() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      offData();
+      offFollow();
+      resolve();
+    }
+  });
+}
+
+/** 받기함이 서버 줄을 처음 고를 때(업데이트 뒤 첫 실행) 직전 몇 분의 자동 알림만 — 예전 버전이 이미 실시간으로 보여 준 것. */
+const FIRST_RUN_AUTO_WINDOW_MS = 2 * 60 * 1000;
 
 function inboxFor(me: { id: string; name: string }): CommentNotificationInbox {
   if (inbox && inboxUserId === me.id) return inbox;
@@ -166,9 +181,22 @@ export async function pullServerCommentNotifications(
   getSettings: () => NotificationSettings,
   mode: CommentNotificationPullMode,
   initial: CommentNotificationCursor | null,
+  overlapForFirstRun = 10 * 60 * 1000,
 ): Promise<CommentNotificationPullResult & { stale: boolean }> {
   settingsSource = getSettings;
-  const result = await inboxFor(me).pull(mode, initial);
+  await waitForPresentationContext(me.id);
+  if (useAuthStore.getState().currentUser?.id !== me.id) return { status: 'failed', presented: 0, quieted: false, stale: true };
+  const box = inboxFor(me);
+  // 업데이트 뒤 첫 실행: 예전 버전이 이미 보여 준(지웠을 수도 있는) 줄은 다시 넘기지 않는다.
+  const show = box.hasCursor()
+    ? undefined
+    : firstRunServerRowFilter({
+      lastSeenAt: getLastSeenAt(me.id),
+      startedAt: Date.now(),
+      autoWindowMs: FIRST_RUN_AUTO_WINDOW_MS,
+      mentionWindowMs: Math.max(overlapForFirstRun, FIRST_RUN_AUTO_WINDOW_MS),
+    });
+  const result = await box.pull(mode, initial, { show });
   const stale = useAuthStore.getState().currentUser?.id !== me.id;
   if (!stale) {
     if (result.status === 'done') setServerCommentNotificationsAvailable(true);
@@ -200,6 +228,7 @@ export async function pullLiveServerCommentNotifications(
     getSettings,
     'live',
     initialServerCommentNotificationCursor(me.id, overlapMs),
+    overlapMs,
   );
   return !result.stale && result.status === 'done' && result.quieted ? result.presented : 0;
 }

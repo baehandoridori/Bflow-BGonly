@@ -316,6 +316,7 @@ async function runMentionCatchUp(
       getSettings,
       'catchup',
       initialServerCommentNotificationCursor(me.id, MENTION_CATCHUP_OVERLAP_MS, serverStartedAt),
+      MENTION_CATCHUP_OVERLAP_MS,
     );
     if (server.stale) return 'stale';
     if (server.status === 'done') {

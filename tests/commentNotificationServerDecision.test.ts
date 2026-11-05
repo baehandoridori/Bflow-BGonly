@@ -93,6 +93,13 @@ test('수정 멘션: 서버 시각 표기(+00:00)를 방송 표기(Z)로 맞춰 
   assert.equal(server.metadata.mentionEditAt, editedAt);
   assert.equal(getNotificationIdentity({ type: server.type, metadata: server.metadata }), `scene_comment:c1:edit:${editedAt}`);
   assert.equal(decide(serverRow({ kind: 'edit', reason: 'auto', detail: 'assignee' })), null, '수정 줄은 멘션만');
+  // 그 뒤 글만 또 고쳐 댓글의 지금 수정 시각이 바뀌어도, 줄에 저장된 그 수정의 시각을 쓴다(같은 수정 알림이 두 번 뜨지 않게).
+  const reEdited = serverRow(
+    { kind: 'edit', reason: 'mention', detail: null, editAt: '2026-11-05T01:05:00.456+00:00' },
+    { editedAt: '2026-11-05T01:06:00.000+00:00', mentions: ['배한솔'] },
+  );
+  assert.equal(reEdited.editAt, '2026-11-05T01:05:00.456+00:00');
+  assert.equal(decide(reEdited)?.dedupeKey, live.dedupeKey);
 });
 
 test('캐릭터 댓글: 멘션 줄만, 누르면 캐릭터로. 작성자 본인 줄은 없음', () => {
