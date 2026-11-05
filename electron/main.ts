@@ -99,7 +99,7 @@ import {
   localSwapAttemptedMarker,
   localSwapSuppressedMarker,
 } from './autoUpdate/paths';
-import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
+import { formatSuppressionMarker, isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
 import { compareVersions, readManifest } from './autoUpdate/manifest';
 import { resolveChildFolderPath } from './pathCreateFolder';
 import { parseFileNameWBuffer, imageMimeForPath, clipboardImageFilePath } from './clipboardFiles';
@@ -1058,8 +1058,10 @@ ipcMain.handle('update:check-now', () => runManualUpdateCheck());
  * v1.44.2 — '자동 중단' 상태 수동 복구.
  *
  * 이전 업데이트 적용 실패로 `.swap-suppressed`(content=own version)가 남으면 checker가 같은
- * 버전에선 fetch를 영구 skip한다(suppressed). 이 상태는 다른 버전을 직접 설치하기 전엔
- * 자동으로 풀리지 않아, 비개발자 사용자가 앱 안에서 빠져나올 길이 없었다. 이 핸들러는
+ * 버전에선 fetch를 skip한다(suppressed). 이 상태는 다른 버전을 직접 설치하기 전엔
+ * 자동으로 풀리지 않아, 비개발자 사용자가 앱 안에서 빠져나올 길이 없었다. (v1.149.1부터는
+ * 실패한 새 버전도 적어 두어 배포 쪽이 더 새 버전을 내놓으면 저절로 한 번 더 시도한다 — 예전
+ * 형식 표시와 같은 새 버전은 그대로 멈춘다.) 이 핸들러는
  * 사용자가 '다시 시도'를 눌렀을 때 suppression/attempted 흔적을 지우고 즉시 재확인하여
  * 자동 업데이트를 재개시킨다. (installer-pending stale 잔여물은 prepareUpdate의 fresh
  * download 경로가 정리하므로 별도 처리 불필요.)
@@ -5277,11 +5279,12 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
       buttons: ['확인'],
     });
 
-    // P2 #2: suppression marker 작성 — checker가 own version과 같으면 fetch skip → 자동
-    // 재시도 영구 중단. 사용자가 NSIS Setup으로 다른 version 설치하면 own 갱신 → marker
+    // P2 #2: suppression marker 작성 — checker가 own version과 같으면 fetch skip → 같은 새 버전
+    // 자동 재시도 중단. 사용자가 NSIS Setup으로 다른 version 설치하면 own 갱신 → marker
     // version과 다르면 marker 자동 정리하여 자동업데이트 재개.
+    // v1.149.1: 실패한 새 버전도 적는다 — 배포 쪽이 그보다 더 새 버전을 내놓으면 한 번 더 시도한다.
     try {
-      await fs.promises.writeFile(localSwapSuppressedMarker(), currentVersion, 'utf-8');
+      await fs.promises.writeFile(localSwapSuppressedMarker(), formatSuppressionMarker(currentVersion, pendingVersion), 'utf-8');
     } catch (err) {
       console.warn('[main] suppression marker 작성 실패 (무시):', err);
     }
@@ -5318,8 +5321,9 @@ async function notifyAndCleanupOnInstallerFailure(): Promise<void> {
       buttons: ['확인'],
     });
 
+    // 실패한 새 버전을 함께 적는다(v1.149.1) — 같은 버전은 계속 멈추고, 더 새 버전이 나오면 한 번 더 시도한다.
     try {
-      await fs.promises.writeFile(localSwapSuppressedMarker(), currentVersion, 'utf-8');
+      await fs.promises.writeFile(localSwapSuppressedMarker(), formatSuppressionMarker(currentVersion, pendingVersion), 'utf-8');
     } catch (err) {
       console.warn('[main] installer suppression marker 작성 실패 (무시):', err);
     }

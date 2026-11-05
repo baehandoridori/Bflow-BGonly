@@ -18,6 +18,7 @@ import {
   INSTALLER_FILE_NAME,
   findRemoteInstaller,
   findRemoteManifest,
+  localInstallerAttemptedMarker,
   localInstallerExePath,
   localInstallerManifestPath,
   localInstallerPendingDir,
@@ -28,6 +29,7 @@ import {
   getOwnVersion,
 } from './paths';
 import { readManifest, compareVersions, type Manifest, type ReleaseNote } from './manifest';
+import { decideSuppression, parseSuppressionMarker } from './failurePolicy';
 
 export type UpdateStatus =
   | 'available'
@@ -91,9 +93,17 @@ export async function prepareUpdate(onState?: (info: UpdateInfo) => void): Promi
   const suppressionMarker = localSwapSuppressedMarker();
   if (existsSync(suppressionMarker)) {
     try {
-      const recordedVersion = (await fsp.readFile(suppressionMarker, 'utf-8')).trim();
-      if (recordedVersion === own) {
-        console.log(`[autoUpdate] 적용 실패 후 suppression 상태 (own=${own}) — fetch skip`);
+      const marker = parseSuppressionMarker(await fsp.readFile(suppressionMarker, 'utf-8'));
+      // 실패한 새 버전을 아는 표시만 배포 쪽 버전을 본다(예전 형식은 예전처럼 같은 앱 버전 동안 멈춘다).
+      const offered = marker.ownVersion === own && marker.failedTarget
+        ? await readRemoteManifestVersion().catch(() => null)
+        : null;
+      let decision = decideSuppression(marker, own, offered);
+      // 더 새 버전이면 한 번 더 시도하되, 실패했던 설치 파일·시작 표시를 먼저 치운다('다시 시도'와 같은 순서).
+      // 못 치우면 그 설치 파일을 다시 쓰거나 시작 확인을 건너뛸 수 있으니 멈춤을 유지한다.
+      if (decision === 'retry-newer-target' && !(await clearFailedInstallerLeftovers())) decision = 'suppress';
+      if (decision === 'suppress') {
+        console.log(`[autoUpdate] 적용 실패 후 suppression 상태 (own=${own}, failed=${marker.failedTarget ?? 'unknown'}, offered=${offered ?? 'unknown'}) — fetch skip`);
         const info: UpdateInfo = {
           status: 'suppressed',
           currentVersion: own,
@@ -107,7 +117,7 @@ export async function prepareUpdate(onState?: (info: UpdateInfo) => void): Promi
         return info;
       }
       await fsp.unlink(suppressionMarker);
-      console.log(`[autoUpdate] suppression marker 정리 (recorded=${recordedVersion}, own=${own})`);
+      console.log(`[autoUpdate] suppression marker 정리 (${decision}, recorded=${marker.ownVersion}, failed=${marker.failedTarget ?? 'unknown'}, offered=${offered ?? 'unknown'}, own=${own})`);
     } catch (err) {
       console.warn('[autoUpdate] suppression marker 처리 실패 (무시):', err);
     }
@@ -173,6 +183,30 @@ export async function prepareUpdate(onState?: (info: UpdateInfo) => void): Promi
   });
   onState?.(failed);
   return failed;
+}
+
+async function readRemoteManifestVersion(): Promise<string | null> {
+  const remoteManifestPath = findRemoteManifest();
+  if (!remoteManifestPath) return null;
+  return (await readManifest(remoteManifestPath))?.version ?? null;
+}
+
+/**
+ * 실패했던 새 버전의 받아 둔 설치 파일과 '설치 도우미 시작함' 표시를 치운다. 둘 다 사라졌을 때만 true.
+ * - 설치 파일이 남으면 아래 readPendingUpdateInfo 가 실패했던 그 파일을 다시 '준비됨'으로 돌려준다.
+ * - 시작 표시가 남으면 다음 적용 때 도우미가 실제로 뜨기 전에 시작 확인을 통과해 앱이 먼저 닫힐 수 있다.
+ * 이 함수는 던지지 않는다 — 던지면 위의 catch 가 멈춤을 건너뛴다.
+ */
+async function clearFailedInstallerLeftovers(): Promise<boolean> {
+  try {
+    await fsp.rm(localInstallerPendingDir(), { recursive: true, force: true });
+    if (existsSync(localInstallerPendingDir())) return false;
+    await fsp.rm(localInstallerAttemptedMarker(), { force: true });
+    return !existsSync(localInstallerAttemptedMarker());
+  } catch (err) {
+    console.warn('[autoUpdate] 실패했던 설치 파일 정리 실패 — 멈춤 유지:', err);
+    return false;
+  }
 }
 
 export async function readPendingUpdateInfo(currentVersion = getOwnVersion()): Promise<UpdateInfo | null> {

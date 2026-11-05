@@ -10,6 +10,7 @@ import {
   existsSync,
   mkdirSync,
   promises as fsp,
+  readFileSync,
   writeFileSync,
 } from 'fs';
 import path from 'path';
@@ -27,6 +28,7 @@ import {
   getOwnVersion,
 } from './paths';
 import { compareVersions, readManifest } from './manifest';
+import { decideSuppression, isPlainVersion, parseSuppressionMarker } from './failurePolicy';
 
 export interface InstallerUpdateHelperOptions {
   /** true면 installer 완료 후 BFLOW를 다시 실행한다. */
@@ -65,12 +67,19 @@ export async function hasPendingInstallerUpdate(currentVersion = getOwnVersion()
   const suppressionMarker = localSwapSuppressedMarker();
   if (existsSync(suppressionMarker)) {
     try {
-      const recordedVersion = (await fsp.readFile(suppressionMarker, 'utf-8')).trim();
-      if (recordedVersion === currentVersion) {
-        logUpdate(`installer skip: suppression active (current=${currentVersion})`);
+      const marker = parseSuppressionMarker(await fsp.readFile(suppressionMarker, 'utf-8'));
+      // 받아 둔 설치 파일이 실패했던 새 버전보다 더 새 것일 때만 멈춤을 넘는다(예전 형식 표시는 예전처럼 멈춤).
+      const pendingVersion = marker.ownVersion === currentVersion && marker.failedTarget
+        ? (await readManifest(localInstallerManifestPath()))?.version ?? null
+        : null;
+      const decision = decideSuppression(marker, currentVersion, pendingVersion);
+      if (decision === 'suppress') {
+        logUpdate(`installer skip: suppression active (current=${currentVersion}, failed=${marker.failedTarget ?? 'unknown'})`);
         return false;
       }
-      await fsp.unlink(suppressionMarker);
+      // 더 새 설치 파일이면 표시는 그대로 둔다 — 지우는 일은 업데이트 확인(prepareUpdate)이 하고,
+      // 이 설치가 또 실패하면 도우미가 그 버전으로 표시를 다시 적는다.
+      if (decision === 'clear') await fsp.unlink(suppressionMarker);
     } catch {
       /* ignore */
     }
@@ -82,6 +91,16 @@ export async function hasPendingInstallerUpdate(currentVersion = getOwnVersion()
     return false;
   }
   return true;
+}
+
+/** 받아 둔 설치 파일의 버전 — 실패하면 멈춤 표시에 함께 적는다. 읽지 못하면 '' (예전 형식으로 적힌다). */
+function readPendingInstallerTargetVersion(): string {
+  try {
+    const parsed = JSON.parse(readFileSync(localInstallerManifestPath(), 'utf-8')) as { version?: unknown };
+    return isPlainVersion(parsed?.version) ? parsed.version : '';
+  } catch {
+    return '';
+  }
 }
 
 export function spawnInstallerUpdateHelper(opts: InstallerUpdateHelperOptions): void {
@@ -96,6 +115,7 @@ export function spawnInstallerUpdateHelper(opts: InstallerUpdateHelperOptions): 
   const nsisBflowExe = escapePs(standardNsisBflowExe());
   const backupDir = escapePs(localBackupDir());
   const currentVersion = escapePs(getOwnVersion());
+  const targetVersion = escapePs(readPendingInstallerTargetVersion());
   const relaunchFlag = opts.relaunch ? '$true' : '$false';
   const parentPid = Number.isFinite(opts.parentPid) ? Math.trunc(opts.parentPid as number) : process.pid;
 
@@ -112,6 +132,7 @@ $bflowExe = '${bflowExe}'
 $nsisBflowExe = '${nsisBflowExe}'
 $backupDir = '${backupDir}'
 $currentVersion = '${currentVersion}'
+$targetVersion = '${targetVersion}'
 $relaunch = ${relaunchFlag}
 $parentPid = ${parentPid}
 
@@ -130,7 +151,9 @@ function Cleanup-SuccessMarkers {
 }
 
 function Mark-Failure {
-  try { Set-Content -Path $suppressedMarker -Value $currentVersion -Force -ErrorAction SilentlyContinue } catch {}
+  $markerLines = @($currentVersion)
+  if ($targetVersion) { $markerLines += "target=$($targetVersion)" }
+  try { Set-Content -Path $suppressedMarker -Value $markerLines -Force -ErrorAction SilentlyContinue } catch {}
 }
 
 function Resolve-BflowExe {

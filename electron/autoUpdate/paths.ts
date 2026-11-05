@@ -126,6 +126,8 @@ export function localSwapAttemptedMarker(): string {
  * 업데이트 적용 실패 알림 후 자동 재시도 영구 중단 마커 (v1.22.3) — content는 own version. 같은
  * version에선 자동업데이트 cycle skip(checker가 검사)하고, 사용자가 NSIS Setup 등으로
  * 다른 version 설치 시 own이 갱신 → marker version과 다르면 자동 정리(자동업데이트 재개).
+ * v1.149.1부터 둘째 줄에 `target=<실패한 새 버전>`을 적어, 배포 쪽이 그보다 더 새 버전을 내놓으면
+ * 한 번 더 시도한다(형식·판정은 failurePolicy.ts).
  */
 export function localSwapSuppressedMarker(): string {
   return path.join(localRoot(), '.swap-suppressed');

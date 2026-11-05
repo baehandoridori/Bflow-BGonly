@@ -183,6 +183,30 @@ test('version center can recover from a suppressed/failed state via retry', asyn
   assert.match(modal, /다시 시도/);
 });
 
+test('every suppression writer records the failed target version so a newer release gets one more try', async () => {
+  const main = await readRepoFile('electron', 'main.ts');
+  const helper = await readRepoFile('electron', 'autoUpdate', 'installerApply.ts');
+  const checker = await readRepoFile('electron', 'autoUpdate', 'checker.ts');
+  const swapper = await readRepoFile('electron', 'autoUpdate', 'swapper.ts');
+
+  // 시작 때 실패 안내 두 곳(레거시 swap·installer)은 받아 둔 버전을 함께 적는다.
+  const writes = main.match(/writeFile\(localSwapSuppressedMarker\(\), [^)]*\)/g) ?? [];
+  assert.equal(writes.length, 2);
+  for (const write of writes) assert.match(write, /formatSuppressionMarker\(currentVersion, pendingVersion/);
+
+  // 설치 도우미는 받아 둔 설치 파일의 버전을 '$($name)' 꼴로 둘째 줄에 적는다(JS 보간 금지).
+  assert.match(helper, /\$targetVersion = '\$\{targetVersion\}'/);
+  assert.match(helper, /function Mark-Failure \{[\s\S]*"target=\$\(\$targetVersion\)"[\s\S]*Set-Content -Path \$suppressedMarker -Value \$markerLines/);
+  assert.equal(helper.includes('"target=${targetVersion}"'), false);
+
+  // 표시를 읽는 세 곳은 모두 같은 해석·판정을 쓴다(새 형식을 낡은 표시로 보고 지우지 않게).
+  for (const source of [checker, helper, swapper]) {
+    assert.match(source, /parseSuppressionMarker\(/);
+    assert.match(source, /decideSuppression\(/);
+    assert.doesNotMatch(source, /recordedVersion === /);
+  }
+});
+
 test('version center only checks updates from the refresh button', async () => {
   const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
 
