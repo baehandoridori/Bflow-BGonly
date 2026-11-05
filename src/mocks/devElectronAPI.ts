@@ -14,6 +14,9 @@ import { version as appVersion } from '../../package.json';
 import { RetakeNotificationService } from '../../electron/retakeNotificationService';
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
 import { createThreadTodoPreviewStore, type ThreadTodoPreviewStore } from './threadTodoPreviewStore';
+import { createCommentNotificationPreviewStore, type CommentNotificationPreviewStore } from './commentNotificationPreviewStore';
+import type { RecipientWorld } from '../shared/commentNotificationRecipients';
+import type { CommentNotificationComment } from '../shared/commentNotification';
 import { createBackgroundPreviewGateway, notifyBackgroundPreview, subscribeBackgroundPreview } from '../features/backgrounds/previewGateway';
 import { KEPT_EDITS, KEPT_EDITS_REFUSAL, keptEntriesOf, keptEntryProblem } from '../shared/backgroundKeptEdits';
 import type { KeptMapEdit } from '../shared/backgroundKeptEdits';
@@ -2369,6 +2372,57 @@ function getMockCommentReadStates(userId: string) {
   return stateRows.filter((row) => row.userId === userId);
 }
 
+// 씬 댓글 서버 알림(씬 댓글 B안 PR 6) — 실서버 트리거처럼 댓글을 쓴 창이 받는 사람별 줄을 만든다(같은 규칙의 짝 파일).
+let previewCommentNotificationStore: CommentNotificationPreviewStore | null = null;
+function commentNotificationPreviewStore(): CommentNotificationPreviewStore {
+  previewCommentNotificationStore ??= createCommentNotificationPreviewStore();
+  return previewCommentNotificationStore;
+}
+
+/** 미리보기 데이터를 서버 받는 사람 계산의 모양으로 — 보관한 에피소드는 활성 아님. 파트 글자는 시트 이름에서(앱의 상대 부서 규칙과 같게). */
+function mockRecipientWorld(): RecipientWorld {
+  const episodes: RecipientWorld['episodes'][number][] = [];
+  const parts: RecipientWorld['parts'][number][] = [];
+  const scenes: RecipientWorld['scenes'][number][] = [];
+  const addEpisode = (episode: Episode, id: string, active: boolean) => {
+    episodes.push({ id, active });
+    for (const part of episode.parts) {
+      if (!part.id) continue;
+      const letter = (part.sheetName.split('_')[1] ?? part.partId).toUpperCase();
+      parts.push({ id: part.id, episodeId: id, partLetter: letter, department: part.department, active: true });
+      for (const scene of part.scenes) {
+        if (!scene.id) continue;
+        scenes.push({ id: scene.id, partId: part.id, sceneNumber: scene.sceneId, sortOrder: scene.no, assignee: scene.assignee || null });
+      }
+    }
+  };
+  for (const episode of getMockEpisodes()) addEpisode(episode, `ep-${episode.episodeNumber}`, true);
+  for (const archived of getMockArchivedEpisodes()) addEpisode(archived.episode, `ep-archived-${archived.episode.episodeNumber}`, false);
+  return {
+    users: getMockUsers().map((user) => ({ id: user.id, name: user.name })),
+    episodes,
+    parts,
+    scenes,
+    comments: getMockCommentRows().map((row) => ({
+      id: row.id, userId: row.userId, partId: row.partId || null, sceneId: row.sceneId || null, sceneUuid: null,
+      mentions: row.mentions, parentCommentId: row.parentCommentId ?? null, revisionId: row.revisionId ?? null, characterId: row.characterId ?? null,
+    })),
+    revisions: getMockRevisionRows().map((revision) => ({
+      id: revision.id, requesterId: revision.requesterId || null,
+      assigneeIds: revision.assigneeIds ?? [], notifyUserIds: revision.notifyUserIds ?? [],
+    })),
+  };
+}
+
+function mockNotificationComment(row: DevPreviewCommentRow): CommentNotificationComment {
+  return {
+    partId: row.partId || null, sceneId: row.sceneId || null, sceneUuid: null, userId: row.userId, userName: row.userName,
+    text: row.text, mentions: [...(row.mentions ?? [])], imageCount: row.images?.length ?? 0,
+    parentCommentId: row.parentCommentId ?? null, revisionId: row.revisionId ?? null, characterId: row.characterId ?? null,
+    createdAt: row.createdAt, editedAt: row.editedAt,
+  };
+}
+
 function getMockRevisionRows(): DevPreviewRevisionRow[] {
   return (localStore.__revisionRows as DevPreviewRevisionRow[] | undefined)
     ?? (localStore.__revisionRows = buildDevPreviewRevisionRows(MOCK_EPISODES)) as DevPreviewRevisionRow[];
@@ -3193,6 +3247,11 @@ export function installDevElectronAPI(): void {
       });
       localStore.__commentRows = comments;
       const added = comments[comments.length - 1];
+      // 실서버 트리거처럼 받는 사람별 알림 줄(씬 댓글 B안 PR 6) — 다른 탭·이 창이 신호를 받아 '내 줄'을 다시 읽는다.
+      void commentNotificationPreviewStore().fanoutAdd(
+        mockRecipientWorld(), commentId, mockNotificationComment(added),
+        revisionId ? getMockRevisionRows().find((revision) => revision.id === revisionId)?.revisionNo ?? null : null,
+      ).catch((error) => console.warn('[preview] 댓글 알림 줄 만들기 실패:', error));
       emitMockCommentRealtime('INSERT', added);
       postMockCommentChannel({
         kind: 'comment',
@@ -3219,6 +3278,8 @@ export function installDevElectronAPI(): void {
       if (images !== undefined) target.images = images;
       target.editedAt = new Date().toISOString();
       localStore.__commentRows = comments;
+      void commentNotificationPreviewStore().fanoutEdit(mockRecipientWorld(), commentId, previousMentions, mockNotificationComment(target))
+        .catch((error) => console.warn('[preview] 수정 멘션 알림 줄 만들기 실패:', error));
       emitMockCommentRealtime('UPDATE', target);
       postMockCommentChannel({
         kind: 'comment',
@@ -3238,6 +3299,7 @@ export function installDevElectronAPI(): void {
         .filter((comment) => comment.id !== commentId)
         .map((comment) => comment.parentCommentId === commentId ? { ...comment, parentCommentId: null } : comment);
       localStore.__commentRows = comments;
+      void commentNotificationPreviewStore().removeComment(commentId).catch(() => undefined);
       if (removed) {
         emitMockCommentRealtime('DELETE', removed);
         postMockCommentChannel({
@@ -4094,6 +4156,10 @@ export function installDevElectronAPI(): void {
     threadTodoSetDone: async (id, done) => threadTodoPreviewStore().setDone(requireMockCalendarUser(), id, done),
     threadTodoDelete: async (id) => threadTodoPreviewStore().remove(requireMockCalendarUser(), id),
     onThreadTodosChanged: (callback) => threadTodoPreviewStore().subscribe(callback),
+    // 씬 댓글 서버 알림(씬 댓글 B안 PR 6) — 실서버 래퍼처럼 로그인한 사람의 줄만.
+    commentNotificationsList: async (cursor, limit) => commentNotificationPreviewStore().list(requireMockCalendarUser().id, cursor, limit),
+    commentNotificationsMarkRead: async (target) => commentNotificationPreviewStore().markRead(requireMockCalendarUser().id, target),
+    onCommentNotificationsChanged: (callback) => commentNotificationPreviewStore().subscribe(callback),
     // 미리보기 새 창 — Electron main 과 같은 #widget-popup/{widgetId} 해시로 같은 앱을 브라우저 창에 연다(코덱스 4차).
     //   팝업 창도 main.tsx 가 mock 을 설치하고 저장된 로그인 세션을 복원한다. 창을 못 열면(차단) ok:false.
     widgetOpenPopup: async (widgetId, title, extra) => {
