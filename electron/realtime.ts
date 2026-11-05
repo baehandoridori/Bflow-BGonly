@@ -65,6 +65,31 @@ let presenceTrackRetryTimer: NodeJS.Timeout | null = null;
 const retry = createRetryManager('Realtime');
 
 /**
+ * 재시도 한도(10번)를 넘긴 뒤에도 이 간격으로 다시 붙어 본다(v1.149.1). 예전에는 한도를 넘기면 그 세션
+ * 내내 다시 붙지 않아, 보이는 창이 1분마다 '전부 다시 받기'(안전망)로 버텼다.
+ */
+export const REALTIME_GAVE_UP_RETRY_MS = 5 * 60_000;
+let gaveUpRetryTimer: ReturnType<typeof setTimeout> | null = null;
+// 지금 채널의 마지막 상태가 끊김(TIMED_OUT·CLOSED·CHANNEL_ERROR)인가 — 절전에서 깨어났을 때 바로 다시 붙을지 본다.
+let lastStatusWasFailure = false;
+
+function clearGaveUpRetry(): void {
+  if (gaveUpRetryTimer) {
+    clearTimeout(gaveUpRetryTimer);
+    gaveUpRetryTimer = null;
+  }
+}
+
+function scheduleGaveUpRetry(): void {
+  if (gaveUpRetryTimer) return;
+  console.log(`[Realtime] 재시도 한도 초과 — ${REALTIME_GAVE_UP_RETRY_MS / 60_000}분 뒤 다시 연결 시도`);
+  gaveUpRetryTimer = setTimeout(() => {
+    gaveUpRetryTimer = null;
+    if (savedCallbacks) reconnect(savedCallbacks, true);
+  }, REALTIME_GAVE_UP_RETRY_MS);
+}
+
+/**
  * 현재 채널로 lastPresencePayload를 track 시도.
  * Supabase channel.track()은 push 실패를 reject가 아니라 'error'/'timed out' status로 resolve하므로,
  * status !== 'ok' 이거나 reject면 바운드 재시도를 예약한다(성공을 놓치지 않기 위함).
@@ -208,10 +233,24 @@ function scheduleRetry(): void {
   const scheduled = retry.schedule(() => {
     if (savedCallbacks) reconnect(savedCallbacks, true);
   });
-  // 최대 재시도 초과 → 영구 실패 알림
+  // 최대 재시도 초과 → 끊김 알림, 그 뒤로는 5분마다 다시 시도(성공하면 retry.reset() 으로 평소 재시도로 돌아온다)
   if (!scheduled) {
     savedCallbacks.onStatusChange('CLOSED', { reconnected: false });
+    scheduleGaveUpRetry();
   }
+}
+
+/**
+ * 절전에서 깨어났을 때(main 의 powerMonitor 'resume') 부른다. 끊긴 채로 재시도를 기다리는 중이면 지금 바로
+ * 다시 붙는다. 붙어 있거나 붙는 중인 채널은 건드리지 않는다 — 깨어난 뒤 진짜로 끊긴 것이면 SDK 가 알려 와
+ * 평소 재시도로 간다. 다시 붙는 길은 평소 재시도와 같아서, 성공하면 reconnected: true 가 한 번만 간다.
+ */
+export function reconnectRealtimeIfDisconnected(): boolean {
+  if (!savedCallbacks || !lastStatusWasFailure) return false;
+  retry.reset();
+  clearGaveUpRetry();
+  reconnect(savedCallbacks, true);
+  return true;
 }
 
 function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
@@ -225,6 +264,7 @@ function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
   channel = newChannel;
   // 새 채널은 아직 join 전 → track 금지 상태로 초기화.
   isSubscribed = false;
+  lastStatusWasFailure = false;
   // retry로 만든 채널의 첫 성공 join만 renderer catch-up 경계다. 같은 채널이
   // SUBSCRIBED를 중복 통지해도 정본 재조회를 반복하지 않도록 한 번만 소비한다.
   let reconnectCatchUpPending = isRetry;
@@ -239,6 +279,7 @@ function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
     // 연결 단절을 본 현재 채널도 다음 성공 join에서 catch-up을 한 번 요구한다.
     if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') {
       reconnectCatchUpPending = true;
+      lastStatusWasFailure = true;
     }
     const reconnected = status === 'SUBSCRIBED' && reconnectCatchUpPending;
     if (status === 'SUBSCRIBED') reconnectCatchUpPending = false;
@@ -254,8 +295,10 @@ function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
     if (reconnected) callbacks.onCalendarDataMaybeChanged?.();
 
     if (status === 'SUBSCRIBED') {
-      // 연결 성공 — 재시도 카운터 초기화
+      // 연결 성공 — 재시도 카운터 초기화(한도를 넘긴 뒤의 5분 재시도도 멈춘다 — SDK 가 같은 채널로 다시 붙은 경우 포함)
       retry.reset();
+      clearGaveUpRetry();
+      lastStatusWasFailure = false;
       isSubscribed = true;
       // 재연결 시 최신 채널로 presence 재track (끊긴 사이 유실 방지). 비-ok status는 바운드 재시도.
       clearTrackPresenceRetry();
@@ -276,6 +319,7 @@ function reconnect(callbacks: RealtimeCallbacks, isRetry: boolean): void {
 export function setupRealtimeSubscription(callbacks: RealtimeCallbacks): () => void {
   savedCallbacks = callbacks;
   retry.reset();
+  clearGaveUpRetry();
 
   reconnect(callbacks, false);
 
@@ -303,7 +347,9 @@ export function teardownRealtime(): void {
   savedCallbacks = null;
   lastPresencePayload = null;
   isSubscribed = false;
+  lastStatusWasFailure = false;
   clearTrackPresenceRetry();
+  clearGaveUpRetry();
   retry.clear();
   if (channel) {
     supabase.removeChannel(channel);

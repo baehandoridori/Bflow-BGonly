@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog, safeStorage } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog, safeStorage, powerMonitor } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
@@ -1476,7 +1476,7 @@ import {
   deleteCharacterBoardTab as sbDeleteCharacterBoardTab,
 } from './supabase';
 import type { BulkStageUpdate, BulkFieldUpdate } from './supabase';
-import { setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
+import { reconnectRealtimeIfDisconnected, setupRealtimeSubscription, teardownRealtime, trackPresence } from './realtime';
 import { mapCalendarNotificationRow } from '../src/shared/calendarNotifications';
 import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 import { startEditingPresenceService, receivePresence } from './presence/editingPresenceService';
@@ -5527,6 +5527,10 @@ app.whenReady().then(async () => {
 
   // Supabase Realtime 구독 시작
   startSupabaseRealtime();
+  // 절전에서 깨어나면 끊긴 실시간 연결을 재시도 간격(최대 5분)까지 기다리지 않고 바로 다시 붙인다(v1.149.1).
+  powerMonitor.on('resume', () => {
+    if (reconnectRealtimeIfDisconnected()) console.log('[Realtime] 절전 복귀 — 끊긴 연결 바로 다시 시도');
+  });
 
   // 저장된 위젯 자동 복원 (Phase 0-6)
   // .once: 렌더러 재로드(Ctrl+Shift+R, 크래시 복구) 시 사용자가 닫은 위젯 재등장 방지

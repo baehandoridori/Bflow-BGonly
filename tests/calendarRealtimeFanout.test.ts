@@ -328,6 +328,147 @@ test('the live Realtime status contract distinguishes an actual reconnect from t
   }
 });
 
+// v1.149.1: 실제 재시도 관리자(retry-utils)를 그대로 쓰고 Supabase 만 바꿔 끼운다 — 한도·간격이 진짜 값이다.
+function realtimePluginWithRealRetry(): Plugin {
+  return {
+    name: 'realtime-real-retry-test-dependencies',
+    setup(builder) {
+      builder.onResolve({ filter: /^\.\/supabase$/ }, () => ({ path: 'supabase', namespace: 'realtime-real-retry-test' }));
+      builder.onLoad({ filter: /^supabase$/, namespace: 'realtime-real-retry-test' }, () => ({
+        contents: `export const supabase = globalThis.${REALTIME_HARNESS_KEY}.supabase;`,
+      }));
+    },
+  };
+}
+
+async function realRetryRealtimeHarness() {
+  const statusCallbacks: Array<(status: string) => void> = [];
+  const subscribed: boolean[] = [];
+  (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY] = {
+    supabase: {
+      channel: () => ({
+        on() { return this; },
+        subscribe(callback?: (status: string) => void) {
+          if (callback) statusCallbacks.push(callback);
+          return this;
+        },
+        presenceState: () => ({}),
+        track: async () => 'ok',
+      }),
+      removeChannel: () => {},
+    },
+  };
+  const module = await bundleModule("export * from './electron/realtime.ts';", realtimePluginWithRealRetry());
+  const noOp = () => {};
+  const cleanup = (module.setupRealtimeSubscription as (callbacks: Record<string, unknown>) => () => void)({
+    onSceneChange: noOp, onCommentChange: noOp, onRevisionChange: noOp, onRevisionSetChange: noOp,
+    onEpisodeChange: noOp, onPartChange: noOp, onSceneWorkLinkChange: noOp, onActivityInsert: noOp, onCalendarChange: noOp,
+    onStatusChange: (status: string, metadata?: { reconnected?: boolean }) => {
+      if (status === 'SUBSCRIBED') subscribed.push(metadata?.reconnected === true);
+    },
+  });
+  return {
+    module, statusCallbacks, subscribed,
+    channels: () => statusCallbacks.length,
+    latest: (status: string) => statusCallbacks[statusCallbacks.length - 1](status),
+    resume: () => (module.reconnectRealtimeIfDisconnected as () => boolean)(),
+    gaveUpMs: module.REALTIME_GAVE_UP_RETRY_MS as number,
+    cleanup: () => { cleanup(); delete (globalThis as Record<string, unknown>)[REALTIME_HARNESS_KEY]; },
+  };
+}
+
+test('Realtime 은 재시도 한도(10번)를 넘긴 뒤에도 5분마다 다시 붙고, 붙으면 따라잡기는 한 번만 간다', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = await realRetryRealtimeHarness();
+  try {
+    assert.equal(h.gaveUpMs, 5 * 60_000);
+    h.latest('SUBSCRIBED');
+    // 평소 재시도 10번이 모두 실패한다(간격은 최대 1분).
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      h.latest('CHANNEL_ERROR');
+      t.mock.timers.tick(60_000);
+    }
+    assert.equal(h.channels(), 11);
+    h.latest('CHANNEL_ERROR');
+    t.mock.timers.tick(60_000);
+    assert.equal(h.channels(), 11, '한도를 넘기면 평소 간격으로는 더 붙지 않는다');
+    t.mock.timers.tick(h.gaveUpMs - 60_001);
+    assert.equal(h.channels(), 11);
+    t.mock.timers.tick(1);
+    assert.equal(h.channels(), 12, '한도를 넘긴 뒤 5분이 지나면 다시 붙어 본다');
+    h.latest('CLOSED');
+    t.mock.timers.tick(h.gaveUpMs);
+    assert.equal(h.channels(), 13, '그 시도도 실패하면 또 5분 뒤');
+
+    h.latest('SUBSCRIBED');
+    h.latest('SUBSCRIBED');
+    assert.deepEqual(h.subscribed, [false, true, false], '다시 붙은 첫 연결에서만 따라잡기');
+    t.mock.timers.tick(h.gaveUpMs * 3);
+    assert.equal(h.channels(), 13, '붙은 뒤에는 5분 재시도가 멈춘다');
+
+    // 붙은 뒤 끊기면 재시도 횟수가 처음부터(2초) 다시 센다.
+    h.latest('CLOSED');
+    t.mock.timers.tick(2_000);
+    assert.equal(h.channels(), 14);
+  } finally { h.cleanup(); }
+});
+
+test('한도를 넘긴 뒤 SDK 가 같은 채널로 스스로 다시 붙으면 5분 재시도는 채널을 갈아 끼우지 않는다', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = await realRetryRealtimeHarness();
+  try {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      h.latest('CHANNEL_ERROR');
+      t.mock.timers.tick(60_000);
+    }
+    h.latest('CHANNEL_ERROR');
+    assert.equal(h.channels(), 11);
+    h.latest('SUBSCRIBED');
+    assert.deepEqual(h.subscribed, [true]);
+    t.mock.timers.tick(h.gaveUpMs * 2);
+    assert.equal(h.channels(), 11);
+    assert.deepEqual(h.subscribed, [true], '멀쩡한 채널을 다시 만들어 따라잡기를 한 번 더 부르지 않는다');
+  } finally { h.cleanup(); }
+});
+
+test('절전에서 깨어나면 끊긴 채 기다리는 중일 때만 바로 다시 붙는다', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = await realRetryRealtimeHarness();
+  try {
+    assert.equal(h.resume(), false, '첫 연결 중에는 건드리지 않는다');
+    h.latest('SUBSCRIBED');
+    assert.equal(h.resume(), false, '붙어 있으면 건드리지 않는다');
+    assert.equal(h.channels(), 1);
+
+    h.latest('CLOSED');
+    assert.equal(h.resume(), true);
+    assert.equal(h.channels(), 2, '재시도 간격을 기다리지 않고 바로 새 채널');
+    assert.equal(h.resume(), false, '새 채널이 붙는 중이면 또 갈아 끼우지 않는다');
+    t.mock.timers.tick(60_000);
+    assert.equal(h.channels(), 2, '기다리던 평소 재시도는 취소됐다');
+    h.latest('SUBSCRIBED');
+    h.latest('SUBSCRIBED');
+    assert.deepEqual(h.subscribed, [false, true, false]);
+
+    // 한도를 넘겨 5분 대기 중일 때도 바로 다시 붙고, 그 5분 재시도는 취소된다.
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      h.latest('CHANNEL_ERROR');
+      t.mock.timers.tick(60_000);
+    }
+    const beforeResume = h.channels();
+    assert.equal(h.resume(), true);
+    assert.equal(h.channels(), beforeResume + 1);
+    t.mock.timers.tick(h.gaveUpMs);
+    assert.equal(h.channels(), beforeResume + 1);
+  } finally { h.cleanup(); }
+});
+
+test('main 은 절전 복귀 때 끊긴 Realtime 을 바로 다시 붙인다', () => {
+  const main = readFileSync('electron/main.ts', 'utf8');
+  assert.match(main, /import \{[^}]*\bpowerMonitor\b[^}]*\} from 'electron';/);
+  assert.match(main, /startSupabaseRealtime\(\);\s*\/\/[^\n]*\n\s*powerMonitor\.on\('resume', \(\) => \{\s*if \(reconnectRealtimeIfDisconnected\(\)\)/);
+});
+
 test('the shared-calendar migration publishes every table consumed by the realtime channel', () => {
   const migration = readFileSync('DEVLOG/migrations/2026-08-24-shared-calendars.sql', 'utf8');
   const publicationSection = migration.match(
