@@ -93,7 +93,7 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 
 ### 씬 작업 링크 한꺼번에 연결 (v1.134.0)
 
-- 제안은 `saveWorkLinkPathGuarded`의 성공 줄 뒤 한 곳에서만, 대표 파일일 때만, 기다리지 않고 시작한다.
+- 제안은 두 곳에서만 시작한다: `saveWorkLinkPathGuarded`의 성공 줄 뒤, 그리고 가이드 작업 폴더 제안 창(`GuideFolderSuggestSheet`)이 대표 파일을 저장하고 창을 닫은 뒤. 둘 다 대표 파일일 때만, 기다리지 않고 시작한다.
 - 한꺼번에 연결과 되돌리기는 저장소의 `upsertLink`·`deleteLink`를 직접 부른다(가드를 다시 지나면 제안이 되풀이된다).
 - 파일 이름을 읽는 규칙은 `src/utils/sceneFileNameList.ts` 한 곳이고 "틀린 목록보다 묻지 않기"가 원칙이다: 자릿수가 같아야 목록, 하이픈은 범위도 구분자도 아님(글자와 숫자 사이의 틈일 뿐), 글자가 맞고 번호가 둘 이상인 목록은 **연결한 씬 자신의 번호가 없어도** 읽는다(P4 — `requireOwnNumber: false`, 한솔 2026-10-10. 번호가 하나뿐인 목록과 글자 없는 목록은 손잡이와 무관하게 자기 번호가 있어야 한다), 글자 없는 목록은 세 자리부터 믿는다, 글자가 맞는 목록이 글자 없는 목록보다 먼저다, **글자 붙은 씬 목록이 이름에 따로 있으면 글자 없는 조각은 이 씬의 목록으로 읽지 않는다**(같은 파일은 어느 씬에서 연결해도 같은 목록이어야 한다), 받아들이지 않은 `~` 바로 뒤의 목록은 버린다.
 - **이름이 다른 씬들을 가리키면(`namesOtherScenes` — 다른 파트의 목록처럼 글자가 다른 목록) 레이아웃 묶음까지 묻지 않는다**(글자는 맞고 자기 번호만 빠진 목록은 여기에 들지 않는다 — 이름에 적힌 씬들을 권한다).
@@ -112,6 +112,16 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - 새 창(`WidgetPopup`)은 `scene_work_links` 신호에 자료를 다시 받지 않는다(작업 링크는 새 창에 보이지 않는다 — 새 창이 링크를 보여 주게 되면 그 줄을 저장소 반영으로 바꾼다).
 - 개발용 `?preview=feedback-hub` 뿌리에는 창의 호스트가 없다(거기서는 묻지 않는 것이 맞다).
 - 씬 작업 링크 테스트는 `npm run test:scene-links`.
+
+### 가이드 그림 작업 폴더 제안 (v1.150.0)
+
+- 배경 씬 상세 창의 **가이드** 칸에 그림이 들어오면(끌어다 놓기·고르기·Ctrl+V·'클립보드 붙여넣기' 버튼) `suggestGuideFolder`(`src/services/guideFolderSuggestion.ts`)가 그림 저장과 나란히 제안을 만든다. 그림 저장을 기다리게 하지 않고, 실패는 콘솔에만 남긴다. 설계: `docs/superpowers/specs/2026-11-10-guide-image-work-folder-suggest-design.md`.
+- 경로가 있으면 그림이 든 폴더(이름에 씬 번호가 없으면 두 단계 위까지), 없으면 같은 파트 다른 씬의 작업 폴더로 파트 폴더를 찾아 짐작한다. 확실하지 않으면 띄우지 않는다.
+- 폴더 이름은 `sceneFileNameList.ts` 규칙에 `.`도 나눔표로 읽고, 이 씬 가족 글자로 시작하는 목록만 씬 번호로 본다(`241_…`·`png_052` 제외). `.clip` 이름은 기존 규칙 그대로 — '한꺼번에 연결'과 같은 목록이 되게.
+- 창(`GuideFolderSuggestSheet`)은 `upsertLink`를 직접 부른다(가드의 확인 창·알림과 겹치지 않게). 바깥을 눌러도 닫지 않고, 창 밖 키·붙여넣기는 window 캡처에서 멈춘다. 저장 중·저장 뒤에는 실시간 다시 판정을 하지 않는다(내 낙관적 반영을 남의 변경으로 오해하지 않게).
+- 폴더 목록은 `work-folder:list-dir`(공유 드라이브 `G:\공유 드라이브\` 안만, 3초), 탐색기 복사 그림 경로는 `work-folder:clipboard-image-path` 로만 읽는다. `clipboard:read-image-file`은 건드리지 않는다.
+- 설정 '시작 › 씬 작업 링크'의 `guideFolderSuggestEnabled`(없으면 켜짐)로 끈다. 제안할 때마다 새로 읽는다.
+- 테스트는 `npm run test:scene-links`(`guideFolderSuggest*`·`workFolderSuggestIpc`).
 
 ### 리테이크 알림·바로가기 경계 (v1.116.0)
 

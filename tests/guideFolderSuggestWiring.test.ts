@@ -87,6 +87,21 @@ test('부서 하나 창: 가이드만, 다섯 길, 붙여넣기는 ref 로', () 
   assert.ok(single.includes("suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'paste' })"));
 });
 
+test('AGENTS: 한꺼번에 연결 시작점 둘, 새 절', () => {
+  const agents = read('AGENTS.md');
+  assert.ok(agents.includes('### 가이드 그림 작업 폴더 제안 (v1.150.0)'));
+  assert.ok(agents.includes('GuideFolderSuggestSheet'));
+  assert.ok(!agents.includes('- 제안은 `saveWorkLinkPathGuarded`의 성공 줄 뒤 한 곳에서만'));
+});
+
+test('버전 1.150.0 과 안내 첫 항목', () => {
+  assert.equal(JSON.parse(read('package.json')).version, '1.150.0');
+  const lock = JSON.parse(read('package-lock.json'));
+  assert.equal(lock.version, '1.150.0');
+  assert.equal(lock.packages[''].version, '1.150.0');
+  assert.equal(JSON.parse(read('DEVLOG/update-notes.json'))[0].version, '1.150.0');
+});
+
 test('설정: 스위치 문구와 저장 키', () => {
   const section = read('src/components/settings/SceneLinkSection.tsx');
   assert.ok(section.includes('가이드 그림을 넣을 때 작업 폴더 제안'));
