@@ -61,6 +61,32 @@ test('작업 링크 칸이 저장 뒤 빛남 신호를 듣는다', () => {
   assert.ok(panel.includes('WORK_LINK_FLASH_EVENT') && panel.includes('isWorkLinkFlashFor('));
 });
 
+test('서비스: 요청 번호로 옛 결과 버림, 다른 창 떠 있으면 안 띄움, 배경 씬만, 설정 확인', () => {
+  const svc = read('src/services/guideFolderSuggestion.ts');
+  assert.ok(svc.includes('++requestSeq') && svc.includes('!== requestSeq'));
+  assert.ok(svc.includes('dialog[open]') && svc.includes('GuideFolderSuggestSheet.isOpen()'));
+  assert.ok(svc.includes('isGuideFolderSuggestEnabled()'));
+  assert.ok(svc.includes("department !== 'bg'"));
+  assert.ok(svc.includes('loadForSceneUuids(') && svc.includes('GUIDE_FOLDER_LINK_WAIT_MS'));
+});
+
+test('통합 창: 가이드만, 붙여넣기는 지금 씬 uuid 를 ref 로, 업로드보다 먼저', () => {
+  const unified = read('src/components/scenes/UnifiedSceneDetailModal.tsx');
+  assert.equal(count(unified, 'suggestGuideFolder('), 3);
+  assert.ok(squash(unified).includes("onDropBlob={(b)=>{voiduploadImage(b,'guide');suggestGuideFolder({sceneUuid:bgScene?.id,method:'drop',file:b});}}"));
+  assert.ok(unified.includes("sceneUuid: bgSceneIdRef.current, method: 'paste', file: blob"));
+  inOrder(unified, ["sceneUuid: bgSceneIdRef.current, method: 'paste', file: blob", 'await uploadImageRef.current(blob, imageType)']);
+  assert.ok(unified.includes("if (imageType === 'guide') suggestGuideFolder({ sceneUuid: bgScene?.id, method: 'pick', file });"));
+});
+
+test('부서 하나 창: 가이드만, 다섯 길, 붙여넣기는 ref 로', () => {
+  const single = read('src/components/scenes/SceneDetailModal.tsx');
+  assert.equal(count(single, 'suggestGuideFolder('), 5);
+  assert.equal(count(single, "if (imageType === 'guide') suggestGuideFolder("), 5);
+  assert.ok(single.includes("suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'paste', file: blob })"));
+  assert.ok(single.includes("suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'paste' })"));
+});
+
 test('설정: 스위치 문구와 저장 키', () => {
   const section = read('src/components/settings/SceneLinkSection.tsx');
   assert.ok(section.includes('가이드 그림을 넣을 때 작업 폴더 제안'));

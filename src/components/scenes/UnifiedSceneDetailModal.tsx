@@ -56,6 +56,7 @@ import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEdit
 import { editingModalBeamClass } from '@/utils/editingPresence';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { useSceneFlip, useSavedFlash } from '@/hooks/useSceneFlip';
+import { suggestGuideFolder } from '@/services/guideFolderSuggestion';
 import {
   EMPTY_IMAGE_SAVE,
   beginImageSave,
@@ -701,6 +702,9 @@ export function UnifiedSceneDetailModal({
   // Ctrl+V 이미지 붙여넣기 (BG 만, 도킹 모드 제외)
   // 아래 구독은 씬이 바뀌어도 그림 주소가 같으면(둘 다 빈 칸 등) 다시 걸리지 않는다 — 저장 함수는 늘 지금 씬 것을 ref 로 읽는다.
   const uploadImageRef = useRef<(blob: Blob, imageType: 'storyboard' | 'guide') => Promise<boolean>>(async () => false);
+  // 같은 이유로 가이드 작업 폴더 제안도 지금 씬 uuid 를 ref 로 읽는다.
+  const bgSceneIdRef = useRef<string | undefined>(undefined);
+  bgSceneIdRef.current = bgScene?.id;
   useEffect(() => {
     if (dockMode !== 'modal') return;
     if (!bgScene || !bgSheetName) return;
@@ -726,6 +730,8 @@ export function UnifiedSceneDetailModal({
           // v1.30.2: pinnedImageSlot 도 paste 후 자동 해제 (한 번 paste 후 다음은 명시적 재핀).
           setHoveredImageSlot(null);
           setPinnedImageSlot(null);
+          // 가이드면 작업 폴더 제안을 그림 저장과 나란히 시작한다(넣자마자 바로). 씬 uuid 는 지금 값을 ref 로.
+          if (imageType === 'guide') suggestGuideFolder({ sceneUuid: bgSceneIdRef.current, method: 'paste', file: blob });
           // 코덱스 2차 P2: uploadImage 가 boolean 반환 — 성공 시에만 success 토스트.
           //   실패 시 uploadImage 자체가 error 토스트 띄움. 이중 토스트 방지.
           const ok = await uploadImageRef.current(blob, imageType);
@@ -786,10 +792,12 @@ export function UnifiedSceneDetailModal({
     input.accept = 'image/*';
     input.onchange = () => {
       const file = input.files?.[0];
-      if (file) uploadImage(file, imageType);
+      if (!file) return;
+      uploadImage(file, imageType);
+      if (imageType === 'guide') suggestGuideFolder({ sceneUuid: bgScene?.id, method: 'pick', file });
     };
     input.click();
-  }, [uploadImage]);
+  }, [uploadImage, bgScene?.id]);
 
   const removeImage = useCallback((imageType: 'storyboard' | 'guide') => {
     if (!bgScene || !bgSheetName) return;
@@ -1111,7 +1119,7 @@ export function UnifiedSceneDetailModal({
                                 onPick={() => pickFile('guide')}
                                 onRemove={() => setDeleteConfirm('guide')}
                                 onView={() => setShowImageModal('guide')}
-                                onDropBlob={(b) => uploadImage(b, 'guide')}
+                                onDropBlob={(b) => { void uploadImage(b, 'guide'); suggestGuideFolder({ sceneUuid: bgScene?.id, method: 'drop', file: b }); }}
                                 onHoverChange={(h) => setHoveredImageSlot(h ? 'guide' : (s) => s === 'guide' ? null : s)}
                                 pinned={pinnedImageSlot === 'guide'}
                                 onPinToggle={() => setPinnedImageSlot((p) => p === 'guide' ? null : 'guide')}

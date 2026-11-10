@@ -52,6 +52,7 @@ import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { useSceneFlip, useSavedFlash } from '@/hooks/useSceneFlip';
+import { suggestGuideFolder } from '@/services/guideFolderSuggestion';
 import {
   EMPTY_IMAGE_SAVE,
   beginImageSave,
@@ -530,6 +531,9 @@ export function SceneDetailModal({
   // 부서 전환(DeptToggle)은 같은 컷을 곧바로 다시 여는 흐름이라 부모 onClose 를 바로 부른다.
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
+  // 가이드 작업 폴더 제안 — 붙여넣기 구독이 늦게 다시 걸려도 지금 씬 uuid 를 쓰게 ref 로 읽는다.
+  const sceneIdRef = useRef<string | undefined>(undefined);
+  sceneIdRef.current = scene.id;
   const closedRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -874,6 +878,7 @@ export function SceneDetailModal({
           if (!blob) continue;
           // 스토리보드가 없으면 스토리보드에, 아니면 가이드에
           const imageType: 'storyboard' | 'guide' = !scene.storyboardUrl ? 'storyboard' : 'guide';
+          if (imageType === 'guide') suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'paste', file: blob });
           await saveSlotImage(imageType, () => resizeBlob(blob), { log: '[Ctrl+V 실패]', toast: '이미지 붙여넣기 실패' });
           return;
         }
@@ -894,6 +899,7 @@ export function SceneDetailModal({
         const file = input.files?.[0];
         if (!file) return;
         void saveSlotImage(imageType, () => resizeBlob(file), { log: '[파일 선택 실패]', toast: '이미지 저장 실패' });
+        if (imageType === 'guide') suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'pick', file });
       };
       input.click();
     },
@@ -901,7 +907,9 @@ export function SceneDetailModal({
   );
 
   const pasteClipboard = useCallback(
-    (imageType: 'storyboard' | 'guide') => saveSlotImage(
+    (imageType: 'storyboard' | 'guide') => {
+      if (imageType === 'guide') suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'paste' });
+      return saveSlotImage(
       imageType,
       async () => {
         // 클립보드에서 이미지 읽기 → 즉시 프리뷰
@@ -910,7 +918,8 @@ export function SceneDetailModal({
         return dataUrl || null;
       },
       { log: '[클립보드 붙여넣기 실패]', toast: '클립보드 붙여넣기 실패' },
-    ),
+      );
+    },
     [saveSlotImage],
   );
 
@@ -923,6 +932,7 @@ export function SceneDetailModal({
           e.preventDefault();
           const blob = item.getAsFile();
           if (!blob) continue;
+          if (imageType === 'guide') suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'paste', file: blob });
           await saveSlotImage(imageType, () => resizeBlob(blob), { log: '[Ctrl+V 실패]', toast: '이미지 붙여넣기 실패' });
           return;
         }
@@ -935,6 +945,7 @@ export function SceneDetailModal({
     async (e: React.DragEvent, imageType: 'storyboard' | 'guide') => {
       const file = e.dataTransfer?.files?.[0];
       if (!file || !file.type.startsWith('image/')) return;
+      if (imageType === 'guide') suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'drop', file });
       await saveSlotImage(imageType, () => resizeBlob(file), { log: '[드롭 실패]', toast: '이미지 드롭 실패' });
     },
     [saveSlotImage],
