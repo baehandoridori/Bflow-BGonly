@@ -227,6 +227,9 @@ function GuideFolderSheetWindow({
       onCancel={(event) => { event.preventDefault(); close(null); }}
       onKeyDown={stop}
       onPaste={stop}
+      /* 창이 떠 있을 때 그림을 다시 끌어다 놓아도 앱 화면이 그 파일로 바뀌지 않게(기본 동작 막기). */
+      onDragOver={(event) => { event.preventDefault(); }}
+      onDrop={(event) => { event.preventDefault(); }}
     >
       <div aria-hidden className={cn('absolute inset-0 bg-black/55 backdrop-blur-[6px]', closing ? 'bf-gfs-scrim-out' : 'bf-gfs-scrim-in')} />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center">

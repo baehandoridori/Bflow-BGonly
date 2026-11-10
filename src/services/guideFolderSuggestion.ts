@@ -51,7 +51,18 @@ function otherModalOpen(): boolean {
   return document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') !== null;
 }
 
-export function suggestGuideFolder(input: { sceneUuid: string | null | undefined; method: GuideImageMethod; file?: Blob | null }): void {
+/** 아직 뜨지 않은 제안을 버린다 — 씬 상세 창이 다른 씬으로 넘어가거나 닫힐 때. 이미 떠 있는 창은 건드리지 않는다. */
+export function cancelGuideFolderSuggestion(): void {
+  requestSeq += 1;
+}
+
+export function suggestGuideFolder(input: {
+  sceneUuid: string | null | undefined;
+  method: GuideImageMethod;
+  file?: Blob | null;
+  /** 붙여넣기에서 클립보드의 파일 경로(탐색기 '파일 복사')를 읽을까. '클립보드 붙여넣기' 버튼은 그림만 읽으니 false(설계 4.1). */
+  readClipboardPath?: boolean;
+}): void {
   const seq = ++requestSeq;
   void (async () => {
     const { sceneUuid, method, file } = input;
@@ -60,7 +71,7 @@ export function suggestGuideFolder(input: { sceneUuid: string | null | undefined
     if (seq !== requestSeq) return;
 
     let imagePath = imagePathOf(file);
-    if (!imagePath && method === 'paste') {
+    if (!imagePath && method === 'paste' && input.readClipboardPath !== false) {
       imagePath = (await window.electronAPI.workFolderClipboardImagePath?.()) ?? '';
       if (seq !== requestSeq) return;
     }

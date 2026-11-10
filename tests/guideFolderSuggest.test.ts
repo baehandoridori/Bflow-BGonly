@@ -46,6 +46,13 @@ test('isSharedDrivePath: 루트·대소문자·슬래시', () => {
   assert.equal(isSharedDrivePath(''), false);
 });
 
+test('isSharedDrivePath: . / .. 조각으로 공유 드라이브 밖을 가리키면 거절', () => {
+  assert.equal(isSharedDrivePath('G:\\공유 드라이브\\..\\내 드라이브'), false);
+  assert.equal(isSharedDrivePath('G:\\공유 드라이브\\사우스 코리안 파크\\..\\..\\Windows'), false);
+  assert.equal(isSharedDrivePath('G:\\공유 드라이브\\.\\사우스 코리안 파크'), false);
+  assert.equal(isSharedDrivePath('G:\\공유 드라이브\\사우스 코리안 파크\\d054..png'), true);
+});
+
 test('samePath: 끝 역슬래시·대소문자·슬래시 무시, 빈 값끼리는 다르다', () => {
   assert.equal(samePath(`${D}\\d파트\\d054\\`, `${D.toLowerCase()}/d파트/d054`), true);
   assert.equal(samePath(`${D}\\d파트\\d054`, `${D}\\d파트\\d055`), false);

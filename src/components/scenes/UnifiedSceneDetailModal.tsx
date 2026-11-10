@@ -56,7 +56,7 @@ import { useSceneEditingPresence, useSceneCollisionWarn } from '@/stores/useEdit
 import { editingModalBeamClass } from '@/utils/editingPresence';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { useSceneFlip, useSavedFlash } from '@/hooks/useSceneFlip';
-import { suggestGuideFolder } from '@/services/guideFolderSuggestion';
+import { cancelGuideFolderSuggestion, suggestGuideFolder } from '@/services/guideFolderSuggestion';
 import {
   EMPTY_IMAGE_SAVE,
   beginImageSave,
@@ -705,6 +705,8 @@ export function UnifiedSceneDetailModal({
   // 같은 이유로 가이드 작업 폴더 제안도 지금 씬 uuid 를 ref 로 읽는다.
   const bgSceneIdRef = useRef<string | undefined>(undefined);
   bgSceneIdRef.current = bgScene?.id;
+  // 다른 씬으로 넘어가거나 창이 닫히면 아직 안 뜬 제안(앞 씬 것)은 버린다.
+  useEffect(() => () => cancelGuideFolderSuggestion(), [bgScene?.id]);
   useEffect(() => {
     if (dockMode !== 'modal') return;
     if (!bgScene || !bgSheetName) return;

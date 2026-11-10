@@ -52,7 +52,7 @@ import { AssigneeProgressStack } from './AssigneeProgressStack';
 import { hasMultiAssigneeProgress } from '@/utils/assigneeProgress';
 import { useMotionPref } from '@/hooks/useMotionPref';
 import { useSceneFlip, useSavedFlash } from '@/hooks/useSceneFlip';
-import { suggestGuideFolder } from '@/services/guideFolderSuggestion';
+import { cancelGuideFolderSuggestion, suggestGuideFolder } from '@/services/guideFolderSuggestion';
 import {
   EMPTY_IMAGE_SAVE,
   beginImageSave,
@@ -534,6 +534,8 @@ export function SceneDetailModal({
   // 가이드 작업 폴더 제안 — 붙여넣기 구독이 늦게 다시 걸려도 지금 씬 uuid 를 쓰게 ref 로 읽는다.
   const sceneIdRef = useRef<string | undefined>(undefined);
   sceneIdRef.current = scene.id;
+  // 다른 씬으로 넘어가거나 창이 닫히면 아직 안 뜬 제안(앞 씬 것)은 버린다.
+  useEffect(() => () => cancelGuideFolderSuggestion(), [scene.id]);
   const closedRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -907,19 +909,18 @@ export function SceneDetailModal({
   );
 
   const pasteClipboard = useCallback(
-    (imageType: 'storyboard' | 'guide') => {
-      if (imageType === 'guide') suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'paste' });
-      return saveSlotImage(
+    (imageType: 'storyboard' | 'guide') => saveSlotImage(
       imageType,
       async () => {
         // 클립보드에서 이미지 읽기 → 즉시 프리뷰
         const dataUrl = await window.electronAPI.clipboardReadImage();
         if (!dataUrl) sonnerToast.error('클립보드에 이미지가 없습니다.');
+        // 그림을 읽었을 때만 작업 폴더 제안 — 이 버튼은 그림만 읽으니 클립보드 파일 경로 없이 짐작한다(설계 4.1).
+        if (dataUrl && imageType === 'guide') suggestGuideFolder({ sceneUuid: sceneIdRef.current, method: 'paste', readClipboardPath: false });
         return dataUrl || null;
       },
       { log: '[클립보드 붙여넣기 실패]', toast: '클립보드 붙여넣기 실패' },
-      );
-    },
+    ),
     [saveSlotImage],
   );
 

@@ -11,9 +11,10 @@ export function normalizeWinPath(path: string): string {
   return slashed.replace(/\\+$/, '');
 }
 
-/** 공유 드라이브 안의 경로인가 — 루트 자체는 아니다. */
+/** 공유 드라이브 안의 경로인가 — 루트 자체는 아니다. '.'·'..' 조각이 있으면 밖을 가리킬 수 있어 거절한다. */
 export function isSharedDrivePath(path: string): boolean {
   const normalized = normalizeWinPath(path).toLowerCase();
   const root = SHARED_DRIVE_ROOT.toLowerCase();
-  return normalized.startsWith(root) && normalized.length > root.length;
+  if (!normalized.startsWith(root) || normalized.length <= root.length) return false;
+  return !normalized.split('\\').some((segment) => segment === '.' || segment === '..');
 }

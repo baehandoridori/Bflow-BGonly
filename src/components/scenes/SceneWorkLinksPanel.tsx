@@ -336,7 +336,7 @@ function WorkLinkRow({
   };
 
   return (
-    <div className={cn('rounded-lg transition-[background-color,box-shadow] duration-[400ms]', flashing && 'bg-accent/15 ring-1 ring-accent')}>
+    <div className={cn('min-w-0 rounded-lg transition-[background-color,box-shadow] duration-[400ms]', flashing && 'bg-accent/15 ring-1 ring-accent')}>
       <PathLinkCard
         kind={linkKind === 'folder' ? 'folder' : 'file'}
         label={kindMeta.label}
