@@ -94,7 +94,9 @@ function GuideFolderSheetWindow({
   const [closing, setClosing] = useState(false);
   // await 뒤에 읽는 값은 지금 값이어야 한다 — 상태가 아닌 ref 로 본다.
   const savingRef = useRef(false);
-  const folderSavedRef = useRef(false);
+  // 이미 저장한 작업 폴더 경로 — 대표 파일만 실패했을 때 다시 시도가 폴더를 건너뛰는 기준. 다른 후보로 바꿔 저장되지 않게 경로로 쥔다.
+  const savedFolderRef = useRef<string | null>(null);
+  const [savedFolder, setSavedFolder] = useState<string | null>(null);
   const closingRef = useRef(false);
 
   // 새 제안이 들어오면 내용만 갈아 끼운다.
@@ -104,7 +106,8 @@ function GuideFolderSheetWindow({
     setClipChecked(true);
     setPhase('idle');
     savingRef.current = false;
-    folderSavedRef.current = false;
+    savedFolderRef.current = null;
+    setSavedFolder(null);
   }, [suggestion, version]);
 
   const previousRef = useRef<HTMLElement | null>(null);
@@ -153,7 +156,7 @@ function GuideFolderSheetWindow({
   // 다른 팀원이 실시간으로 작업 폴더를 바꾸면 다시 판정한다. 내 저장(낙관적 반영)을 남의 변경으로 오해하지 않게 저장 중·뒤엔 보지 않는다.
   const currentFolder = useSceneWorkLinkStore((state) => getSceneWorkLinkSlots(state.linkMap, view.sceneUuid, 'bg').folder?.path ?? null);
   useEffect(() => {
-    if (savingRef.current || folderSavedRef.current || closingRef.current) return;
+    if (savingRef.current || savedFolderRef.current !== null || closingRef.current) return;
     const next = reconcileCurrentFolder(view, currentFolder);
     if (next === null) { close(null); return; }
     if (next !== view) setView(next);
@@ -181,10 +184,11 @@ function GuideFolderSheetWindow({
     const kinds: Array<'folder' | 'primary_file'> = ['folder'];
     let clipSaved: string | null = null;
     try {
-      if (!folderSavedRef.current && !samePath(slotsNow().folder?.path, candidate.folder)) {
+      if (!samePath(savedFolderRef.current, candidate.folder) && !samePath(slotsNow().folder?.path, candidate.folder)) {
         await useSceneWorkLinkStore.getState().upsertLink({ sceneUuid, department: 'bg', linkKind: 'folder', path: candidate.folder, userId });
       }
-      folderSavedRef.current = true;
+      savedFolderRef.current = candidate.folder;
+      setSavedFolder(candidate.folder);
       const clip = showClip && clipChecked ? candidate.clip : null;
       if (clip && !slotsNow().primaryFile?.path) {
         await useSceneWorkLinkStore.getState().upsertLink({ sceneUuid, department: 'bg', linkKind: 'primary_file', path: clip, userId });
@@ -272,6 +276,7 @@ function GuideFolderSheetWindow({
                       name={`${titleId}-candidate`}
                       className="h-4 w-4 shrink-0 accent-accent"
                       checked={index === selected}
+                      disabled={savedFolder !== null}
                       onChange={() => setSelected(index)}
                     />
                     <PathBox path={item.folder} />
