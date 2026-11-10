@@ -35,7 +35,7 @@
   background-color: color-mix(in srgb, rgb(var(--color-accent)) 86%, white);
 }
 
-/* 건너뛰기·나중에 버튼 마우스 올림 — 어두운 화면은 흰 덧칠, 밝은 화면은 검은 덧칠(테마가 뒤집는 색). */
+/* 건너뛰기·그대로 두기 버튼 마우스 올림 — 어두운 화면은 흰 덧칠, 밝은 화면은 검은 덧칠(테마가 뒤집는 색). */
 .bf-gfs-secondary:hover {
   background-color: rgb(var(--color-glass-highlight) / 0.06);
 }
