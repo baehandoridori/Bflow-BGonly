@@ -290,7 +290,7 @@ function GuideFolderSheetWindow({
           ) : null}
 
           {view.mismatch && (
-            <div className="mt-2.5 flex gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-2 text-[11.5px] leading-snug text-amber-200">
+            <div className="bf-gfs-warn mt-2.5 flex gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-2 text-[11.5px] leading-snug text-amber-200">
               <AlertTriangle size={13} className="mt-px shrink-0" aria-hidden />
               <span>{guideFolderMismatchText(view.sceneId)}</span>
             </div>
@@ -311,7 +311,7 @@ function GuideFolderSheetWindow({
           )}
 
           {phase === 'error' && (
-            <p role="alert" className="mt-2.5 flex items-center gap-1.5 text-[11.5px] text-red-300">
+            <p role="alert" className="bf-gfs-error mt-2.5 flex items-center gap-1.5 text-[11.5px] text-red-300">
               <WifiOff size={13} aria-hidden />
               {GUIDE_FOLDER_TEXT.saveFailed}
             </p>
@@ -330,7 +330,7 @@ function GuideFolderSheetWindow({
               <button
                 type="button"
                 onClick={() => close(null)}
-                className="h-8 rounded-lg border border-bg-border px-3.5 text-[12.5px] font-medium text-text-primary transition-colors hover:bg-white/5"
+                className="bf-gfs-secondary h-8 rounded-lg border border-bg-border px-3.5 text-[12.5px] font-medium text-text-primary transition-colors"
               >
                 {secondaryLabel}
               </button>

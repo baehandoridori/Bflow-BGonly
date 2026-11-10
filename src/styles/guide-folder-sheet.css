@@ -35,6 +35,21 @@
   background-color: color-mix(in srgb, rgb(var(--color-accent)) 86%, white);
 }
 
+/* 건너뛰기·나중에 버튼 마우스 올림 — 어두운 화면은 흰 덧칠, 밝은 화면은 검은 덧칠(테마가 뒤집는 색). */
+.bf-gfs-secondary:hover {
+  background-color: rgb(var(--color-glass-highlight) / 0.06);
+}
+
+/* 밝은 화면: 어두운 화면용 연한 노랑·빨강 글자는 흰 카드에서 거의 안 보인다 → 진한 색으로(흰 바탕 대비 4.5:1 이상). */
+[data-color-mode="light"] .bf-gfs-warn {
+  color: #92400e;
+  background-color: rgb(217 119 6 / 0.1);
+  border-color: rgb(217 119 6 / 0.35);
+}
+[data-color-mode="light"] .bf-gfs-error {
+  color: #ae3428;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bf-gfs-scrim-in,
   .bf-gfs-scrim-out,
