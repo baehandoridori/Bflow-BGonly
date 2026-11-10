@@ -20,6 +20,7 @@ import {
   getWorkLinkWarnings,
   type WorkLinkWarning,
 } from '@/utils/sceneWorkLinks';
+import { WORK_LINK_FLASH_EVENT, isWorkLinkFlashFor, type WorkLinkFlashDetail } from '@/utils/workLinkFlash';
 import type { Scene, SceneWorkLink, SceneWorkLinkDepartment } from '@/types';
 
 type SlotKind = 'folder' | 'primary_file';
@@ -174,6 +175,24 @@ function WorkLinkRow({
   const savingRef = useRef(false);
   const [opening, setOpening] = useState(false);
   const [exists, setExists] = useState<boolean | null>(null);
+  // 가이드 작업 폴더 제안으로 이 칸이 방금 채워졌으면 잠깐 빛낸다(설계 2026-11-10 4.7).
+  const [flashing, setFlashing] = useState(false);
+  const sceneUuid = scene?.id;
+  useEffect(() => {
+    let timer: number | undefined;
+    const onFlash = (event: Event) => {
+      const detail = (event as CustomEvent<WorkLinkFlashDetail>).detail;
+      if (!detail || !isWorkLinkFlashFor(detail, sceneUuid, department, linkKind)) return;
+      setFlashing(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setFlashing(false), 1200);
+    };
+    window.addEventListener(WORK_LINK_FLASH_EVENT, onFlash);
+    return () => {
+      window.removeEventListener(WORK_LINK_FLASH_EVENT, onFlash);
+      window.clearTimeout(timer);
+    };
+  }, [department, linkKind, sceneUuid]);
 
   const kindMeta = KIND_META[linkKind];
   const canEdit = !!scene?.id;
@@ -318,6 +337,7 @@ function WorkLinkRow({
 
   return (
     <>
+      <div className={cn('rounded-lg transition-[background-color,box-shadow] duration-[400ms]', flashing && 'bg-accent/15 ring-1 ring-accent')}>
       <PathLinkCard
         kind={linkKind === 'folder' ? 'folder' : 'file'}
         label={kindMeta.label}
@@ -377,6 +397,7 @@ function WorkLinkRow({
           </div>
         )}
       </PathLinkCard>
+      </div>
 
       {menuOpen && menuPos && createPortal(
         <div

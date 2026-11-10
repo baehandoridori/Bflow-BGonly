@@ -18,7 +18,18 @@ import {
   samePath,
 } from '../src/utils/guideFolderSuggest.ts';
 
+import { isWorkLinkFlashFor } from '../src/utils/workLinkFlash.ts';
+
 const D = 'G:\\공유 드라이브\\사우스 코리안 파크\\241_싱크홀 대축제\\배경_싱크홀';
+
+test('isWorkLinkFlashFor: 같은 씬·부서·칸만', () => {
+  const detail = { sceneUuid: 'u1', department: 'bg' as const, kinds: ['folder' as const] };
+  assert.equal(isWorkLinkFlashFor(detail, 'u1', 'bg', 'folder'), true);
+  assert.equal(isWorkLinkFlashFor(detail, 'u1', 'bg', 'primary_file'), false);
+  assert.equal(isWorkLinkFlashFor(detail, 'u2', 'bg', 'folder'), false);
+  assert.equal(isWorkLinkFlashFor(detail, 'u1', 'acting', 'folder'), false);
+  assert.equal(isWorkLinkFlashFor(detail, null, 'bg', 'folder'), false);
+});
 const scene = (id: string) => ({ sceneId: id, partId: 'D' });
 
 test('normalizeWinPath: 슬래시·연속 역슬래시·끝 역슬래시', () => {

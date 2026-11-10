@@ -15,7 +15,51 @@ function inOrder(source: string, parts: string[]): void {
     at = found + part.length;
   }
 }
-void squash; void count; void inOrder;
+
+test('창: 네이티브 dialog, 바깥 누름으로 닫지 않음, 키·붙여넣기 뒤로 새지 않음', () => {
+  const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
+  assert.ok(sheet.includes('.showModal()'));
+  assert.ok(sheet.includes("window.addEventListener('keydown',") && sheet.includes("window.addEventListener('paste',"));
+  assert.ok(squash(sheet).includes('onCancel={(event)=>{event.preventDefault();'));
+  assert.ok(!sheet.includes('onMouseDown'), '바깥 누름 닫기 없음(설계 4.8)');
+  assert.ok(sheet.includes('onKeyDown={stop}') && sheet.includes('onPaste={stop}'));
+});
+
+test('창: 저장은 upsertLink 직접, 가드 길 안 씀', () => {
+  const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
+  assert.ok(sheet.includes('upsertLink(') && !sheet.includes('saveWorkLinkPathGuarded'));
+});
+
+test('창: 한꺼번에 연결은 dialog.close() 뒤에', () => {
+  inOrder(read('src/components/scenes/GuideFolderSuggestSheet.tsx'), ['dialogRef.current?.close()', 'offerBulkWorkLink(']);
+});
+
+test('창: 저장 중·저장 뒤에는 실시간 다시 판정 안 함', () => {
+  const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
+  assert.ok(sheet.includes('reconcileCurrentFolder('));
+  inOrder(sheet, ['if (savingRef.current || folderSavedRef.current || closingRef.current) return;', 'reconcileCurrentFolder(']);
+});
+
+test('창: 긍정 버튼 강조색, accent-sub 안 씀', () => {
+  const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
+  assert.ok(sheet.includes('bg-accent text-on-accent') && !sheet.includes('accent-sub'));
+});
+
+test('창: 흐림은 겹 하나에만, 줄이기에서는 시트 움직임 없음', () => {
+  const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
+  assert.equal(count(sheet, 'backdrop-blur'), 1);
+  const css = read('src/styles/motion-popups-panels.css');
+  inOrder(css, ['@media (prefers-reduced-motion: reduce)', '.bf-gfs-sheet-in', 'animation: none']);
+});
+
+test('App 이 창 호스트를 띄운다', () => {
+  inOrder(read('src/App.tsx'), ['<BulkWorkLinkDialogHost />', '<GuideFolderSuggestSheetHost />']);
+});
+
+test('작업 링크 칸이 저장 뒤 빛남 신호를 듣는다', () => {
+  const panel = read('src/components/scenes/SceneWorkLinksPanel.tsx');
+  assert.ok(panel.includes('WORK_LINK_FLASH_EVENT') && panel.includes('isWorkLinkFlashFor('));
+});
 
 test('설정: 스위치 문구와 저장 키', () => {
   const section = read('src/components/settings/SceneLinkSection.tsx');
