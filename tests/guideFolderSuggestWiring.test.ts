@@ -96,12 +96,12 @@ test('AGENTS: 한꺼번에 연결 시작점 둘, 새 절', () => {
   assert.ok(!agents.includes('- 제안은 `saveWorkLinkPathGuarded`의 성공 줄 뒤 한 곳에서만'));
 });
 
-test('버전 1.150.0 과 안내 첫 항목', () => {
-  assert.equal(JSON.parse(read('package.json')).version, '1.150.0');
+test('버전 1.150.1 과 안내 첫 항목', () => {
+  assert.equal(JSON.parse(read('package.json')).version, '1.150.1');
   const lock = JSON.parse(read('package-lock.json'));
-  assert.equal(lock.version, '1.150.0');
-  assert.equal(lock.packages[''].version, '1.150.0');
-  assert.equal(JSON.parse(read('DEVLOG/update-notes.json'))[0].version, '1.150.0');
+  assert.equal(lock.version, '1.150.1');
+  assert.equal(lock.packages[''].version, '1.150.1');
+  assert.equal(JSON.parse(read('DEVLOG/update-notes.json'))[0].version, '1.150.1');
 });
 
 test('최종 리뷰: 작업 링크 칸 감싸기는 그리드 칸이 줄어들 수 있게 min-w-0', () => {
@@ -145,6 +145,39 @@ test('코덱스 2차 P2: 저장이 도는 동안 후보·대표 파일 체크를
   const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
   assert.equal(count(sheet, "disabled={phase === 'saving' || savedFolder !== null}"), 1);
   assert.ok(sheet.includes("disabled={phase === 'saving'}\n"), '대표 파일 체크도 저장 중엔 잠근다');
+});
+
+// 밝은 테마 대비: 흰 카드(255,255,255) 위 글자 대비가 4.5:1 이상이어야 읽힌다(WCAG AA 본문).
+function luminance(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function contrastOnWhite(hex: string): number {
+  return 1.05 / (luminance(hex) + 0.05);
+}
+function lightRuleColor(css: string, className: string): string {
+  const rule = new RegExp(`\\[data-color-mode="light"\\] \\.${className}\\s*\\{([^}]*)\\}`).exec(css);
+  assert.ok(rule, `밝은 테마 규칙이 없다: .${className}`);
+  const color = /(?:^|[;\s])color:\s*(#[0-9a-fA-F]{6})/.exec(rule[1]);
+  assert.ok(color, `밝은 테마 글자색이 없다: .${className}`);
+  return color[1];
+}
+
+test('밝은 테마: 번호 다름 경고·저장 실패 글자가 흰 카드에서 읽힌다', () => {
+  const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
+  assert.ok(sheet.includes('bf-gfs-warn') && sheet.includes('bf-gfs-error'));
+  const css = read('src/styles/guide-folder-sheet.css');
+  assert.ok(contrastOnWhite(lightRuleColor(css, 'bf-gfs-warn')) >= 4.5, '경고 글자 대비 부족');
+  assert.ok(contrastOnWhite(lightRuleColor(css, 'bf-gfs-error')) >= 4.5, '오류 글자 대비 부족');
+});
+
+test('밝은 테마: 건너뛰기 버튼 마우스 올림이 흰 카드에서도 보인다', () => {
+  const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
+  assert.ok(!sheet.includes('hover:bg-white/5'), '흰 바탕에 흰 덧칠은 안 보인다');
+  assert.ok(sheet.includes('bf-gfs-secondary'));
+  const css = read('src/styles/guide-folder-sheet.css');
+  assert.ok(/\.bf-gfs-secondary:hover[^{]*\{[^}]*var\(--color-glass-highlight\)/.test(css), '테마 따라 뒤집히는 덧칠 색을 쓴다');
 });
 
 test('설정: 스위치 문구와 저장 키', () => {
