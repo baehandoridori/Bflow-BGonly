@@ -336,8 +336,7 @@ function WorkLinkRow({
   };
 
   return (
-    <>
-      <div className={cn('rounded-lg transition-[background-color,box-shadow] duration-[400ms]', flashing && 'bg-accent/15 ring-1 ring-accent')}>
+    <div className={cn('rounded-lg transition-[background-color,box-shadow] duration-[400ms]', flashing && 'bg-accent/15 ring-1 ring-accent')}>
       <PathLinkCard
         kind={linkKind === 'folder' ? 'folder' : 'file'}
         label={kindMeta.label}
@@ -397,7 +396,6 @@ function WorkLinkRow({
           </div>
         )}
       </PathLinkCard>
-      </div>
 
       {menuOpen && menuPos && createPortal(
         <div
@@ -424,6 +422,6 @@ function WorkLinkRow({
         </div>,
         document.body,
       )}
-    </>
+    </div>
   );
 }
