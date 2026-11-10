@@ -114,6 +114,7 @@ import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { BulkWorkLinkDialogHost } from '@/components/scenes/BulkWorkLinkDialog';
+import { GuideFolderSuggestSheetHost } from '@/components/scenes/GuideFolderSuggestSheet';
 import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
 import { useCalendarStore } from '@/stores/useCalendarStore';
@@ -3223,6 +3224,7 @@ export default function App() {
       {/* Promise 기반 확인 다이얼로그 호스트 */}
       <ConfirmDialogHost />
       <BulkWorkLinkDialogHost />
+      <GuideFolderSuggestSheetHost />
       <UpdateCenterModal />
 
       {/* Sonner 토스트 — 대화상자가 #root를 inert 처리해도 알림은 body에서 유지 */}

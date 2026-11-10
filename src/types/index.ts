@@ -1140,6 +1140,10 @@ export interface ElectronAPI extends CalendarApiInputContract {
   imageGetDir: () => Promise<string>;
   clipboardReadImage: () => Promise<string | null>;
   clipboardReadImageFile: () => Promise<{ fileName: string; dataUrl: string } | null>;
+  /** 탐색기에서 '파일 복사'한 그림의 경로. 그림이 아니거나 없으면 null(가이드 작업 폴더 제안). */
+  workFolderClipboardImagePath?: () => Promise<string | null>;
+  /** 공유 드라이브 폴더의 한 단계 하위 이름(폴더 또는 파일). 공유 드라이브 밖·시간 초과·오류면 null. */
+  workFolderListDir?: (dir: string, kind: 'dirs' | 'files') => Promise<string[] | null>;
   /** PNG 바이트를 클립보드에 그림으로 쓴다 — 창이 앞에 없어도 쓰인다. 읽지 못하는 값이면 false. */
   clipboardWriteImage: (png: Uint8Array) => Promise<boolean>;
   // GAS 연결 (이미지 업로드용 Apps Script 웹 앱)

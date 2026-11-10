@@ -25,6 +25,8 @@ import { registerCalendarIpc, type CalendarNotificationDrain } from './calendarI
 import { registerCalendarReminders } from './calendarReminders';
 import { registerGanttIpc } from './ganttIpc';
 import { registerBackgroundIpc } from './backgroundIpc';
+import { registerWorkFolderSuggestIpc } from './workFolderSuggestIpc';
+import { isSharedDrivePath } from '../src/shared/sharedDrivePath';
 import { createKeptEditsStore, finishKeptEditsBeforeExit, registerKeptEditsIpc } from './backgroundKeptEdits';
 import { createBackgroundStore, startBackgroundRealtime } from './backgroundStore';
 import { uploadBackgroundImage } from './backgroundStorage';
@@ -2583,6 +2585,13 @@ registerBackgroundIpc({
 // The unsaved map edits this PC keeps, one file per account in the app's folder. Nothing of it goes to Supabase.
 const backgroundKeptEdits = createKeptEditsStore(getDataPath());
 registerKeptEditsIpc({ ipc: ipcMain, getSessionOriginOrThrow, store: backgroundKeptEdits });
+// 가이드 그림 작업 폴더 제안 — 공유 드라이브 폴더의 한 단계 목록과 탐색기 복사 그림 경로만(설계 2026-11-10 6절).
+registerWorkFolderSuggestIpc({
+  ipc: ipcMain,
+  readClipboardFilePath: () => clipboardImageFilePath(format => clipboard.readBuffer(format)),
+  readDir: dir => fs.promises.readdir(dir, { withFileTypes: true }),
+  isAllowedPath: isSharedDrivePath,
+});
 calendarStore.setCalendarSessionTokenResolver({ tokenFor: (actorId) => sessionManager.getSessionTokenFor(actorId) });
 registerCalendarSubscriptionIpc({
   getSessionOriginOrThrow,

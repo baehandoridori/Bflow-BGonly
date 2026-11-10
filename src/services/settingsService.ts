@@ -183,6 +183,9 @@ export interface UserPreferences {
   // 시트 뷰 작업 링크 배지 표시 여부 (기본 true)
   sheetWorkLinkBadgesVisible?: boolean;
 
+  // v1.150.0: 가이드 그림을 넣을 때 작업 폴더 제안. 없으면 켜짐(설계 2026-11-10 4.8)
+  guideFolderSuggestEnabled?: boolean;
+
   // 화이트보드 배경색
   whiteboardBgColor?: string;  // 기본값 '#FFFFFF'
 
@@ -234,6 +237,12 @@ export async function savePreferences(prefs: UserPreferences): Promise<boolean> 
     console.error('[설정] 환경설정 저장 실패:', err);
     return false;
   }
+}
+
+/** 가이드 그림을 넣을 때 작업 폴더를 제안하는가. 값이 없거나 읽지 못하면 켜짐. 제안할 때마다 새로 읽는다. */
+export async function isGuideFolderSuggestEnabled(): Promise<boolean> {
+  const prefs = await loadPreferences();
+  return prefs?.guideFolderSuggestEnabled ?? true;
 }
 
 // ─── 테마 설정 ───────────────────────────────
