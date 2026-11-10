@@ -138,7 +138,13 @@ test('코덱스 1차 P2: 다시 시도는 실제로 저장한 폴더 기준, 폴
   assert.ok(sheet.includes('const savedFolderRef = useRef<string | null>(null);'));
   assert.ok(!sheet.includes('folderSavedRef'), '참·거짓 표시 대신 저장한 경로를 쥔다');
   assert.ok(sheet.includes('if (!samePath(savedFolderRef.current, candidate.folder) && !samePath(slotsNow().folder?.path, candidate.folder))'));
-  assert.ok(sheet.includes('disabled={savedFolder !== null}'), '폴더가 저장된 뒤 후보 고르기는 잠긴다');
+  assert.ok(sheet.includes("disabled={phase === 'saving' || savedFolder !== null}"), '저장 중·폴더 저장 뒤 후보 고르기는 잠긴다');
+});
+
+test('코덱스 2차 P2: 저장이 도는 동안 후보·대표 파일 체크를 바꾸지 못한다', () => {
+  const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
+  assert.equal(count(sheet, "disabled={phase === 'saving' || savedFolder !== null}"), 1);
+  assert.ok(sheet.includes("disabled={phase === 'saving'}\n"), '대표 파일 체크도 저장 중엔 잠근다');
 });
 
 test('설정: 스위치 문구와 저장 키', () => {

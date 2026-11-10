@@ -276,7 +276,7 @@ function GuideFolderSheetWindow({
                       name={`${titleId}-candidate`}
                       className="h-4 w-4 shrink-0 accent-accent"
                       checked={index === selected}
-                      disabled={savedFolder !== null}
+                      disabled={phase === 'saving' || savedFolder !== null}
                       onChange={() => setSelected(index)}
                     />
                     <PathBox path={item.folder} />
@@ -298,7 +298,13 @@ function GuideFolderSheetWindow({
 
           {showClip && candidate?.clip && (
             <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12px] text-text-primary">
-              <input type="checkbox" className="h-4 w-4 shrink-0 accent-accent" checked={clipChecked} onChange={(event) => setClipChecked(event.target.checked)} />
+              <input
+                type="checkbox"
+                className="h-4 w-4 shrink-0 accent-accent"
+                checked={clipChecked}
+                disabled={phase === 'saving'}
+                onChange={(event) => setClipChecked(event.target.checked)}
+              />
               {GUIDE_FOLDER_TEXT.clipLabel}
               <span className="text-text-secondary">· {leafName(candidate.clip)}</span>
             </label>
