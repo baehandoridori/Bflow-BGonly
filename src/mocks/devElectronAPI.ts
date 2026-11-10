@@ -240,7 +240,26 @@ type DevPreviewWindow = Window & typeof globalThis & {
   __bflowMockCalendarNotify?: (overrides?: MockCalendarNotificationOverrides) => void;
   __bflowMockSetLoginServerAvailable?: (available: boolean) => void;
   __bflowMockBackgroundAdd?: { filePath?: (file: File) => string; clipboardFile?: string; pick?: () => File[] };
+  /** 가이드 작업 폴더 제안 — 탐색기에서 '파일 복사'한 그림 경로 흉내. 콘솔에서 넣는다. */
+  __bflowMockGuideClipboardPath?: string;
 };
+/** 가이드 작업 폴더 제안 미리보기용 공유 드라이브 폴더 구조(실제 241 싱크홀 대축제 이름 일부). */
+const MOCK_GUIDE_ROOT = 'G:\\공유 드라이브\\사우스 코리안 파크\\241_싱크홀 대축제\\배경_싱크홀';
+const MOCK_GUIDE_TREE: Record<string, { dirs: string[]; files: string[] }> = {
+  [MOCK_GUIDE_ROOT]: { dirs: ['a파트', 'b파트', 'd파트', '프랍'], files: [] },
+  [`${MOCK_GUIDE_ROOT}\\a파트`]: { dirs: ['a001', 'a002', 'a003.005', 'a004'], files: [] },
+  [`${MOCK_GUIDE_ROOT}\\a파트\\a001`]: { dirs: [], files: ['a001.clip', 'a001.png', 'a001가이드.png'] },
+  [`${MOCK_GUIDE_ROOT}\\a파트\\a003.005`]: { dirs: ['png'], files: ['a003.clip', 'a005.clip', 'a003_가이드.png'] },
+  [`${MOCK_GUIDE_ROOT}\\d파트`]: { dirs: ['d028.043.046', 'd043.046', 'd050.052', 'd054', 'd055'], files: [] },
+  [`${MOCK_GUIDE_ROOT}\\d파트\\d054`]: { dirs: [], files: ['d054.clip', 'd054.png', 'd054가이드.png'] },
+  [`${MOCK_GUIDE_ROOT}\\d파트\\d050.052`]: { dirs: ['png'], files: ['d050.clip', 'd052.clip', 'd050_가이드.png'] },
+  [`${MOCK_GUIDE_ROOT}\\d파트\\d043.046`]: { dirs: [], files: ['d043.clip', 'd046.clip'] },
+};
+function mockGuideListDir(dir: string, kind: 'dirs' | 'files'): string[] | null {
+  const key = dir.trim().replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  const found = Object.entries(MOCK_GUIDE_TREE).find(([path]) => path.toLowerCase() === key);
+  return found ? found[1][kind] : null;
+}
 const CALENDAR_TAG_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MOCK_CALENDAR_CHANGE_CHANNEL = 'bflow-dev-calendar-change-v1';
 const MOCK_CALENDAR_TAG_AUTHORITY_STORAGE_KEY = 'bflow-dev-calendar-tag-authority-v1';
@@ -3001,6 +3020,8 @@ export function installDevElectronAPI(): void {
     imageGetDir: async () => '/dev/images',
     clipboardReadImage: async () => null,
     clipboardReadImageFile: async () => null,
+    workFolderClipboardImagePath: async () => (window as DevPreviewWindow).__bflowMockGuideClipboardPath ?? null,
+    workFolderListDir: async (dir: string, kind: 'dirs' | 'files') => mockGuideListDir(dir, kind),
     // 미리보기에는 main 이 없어 브라우저 클립보드로 쓴다(창이 앞에 있을 때만 된다 — 앱과 다른 점).
     clipboardWriteImage: async (png: Uint8Array) => {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([png.slice()], { type: 'image/png' }) })]);

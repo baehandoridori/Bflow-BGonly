@@ -231,6 +231,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clipboardReadImage: () =>
     ipcRenderer.invoke('clipboard:read-image') as Promise<string | null>,
   clipboardReadImageFile: () => ipcRenderer.invoke('clipboard:read-image-file'),
+  // 가이드 그림 작업 폴더 제안 — 탐색기 복사 그림 경로, 공유 드라이브 폴더의 한 단계 목록.
+  workFolderClipboardImagePath: () =>
+    ipcRenderer.invoke('work-folder:clipboard-image-path') as Promise<string | null>,
+  workFolderListDir: (dir: string, kind: 'dirs' | 'files') =>
+    ipcRenderer.invoke('work-folder:list-dir', dir, kind) as Promise<string[] | null>,
   clipboardWriteImage: (png: Uint8Array) =>
     ipcRenderer.invoke('clipboard:write-image', png) as Promise<boolean>,
 
