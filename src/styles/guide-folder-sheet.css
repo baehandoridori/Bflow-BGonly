@@ -1,0 +1,45 @@
+/* 가이드 작업 폴더 제안 창 — 화면 아래에서 올라오는 시트(설계 docs/superpowers/specs/2026-11-10-guide-image-work-folder-suggest-design.md 5.3).
+   창·메뉴 공용 박자(motion-popups-panels.css)는 닫힐 때 움직이지 않지만, 이 시트는 한솔이 시안에서 고른 대로
+   내려가며 닫힌다(짧게 — 다음 동작을 막지 않게). 그래서 공용 파일과 따로 둔다.
+   - 겹(흐림 판)은 자기 투명도만 움직인다 — 흐림 크기는 움직이지 않고, 겹의 조상에는 opacity 를 걸지 않는다.
+   - 동작 줄이기('최소' 포함)에서는 흐림·어둡게는 그대로, 올라옴·내려감·겹 페이드 없이 바로 나타나고 사라진다. */
+
+@keyframes bf-gfs-fade-in {
+  from { opacity: 0; }
+}
+@keyframes bf-gfs-fade-out {
+  to { opacity: 0; }
+}
+@keyframes bf-gfs-up {
+  from { opacity: 0.6; transform: translateY(100%); }
+}
+@keyframes bf-gfs-down {
+  to { opacity: 0; transform: translateY(100%); }
+}
+
+.bf-gfs-scrim-in {
+  animation: bf-gfs-fade-in var(--motion-base) var(--ease-out) backwards;
+}
+.bf-gfs-scrim-out {
+  animation: bf-gfs-fade-out 160ms var(--ease-in) forwards;
+}
+.bf-gfs-sheet-in {
+  animation: bf-gfs-up 320ms var(--ease-out) backwards;
+}
+.bf-gfs-sheet-out {
+  animation: bf-gfs-down 180ms var(--ease-in) forwards;
+}
+
+/* 긍정 버튼 마우스 올림 — 강조색에 흰색을 조금 섞는다(보조 강조색은 테마에 따라 너무 밝아 흰 글자가 안 보인다). */
+.bf-gfs-primary:hover:not(:disabled) {
+  background-color: color-mix(in srgb, rgb(var(--color-accent)) 86%, white);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bf-gfs-scrim-in,
+  .bf-gfs-scrim-out,
+  .bf-gfs-sheet-in,
+  .bf-gfs-sheet-out {
+    animation: none !important;
+  }
+}

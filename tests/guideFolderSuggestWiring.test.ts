@@ -48,8 +48,11 @@ test('창: 긍정 버튼 강조색, accent-sub 안 씀', () => {
 test('창: 흐림은 겹 하나에만, 줄이기에서는 시트 움직임 없음', () => {
   const sheet = read('src/components/scenes/GuideFolderSuggestSheet.tsx');
   assert.equal(count(sheet, 'backdrop-blur'), 1);
-  const css = read('src/styles/motion-popups-panels.css');
+  const css = read('src/styles/guide-folder-sheet.css');
   inOrder(css, ['@media (prefers-reduced-motion: reduce)', '.bf-gfs-sheet-in', 'animation: none']);
+  assert.ok(!css.includes('backdrop-filter'), '흐림 크기를 움직이지 않는다');
+  assert.ok(read('src/main.tsx').includes("import './styles/guide-folder-sheet.css';"));
+  assert.ok(!read('src/styles/motion-popups-panels.css').includes('bf-gfs-'), '공용 박자 파일은 퇴장 움직임 없음 규칙 그대로');
 });
 
 test('App 이 창 호스트를 띄운다', () => {

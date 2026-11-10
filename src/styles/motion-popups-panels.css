@@ -70,43 +70,6 @@
 
 /* 동작 줄이기 — 움직임 없이 opacity 만 100ms. 전역 규칙(index.css 의 * {animation-duration:.01ms !important})보다
    특이도가 높아야 이긴다(클래스 선택자 + !important). */
-/* 가이드 작업 폴더 제안 창 — 아래에서 올라오는 시트(설계 2026-11-10 5.3).
-   겹(흐림 판)은 자기 투명도만 움직인다 — 흐림 크기는 움직이지 않는다. 닫힘은 다음 동작을 막지 않게 짧게 내려간다. */
-@keyframes bf-gfs-up {
-  from { opacity: 0.6; transform: translateY(100%); }
-}
-@keyframes bf-gfs-down {
-  to { opacity: 0; transform: translateY(100%); }
-}
-@keyframes bf-gfs-fade-out {
-  to { opacity: 0; }
-}
-.bf-gfs-scrim-in {
-  animation: bf-fade-in var(--motion-base) var(--ease-out) backwards;
-}
-.bf-gfs-scrim-out {
-  animation: bf-gfs-fade-out 160ms var(--ease-in) forwards;
-}
-.bf-gfs-sheet-in {
-  animation: bf-gfs-up 320ms var(--ease-out) backwards;
-}
-.bf-gfs-sheet-out {
-  animation: bf-gfs-down 180ms var(--ease-in) forwards;
-}
-/* 긍정 버튼 마우스 올림 — 강조색에 흰색을 조금 섞는다(보조 강조색은 테마에 따라 너무 밝아 흰 글자가 안 보인다). */
-.bf-gfs-primary:hover:not(:disabled) {
-  background-color: color-mix(in srgb, rgb(var(--color-accent)) 86%, white);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .bf-gfs-sheet-in,
-  .bf-gfs-sheet-out,
-  .bf-gfs-scrim-in,
-  .bf-gfs-scrim-out {
-    animation: none !important;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .bf-scrim-in,
   .bf-modal-in,
