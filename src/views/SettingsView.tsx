@@ -10,6 +10,7 @@ const SpacingSection = lazy(() => import('@/components/settings/SpacingSection')
 const SheetsSection = lazy(() => import('@/components/settings/SheetsSection').then(m => ({ default: m.SheetsSection })));
 const GuideSection = lazy(() => import('@/components/settings/GuideSection').then(m => ({ default: m.GuideSection })));
 const StartupSection = lazy(() => import('@/components/settings/StartupSection').then(m => ({ default: m.StartupSection })));
+const SceneLinkSection = lazy(() => import('@/components/settings/SceneLinkSection').then(m => ({ default: m.SceneLinkSection })));
 const EffectsSection = lazy(() => import('@/components/settings/EffectsSection').then(m => ({ default: m.EffectsSection })));
 const LoginSection = lazy(() => import('@/components/settings/LoginSection').then(m => ({ default: m.LoginSection })));
 const ProfileSection = lazy(() => import('@/components/settings/ProfileSection').then(m => ({ default: m.ProfileSection })));
@@ -85,7 +86,12 @@ export function SettingsView() {
       case 'effects':
         return <EffectsSection />;
       case 'startup':
-        return <StartupSection />;
+        return (
+          <div className="flex flex-col gap-6">
+            <StartupSection />
+            <SceneLinkSection />
+          </div>
+        );
       case 'login':
         return <LoginSection />;
       case 'shortcuts':
