@@ -12,28 +12,18 @@ import { nativeImage } from 'electron';
 import { supabase } from './supabase';
 import { uploadCharacterImageFiles, type CharacterImageStore } from './characterImageUpload';
 import { withCharacterOriginalPaths } from '../src/shared/characterImageOriginal';
+import { buildSceneImageStoragePath } from '../src/shared/sceneImageStoragePath';
 
 const BUCKET = 'scene-images';
 const MAX_PX = 800;
 const JPEG_QUALITY = 80;
 const SAFE_SIZE_BYTES = 500 * 1024; // 500KB 이상이면 안전망 resize 고려
 
-/** sheetName 예: "EP01_A_BG" → { ep: "EP01", partId: "A", dept: "BG" } */
-function parseSheetName(sheetName: string): { ep: string; partId: string; dept: string } {
-  const m = sheetName.match(/^(EP\d+)_([A-Z])_(BG|ACT)$/);
-  if (!m) throw new Error(`Invalid sheetName: ${sheetName}`);
-  return { ep: m[1], partId: m[2], dept: m[3] };
-}
-
+/** 경로 규칙(씬 번호의 한글 등은 저장소가 받는 글자로 바꿔 적기)은 src/shared/sceneImageStoragePath.ts. */
 function buildPath(sheetName: string, sceneId: string, imageType: string, ext: 'jpg' | 'png'): string {
   // 8자리 hex random suffix로 같은 ms 내 충돌 방지
   const uniq = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  // 캐릭터 댓글 이미지 — sheetName='char', sceneId=characterId. 씬 EP 경로 규칙(parseSheetName) 대신 캐릭터 경로로.
-  if (sheetName === 'char') {
-    return `characters/${sceneId}/comments/${imageType}_${uniq}.${ext}`;
-  }
-  const { ep, partId, dept } = parseSheetName(sheetName);
-  return `${ep}/${partId}/${dept}/${sceneId}/${imageType}_${uniq}.${ext}`;
+  return buildSceneImageStoragePath(sheetName, sceneId, imageType, ext, uniq);
 }
 
 /** public URL → storage 경로 추출 */
