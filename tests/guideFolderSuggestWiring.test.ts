@@ -96,12 +96,12 @@ test('AGENTS: 한꺼번에 연결 시작점 둘, 새 절', () => {
   assert.ok(!agents.includes('- 제안은 `saveWorkLinkPathGuarded`의 성공 줄 뒤 한 곳에서만'));
 });
 
-test('버전 1.150.1 과 안내 첫 항목', () => {
-  assert.equal(JSON.parse(read('package.json')).version, '1.150.1');
+test('버전 1.150.2 과 안내 첫 항목', () => {
+  assert.equal(JSON.parse(read('package.json')).version, '1.150.2');
   const lock = JSON.parse(read('package-lock.json'));
-  assert.equal(lock.version, '1.150.1');
-  assert.equal(lock.packages[''].version, '1.150.1');
-  assert.equal(JSON.parse(read('DEVLOG/update-notes.json'))[0].version, '1.150.1');
+  assert.equal(lock.version, '1.150.2');
+  assert.equal(lock.packages[''].version, '1.150.2');
+  assert.equal(JSON.parse(read('DEVLOG/update-notes.json'))[0].version, '1.150.2');
 });
 
 test('최종 리뷰: 작업 링크 칸 감싸기는 그리드 칸이 줄어들 수 있게 min-w-0', () => {
