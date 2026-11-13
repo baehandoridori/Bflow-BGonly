@@ -11,6 +11,7 @@ import { subscribeToActivityRealtime } from '@/services/supabaseService';
 import {
   loadAssigneeView,
   loadBackgroundLibraryView,
+  loadBaeGyeongView,
   loadCharacterBoardView,
   loadCompositingDashboardView,
   loadCompositingView,
@@ -39,6 +40,7 @@ const CompositingDashboardView = lazy(loadCompositingDashboardView); // v1.30.0+
 const RetakeHubView = lazy(loadRetakeHubView); // 리테이크 허브 5단계 — 감독 세트 허브
 const CharacterBoardView = lazy(loadCharacterBoardView); // 캐릭터 현황판
 const BackgroundLibraryView = lazy(loadBackgroundLibraryView); // 배경 라이브러리
+const BaeGyeongView = lazy(loadBaeGyeongView); // BAE경 (AI 배경 작업실)
 const PlaygroundView = lazy(() => import('@/views/PlaygroundView'));
 const SettingsView = lazy(() => loadSettingsView().then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
@@ -3113,6 +3115,8 @@ export default function App() {
           return <CharacterBoardView />;
         case 'background-library':
           return <BackgroundLibraryView />;
+        case 'bae-gyeong':
+          return <BaeGyeongView />;
         case 'playground':
           return <PlaygroundView authorizedHansol={canAccessPlayground(currentUser)} />;
         case 'settings':

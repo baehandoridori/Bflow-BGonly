@@ -1007,3 +1007,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('character-board:realtime-status', listener);
   },
 });
+
+// BAE경 (AI 배경 작업실). 화면 → 메인 → 세션 래퍼. 키를 돌려받는 통로는 없다 (넣기와 '있음/없음'만).
+contextBridge.exposeInMainWorld('baeGyeongAPI', {
+  access: () => ipcRenderer.invoke('bae:access', canonicalSessionEpoch),
+  settings: () => ipcRenderer.invoke('bae:settings', canonicalSessionEpoch),
+  settingsSave: (key: string, value: unknown, expectedRevision: number) => ipcRenderer.invoke('bae:settings-save', key, value, expectedRevision, canonicalSessionEpoch),
+  settingsSeed: (key: 'manual' | 'fixed', expectedRevision: number) => ipcRenderer.invoke('bae:settings-seed', key, expectedRevision, canonicalSessionEpoch),
+  settingsHistory: (key: string) => ipcRenderer.invoke('bae:settings-history', key, canonicalSessionEpoch),
+  keyStatus: () => ipcRenderer.invoke('bae:key-status', canonicalSessionEpoch),
+  keySet: (key: string) => ipcRenderer.invoke('bae:key-set', key, canonicalSessionEpoch),
+  membersList: () => ipcRenderer.invoke('bae:members-list', canonicalSessionEpoch),
+  membersSet: (userId: string, role: 'user' | 'reviewer' | null) => ipcRenderer.invoke('bae:members-set', userId, role, canonicalSessionEpoch),
+  onChanged: (callback: (what: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { what?: unknown } | undefined) => callback(typeof payload?.what === 'string' ? payload.what : 'settings');
+    ipcRenderer.on('bae:changed', listener);
+    return () => ipcRenderer.removeListener('bae:changed', listener);
+  },
+});

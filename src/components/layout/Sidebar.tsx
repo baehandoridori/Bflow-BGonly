@@ -7,7 +7,8 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { isNavItemHiddenForUser } from './navVisibility';
-import { canAccessBackgroundLibrary, canAccessPlayground } from '@/features/playground/featureFlag';
+import { canAccessBackgroundLibrary, canAccessBaeGyeong, canAccessPlayground } from '@/features/playground/featureFlag';
+import { BaeGyeongIcon } from '@/features/bae-gyeong/icons/BaeGyeongIcon';
 import { BackgroundKeptDot } from '@/features/backgrounds/BackgroundKeptDot';
 import { originFromActivation } from '@/features/playground/transition/dotWipeMath';
 import { usePlaygroundEntryStore } from '@/features/playground/transition/usePlaygroundEntryStore';
@@ -61,6 +62,7 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   // 캐릭터 현황판 — 전면 공개(정식 릴리즈).
   { id: 'character-board', label: '캐릭터', icon: <Drama size={20} /> },
   { id: 'background-library', label: '배경', icon: <Map size={20} /> },
+  { id: 'bae-gyeong', label: 'BAE경', icon: <BaeGyeongIcon size={20} /> },
   { id: 'playground', label: '배플레이그라운드', icon: <Gamepad2 size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
@@ -234,6 +236,7 @@ export function Sidebar() {
     () =>
       NAV_ITEMS.filter((item) => item.id !== 'playground' || canAccessPlayground(currentUser))
         .filter((item) => item.id !== 'background-library' || canAccessBackgroundLibrary(currentUser))
+        .filter((item) => item.id !== 'bae-gyeong' || canAccessBaeGyeong(currentUser))
         // 휴가 탭 등: 지정된 사용자에게는 숨김
         .filter((item) => !isNavItemHiddenForUser(item.id, currentUserName)),
     [currentUser, currentUserName],

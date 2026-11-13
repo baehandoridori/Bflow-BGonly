@@ -1,0 +1,163 @@
+/*
+ * BAE경 화면 (계획 14b 10-2, 시안 docs/mockups/bae-gyeong). 색은 Bflow 토큰(rgb(var(--color-…)))을 쓰고,
+ * BAE경 안에서만 쓰는 새 색은 .bae-root 에만 둔다 (Bflow 공통 토큰은 건드리지 않음 — 14b 14장 11번).
+ * 움직임은 transform · opacity 와 Bflow 박자(--motion-fast/base, --ease-std)만. '움직임: 최소'는 아래 reduce 규칙.
+ */
+.bae-root {
+  --bae-accent-text: var(--color-accent-sub);
+  --bae-field-edge: 104 107 130;
+  --bae-ok: 0 184 148;
+  --bae-warn: 253 203 110;
+  --bae-error: 255 118 117;
+  --bae-tool-layers: 116 185 255;
+  --bae-tool-angle: 85 239 196;
+  --bae-tool-upscale: 253 203 110;
+  --bae-tool-denoise: 253 121 168;
+  --bae-stage: 10 11 17;
+  --bae-tab-h: 40px;
+  --bae-pane-head: 44px;
+  --bae-control: 40px;
+  --bae-control-s: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+  padding: 0 24px 32px;
+  color: rgb(var(--color-text-primary));
+}
+[data-color-mode="light"] .bae-root {
+  --bae-accent-text: 86 70 205;
+  --bae-field-edge: 118 126 144;
+  --bae-ok: 0 102 84;
+  --bae-warn: 116 80 0;
+  --bae-error: 165 40 38;
+  --bae-tool-layers: 31 99 168;
+  --bae-tool-angle: 0 122 98;
+  --bae-tool-upscale: 146 96 0;
+  --bae-tool-denoise: 184 42 104;
+}
+.bae-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.bae-num { font-variant-numeric: tabular-nums; }
+
+/* buttons (시안의 .btn 그대로, 이름만 bae-) */
+.bae-btn {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: var(--bae-control); padding: 0 16px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px;
+  background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); font-size: 0.875rem; font-weight: 500; line-height: 1;
+  white-space: nowrap; cursor: pointer;
+  transition: color var(--motion-base, 180ms) var(--ease-std, ease), background-color var(--motion-base, 180ms) var(--ease-std, ease), border-color var(--motion-base, 180ms) var(--ease-std, ease), transform var(--motion-fast, 120ms) var(--ease-snap, ease);
+}
+.bae-btn:active { transform: translateY(1px); }
+.bae-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.bae-btn:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-btn-primary { border-color: rgb(var(--color-accent)); background: rgb(var(--color-accent)); color: #fff; font-weight: 600; }
+.bae-btn-tint { border-color: color-mix(in srgb, rgb(var(--color-accent)) 35%, rgb(var(--color-bg-card))); background: color-mix(in srgb, rgb(var(--color-accent)) 10%, rgb(var(--color-bg-card))); color: rgb(var(--bae-accent-text)); }
+.bae-btn-ghost { border-color: transparent; background: transparent; color: rgb(var(--color-text-secondary)); }
+.bae-btn-danger { color: rgb(var(--bae-error)); }
+.bae-btn-s { height: var(--bae-control-s); padding: 0 12px; font-size: 0.8125rem; }
+.bae-btn-block { justify-content: flex-start; width: 100%; }
+.bae-tool-layers { --bae-tool: var(--bae-tool-layers); }
+.bae-tool-angle { --bae-tool: var(--bae-tool-angle); }
+.bae-tool-upscale { --bae-tool: var(--bae-tool-upscale); }
+.bae-tool-denoise { --bae-tool: var(--bae-tool-denoise); }
+.bae-tool-same { --bae-tool: var(--bae-accent-text); }
+.bae-tool > svg { color: rgb(var(--bae-tool)); }
+.bae-btn-tool { border-color: color-mix(in srgb, rgb(var(--bae-tool)) 32%, rgb(var(--color-bg-border))); background: color-mix(in srgb, rgb(var(--bae-tool)) 9%, rgb(var(--color-bg-card))); }
+@media (hover: hover) {
+  .bae-btn:hover { background: color-mix(in srgb, rgb(var(--color-bg-border)) 50%, rgb(var(--color-bg-card))); }
+  .bae-btn-primary:hover { border-color: color-mix(in srgb, rgb(var(--color-accent)) 86%, rgb(15 17 23)); background: color-mix(in srgb, rgb(var(--color-accent)) 86%, rgb(15 17 23)); }
+  .bae-btn-tint:hover { background: color-mix(in srgb, rgb(var(--color-accent)) 20%, transparent); }
+  .bae-btn-tool:hover { border-color: color-mix(in srgb, rgb(var(--bae-tool)) 60%, rgb(var(--color-bg-border))); background: color-mix(in srgb, rgb(var(--bae-tool)) 18%, rgb(var(--color-bg-card))); }
+  .bae-btn-ghost:hover { background: color-mix(in srgb, rgb(var(--color-bg-border)) 50%, transparent); color: rgb(var(--color-text-primary)); }
+}
+
+/* tabs and this month's use (탭 줄은 스크롤하지 않는다 — 14b 10-2) */
+.bae-tabs { display: flex; align-items: stretch; gap: 16px; height: var(--bae-tab-h); border-bottom: 1px solid rgb(var(--color-bg-border)); }
+.bae-tablist { display: flex; gap: 4px; min-width: 0; }
+.bae-tab { position: relative; display: inline-flex; align-items: center; height: 100%; padding: 0 12px; border: 0; border-radius: 6px 6px 0 0; background: transparent; color: rgb(var(--color-text-secondary)); font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: color var(--motion-base, 180ms) var(--ease-std, ease); }
+.bae-tab:hover { color: rgb(var(--color-text-primary)); }
+.bae-tab:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: -2px; }
+.bae-tab[aria-current="page"] { color: rgb(var(--color-text-primary)); }
+.bae-tab[aria-current="page"]::after { content: ""; position: absolute; right: 12px; bottom: -1px; left: 12px; height: 2px; border-radius: 999px; background: rgb(var(--color-accent)); }
+.bae-usage { display: flex; align-items: center; gap: 16px; margin-left: auto; white-space: nowrap; }
+.bae-month { display: flex; align-items: baseline; gap: 8px; margin: 0; }
+.bae-month dt { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-month dd { margin: 0; font-size: 0.8125rem; font-weight: 600; }
+.bae-month dd + dd { padding-left: 8px; border-left: 1px solid rgb(var(--color-bg-border)); }
+.bae-pc svg { color: rgb(var(--bae-ok)); }
+.bae-pc.is-not-ready svg { color: rgb(var(--bae-warn)); }
+
+/* start row */
+.bae-start { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
+.bae-start-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bae-push { margin-left: auto; }
+.bae-group-label { margin-right: 4px; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); white-space: nowrap; }
+
+/* the bench: 1 재료 · 2 주문서 · 3 결과 = 3 : 3 : 6, 높이 32cqw + 154px (어떤 상태에서도 같음) */
+.bae-bench { position: relative; overflow: hidden; container-type: inline-size; border: 1px solid rgb(var(--color-bg-border)); border-radius: 12px; background: rgb(var(--color-bg-card)); }
+.bae-panes { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 3fr) minmax(0, 6fr); min-height: calc(32cqw + 154px); margin: 0; padding: 0; list-style: none; }
+.bae-pane { display: flex; flex-direction: column; min-width: 0; }
+.bae-pane + .bae-pane { border-left: 1px solid rgb(var(--color-bg-border)); }
+.bae-pane-head { display: flex; align-items: center; gap: 12px; height: var(--bae-pane-head); padding: 0 12px 0 16px; border-bottom: 1px solid rgb(var(--color-bg-border)); }
+.bae-pane-title { margin: 0; font-size: 0.8125rem; font-weight: 600; white-space: nowrap; }
+.bae-pane-body { flex: 1; display: flex; flex-direction: column; gap: 16px; min-height: 0; padding: 16px; }
+.bae-empty-text { margin: 0; font-size: 0.8125rem; color: rgb(var(--color-text-secondary)); }
+.bae-empty-acts { display: flex; flex-direction: column; gap: 8px; }
+.bae-well { display: flex; align-items: center; justify-content: center; flex: 1; border: 1px dashed rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); }
+.bae-msg { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 24px; }
+.bae-msg-title { margin: 0; font-size: 0.875rem; font-weight: 600; }
+.bae-msg-text { margin: 0; font-size: 0.8125rem; color: rgb(var(--color-text-secondary)); }
+
+/* my records */
+.bae-log { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.bae-log-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.bae-h2 { margin: 0; font-size: 0.875rem; font-weight: 600; }
+.bae-log-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 100%; }
+.bae-search { position: relative; display: block; color: rgb(var(--color-text-secondary)); }
+.bae-search svg { position: absolute; top: 50%; left: 10px; transform: translateY(-50%); pointer-events: none; }
+.bae-search-input { width: 240px; height: var(--bae-control-s); padding: 0 12px 0 32px; border: 1px solid rgb(var(--bae-field-edge)); border-radius: 8px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); font-size: 0.8125rem; outline: 2px solid transparent; outline-offset: -3px; }
+.bae-search-input::placeholder { color: rgb(var(--color-text-secondary)); }
+.bae-search-input:focus-visible { outline-color: rgb(var(--color-accent-sub)); }
+.bae-seg { display: inline-flex; }
+.bae-seg .bae-btn { border-radius: 0; }
+.bae-seg .bae-btn + .bae-btn { margin-left: -1px; }
+.bae-seg .bae-btn:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.bae-seg .bae-btn:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+.bae-seg .bae-btn[aria-pressed="true"] { z-index: 1; border-color: color-mix(in srgb, rgb(var(--color-accent)) 35%, rgb(var(--color-bg-card))); background: color-mix(in srgb, rgb(var(--color-accent)) 10%, rgb(var(--color-bg-card))); color: rgb(var(--bae-accent-text)); }
+.bae-log-msg { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 24px 12px; border-top: 1px solid rgb(var(--color-bg-border)); }
+
+/* settings tab */
+.bae-set { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; max-width: 980px; }
+.bae-card { display: flex; flex-direction: column; gap: 12px; padding: 20px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 12px; background: rgb(var(--color-bg-card)); }
+.bae-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.bae-card-title { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 0.875rem; font-weight: 600; }
+.bae-card-sub { margin: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-row-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 0.8125rem; }
+.bae-label { font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-text-secondary)); }
+.bae-hint { margin: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-ok-text { color: rgb(var(--bae-ok)); }
+.bae-warn-text { color: rgb(var(--bae-warn)); }
+.bae-error-text { color: rgb(var(--bae-error)); }
+.bae-input, .bae-textarea { width: 100%; padding: 8px 12px; border: 1px solid rgb(var(--bae-field-edge)); border-radius: 8px; background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); font-size: 0.8125rem; outline: 2px solid transparent; outline-offset: -3px; }
+.bae-input { height: var(--bae-control-s); }
+.bae-textarea { min-height: 220px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.75rem; line-height: 1.5; resize: vertical; }
+.bae-input:focus-visible, .bae-textarea:focus-visible { outline-color: rgb(var(--color-accent-sub)); }
+.bae-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; cursor: pointer; }
+.bae-switch input { width: 16px; height: 16px; accent-color: rgb(var(--color-accent)); }
+.bae-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.bae-table th { padding: 6px 8px; border-bottom: 1px solid rgb(var(--color-bg-border)); color: rgb(var(--color-text-secondary)); font-size: 0.75rem; font-weight: 500; text-align: left; }
+.bae-table td { padding: 6px 8px; border-bottom: 1px solid rgb(var(--color-bg-border)); }
+.bae-alert { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, rgb(var(--bae-error)) 40%, rgb(var(--color-bg-border))); border-radius: 8px; background: color-mix(in srgb, rgb(var(--bae-error)) 8%, rgb(var(--color-bg-card))); color: rgb(var(--color-text-primary)); font-size: 0.8125rem; }
+.bae-alert svg { flex: none; color: rgb(var(--bae-error)); }
+
+@media (max-width: 1100px) {
+  .bae-panes { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .bae-pane:nth-child(3) { grid-column: 1 / -1; border-left: 0; border-top: 1px solid rgb(var(--color-bg-border)); }
+}
+@media (max-width: 900px) {
+  .bae-usage { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bae-btn, .bae-tab { transition: none; }
+  .bae-btn:active { transform: none; }
+}

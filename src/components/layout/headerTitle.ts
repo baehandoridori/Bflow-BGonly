@@ -10,6 +10,7 @@ const VIEW_TITLES: Partial<Record<ViewMode, string>> = {
   playground: '배플레이그라운드',
   settings: '설정',
   'background-library': '배경 라이브러리',
+  'bae-gyeong': 'BAE경',
 };
 
 export function resolveHeaderTitle(

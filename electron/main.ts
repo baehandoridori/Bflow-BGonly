@@ -29,6 +29,9 @@ import { registerWorkFolderSuggestIpc } from './workFolderSuggestIpc';
 import { isSharedDrivePath } from '../src/shared/sharedDrivePath';
 import { createKeptEditsStore, finishKeptEditsBeforeExit, registerKeptEditsIpc } from './backgroundKeptEdits';
 import { createBackgroundStore, startBackgroundRealtime } from './backgroundStore';
+import { createBaeStore, startBaeRealtime } from './bae/baeStore';
+import { createBaeKeyring } from './bae/baeKeyring';
+import { registerBaeIpc } from './bae/baeIpc';
 import { uploadBackgroundImage } from './backgroundStorage';
 import { readBackgroundImageFile } from './backgroundImageFile';
 import { registerCalendarSubscriptionIpc } from './calendarSubscriptionIpc';
@@ -2585,6 +2588,16 @@ registerBackgroundIpc({
 // The unsaved map edits this PC keeps, one file per account in the app's folder. Nothing of it goes to Supabase.
 const backgroundKeptEdits = createKeptEditsStore(getDataPath());
 registerKeptEditsIpc({ ipc: ipcMain, getSessionOriginOrThrow, store: backgroundKeptEdits });
+// BAE경: 세션 토큰 래퍼만 부른다. OpenAI 키는 이 프로세스의 메모리에만 있다 (계획 14의 4장).
+const baeStore = createBaeStore(supabaseClient, { tokenFor: actorId => sessionManager.getSessionTokenFor(actorId) });
+const baeKeyring = createBaeKeyring(actorId => baeStore.getKey(actorId));
+registerBaeIpc({
+  ipc: ipcMain,
+  store: baeStore,
+  keyring: baeKeyring,
+  getSessionOriginOrThrow,
+  onChanged: what => broadcastToAllWindows('bae:changed', { what }),
+});
 // 가이드 그림 작업 폴더 제안 — 공유 드라이브 폴더의 한 단계 목록과 탐색기 복사 그림 경로만(설계 2026-11-10 6절).
 registerWorkFolderSuggestIpc({
   ipc: ipcMain,
@@ -3395,9 +3408,15 @@ ipcMain.handle('slack:send-rigging-webhook', wrapIpc(async (_e: unknown, payload
 
 // ─── Realtime 구독 (앱 시작 시 자동 설정) ───
 let backgroundRealtimeCleanup: (() => void) | null = null;
+let baeRealtimeCleanup: (() => void) | null = null;
 function startSupabaseRealtime() {
   backgroundRealtimeCleanup?.();
   backgroundRealtimeCleanup = startBackgroundRealtime(supabaseClient, () => broadcastToAllWindows('background:changed', {}));
+  baeRealtimeCleanup?.();
+  baeRealtimeCleanup = startBaeRealtime(supabaseClient, (what) => {
+    if (what === 'settings') baeKeyring.forget(); // 키가 바뀌었을 수 있다: 다음 호출 때 다시 받는다
+    broadcastToAllWindows('bae:changed', { what });
+  });
   // 1) postgres_changes 기반 (기존)
   setupRealtimeSubscription({
     onSceneChange: (payload) => broadcastSupabaseEvent('scenes', payload),
@@ -5595,6 +5614,9 @@ app.whenReady().then(async () => {
 app.on('before-quit', (e) => {
   backgroundRealtimeCleanup?.();
   backgroundRealtimeCleanup = null;
+  baeRealtimeCleanup?.();
+  baeRealtimeCleanup = null;
+  baeKeyring.forget();
   icsSubscriptionIpc.dispose();
   if (isQuitting) return;
   isQuitting = true;

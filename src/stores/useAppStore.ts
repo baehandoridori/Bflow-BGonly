@@ -33,6 +33,7 @@ export type ViewMode =
   | 'retake-hub'
   | 'character-board'
   | 'background-library'
+  | 'bae-gyeong'
   | 'playground'
   | 'settings';
 // v1.30.0~ : 'compositing' = 새 컴포지팅 현황 대시보드 (CompositingDashboardView)
