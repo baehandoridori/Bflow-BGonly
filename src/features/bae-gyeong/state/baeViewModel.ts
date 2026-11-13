@@ -120,7 +120,7 @@ export function styleEntries(): BaeStyleEntryView[] {
 }
 
 /** 작업대 — 지금 작업 (이 PC 에서 진행 중이거나 방금 끝난 것) */
-export function activeBench(rate: number): { bench: BaeBenchView; busy: BaeBusyView | null } {
+export function activeBench(rate: number, seconds = 0): { bench: BaeBenchView; busy: BaeBusyView | null } {
   const s = useBaeMake.getState(); const j = s.job!; const o = j.order;
   const [w, h] = RATIOS[s.ratio].sizes[s.tier];
   const mat: BaeMaterialsView = {
@@ -144,7 +144,7 @@ export function activeBench(rate: number): { bench: BaeBenchView; busy: BaeBusyV
   };
   const busy: BaeBusyView | null = j.phase === 'ordering' || j.phase === 'drawing' ? {
     phase: j.phase === 'ordering' ? 'order' : 'draw',
-    main: j.phase === 'ordering' ? 'PD가 주문서 쓰는 중' : '그리는 중', sub: j.phase === 'ordering' ? '다 쓰면 요약을 읽고 그림을 만들어요' : `중간 그림 2장 중 ${Math.min(2, j.partialCount)}장`,
+    main: j.phase === 'ordering' ? `PD가 주문서 쓰는 중, ${seconds}초째` : `그리는 중, ${seconds}초째`, sub: j.phase === 'ordering' ? '다 쓰면 요약을 읽고 그림을 만들어요' : `중간 그림 2장 중 ${Math.min(2, j.partialCount)}장`,
     src: j.phase === 'drawing' ? (j.partial ?? j.inputs?.rough.small ?? null) : (j.inputs?.rough.small ?? null), partial: j.phase === 'drawing' && !!j.partial, aspect: w / h,
     facts: [{ k: '크기', v: `${w}×${h}` }, { k: '그림', v: j.phase === 'ordering' ? '아직' : '그리는 중' }, { k: '지금까지', v: wonOf(j.orderCostUsd ?? 0, rate) }],
   } : null;

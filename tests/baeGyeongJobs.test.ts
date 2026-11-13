@@ -123,3 +123,20 @@ test('a job already running refuses a second start; bad job ids are refused', as
   const r = await h.jobs.order(origin, orderCall('not-a-uuid'));
   assert.equal(r.ok, false); assert.match(r.message, /작업 번호/);
 });
+
+test('the draft on this PC belongs to the account that saved it', async () => {
+  const { registerBaeJobsIpc } = await load('electron/bae/baeJobsIpc.ts');
+  const { createBaeLocalStore } = await load('electron/bae/localStore.ts');
+  const local = createBaeLocalStore({ root: fs.mkdtempSync(path.join(os.tmpdir(), 'bae-draft-')) });
+  const handlers = new Map<string, (...a: unknown[]) => Promise<any>>();
+  let who = { userId: 'u1', epoch: 3 };
+  registerBaeJobsIpc({ ipc: { handle: (c: string, h: any) => handlers.set(c, h) }, getSessionOriginOrThrow: () => who, canUse: async () => true,
+    jobs: {} as never, local, flushOutbox() {}, saveAs: async () => null });
+  assert.deepEqual([...handlers.keys()].sort(), ['bae:abort', 'bae:active', 'bae:draft-clear', 'bae:draft-load', 'bae:draft-save', 'bae:draw', 'bae:job-patch', 'bae:local-file', 'bae:online', 'bae:order', 'bae:save-as'].sort());
+  await handlers.get('bae:draft-save')!(null, { data: { request: '작은 거실' }, images: { 'board_paint.png': new Uint8Array([1, 2, 3]) } }, 3);
+  const mine = await handlers.get('bae:draft-load')!(null, 3);
+  assert.deepEqual(mine.data, { request: '작은 거실' }); assert.deepEqual([...mine.images['board_paint.png']], [1, 2, 3]);
+  who = { userId: 'u2', epoch: 4 };
+  assert.equal(await handlers.get('bae:draft-load')!(null, 4), null, "another account does not get my draft");
+  await assert.rejects(handlers.get('bae:draft-load')!(null, 3), /세션이 바뀌었어요/);
+});

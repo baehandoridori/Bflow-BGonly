@@ -158,7 +158,7 @@ export default function BaeGyeongView() {
   }
 
   let bench = null; let busy = null;
-  if (showActive && active) { const b = activeBench(rate); bench = b.bench; busy = b.busy; }
+  if (showActive && active) { const b = activeBench(rate, sec); bench = b.bench; busy = b.busy; }
   else if (benchRecord) bench = recordBench(benchRecord, rate, localBench);
   const big = !!live && make.makingBig && showActive;
 

@@ -83,15 +83,22 @@ export function registerBaeJobsIpc(deps: BaeJobsIpcDeps): void {
     return deps.saveAs(name, bytes);
   });
   deps.ipc.handle('bae:draft-save', async (_e, draft, epoch) => {
-    originFor(epoch);
+    const origin = originFor(epoch);
     const d = draft as { data?: unknown; images?: Record<string, unknown> } | null;
     if (!d || typeof d !== 'object') throw new Error('초안 모양이 올바르지 않아요.');
     const images: Record<string, Uint8Array> = {};
     for (const [k, v] of Object.entries(d.images ?? {})) if (v instanceof Uint8Array) images[k] = v;
-    try { await deps.local.saveDraft({ data: d.data ?? null, images }); return true; }
+    // 초안은 이 PC 에 하나: 주인(로그인한 계정)을 적어 두고, 다른 계정에는 돌려주지 않는다.
+    try { await deps.local.saveDraft({ data: { owner: origin.userId, data: d.data ?? null }, images }); return true; }
     catch (e) { throw new Error(maskSecrets(e instanceof Error ? e.message : String(e))); }
   });
-  deps.ipc.handle('bae:draft-load', async (_e, epoch) => { originFor(epoch); return deps.local.loadDraft(); });
+  deps.ipc.handle('bae:draft-load', async (_e, epoch) => {
+    const origin = originFor(epoch);
+    const d = await deps.local.loadDraft();
+    const box = d?.data as { owner?: unknown; data?: unknown } | null | undefined;
+    if (!d || !box || box.owner !== origin.userId) return null;
+    return { ...d, data: box.data ?? null };
+  });
   deps.ipc.handle('bae:draft-clear', async (_e, epoch) => { originFor(epoch); await deps.local.clearDraft(); return true; });
   /** 화면이 다시 연결됐다고 알릴 때 (window 'online') · BAE경을 열 때: 못 보낸 줄을 바로 보낸다. */
   deps.ipc.handle('bae:online', async (_e, epoch) => { originFor(epoch); deps.flushOutbox(); return true; });

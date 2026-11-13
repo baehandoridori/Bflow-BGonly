@@ -104,8 +104,8 @@ let progressOff: (() => void) | null = null;
 export function baeBoard(): Board {
   if (board) return board;
   board = createBoard({
-    onChange: () => { useBaeMake.setState((s) => ({ boardRev: board!.rev() })); markStale(); },
-    onGuide: () => { const g = board!.guide(); useBaeMake.setState({ guide: { ...g } }); markStale(); },
+    onChange: () => { useBaeMake.setState({ boardRev: board!.rev() }); markStale(); scheduleDraftSave(); },
+    onGuide: () => { const g = board!.guide(); useBaeMake.setState({ guide: { ...g } }); markStale(); scheduleDraftSave(); },
     onTilt: (t) => { useBaeMake.setState({ tilt: t }); markStale(); },
     onRatio: (r) => { if (useBaeMake.getState().ratio !== r) useBaeMake.setState({ ratio: r }); },
     onToast: (text) => toast(text),
@@ -143,9 +143,46 @@ export function baeOrderStale(): boolean {
   return o.dirty || (pickIds() || []).join(',') !== o.picks.join(',');
 }
 function markStale() {
+  scheduleDraftSave();
   const s = useBaeMake.getState(); const j = s.job;
   if (j?.order && !j.order.dirty && (j.phase === 'ordered' || j.phase === 'revising')) useBaeMake.setState({ job: { ...j, order: { ...j.order, dirty: true } } });
 }
+/* ── 초안 (HTML scheduleDraftSave): 재료 창의 러프 · 설명 · 고른 값을 이 PC 보관함에. 앱을 다시 켜도 이어서. ── */
+let draftTimer = 0; let draftLoaded = false; let draftSaving = false;
+export function scheduleDraftSave(delay = 1500) {
+  window.clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(() => { void saveDraftNow(); }, delay);
+}
+async function saveDraftNow() {
+  if (draftSaving || !board) return; draftSaving = true;
+  try {
+    const s = useBaeMake.getState(); const d = await board.serialize();
+    const images: Record<string, Uint8Array> = {};
+    if (d.paint) images['board_paint.png'] = new Uint8Array(await d.paint.arrayBuffer());
+    const data = { v: 1, board: { ...d, paint: d.paint ? 'board_paint.png' : null }, kind: s.kind, ratio: s.ratio, place: s.place, time: s.time, persp: s.persp, request: s.request,
+      refs: s.refs.map((r) => ({ src: r.src, note: r.note })), styleMode: s.styleMode, manualPicks: s.manualPicks };
+    await baeGw().draftSave({ data, images });
+  } catch { /* 초안을 못 남겨도 그리는 일은 계속 */ } finally { draftSaving = false; }
+}
+async function loadDraftOnce() {
+  if (draftLoaded) return; draftLoaded = true;
+  try {
+    const d = await baeGw().draftLoad(); const data = d?.data as Record<string, any> | null | undefined;
+    if (!data || data.v !== 1 || !board || board.hasContent()) return;
+    const paintBytes = d!.images['board_paint.png'];
+    await board.restore({ ...data.board, paint: paintBytes ? new Blob([paintBytes as BlobPart], { type: 'image/png' }) : null });
+    const refs: BaeRef[] = [];
+    for (const r of (Array.isArray(data.refs) ? data.refs : []).slice(0, 4)) {
+      if (typeof r?.src !== 'string') continue; const img = new Image(); img.src = r.src; await img.decode().catch(() => undefined);
+      refs.push({ id: ++refSeq + Date.now(), src: r.src, note: typeof r.note === 'string' ? r.note : '', img });
+    }
+    useBaeMake.setState({ ratio: RATIOS[data.ratio as RatioId] ? data.ratio : useBaeMake.getState().ratio,
+      place: data.place ?? 'auto', time: data.time ?? 'day', persp: data.persp ?? 'auto', request: typeof data.request === 'string' ? data.request : '',
+      refs, styleMode: data.styleMode === 'manual' ? 'manual' : 'auto', manualPicks: Array.isArray(data.manualPicks) ? data.manualPicks.slice(0, 2) : [],
+      guide: board.guide(), tilt: board.tilt(), boardRev: board.rev() });
+  } catch { /* 초안이 깨졌으면 빈 재료로 */ }
+}
+
 /** HTML snapAll: PD 를 기다리는 동안 재료가 바뀌었는지 보는 사진 */
 function snapAll(): string {
   const s = useBaeMake.getState(); const b = baeBoard();
@@ -181,8 +218,8 @@ export const useBaeMake = create<MakeState>((set, get) => ({
   job: null, makingBig: true, showNotes: true, reviseText: '', message: null, submitting: false, viewVisible: false, waitingCheck: false,
 
   set: (k, v) => set({ [k]: v } as Partial<MakeState>),
-  openMaterial: (kind) => { ensureProgress(); baeBoard(); set({ win: 'material', winAuto: false, kind: kind ?? get().kind, message: null }); },
-  closeWin: () => set({ win: null, winAuto: false }),
+  openMaterial: (kind) => { ensureProgress(); baeBoard(); void loadDraftOnce(); set({ win: 'material', winAuto: false, kind: kind ?? get().kind, message: null }); },
+  closeWin: () => { if (get().win === 'material') scheduleDraftSave(0); set({ win: null, winAuto: false }); },
   openStyle: () => set((s) => ({ styleBack: s.win === 'material' ? 'material' : null, win: 'style', winAuto: false })),
   backFromStyle: () => set((s) => ({ win: s.styleBack, styleBack: null })),
   setRequest: (t) => { set({ request: t }); markStale(); },

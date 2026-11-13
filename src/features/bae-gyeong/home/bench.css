@@ -138,7 +138,7 @@
 .bae-jv-prompt-text { max-height: 320px; margin: 8px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ── 기록: 액자 보기 (결과 그림이 곧 줄, 이름과 숫자는 아래) ── */
-.bae-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(310px, 100%), 1fr)); gap: 20px 16px; margin: 0; padding: 0; list-style: none; }
+.bae-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(245px, 100%), 1fr)); gap: 20px 16px; margin: 0; padding: 0; list-style: none; }
 .bae-shotcell { display: flex; flex-direction: column; gap: 8px; min-width: 0; container: shot / inline-size; }
 .bae-shotbtn { position: relative; display: block; overflow: hidden; width: 100%; aspect-ratio: 16 / 9; padding: 0; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-card)); cursor: pointer; }
 .bae-shotbtn:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
