@@ -1019,6 +1019,26 @@ contextBridge.exposeInMainWorld('baeGyeongAPI', {
   keySet: (key: string) => ipcRenderer.invoke('bae:key-set', key, canonicalSessionEpoch),
   membersList: () => ipcRenderer.invoke('bae:members-list', canonicalSessionEpoch),
   membersSet: (userId: string, role: 'user' | 'reviewer' | null) => ipcRenderer.invoke('bae:members-set', userId, role, canonicalSessionEpoch),
+  jobsMine: (since: string | null, limit?: number) => ipcRenderer.invoke('bae:jobs-mine', since, limit, canonicalSessionEpoch),
+  jobGet: (jobId: string) => ipcRenderer.invoke('bae:job-get', jobId, canonicalSessionEpoch),
+  jobHide: (jobId: string, hidden: boolean) => ipcRenderer.invoke('bae:job-hide', jobId, hidden, canonicalSessionEpoch),
+  usageSummary: (from: string | null, to: string | null) => ipcRenderer.invoke('bae:usage-summary', from, to, canonicalSessionEpoch),
+  order: (call: unknown) => ipcRenderer.invoke('bae:order', call, canonicalSessionEpoch),
+  draw: (call: unknown) => ipcRenderer.invoke('bae:draw', call, canonicalSessionEpoch),
+  abort: (jobId: string) => ipcRenderer.invoke('bae:abort', jobId, canonicalSessionEpoch),
+  jobPatch: (jobId: string, status: string, patch: unknown) => ipcRenderer.invoke('bae:job-patch', jobId, status, patch, canonicalSessionEpoch),
+  active: () => ipcRenderer.invoke('bae:active', canonicalSessionEpoch),
+  localFile: (jobId: string, name: string) => ipcRenderer.invoke('bae:local-file', jobId, name, canonicalSessionEpoch),
+  saveAs: (jobId: string, defaultName: string) => ipcRenderer.invoke('bae:save-as', jobId, defaultName, canonicalSessionEpoch),
+  draftSave: (draft: unknown) => ipcRenderer.invoke('bae:draft-save', draft, canonicalSessionEpoch),
+  draftLoad: () => ipcRenderer.invoke('bae:draft-load', canonicalSessionEpoch),
+  draftClear: () => ipcRenderer.invoke('bae:draft-clear', canonicalSessionEpoch),
+  online: () => ipcRenderer.invoke('bae:online', canonicalSessionEpoch),
+  onProgress: (callback: (p: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('bae:progress', listener);
+    return () => ipcRenderer.removeListener('bae:progress', listener);
+  },
   onChanged: (callback: (what: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { what?: unknown } | undefined) => callback(typeof payload?.what === 'string' ? payload.what : 'settings');
     ipcRenderer.on('bae:changed', listener);

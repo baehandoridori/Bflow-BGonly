@@ -1,0 +1,709 @@
+{
+ "id": "m5_revise",
+ "kind": "pd",
+ "html": {
+  "ver": "v0.4.11",
+  "manual": "# BAE PD manual v1.7"
+ },
+ "call": {
+  "revText": "소파를 더 크게, {벽은 진한 남색}",
+  "label": null,
+  "carryExtra": [],
+  "rejectDeveloper": false
+ },
+ "snap": {
+  "materials": {
+   "ratio": "16:9",
+   "time": "day",
+   "place": "auto",
+   "persp": "auto",
+   "styleMode": "auto",
+   "manualPicks": [],
+   "request": "현관에서 본 거실이에요. 소파는 왼쪽 앞, 창문은 안쪽 벽에 있어요.",
+   "refs": [],
+   "guide": {
+    "type": "auto",
+    "placed": false,
+    "hy": 0.5,
+    "v1": 0.5,
+    "v2": 1.6,
+    "v3": -0.9,
+    "depth": 0.16,
+    "cx": 0.42,
+    "ct": 0.14,
+    "cb": 0.86
+   },
+   "tilt": 0,
+   "tier": "m",
+   "calib": 0,
+   "rulesKo": "",
+   "timeUser": [],
+   "pdModel": "gpt-6.1-sol",
+   "imgModel": "gpt-image-2.5-sunburst",
+   "quality": "high",
+   "stream": true,
+   "rate": 1400,
+   "manualCustom": false,
+   "blocksCustom": false,
+   "library": [
+    {
+     "id": "L1",
+     "name": "학교 앞 횡단보도",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L2",
+     "name": "아파트 집 안 (현관에서 본 거실)",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L3",
+     "name": "공원 벤치",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L4",
+     "name": "작은 집 방 (소파, 에어컨)",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L5",
+     "name": "아파트 공동현관 (낮)",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L6",
+     "name": "아파트 공동현관 (밤)",
+     "place": "exterior",
+     "tod": "night"
+    },
+    {
+     "id": "L7",
+     "name": "아파트 단지와 거리",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L8",
+     "name": "초등학교 교실",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L9",
+     "name": "나무 아지트 안",
+     "place": "interior",
+     "tod": "any"
+    },
+    {
+     "id": "L10",
+     "name": "공중화장실",
+     "place": "interior",
+     "tod": "any"
+    },
+    {
+     "id": "L11",
+     "name": "공원 정자",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L12",
+     "name": "놀이터",
+     "place": "exterior",
+     "tod": "day"
+    }
+   ]
+  },
+  "board": {
+   "hasColor": false,
+   "noteCount": 3,
+   "notesPlain": "- text \"소파 (빨간색)\" at (x 14%, y 71%)\n- arrow from (x 46%, y 23%) to (x 49%, y 44%)\n- circled or marked area around (x 59%, y 49%), about 12% wide and 14% tall",
+   "notesLevel": null,
+   "isGuide": false,
+   "mode": "rough",
+   "hasBg": true,
+   "hasContent": true,
+   "rev": 1,
+   "ratio": "16:9",
+   "tilt": 0,
+   "guide": {
+    "type": "auto",
+    "placed": false,
+    "hy": 0.5,
+    "v1": 0.5,
+    "v2": 1.6,
+    "v3": -0.9,
+    "depth": 0.16,
+    "cx": 0.42,
+    "ct": 0.14,
+    "cb": 0.86
+   },
+   "paintShare": 0.007467382008205832,
+   "photoLike": false,
+   "levelSamples": null
+  },
+  "inputs": {
+   "rough": {
+    "kind": "rough",
+    "label": "러프",
+    "small": "img:7eadbd5f12a005d3.jpg",
+    "annotated": "img:5558f9675ecbe109.jpg",
+    "notesText": "- text \"소파 (빨간색)\" at (x 14%, y 71%)\n- arrow from (x 46%, y 23%) to (x 49%, y 44%)\n- circled or marked area around (x 59%, y 49%), about 12% wide and 14% tall",
+    "hasColor": false,
+    "tilt": 0,
+    "noteCount": 3,
+    "key": "ppe5k6:29939",
+    "painted": false,
+    "orig": null,
+    "w": 1536,
+    "h": 864
+   },
+   "refs": [],
+   "base": {
+    "kind": "style",
+    "label": "그림체 기준 (원경)",
+    "note": null,
+    "small": "img:69e32b6362305593.jpg",
+    "w": 1536,
+    "h": 396
+   },
+   "refIds": [],
+   "place": null
+  },
+  "prevOrder": {
+   "summary": "현관에서 본 아파트 거실을 러프 구도 그대로 그려요.",
+   "notes": [
+    "소파 자리는 빨간 메모대로 왼쪽 앞에 뒀어요.",
+    "장소가 자동이라 시간대 문장을 실외 기준으로 넣었어요. 실내 장면이면 장소를 실내로 고르고 주문서를 다시 만들어 주세요."
+   ],
+   "raw": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1 exactly for the camera, the walls, the window and the sofa on the left. [STYLE] Images {S1} and {S2} are style examples from our team: follow their flat colors and simple shapes. [TREES] [TIME] [LIGHT EVEN] Text: no text anywhere. [AVOID] dark shadows, clutter Aspect ratio 16:9.",
+   "prompt": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1 exactly for the camera, the walls, the window and the sofa on the left. Image 4 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 4. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Images 2 and 3 are style examples from our team: follow their flat colors and simple shapes. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat greens with the lighter one on top, like the trees in image 4, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Time: a clear day. Use a bright, clear daytime palette with fairly strong saturation: clean white and light cream walls, a clear saturated sky blue with a few flat-bottomed white clouds, fresh leaf greens, neutral white balance. Cast shadows are flat, slightly darker shapes. Lamps are off. Light: even and neutral with no direction; no sunbeams, no light patches on the floor or walls, no strong shadows, only small flat contact shadows under objects. Text: no text anywhere. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 4, the objects, layout or text of the style examples, identical repeated trees, many small leaf clusters, dark shadows, clutter, people. Aspect ratio 16:9.",
+   "picks": [
+    "L2",
+    "L8"
+   ],
+   "refIds": [],
+   "reason": "실내 거실이라 L2, L8을 골랐어요.",
+   "cost": 0.033,
+   "doneMsg": "주문서 완료 · 해석 비용 약 46원. 확인하고 '그림 만들기'를 눌러주세요.",
+   "dirty": false,
+   "revisions": [],
+   "revTexts": [],
+   "carried": [],
+   "roughKey": "ppe5k6:29939",
+   "manualVer": "v1.7",
+   "blocksVer": "v1",
+   "rulesKo": "",
+   "director": null,
+   "place": null,
+   "tilt": 0
+  },
+  "promptBefore": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1 exactly for the camera, the walls, the window and the sofa on the left. Image 4 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 4. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Images 2 and 3 are style examples from our team: follow their flat colors and simple shapes. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat greens with the lighter one on top, like the trees in image 4, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Time: a clear day. Use a bright, clear daytime palette with fairly strong saturation: clean white and light cream walls, a clear saturated sky blue with a few flat-bottomed white clouds, fresh leaf greens, neutral white balance. Cast shadows are flat, slightly darker shapes. Lamps are off. Light: even and neutral with no direction; no sunbeams, no light patches on the floor or walls, no strong shadows, only small flat contact shadows under objects. Text: no text anywhere. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 4, the objects, layout or text of the style examples, identical repeated trees, many small leaf clusters, dark shadows, clutter, people. Aspect ratio 16:9.",
+  "carryChecked": true,
+  "misc": {
+   "manualVersion": "v1.7",
+   "blocksVersion": "v1",
+   "carryList": [],
+   "orderPhrases": [
+    "PD가 러프를 읽는 중",
+    "빨간 메모 읽는 중",
+    "비슷한 팀 배경 찾는 중",
+    "영어 주문서 쓰는 중"
+   ],
+   "mapping": "image 2 = {S1}, image 3 = {S2}, image 4 = {BASE}",
+   "guideSummaryKo": "",
+   "cameraSentence": "",
+   "effRatio": "16:9",
+   "drawSizes": {
+    "gen": [
+     2048,
+     1152
+    ],
+    "out": [
+     2048,
+     1152
+    ],
+    "tilt": 0
+   },
+   "currentPickIds": [
+    "L2",
+    "L8"
+   ],
+   "timeForPD": "day"
+  }
+ },
+ "answer": {
+  "obj": {
+   "notes_ko": [
+    "소파 크기만 바꿨어요."
+   ],
+   "style_picks": [
+    "L2",
+    "L8"
+   ],
+   "style_reason_ko": "그대로 뒀어요.",
+   "summary_ko": "소파를 더 크게 하고 벽을 진한 남색으로 바꿨어요.",
+   "director_en": [
+    "Paint the walls deep navy blue."
+   ],
+   "director_replaced": [
+    "TIME"
+   ],
+   "prompt": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1; the sofa on the left is bigger, about a third of the picture width. [STYLE] Images {S1} and {S2} are style examples from our team. [TREES] Time: day, the walls are deep navy blue. [LIGHT EVEN] Text: no text anywhere. [AVOID] dark shadows Aspect ratio 16:9."
+  },
+  "usage": {
+   "input_tokens": 12000,
+   "output_tokens": 900
+  }
+ },
+ "requests": [
+  {
+   "status": 200,
+   "body": {
+    "model": "gpt-6.1-sol",
+    "instructions": "@@MANUAL@@\n\n## Director's notes in { } (this section wins over everything above)\nSometimes parts of the artist's request are wrapped in curly brackets { }. Those parts are DIRECTOR'S NOTES: special directions from our director for this one episode, often a special drawing style, palette, mood or rule that differs from the house style. They are also listed separately as DIRECTOR'S NOTES.\n- Follow every director's note exactly and fully. A note wins over the request, the house rules (house rule 7 does not apply to it: never keep the house style against a note), the extra rules from our art director, the fixed sentences behind the markers, the style examples and the base style strip. Never water a note down or skip it, and never warn about it in notes_ko as a conflict with the house style.\n- Keep the manual and the house style for everything the notes do not touch.\n- When a note changes something a marker covers (the drawing style, the time of day and its palette, the light, the trees, the cars, the buildings, the avoid list), do not write that marker. Write its fixed sentence out yourself instead, changing or removing only the parts the note changes. For example, for a note that wants thick black outlines, write the [STYLE] sentence without \"no black outlines\" and say that the outlines are thick and black, and write the avoid list without \"black outlines\". Keep {BASE} as it is in the sentences you write out. Put the names of the markers you wrote out in director_replaced, for example [\"STYLE\", \"AVOID\"]. Markers the notes do not touch stay markers. Sentences you write out this way count like markers for the word limit.\n- If the base style strip or the style examples would pull against a note (another drawing style, another palette), say in their sentence what to take from them and what not (for example \"follow only its simple shapes, not its flat colors\").\n- director_en: one short, plain, concrete English sentence per note, in the order of the notes, saying what the image model must do. The app adds them at the very end of the order sheet after \"Director's note for this episode (this wins over everything above, including the drawing style, the time block and the avoid list):\". Do not write that line yourself.\n- summary_ko: add one short sentence saying how you applied the notes.\nThe fixed sentences behind the markers (write one out only when a note changes it):\n[STYLE] = Image {BASE} shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image {BASE}. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines.\n[TREES] = Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat greens with the lighter one on top, like the trees in image {BASE}, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds.\n[CARS] = Cars: simple flat everyday cars of mixed types in clear body colors, with flat dark windows, small flat lights, blank plates and plain dark wheels, no shine or logos. Every car stands on its wheels with a small flat contact shadow; cars farther back are smaller and higher in the picture, never half hidden behind a hedge as if sunk.\n[CARS EYE LEVEL] = the [CARS] sentence, then: At eye level, the roofs of cars near and far stay close to the horizon line.\n[BUILDINGS] = Large buildings: drawn by hand like the distant buildings in image {BASE}, a few broad flat shapes slightly deformed like a quick doodle: roof lines and long edges a little tilted or bent, corners not quite square, windows a few uneven flat rectangles; never ruler-straight edges or perfectly even rows of windows.\n[TIME] = Time: a clear day. Use a bright, clear daytime palette with fairly strong saturation: clean white and light cream walls, a clear saturated sky blue with a few flat-bottomed white clouds, fresh leaf greens, neutral white balance. Cast shadows are flat, slightly darker shapes. Lamps are off.\n[TIME exterior] = Time: a clear day. Use a bright, clear daytime palette with fairly strong saturation: clean white and light cream walls, a clear saturated sky blue with a few flat-bottomed white clouds, fresh leaf greens, neutral white balance. Cast shadows are flat, slightly darker shapes. Lamps are off.\n[TIME interior] = Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors.\n[LIGHT FLAT] = Light: completely flat and even with no direction; no shadows of any kind, not even small contact shadows under objects.\n[LIGHT EVEN] = Light: even and neutral with no direction; no sunbeams, no light patches on the floor or walls, no strong shadows, only small flat contact shadows under objects.\n[AVOID] = Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image {BASE}, people. Before \"people\", add: the objects, layout or text of the style examples (only with style examples); identical repeated trees, many small leaf clusters (with trees); cars sunk into the ground (with cars); and your scene items.\n",
+    "input": [
+     {
+      "role": "developer",
+      "content": [
+       {
+        "type": "input_text",
+        "text": "DIRECTOR'S NOTES for this episode (the parts of the artist's request written in { }). Follow them exactly. They win over the manual, the house rules, the extra rules from our art director, the fixed sentences behind the markers, the style examples and the base style strip:\n1. 벽은 진한 남색"
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "input_text",
+        "text": "Aspect ratio: 16:9 (the image will be 2048x1152).\nTime of day: day\nPlace: auto (decide from the sketch)\nPerspective: auto (follow the sketch; there is no camera sentence).\nImage 1: rough sketch by our artist (layout source).\nImage 1 with notes: the same picture with the artist's red notes, sent only to you. Note list (positions in % of the picture, x from the left, y from the top):\n- text \"소파 (빨간색)\" at (x 14%, y 71%)\n- arrow from (x 46%, y 23%) to (x 49%, y 44%)\n- circled or marked area around (x 59%, y 49%), about 12% wide and 14% tall\nStyle examples: auto mode. Choose up to two from this style library (their small thumbnails follow the input images):\n  L1: 학교 앞 횡단보도 (exterior, day)\n  L2: 아파트 집 안 (현관에서 본 거실) (interior, day)\n  L3: 공원 벤치 (exterior, day)\n  L4: 작은 집 방 (소파, 에어컨) (interior, day)\n  L5: 아파트 공동현관 (낮) (exterior, day)\n  L6: 아파트 공동현관 (밤) (exterior, night)\n  L7: 아파트 단지와 거리 (exterior, day)\n  L8: 초등학교 교실 (interior, day)\n  L9: 나무 아지트 안 (interior, any)\n  L10: 공중화장실 (interior, any)\n  L11: 공원 정자 (exterior, day)\n  L12: 놀이터 (exterior, day)\nBase style strip: always sent as the last image. In the prompt write {BASE} for its number and {S1}, {S2} for the style examples.\nArtist's request (Korean): 현관에서 본 거실이에요. 소파는 왼쪽 앞, 창문은 안쪽 벽에 있어요.\nREVISION MODE.\nPrevious order sheet (with real image numbers):\n\"\"\"\nGenerate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1 exactly for the camera, the walls, the window and the sofa on the left. [STYLE] Images 2 and 3 are style examples from our team: follow their flat colors and simple shapes. [TREES] [TIME exterior] [LIGHT EVEN] Text: no text anywhere. [AVOID] dark shadows, clutter Aspect ratio 16:9.\n\"\"\"\nIn the previous order sheet, image 2 = {S1}, image 3 = {S2}, image 4 = {BASE}. Write {S1}, {S2} and {BASE} again for those images.\nPrevious style_picks: [\"L2\",\"L8\"] (keep them unless the request asks for other style examples).\nRevision request from the artist (Korean): 소파를 더 크게, {벽은 진한 남색}\nThe parts of the revision request in { } are new director's notes; they are in the list of DIRECTOR'S NOTES too.\nWrite the revised order sheet now, following \"Revision mode\" in the manual."
+       },
+       {
+        "type": "input_text",
+        "text": "Image 1:"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:7eadbd5f12a005d3.jpg",
+        "detail": "high"
+       },
+       {
+        "type": "input_text",
+        "text": "Image 1 with the artist's notes (only for you; the image model never sees the red notes):"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:5558f9675ecbe109.jpg",
+        "detail": "high"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L1: 학교 앞 횡단보도"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:57858f088f1aee90.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L2: 아파트 집 안 (현관에서 본 거실)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:1188a06f8038034b.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L3: 공원 벤치"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:70ece9abf5268ed2.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L4: 작은 집 방 (소파, 에어컨)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:287df56c609ab8da.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L5: 아파트 공동현관 (낮)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:2390699e7d15dc90.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L6: 아파트 공동현관 (밤)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:c842a60f1ae7d4fc.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L7: 아파트 단지와 거리"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:cbee0b58e5805bef.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L8: 초등학교 교실"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:d4a118ba3f0678ac.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L9: 나무 아지트 안"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:de32c7f07adb39df.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L10: 공중화장실"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:883c1b4fc23cf3c1.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L11: 공원 정자"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:ffb7eeb807d9858c.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L12: 놀이터"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:eabc9359cff55b8e.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Base style strip (always the last image):"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:69e32b6362305593.jpg",
+        "detail": "auto"
+       }
+      ]
+     }
+    ],
+    "text": {
+     "format": {
+      "type": "json_schema",
+      "name": "bae_order",
+      "strict": true,
+      "schema": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "summary_ko",
+        "notes_ko",
+        "style_picks",
+        "style_reason_ko",
+        "prompt",
+        "director_en",
+        "director_replaced"
+       ],
+       "properties": {
+        "summary_ko": {
+         "type": "string"
+        },
+        "notes_ko": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "style_picks": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "style_reason_ko": {
+         "type": "string"
+        },
+        "prompt": {
+         "type": "string"
+        },
+        "director_en": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "director_replaced": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "enum": [
+           "STYLE",
+           "TREES",
+           "CARS",
+           "CARS EYE LEVEL",
+           "BUILDINGS",
+           "TIME",
+           "LIGHT FLAT",
+           "LIGHT EVEN",
+           "AVOID"
+          ]
+         }
+        }
+       }
+      }
+     }
+    },
+    "store": false
+   }
+  }
+ ],
+ "after": {
+  "order": {
+   "summary": "소파를 더 크게 하고 벽을 진한 남색으로 바꿨어요.",
+   "notes": [
+    "소파 크기만 바꿨어요."
+   ],
+   "raw": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1; the sofa on the left is bigger, about a third of the picture width. [STYLE] Images {S1} and {S2} are style examples from our team. [TREES] Time: day, the walls are deep navy blue. [LIGHT EVEN] Text: no text anywhere. [AVOID] dark shadows Aspect ratio 16:9.",
+   "prompt": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1; the sofa on the left is bigger, about a third of the picture width. Image 4 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 4. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Images 2 and 3 are style examples from our team. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat greens with the lighter one on top, like the trees in image 4, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Time: day, the walls are deep navy blue. Light: even and neutral with no direction; no sunbeams, no light patches on the floor or walls, no strong shadows, only small flat contact shadows under objects. Text: no text anywhere. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 4, the objects, layout or text of the style examples, identical repeated trees, many small leaf clusters, dark shadows, people. Aspect ratio 16:9.\n\nDirector's note for this episode (this wins over everything above, including the drawing style, the time block and the avoid list): Paint the walls deep navy blue.",
+   "picks": [
+    "L2",
+    "L8"
+   ],
+   "refIds": [],
+   "reason": "그대로 뒀어요.",
+   "cost": 0.066,
+   "doneMsg": "고친 주문서 완료 · 해석 비용 약 46원. 확인하고 '그림 만들기'를 눌러주세요.",
+   "dirty": false,
+   "revisions": [
+    "소파를 더 크게, {벽은 진한 남색}"
+   ],
+   "revTexts": [
+    "소파를 더 크게, {벽은 진한 남색}"
+   ],
+   "carried": [],
+   "roughKey": "ppe5k6:29939",
+   "manualVer": "v1.7",
+   "blocksVer": "v1",
+   "rulesKo": "",
+   "director": {
+    "ko": [
+     "벽은 진한 남색"
+    ],
+    "revKo": [
+     "벽은 진한 남색"
+    ],
+    "en": [
+     "Paint the walls deep navy blue."
+    ],
+    "replaced": [
+     "TIME"
+    ]
+   },
+   "place": null,
+   "tilt": 0
+  },
+  "promptText": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1; the sofa on the left is bigger, about a third of the picture width. Image 4 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 4. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Images 2 and 3 are style examples from our team. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat greens with the lighter one on top, like the trees in image 4, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Time: day, the walls are deep navy blue. Light: even and neutral with no direction; no sunbeams, no light patches on the floor or walls, no strong shadows, only small flat contact shadows under objects. Text: no text anywhere. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 4, the objects, layout or text of the style examples, identical repeated trees, many small leaf clusters, dark shadows, people. Aspect ratio 16:9.\n\nDirector's note for this episode (this wins over everything above, including the drawing style, the time block and the avoid list): Paint the walls deep navy blue.",
+  "orderMsg": "",
+  "manualPicks": [],
+  "promptCount": "영어 주문서 329단어",
+  "currentPickIds": [
+   "L2",
+   "L8"
+  ]
+ },
+ "draw": {
+  "mode": "ok",
+  "attempts": [
+   {
+    "status": 200,
+    "fields": [
+     {
+      "name": "model",
+      "value": "gpt-image-2.5-sunburst"
+     },
+     {
+      "name": "prompt",
+      "value": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1; the sofa on the left is bigger, about a third of the picture width. Image 4 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 4. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Images 2 and 3 are style examples from our team. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat greens with the lighter one on top, like the trees in image 4, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Time: day, the walls are deep navy blue. Light: even and neutral with no direction; no sunbeams, no light patches on the floor or walls, no strong shadows, only small flat contact shadows under objects. Text: no text anywhere. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 4, the objects, layout or text of the style examples, identical repeated trees, many small leaf clusters, dark shadows, people. Aspect ratio 16:9.\r\n\r\nDirector's note for this episode (this wins over everything above, including the drawing style, the time block and the avoid list): Paint the walls deep navy blue."
+     },
+     {
+      "name": "size",
+      "value": "2048x1152"
+     },
+     {
+      "name": "quality",
+      "value": "high"
+     },
+     {
+      "name": "n",
+      "value": "1"
+     },
+     {
+      "name": "output_format",
+      "value": "png"
+     },
+     {
+      "name": "stream",
+      "value": "true"
+     },
+     {
+      "name": "partial_images",
+      "value": "2"
+     },
+     {
+      "name": "image[]",
+      "filename": "image1.png",
+      "type": "image/png",
+      "bytes": 79172,
+      "sha256": "e27dd9f9a040d7bceee791245541147495405f3ab8b604845481f502b09f14b8",
+      "format": "png",
+      "width": 1536,
+      "height": 864
+     },
+     {
+      "name": "image[]",
+      "filename": "image2.png",
+      "type": "image/png",
+      "bytes": 437333,
+      "sha256": "d26a50383f3992847c2651d89818729616355f18821099f1f11472f24e9b99b2",
+      "format": "png",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "name": "image[]",
+      "filename": "image3.png",
+      "type": "image/png",
+      "bytes": 626236,
+      "sha256": "e09393467fc1f2d0b1a6e10beceaaa1653e14b747ad6d614af26d5efa25693db",
+      "format": "png",
+      "width": 1024,
+      "height": 576
+     },
+     {
+      "name": "image[]",
+      "filename": "image4.png",
+      "type": "image/png",
+      "bytes": 539964,
+      "sha256": "2c4b9c72d3e2334381f403bd939d6217320c796c79ec0ddd0dc95c7d03b05563",
+      "format": "png",
+      "width": 1536,
+      "height": 396
+     }
+    ]
+   }
+  ],
+  "list": [
+   {
+    "kind": "rough",
+    "label": "러프",
+    "note": null,
+    "id": null,
+    "w": 1536,
+    "h": 864,
+    "small": "img:7eadbd5f12a005d3.jpg",
+    "thumb": null,
+    "sha256": "e27dd9f9a040d7bceee791245541147495405f3ab8b604845481f502b09f14b8",
+    "bytes": 79172,
+    "format": "png",
+    "width": 1536,
+    "height": 864
+   },
+   {
+    "kind": "example",
+    "label": "레퍼런스 이미지 예시 L2",
+    "note": "아파트 집 안 (현관에서 본 거실)",
+    "id": "L2",
+    "w": 1024,
+    "h": 576,
+    "small": "img:9bd62f6e25853e46.jpg",
+    "thumb": "img:1188a06f8038034b.jpg",
+    "sha256": "d26a50383f3992847c2651d89818729616355f18821099f1f11472f24e9b99b2",
+    "bytes": 437333,
+    "format": "png",
+    "width": 1024,
+    "height": 576
+   },
+   {
+    "kind": "example",
+    "label": "레퍼런스 이미지 예시 L8",
+    "note": "초등학교 교실",
+    "id": "L8",
+    "w": 1024,
+    "h": 576,
+    "small": "img:2a06532f61525d98.jpg",
+    "thumb": "img:d4a118ba3f0678ac.jpg",
+    "sha256": "e09393467fc1f2d0b1a6e10beceaaa1653e14b747ad6d614af26d5efa25693db",
+    "bytes": 626236,
+    "format": "png",
+    "width": 1024,
+    "height": 576
+   },
+   {
+    "kind": "style",
+    "label": "그림체 기준 (원경)",
+    "note": null,
+    "id": null,
+    "w": 1536,
+    "h": 396,
+    "small": "img:69e32b6362305593.jpg",
+    "thumb": null,
+    "sha256": "2c4b9c72d3e2334381f403bd939d6217320c796c79ec0ddd0dc95c7d03b05563",
+    "bytes": 539964,
+    "format": "png",
+    "width": 1536,
+    "height": 396
+   }
+  ],
+  "done": {
+   "drawMsg": "",
+   "busy": false,
+   "result": {
+    "cost": 0.2031,
+    "total": 0.2691,
+    "model": "gpt-image-2.5-sunburst",
+    "quality": "high",
+    "w": 64,
+    "h": 36,
+    "prompt": "Generate an image of a cozy apartment living room seen from the entrance. 1. Layout: follow image 1; the sofa on the left is bigger, about a third of the picture width. Image 4 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 4. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Images 2 and 3 are style examples from our team. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat greens with the lighter one on top, like the trees in image 4, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Time: day, the walls are deep navy blue. Light: even and neutral with no direction; no sunbeams, no light patches on the floor or walls, no strong shadows, only small flat contact shadows under objects. Text: no text anywhere. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 4, the objects, layout or text of the style examples, identical repeated trees, many small leaf clusters, dark shadows, people. Aspect ratio 16:9.\n\nDirector's note for this episode (this wins over everything above, including the drawing style, the time block and the avoid list): Paint the walls deep navy blue.",
+    "tilt": 0,
+    "gen": null
+   }
+  }
+ }
+}

@@ -42,5 +42,22 @@ BEGIN
   r := public.bae_gyeong_session_get_key(t_user); IF r->>'key' <> 'sk-test-local-only-smoke-0123456789' OR r->>'label' <> 'team' THEN RAISE EXCEPTION 'get_key wrong'; END IF;
   BEGIN PERFORM public.bae_gyeong_session_get_key(t_out); RAISE EXCEPTION 'outsider got the key'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 
+  -- 5. 작업 기록: 만든 사람만 쓰고, 다른 사람은 못 보고, 끝난 작업은 늦은 쓰기로 되돌아가지 않음
+  r := public.bae_gyeong_session_job_upsert(t_user, '{"id":"5b0c4f1e-0000-4000-8000-00000000a001","kind":"new","status":"drawing","summary":{"request":"smoke"}}'::jsonb);
+  IF r->>'userId' <> 'bae-smoke-user' OR r->>'userName' <> 'bae smoke user' THEN RAISE EXCEPTION 'job owner wrong: %', r; END IF;
+  r := public.bae_gyeong_session_job_upsert(t_user, '{"id":"5b0c4f1e-0000-4000-8000-00000000a001","status":"done","costUsd":0.09}'::jsonb);
+  r := public.bae_gyeong_session_job_upsert(t_user, '{"id":"5b0c4f1e-0000-4000-8000-00000000a001","status":"drawing"}'::jsonb);
+  IF r->>'status' <> 'done' THEN RAISE EXCEPTION 'late write reopened the job'; END IF;
+  BEGIN PERFORM public.bae_gyeong_session_job_get(t_out, '5b0c4f1e-0000-4000-8000-00000000a001'); RAISE EXCEPTION 'outsider read the job'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN PERFORM public.bae_gyeong_session_job_upsert(t_out, '{"id":"5b0c4f1e-0000-4000-8000-00000000a002","kind":"new","status":"drawing"}'::jsonb); RAISE EXCEPTION 'outsider made a job'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN PERFORM public.bae_gyeong_session_job_list_team(t_user, NULL, 10); RAISE EXCEPTION 'member read the team list'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  r := public.bae_gyeong_session_job_list_mine(t_user, NULL, 10); IF jsonb_array_length(r->'rows') <> 1 THEN RAISE EXCEPTION 'list_mine wrong: %', r; END IF;
+
+  -- 6. 장부: 같은 번호표는 한 줄, 누가 · 어느 키는 서버가 정함
+  r := public.bae_gyeong_session_usage_log(t_user, '{"kind":"image","model":"gpt-image-2.5-sunburst","usd":0.0752,"requestId":"bae-smoke-r1","keyLabel":"x"}'::jsonb);
+  r := public.bae_gyeong_session_usage_log(t_user, '{"kind":"image","model":"gpt-image-2.5-sunburst","usd":0.0752,"requestId":"bae-smoke-r1"}'::jsonb);
+  IF NOT (r->>'duplicate')::boolean THEN RAISE EXCEPTION 'duplicate usage line'; END IF;
+  IF (SELECT count(*) FROM public.bae_gyeong_usage WHERE user_id = 'bae-smoke-user') <> 1 OR (SELECT key_label FROM public.bae_gyeong_usage WHERE user_id = 'bae-smoke-user') <> 'team' THEN RAISE EXCEPTION 'usage line wrong'; END IF;
+
   RAISE EXCEPTION 'BAE SMOKE OK (all checks passed; everything rolled back)';
 END $$;

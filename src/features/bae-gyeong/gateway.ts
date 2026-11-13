@@ -5,6 +5,7 @@
 import { isExplicitPlaygroundPreviewMode } from '@/features/playground/featureFlag';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { createBaePreviewGateway } from './previewGateway';
+import { createPreviewMake } from './previewMake';
 import type { BaeGateway } from './types';
 
 let preview: BaeGateway | null = null;
@@ -20,6 +21,7 @@ export function baeGateway(): BaeGateway {
       },
       knownUserIds: () => useAuthStore.getState().users.map((u) => u.id),
       channel: typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('bflow-preview-bae-gyeong'),
+      make: createPreviewMake,
     });
     return preview;
   }

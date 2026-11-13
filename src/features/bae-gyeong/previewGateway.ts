@@ -7,6 +7,7 @@
 import { BAE_BODY_KEYS, baeSettingProblem, isBaeSettingKey, textVersion, type BaeSettingKey, type BaeSettingRow } from '../../shared/bae/settings.ts';
 import { baeMemberChangeProblem, type BaeAccess, type BaeMember, type BaeMemberRole } from '../../shared/bae/access.ts';
 import { baeKeyProblem, type BaeKeyStatus } from '../../shared/bae/secrets.ts';
+import { parseBaeJob, type BaeJob, type BaeJobWrite, type BaeUsageLine, type BaeUsageSummary } from '../../shared/bae/jobs.ts';
 import type { BaeChange, BaeGateway, BaeSettingsView } from './types.ts';
 
 export interface PreviewIdentity { id: string; name: string; role: string }
@@ -16,10 +17,26 @@ export interface PreviewOptions {
   knownUserIds: () => string[];
   channel?: { postMessage(m: unknown): void; addEventListener(t: 'message', l: (e: { data: unknown }) => void): void; removeEventListener(t: 'message', l: (e: { data: unknown }) => void): void } | null;
   now?: () => string;
+  /** 만들기 흐름(가짜 PD · 가짜 그림 모델). 화면 쪽(previewMake.ts)이 넣는다 — node 시험에서는 비워 둔다. */
+  make?: (ctx: PreviewMakeContext) => PreviewMakeMethods;
 }
+export type PreviewMakeMethods = Pick<BaeGateway, 'order' | 'draw' | 'abort' | 'jobPatch' | 'active' | 'localFile' | 'saveAs' | 'draftSave' | 'draftLoad' | 'draftClear' | 'online' | 'onProgress'>;
+export interface PreviewMakeContext {
+  me(): PreviewIdentity;
+  requireUse(): void;
+  writeJob(w: BaeJobWrite): BaeJob;
+  logUsage(line: BaeUsageLine): { duplicate: boolean };
+}
+const notReady = () => Promise.reject(new Error('테스트 모드의 만들기가 준비되지 않았어요.'));
+const noMake: PreviewMakeMethods = {
+  order: notReady, draw: notReady, abort: async () => false, jobPatch: notReady, active: async () => [], localFile: async () => null, saveAs: async () => null,
+  draftSave: async () => false, draftLoad: async () => null, draftClear: async () => true, online: async () => true, onProgress: () => () => {},
+};
 
-const K = { settings: 'bflow:preview:bae-settings', history: 'bflow:preview:bae-settings-history', members: 'bflow:preview:bae-members', key: 'bflow:preview:bae-key' };
+const K = { settings: 'bflow:preview:bae-settings', history: 'bflow:preview:bae-settings-history', members: 'bflow:preview:bae-members', key: 'bflow:preview:bae-key',
+  jobs: 'bflow:preview:bae-jobs', usage: 'bflow:preview:bae-usage' };
 /** 테스트 모드의 처음 글: 진짜 매뉴얼은 메인에만 있어서, 판 번호만 같은 대역 글을 쓴다. */
+export type { BaeJobWrite };
 export const PREVIEW_DEFAULT_TEXTS = {
   manual: '# BAE PD manual v1.7\n\n(테스트 모드의 대역 글이에요. 진짜 매뉴얼은 앱의 메인 프로세스에만 있어요.)',
   fixed: '# BAE fixed sentences v1\n\n## STYLE\n(테스트 모드의 대역 글이에요.)',
@@ -61,7 +78,36 @@ export function createBaePreviewGateway(opts: PreviewOptions): BaeGateway {
     signal('settings');
     return forScreen([toRow(key, next)], true)[0];
   }
+  // ── 작업 기록 · 장부: 서버 함수(bae_gyeong_session_job_* · usage_*)와 같은 규칙 ──
+  const jobs = () => read<BaeJob[]>(K.jobs, []);
+  const rank = (st: string) => (st === 'ordering' ? 0 : st === 'ordered' ? 1 : st === 'drawing' ? 2 : 3);
+  /** 메인의 작업 흐름 대신 테스트 모드의 만들기 흐름이 부른다. 누가 · 이름표는 여기서 정한다. */
+  function writeJob(w: BaeJobWrite): BaeJob {
+    const u = me(); const all = jobs(); const i = all.findIndex((j) => j.id === w.id); const at = now();
+    if (i < 0) {
+      requireUse();
+      const job = parseBaeJob({ id: w.id, userId: u.id, userName: u.name, kind: w.kind ?? 'new', status: w.status, name: w.name ?? null, parentJobId: w.parentJobId ?? null,
+        summary: w.summary ?? {}, pd: w.pd ?? {}, result: w.result ?? {}, images: w.images ?? {}, selfReview: w.selfReview ?? null, costUsd: w.costUsd ?? 0,
+        origin: w.origin ?? '', appVersion: w.appVersion ?? '', hidden: false, createdAt: w.createdAt ?? at, finishedAt: rank(w.status) === 3 ? (w.finishedAt ?? at) : null, updatedAt: at });
+      all.unshift(job); write(K.jobs, all.slice(0, 300)); signal('jobs'); return job;
+    }
+    const cur = all[i];
+    if (cur.userId !== u.id) throw new Error('다른 사람의 BAE경 작업 기록은 고칠 수 없습니다.');
+    const status = rank(cur.status) === 3 && rank(w.status) < 3 ? cur.status : w.status;
+    const next: BaeJob = { ...cur, status, name: 'name' in w ? (w.name ?? null) : cur.name, summary: w.summary ?? cur.summary, pd: w.pd ?? cur.pd, result: w.result ?? cur.result,
+      images: w.images ?? cur.images, selfReview: 'selfReview' in w ? (w.selfReview ?? null) : cur.selfReview, costUsd: w.costUsd ?? cur.costUsd,
+      finishedAt: rank(status) === 3 ? (cur.finishedAt ?? w.finishedAt ?? at) : null, updatedAt: at };
+    all[i] = next; write(K.jobs, all); signal('jobs'); return next;
+  }
+  function logUsage(line: BaeUsageLine): { duplicate: boolean } {
+    const u = me(); const all = read<Array<BaeUsageLine & { userId: string }>>(K.usage, []);
+    if (all.some((x) => x.userId === u.id && x.requestId === line.requestId)) return { duplicate: true };
+    all.push({ ...line, userId: u.id }); write(K.usage, all.slice(-2000)); return { duplicate: false };
+  }
+  const listShape = (j: BaeJob): BaeJob => { const { pd: _pd, stampBy: _b, stampNote: _n, ...rest } = j; return rest; };
+  const make = opts.make ? opts.make({ me, requireUse: () => { requireUse(); }, writeJob, logUsage }) : noMake;
   return {
+    ...make,
     async access() { return accessOf(me()); },
     async settings(): Promise<BaeSettingsView> {
       const u = me(); const a = accessOf(u);
@@ -91,6 +137,32 @@ export function createBaePreviewGateway(opts: PreviewOptions): BaeGateway {
       const next = read<BaeMember[]>(K.members, []).filter((m) => m.userId !== userId);
       if (role) next.push({ userId, role }); write(K.members, next); signal('members');
       return members();
+    },
+    async jobsMine(since, limit = 100) {
+      const u = me(); const n = Math.min(300, Math.max(1, limit));
+      const mine = jobs().filter((j) => j.userId === u.id).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+      const picked = since === null ? mine.slice(0, n) : mine.filter((j) => j.updatedAt > since).reverse().slice(0, n);
+      return { rows: picked.map(listShape), more: picked.length >= n, serverTime: now(), total: mine.length };
+    },
+    async jobGet(jobId) {
+      const u = me(); const j = jobs().find((x) => x.id === jobId);
+      if (!j) throw new Error('BAE경 작업 기록을 찾을 수 없습니다.');
+      if (j.userId !== u.id && !accessOf(u).canReview) throw new Error('다른 사람의 BAE경 작업 기록은 볼 수 없습니다.');
+      return j;
+    },
+    async jobHide(jobId, hidden) {
+      const u = me(); const all = jobs(); const i = all.findIndex((x) => x.id === jobId);
+      if (i < 0) throw new Error('BAE경 작업 기록을 찾을 수 없습니다.');
+      if (all[i].userId !== u.id) throw new Error('내 BAE경 작업 기록만 숨길 수 있습니다.');
+      all[i] = { ...all[i], hidden, updatedAt: now() }; write(K.jobs, all); signal('jobs');
+      return listShape(all[i]);
+    },
+    async usageSummary(from, to): Promise<BaeUsageSummary> {
+      const u = me(); const rows = read<Array<BaeUsageLine & { userId: string }>>(K.usage, []).filter((x) => x.userId === u.id && (!from || x.at >= from) && (!to || x.at < to));
+      const groups = new Map<string, { kind: string; model: string; n: number; usd: number }>();
+      for (const r of rows) { const k = r.kind + '|' + r.model; const g = groups.get(k) ?? { kind: r.kind, model: r.model, n: 0, usd: 0 }; g.n++; g.usd += r.usd; groups.set(k, g); }
+      return { usd: rows.reduce((a, r) => a + r.usd, 0), images: rows.filter((r) => r.kind === 'image').length, orders: rows.filter((r) => r.kind === 'order').length,
+        lines: [...groups.values()].sort((a, b) => (a.kind + a.model).localeCompare(b.kind + b.model)) };
     },
     onChanged(callback) {
       listeners.add(callback);

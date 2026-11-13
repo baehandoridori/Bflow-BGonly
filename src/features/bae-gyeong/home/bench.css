@@ -1,0 +1,216 @@
+/*
+ * BAE경 2단계 작업대(채워진 작업판 · 진행 줄) · 기록 목록 · 크게 보기 틀(한 건 보기 · 만드는 화면).
+ * 시안 Main.dc.html 의 값을 픽셀로 옮겼다 (1단계 bae-gyeong.css 와 같은 방식). 창 부품(bae-windows.css)과 이름이 같은
+ * 규칙은 이 화면들 안으로만 좁혔다 (:is(.bae-pane, .bae-jv)). 움직임은 opacity · transform 만, 동작 줄이기에서는 없다.
+ */
+@keyframes bae-spin { to { transform: rotate(360deg); } }
+@keyframes bae-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+@keyframes bae-in { from { opacity: 0; } to { opacity: 1; } }
+.bae-spin { animation: bae-spin 900ms linear infinite; }
+.bae-btn.bae-btn-center { justify-content: center; }
+.bae-btn.is-on { border-color: color-mix(in srgb, rgb(var(--color-accent)) 35%, rgb(var(--color-bg-card))); background: color-mix(in srgb, rgb(var(--color-accent)) 10%, rgb(var(--color-bg-card))); color: rgb(var(--bae-accent-text)); }
+.bae-seg-fill { display: flex; }
+.bae-seg-fill .bae-btn { flex: 1; }
+.bae-seg-fill .bae-btn[aria-pressed="true"] { z-index: 1; border-color: color-mix(in srgb, rgb(var(--color-accent)) 35%, rgb(var(--color-bg-card))); background: color-mix(in srgb, rgb(var(--color-accent)) 10%, rgb(var(--color-bg-card))); color: rgb(var(--bae-accent-text)); }
+
+/* ── 작업판의 머리 줄 ── */
+.bae-job { display: flex; gap: 12px; overflow: hidden; min-width: 0; margin: 0 0 0 auto; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); white-space: nowrap; }
+.bae-job-name { overflow: hidden; font-weight: 500; color: rgb(var(--color-text-primary)); text-overflow: ellipsis; }
+.bae-head-dl { flex-wrap: nowrap; overflow: hidden; gap: 12px; margin-left: auto; }
+.bae-pane-foot { margin-top: auto; }
+
+/* ── 재료 (작업판 1 칸 · 한 건 보기) ── */
+:is(.bae-pane, .bae-jv) .bae-mats { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+:is(.bae-pane, .bae-jv) .bae-mgroup { display: flex; flex-direction: column; gap: 4px; }
+:is(.bae-pane, .bae-jv) .bae-mhead { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+:is(.bae-pane, .bae-jv) .bae-mhead-name { margin: 0; font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-text-secondary)); }
+:is(.bae-pane, .bae-jv) .bae-mcount { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+:is(.bae-pane, .bae-jv) .bae-mrow { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; }
+.bae-mthumb { position: relative; display: block; overflow: hidden; width: 72px; height: 46px; padding: 0; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-primary)); }
+.bae-mthumb-l { width: 104px; height: 66px; }
+.bae-mthumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bae-mtext { min-width: 0; }
+.bae-mname { margin: 0; font-size: 0.8125rem; font-weight: 500; }
+.bae-msub { margin: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-mnote { display: -webkit-box; overflow: hidden; margin: 0; font-size: 0.8125rem; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+:is(.bae-pane, .bae-jv) .bae-style { display: flex; align-items: center; gap: 12px; }
+:is(.bae-pane, .bae-jv) .bae-style-thumb { overflow: hidden; flex: none; width: 56px; height: 32px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--bae-paper, 255 255 255)); }
+:is(.bae-pane, .bae-jv) .bae-style-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+:is(.bae-pane, .bae-jv) .bae-style-text { display: flex; flex-direction: column; min-width: 0; margin: 0 auto 0 0; line-height: 1.3; }
+:is(.bae-pane, .bae-jv) .bae-style-name { font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-text-secondary)); }
+:is(.bae-pane, .bae-jv) .bae-style-sub { font-size: 0.75rem; }
+
+/* 이름 아래 값 (시안 .bae-dl, 여섯 칸 격자에 두 칸씩) */
+.bae-dl { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.bae-fact { grid-column: span 2; min-width: 0; }
+.bae-dl .bae-wide { grid-column: 1 / -1; }
+.bae-dl dt { font-size: 0.75rem; font-weight: 500; line-height: 1.3; color: rgb(var(--color-text-secondary)); }
+.bae-dl dd { margin: 2px 0 0; font-size: 0.8125rem; line-height: 1.55; overflow-wrap: break-word; }
+.bae-clamp { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+.bae-pre { white-space: pre-wrap; }
+.bae-note { color: rgb(var(--color-text-secondary)); }
+.bae-pdnotes { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.bae-pdnote { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; font-size: 0.8125rem; line-height: 1.55; color: rgb(var(--bae-warn)); }
+.bae-pdnote svg { margin-top: 3px; }
+.bae-writing { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.8125rem; font-weight: 500; }
+.bae-writing svg { color: rgb(var(--bae-accent-text)); }
+
+/* ── 결과 (작업판 3 칸 25:16, 크게 보기 16:9) ── */
+.bae-stage { position: relative; aspect-ratio: 25 / 16; }
+.bae-stage.bae-well { flex: none; }
+.bae-view .bae-stage { aspect-ratio: 16 / 9; }
+.bae-well.bae-stage-empty { display: grid; place-items: center; align-content: center; gap: 8px; padding: 24px; border: 1px dashed rgb(var(--bae-field-edge)); text-align: center; }
+.bae-stage > .bae-well.bae-stage-empty { position: absolute; inset: 0; }
+.bae-frame { position: absolute; top: 0; bottom: 0; left: 50%; overflow: hidden; max-width: 100%; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); transform: translateX(-50%); }
+.bae-frame.is-wide { top: 50%; bottom: auto; left: 0; width: 100%; transform: translateY(-50%); }
+.bae-shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.bae-shot.is-partial { filter: blur(7px) saturate(0.85); transform: scale(1.06); }
+.bae-shot.is-wait { opacity: 0.4; }
+.bae-hit { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+.bae-hit:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: -2px; }
+.bae-hit-chip { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); }
+.bae-drawing { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 4px 4px 4px 12px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-card)); font-size: 0.8125rem; }
+.bae-drawing-main { display: flex; align-items: center; gap: 8px; font-weight: 500; white-space: nowrap; }
+.bae-drawing-main svg { color: rgb(var(--bae-accent-text)); }
+.bae-drawing-sub { flex: 1 1 120px; overflow: hidden; min-width: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); text-overflow: ellipsis; white-space: nowrap; }
+.bae-res-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; min-height: 32px; }
+.bae-res-view { display: flex; flex-wrap: wrap; gap: 8px; }
+.bae-res-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; margin-top: auto; }
+.bae-res-acts { display: flex; gap: 8px; }
+.bae-inline-dl { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0; }
+.bae-inline-fact { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.bae-inline-dl dt { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-inline-dl dd { margin: 0; font-size: 0.8125rem; font-weight: 500; }
+.bae-bench-err svg, .bae-stage.bae-msg svg, .bae-log-err svg { color: rgb(var(--bae-error)); }
+.bae-stage.bae-msg { justify-content: center; }
+
+/* 불러오는 중 자리 (시안 .sk) */
+.bae-sk { display: block; height: 12px; border-radius: 6px; background: color-mix(in srgb, rgb(var(--color-bg-border)) 70%, rgb(var(--color-bg-card))); animation: bae-pulse 1600ms var(--ease-std) infinite; }
+.bae-sk-img { height: auto; aspect-ratio: 3 / 2; border-radius: 8px; }
+.bae-sk-stage { height: auto; aspect-ratio: 16 / 9; border-radius: 8px; }
+.bae-sk-res { aspect-ratio: 25 / 16; }
+.bae-sk-thumb { width: 80px; height: 46px; }
+.bae-sk-w30 { width: 30%; }
+.bae-sk-w50 { width: 50%; }
+.bae-sk-w70 { width: 70%; }
+.bae-sk-w90 { width: 90%; }
+.bae-sk-lines { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── 크게 보기 틀: 작업판과 기록 자리를 차지하고, Bflow 틀은 그대로 ── */
+.bae-view { display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgb(var(--color-bg-border)); border-radius: 12px; background: rgb(var(--color-bg-card)); animation: bae-in var(--motion-base) var(--ease-out); }
+.bae-view-head { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 16px 0 8px; border-bottom: 1px solid rgb(var(--color-bg-border)); }
+.bae-view-title { overflow: hidden; min-width: 0; margin: 0; font-size: 0.8125rem; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.bae-view-head .bae-job { flex: none; }
+.bae-view-main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
+.bae-view-left { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 16px; }
+.bae-view-side { display: flex; flex-direction: column; gap: 20px; min-width: 0; padding: 16px; border-left: 1px solid rgb(var(--color-bg-border)); }
+.bae-view .bae-side-title { margin: 0; font-size: 0.8125rem; font-weight: 600; }
+.bae-view .bae-field { display: flex; flex-direction: column; gap: 6px; }
+.bae-tool-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bae-tool-name { margin: 0; font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-text-secondary)); }
+.bae-tool-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.bae-end { margin-top: auto; }
+.bae-rev { display: flex; flex-direction: column; gap: 12px; }
+.bae-rev-head { display: flex; align-items: baseline; gap: 8px; }
+.bae-opt { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-rev-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.bae-textarea.bae-rev-text { min-height: 56px; font-family: inherit; font-size: 0.8125rem; line-height: 1.55; }
+
+/* 한 건 보기: 그림 아래 재료 | PD 글 */
+.bae-jv-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; padding-top: 16px; border-top: 1px solid rgb(var(--color-bg-border)); }
+.bae-jv-sec { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.bae-jv-sec-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bae-jv-sec-head .bae-inline-dl { margin-left: auto; }
+.bae-jv-block { display: flex; flex-direction: column; gap: 6px; }
+.bae-jv-block > .bae-label { margin: 0; }
+.bae-jv-dir { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid color-mix(in srgb, rgb(var(--color-accent)) 35%, rgb(var(--color-bg-border))); border-radius: 8px; background: color-mix(in srgb, rgb(var(--color-accent)) 6%, rgb(var(--color-bg-card))); }
+.bae-jv-dir-h { margin: 0; font-size: 0.75rem; font-weight: 600; color: rgb(var(--bae-accent-text)); }
+.bae-jv-dir-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 18px; list-style: decimal; font-size: 0.8125rem; line-height: 1.5; }
+.bae-jv-dir-en { display: block; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-jv-revs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bae-jv-revs li { max-width: 100%; padding: 2px 8px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-primary)); font-size: 0.75rem; line-height: 1.55; overflow-wrap: anywhere; }
+.bae-jv-prompt > summary { display: flex; align-items: center; gap: 6px; min-height: 28px; font-size: 0.8125rem; font-weight: 500; color: rgb(var(--color-text-secondary)); cursor: pointer; list-style: none; }
+.bae-jv-prompt > summary::-webkit-details-marker { display: none; }
+.bae-jv-prompt > summary::before { content: ""; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid currentColor; transition: transform var(--motion-fast) var(--ease-snap); }
+.bae-jv-prompt[open] > summary::before { transform: rotate(90deg); }
+.bae-jv-prompt > summary:hover { color: rgb(var(--color-text-primary)); }
+.bae-jv-prompt > summary:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 4px; }
+.bae-jv-prompt-text { max-height: 320px; margin: 8px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ── 기록: 액자 보기 (결과 그림이 곧 줄, 이름과 숫자는 아래) ── */
+.bae-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(310px, 100%), 1fr)); gap: 20px 16px; margin: 0; padding: 0; list-style: none; }
+.bae-shotcell { display: flex; flex-direction: column; gap: 8px; min-width: 0; container: shot / inline-size; }
+.bae-shotbtn { position: relative; display: block; overflow: hidden; width: 100%; aspect-ratio: 16 / 9; padding: 0; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-card)); cursor: pointer; }
+.bae-shotbtn:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-shotimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.bae-thumb-alt { opacity: 0; background: rgb(var(--bae-paper, 255 255 255)); transition: opacity var(--motion-fast) var(--ease-std); }
+.bae-shotcell.is-on .bae-shotbtn { border-color: rgb(var(--color-accent)); box-shadow: 0 0 0 1px rgb(var(--color-accent)); }
+.bae-tag { position: absolute; top: 8px; padding: 2px 8px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-card)); font-size: 0.75rem; font-weight: 500; line-height: 1.55; color: rgb(var(--color-text-secondary)); pointer-events: none; }
+.bae-tag-l { left: 8px; }
+.bae-tag-r { right: 8px; }
+.bae-tag.is-error { color: rgb(var(--bae-error)); }
+.bae-tag.is-live { color: rgb(var(--bae-accent-text)); }
+.bae-shotstamp { position: absolute; right: 8px; bottom: 8px; padding: 2px 8px 2px 2px; border-radius: 6px; background: rgb(var(--color-bg-card)); }
+.bae-shotcap { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bae-shotname { margin: 0; overflow: hidden; font-size: 0.8125rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.bae-shotdesc { margin: 0; overflow: hidden; font-size: 0.8125rem; text-overflow: ellipsis; white-space: nowrap; }
+.bae-shotdesc.is-sub { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-shotmeta { display: flex; align-items: center; gap: 12px; min-height: 32px; margin-top: auto; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); white-space: nowrap; }
+.bae-shotmeta .is-live, .bae-rtable .is-live { color: rgb(var(--bae-accent-text)); }
+.bae-name-input.bae-minput { height: 28px; }
+@container shot (max-width: 299px) { .bae-shot-took { display: none; } }
+@container shot (max-width: 219px) { .bae-shotdesc, .bae-shot-acttext { display: none; } .bae-shotmeta { gap: 8px; } }
+
+/* ── 기록: 목록 보기 (설정 표 .bae-table 과 다른 이름) ── */
+.bae-rtable { display: flex; flex-direction: column; font-size: 0.8125rem; }
+.bae-rtr { display: grid; grid-template-columns: 80px minmax(0, 1fr) 120px 132px 76px 68px 96px 40px; align-items: center; column-gap: 16px; padding: 0 12px; }
+.bae-rthead { height: 36px; font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-text-secondary)); white-space: nowrap; }
+.bae-rrow { position: relative; min-height: 56px; border-top: 1px solid rgb(var(--color-bg-border)); transition: background-color var(--motion-fast) var(--ease-std); }
+.bae-rrow.is-on { background: color-mix(in srgb, rgb(var(--color-accent)) 20%, rgb(var(--color-bg-primary))); }
+.c-num { text-align: right; }
+.bae-thumb { position: relative; display: block; overflow: hidden; width: 80px; height: 46px; border-radius: 6px; background: rgb(var(--color-bg-card)); }
+.bae-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.bae-cell-desc { min-width: 0; }
+.bae-row-btn { display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
+.bae-row-btn::after { content: ""; position: absolute; inset: 0; }
+.bae-row-btn:focus-visible { outline: none; }
+.bae-row-btn:focus-visible::after { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: -2px; }
+.bae-row-title { overflow: hidden; max-width: 100%; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.bae-row-sub { overflow: hidden; max-width: 100%; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); text-overflow: ellipsis; white-space: nowrap; }
+.bae-row-sub.is-error, .bae-state.is-error { color: rgb(var(--bae-error)); }
+.bae-row-sub.is-live, .bae-state.is-live { color: rgb(var(--bae-accent-text)); }
+.bae-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bae-state { font-size: 0.75rem; font-weight: 500; white-space: nowrap; }
+.bae-stamp { display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 500; white-space: nowrap; }
+.bae-stamp.is-seen { color: rgb(var(--color-text-secondary)); }
+.bae-stamp.is-good { color: rgb(var(--bae-accent-text)); }
+.bae-stamp.is-again { color: rgb(var(--bae-warn)); }
+.bae-seal { width: 24px; height: 24px; }
+.bae-seal-fill { fill: currentColor; }
+.bae-seal-cut { fill: none; stroke: rgb(var(--color-bg-primary)); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.bae-row-acts { position: relative; z-index: 1; display: flex; justify-content: flex-end; gap: 12px; }
+.bae-rtable .bae-ib { position: relative; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: rgb(var(--color-text-secondary)); cursor: pointer; transition: color var(--motion-base) var(--ease-std), background-color var(--motion-base) var(--ease-std); }
+.bae-rtable .bae-ib:hover { background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); }
+.bae-rtable .bae-ib:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+@media (hover: hover) {
+  .bae-shotbtn:hover .bae-thumb-alt, .bae-rrow:hover .bae-thumb-alt { opacity: 1; }
+  .bae-rrow:hover { background: color-mix(in srgb, rgb(var(--color-bg-border)) 35%, rgb(var(--color-bg-primary))); }
+  .bae-rrow.is-on:hover { background: color-mix(in srgb, rgb(var(--color-accent)) 20%, rgb(var(--color-bg-primary))); }
+  .bae-btn.is-on:hover { background: color-mix(in srgb, rgb(var(--color-accent)) 20%, transparent); }
+}
+
+@media (max-width: 1100px) {
+  .bae-rtr { grid-template-columns: 80px minmax(0, 1fr) 132px 68px 40px; }
+  .c-kind, .c-took, .c-state { display: none; }
+  .bae-view-main { grid-template-columns: minmax(0, 1fr); }
+  .bae-view-side { border-top: 1px solid rgb(var(--color-bg-border)); border-left: 0; }
+  .bae-jv-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .bae-rtr { grid-template-columns: 80px minmax(0, 1fr) 68px; }
+  .c-when, .bae-row-acts { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bae-spin, .bae-sk, .bae-view { animation: none; }
+  .bae-thumb-alt, .bae-rrow, .bae-rtable .bae-ib, .bae-jv-prompt > summary::before { transition: none; }
+}

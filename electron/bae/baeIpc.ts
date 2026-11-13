@@ -7,6 +7,7 @@
 import { BAE_BODY_KEYS, baeSettingProblem, isBaeSettingKey, textVersion, type BaeSettingKey, type BaeSettingRow } from '../../src/shared/bae/settings';
 import { baeMemberChangeProblem, type BaeAccess, type BaeMemberRole } from '../../src/shared/bae/access';
 import { baeKeyProblem, maskSecrets } from '../../src/shared/bae/secrets';
+import { isBaeJobId } from '../../src/shared/bae/jobs';
 import type { BaeStore } from './baeStore';
 import type { BaeKeyring } from './baeKeyring';
 import { BAE_DEFAULT_FIXED, BAE_DEFAULT_MANUAL } from './defaultTexts';
@@ -14,7 +15,8 @@ import { BAE_DEFAULT_FIXED, BAE_DEFAULT_MANUAL } from './defaultTexts';
 export interface BaeIpcDependencies {
   ipc: { handle(channel: string, handler: (_event: unknown, ...args: unknown[]) => Promise<unknown>): void };
   getSessionOriginOrThrow(): { userId: string; epoch: number };
-  store: Pick<BaeStore, 'access' | 'settingsGet' | 'settingsSave' | 'settingsHistory' | 'keyStatus' | 'setKey' | 'membersList' | 'membersSet'>;
+  store: Pick<BaeStore, 'access' | 'settingsGet' | 'settingsSave' | 'settingsHistory' | 'keyStatus' | 'setKey' | 'membersList' | 'membersSet'
+    | 'jobListMine' | 'jobGet' | 'jobHide' | 'usageSummary'>;
   keyring: Pick<BaeKeyring, 'forget'>;
   onChanged(what: 'settings' | 'members' | 'jobs'): void;
 }
@@ -108,5 +110,30 @@ export function registerBaeIpc(deps: BaeIpcDependencies): void {
     const r = await deps.store.membersSet(origin.userId, userId as string, role as BaeMemberRole | null);
     signal('members'); current(origin);
     return r;
+  });
+  // ── 작업 기록 · 장부 읽기 (2단계). 쓰기는 메인의 작업 흐름(baeJobs)만 한다 — 화면이 기록을 직접 쓰지 않는다. ──
+  const sinceOk = (v: unknown): string | null => {
+    if (v === null || v === undefined) return null;
+    if (typeof v !== 'string' || !Number.isFinite(Date.parse(v))) throw new Error('목록 기준 시각이 올바르지 않아요.');
+    return v;
+  };
+  deps.ipc.handle('bae:jobs-mine', async (_e, since, limit, epoch) => {
+    const origin = originFor(epoch);
+    const n = Number.isSafeInteger(limit) ? Math.min(300, Math.max(1, limit as number)) : 100;
+    const r = await deps.store.jobListMine(origin.userId, sinceOk(since), n); current(origin); return r;
+  });
+  deps.ipc.handle('bae:job-get', async (_e, jobId, epoch) => {
+    const origin = originFor(epoch);
+    if (!isBaeJobId(jobId)) throw new Error('BAE경 작업 번호가 올바르지 않아요.');
+    const r = await deps.store.jobGet(origin.userId, jobId); current(origin); return r;
+  });
+  deps.ipc.handle('bae:job-hide', async (_e, jobId, hidden, epoch) => {
+    const origin = originFor(epoch);
+    if (!isBaeJobId(jobId) || typeof hidden !== 'boolean') throw new Error('BAE경 작업 번호가 올바르지 않아요.');
+    const r = await deps.store.jobHide(origin.userId, jobId, hidden); signal('jobs'); current(origin); return r;
+  });
+  deps.ipc.handle('bae:usage-summary', async (_e, from, to, epoch) => {
+    const origin = originFor(epoch);
+    const r = await deps.store.usageSummary(origin.userId, sinceOk(from), sinceOk(to)); current(origin); return r;
   });
 }

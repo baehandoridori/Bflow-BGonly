@@ -1,0 +1,555 @@
+{
+ "id": "m6_guide",
+ "kind": "pd",
+ "html": {
+  "ver": "v0.4.11",
+  "manual": "# BAE PD manual v1.7"
+ },
+ "call": {
+  "revText": null,
+  "label": null,
+  "carryExtra": [],
+  "rejectDeveloper": false
+ },
+ "snap": {
+  "materials": {
+   "ratio": "16:9",
+   "time": "night",
+   "place": "exterior",
+   "persp": "auto",
+   "styleMode": "auto",
+   "manualPicks": [],
+   "request": "사진처럼 배치해 주세요.",
+   "refs": [],
+   "guide": {
+    "type": "auto",
+    "placed": false,
+    "hy": 0.5,
+    "v1": 0.5,
+    "v2": 1.6,
+    "v3": -0.9,
+    "depth": 0.16,
+    "cx": 0.42,
+    "ct": 0.14,
+    "cb": 0.86
+   },
+   "tilt": 0,
+   "tier": "m",
+   "calib": 0,
+   "rulesKo": "",
+   "timeUser": [],
+   "pdModel": "gpt-6.1-sol",
+   "imgModel": "gpt-image-2.5-sunburst",
+   "quality": "high",
+   "stream": true,
+   "rate": 1400,
+   "manualCustom": false,
+   "blocksCustom": false,
+   "library": [
+    {
+     "id": "L1",
+     "name": "학교 앞 횡단보도",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L2",
+     "name": "아파트 집 안 (현관에서 본 거실)",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L3",
+     "name": "공원 벤치",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L4",
+     "name": "작은 집 방 (소파, 에어컨)",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L5",
+     "name": "아파트 공동현관 (낮)",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L6",
+     "name": "아파트 공동현관 (밤)",
+     "place": "exterior",
+     "tod": "night"
+    },
+    {
+     "id": "L7",
+     "name": "아파트 단지와 거리",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L8",
+     "name": "초등학교 교실",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L9",
+     "name": "나무 아지트 안",
+     "place": "interior",
+     "tod": "any"
+    },
+    {
+     "id": "L10",
+     "name": "공중화장실",
+     "place": "interior",
+     "tod": "any"
+    },
+    {
+     "id": "L11",
+     "name": "공원 정자",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L12",
+     "name": "놀이터",
+     "place": "exterior",
+     "tod": "day"
+    }
+   ]
+  },
+  "board": {
+   "hasColor": false,
+   "noteCount": 0,
+   "notesPlain": "",
+   "notesLevel": null,
+   "isGuide": true,
+   "mode": "guide",
+   "hasBg": true,
+   "hasContent": true,
+   "rev": 1,
+   "ratio": "16:9",
+   "tilt": 0,
+   "guide": {
+    "type": "auto",
+    "placed": false,
+    "hy": 0.5,
+    "v1": 0.5,
+    "v2": 1.6,
+    "v3": -0.9,
+    "depth": 0.16,
+    "cx": 0.42,
+    "ct": 0.14,
+    "cb": 0.86
+   },
+   "paintShare": 0.9217130520945969,
+   "photoLike": false,
+   "levelSamples": null
+  },
+  "inputs": {
+   "rough": {
+    "kind": "guide",
+    "label": "구도 가이드 (흐리게)",
+    "small": "img:112be6e31a5cf26a.jpg",
+    "annotated": null,
+    "notesText": "",
+    "hasColor": false,
+    "tilt": 0,
+    "noteCount": 0,
+    "key": "1l8kxy9:61551",
+    "painted": false,
+    "orig": null,
+    "w": 1536,
+    "h": 864
+   },
+   "refs": [],
+   "base": {
+    "kind": "style",
+    "label": "그림체 기준 (원경)",
+    "note": null,
+    "small": "img:69e32b6362305593.jpg",
+    "w": 1536,
+    "h": 396
+   },
+   "refIds": [],
+   "place": null
+  },
+  "prevOrder": null,
+  "promptBefore": "",
+  "carryChecked": true,
+  "misc": {
+   "manualVersion": "v1.7",
+   "blocksVersion": "v1",
+   "carryList": [],
+   "orderPhrases": [
+    "PD가 러프를 읽는 중",
+    "비슷한 팀 배경 찾는 중",
+    "영어 주문서 쓰는 중"
+   ],
+   "mapping": null,
+   "guideSummaryKo": "",
+   "cameraSentence": "",
+   "effRatio": "16:9",
+   "drawSizes": {
+    "gen": [
+     2048,
+     1152
+    ],
+    "out": [
+     2048,
+     1152
+    ],
+    "tilt": 0
+   },
+   "currentPickIds": null,
+   "timeForPD": "night"
+  }
+ },
+ "answer": {
+  "obj": {
+   "notes_ko": [
+    "사진은 흐리게 보냈어요."
+   ],
+   "style_picks": [],
+   "style_reason_ko": "",
+   "summary_ko": "흐린 사진의 배치만 따라 밤 거리를 그려요.",
+   "prompt": "Generate an image of a quiet street at night. Layout from image 1 only. [STYLE] Image {S1} is a style example. [TREES] [CARS] [TIME exterior] [LIGHT FLAT] [LIGHT EVEN] [WEATHER] [AVOID] puddles, people Text: no signs. Aspect ratio 16:9."
+  },
+  "usage": {
+   "input_tokens": 12000,
+   "output_tokens": 900
+  }
+ },
+ "requests": [
+  {
+   "status": 200,
+   "body": {
+    "model": "gpt-6.1-sol",
+    "instructions": "@@MANUAL@@",
+    "input": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "input_text",
+        "text": "Aspect ratio: 16:9 (the image will be 2048x1152).\nTime of day: night\nPlace: exterior\nPerspective: auto (follow the sketch; there is no camera sentence).\nImage 1: blurry layout guide (a detailed AI image or photo, blurred on purpose; layout source).\nStyle examples: auto mode. Choose up to two from this style library (their small thumbnails follow the input images):\n  L1: 학교 앞 횡단보도 (exterior, day)\n  L2: 아파트 집 안 (현관에서 본 거실) (interior, day)\n  L3: 공원 벤치 (exterior, day)\n  L4: 작은 집 방 (소파, 에어컨) (interior, day)\n  L5: 아파트 공동현관 (낮) (exterior, day)\n  L6: 아파트 공동현관 (밤) (exterior, night)\n  L7: 아파트 단지와 거리 (exterior, day)\n  L8: 초등학교 교실 (interior, day)\n  L9: 나무 아지트 안 (interior, any)\n  L10: 공중화장실 (interior, any)\n  L11: 공원 정자 (exterior, day)\n  L12: 놀이터 (exterior, day)\nBase style strip: always sent as the last image. In the prompt write {BASE} for its number and {S1}, {S2} for the style examples.\nArtist's request (Korean): 사진처럼 배치해 주세요.\nWrite the order sheet now. Follow the manual exactly: its markers or verbatim sentences, the numbers of Image 1 and the references, and the placeholders."
+       },
+       {
+        "type": "input_text",
+        "text": "Image 1:"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:112be6e31a5cf26a.jpg",
+        "detail": "high"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L1: 학교 앞 횡단보도"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:57858f088f1aee90.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L2: 아파트 집 안 (현관에서 본 거실)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:1188a06f8038034b.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L3: 공원 벤치"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:70ece9abf5268ed2.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L4: 작은 집 방 (소파, 에어컨)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:287df56c609ab8da.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L5: 아파트 공동현관 (낮)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:2390699e7d15dc90.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L6: 아파트 공동현관 (밤)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:c842a60f1ae7d4fc.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L7: 아파트 단지와 거리"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:cbee0b58e5805bef.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L8: 초등학교 교실"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:d4a118ba3f0678ac.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L9: 나무 아지트 안"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:de32c7f07adb39df.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L10: 공중화장실"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:883c1b4fc23cf3c1.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L11: 공원 정자"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:ffb7eeb807d9858c.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L12: 놀이터"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:eabc9359cff55b8e.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Base style strip (always the last image):"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:69e32b6362305593.jpg",
+        "detail": "auto"
+       }
+      ]
+     }
+    ],
+    "text": {
+     "format": {
+      "type": "json_schema",
+      "name": "bae_order",
+      "strict": true,
+      "schema": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "summary_ko",
+        "notes_ko",
+        "style_picks",
+        "style_reason_ko",
+        "prompt"
+       ],
+       "properties": {
+        "summary_ko": {
+         "type": "string"
+        },
+        "notes_ko": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "style_picks": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "style_reason_ko": {
+         "type": "string"
+        },
+        "prompt": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    },
+    "store": false
+   }
+  }
+ ],
+ "after": {
+  "order": {
+   "summary": "흐린 사진의 배치만 따라 밤 거리를 그려요.",
+   "notes": [
+    "사진은 흐리게 보냈어요.",
+    "알 수 없는 자리표시가 남아 있어요: [WEATHER]. 영어 주문서에서 확인해 주세요.",
+    "주문서에 레퍼런스 이미지 예시 문장이 있었는데 고른 예시가 없어서, 그 문장은 기준 이미지를 가리키게 됐어요. 필요하면 영어 주문서에서 그 문장을 지워주세요."
+   ],
+   "raw": "Generate an image of a quiet street at night. Layout from image 1 only. [STYLE] Image {S1} is a style example. [TREES] [CARS] [TIME exterior] [LIGHT FLAT] [LIGHT EVEN] [WEATHER] [AVOID] puddles, people Text: no signs. Aspect ratio 16:9.",
+   "prompt": "Generate an image of a quiet street at night. Layout from image 1 only. Image 2 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 2. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Image 2 is a style example. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat dark blue-greens, like the trees in image 2, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Cars: simple flat everyday cars of mixed types in clear body colors, with flat dark windows, small flat lights, blank plates and plain dark wheels, no shine or logos. Every car stands on its wheels; cars farther back are smaller and higher in the picture, never half hidden behind a hedge as if sunk. Time: night. A cool night palette of clear deep blues and violets for walls, ground and sky, never grey; lit windows and lamps are flat warm yellow or flat white shapes with no glow; unlit areas are darker flat navy blue. Light: completely flat and even with no direction; no shadows of any kind, not even small contact shadows under objects. [WEATHER] Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects or the daylight colors of image 2, cast shadows, contact shadows, shading, identical repeated trees, many small leaf clusters, cars sunk into the ground, puddles, people. Text: no signs. Aspect ratio 16:9.",
+   "picks": [],
+   "refIds": [],
+   "reason": "",
+   "cost": 0.033,
+   "doneMsg": "주문서 완료 · 해석 비용 약 46원. 확인하고 '그림 만들기'를 눌러주세요.",
+   "dirty": false,
+   "revisions": [],
+   "revTexts": [],
+   "carried": [],
+   "roughKey": "1l8kxy9:61551",
+   "manualVer": "v1.7",
+   "blocksVer": "v1",
+   "rulesKo": "",
+   "director": null,
+   "place": null,
+   "tilt": 0
+  },
+  "promptText": "Generate an image of a quiet street at night. Layout from image 1 only. Image 2 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 2. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Image 2 is a style example. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat dark blue-greens, like the trees in image 2, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Cars: simple flat everyday cars of mixed types in clear body colors, with flat dark windows, small flat lights, blank plates and plain dark wheels, no shine or logos. Every car stands on its wheels; cars farther back are smaller and higher in the picture, never half hidden behind a hedge as if sunk. Time: night. A cool night palette of clear deep blues and violets for walls, ground and sky, never grey; lit windows and lamps are flat warm yellow or flat white shapes with no glow; unlit areas are darker flat navy blue. Light: completely flat and even with no direction; no shadows of any kind, not even small contact shadows under objects. [WEATHER] Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects or the daylight colors of image 2, cast shadows, contact shadows, shading, identical repeated trees, many small leaf clusters, cars sunk into the ground, puddles, people. Text: no signs. Aspect ratio 16:9.",
+  "orderMsg": "",
+  "manualPicks": [],
+  "promptCount": "영어 주문서 359단어",
+  "currentPickIds": []
+ },
+ "draw": {
+  "mode": "ok",
+  "attempts": [
+   {
+    "status": 200,
+    "fields": [
+     {
+      "name": "model",
+      "value": "gpt-image-2.5-sunburst"
+     },
+     {
+      "name": "prompt",
+      "value": "Generate an image of a quiet street at night. Layout from image 1 only. Image 2 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 2. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Image 2 is a style example. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat dark blue-greens, like the trees in image 2, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Cars: simple flat everyday cars of mixed types in clear body colors, with flat dark windows, small flat lights, blank plates and plain dark wheels, no shine or logos. Every car stands on its wheels; cars farther back are smaller and higher in the picture, never half hidden behind a hedge as if sunk. Time: night. A cool night palette of clear deep blues and violets for walls, ground and sky, never grey; lit windows and lamps are flat warm yellow or flat white shapes with no glow; unlit areas are darker flat navy blue. Light: completely flat and even with no direction; no shadows of any kind, not even small contact shadows under objects. [WEATHER] Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects or the daylight colors of image 2, cast shadows, contact shadows, shading, identical repeated trees, many small leaf clusters, cars sunk into the ground, puddles, people. Text: no signs. Aspect ratio 16:9."
+     },
+     {
+      "name": "size",
+      "value": "2048x1152"
+     },
+     {
+      "name": "quality",
+      "value": "high"
+     },
+     {
+      "name": "n",
+      "value": "1"
+     },
+     {
+      "name": "output_format",
+      "value": "png"
+     },
+     {
+      "name": "stream",
+      "value": "true"
+     },
+     {
+      "name": "partial_images",
+      "value": "2"
+     },
+     {
+      "name": "image[]",
+      "filename": "image1.png",
+      "type": "image/png",
+      "bytes": 803222,
+      "sha256": "306b78ff75642efd6b593600ba4937371de6dce80eff54e55de4600f244fd476",
+      "format": "png",
+      "width": 1536,
+      "height": 864
+     },
+     {
+      "name": "image[]",
+      "filename": "image2.png",
+      "type": "image/png",
+      "bytes": 539964,
+      "sha256": "2c4b9c72d3e2334381f403bd939d6217320c796c79ec0ddd0dc95c7d03b05563",
+      "format": "png",
+      "width": 1536,
+      "height": 396
+     }
+    ]
+   }
+  ],
+  "list": [
+   {
+    "kind": "guide",
+    "label": "구도 가이드 (흐리게)",
+    "note": null,
+    "id": null,
+    "w": 1536,
+    "h": 864,
+    "small": "img:112be6e31a5cf26a.jpg",
+    "thumb": null,
+    "sha256": "306b78ff75642efd6b593600ba4937371de6dce80eff54e55de4600f244fd476",
+    "bytes": 803222,
+    "format": "png",
+    "width": 1536,
+    "height": 864
+   },
+   {
+    "kind": "style",
+    "label": "그림체 기준 (원경)",
+    "note": null,
+    "id": null,
+    "w": 1536,
+    "h": 396,
+    "small": "img:69e32b6362305593.jpg",
+    "thumb": null,
+    "sha256": "2c4b9c72d3e2334381f403bd939d6217320c796c79ec0ddd0dc95c7d03b05563",
+    "bytes": 539964,
+    "format": "png",
+    "width": 1536,
+    "height": 396
+   }
+  ],
+  "done": {
+   "drawMsg": "",
+   "busy": false,
+   "result": {
+    "cost": 0.2031,
+    "total": 0.2361,
+    "model": "gpt-image-2.5-sunburst",
+    "quality": "high",
+    "w": 64,
+    "h": 36,
+    "prompt": "Generate an image of a quiet street at night. Layout from image 1 only. Image 2 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 2. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Image 2 is a style example. Trees: each tree's leaves are one to three big solid masses with a simple bumpy outline, in two flat dark blue-greens, like the trees in image 2, not a pattern of many small leaf clusters; a brown trunk with a few thick, loose branch strokes; every tree a little different. Bushes and hedges are low rounded mounds. Cars: simple flat everyday cars of mixed types in clear body colors, with flat dark windows, small flat lights, blank plates and plain dark wheels, no shine or logos. Every car stands on its wheels; cars farther back are smaller and higher in the picture, never half hidden behind a hedge as if sunk. Time: night. A cool night palette of clear deep blues and violets for walls, ground and sky, never grey; lit windows and lamps are flat warm yellow or flat white shapes with no glow; unlit areas are darker flat navy blue. Light: completely flat and even with no direction; no shadows of any kind, not even small contact shadows under objects. [WEATHER] Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects or the daylight colors of image 2, cast shadows, contact shadows, shading, identical repeated trees, many small leaf clusters, cars sunk into the ground, puddles, people. Text: no signs. Aspect ratio 16:9.",
+    "tilt": 0,
+    "gen": null
+   }
+  }
+ }
+}

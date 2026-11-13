@@ -294,7 +294,192 @@ BEGIN
  RETURN public.bae_gyeong_session_members_list(p_session_token);
 END $$;
 
--- (stage 2 adds the job and usage wrappers here, before the lockdown)
+-- ───────────── jobs and the ledger (stage 2) ─────────────
+-- A time the PC sends (an offline job arrives later than it was made), or NULL when it is missing, unreadable or
+-- outside sane bounds (more than 5 minutes ahead, more than 60 days back). Internal.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_pc_time(v TEXT)
+RETURNS TIMESTAMPTZ LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+DECLARE t TIMESTAMPTZ;
+BEGIN
+ IF v IS NULL OR v = '' THEN RETURN NULL; END IF;
+ BEGIN t := v::timestamptz; EXCEPTION WHEN OTHERS THEN RETURN NULL; END;
+ IF t > now() + interval '5 minutes' OR t < now() - interval '60 days' THEN RETURN NULL; END IF;
+ RETURN t;
+END $$;
+-- 0 ordering · 1 ordered · 2 drawing · 3 finished. A late, out-of-order write never takes a finished job back.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_status_rank(s TEXT)
+RETURNS INTEGER LANGUAGE sql IMMUTABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+ SELECT CASE s WHEN 'ordering' THEN 0 WHEN 'ordered' THEN 1 WHEN 'drawing' THEN 2 ELSE 3 END
+$$;
+-- One job as the app reads it. The list leaves out the PD words (pd), which only the one-job view needs.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_job_json(j public.bae_gyeong_jobs, full_row BOOLEAN)
+RETURNS JSONB LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+ SELECT jsonb_build_object('id', j.id, 'userId', j.user_id, 'userName', j.user_name, 'kind', j.kind, 'status', j.status,
+   'name', j.name, 'parentJobId', j.parent_job_id, 'summary', j.summary, 'result', j.result, 'images', j.images,
+   'selfReview', j.self_review, 'stamp', j.stamp, 'stampAt', j.stamp_at, 'costUsd', j.cost_usd, 'origin', j.origin,
+   'appVersion', j.app_version, 'hidden', j.hidden_by_owner, 'createdAt', j.created_at, 'finishedAt', j.finished_at,
+   'updatedAt', j.updated_at)
+  || CASE WHEN full_row THEN jsonb_build_object('pd', j.pd, 'stampBy', j.stamp_by, 'stampNote', j.stamp_note) ELSE '{}'::jsonb END
+$$;
+
+-- The maker writes their own job: made when '그림 만들기' is pressed, then finished (done · failed · stopped).
+-- The server decides who (the session) and the name shown; the PC sends the words, numbers and preview addresses.
+-- A new job needs the right to use BAE경; a job already started may still be finished after the right is taken away.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_session_job_upsert(p_session_token TEXT, p_job JSONB)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE actor TEXT := public.bae_gyeong_actor(p_session_token); jid UUID; parent UUID; cur public.bae_gyeong_jobs;
+  saved public.bae_gyeong_jobs; st TEXT; nm TEXT; cost NUMERIC; uname TEXT; part TEXT;
+BEGIN
+ IF p_job IS NULL OR jsonb_typeof(p_job) <> 'object' OR length(p_job::text) > 300000 THEN
+  RAISE EXCEPTION 'BAE경 작업 기록의 모양이 올바르지 않습니다.' USING ERRCODE = '22023';
+ END IF;
+ BEGIN jid := (p_job->>'id')::uuid; EXCEPTION WHEN OTHERS THEN jid := NULL; END;
+ IF jid IS NULL THEN RAISE EXCEPTION 'BAE경 작업 번호가 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ parent := NULL;
+ IF p_job ? 'parentJobId' AND jsonb_typeof(p_job->'parentJobId') = 'string' THEN
+  BEGIN parent := (p_job->>'parentJobId')::uuid; EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'BAE경 작업 번호가 올바르지 않습니다.' USING ERRCODE = '22023'; END;
+ END IF;
+ st := p_job->>'status';
+ IF st IS NULL OR st NOT IN ('ordering','ordered','drawing','done','failed','stopped') THEN RAISE EXCEPTION 'BAE경 작업 상태가 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ FOREACH part IN ARRAY ARRAY['summary','pd','result','images'] LOOP
+  IF p_job ? part AND jsonb_typeof(p_job->part) <> 'object' THEN RAISE EXCEPTION 'BAE경 작업 기록의 모양이 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ END LOOP;
+ IF p_job ? 'selfReview' AND jsonb_typeof(p_job->'selfReview') NOT IN ('object','null') THEN RAISE EXCEPTION 'BAE경 작업 기록의 모양이 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ nm := NULLIF(btrim(COALESCE(p_job->>'name', '')), '');
+ IF nm IS NOT NULL AND length(nm) > 80 THEN RAISE EXCEPTION '그림 이름은 80자까지 쓸 수 있습니다.' USING ERRCODE = '22023'; END IF;
+ BEGIN cost := COALESCE((p_job->>'costUsd')::numeric, 0); EXCEPTION WHEN OTHERS THEN cost := NULL; END;
+ IF cost IS NULL OR cost < 0 OR cost >= 1000 THEN RAISE EXCEPTION 'BAE경 작업 비용이 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+
+ SELECT * INTO cur FROM public.bae_gyeong_jobs WHERE id = jid FOR UPDATE;
+ IF NOT FOUND THEN
+  PERFORM public.bae_gyeong_require_use(actor);
+  IF p_job->>'kind' IS NULL OR p_job->>'kind' NOT IN ('new','same','edit','angle','layers','import','upscale','denoise') THEN
+   RAISE EXCEPTION 'BAE경 작업 종류가 올바르지 않습니다.' USING ERRCODE = '22023';
+  END IF;
+  SELECT u.name INTO uname FROM public.users u WHERE u.id = actor;
+  INSERT INTO public.bae_gyeong_jobs(id, user_id, user_name, kind, status, name, parent_job_id, summary, pd, result, images,
+    self_review, cost_usd, origin, app_version, request_id, created_at, finished_at, updated_at)
+  VALUES (jid, actor, COALESCE(uname, ''), p_job->>'kind', st, nm, parent,
+    COALESCE(p_job->'summary', '{}'::jsonb), COALESCE(p_job->'pd', '{}'::jsonb), COALESCE(p_job->'result', '{}'::jsonb), COALESCE(p_job->'images', '{}'::jsonb),
+    CASE WHEN jsonb_typeof(p_job->'selfReview') = 'object' THEN p_job->'selfReview' END, cost,
+    left(COALESCE(p_job->>'origin', ''), 120), left(COALESCE(p_job->>'appVersion', ''), 40), jid::text,
+    COALESCE(public.bae_gyeong_pc_time(p_job->>'createdAt'), now()),
+    CASE WHEN public.bae_gyeong_status_rank(st) = 3 THEN COALESCE(public.bae_gyeong_pc_time(p_job->>'finishedAt'), now()) END, now())
+  RETURNING * INTO saved;
+ ELSE
+  IF cur.user_id <> actor THEN RAISE EXCEPTION '다른 사람의 BAE경 작업 기록은 고칠 수 없습니다.' USING ERRCODE = '42501'; END IF;
+  IF public.bae_gyeong_status_rank(cur.status) = 3 AND public.bae_gyeong_status_rank(st) < 3 THEN st := cur.status; END IF;
+  UPDATE public.bae_gyeong_jobs SET
+    status = st,
+    name = CASE WHEN p_job ? 'name' THEN nm ELSE cur.name END,
+    summary = COALESCE(p_job->'summary', cur.summary), pd = COALESCE(p_job->'pd', cur.pd),
+    result = COALESCE(p_job->'result', cur.result), images = COALESCE(p_job->'images', cur.images),
+    self_review = CASE WHEN p_job ? 'selfReview' THEN CASE WHEN jsonb_typeof(p_job->'selfReview') = 'object' THEN p_job->'selfReview' END ELSE cur.self_review END,
+    cost_usd = CASE WHEN p_job ? 'costUsd' THEN cost ELSE cur.cost_usd END,
+    finished_at = CASE WHEN public.bae_gyeong_status_rank(st) = 3 THEN COALESCE(cur.finished_at, public.bae_gyeong_pc_time(p_job->>'finishedAt'), now()) END,
+    updated_at = now()
+  WHERE id = jid RETURNING * INTO saved;
+ END IF;
+ PERFORM public.bae_gyeong_signal('jobs-changed');
+ RETURN public.bae_gyeong_job_json(saved, false);
+END $$;
+
+-- My jobs. With no cursor: the newest p_limit. With a cursor (the newest updated_at the PC has, minus a small overlap):
+-- what changed after it, oldest first, so the PC can ask again until 'more' is false. 'total' lets the PC notice rows
+-- an admin removed.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_session_job_list_mine(p_session_token TEXT, p_since TIMESTAMPTZ, p_limit INTEGER)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE actor TEXT := public.bae_gyeong_actor(p_session_token); lim INTEGER := LEAST(GREATEST(COALESCE(p_limit, 100), 1), 300); rows_out JSONB; n INTEGER;
+BEGIN
+ IF p_since IS NULL THEN
+  SELECT COALESCE(jsonb_agg(public.bae_gyeong_job_json(j, false) ORDER BY j.updated_at DESC, j.id), '[]'::jsonb), count(*) INTO rows_out, n
+   FROM public.bae_gyeong_jobs j WHERE j.id IN (SELECT x.id FROM public.bae_gyeong_jobs x WHERE x.user_id = actor ORDER BY x.updated_at DESC, x.id LIMIT lim);
+ ELSE
+  SELECT COALESCE(jsonb_agg(public.bae_gyeong_job_json(j, false) ORDER BY j.updated_at, j.id), '[]'::jsonb), count(*) INTO rows_out, n
+   FROM public.bae_gyeong_jobs j WHERE j.id IN (SELECT x.id FROM public.bae_gyeong_jobs x WHERE x.user_id = actor AND x.updated_at > p_since ORDER BY x.updated_at, x.id LIMIT lim);
+ END IF;
+ RETURN jsonb_build_object('rows', rows_out, 'more', n >= lim, 'serverTime', now(),
+   'total', (SELECT count(*) FROM public.bae_gyeong_jobs WHERE user_id = actor));
+END $$;
+
+-- Every member's jobs, for a reviewer (the admin screen, stage 8). Hidden ones too: hiding only tidies the maker's list.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_session_job_list_team(p_session_token TEXT, p_since TIMESTAMPTZ, p_limit INTEGER)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE actor TEXT := public.bae_gyeong_actor(p_session_token); lim INTEGER := LEAST(GREATEST(COALESCE(p_limit, 100), 1), 300); rows_out JSONB; n INTEGER;
+BEGIN
+ IF NOT public.bae_gyeong_can_review(actor) THEN RAISE EXCEPTION '팀 기록은 BAE경 검수자만 볼 수 있습니다.' USING ERRCODE = '42501'; END IF;
+ IF p_since IS NULL THEN
+  SELECT COALESCE(jsonb_agg(public.bae_gyeong_job_json(j, false) ORDER BY j.updated_at DESC, j.id), '[]'::jsonb), count(*) INTO rows_out, n
+   FROM public.bae_gyeong_jobs j WHERE j.id IN (SELECT x.id FROM public.bae_gyeong_jobs x ORDER BY x.updated_at DESC, x.id LIMIT lim);
+ ELSE
+  SELECT COALESCE(jsonb_agg(public.bae_gyeong_job_json(j, false) ORDER BY j.updated_at, j.id), '[]'::jsonb), count(*) INTO rows_out, n
+   FROM public.bae_gyeong_jobs j WHERE j.id IN (SELECT x.id FROM public.bae_gyeong_jobs x WHERE x.updated_at > p_since ORDER BY x.updated_at, x.id LIMIT lim);
+ END IF;
+ RETURN jsonb_build_object('rows', rows_out, 'more', n >= lim, 'serverTime', now(), 'total', (SELECT count(*) FROM public.bae_gyeong_jobs));
+END $$;
+
+-- One job with the PD words, for its maker or a reviewer.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_session_job_get(p_session_token TEXT, p_job_id UUID)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE actor TEXT := public.bae_gyeong_actor(p_session_token); j public.bae_gyeong_jobs;
+BEGIN
+ SELECT * INTO j FROM public.bae_gyeong_jobs WHERE id = p_job_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'BAE경 작업 기록을 찾을 수 없습니다.' USING ERRCODE = 'P0002'; END IF;
+ IF j.user_id <> actor AND NOT public.bae_gyeong_can_review(actor) THEN RAISE EXCEPTION '다른 사람의 BAE경 작업 기록은 볼 수 없습니다.' USING ERRCODE = '42501'; END IF;
+ RETURN public.bae_gyeong_job_json(j, true);
+END $$;
+
+-- The maker hides a job from their own list (or shows it again). The row and its ledger lines stay (plan 14 5-4).
+CREATE OR REPLACE FUNCTION public.bae_gyeong_session_job_hide(p_session_token TEXT, p_job_id UUID, p_hidden BOOLEAN)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE actor TEXT := public.bae_gyeong_actor(p_session_token); j public.bae_gyeong_jobs;
+BEGIN
+ SELECT * INTO j FROM public.bae_gyeong_jobs WHERE id = p_job_id FOR UPDATE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'BAE경 작업 기록을 찾을 수 없습니다.' USING ERRCODE = 'P0002'; END IF;
+ IF j.user_id <> actor THEN RAISE EXCEPTION '내 BAE경 작업 기록만 숨길 수 있습니다.' USING ERRCODE = '42501'; END IF;
+ UPDATE public.bae_gyeong_jobs SET hidden_by_owner = COALESCE(p_hidden, true), updated_at = now() WHERE id = p_job_id RETURNING * INTO j;
+ PERFORM public.bae_gyeong_signal('jobs-changed');
+ RETURN public.bae_gyeong_job_json(j, false);
+END $$;
+
+-- One ledger line per OpenAI call. Who and which key are decided here; the same request id twice is one line.
+-- A signed-in session is enough: money already spent is recorded even if the right to use was taken away meanwhile.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_session_usage_log(p_session_token TEXT, p_row JSONB)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE actor TEXT := public.bae_gyeong_actor(p_session_token); jid UUID; usd NUMERIC; n INTEGER; rid TEXT; mdl TEXT;
+BEGIN
+ IF p_row IS NULL OR jsonb_typeof(p_row) <> 'object' OR length(p_row::text) > 8000 THEN RAISE EXCEPTION 'BAE경 장부 줄의 모양이 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ jid := NULL;
+ IF jsonb_typeof(p_row->'jobId') = 'string' THEN
+  BEGIN jid := (p_row->>'jobId')::uuid; EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'BAE경 작업 번호가 올바르지 않습니다.' USING ERRCODE = '22023'; END;
+ END IF;
+ IF p_row->>'kind' IS NULL OR p_row->>'kind' NOT IN ('order','image','layers','angle','note','other') THEN RAISE EXCEPTION 'BAE경 장부 줄의 종류가 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ mdl := p_row->>'model'; rid := p_row->>'requestId';
+ IF mdl IS NULL OR length(mdl) NOT BETWEEN 1 AND 120 OR rid IS NULL OR length(rid) NOT BETWEEN 1 AND 100 THEN RAISE EXCEPTION 'BAE경 장부 줄의 모양이 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ IF p_row ? 'tokens' AND jsonb_typeof(p_row->'tokens') NOT IN ('object','null') THEN RAISE EXCEPTION 'BAE경 장부 줄의 모양이 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ BEGIN usd := (p_row->>'usd')::numeric; EXCEPTION WHEN OTHERS THEN usd := NULL; END;
+ IF usd IS NULL OR usd < 0 OR usd >= 100 THEN RAISE EXCEPTION 'BAE경 장부 금액이 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
+ INSERT INTO public.bae_gyeong_usage(job_id, user_id, kind, model, tokens, usd, key_label, request_id, created_at)
+ VALUES (jid, actor, p_row->>'kind', mdl, CASE WHEN jsonb_typeof(p_row->'tokens') = 'object' THEN p_row->'tokens' ELSE '{}'::jsonb END, usd,
+   public.bae_gyeong_key_label_for(actor), rid, COALESCE(public.bae_gyeong_pc_time(p_row->>'at'), now()))
+ ON CONFLICT (user_id, request_id) DO NOTHING;
+ GET DIAGNOSTICS n = ROW_COUNT;
+ RETURN jsonb_build_object('ok', true, 'duplicate', n = 0);
+END $$;
+
+-- My spending between two times: totals, pictures and orders, and lines per kind and model.
+CREATE OR REPLACE FUNCTION public.bae_gyeong_session_usage_summary(p_session_token TEXT, p_from TIMESTAMPTZ, p_to TIMESTAMPTZ)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE actor TEXT := public.bae_gyeong_actor(p_session_token);
+BEGIN
+ RETURN (SELECT jsonb_build_object('usd', COALESCE(sum(u.usd), 0), 'images', count(*) FILTER (WHERE u.kind = 'image'),
+   'orders', count(*) FILTER (WHERE u.kind = 'order'),
+   'lines', COALESCE((SELECT jsonb_agg(jsonb_build_object('kind', g.kind, 'model', g.model, 'n', g.n, 'usd', g.usd) ORDER BY g.kind, g.model)
+     FROM (SELECT x.kind, x.model, count(*) n, sum(x.usd) usd FROM public.bae_gyeong_usage x
+       WHERE x.user_id = actor AND x.created_at >= COALESCE(p_from, '-infinity') AND x.created_at < COALESCE(p_to, 'infinity') GROUP BY x.kind, x.model) g), '[]'::jsonb))
+  FROM public.bae_gyeong_usage u
+  WHERE u.user_id = actor AND u.created_at >= COALESCE(p_from, '-infinity') AND u.created_at < COALESCE(p_to, 'infinity'));
+END $$;
 
 -- ───────────── lockdown: no direct right on any table or internal function; only the session wrappers ─────────────
 DO $$ DECLARE role_name TEXT; fn REGPROCEDURE; tbl TEXT; BEGIN

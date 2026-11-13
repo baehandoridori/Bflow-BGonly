@@ -32,6 +32,7 @@ import { createBackgroundStore, startBackgroundRealtime } from './backgroundStor
 import { createBaeStore, startBaeRealtime } from './bae/baeStore';
 import { createBaeKeyring } from './bae/baeKeyring';
 import { registerBaeIpc } from './bae/baeIpc';
+import { startBaeMain } from './bae/baeMain';
 import { uploadBackgroundImage } from './backgroundStorage';
 import { readBackgroundImageFile } from './backgroundImageFile';
 import { registerCalendarSubscriptionIpc } from './calendarSubscriptionIpc';
@@ -2598,6 +2599,25 @@ registerBaeIpc({
   getSessionOriginOrThrow,
   onChanged: what => broadcastToAllWindows('bae:changed', { what }),
 });
+// BAE경 만들기: 이 PC 보관함(%LOCALAPPDATA%) · 못 보낸 것 줄 · 작업 흐름 (계획 14의 5장).
+const baeMain = startBaeMain({
+  ipc: ipcMain,
+  store: baeStore,
+  keyring: baeKeyring,
+  storage: () => supabaseClient.storage.from('scene-images'),
+  getSessionOriginOrThrow,
+  tokenFor: actorId => sessionManager.getSessionTokenFor(actorId),
+  broadcast: (channel, payload) => broadcastToAllWindows(channel, payload),
+  saveAs: async (defaultName, bytes) => {
+    const opts = { defaultPath: path.join(app.getPath('downloads'), defaultName), filters: [{ name: 'PNG', extensions: ['png'] }] };
+    const r = mainWindow && !mainWindow.isDestroyed() ? await dialog.showSaveDialog(mainWindow, opts) : await dialog.showSaveDialog(opts);
+    if (r.canceled || !r.filePath) return null;
+    await fs.promises.writeFile(r.filePath, bytes);
+    return r.filePath;
+  },
+  appVersion: app.getVersion(),
+  localAppData: process.env.LOCALAPPDATA || app.getPath('userData'),
+});
 // 가이드 그림 작업 폴더 제안 — 공유 드라이브 폴더의 한 단계 목록과 탐색기 복사 그림 경로만(설계 2026-11-10 6절).
 registerWorkFolderSuggestIpc({
   ipc: ipcMain,
@@ -3414,7 +3434,7 @@ function startSupabaseRealtime() {
   backgroundRealtimeCleanup = startBackgroundRealtime(supabaseClient, () => broadcastToAllWindows('background:changed', {}));
   baeRealtimeCleanup?.();
   baeRealtimeCleanup = startBaeRealtime(supabaseClient, (what) => {
-    if (what === 'settings') baeKeyring.forget(); // 키가 바뀌었을 수 있다: 다음 호출 때 다시 받는다
+    if (what === 'settings') { baeKeyring.forget(); baeMain.settingsChanged(); } // 키 · 매뉴얼 · 모델이 바뀌었을 수 있다: 다음 호출 때 다시 받는다
     broadcastToAllWindows('bae:changed', { what });
   });
   // 1) postgres_changes 기반 (기존)
@@ -5617,6 +5637,7 @@ app.on('before-quit', (e) => {
   baeRealtimeCleanup?.();
   baeRealtimeCleanup = null;
   baeKeyring.forget();
+  baeMain.stop();
   icsSubscriptionIpc.dispose();
   if (isQuitting) return;
   isQuitting = true;

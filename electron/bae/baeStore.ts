@@ -6,6 +6,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseBaeAccess, parseBaeMembers, type BaeAccess, type BaeMember, type BaeMemberRole } from '../../src/shared/bae/access';
 import { isBaeSettingKey, type BaeSettingKey, type BaeSettingRow } from '../../src/shared/bae/settings';
 import { maskSecrets, parseBaeKeyStatus, type BaeKeyStatus } from '../../src/shared/bae/secrets';
+import {
+  parseBaeJob, parseBaeJobPage, parseBaeUsageSummary,
+  type BaeJob, type BaeJobPage, type BaeJobWrite, type BaeUsageLine, type BaeUsageSummary,
+} from '../../src/shared/bae/jobs';
 
 export interface BaeRpcClient {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>;
@@ -54,6 +58,19 @@ export function createBaeStore(client: BaeRpcClient, sessions: BaeSessionResolve
     membersList: (actorId: string): Promise<BaeMember[]> => call(actorId, 'bae_gyeong_session_members_list', {}, parseBaeMembers),
     membersSet: (actorId: string, userId: string, role: BaeMemberRole | null): Promise<BaeMember[]> =>
       call(actorId, 'bae_gyeong_session_members_set', { p_user_id: userId, p_role: role }, parseBaeMembers),
+    // ── 작업 기록 · 장부 (2단계) ──
+    jobUpsert: (actorId: string, job: BaeJobWrite): Promise<BaeJob> => call(actorId, 'bae_gyeong_session_job_upsert', { p_job: job }, parseBaeJob),
+    jobListMine: (actorId: string, since: string | null, limit = 100): Promise<BaeJobPage> =>
+      call(actorId, 'bae_gyeong_session_job_list_mine', { p_since: since, p_limit: limit }, parseBaeJobPage),
+    jobListTeam: (actorId: string, since: string | null, limit = 100): Promise<BaeJobPage> =>
+      call(actorId, 'bae_gyeong_session_job_list_team', { p_since: since, p_limit: limit }, parseBaeJobPage),
+    jobGet: (actorId: string, jobId: string): Promise<BaeJob> => call(actorId, 'bae_gyeong_session_job_get', { p_job_id: jobId }, parseBaeJob),
+    jobHide: (actorId: string, jobId: string, hidden: boolean): Promise<BaeJob> =>
+      call(actorId, 'bae_gyeong_session_job_hide', { p_job_id: jobId, p_hidden: hidden }, parseBaeJob),
+    usageLog: (actorId: string, line: BaeUsageLine): Promise<{ duplicate: boolean }> =>
+      call(actorId, 'bae_gyeong_session_usage_log', { p_row: line }, (d) => ({ duplicate: !!(d && (d as Record<string, unknown>).duplicate) })),
+    usageSummary: (actorId: string, from: string | null, to: string | null): Promise<BaeUsageSummary> =>
+      call(actorId, 'bae_gyeong_session_usage_summary', { p_from: from, p_to: to }, parseBaeUsageSummary),
   };
 }
 export type BaeStore = ReturnType<typeof createBaeStore>;

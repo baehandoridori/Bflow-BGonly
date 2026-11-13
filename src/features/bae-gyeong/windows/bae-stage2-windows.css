@@ -1,0 +1,150 @@
+/*
+ * BAE경 2단계 창 부품: 재료 창(bae-mt-) · 만드는 창(bae-mk-) · 그림체 기준 창(시안 WinStyle 의 bw-strip · bw-libs 그대로).
+ * 틀과 공통 부품은 bae-windows.css (리드 것). 값은 시안의 변수를 픽셀로 옮겼다. 움직임은 opacity · transform 만,
+ * 동작 줄이기에서는 없다. 기울임 글꼴은 쓰지 않는다 (안내는 색 · 굵기로만).
+ */
+@keyframes bae-spin { to { transform: rotate(360deg); } }
+.bae-spin { animation: bae-spin 900ms linear infinite; }
+
+/* 칸을 채우는 나눔 버튼 (시안 .bae-seg-fill) */
+.bae-seg-fill { display: flex; }
+.bae-seg-fill .bae-btn { flex: 1; }
+
+/* 눌린 칩 (시안 .btn.is-on) */
+.bae-chips .bae-btn[aria-pressed="true"] { border-color: color-mix(in srgb, rgb(var(--color-accent)) 35%, rgb(var(--color-bg-card))); background: color-mix(in srgb, rgb(var(--color-accent)) 10%, rgb(var(--color-bg-card))); color: rgb(var(--bae-accent-text)); }
+
+/* PD 메모: 확실하지 않은 점, 경고 색 (시안 .bae-pdnotes) */
+.bae-pdnotes { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.bae-pdnote { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; font-size: 0.8125rem; line-height: 1.55; color: rgb(var(--bae-warn)); }
+.bae-pdnote svg { margin-top: 3px; }
+
+/* ── 재료 창 ── */
+.bae-pop .bae-mt-desc { min-height: 96px; }
+.bae-mt-dir { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-left: 2px solid rgb(var(--bae-accent-text)); border-radius: 0 6px 6px 0; background: color-mix(in srgb, rgb(var(--color-accent)) 6%, rgb(var(--color-bg-card))); }
+.bae-mt-dir-head { margin: 0; font-size: 0.75rem; font-weight: 600; color: rgb(var(--bae-accent-text)); }
+.bae-mt-dir-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 0.8125rem; }
+.bae-mt-dir-list li { overflow-wrap: anywhere; }
+.bae-mt-dir-warn { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 0.75rem; font-weight: 500; color: rgb(var(--bae-warn)); }
+.bae-mt-pick { display: flex; flex-direction: column; gap: 6px; }
+.bae-mt-guide { align-items: flex-start; padding: 4px 0; }
+.bae-mt-guide .bw-switch-track { margin-top: 1px; }
+.bae-mt-guide-text { display: flex; flex-direction: column; gap: 2px; line-height: 1.35; white-space: normal; }
+.bae-mt-guide-sub { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-mt-carry { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; font-size: 0.8125rem; cursor: pointer; }
+.bae-mt-carry input { width: 16px; height: 16px; margin: 0; accent-color: rgb(var(--color-accent)); }
+.bae-mt-msg { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 12px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; font-size: 0.8125rem; line-height: 1.5; }
+.bae-mt-msg svg { flex: none; margin-top: 2px; }
+.bae-mt-msg span { white-space: pre-line; }
+.bae-mt-msg.is-info { color: rgb(var(--color-text-secondary)); }
+.bae-mt-msg.is-warn { border-color: color-mix(in srgb, rgb(var(--bae-warn)) 40%, rgb(var(--color-bg-border))); color: rgb(var(--color-text-primary)); }
+.bae-mt-msg.is-warn svg { color: rgb(var(--bae-warn)); }
+.bae-mt-msg.is-error { border-color: color-mix(in srgb, rgb(var(--bae-error)) 40%, rgb(var(--color-bg-border))); background: color-mix(in srgb, rgb(var(--bae-error)) 8%, rgb(var(--color-bg-card))); color: rgb(var(--color-text-primary)); }
+.bae-mt-msg.is-error svg { color: rgb(var(--bae-error)); }
+
+/* ── 만드는 창: 왼쪽은 스크롤하지 않고 러프 틀이 남는 높이를 가진다 ── */
+.bae-mk-left { overflow: hidden; }
+.bae-mk-board { position: relative; flex: 1; display: grid; place-items: center; min-height: 160px; overflow: hidden; container-type: size; border-radius: 8px; background: rgb(var(--color-bg-primary)); }
+.bae-mk-fit { position: relative; max-width: 100%; max-height: 100%; overflow: hidden; border: 1px solid rgb(var(--color-bg-border)); background: rgb(var(--bae-paper, 255 255 255)); }
+.bae-mk-rough { display: block; width: 100%; height: 100%; object-fit: contain; }
+.bae-mk-chip { position: absolute; display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-secondary)); font-size: 0.75rem; font-weight: 500; line-height: 1.55; white-space: nowrap; }
+.bae-mk-px { right: 8px; bottom: 8px; pointer-events: none; }
+.bae-mk-notes { top: 8px; left: 8px; min-height: 28px; cursor: pointer; transition: color var(--motion-base) var(--ease-std), border-color var(--motion-base) var(--ease-std); }
+.bae-mk-notes[aria-pressed="true"] { border-color: color-mix(in srgb, rgb(var(--bae-error)) 45%, rgb(var(--color-bg-border))); color: rgb(var(--bae-error)); }
+.bae-mk-notes:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-mk-size { display: flex; flex-direction: column; gap: 6px; }
+.bae-mk-tiers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.bae-mk-tier { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 6px 12px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); text-align: left; cursor: pointer; transition: background-color var(--motion-base) var(--ease-std), border-color var(--motion-base) var(--ease-std), transform var(--motion-fast) var(--ease-snap); }
+.bae-mk-tier:active { transform: translateY(1px); }
+.bae-mk-tier:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-mk-tier[aria-pressed="true"] { border-color: color-mix(in srgb, rgb(var(--color-accent)) 55%, rgb(var(--color-bg-card))); background: color-mix(in srgb, rgb(var(--color-accent)) 12%, rgb(var(--color-bg-card))); }
+.bae-mk-tier-name { font-size: 0.8125rem; font-weight: 600; line-height: 1.3; }
+.bae-mk-tier[aria-pressed="true"] .bae-mk-tier-name { color: rgb(var(--bae-accent-text)); }
+.bae-mk-tier-px { font-size: 0.75rem; line-height: 1.3; color: rgb(var(--color-text-secondary)); }
+@media (hover: hover) { .bae-mk-tier:hover { background: color-mix(in srgb, rgb(var(--color-bg-border)) 50%, rgb(var(--color-bg-card))); } }
+.bae-mk-send { display: flex; flex-direction: column; gap: 6px; }
+.bae-mk-send > .bae-label { margin: 0; }
+.bae-mk-send-sub { margin-left: 6px; font-weight: 400; }
+.bae-mk-send-list { display: flex; gap: 8px; margin: 0; padding: 0; overflow: hidden; list-style: none; }
+.bae-mk-send-item { flex: none; display: flex; flex-direction: column; gap: 2px; width: 72px; }
+.bae-mk-send-pic { position: relative; display: block; overflow: hidden; width: 72px; height: 46px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-primary)); }
+.bae-mk-send-pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bae-mk-send-n { position: absolute; top: 3px; left: 3px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); font-size: 0.6875rem; font-weight: 600; line-height: 1; }
+.bae-mk-send-label { overflow: hidden; font-size: 0.6875rem; line-height: 1.4; color: rgb(var(--color-text-secondary)); text-overflow: ellipsis; white-space: nowrap; }
+
+.bae-mk-side { flex: 0 0 var(--bae-win-side, 440px); display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid rgb(var(--color-bg-border)); }
+.bae-mk-scroll { flex: 1; display: flex; flex-direction: column; gap: 16px; min-height: 0; padding: 16px; overflow: auto; }
+.bae-mk-sum { display: flex; flex-direction: column; gap: 8px; }
+.bae-mk-sum-h { margin: 0; font-size: 0.8125rem; font-weight: 600; color: rgb(var(--bae-accent-text)); }
+.bae-mk-sum-h:focus { outline: none; }
+.bae-mk-sum-h:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 4px; }
+.bae-mk-sum-text { margin: 0; font-size: 0.9375rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: break-word; }
+.bae-mk-revising { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 8px 8px 8px 12px; border: 1px dashed rgb(var(--bae-field-edge)); border-radius: 8px; background: rgb(var(--color-bg-primary)); }
+.bae-mk-revising svg { color: rgb(var(--bae-accent-text)); }
+.bae-mk-revising-text { font-size: 0.875rem; font-weight: 500; }
+.bae-mk-block { display: flex; flex-direction: column; gap: 6px; }
+.bae-mk-block > .bae-label { margin: 0; }
+.bae-mk-text { margin: 0; font-size: 0.8125rem; line-height: 1.55; }
+.bae-mk-picks { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0; padding: 0; list-style: none; }
+.bae-mk-pick { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bae-mk-pick-name { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-mk-dir { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid color-mix(in srgb, rgb(var(--color-accent)) 35%, rgb(var(--color-bg-border))); border-radius: 8px; background: color-mix(in srgb, rgb(var(--color-accent)) 6%, rgb(var(--color-bg-card))); }
+.bae-mk-dir-h { margin: 0; font-size: 0.75rem; font-weight: 600; color: rgb(var(--bae-accent-text)); }
+.bae-mk-dir-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 18px; list-style: decimal; font-size: 0.8125rem; line-height: 1.5; }
+.bae-mk-dir-en { display: block; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-mk-revise { display: flex; flex-direction: column; gap: 6px; }
+.bae-mk-revise-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.bae-mk-revs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bae-mk-revs li { max-width: 100%; padding: 2px 8px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-primary)); font-size: 0.75rem; line-height: 1.55; overflow-wrap: anywhere; }
+.bae-mk-prompt { border-top: 1px solid rgb(var(--color-bg-border)); padding-top: 12px; }
+.bae-mk-prompt > summary { display: flex; align-items: center; gap: 6px; min-height: 28px; font-size: 0.8125rem; font-weight: 500; color: rgb(var(--color-text-secondary)); cursor: pointer; list-style: none; }
+.bae-mk-prompt > summary::-webkit-details-marker { display: none; }
+.bae-mk-prompt > summary::before { content: ""; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid currentColor; transition: transform var(--motion-fast) var(--ease-snap); }
+.bae-mk-prompt[open] > summary::before { transform: rotate(90deg); }
+.bae-mk-prompt > summary:hover { color: rgb(var(--color-text-primary)); }
+.bae-mk-prompt > summary:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 4px; }
+.bae-mk-prompt-body { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.bae-pop .bae-mk-prompt-text { min-height: 220px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.75rem; }
+.bae-mk-status { flex: none; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 16px; border-top: 1px solid rgb(var(--color-bg-border)); font-size: 0.8125rem; line-height: 1.45; }
+.bae-mk-status svg { flex: none; }
+.bae-mk-status-text { flex: 1; min-width: 0; margin: 0; white-space: pre-line; }
+.bae-mk-status.is-info svg { color: rgb(var(--color-text-secondary)); }
+.bae-mk-status.is-warn { background: color-mix(in srgb, rgb(var(--bae-warn)) 8%, rgb(var(--color-bg-card))); }
+.bae-mk-status.is-warn svg { color: rgb(var(--bae-warn)); }
+.bae-mk-status.is-error { background: color-mix(in srgb, rgb(var(--bae-error)) 8%, rgb(var(--color-bg-card))); }
+.bae-mk-status.is-error svg { color: rgb(var(--bae-error)); }
+
+/* ── 그림체 기준 창 (시안 WinStyle) ── */
+.bw-side-first { order: -1; border-right: 1px solid rgb(var(--color-bg-border)); border-left: 0; }
+.bw-strip { overflow: hidden; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--bae-paper, 255 255 255)); }
+.bw-strip img { display: block; width: 100%; height: auto; }
+.bw-libs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 12px; margin: 0; padding: 0; list-style: none; }
+.bw-lib { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bw-lib-pic { position: relative; display: block; overflow: hidden; width: 100%; aspect-ratio: 16 / 9; padding: 0; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); cursor: pointer; }
+.bw-lib-pic:disabled { cursor: default; }
+.bw-lib-pic:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bw-lib-pic img { display: block; width: 100%; height: 100%; object-fit: cover; transition: opacity var(--motion-base) var(--ease-std); }
+.bw-lib-pic .bae-tag { position: absolute; top: 6px; left: 6px; padding: 0 6px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-secondary)); font-size: 0.6875rem; font-weight: 500; line-height: 1.55; }
+.bw-lib.is-on .bw-lib-pic { border-color: rgb(var(--color-accent)); box-shadow: 0 0 0 1px rgb(var(--color-accent)); }
+.bw-lib.is-off .bw-lib-pic img { opacity: 0.3; }
+.bw-lib-check { position: absolute; right: 8px; bottom: 8px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: rgb(var(--color-accent)); color: #fff; }
+.bw-lib-cap { min-width: 0; }
+.bw-lib-name { margin: 0; overflow: hidden; font-size: 0.8125rem; font-weight: 500; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.bw-lib-meta { margin: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+@media (hover: hover) { .bw-lib-pic:not(:disabled):hover img { opacity: 0.85; } }
+
+@media (max-width: 1100px) {
+  .bae-mk-side { flex: none; border-top: 1px solid rgb(var(--color-bg-border)); border-left: 0; }
+  .bae-mk-scroll { overflow: visible; }
+  .bae-mk-left { overflow: visible; }
+  .bae-mk-board { flex: none; height: 360px; }
+  .bw-side-first { order: 0; border-right: 0; }
+}
+@media (max-width: 640px) {
+  .bw-libs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bae-mk-tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bae-spin { animation: none; }
+  .bae-mk-tier, .bae-mk-notes, .bw-lib-pic img, .bae-mk-prompt > summary::before { transition: none; }
+  .bae-mk-tier:active { transform: none; }
+}

@@ -35,7 +35,8 @@ function harness(opts: { isAdmin: boolean; canUse?: boolean; setKeyError?: strin
 test('no channel gives the key back: the screen can put a key in and ask whether there is one, nothing more', async () => {
   const { registerBaeIpc } = await load('electron/bae/baeIpc.ts');
   const h = harness({ isAdmin: true }); registerBaeIpc(h.deps);
-  assert.deepEqual([...h.handlers.keys()].sort(), ['bae:access', 'bae:key-set', 'bae:key-status', 'bae:members-list', 'bae:members-set', 'bae:settings', 'bae:settings-history', 'bae:settings-save', 'bae:settings-seed'].sort());
+  assert.deepEqual([...h.handlers.keys()].sort(), ['bae:access', 'bae:key-set', 'bae:key-status', 'bae:members-list', 'bae:members-set', 'bae:settings', 'bae:settings-history', 'bae:settings-save', 'bae:settings-seed',
+    'bae:jobs-mine', 'bae:job-get', 'bae:job-hide', 'bae:usage-summary'].sort());
   const st = await h.invoke('bae:key-set', `  ${FAKE_KEY}\n`, 7);
   assert.deepEqual(st, { hasKey: true, updatedAt: 'now', label: 'team' });
   assert.deepEqual(h.calls.at(-1), ['setKey', 'u1', FAKE_KEY], 'trimmed before it goes to the server');
