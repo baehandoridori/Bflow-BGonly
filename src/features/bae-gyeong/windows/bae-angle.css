@@ -1,0 +1,125 @@
+/*
+ * BAE경 '다른 각도로' 창 (계획 14d 3-3, 시안 WinAngle 의 bw-angle · bw-fig · bw-lower · bw-sliders · bw-info · bw-extras).
+ * 그림 칸 안의 표시(빨간 B · 소실점 · 메모 빨강 · 더한 그림 색)는 HTML v0.4.11 의 도면 색 그대로 — 그림 위에 그려지는 것이라 테마를 따르지 않는다.
+ * 그 밖의 색은 Bflow 토큰과 .bae-root 의 BAE경 토큰만. 움직임은 색 · 투명도 · transform 만 (CLAUDE.md 움직임 규칙), 동작 줄이기는 맨 아래.
+ */
+.bae-ag { gap: 10px; }
+.bae-ag .bw-bar { gap: 8px; }
+.bae-ag .bw-bar .bae-hint { margin: 0; font-size: 0.75rem; }
+
+/* 도면 · B 그림 두 칸 (시안 800 : 894) */
+.bw-angle { position: relative; display: grid; grid-template-columns: minmax(0, 800fr) minmax(0, 894fr); gap: 16px; align-items: start; }
+.bw-fig { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; }
+.bw-fig-cap { display: flex; align-items: baseline; gap: 8px; min-height: 20px; min-width: 0; }
+.bw-fig-title { flex: none; font-size: 0.8125rem; font-weight: 600; white-space: nowrap; }
+.bae-ag-cap { overflow: hidden; margin: 0; font-size: 0.75rem; white-space: nowrap; text-overflow: ellipsis; }
+.bw-fig-pic { position: relative; overflow: hidden; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); }
+.bae-ag-stage { width: 100%; line-height: 0; }
+/* 두 그림이 1400×900 · 1280×800 창에서 스크롤 없이 들어가게 높이 320px 까지 */
+.bae-ag-plan { aspect-ratio: 16 / 10; width: min(100%, calc(320px * 1.6)); margin: 0 auto; }
+.bae-ag-view { aspect-ratio: var(--ar, 1.7778); width: min(100%, calc(320px * var(--ar, 1.7778))); margin: 0 auto; }
+.bae-ag-stage canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.bae-ag-plan canvas:last-child { cursor: crosshair; touch-action: none; }
+.bae-ag-plan canvas:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: -2px; }
+.bae-ag-paint { pointer-events: none; touch-action: none; }
+.bae-ag-paint.on { pointer-events: auto; cursor: crosshair; }
+.bae-ag-paint.pick { pointer-events: auto; cursor: copy; }
+.bae-ag-paint.txt { pointer-events: auto; cursor: text; }
+.bae-ag-note { pointer-events: none; }
+.bae-ag-orig { position: absolute; inset: 0; display: none; width: 100%; height: 100%; object-fit: contain; background: rgb(var(--color-bg-primary)); user-select: none; -webkit-user-drag: none; }
+.bae-ag-view.is-orig .bae-ag-orig { display: block; }
+.bae-ag-view.is-orig .bae-ag-paint, .bae-ag-view.is-orig .bae-ag-note, .bae-ag-view.is-orig .bae-ag-notetx, .bae-ag-view.is-orig .bae-ag-vp { visibility: hidden; }
+.bae-ag-origbtn { position: absolute; top: 8px; right: 8px; z-index: 3; line-height: normal; }
+.bae-ag-view .bae-tag { z-index: 3; line-height: normal; }
+/* PD메모 글씨 칸 (HTML .agnotetx: 메모 빨강 점선) */
+.bae-ag-notetx {
+  position: absolute; z-index: 4; min-width: 150px; max-width: 60%; margin: 0; padding: 2px 4px; transform: translate(-5.5px, -3.5px);
+  border: 1.5px dashed #E5336B; border-radius: 4px; background: rgb(255 255 255 / 0.88); color: #E5336B;
+  font-family: inherit; font-weight: 800; line-height: 1.22; resize: none; outline: none; overflow: hidden; field-sizing: content; box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+}
+.bae-ag-notetx[hidden] { display: none; }
+/* 투시만 바꾸기: 빨간 소실점과 지평선 */
+.bae-ag-vp { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.bae-ag-vp[hidden] { display: none; }
+.bae-ag-vph { position: absolute; left: 0; right: 0; top: var(--vy, 50%); height: 0; border-top: 2px solid rgb(224 40 40 / 0.85); box-shadow: 0 0 0 1px rgb(255 255 255 / 0.5); }
+.bae-ag-vpd {
+  position: absolute; left: var(--vx, 50%); top: var(--vy, 50%); width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  border: 3px solid #e02828; border-radius: 50%; background: rgb(255 255 255 / 0.35); box-shadow: 0 0 0 2px #fff; pointer-events: auto; cursor: grab; touch-action: none; outline: none;
+}
+.bae-ag-vpd:focus-visible { box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgb(var(--color-accent-sub)); }
+/* 깊이 재는 중 · 모델 받는 중 */
+.bae-ag-wait { position: absolute; inset: 26px 0 0; z-index: 5; display: grid; place-items: center; border-radius: 8px; background: rgb(var(--color-bg-primary) / 0.82); }
+.bae-ag-wait > div { display: flex; flex-direction: column; gap: 8px; width: min(460px, 90%); padding: 14px 16px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 12px; background: rgb(var(--color-bg-card)); }
+.bae-ag-wait b { font-size: 0.875rem; }
+.bae-ag-wait .bae-hint { margin: 0; }
+.bae-ag-wait .bae-btn { align-self: flex-start; }
+.bae-ag-bar { overflow: hidden; height: 6px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 999px; background: rgb(var(--color-bg-primary)); }
+.bae-ag-bar i { display: block; height: 100%; background: rgb(var(--color-accent)); transform-origin: left center; transition: transform var(--motion-base) var(--ease-std); }
+
+/* 아래: 손잡이 다섯 + 장소, 안내 줄 | 같은 공간 그림 · 러프 덧대기 · PD메모 */
+.bw-lower { display: grid; grid-template-columns: minmax(0, 1fr) var(--bae-win-side, 440px); gap: 20px; }
+.bw-lower-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.bw-sliders { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 20px; }
+.bw-slabel { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.bw-sval { font-size: 0.75rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.bae-ag-range { width: 100%; height: var(--bae-control-s, 32px); margin: 0; padding: 0; -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
+.bae-ag-range::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: rgb(var(--bae-field-edge)); }
+.bae-ag-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -6px; border: 2px solid rgb(var(--color-bg-card)); border-radius: 999px; background: rgb(var(--color-accent)); }
+.bae-ag-range:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 6px; }
+.bae-ag-range:disabled { opacity: 0.5; cursor: not-allowed; }
+.bw-info { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding: 8px 12px; border-radius: 8px; background: rgb(var(--color-bg-primary)); font-size: 0.75rem; line-height: 1.5; }
+.bw-info > svg { margin-top: 2px; color: rgb(var(--bae-tool-angle)); }
+.bw-info.is-warn > svg, .bw-info.is-warn .bw-facts { color: rgb(var(--bae-warn)); }
+.bw-info.is-err > svg, .bw-info.is-err .bw-facts { color: rgb(var(--bae-error)); }
+.bw-facts-clip { overflow: hidden; }
+.bw-facts { display: flex; flex-wrap: wrap; row-gap: 4px; margin: 0 0 0 -13px; padding: 0; list-style: none; }
+.bw-facts li { padding: 0 12px; border-left: 1px solid rgb(var(--color-bg-border)); }
+.bw-extras { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bw-extras > .bae-hint { margin: 0; font-size: 0.75rem; }
+.bw-extra { display: flex; align-items: center; gap: 8px; min-height: var(--bae-control-s, 32px); }
+.bw-extra-name { flex: 0 0 96px; font-size: 0.75rem; font-weight: 500; }
+.bw-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.bae-ag-memo { color: rgb(var(--bae-error)); }
+.bae-ag-memo[aria-pressed="true"] { background: color-mix(in srgb, rgb(var(--bae-error)) 14%, rgb(var(--color-bg-card))); color: rgb(var(--bae-error)); }
+.bae-ag-sep { width: 1px; height: 18px; margin: 0 4px; background: rgb(var(--color-bg-border)); }
+.bae-ag-color { display: inline-flex; align-items: center; }
+.bae-ag-color input { width: 32px; height: 28px; padding: 0; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: none; cursor: pointer; }
+.bae-ag-color input:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-ag-brush { width: 96px; }
+/* 더한 그림 칩 (HTML .amchip) */
+.bae-ag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bae-ag-chip { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); font-size: 0.75rem; line-height: 1.25; }
+.bae-ag-chip.is-a { gap: 6px; padding: 3px 8px 3px 3px; }
+.bae-ag-chip.is-on { border-color: var(--exc); box-shadow: 0 0 0 1px var(--exc) inset; }
+.bae-ag-chipb { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px 3px 3px; border: 0; border-radius: 8px; background: none; color: rgb(var(--color-text-primary)); font: inherit; text-align: left; cursor: pointer; }
+.bae-ag-chipb:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 1px; }
+.bae-ag-chip img, .bae-ag-chipimg { display: block; flex: none; width: 48px; height: 27px; border-radius: 5px; object-fit: cover; background: rgb(var(--color-bg-card)); }
+.bae-ag-chipn { display: flex; flex-direction: column; min-width: 0; max-width: 170px; }
+.bae-ag-chipn b { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.bae-ag-chipn i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; vertical-align: 0; }
+.bae-ag-chipn em { overflow: hidden; color: rgb(var(--color-text-secondary)); font-style: normal; white-space: nowrap; text-overflow: ellipsis; }
+.bae-ag-chip.is-err .bae-ag-chipn em { color: rgb(var(--bae-error)); }
+.bae-ag-chipx { width: 24px; height: 24px; }
+.bae-ag-exsl { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 10px; padding: 4px 8px; border-left: 2px solid var(--exc); }
+.bae-ag-exsl .bae-ag-range::-webkit-slider-thumb { background: var(--exc); }
+.bae-ag-exhead { position: relative; }
+.bae-ag-add {
+  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 6; display: flex; flex-direction: column; gap: 8px; width: min(560px, 80vw); max-height: 320px; overflow: auto;
+  padding: 10px 12px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 12px; background: rgb(var(--color-bg-card)); box-shadow: 0 10px 40px rgb(0 0 0 / 0.3);
+}
+.bae-ag-addh { display: flex; align-items: center; gap: 8px; }
+.bae-ag-addh b { font-size: 0.8125rem; }
+.bae-ag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.bae-ag-grid button { display: flex; flex-direction: column; gap: 4px; padding: 4px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); font: inherit; font-size: 0.6875rem; text-align: left; cursor: pointer; transition: border-color var(--motion-fast) var(--ease-std); }
+.bae-ag-grid button:hover { border-color: rgb(var(--color-accent)); }
+.bae-ag-grid button:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 1px; }
+.bae-ag-grid img { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 5px; object-fit: cover; }
+.bae-ag-grid .bae-hint { grid-column: 1 / -1; margin: 0; }
+.bae-ag-est { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  .bw-angle, .bw-lower, .bw-sliders { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bae-ag-bar i, .bae-ag-grid button { transition: none; }
+}
