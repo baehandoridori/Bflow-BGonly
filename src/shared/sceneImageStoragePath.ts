@@ -39,6 +39,13 @@ export function buildSceneImageStoragePath(
   if (sheetName === 'char') {
     return `characters/${sceneId}/comments/${imageType}_${uniq}.${ext}`;
   }
+  // BAE경 기록 댓글 그림(9단계) — sheetName='bae', sceneId=작업 id. 기록의 미리보기와 같은 bae/{작업 id}/ 아래 comments/.
+  //   서버(bae_gyeong_comment_clean)는 이 자리의 주소만 댓글 그림으로 받는다. 작업 id 모양이 아니면 올리지 않는다.
+  if (sheetName === 'bae') {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(sceneId)) throw new Error(`Invalid BAE job id: ${sceneId}`);
+    if (!/^[A-Za-z0-9_-]{1,80}$/.test(uniq) || !/^[a-z]+$/.test(imageType)) throw new Error('Invalid BAE comment image name');
+    return `bae/${sceneId}/comments/${imageType}_${uniq}.${ext}`;
+  }
   const { ep, partId, dept } = parseSheetName(sheetName);
   return `${ep}/${partId}/${dept}/${sceneImageStorageFolder(sceneId)}/${imageType}_${uniq}.${ext}`;
 }

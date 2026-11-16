@@ -28,6 +28,11 @@ export interface PreviewOptions {
   now?: () => string;
   /** 만들기 흐름(가짜 PD · 가짜 그림 모델). 화면 쪽(previewMake.ts)이 넣는다 — node 시험에서는 비워 둔다. */
   make?: (ctx: PreviewMakeContext) => PreviewMakeMethods;
+  /**
+   * 9단계: 도장이 새로 찍혔을 때(같은 도장을 다시 누른 것은 빼고). 실서버에서는 bae_gyeong_stamps 트리거가 좋아요 · 다시를 코멘트 한 줄로 남긴다 —
+   * 테스트 모드는 화면 쪽(gateway.ts)이 여기서 같은 줄을 남긴다.
+   */
+  onStamped?: (jobId: string, stamp: PreviewStampLine['stamp'], note: string | null, by: string) => void;
 }
 export type PreviewMakeMethods = Pick<BaeGateway, 'order' | 'draw' | 'drawFinish' | 'resultSet' | 'toolJob' | 'abort' | 'jobPatch' | 'active' | 'localFile' | 'saveAs' | 'draftSave' | 'draftLoad' | 'draftClear' | 'online' | 'onProgress'>;
 export interface PreviewMakeContext {
@@ -248,7 +253,9 @@ export function createBaePreviewGateway(opts: PreviewOptions): BaeGateway {
       if (!finished(all[i].status)) throw new Error('아직 만드는 중인 작업에는 도장을 찍을 수 없습니다.');
       const nt = stamp === null ? null : baeStampNote(note); const cur = all[i];
       if (cur.stamp === stamp && (cur.stampNote ?? null) === nt && (stamp === null || cur.stampBy === u.id)) return cur;
-      const j = putStamp(all, i, stamp, nt, u.id); write(K.jobs, all); signal('jobs'); return j;
+      const j = putStamp(all, i, stamp, nt, u.id); write(K.jobs, all); signal('jobs');
+      try { opts.onStamped?.(jobId, stamp, nt, u.id); } catch { /* 코멘트 줄을 못 남겨도 도장은 찍혔다 */ }
+      return j;
     },
     async jobStampBulk(jobIds) {
       const u = requireReview('확인 도장');
@@ -259,6 +266,7 @@ export function createBaePreviewGateway(opts: PreviewOptions): BaeGateway {
         const i = all.findIndex((j) => j.id === id);
         if (i < 0 || all[i].stamp !== null || !finished(all[i].status)) continue;
         putStamp(all, i, 'seen', null, u.id); stamped.push(id);
+        try { opts.onStamped?.(id, 'seen', null, u.id); } catch { /* 확인함은 조용히 — 줄을 남기지 않는다 */ }
       }
       if (stamped.length) { write(K.jobs, all); signal('jobs'); }
       return { stamped, skipped: ids.length - stamped.length };

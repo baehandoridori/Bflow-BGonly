@@ -1099,3 +1099,17 @@ contextBridge.exposeInMainWorld('baeLayersAPI', {
   storeForget: (pic: string) => ipcRenderer.invoke('bae:layers-store-forget', pic, canonicalSessionEpoch),
   showPsd: (jobId: string) => ipcRenderer.invoke('bae:layers-show-psd', jobId, canonicalSessionEpoch),
 });
+// BAE경 9단계 코멘트: 기록 한 건 = 댓글 스레드 하나. 화면 → 메인 → bae_gyeong_session_comment_* (세션 토큰은 메인 밖으로 나가지 않는다).
+contextBridge.exposeInMainWorld('baeCommentsAPI', {
+  list: (jobId: string) => ipcRenderer.invoke('bae-comments:list', jobId, canonicalSessionEpoch),
+  add: (jobId: string, draft: unknown) => ipcRenderer.invoke('bae-comments:add', jobId, draft, canonicalSessionEpoch),
+  edit: (commentId: string, text: string, mentions: string[], images: string[] | null) => ipcRenderer.invoke('bae-comments:edit', commentId, text, mentions, images, canonicalSessionEpoch),
+  remove: (commentId: string) => ipcRenderer.invoke('bae-comments:delete', commentId, canonicalSessionEpoch),
+  react: (commentId: string, emoji: string, on: boolean) => ipcRenderer.invoke('bae-comments:react', commentId, emoji, on, canonicalSessionEpoch),
+  reactions: (commentIds: string[]) => ipcRenderer.invoke('bae-comments:reactions', commentIds, canonicalSessionEpoch),
+  onChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('bae-comments:changed', listener);
+    return () => ipcRenderer.removeListener('bae-comments:changed', listener);
+  },
+});

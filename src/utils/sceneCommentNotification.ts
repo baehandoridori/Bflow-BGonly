@@ -38,6 +38,8 @@ export interface NormalizedSceneComment {
   parentAuthorId?: string | null;
   revisionId: string | null;
   characterId: string | null;
+  /** BAE경 9단계: BAE경 기록 코멘트면 그 기록(작업) id — 받는 사람은 서버 줄만 정한다(실시간 판정은 하지 않는다). */
+  baeJobId?: string | null;
   createdAt?: string | null;
   /** 'edit' 이면 addedMentions(수정으로 새로 들어간 @이름)만 멘션으로 본다 — 답글·자동 알림은 만들지 않는다. */
   kind?: 'add' | 'edit';
@@ -138,6 +140,55 @@ function characterMentionDecision(comment: NormalizedSceneComment & { commentId:
   };
 }
 
+/**
+ * BAE경 기록 코멘트(9단계) — 받는 사람은 서버가 이미 정했다(그 기록을 만든 사람 · 검수자만). 누르면 BAE경의 그 기록으로.
+ *   나를 부름 · 내 코멘트에 답글 · 내 기록에 코멘트: 늘(토스트 · Windows 알림). 스레드에 쓴 적 있어 받는 새 코멘트(participant):
+ *   설정 '내 씬 자동 알림'이 켜졌을 때 조용히. 씬 팔로우 · 끄기는 쓰지 않는다(그 표는 기록 스레드를 모른다).
+ */
+function baeCommentDecision(
+  comment: NormalizedSceneComment & { commentId: string; baeJobId: string },
+  server: ServerSceneCommentFacts,
+  author: string,
+  body: string,
+  settings: SceneCommentNotificationSettings,
+): SceneCommentNotificationDecision | null {
+  const isEdit = comment.kind === 'edit';
+  const make = (reason: SceneCommentNotificationReason, type: 'mention' | 'comment', title: string, extra: Record<string, unknown> = {}): SceneCommentNotificationDecision => ({
+    type,
+    reason,
+    title,
+    body,
+    quiet: type === 'comment',
+    native: type === 'mention',
+    metadata: {
+      baeJobId: comment.baeJobId,
+      commentId: comment.commentId,
+      authorName: comment.userName ?? undefined,
+      reason,
+      ...(type === 'mention' ? { mentionedBy: author } : {}),
+      ...(comment.parentCommentId ? { parentCommentId: comment.parentCommentId } : {}),
+      ...extra,
+    },
+    dedupeKey: `${comment.commentId}:${reason}${isEdit ? `:edit:${comment.createdAt ?? ''}` : ''}`,
+  });
+  if (isEdit) {
+    return server.reason === 'mention'
+      ? make('mention', 'mention', `${author}님이 BAE경 기록에서 나를 태그했습니다`, { mentionEditAt: comment.createdAt ?? 'edit' })
+      : null;
+  }
+  switch (server.reason) {
+    case 'mention':
+      return make('mention', 'mention', `${author}님이 BAE경 기록에서 나를 태그했습니다`);
+    case 'reply':
+      return make('reply', 'mention', `${author}님이 BAE경 기록에서 내 코멘트에 답글을 남겼습니다`);
+    case 'auto':
+      if (server.detail === 'assignee') return make('auto', 'mention', `${author}님이 내 BAE경 기록에 코멘트를 남겼습니다`);
+      return settings.autoNotify ? make('auto', 'comment', `${author}님이 BAE경 기록에 새 코멘트를 남겼습니다`) : null;
+    default:
+      return null;
+  }
+}
+
 type DecisionBuilder = (reason: SceneCommentNotificationReason, title: string, extra?: Record<string, unknown>) => SceneCommentNotificationDecision;
 
 /** 씬 댓글 판정의 공통 바탕 — 씬·위치 이름·팔로우 상태와, 같은 모양의 결정을 만드는 함수(실시간 판정·서버 줄 둘 다 쓴다). */
@@ -192,6 +243,8 @@ export function decideSceneCommentNotification(
 ): SceneCommentNotificationDecision | null {
   if (!me?.id || !comment.commentId) return null;
   if (!comment.userId || comment.userId === me.id) return null;
+  // BAE경 기록 코멘트는 실시간 행 · 방송으로 오지 않는다(표에서 보이지 않는다). 혹시 오더라도 판정은 서버 줄에만 맡긴다.
+  if (comment.baeJobId) return null;
   const commentWithId = comment as NormalizedSceneComment & { commentId: string };
 
   const author = comment.userName || '누군가';
@@ -273,6 +326,7 @@ export function decideSceneCommentNotificationFromServer(
   const body = buildNotificationBody(comment, deps.plainText);
   const isEdit = comment.kind === 'edit';
 
+  if (comment.baeJobId) return baeCommentDecision({ ...commentWithId, baeJobId: comment.baeJobId }, server, author, body, settings);
   if (comment.characterId) {
     return server.reason === 'mention' ? characterMentionDecision({ ...commentWithId, characterId: comment.characterId }, author, body) : null;
   }
@@ -363,6 +417,7 @@ export function normalizeSceneCommentFromRealtimeRow(row: unknown): NormalizedSc
     parentAuthorId: null,
     revisionId: asText(r.revision_id),
     characterId: asText(r.character_id),
+    ...(asText(r.bae_job_id) ? { baeJobId: asText(r.bae_job_id) } : {}),
     createdAt: asText(r.created_at),
     kind: 'add',
   };
@@ -443,7 +498,7 @@ export function normalizeSceneCommentFromServerRow(row: {
   comment: {
     partId: string | null; sceneId: string | null; sceneUuid: string | null; userId: string; userName: string; text: string;
     mentions: readonly string[]; imageCount: number; parentCommentId: string | null; revisionId: string | null;
-    characterId: string | null; createdAt: string | null; editedAt: string | null;
+    characterId: string | null; baeJobId?: string | null; createdAt: string | null; editedAt: string | null;
   };
 }): NormalizedSceneComment {
   const c = row.comment;
@@ -462,6 +517,7 @@ export function normalizeSceneCommentFromServerRow(row: {
     parentAuthorId: null,
     revisionId: c.revisionId,
     characterId: c.characterId,
+    ...(c.baeJobId ? { baeJobId: c.baeJobId } : {}),
     // 수정 줄은 그 수정의 시각(줄에 저장된 값) — 그 뒤 또 고쳐 바뀐 지금 edited_at 이 아니라(리뷰 지적: 같은 수정이 두 번 뜸).
     createdAt: isEdit ? canonicalIso(row.editAt ?? c.editedAt ?? row.eventAt) : canonicalIso(c.createdAt ?? row.eventAt),
     kind: row.kind,

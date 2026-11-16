@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, CopyPlus, Download, FolderOpen, Layers, Loade
 import type { BaeJobViewProps } from '../home/benchTypes';
 import { FactsDl, InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ResultTools, ReviewPanel } from '../home/BenchParts';
 import { StampPanel } from './StampPanel';
+import { BaeJobComments } from '../comments/BaeJobComments';
 import '../home/bench.css';
 import '../windows/bae-stage3.css';
 
@@ -101,6 +102,10 @@ export function JobView(p: BaeJobViewProps) {
               ) : <p className="bae-empty-text">재료를 넣으면 PD가 한국어 요약과 주문서를 여기에 써요.</p>}
             </section>
           </div>
+
+          {p.comments ? (
+            <BaeJobComments jobId={p.comments.jobId} jobName={p.comments.jobName} focusCommentId={p.comments.focusCommentId ?? null} />
+          ) : null}
         </div>
 
         <div className="bae-view-side">

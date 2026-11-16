@@ -33,6 +33,7 @@ import { createBaeStore, startBaeRealtime } from './bae/baeStore';
 import { createBaeKeyring } from './bae/baeKeyring';
 import { registerBaeIpc } from './bae/baeIpc';
 import { startBaeMain } from './bae/baeMain';
+import { createBaeCommentsStore, registerBaeCommentsIpc, startBaeCommentsRealtime } from './bae/baeComments';
 import { uploadBackgroundImage } from './backgroundStorage';
 import { readBackgroundImageFile } from './backgroundImageFile';
 import { registerCalendarSubscriptionIpc } from './calendarSubscriptionIpc';
@@ -2607,6 +2608,15 @@ registerBaeIpc({
     return r.filePath;
   },
 });
+// BAE경 9단계 코멘트: 기록 한 건 = 댓글 스레드 하나. bae_gyeong_session_comment_* 래퍼만 부른다(씬 댓글의 방송 · 행 캐시를 타지 않는다).
+const baeComments = createBaeCommentsStore(supabaseClient, { tokenFor: actorId => sessionManager.getSessionTokenFor(actorId) });
+registerBaeCommentsIpc({
+  ipc: ipcMain,
+  store: baeComments,
+  getSessionOriginOrThrow,
+  onChanged: () => broadcastToAllWindows('bae-comments:changed', {}),
+  deleteImage: url => storageDeleteImage(url),
+});
 // BAE경 만들기: 이 PC 보관함(%LOCALAPPDATA%) · 못 보낸 것 줄 · 작업 흐름 (계획 14의 5장).
 const baeMain = startBaeMain({
   ipc: ipcMain,
@@ -3438,6 +3448,7 @@ ipcMain.handle('slack:send-rigging-webhook', wrapIpc(async (_e: unknown, payload
 // ─── Realtime 구독 (앱 시작 시 자동 설정) ───
 let backgroundRealtimeCleanup: (() => void) | null = null;
 let baeRealtimeCleanup: (() => void) | null = null;
+let baeCommentsRealtimeCleanup: (() => void) | null = null;
 function startSupabaseRealtime() {
   backgroundRealtimeCleanup?.();
   backgroundRealtimeCleanup = startBackgroundRealtime(supabaseClient, () => broadcastToAllWindows('background:changed', {}));
@@ -3446,6 +3457,9 @@ function startSupabaseRealtime() {
     if (what === 'settings') { baeKeyring.forget(); baeMain.settingsChanged(); } // 키 · 매뉴얼 · 모델이 바뀌었을 수 있다: 다음 호출 때 다시 받는다
     broadcastToAllWindows('bae:changed', { what });
   });
+  // BAE경 코멘트: 내용 없는 신호 → 열린 코멘트 칸이 자기 세션으로 다시 읽는다.
+  baeCommentsRealtimeCleanup?.();
+  baeCommentsRealtimeCleanup = startBaeCommentsRealtime(supabaseClient, () => broadcastToAllWindows('bae-comments:changed', {}));
   // 1) postgres_changes 기반 (기존)
   setupRealtimeSubscription({
     onSceneChange: (payload) => broadcastSupabaseEvent('scenes', payload),
@@ -5645,6 +5659,8 @@ app.on('before-quit', (e) => {
   backgroundRealtimeCleanup = null;
   baeRealtimeCleanup?.();
   baeRealtimeCleanup = null;
+  baeCommentsRealtimeCleanup?.();
+  baeCommentsRealtimeCleanup = null;
   baeKeyring.forget();
   baeMain.stop();
   icsSubscriptionIpc.dispose();

@@ -11,6 +11,7 @@ import {
 } from '@/utils/notificationSceneNavigation';
 import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 import { openRetakeInApp } from '@/utils/retakeNavigation';
+import { openBaeJobInApp } from '@/features/bae-gyeong/comments/baeJobJump';
 
 export { markNotificationDomainRead } from '@/utils/notificationDomainRead';
 
@@ -35,6 +36,7 @@ export function getNotificationSceneActionLabel(
   // v1.146.0(§6.1): 리테이크 댓글 알림도 '나를 부른 알림'(mention) 이다 — 리테이크 탭의 그 댓글로 간다.
   if (type === 'mention' && asString(metadataValue(metadata, 'revisionId'))) return '리테이크 댓글';
   if (type === 'mention' && asString(metadataValue(metadata, 'characterId'))) return '캐릭터 보기';
+  if ((type === 'mention' || type === 'comment') && asString(metadataValue(metadata, 'baeJobId'))) return '기록 보기';
   if (type === 'comment' || type === 'mention' || type === 'comment_reaction') return '댓글 보기';
   if (type === 'revision' && asString(metadataValue(metadata, 'revisionAction')) === 'comment') return '리테이크 댓글';
   if (type === 'revision') return '리테이크 확인하기';
@@ -66,6 +68,13 @@ export function navigateNotificationToScene(
       /* 세트 스토어 미로드 — 허브 진입 후 자동 로드/선택 */
     }
     return { attempted: true, matched: true, openedModal: false };
+  }
+
+  // BAE경 9단계: 기록 코멘트 알림 — BAE경의 그 기록(그 코멘트)으로. 볼 수 있는지는 열 때 서버가 다시 정한다.
+  const baeJobId = asString(metadataValue(metadata, 'baeJobId'));
+  if (baeJobId && (type === 'mention' || type === 'comment')) {
+    const opened = openBaeJobInApp(baeJobId, asString(metadataValue(metadata, 'commentId')));
+    return { attempted: true, matched: opened, openedModal: false };
   }
 
   // v1.146.0(§6.1): 캐릭터 댓글 멘션 — 캐릭터 현황판의 그 캐릭터 상세로.

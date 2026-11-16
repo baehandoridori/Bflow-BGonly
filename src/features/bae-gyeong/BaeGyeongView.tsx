@@ -29,6 +29,8 @@ import { CostTab } from './costs/CostTab';
 import { useBaeTeam } from './state/useBaeTeam';
 import { useBaeStamps } from './state/useBaeStamps';
 import { BAE_STAMP_LABEL, type BaeStamp } from '@/shared/bae/review';
+import { useBaeJobJumpStore, usePendingBaeJobJump } from './comments/baeJobJump';
+import { notifyBaeStampSlack } from './comments/baeCommentSlack';
 import './bae-gyeong.css';
 
 /** 기록 목록을 받은 계정 — 다른 계정으로 바뀌면 목록을 비운다 (화면을 다시 열 때마다 비우지는 않는다). */
@@ -73,6 +75,11 @@ export default function BaeGyeongView() {
   const stampCount = useBaeStamps((s) => s.count);
   const marked = useMemo(() => new Set([...stampIds, ...stampFresh]), [stampIds, stampFresh]);
   const nameOf = (id: string) => users.find((u) => u.id === id)?.name ?? '검수자';
+  // ── 9단계 코멘트: 종 · Windows 알림 · 슬랙 바로가기(bflow://bae/…) · 댓글 링크로 온 '이 기록 열기' ──
+  //   요청(comments/baeJobJump)은 이 화면이 권리를 다 읽은 뒤 한 번만 꺼낸다. 내 기록이면 '내 기록', 남의 기록은 검수자만 '팀 기록'으로.
+  //   볼 수 있는지는 서버가 다시 정한다(한 건 읽기가 거절되면 알리고 열지 않는다). 가리킨 코멘트는 그 기록의 코멘트 칸이 강조한다.
+  const jump = usePendingBaeJobJump();
+  const [focusComment, setFocusComment] = useState<{ jobId: string; commentId: string | null } | null>(null);
 
   useEffect(() => {
     const id = currentUser?.id ?? null;
@@ -131,12 +138,48 @@ export default function BaeGyeongView() {
   // 내 기록을 보면 새 도장(좋아요 · 다시)을 본 것으로 적는다 — 景 숫자가 사라지고, 줄의 '새 도장' 표시는 이 화면을 떠날 때까지 남는다
   useEffect(() => { if (tab === 'records' && recScope === 'mine' && access.canUse && stampCount > 0) void useBaeStamps.getState().markSeen(); }, [tab, recScope, access.canUse, stampCount]);
   useEffect(() => () => useBaeStamps.getState().clearFresh(), []);
+  useEffect(() => {
+    if (!jump || loading || !currentUser || !access.canUse) return;
+    const req = useBaeJobJumpStore.getState().consume(jump.seq);
+    if (!req) return;
+    const me = currentUser.id;
+    setTab('records');
+    setFocusComment({ jobId: req.jobId, commentId: req.commentId });
+    const openMine = () => { setRecScope('mine'); setTeamSel(null); setRecSel(req.jobId); };
+    if (rows.some((r) => r.id === req.jobId && r.userId === me)) { openMine(); return; }
+    void baeGw().jobGet(req.jobId).then((j) => {
+      if (useAuthStore.getState().currentUser?.id !== me) return;
+      if (j.userId === me) { openMine(); return; }
+      if (useBaeStore.getState().access.canReview) {
+        useBaeTeam.getState().put(j);
+        setRecScope('team'); setRecSel(null); setTeamSel(j.id);
+        return;
+      }
+      setFocusComment(null);
+      toast.error('이 기록은 만든 사람과 검수자만 볼 수 있어요');
+    }).catch((e) => {
+      setFocusComment(null);
+      toast.error(`이 기록을 열 수 없어요: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }, [jump, loading, currentUser?.id, access.canUse]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** 한 건 보기의 코멘트 칸(9단계). 서버에 있는 기록만 — 이 PC 에서 방금 만들어 아직 안 올라간 작업은 서버가 모르니 칸을 그리지 않는다. */
+  const commentsFor = (j: BaeJob, onServer: boolean) => (onServer
+    ? { jobId: j.id, jobName: baeRecordTitle(j), focusCommentId: focusComment?.jobId === j.id ? focusComment.commentId : null }
+    : null);
   const doStamp = async (j: BaeJob, s: BaeStamp | null, note: string) => {
     if (!currentUser) return;
+    const before = { stamp: j.stamp, note: j.stampNote ?? null, by: j.stampBy ?? null };
     try {
       const saved = await useBaeTeam.getState().stamp(j, s, s === null ? null : note.trim() || null, currentUser.id);
       if (saved.userId === currentUser.id) useBaeJobs.getState().putLocal(saved);
       toast.success(s === null ? '도장을 뺐어요' : `${BAE_STAMP_LABEL[s]} 도장을 찍었어요`);
+      // 9단계: 좋아요 · 다시는 만든 사람에게 슬랙으로도(종 알림은 서버가 도장 → 코멘트 한 줄로 만든다). 같은 도장을 다시 누른 것은 보내지 않는다.
+      const changed = before.stamp !== s || before.note !== (saved.stampNote ?? null) || before.by !== currentUser.id;
+      if ((s === 'good' || s === 'again') && changed) {
+        void notifyBaeStampSlack({ job: { id: saved.id, userId: saved.userId, name: baeRecordTitle(saved) }, stamp: s, note: saved.stampNote ?? null, me: currentUser, users })
+          .then((r) => { if (r && r.failed > 0) toast.error('만든 사람에게 슬랙으로 알리지 못했어요'); })
+          .catch(() => undefined);
+      }
     } catch (e) { toast.error(`도장을 찍지 못했어요: ${e instanceof Error ? e.message : String(e)}`); }
   };
   const stampFor = (j: BaeJob) => stampPanelView(j, team.history[j.id], {
@@ -297,7 +340,7 @@ export default function BaeGyeongView() {
   const teamJobView = (j: BaeJob) => {
     const mine = j.userId === currentUser?.id;
     const p = jobViewProps(j, rate, mine ? localTeam : null, {
-      backLabel: '팀 기록으로', onBack: () => setTeamSel(null),
+      backLabel: '팀 기록으로', onBack: () => { setTeamSel(null); setFocusComment(null); },
       onSave: mine ? () => { void saveAs(j.id, j.name ?? ''); } : undefined,
       review: null,
       onNoise: mine ? () => noiseFor(targetOf(j), localTeam, j, j.name ?? '') : undefined,
@@ -308,7 +351,7 @@ export default function BaeGyeongView() {
       onAngle: mine ? () => angleRecord(j, j.name ?? '') : undefined,
       onShowPsd: psdFor(j),
     }, tools.busy[j.id], upParent === j.id);
-    return { ...withUpscaleFact(p, j), result: p.result && !mine ? { ...p.result, tools: null } : p.result, stamp: stampFor(j) };
+    return { ...withUpscaleFact(p, j), result: p.result && !mine ? { ...p.result, tools: null } : p.result, stamp: stampFor(j), comments: commentsFor(j, true) };
   };
 
   if (error) {
@@ -391,7 +434,7 @@ export default function BaeGyeongView() {
         : <TeamRecords scope={scopeSeg} rate={rate} actorId={currentUser.id} selectedId={teamSel} onPick={(id) => setTeamSel(id)} />)}
       {activeTab === 'records' && !(recScope === 'team' && access.canReview) && (recordPicked
         ? <JobView {...withUpscaleFact(jobViewProps(recordPicked, rate, localRec, {
-          backLabel: '기록으로', onBack: () => setRecSel(null), onSave: () => { void saveAs(recordPicked.id, recordPicked.name ?? ''); },
+          backLabel: '기록으로', onBack: () => { setRecSel(null); setFocusComment(null); }, onSave: () => { void saveAs(recordPicked.id, recordPicked.name ?? ''); },
           review: recordPicked.userId === currentUser?.id && recordPicked.status === 'done' ? { value: reviewOf(recordPicked), onSave: (v) => { void saveReview(recordPicked, v); } } : null,
           onNoise: () => noiseFor(targetOf(recordPicked), localRec, recordPicked, recordPicked.name ?? ''),
           onLock: () => { const t = targetOf(recordPicked); if (t) void tools.toggleLock(t); },
@@ -400,7 +443,8 @@ export default function BaeGyeongView() {
           onLayers: () => layersRecord(recordPicked, recordPicked.name ?? ''),
           onAngle: () => angleRecord(recordPicked, recordPicked.name ?? ''),
           onShowPsd: psdFor(recordPicked),
-        }, tools.busy[recordPicked.id], upParent === recordPicked.id), recordPicked)} stamp={stampFor(recordPicked)} />
+        }, tools.busy[recordPicked.id], upParent === recordPicked.id), recordPicked)} stamp={stampFor(recordPicked)}
+          comments={commentsFor(recordPicked, jobs.rows.some((r) => r.id === recordPicked.id) || !!jobs.details[recordPicked.id])} />
         : <RecordList {...log((id) => setRecSel(id), '자세히 보기')} title="내 기록" onAll={undefined} scope={scopeSeg} />)}
       {activeTab === 'costs' && access.canReview && <CostTab rate={rate} />}
       {activeTab === 'settings' && <BaeSettingsTab />}

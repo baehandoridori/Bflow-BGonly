@@ -1,7 +1,8 @@
 /** Shared by Electron and the renderer; links carry identity, never executable actions. */
-export type BflowDeepLink = { sheetName: string; sceneId: string; commentId?: string } | { revisionId: string };
+export type BflowDeepLink = { sheetName: string; sceneId: string; commentId?: string } | { revisionId: string } | { baeJobId: string; commentId?: string };
 
 const COMMENT_ID = /^[a-zA-Z0-9_-]{1,128}$/;
+const BAE_JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /**
  * 댓글 링크(씬 댓글 B안 §5.2 '댓글 링크 복사', v1.147.0) — 씬 링크 뒤에 ?comment=<댓글 id>.
@@ -15,6 +16,15 @@ export function buildRetakeDeepLink(revisionId: string): string {
   return `bflow://retake/${encodeURIComponent(revisionId)}`;
 }
 
+/**
+ * BAE경 기록 한 건(9단계 코멘트) — bflow://bae/<작업 id>[?comment=<댓글 id>]. 누르면 BAE경의 그 기록을 열고 그 댓글로 간다.
+ * 기록을 볼 수 있는지는 열 때 서버가 다시 정한다(링크는 신원만 싣는다).
+ */
+export function buildBaeJobDeepLink(jobId: string, commentId?: string | null): string {
+  const base = `bflow://bae/${encodeURIComponent(jobId)}`;
+  return commentId ? `${base}?comment=${encodeURIComponent(commentId)}` : base;
+}
+
 export function parseBflowDeepLink(url: string): BflowDeepLink | null {
   try {
     const parsed = new URL(url);
@@ -22,6 +32,10 @@ export function parseBflowDeepLink(url: string): BflowDeepLink | null {
     const segments = parsed.pathname.replace(/^\/+/, '').split('/').map(decodeURIComponent);
     if (parsed.hostname === 'retake' && segments.length === 1 && /^[a-zA-Z0-9_-]{1,128}$/.test(segments[0])) {
       return { revisionId: segments[0] };
+    }
+    if (parsed.hostname === 'bae' && segments.length === 1 && BAE_JOB_ID.test(segments[0])) {
+      const commentId = parsed.searchParams.get('comment');
+      return commentId && COMMENT_ID.test(commentId) ? { baeJobId: segments[0], commentId } : { baeJobId: segments[0] };
     }
     if (parsed.hostname === 'scene' && segments.length === 2 && segments.every((s) => s.trim() && !/[\u0000-\u001f/\\]/.test(s))) {
       const commentId = parsed.searchParams.get('comment');

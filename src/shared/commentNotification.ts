@@ -24,6 +24,8 @@ export interface CommentNotificationComment {
   parentCommentId: string | null;
   revisionId: string | null;
   characterId: string | null;
+  /** BAE경 9단계: BAE경 기록 스레드의 댓글이면 그 기록(작업) id. 예전 서버(9단계 SQL 전)는 싣지 않는다. */
+  baeJobId?: string | null;
   createdAt: string | null;
   editedAt: string | null;
 }
@@ -134,6 +136,7 @@ export function parseCommentNotificationRow(raw: unknown): CommentNotificationRo
       parentCommentId: text(c.parentCommentId),
       revisionId: text(c.revisionId),
       characterId: text(c.characterId),
+      ...(text(c.baeJobId) ? { baeJobId: text(c.baeJobId) } : {}),
       createdAt: isoText(c.createdAt),
       editedAt: isoText(c.editedAt),
     },

@@ -209,6 +209,8 @@ export interface BaeJobViewProps {
   onAngle?(): void;              // 이어서 만들기: 다른 각도로 (창)
   onShowPsd?(): void;            // 레이어 작업: PSD가 있는 폴더 열기
   stamp?: BaeStampPanelView | null; // 확인 도장 (8단계)
+  /** 코멘트 (9단계): 이 기록의 스레드 — 만든 사람 · 검수자만(서버가 정한다). 서버에 아직 없는 작업이면 null(칸을 그리지 않는다). */
+  comments?: { jobId: string; jobName: string | null; focusCommentId?: string | null } | null;
 }
 
 /** 기록 찾기 (시안과 같은 규칙: 이름 · 설명 · 둘째 줄 · 종류에 찾는 말이 들어 있으면). 상태 쪽이 쓴다. */

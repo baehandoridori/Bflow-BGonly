@@ -7,6 +7,7 @@ import {
   buildMentionWebhookPayloads,
   mergeMentionDeliveryRetry,
   type MentionDeliveryResult,
+  type MentionWebhookPlace,
   type MentionWebhookUser,
 } from '../utils/mentionWebhookPayloads.ts';
 
@@ -89,6 +90,8 @@ export interface NotifyMentionsInput {
   extraTargetIds?: readonly string[];
   /** '다시 보내기' — 이 사람들에게만 보낸다(처음에 실패한 사람). */
   onlyTargetIds?: readonly string[];
+  /** 씬 밖의 댓글(BAE경 기록 코멘트)이면 위치 · 바로가기 — sheetName · sceneNo 대신 쓴다. */
+  place?: MentionWebhookPlace | null;
 }
 
 /**
@@ -114,6 +117,7 @@ export async function notifyMentionsForComment(input: NotifyMentionsInput): Prom
     sheetName: input.sheetName,
     sceneNo: input.sceneNo,
     sceneLabel: input.sceneLabel,
+    place: input.place ?? null,
     me: input.me,
     targets: only ? targets.filter((user) => only.has(user.id)) : targets,
     plainText: stripEntityTokens,

@@ -67,20 +67,24 @@ export function CommentFilterTabs({
   counts,
   onChange,
   extra,
+  hideRetake = false,
 }: {
   filter: CommentFeedFilter;
   counts: CommentFeedCounts;
   onChange: (next: CommentFeedFilter) => void;
   /** 오른쪽 끝(예: '스레드 다시 열기'). */
   extra?: ReactNode;
+  /** 리테이크가 없는 스레드(BAE경 기록 코멘트)에서는 '리테이크' 탭을 감춘다. */
+  hideRetake?: boolean;
 }) {
+  const tabs = hideRetake ? TABS.filter((tab) => tab.id !== 'retake') : TABS;
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const move = (index: number) => {
-    const next = TABS[(index + TABS.length) % TABS.length];
+    const next = tabs[(index + tabs.length) % tabs.length];
     onChange(next.id);
-    tabRefs.current[(index + TABS.length) % TABS.length]?.focus();
+    tabRefs.current[(index + tabs.length) % tabs.length]?.focus();
   };
-  const current = Math.max(0, TABS.findIndex((tab) => tab.id === filter));
+  const current = Math.max(0, tabs.findIndex((tab) => tab.id === filter));
   return (
     <div className="cmt-tabs">
       <div
@@ -89,14 +93,14 @@ export function CommentFilterTabs({
         className="cmt-tablist"
         onKeyDown={(event) => {
           // 탭 사이는 화살표로(roving). 상세 모달이 ←/→ 를 '씬 넘기기'로 받지 않게 여기서 멈춘다.
-          const keys: Record<string, number> = { ArrowLeft: current - 1, ArrowRight: current + 1, Home: 0, End: TABS.length - 1 };
+          const keys: Record<string, number> = { ArrowLeft: current - 1, ArrowRight: current + 1, Home: 0, End: tabs.length - 1 };
           if (!(event.key in keys)) return;
           event.preventDefault();
           event.stopPropagation();
           move(keys[event.key]);
         }}
       >
-        {TABS.map((tab, index) => (
+        {tabs.map((tab, index) => (
           <button
             key={tab.id}
             ref={(el) => { tabRefs.current[index] = el; }}

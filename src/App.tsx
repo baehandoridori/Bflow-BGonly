@@ -153,6 +153,7 @@ import { isGeneralRevisionSceneKey } from '@/utils/revisionGeneral';
 import { createSyncQueue } from '@/utils/syncQueue';
 import { useRetakeNotifications } from '@/hooks/useRetakeNotifications';
 import { openRetakeInApp } from '@/utils/retakeNavigation';
+import { openBaeJobInApp } from '@/features/bae-gyeong/comments/baeJobJump';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 import { buildCalendarNotificationText } from '@/shared/calendarNotifications';
 import type { CalendarNotificationPushRow } from '@/shared/calendarNotifications';
@@ -3069,6 +3070,11 @@ export default function App() {
       console.log('[DeepLink] 수신:', data);
       if ('revisionId' in data) {
         openRetakeInApp(data.revisionId);
+        return;
+      }
+      // BAE경 기록 코멘트 바로가기(bflow://bae/…, 9단계 슬랙 · 댓글 링크) — BAE경의 그 기록으로.
+      if ('baeJobId' in data) {
+        openBaeJobInApp(data.baeJobId, data.commentId ?? null);
         return;
       }
       setPendingDeepLink(data);
