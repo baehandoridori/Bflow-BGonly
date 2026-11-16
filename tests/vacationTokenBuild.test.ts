@@ -326,7 +326,7 @@ test('checkReleaseVacationToken — 토큰이 없거나 묶음에 안 들어갔�
 // ── 빌드 첫 단계 (node scripts/vacation-token.cjs) ────────────────────
 function copyScripts(root: string): void {
   mkdirSync(path.join(root, 'scripts'), { recursive: true });
-  for (const name of ['vacation-token.cjs', 'generate-manifest.js']) {
+  for (const name of ['vacation-token.cjs', 'generate-manifest.js', 'installer-size.cjs']) {
     copyFileSync(path.join(repoRoot, 'scripts', name), path.join(root, 'scripts', name));
   }
 }

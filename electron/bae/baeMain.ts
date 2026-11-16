@@ -15,10 +15,16 @@ import { createBaeJobs, type BaeProgress } from './baeJobs';
 import { registerBaeJobsIpc } from './baeJobsIpc';
 import { makeJpegPreview, uploadBaePreview, type BaeStorageLike } from './baePreviews';
 import type { BaeImageFieldName } from './openaiClient';
+import { app, MessageChannelMain, utilityProcess } from 'electron';
+import type { BaeRpcClient } from './baeStore';
+import { startBaeModelMain } from './model/modelIpc';
+import { baeModelWarehouseDir } from './model/modelPaths';
 
 export interface BaeMainDeps {
   ipc: Parameters<typeof registerBaeJobsIpc>[0]['ipc'];
   store: BaeStore;
+  /** Supabase 클라이언트 (세션 래퍼 rpc) — 이 PC 점검을 올리고 읽을 때 (4단계) */
+  rpc: BaeRpcClient;
   keyring: BaeKeyring;
   storage: () => BaeStorageLike;
   getSessionOriginOrThrow(): { userId: string; epoch: number };
@@ -88,10 +94,25 @@ export function startBaeMain(deps: BaeMainDeps) {
     saveAs: deps.saveAs,
   });
 
+  // 4단계: 모델 일꾼 프로세스(SAM · BiRefNet · 깊이 · 4K A) · 모델 창고 · 이 PC 점검. 일꾼은 처음 쓸 때 뜨고 5분 쉬면 내려간다.
+  const models = startBaeModelMain({
+    electron: { utilityProcess, MessageChannelMain, app },
+    ipc: deps.ipc,
+    getSessionOriginOrThrow: deps.getSessionOriginOrThrow,
+    canUse: async (u) => (await deps.store.access(u)).canUse,
+    rpc: deps.rpc,
+    tokenFor: deps.tokenFor,
+    broadcast: deps.broadcast,
+    localAppData: deps.localAppData,
+    workerPath: path.join(__dirname, 'modelWorker.js'),
+    appVersion: deps.appVersion,
+    warehouse: baeModelWarehouseDir,
+  });
+
   return {
     /** 'settings' 신호: 매뉴얼 · 모델 · 가격을 다음 호출 때 다시 읽는다. */
     settingsChanged() { settings.forget(); },
     flush() { void outbox.flush({ all: true }); },
-    stop() { jobs.abortAll(); outbox.stop(); },
+    stop() { jobs.abortAll(); outbox.stop(); models.stop(); },
   };
 }

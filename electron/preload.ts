@@ -1048,3 +1048,27 @@ contextBridge.exposeInMainWorld('baeGyeongAPI', {
     return () => ipcRenderer.removeListener('bae:changed', listener);
   },
 });
+
+// BAE경 모델 일꾼 (4단계): 모델 받기 · 4K A · 이 PC 점검 · 화면 쪽 일꾼과의 전용 통로(MessagePort).
+const baeModelListen = (channel: string) => (callback: (payload: any) => void) => {
+  const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+contextBridge.exposeInMainWorld('baeModelAPI', {
+  status: () => ipcRenderer.invoke('bae:model-status', canonicalSessionEpoch),
+  ensure: (id: string) => ipcRenderer.invoke('bae:model-ensure', id, canonicalSessionEpoch),
+  files: (id: string) => ipcRenderer.invoke('bae:model-files', id, canonicalSessionEpoch),
+  upscaleA: (rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, ticket: string) => ipcRenderer.invoke('bae:upscale-a', rgba, w, h, ticket, canonicalSessionEpoch),
+  pcCheck: (webgpu: unknown) => ipcRenderer.invoke('bae:pc-check', webgpu, canonicalSessionEpoch),
+  pcCheckPut: () => ipcRenderer.invoke('bae:pc-check-put', canonicalSessionEpoch),
+  pcCheckList: () => ipcRenderer.invoke('bae:pc-check-list', canonicalSessionEpoch),
+  portRequest: () => ipcRenderer.invoke('bae:model-port', canonicalSessionEpoch),
+  onProgress: baeModelListen('bae:model-progress'),
+  onUpscaleProgress: baeModelListen('bae:upscale-progress'),
+  onWorker: baeModelListen('bae:model-worker'),
+});
+// 전용 통로: 메인이 보낸 MessagePort 를 화면으로 넘긴다 (contextBridge 로는 포트를 못 넘김).
+ipcRenderer.on('bae:model-port', (event, data: { nonce?: unknown } | undefined) => {
+  window.postMessage({ type: 'bae-model-port', nonce: data?.nonce }, '*', event.ports);
+});

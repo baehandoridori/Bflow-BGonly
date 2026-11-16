@@ -164,7 +164,7 @@ function write(file: string, text: string): void {
 function makeRelease(leaked: string[] = []): string {
   const root = mkdtempSync(path.join(os.tmpdir(), 'bflow-packaged-app-'));
   tempDirs.push(root);
-  for (const name of ['generate-manifest.js', 'vacation-token.cjs']) {
+  for (const name of ['generate-manifest.js', 'vacation-token.cjs', 'installer-size.cjs']) {
     mkdirSync(path.join(root, 'scripts'), { recursive: true });
     copyFileSync(path.join(repoRoot, 'scripts', name), path.join(root, 'scripts', name));
   }
@@ -334,6 +334,95 @@ test('package-lock.json — 설치 목록에도 폴더 연결이 남아 있지 �
     [],
     'package.json 에서 줄만 지우고 `npm install --package-lock-only` 를 돌리면 연결 대상 항목이 extraneous 표시로 남습니다 — 그 항목도 지워 주세요.',
   );
+});
+
+// ── 4) BAE경 계산 엔진과 설치 파일 크기 (BAE경 이전 0단계, 2026-11-13) ──────
+/**
+ * onnxruntime-node 1.29.0 은 모든 운영체제용이 들어 있어 풀면 약 296MB 다. 윈도우 64비트용(약 63MB)만 담고,
+ * 그 안의 셰이더 컴파일러 둘(dxcompiler · dxil)은 DirectML 에 필요 없어 뺀다 (0단계에서 빼고 DirectML 로 돌려 확인).
+ * onnxruntime-web 은 4K '원본 그대로'가 화면에서 쓰는데, vite 가 화면 묶음(dist/assets)에 필요한 파일만 넣으므로
+ * node_modules 의 사본(약 137MB)은 담지 않는다 — 개발 의존성이라 원래 안 담기지만, 누가 옮겨도 담기지 않게 규칙으로도 막는다.
+ * 이 규칙이 빠지면 설치 파일이 수백 MB 가 된다. 마지막 확인은 generate-manifest 의 크기 기준(scripts/installer-size.cjs).
+ */
+test('build.files — onnxruntime-node 는 윈도우 64비트용만 담고, 셰이더 컴파일러 둘과 onnxruntime-web 은 담지 않는다', async () => {
+  const packaged = await loadPackagedCheck();
+  const bin = 'node_modules/onnxruntime-node/bin/napi-v6';
+  for (const file of [
+    'node_modules/onnxruntime-node/package.json',
+    'node_modules/onnxruntime-node/dist/index.js',
+    `${bin}/win32/x64/onnxruntime_binding.node`,
+    `${bin}/win32/x64/onnxruntime.dll`,
+    `${bin}/win32/x64/DirectML.dll`,
+    'node_modules/onnxruntime-common/dist/cjs/index.js',
+  ]) {
+    assert.equal(packaged(file), true, `${file} 이 빠지면 모델 일꾼이 뜨지 않는다`);
+  }
+  for (const file of [
+    `${bin}/darwin/arm64/libonnxruntime.1.29.0.dylib`,
+    `${bin}/linux/x64/libonnxruntime.so.1`,
+    `${bin}/linux/arm64/onnxruntime_binding.node`,
+    `${bin}/win32/arm64/onnxruntime.dll`,
+    `${bin}/win32/arm64/DirectML.dll`,
+    `${bin}/win32/x64/dxcompiler.dll`,
+    `${bin}/win32/x64/dxil.dll`,
+    'node_modules/onnxruntime-web/package.json',
+    'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm',
+    'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm',
+  ]) {
+    assert.equal(packaged(file), false, `${file} 은 설치 파일에 담기면 안 된다`);
+  }
+});
+
+test('package.json — 계산 엔진 두 벌의 판이 고정돼 있고, onnxruntime-web 은 개발 의존성이다', () => {
+  const pkg = readRepoJson('package.json') as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+  assert.equal(pkg.dependencies['onnxruntime-node'], '1.29.0', '모델 일꾼은 0단계에서 잰 판 그대로');
+  assert.equal(pkg.devDependencies['onnxruntime-web'], '1.29.0', '4K B 는 0단계에서 잰 판 그대로 (vite 가 화면 묶음에 넣는다)');
+  assert.equal(pkg.dependencies['onnxruntime-web'], undefined, 'dependencies 에 두면 node_modules 사본이 설치 파일로 갈 수 있다');
+});
+
+const installerSize = require(path.join(repoRoot, 'scripts', 'installer-size.cjs')) as {
+  INSTALLER_MAX_MB: number; INSTALLER_MAX_BYTES: number; checkInstallerSize(sizeBytes: number): { ok: boolean; message: string };
+};
+
+test('installer-size — 기준은 0단계에서 정한 140MB, 그때 잰 설치 파일로 맞춰 본다', () => {
+  assert.equal(installerSize.INSTALLER_MAX_MB, 140);
+  assert.equal(installerSize.INSTALLER_MAX_BYTES, 140 * 1024 * 1024);
+  // C:\BAE_stage0\results\size\ 의 세 설치 파일 (바이트)
+  assert.equal(installerSize.checkInstallerSize(120_718_727).ok, true, 'v1.150.2 main 115.1MB');
+  assert.equal(installerSize.checkInstallerSize(146_400_125).ok, true, '계산 엔진 넣고 dxcompiler · dxil 뺀 139.6MB');
+  const withDxc = installerSize.checkInstallerSize(152_004_607);
+  assert.equal(withDxc.ok, false, 'dxcompiler · dxil 까지 담은 145.0MB 는 넘는다');
+  assert.match(withDxc.message, /145\.0MB/);
+  assert.match(withDxc.message, /140MB/);
+  assert.match(withDxc.message, /build\.files/);
+  assert.equal(installerSize.checkInstallerSize(140 * 1024 * 1024).ok, true, '딱 기준까지는 된다');
+  assert.equal(installerSize.checkInstallerSize(140 * 1024 * 1024 + 1).ok, false);
+  assert.equal(installerSize.checkInstallerSize(0).ok, false);
+  assert.equal(installerSize.checkInstallerSize(Number.NaN).ok, false);
+});
+
+test('generate-manifest — 설치 파일이 크기 기준을 넘으면 manifest.json 을 쓰지 않는다 (배포용만)', () => {
+  const root = makeRelease();
+  const ok = generateManifest(root);
+  assert.equal(ok.status, 0, ok.output);
+  assert.match(ok.output, /설치 파일 크기 확인/);
+
+  // 같은 결과물에서 기준만 아주 작게 (설치 파일 9바이트 > 기준) — 크기 확인이 실제로 manifest 를 막는지
+  const blockedRoot = makeRelease();
+  const sizeFile = path.join(blockedRoot, 'scripts', 'installer-size.cjs');
+  const text = readFileSync(sizeFile, 'utf8');
+  assert.match(text, /const INSTALLER_MAX_MB = 140;/);
+  writeFileSync(sizeFile, text.replace('const INSTALLER_MAX_MB = 140;', 'const INSTALLER_MAX_MB = 0.000001;'));
+  const blocked = generateManifest(blockedRoot);
+  assert.notEqual(blocked.status, 0, blocked.output);
+  assert.equal(blocked.manifestWritten, false, '크기를 넘은 설치 파일은 팀 PC 로 나가지 않는다');
+  assert.match(blocked.output, /기준\(0\.000001MB\)을 넘었습니다/);
+
+  // 개발용(--allow-missing-installer)은 설치 파일이 없으니 크기를 보지 않는다
+  const dev = spawnSync(process.execPath, [path.join(blockedRoot, 'scripts', 'generate-manifest.js'), '--allow-missing-installer'], {
+    cwd: blockedRoot, encoding: 'utf8', timeout: 20000, env: { ...process.env, BFLOW_VACATION_TOKEN: TOKEN },
+  });
+  assert.equal(dev.status, 0, `${dev.stdout}\n${dev.stderr}`);
 });
 
 // ── 연결 ──────────────────────────────────────────────────────────────

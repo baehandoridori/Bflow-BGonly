@@ -2603,6 +2603,7 @@ registerBaeIpc({
 const baeMain = startBaeMain({
   ipc: ipcMain,
   store: baeStore,
+  rpc: supabaseClient,
   keyring: baeKeyring,
   storage: () => supabaseClient.storage.from('scene-images'),
   getSessionOriginOrThrow,
