@@ -3,53 +3,50 @@
  * 이 화면에 들어오는 길은 `canAccessBaeGyeong`(featureFlag.ts)을 거치고, 실제로 막는 것은 서버 함수다.
  * 만들기 상태(useBaeMake)는 이 화면 밖에 있어서, 다른 메뉴에 다녀와도 작업이 이어진다.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, MonitorCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/useAuthStore';
-import type { BaeJob, BaeUsageSummary } from '@/shared/bae/jobs';
+import { baeJobHasLock, baeJobVariant, type BaeJob, type BaeUsageSummary } from '@/shared/bae/jobs';
 import { useBaeStore, baeGw, type BaeTab } from './useBaeStore';
 import { Workbench, type BaeStartKind } from './home/Workbench';
-import { filterBaeRecordRows, type BaeRecordListProps, type BaeReviewView } from './home/benchTypes';
+import { filterBaeRecordRows, type BaeDropView, type BaeDropZone, type BaeRecordListProps, type BaeReviewView } from './home/benchTypes';
 import { RecordList } from './records/RecordList';
 import { JobView } from './records/JobView';
 import { MakingStage } from './make/MakingStage';
 import { BaeSettingsTab } from './settings/BaeSettingsTab';
-import { useBaeMake } from './state/useBaeMake';
+import { baeBoard, useBaeMake } from './state/useBaeMake';
+import { useBaeLocal, useBaeTools, type BaeToolTarget } from './state/useBaeTools';
 import { useBaeJobs, visibleBaeJobs } from './state/useBaeJobs';
 import { BaeMakeLayer, useSeconds } from './state/BaeMakeLayer';
-import { activeBench, jobViewProps, makingProps, recordBench, recordRow, reviewOf, wonOf } from './state/baeViewModel';
+import { KIND_LABEL, activeBench, jobViewProps, makingProps, recordBench, recordRow, reviewOf, wonOf } from './state/baeViewModel';
 import './bae-gyeong.css';
 
-const LATER: Record<BaeStartKind, string> = {
-  new: '', same: '같은 장소 다른 컷은 다음 단계에서 열려요.', layers: '레이어로 나누기는 5단계에서 열려요.', angle: '다른 각도로는 7단계에서 열려요.',
-  upscale: '4K로 키우기는 4단계에서 열려요.', denoise: '노이즈 제거는 3단계에서 열려요.',
+/** 아직 열리지 않은 도구 (그 단계에서 열린다) */
+const LATER: Record<'layers' | 'angle' | 'upscale', string> = {
+  layers: '레이어로 나누기는 5단계에서 열려요.', angle: '다른 각도로는 7단계에서 열려요.', upscale: '4K로 키우기는 4단계에서 열려요.',
 };
 
-/** 이 PC 원본 그림 주소 (없으면 null → 서버 미리보기). 한 번 만든 주소는 다시 쓴다. */
-const localUrls = new Map<string, string | null>();
 /** 기록 목록을 받은 계정 — 다른 계정으로 바뀌면 목록을 비운다 (화면을 다시 열 때마다 비우지는 않는다). */
 let jobsActor: string | null = null;
-function useLocalResult(jobId: string | null): string | null {
-  const [url, setUrl] = useState<string | null>(jobId ? localUrls.get(jobId) ?? null : null);
-  useEffect(() => {
-    if (!jobId) { setUrl(null); return; }
-    if (localUrls.has(jobId)) { setUrl(localUrls.get(jobId) ?? null); return; }
-    let alive = true;
-    void baeGw().localFile(jobId, 'result.png').then((bytes) => {
-      const u = bytes ? URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' })) : null;
-      localUrls.set(jobId, u); if (alive) setUrl(u);
-    }).catch(() => { localUrls.set(jobId, null); });
-    return () => { alive = false; };
-  }, [jobId]);
+/** 이 PC 원본 그림 주소 (없으면 null → 서버 미리보기). 판을 바꾸면(결과 도구) 새 주소로. */
+function useLocalResult(jobId: string | null, updatedAt: string | null = null): string | null {
+  const url = useBaeLocal((s) => (jobId ? s.urls[jobId] ?? null : null));
+  useEffect(() => { if (jobId) useBaeLocal.getState().ensure(jobId); }, [jobId, updatedAt]);
   return url;
 }
+/** 그림 주소 → Blob (이 PC 원본 · 미리보기). */
+async function blobOf(src: string): Promise<Blob> { const r = await fetch(src); if (!r.ok) throw new Error('그림을 불러오지 못했어요.'); return r.blob(); }
+const imageOf = (list: Iterable<File> | null | undefined) => Array.from(list ?? []).find((f) => f.type.startsWith('image/')) ?? null;
 
 export default function BaeGyeongView() {
   const currentUser = useAuthStore((s) => s.currentUser);
   const { access, loading, error, tab, setTab, start, keyStatus, row } = useBaeStore();
   const make = useBaeMake();
   const jobs = useBaeJobs();
+  const tools = useBaeTools();
+  const [drop, setDrop] = useState<{ mode: 'drag' | 'paste'; file: File | null } | null>(null);
+  const denoiseFileRef = useRef<HTMLInputElement>(null);
   const [selId, setSelId] = useState<string | null>(null);
   const [recSel, setRecSel] = useState<string | null>(null);
   const [view, setView] = useState<'grid' | 'list'>('grid');
@@ -86,15 +83,16 @@ export default function BaeGyeongView() {
   const live = active && (active.phase === 'ordering' || active.phase === 'drawing');
   const sec = useSeconds(active?.startedAt ?? null, !!live);
   const rows = useMemo(() => visibleBaeJobs(jobs), [jobs]);
-  const withPd = (j: BaeJob | null): BaeJob | null => { if (!j) return null; const d = jobs.details[j.id]; return d && d.updatedAt >= j.updatedAt ? { ...j, pd: d.pd, stampBy: d.stampBy, stampNote: d.stampNote } : j; };
+  const withPd = (j: BaeJob | null): BaeJob | null => { if (!j) return null; const d = jobs.details[j.id]; return d && (d.updatedAt >= j.updatedAt || !j.pd) ? { ...j, pd: d.pd, stampBy: d.stampBy, stampNote: d.stampNote } : j; };
   const picked: BaeJob | null = rows.find((r) => r.id === (selId ?? '')) ?? null;
   const showActive = !!active && (!selId || selId === active.id);
   const benchRecord = withPd(showActive ? null : picked ?? (active ? null : rows[0] ?? null));
-  const localBench = useLocalResult(benchRecord?.id ?? null);
+  const localBench = useLocalResult(benchRecord?.id ?? null, benchRecord?.updatedAt ?? null);
   const recordPicked = withPd(rows.find((r) => r.id === recSel) ?? null);
-  useEffect(() => { if (benchRecord && !benchRecord.pd) void jobs.loadDetail(benchRecord.id, benchRecord.updatedAt); }, [benchRecord?.id, benchRecord?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (recordPicked && !recordPicked.pd) void jobs.loadDetail(recordPicked.id, recordPicked.updatedAt); }, [recordPicked?.id, recordPicked?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
-  const localRec = useLocalResult(recordPicked?.id ?? null);
+  // 한 건의 PD 글: 처음 열 때와 그 줄이 바뀌었을 때만 받는다 (결과 판만 바꾼 줄도 PD 글은 그대로 보여 준다)
+  useEffect(() => { if (benchRecord) void jobs.loadDetail(benchRecord.id, benchRecord.updatedAt); }, [benchRecord?.id, benchRecord?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (recordPicked) void jobs.loadDetail(recordPicked.id, recordPicked.updatedAt); }, [recordPicked?.id, recordPicked?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const localRec = useLocalResult(recordPicked?.id ?? null, recordPicked?.updatedAt ?? null);
 
   const tabs: Array<{ id: BaeTab; label: string; show: boolean }> = [
     { id: 'bench', label: '작업대', show: true },
@@ -103,12 +101,61 @@ export default function BaeGyeongView() {
     { id: 'settings', label: '설정', show: true },
   ];
   const activeTab = tabs.find((t) => t.id === tab && t.show)?.id ?? 'bench';
-  const onStart = (kind: BaeStartKind) => { if (kind === 'new') { setSelId(null); make.openMaterial('new'); } else toast.message(LATER[kind]); };
+  const onStart = (kind: BaeStartKind) => {
+    if (kind === 'new') { setSelId(null); make.openMaterial('new'); }
+    else if (kind === 'same') { setSelId(null); void make.openSame(); }
+    else if (kind === 'denoise') denoiseFileRef.current?.click();   // 14d 8장 6번: 먼저 그림을 고르고, 고르면 창
+    else toast.message(LATER[kind]);
+  };
+  // 그림 파일을 끌고 오거나(Ctrl+V 로 붙여 넣으면) 작업판이 '놓는 자리' 여섯 칸으로 (14b 10-2). 창이 떠 있으면 그 창이 받는다.
+  const benchFree = tab === 'bench' && !make.win && !(make.job && (make.job.phase === 'ordering' || make.job.phase === 'drawing') && make.makingBig);
+  useEffect(() => {
+    if (!benchFree || !access.canUse) { setDrop(null); return; }
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const onEnter = (e: DragEvent) => { if (hasFiles(e)) { e.preventDefault(); setDrop((d) => d ?? { mode: 'drag', file: null }); } };
+    const onOver = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
+    const onLeave = (e: DragEvent) => { if (!e.relatedTarget && (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight)) setDrop((d) => (d?.mode === 'drag' ? null : d)); };
+    const onDrop = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); setDrop((d) => (d?.mode === 'drag' ? null : d)); };
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null; if (t && (t.closest('input, textarea, [contenteditable="true"]'))) return;
+      const f = imageOf(Array.from(e.clipboardData?.files ?? [])); if (!f) return;
+      e.preventDefault(); setDrop({ mode: 'paste', file: f });
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrop(null); };
+    window.addEventListener('dragenter', onEnter); window.addEventListener('dragover', onOver); window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop); window.addEventListener('paste', onPaste); window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('dragenter', onEnter); window.removeEventListener('dragover', onOver); window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop', onDrop); window.removeEventListener('paste', onPaste); window.removeEventListener('keydown', onKey);
+    };
+  }, [benchFree, access.canUse]);
+  const onZone = (zone: BaeDropZone, dropped: File | null) => {
+    const file = dropped ?? drop?.file ?? null; setDrop(null);
+    if (!file) { toast('그림 파일만 놓을 수 있어요'); return; }
+    if (zone === 'rough') { setSelId(null); make.openMaterial('new'); void baeBoard().loadFile(file); }
+    else if (zone === 'base') { setSelId(null); void make.openSame(file); }
+    else if (zone === 'denoise') void tools.openDenoise({ blob: file, label: file.name });
+    else toast.message(LATER[zone]);
+  };
+  const dropView: BaeDropView | null = drop && benchFree ? { mode: drop.mode, onZone, onCancel: () => setDrop(null) } : null;
+  // 결과 도구 (다듬기 · 기준 배경으로 새 컷): 지금 작업이거나 기록 한 건
+  const targetOf = (j: BaeJob | null): BaeToolTarget | null => (j ? { jobId: j.id, variant: baeJobVariant(j), hasLock: baeJobHasLock(j) } : null);
+  const noiseFor = (t: BaeToolTarget | null, local: string | null, j: BaeJob | null, title: string) => {
+    if (!t) return;
+    if (local || !j) { void tools.toggleNoise(t); return; }
+    // 다른 PC 에서 만든 그림: 미리보기로 노이즈 제거 창을 연다 (새 도구 작업)
+    const src = j.images.result; if (!src) { toast('이 그림의 원본도 미리보기도 없어요'); return; }
+    void blobOf(src).then((b) => tools.openDenoise({ blob: b, label: title, parentJobId: j.id })).catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
+  };
+  const useBaseFrom = (src: string | null) => {
+    if (!src) { toast('기준 배경으로 쓸 그림이 없어요'); return; }
+    setSelId(null); void make.openSame(src);
+  };
 
   const rowViews = rows.map((j) => recordRow(j, rate, null));
   const activeRow = active && !rows.some((r) => r.id === active.id) && (live || active.phase === 'ordered')
     ? [{ id: active.id, thumb: active.inputs?.rough.small ?? null, thumbAlt: null, title: active.order?.summary?.slice(0, 40) || '새 배경', name: '', sub: '',
-      kindLabel: '새 배경', when: '', took: live ? `${sec}초째` : '', cost: wonOf(active.orderCostUsd ?? 0, rate), state: 'live' as const,
+      kindLabel: KIND_LABEL[active.kind], when: '', took: live ? `${sec}초째` : '', cost: wonOf(active.orderCostUsd ?? 0, rate), state: 'live' as const,
       stateLabel: active.phase === 'drawing' ? '그리는 중' : active.phase === 'ordering' ? '주문서 쓰는 중' : '주문서 확인 대기', stamp: null }]
     : [];
   const allRows = [...activeRow, ...rowViews];
@@ -158,8 +205,9 @@ export default function BaeGyeongView() {
   }
 
   let bench = null; let busy = null;
-  if (showActive && active) { const b = activeBench(rate, sec); bench = b.bench; busy = b.busy; }
-  else if (benchRecord) bench = recordBench(benchRecord, rate, localBench);
+  if (showActive && active) { const b = activeBench(rate, sec, tools.busy[active.id]); bench = b.bench; busy = b.busy; }
+  else if (benchRecord) bench = recordBench(benchRecord, rate, localBench, tools.busy[benchRecord.id]);
+  const activeTarget: BaeToolTarget | null = showActive && active?.result ? { jobId: active.id, variant: active.result.variant, hasLock: active.result.hasLock } : null;
   const big = !!live && make.makingBig && showActive;
 
   return (
@@ -185,6 +233,7 @@ export default function BaeGyeongView() {
             onStart={onStart}
             bench={bench}
             busy={showActive ? busy : null}
+            drop={dropView}
             actions={{
               onEditMat: () => make.openMaterial(),
               onOpenStyle: () => make.openStyle(),
@@ -195,6 +244,9 @@ export default function BaeGyeongView() {
               onSave: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) void saveAs(id, bench?.title ?? ''); },
               onZoom: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) { setRecSel(id); setTab('records'); } },
               onReview: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) { setRecSel(id); setTab('records'); } },
+              onNoise: () => { if (activeTarget) void tools.toggleNoise(activeTarget); else noiseFor(targetOf(benchRecord), localBench, benchRecord, bench?.title ?? ''); },
+              onLock: () => { const t = activeTarget ?? targetOf(benchRecord); if (t) void tools.toggleLock(t); },
+              onUseBase: () => useBaseFrom(showActive ? active?.result?.url ?? null : localBench ?? benchRecord?.images.result ?? null),
             }}
             log={log((id) => setSelId(id === active?.id ? null : id), '작업판에 올리기')}
           />
@@ -203,7 +255,11 @@ export default function BaeGyeongView() {
         ? <JobView {...jobViewProps(recordPicked, rate, localRec, {
           backLabel: '기록으로', onBack: () => setRecSel(null), onSave: () => { void saveAs(recordPicked.id, recordPicked.name ?? ''); },
           review: recordPicked.userId === currentUser?.id && recordPicked.status === 'done' ? { value: reviewOf(recordPicked), onSave: (v) => { void saveReview(recordPicked, v); } } : null,
-        })} />
+          onNoise: () => noiseFor(targetOf(recordPicked), localRec, recordPicked, recordPicked.name ?? ''),
+          onLock: () => { const t = targetOf(recordPicked); if (t) void tools.toggleLock(t); },
+          onUseBase: () => useBaseFrom(localRec ?? recordPicked.images.result ?? null),
+          onLater: (tool) => toast.message(LATER[tool]),
+        }, tools.busy[recordPicked.id])} />
         : <RecordList {...log((id) => setRecSel(id), '자세히 보기')} title="내 기록" onAll={undefined} />)}
       {activeTab === 'costs' && (
         <section className="bae-log" aria-label="비용">
@@ -211,6 +267,8 @@ export default function BaeGyeongView() {
         </section>
       )}
       {activeTab === 'settings' && <BaeSettingsTab />}
+      <input ref={denoiseFileRef} className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
+        onChange={(e) => { const f = imageOf(e.target.files ? Array.from(e.target.files) : null); e.target.value = ''; if (f) void tools.openDenoise({ blob: f, label: f.name }); }} />
       <BaeMakeLayer />
     </div>
   );

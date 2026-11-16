@@ -22,11 +22,13 @@ const withExt = (stems: string[]) => stems.flatMap((s) => [`${s}.png`, `${s}.jpg
 
 /**
  * 작업 폴더에 둘 수 있는 그림 이름.
- * result=원본(마무리한 그림) · gpt=GPT 가 준 그대로 · alt=색 맞춤 전/후 다른 판 · input_N=그림 모델에 보낸 재료 순서대로 ·
+ * result=지금 보이는 그림 · gpt=GPT 가 준 그대로 · final=화면이 마무리한 처음 그림(기울기 되돌림 · 색 맞춤) · alt=색 맞춤 전/후 다른 판 ·
+ * final_noise · alt_noise=그 둘의 노이즈 제거 · source=도구 작업에 불러온 그림 · input_N=그림 모델에 보낸 재료 순서대로 ·
  * rough · rough_level(수평 맞춘 러프) · rough_notes(빨간 메모) · ref_N · base_N · sheet · style(기본 스타일 띠) · pick_N(고른 팀 배경) · review(검수 표시)
+ * 판 파일(final · alt · *_noise · gpt · source)은 한 번 쓰면 바꾸지 않는다: 미리보기 줄이 나중에 읽어도 같은 그림이 올라간다.
  */
 export const BAE_JOB_FILE_NAMES: readonly string[] = Object.freeze(withExt([
-  'result', 'gpt', 'alt', 'rough', 'rough_level', 'rough_notes', 'sheet', 'style', 'review',
+  'result', 'gpt', 'final', 'alt', 'final_noise', 'alt_noise', 'source', 'rough', 'rough_level', 'rough_notes', 'sheet', 'style', 'review',
   ...range('input', 16), ...range('ref', 4), ...range('base', 3), ...range('pick', 4),
 ]));
 /** 초안에 둘 수 있는 그림 이름 (그림판 층 · 재료). */

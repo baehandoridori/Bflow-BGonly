@@ -18,6 +18,8 @@ export interface StyleWindowProps {
   onBack(): void;                 // backTo 가 있을 때 발 버튼
   onClose(): void;                // 닫기 X · Esc · 창 바깥 (backTo 가 없으면 발 버튼도)
   autoOpened?: boolean;
+  /** 기준 배경이 있으면 예시를 보내지 않는다는 안내 (HTML syncStyleForPlace) — 있으면 고르는 방식을 숨긴다 */
+  placeHint?: string | null;
 }
 
 /** 직접 고르기: 이미 고른 것은 빼고, 아니면 더하되 max 장을 넘으면 가장 먼저 고른 것이 빠진다 (시안 · HTML 과 같은 규칙). */
@@ -29,7 +31,7 @@ const placeKo = (v: string) => PLACE_KO[v] ?? v;
 const todKo = (v: string) => (v === 'any' ? '시간대 없음' : TOD_KO[v] ?? v);
 
 export function StyleWindow(p: StyleWindowProps) {
-  const manual = p.mode === 'manual';
+  const manual = p.mode === 'manual' && !p.placeHint;
   const picked = p.entries.filter((e) => e.picked && !e.off).length;
   const onCount = p.entries.filter((e) => !e.off).length;
   const back = p.backTo ? `${p.backTo}${p.backTo === '같은 장소 다른 컷' ? '으로' : '로'} 돌아가기` : '';
@@ -56,11 +58,15 @@ export function StyleWindow(p: StyleWindowProps) {
           </section>
           <section className="bw-group" aria-labelledby="bae-st-mode-h">
             <div className="bw-group-head"><h3 className="bae-side-title" id="bae-st-mode-h">스타일 예시를 고르는 방식</h3></div>
-            <div className="bae-seg bae-seg-fill" role="group" aria-labelledby="bae-st-mode-h">
-              <button type="button" className="bae-btn bae-btn-s" aria-pressed={!manual} onClick={() => p.onMode('auto')}>PD가 골라요</button>
-              <button type="button" className="bae-btn bae-btn-s" aria-pressed={manual} onClick={() => p.onMode('manual')}>직접 고르기 (2장까지)</button>
-            </div>
-            <p className="bae-hint" aria-live="polite">{manual ? `아래에서 쓸 예시를 2장까지 눌러서 골라요. 지금 ${picked}장 골랐어요.` : 'PD가 장소와 시간대가 비슷한 예시를 2장까지 골라요. 꺼 둔 예시는 고르지 않아요.'}</p>
+            {p.placeHint ? <p className="bae-hint" aria-live="polite">{p.placeHint}</p> : (
+              <>
+                <div className="bae-seg bae-seg-fill" role="group" aria-labelledby="bae-st-mode-h">
+                  <button type="button" className="bae-btn bae-btn-s" aria-pressed={!manual} onClick={() => p.onMode('auto')}>PD가 골라요</button>
+                  <button type="button" className="bae-btn bae-btn-s" aria-pressed={manual} onClick={() => p.onMode('manual')}>직접 고르기 (2장까지)</button>
+                </div>
+                <p className="bae-hint" aria-live="polite">{manual ? `아래에서 쓸 예시를 2장까지 눌러서 골라요. 지금 ${picked}장 골랐어요.` : 'PD가 장소와 시간대가 비슷한 예시를 2장까지 골라요. 꺼 둔 예시는 고르지 않아요.'}</p>
+              </>
+            )}
           </section>
         </div>
         <div className="bw-main">

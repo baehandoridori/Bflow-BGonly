@@ -1,10 +1,11 @@
 // 재료 창 (계획 14d 3-1 · 14e 5-5, 시안 WinNew): 왼쪽은 그림판(board)을 그대로, 오른쪽은 설명 · 장소 · 시간대 · 투시 ·
 // 기준 배경 · 레퍼런스 · 그림체 기준 · 이어 가기 · 알림. 발의 '주문서 만들기'. 보여 주기만 하고 바뀐 것은 콜백으로 알린다.
-import { useRef } from 'react';
-import { AlertTriangle, ChevronDown, CopyPlus, Info, Loader2, Palette, Plus, X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { AlertTriangle, ChevronDown, CopyPlus, Info, Loader2, Palette, Plus, Scissors, X } from 'lucide-react';
 import { BaeWindow } from './BaeWindow';
 import type { BaePlace, MaterialWindowProps } from '../make/ui';
 import './bae-stage2-windows.css';
+import './bae-stage3.css';
 
 const PLACES: { id: BaePlace; label: string }[] = [{ id: 'auto', label: '자동' }, { id: 'interior', label: '실내' }, { id: 'exterior', label: '실외' }];
 const DIR_HELP = '이번 화만의 특별한 지시는 { }로 감싸 주세요. 개발자 지문이 되어 매뉴얼과 고정 문장보다 먼저 따라요. 예) {이번 화는 회상 장면이라 전체를 세피아 톤으로}';
@@ -12,7 +13,11 @@ const short = (t: string) => (t.length > 70 ? `${t.slice(0, 70)}…` : t);
 
 export function MaterialWindow(p: MaterialWindowProps) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const baseFileRef = useRef<HTMLInputElement>(null);
+  const [baseOver, setBaseOver] = useState(false);
   const same = p.kind === 'same';
+  const baseFull = p.bases.length >= p.baseMax;
+  const imageFiles = (list: FileList | null | undefined) => Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
   const refFull = p.refs.length >= p.refMax;
   const msgIcon = p.message?.tone === 'info' ? <Info size={16} aria-hidden="true" /> : <AlertTriangle size={16} aria-hidden="true" />;
 
@@ -92,13 +97,50 @@ export function MaterialWindow(p: MaterialWindowProps) {
             ) : null}
           </div>
 
-          <section className="bae-mgroup" aria-labelledby="bae-mt-base-h">
+          <section
+            className={`bae-mgroup bae-mt-bases${baseOver ? ' is-over' : ''}`}
+            aria-labelledby="bae-mt-base-h"
+            onDragOver={(e) => { if (baseFull || !Array.from(e.dataTransfer.types).includes('Files')) return; e.preventDefault(); e.stopPropagation(); setBaseOver(true); }}
+            onDragLeave={() => setBaseOver(false)}
+            onDrop={(e) => { if (baseFull) return; e.preventDefault(); e.stopPropagation(); setBaseOver(false); const fs = imageFiles(e.dataTransfer.files); if (fs.length) p.onAddBases(fs); }}
+          >
             <div className="bae-mhead">
               <p className="bae-mhead-name" id="bae-mt-base-h">기준 배경</p>
-              <span className="bae-mcount">0/3</span>
-              <button type="button" className="bae-btn bae-btn-ghost bae-btn-s bae-push" disabled><Plus size={14} aria-hidden="true" />넣기</button>
+              <span className="bae-mcount bae-num">{p.bases.length}/{p.baseMax}</span>
+              {p.bases.length ? <button type="button" className="bae-btn bae-btn-ghost bae-btn-s bae-push" onClick={p.onOpenParts}><Scissors size={14} aria-hidden="true" />{p.partsButton}</button> : null}
+              <button type="button" className={`bae-btn bae-btn-ghost bae-btn-s${p.bases.length ? '' : ' bae-push'}`} disabled={baseFull} onClick={() => baseFileRef.current?.click()}><Plus size={14} aria-hidden="true" />넣기</button>
+              <input
+                ref={baseFileRef}
+                className="bae-vh"
+                type="file"
+                accept="image/*"
+                multiple
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(e) => { const files = imageFiles(e.target.files); e.target.value = ''; if (files.length) p.onAddBases(files); }}
+              />
             </div>
-            <p className="bae-hint">같은 장소 다른 컷은 다음 단계에서 열려요.</p>
+            {p.bases.length ? (
+              <>
+                <ul className="bae-mats">
+                  {p.bases.map((b, i) => (
+                    <li key={b.id} className="bae-mrow">
+                      <span className="bw-thumb bae-mt-basethumb"><img src={b.src} alt={`기준 배경 ${i + 1}`} />{b.parts ? <span className="bae-mt-pc bae-num">부품 {b.parts}</span> : null}</span>
+                      <input className="bae-minput" type="text" value={b.note} onChange={(e) => p.onBaseNote(b.id, e.target.value)} placeholder="어느 쪽? 예) 소파 쪽" aria-label={`기준 배경 ${i + 1}: 어느 쪽을 본 그림인지`} />
+                      <button type="button" className="bae-ib" aria-label={`기준 배경 ${i + 1} 빼기`} title="빼기" onClick={() => p.onRemoveBase(b.id)}><X size={16} aria-hidden="true" /></button>
+                    </li>
+                  ))}
+                </ul>
+                {p.baseHint ? <p className="bae-hint">{p.baseHint}</p> : null}
+                <button type="button" className="bw-switch bae-mt-guide" role="switch" aria-checked={p.lockOn} onClick={() => p.onLockOn(!p.lockOn)}>
+                  <span className="bw-switch-track" />
+                  <span className="bae-mt-guide-text">
+                    <span>그린 뒤 색 맞춤</span>
+                    <span className="bae-mt-guide-sub">넓은 벽·바닥·소파 색을 기준 배경 색에 맞춰요. 결과에서 껐다 켤 수 있어요</span>
+                  </span>
+                </button>
+              </>
+            ) : <p className="bae-hint">같은 장소의 다른 컷을 그릴 때, 먼저 그린 완성 배경을 넣으면 가구 디자인과 벽·바닥 색을 그대로 따라가요.</p>}
           </section>
 
           <section className="bae-mgroup" aria-labelledby="bae-mt-ref-h">

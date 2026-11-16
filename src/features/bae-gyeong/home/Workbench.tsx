@@ -6,15 +6,17 @@
 import { AlertTriangle, ClipboardCheck, ClipboardPaste, CopyPlus, Download, Eraser, Layers, Loader2, Maximize2, Pencil, Plus, Rotate3d, Scaling, Upload } from 'lucide-react';
 import { useState } from 'react';
 import type { BaeBenchActions, BaeBenchView, BaeBusyView, BaeStartKind, BaeWorkbenchProps } from './benchTypes';
-import { InlineFacts, MaterialsBlock, OrderBlock, ResultFrame } from './BenchParts';
+import { InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ResultTools } from './BenchParts';
+import { DropZones } from './DropZones';
 import { RecordList } from '../records/RecordList';
 import './bench.css';
+import '../windows/bae-stage3.css';
 
 export type { BaeStartKind } from './benchTypes';
 
 const BOX = 25 / 16; // 결과 칸 비율
 
-export function Workbench({ onStart, bench, busy, benchLoading, benchError, onBenchRetry, actions = {}, log }: BaeWorkbenchProps) {
+export function Workbench({ onStart, bench, busy, benchLoading, benchError, onBenchRetry, actions = {}, log, drop }: BaeWorkbenchProps) {
   // 기록을 넘기지 않으면(1단계 화면) 보기 방식 · 찾기는 여기서만 든다
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [q, setQ] = useState('');
@@ -36,7 +38,7 @@ export function Workbench({ onStart, bench, busy, benchLoading, benchError, onBe
 
       <section className="bae-bench" aria-labelledby="bae-bench-h">
         <h2 className="bae-vh" id="bae-bench-h">작업판</h2>
-        {benchError ? (
+        {drop ? <DropZones drop={drop} /> : benchError ? (
           <div className="bae-msg bae-bench-err" role="alert">
             <AlertTriangle size={20} aria-hidden="true" />
             <p className="bae-msg-title">하던 작업을 불러오지 못했어요</p>
@@ -179,6 +181,7 @@ function FullPanes({ bench: b, busy, a }: { bench: BaeBenchView; busy: BaeBusyVi
             <div className="bae-res-bar">
               <div className="bae-res-view">
                 {a.onZoom ? <button type="button" className="bae-btn bae-btn-s" onClick={a.onZoom}><Maximize2 size={14} aria-hidden="true" />크게 보기</button> : null}
+                {b.result.tools ? <ResultTools tools={b.result.tools} onNoise={a.onNoise} onLock={a.onLock} /> : null}
               </div>
               {b.review && a.onReview ? (
                 <button type="button" className={`bae-btn bae-btn-ghost bae-btn-s${rate ? ' is-on' : ''}`} onClick={a.onReview}><ClipboardCheck size={14} aria-hidden="true" />{rate ? `검수: ${rate}` : '검수 남기기 (선택)'}</button>
@@ -188,9 +191,13 @@ function FullPanes({ bench: b, busy, a }: { bench: BaeBenchView; busy: BaeBusyVi
 
           <div className="bae-res-foot">
             <InlineFacts facts={busy ? busy.facts : b.result ? b.result.facts : []} />
-            {b.result && !busy && a.onSave ? (
-              <div className="bae-res-acts"><button type="button" className="bae-btn bae-btn-s" onClick={a.onSave}><Download size={14} aria-hidden="true" />PNG 저장</button></div>
+            {b.result && !busy && (a.onSave || a.onUseBase) ? (
+              <div className="bae-res-acts">
+                {a.onSave ? <button type="button" className="bae-btn bae-btn-s" onClick={a.onSave}><Download size={14} aria-hidden="true" />PNG 저장</button> : null}
+                {a.onUseBase ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-same" title="이 그림을 기준 배경 칸에 넣어서, 같은 장소의 다른 컷을 그려요" onClick={a.onUseBase}><CopyPlus size={14} aria-hidden="true" />기준 배경으로 새 컷</button> : null}
+              </div>
             ) : null}
+            {b.result?.tools?.note && !busy ? <p className="bae-res-note" role="note">{b.result.tools.note}</p> : null}
           </div>
         </div>
       </li>

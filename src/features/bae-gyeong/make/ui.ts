@@ -6,6 +6,8 @@ import type { PerspectiveId, RatioId, TierId } from '../../../shared/bae/order/c
 export type BaePlace = 'auto' | 'interior' | 'exterior';
 export interface BaeOption<T extends string = string> { id: T; label: string }
 export interface BaeRefView { id: string; src: string; note: string }
+/** 기준 배경 한 장 (재료 창의 줄): 부품 수는 작은 그림 위 표시 */
+export interface BaeBaseView { id: string; src: string; note: string; parts: number }
 export interface BaeStyleEntryView { id: string; name: string; src: string; place: string; tod: string; off: boolean; picked: boolean }
 
 /** 재료 창 (새 배경 만들기 · 같은 장소 다른 컷, 14d 3-1 · 14e 5-5). 왼쪽 칸은 그림판(board)을 그대로 넣는다. */
@@ -33,8 +35,19 @@ export interface MaterialWindowProps {
   onAddRefs(files: File[]): void;
   onRefNote(id: string, note: string): void;
   onRemoveRef(id: string): void;
-  stripSrc: string;            // 그림체 기준 띠 그림
-  styleRow: string;            // "스타일 띠, PD가 골라요" 같은 한 줄
+  // ── 기준 배경 (같은 장소, 3단계 · HTML baseField) ──
+  bases: BaeBaseView[];
+  baseMax: number;             // 3
+  onAddBases(files: File[]): void;
+  onBaseNote(id: string, note: string): void;
+  onRemoveBase(id: string): void;
+  baseHint: string;            // HTML baseHint ('지금은 기준 배경을 통째로 보내요 …')
+  partsButton: string;         // '부품 자르기' · '부품 고치기 (3개)'
+  onOpenParts(): void;
+  lockOn: boolean;             // 그린 뒤 색 맞춤
+  onLockOn(on: boolean): void;
+  stripSrc: string;            // 그림체 기준 띠 그림 (기준 배경이 있으면 첫 기준 배경)
+  styleRow: string;            // "스타일 띠, PD가 골라요" · "기준 배경 2장이 기준이에요"
   onOpenStyle(): void;
   carry: { count: number; on: boolean; text: string } | null; // 이전 수정 요청 이어 가기 (HTML carryRev)
   onCarry(on: boolean): void;

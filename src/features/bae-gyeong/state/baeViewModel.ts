@@ -6,11 +6,13 @@ import {
   dirNotes, dirUnclosed, guideSummaryKo, sizeChoices, promptCountText, carryList,
 } from '@/shared/bae/order';
 import { BAE_LIBRARY_DEFAULT } from '@/shared/bae/library';
-import type { BaeJob } from '@/shared/bae/jobs';
+import { baeJobHasLock, baeJobVariant, type BaeJob, type BaeVariant } from '@/shared/bae/jobs';
+import { BAE_BASE_MAX, baeBaseFieldView, baeStyleForPlace, baePlaceMode } from '@/shared/bae/place';
 import type { MakeWindowProps, MaterialWindowProps, MakingStageProps, BaeStepView } from '../make/ui';
-import type { BaeBenchView, BaeBusyView, BaeFactView, BaeJobViewProps, BaeMaterialsView, BaeRecordRowView, BaeReviewView } from '../home/benchTypes';
+import type { BaeBenchView, BaeBusyView, BaeFactView, BaeJobViewProps, BaeMaterialsView, BaeRecordRowView, BaeResultToolsView, BaeReviewView } from '../home/benchTypes';
 import type { BaeStyleEntryView } from '../make/ui';
 import { BAE_STRIP_SRC, baeActiveLibrary, baeBoard, baeLibSrc, baeMisfit, baeOrderStale, useBaeMake, type BaeActiveJob } from './useBaeMake';
+import { baeLockText, baeNoiseText, baeStyleRowForBases } from './baeBases';
 
 export const KIND_LABEL: Record<string, string> = { new: '새 배경', same: '같은 장소', edit: '고친 그림', angle: '다른 각도', layers: '레이어', import: '불러온 그림', upscale: '4K', denoise: '노이즈 제거' };
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -23,8 +25,27 @@ export const wonOf = (usd: number | null | undefined, rate: number) => (usd == n
 const timeLabel = (id: string) => TIMES_BUILTIN.find((t) => t.id === id)?.label ?? id;
 const perspLabel = (id: string) => PERSPECTIVES.find((p) => p.id === id)?.label ?? id;
 
-function styleRow(mode: 'auto' | 'manual', picks: string[]): string {
+/** 기준 배경이 있으면 스타일 예시는 보내지 않는다 (시안 작업판 2 주문서 '스타일 예시' 줄). */
+const PLACE_STYLE = '보내지 않았어요. 기준 배경이 이 장소의 그림체 기준이에요.';
+/** 그림체 기준 줄: 재료 창은 '기준 배경 2장이 기준이에요', 작업판의 좁은 칸은 '기준 배경 2장' (시안 그대로). */
+function styleRow(mode: 'auto' | 'manual', picks: string[], bases = 0, short = false): string {
+  if (bases) return short ? `기준 배경 ${bases}장` : baeStyleRowForBases(bases);
   return mode === 'manual' ? `스타일 띠, 예시 ${picks.length ? picks.join(' · ') : '고르는 중'}` : '스타일 띠, PD가 골라요';
+}
+/** 그림체 기준 창에 보일 안내 (기준 배경이 있으면 예시를 보내지 않는다 — HTML syncStyleForPlace). 없으면 null. */
+export function stylePlaceHint(): string | null {
+  const s = useBaeMake.getState(); const m = baePlaceMode(s.bases);
+  return m ? baeStyleForPlace(m, s.styleMode).hint : null;
+}
+/** 결과 다듬기 줄 (HTML syncNoiseBtn · syncLockRow 의 글). */
+export function toolsView(q: { variant: BaeVariant; hasLock: boolean; moved: number; noiseSec: number | null | undefined; note: string; busy?: { what: 'noise' | 'lock'; step: string }; away: boolean }): BaeResultToolsView {
+  const nt = baeNoiseText(q.variant.noise, q.noiseSec);
+  const lt = q.hasLock ? baeLockText(!q.variant.alt, q.moved) : null;
+  return {
+    noise: { on: q.variant.noise, ...nt, busy: q.busy?.what === 'noise' ? q.busy.step || '지우는 중' : '' },
+    lock: lt ? { on: !q.variant.alt, ...lt, busy: q.busy?.what === 'lock' ? q.busy.step || '바꾸는 중' : '' } : null,
+    note: q.note, away: q.away,
+  };
 }
 
 /** 재료 창 */
@@ -32,8 +53,9 @@ export function materialProps(a: { onAddRefs(files: File[]): void; isAdmin: bool
   const s = useBaeMake.getState(); const g = s.guide;
   const prev = s.job?.order ?? null;
   const carry = prev && s.job?.inputs ? carryList(prev, s.job.inputs.rough.key) : [];
+  const fv = baeBaseFieldView(s.bases, BAE_BASE_MAX);
   return {
-    kind: s.kind,
+    kind: s.kind === 'same' || s.bases.length ? 'same' : 'new',
     request: s.request, onRequest: s.setRequest,
     dirNotes: dirNotes(s.request), dirUnclosed: dirUnclosed(s.request),
     place: s.place, onPlace: s.setPlace,
@@ -44,7 +66,10 @@ export function materialProps(a: { onAddRefs(files: File[]): void; isAdmin: bool
     guideUseText: s.persp === 'auto' ? '' : guideSummaryKo(s.persp, g),
     refs: s.refs.map((r) => ({ id: String(r.id), src: r.src, note: r.note })), refMax: 4,
     onAddRefs: a.onAddRefs, onRefNote: (id, note) => s.setRefNote(Number(id), note), onRemoveRef: (id) => s.removeRef(Number(id)),
-    stripSrc: BAE_STRIP_SRC, styleRow: styleRow(s.styleMode, s.manualPicks), onOpenStyle: s.openStyle,
+    bases: s.bases.map((b) => ({ id: String(b.id), src: b.src, note: b.note, parts: b.parts.length })), baseMax: BAE_BASE_MAX,
+    onAddBases: (files) => { void s.addBases(files); }, onBaseNote: (id, note) => s.setBaseNote(Number(id), note), onRemoveBase: (id) => s.removeBase(Number(id)),
+    baseHint: fv.hint, partsButton: fv.partsButton, onOpenParts: () => s.openParts(0), lockOn: s.lockOn, onLockOn: s.setLockOn,
+    stripSrc: BAE_STRIP_SRC, styleRow: styleRow(s.styleMode, s.manualPicks, s.bases.length), onOpenStyle: s.openStyle,
     carry: carry.length ? { count: carry.length, on: s.carryOn, text: carry.join('\n') } : null, onCarry: (on) => s.set('carryOn', on),
     message: s.message, submitting: s.submitting, onSubmit: () => { void s.submitOrder(); }, onClose: s.closeWin,
   };
@@ -54,6 +79,7 @@ export function materialProps(a: { onAddRefs(files: File[]): void; isAdmin: bool
 function sendList(j: BaeActiveJob): { src: string; label: string }[] {
   const inp = j.inputs; if (!inp) return [];
   const out: { src: string; label: string }[] = [{ src: inp.rough.small, label: '1번 ' + inp.rough.label }];
+  (inp.place?.items ?? []).forEach((it) => out.push({ src: it.small, label: `${out.length + 1}번 ${it.label}${it.note ? ` (${it.note})` : ''}` }));
   inp.refs.forEach((r) => out.push({ src: r.small, label: `${out.length + 1}번 레퍼런스` }));
   for (const id of j.order?.picks ?? []) { const e = BAE_LIBRARY_DEFAULT.find((x) => x.id === id); if (e) out.push({ src: baeLibSrc(e.file ?? ''), label: `${out.length + 1}번 예시 ${id}` }); }
   out.push({ src: BAE_STRIP_SRC, label: '마지막 그림체 기준' });
@@ -98,18 +124,20 @@ export function makingProps(seconds: number): MakingStageProps {
   const mat = materialsLine(j);
   const steps: BaeStepView[] = ordering
     ? [{ name: '1 재료', text: mat, state: 'ok' }, { name: '2 주문서', text: `PD가 쓰는 중, ${seconds}초째`, state: 'now' }, { name: '3 결과', text: '주문서를 읽어 본 다음에 그려요', state: 'wait' }]
-    : [{ name: '1 재료', text: mat, state: 'ok' }, { name: '2 주문서', text: `PD ${tookText(j.orderSec)}`, state: 'ok' }, { name: '3 결과', text: `그리는 중, ${seconds}초째. 중간 그림 2장 중 ${Math.min(2, j.partialCount)}장`, state: 'now' }];
+    : [{ name: '1 재료', text: mat, state: 'ok' }, { name: '2 주문서', text: `PD ${tookText(j.orderSec)}`, state: 'ok' },
+      { name: '3 결과', text: j.finishing ? `${j.finishing}, ${seconds}초째. 이 PC에서 마무리해요` : `그리는 중, ${seconds}초째. 중간 그림 2장 중 ${Math.min(2, j.partialCount)}장`, state: 'now' }];
   const [w, h] = RATIOS[s.ratio].sizes[s.tier];
   return {
     phase: ordering ? 'order' : 'draw', title: titleOf(s.request), kindLabel: KIND_LABEL[j.kind],
-    label: ordering ? `주문서 쓰는 중, ${seconds}초째` : `그리는 중, ${seconds}초째`,
+    label: ordering ? `주문서 쓰는 중, ${seconds}초째` : j.finishing ? `${j.finishing}, ${seconds}초째` : `그리는 중, ${seconds}초째`,
     src: ordering ? (j.inputs?.rough.small ?? null) : (j.partial ?? j.inputs?.rough.small ?? null), partial: !ordering && !!j.partial,
     aspect: w / h, steps, onFold: s.fold, onStop: () => { void s.stop(); },
   };
 }
 function materialsLine(j: BaeActiveJob): string {
   const inp = j.inputs; if (!inp) return '러프';
-  return (inp.rough.noteCount ? '러프와 빨간 메모' : '러프') + ' 1장' + (inp.refs.length ? `, 레퍼런스 ${inp.refs.length}장` : '');
+  const pl = inp.place ? (inp.place.mode === 'sheet' ? ', 부품 시트 1장' : `, 기준 배경 ${inp.place.n}장`) : '';
+  return (inp.rough.noteCount ? '러프와 빨간 메모' : '러프') + ' 1장' + pl + (inp.refs.length ? `, 레퍼런스 ${inp.refs.length}장` : '');
 }
 const titleOf = (request: string) => { const t = request.replace(/[{｛][^}｝]*[}｝]/g, '').replace(/\s+/g, ' ').trim(); return t ? (t.length > 40 ? t.slice(0, 40) + '…' : t) : '새 배경'; };
 
@@ -120,12 +148,14 @@ export function styleEntries(): BaeStyleEntryView[] {
 }
 
 /** 작업대 — 지금 작업 (이 PC 에서 진행 중이거나 방금 끝난 것) */
-export function activeBench(rate: number, seconds = 0): { bench: BaeBenchView; busy: BaeBusyView | null } {
+export function activeBench(rate: number, seconds = 0, toolBusy?: { what: 'noise' | 'lock'; step: string }): { bench: BaeBenchView; busy: BaeBusyView | null } {
   const s = useBaeMake.getState(); const j = s.job!; const o = j.order;
   const [w, h] = RATIOS[s.ratio].sizes[s.tier];
   const mat: BaeMaterialsView = {
     rough: j.inputs ? { src: j.inputs.rough.annotated ?? j.inputs.rough.small, alt: '러프', name: j.inputs.rough.noteCount ? '러프와 빨간 메모' : '러프', sub: j.inputs.rough.noteCount ? `빨간 메모 ${j.inputs.rough.noteCount}개` : '' } : null,
-    refs: s.refs.map((r) => ({ id: String(r.id), src: r.src, alt: '레퍼런스', note: r.note })), refMax: 4, stripSrc: BAE_STRIP_SRC, styleRow: styleRow(s.styleMode, s.manualPicks),
+    refs: s.refs.map((r) => ({ id: String(r.id), src: r.src, alt: '레퍼런스', note: r.note })), refMax: 4,
+    bases: s.bases.map((b, i) => ({ id: String(b.id), src: b.src, alt: `기준 배경 ${i + 1}`, note: b.note })), baseMax: BAE_BASE_MAX, sheet: null,
+    stripSrc: BAE_STRIP_SRC, styleRow: styleRow(s.styleMode, s.manualPicks, s.bases.length, true),
     descLabel: '설명', desc: s.request,
     facts: [{ k: '비율', v: s.ratio }, { k: '장소', v: PLACE_LABEL_KO[s.place] }, { k: '시간대', v: timeLabel(s.time) }, { k: '투시', v: perspLabel(s.persp) }],
   };
@@ -134,17 +164,19 @@ export function activeBench(rate: number, seconds = 0): { bench: BaeBenchView; b
   if (j.orderCostUsd != null) head.push({ k: 'PD 비용', v: wonOf(j.orderCostUsd, rate) });
   const bench: BaeBenchView = {
     id: j.id, title: titleOf(s.request), named: false, kindLabel: KIND_LABEL[j.kind], when: whenText(j.createdAt), mat, matAct: '재료 바꿔 다시 그리기',
-    order: o ? { summary: o.summary, ask: o.revisions.at(-1) ?? '', notes: o.notes, style: o.reason ? `예시 ${o.picks.join(' · ')}: ${o.reason}` : '', pdNote: '', head } : null,
+    order: o ? { summary: o.summary, ask: o.revisions.at(-1) ?? '', notes: o.notes, style: o.place ? PLACE_STYLE : o.reason ? `예시 ${o.picks.join(' · ')}: ${o.reason}` : '', pdNote: '', head } : null,
     orderReady: j.phase === 'ordered' && !!o,
     result: j.result ? { src: j.result.url, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : w / h,
-      facts: [{ k: '크기', v: `${j.result.w}×${j.result.h}` }, { k: '그림', v: tookText(j.result.sec) }, { k: '비용', v: wonOf(j.result.costUsd, rate) }] } : null,
+      facts: [{ k: '크기', v: `${j.result.w}×${j.result.h}` }, { k: '그림', v: tookText(j.result.sec) }, { k: '비용', v: wonOf(j.result.costUsd, rate) }],
+      tools: toolsView({ variant: j.result.variant, hasLock: j.result.hasLock, moved: j.result.moved, noiseSec: j.result.noiseSec, note: j.result.note, busy: toolBusy, away: false }) } : null,
     review: null,
     failed: j.phase === 'failed' || j.phase === 'order-failed' ? { title: j.phase === 'order-failed' ? '주문서를 만들지 못했어요' : '그림을 만들지 못했어요', text: j.error ?? '' }
       : j.phase === 'stopped' ? { title: '그만뒀어요', text: j.error ?? '' } : null,
   };
   const busy: BaeBusyView | null = j.phase === 'ordering' || j.phase === 'drawing' ? {
     phase: j.phase === 'ordering' ? 'order' : 'draw',
-    main: j.phase === 'ordering' ? `PD가 주문서 쓰는 중, ${seconds}초째` : `그리는 중, ${seconds}초째`, sub: j.phase === 'ordering' ? '다 쓰면 요약을 읽고 그림을 만들어요' : `중간 그림 2장 중 ${Math.min(2, j.partialCount)}장`,
+    main: j.phase === 'ordering' ? `PD가 주문서 쓰는 중, ${seconds}초째` : j.finishing ? `${j.finishing}, ${seconds}초째` : `그리는 중, ${seconds}초째`,
+    sub: j.phase === 'ordering' ? '다 쓰면 요약을 읽고 그림을 만들어요' : j.finishing ? '그림이 왔어요. 이 PC에서 마무리하는 중이에요 (0원)' : `중간 그림 2장 중 ${Math.min(2, j.partialCount)}장`,
     src: j.phase === 'drawing' ? (j.partial ?? j.inputs?.rough.small ?? null) : (j.inputs?.rough.small ?? null), partial: j.phase === 'drawing' && !!j.partial, aspect: w / h,
     facts: [{ k: '크기', v: `${w}×${h}` }, { k: '그림', v: j.phase === 'ordering' ? '아직' : '그리는 중' }, { k: '지금까지', v: wonOf(j.orderCostUsd ?? 0, rate) }],
   } : null;
@@ -157,7 +189,10 @@ export function recordMaterials(j: BaeJob): BaeMaterialsView {
   return {
     rough: j.images.rough || j.images.roughNotes ? { src: (j.images.roughNotes ?? j.images.rough)!, alt: '러프', name: j.images.roughNotes ? '러프와 빨간 메모' : '러프', sub: '' } : null,
     refs: (j.images.refs ?? []).map((src, i) => ({ id: `${j.id}-${i}`, src, alt: '레퍼런스', note: sm.refNotes?.[i] ?? '' })),
-    refMax: 4, stripSrc: BAE_STRIP_SRC, styleRow: sm.styleMode ? styleRow(sm.styleMode, sm.picks ?? []) : '',
+    refMax: 4,
+    bases: (j.images.bases ?? []).map((src, i) => ({ id: `${j.id}-b${i}`, src, alt: `기준 배경 ${i + 1}`, note: sm.base?.notes?.[i] ?? '' })),
+    baseMax: BAE_BASE_MAX, sheet: j.images.sheet ?? null,
+    stripSrc: BAE_STRIP_SRC, styleRow: sm.base ? styleRow('auto', [], sm.base.notes?.length || sm.base.n, true) : sm.styleMode ? styleRow(sm.styleMode, sm.picks ?? []) : '',
     descLabel: '설명', desc: sm.request ?? '',
     facts: [sm.ratio ? { k: '비율', v: sm.ratio } : null, sm.place ? { k: '장소', v: PLACE_LABEL_KO[sm.place as 'auto'] ?? sm.place } : null,
       sm.timeLabel ? { k: '시간대', v: sm.timeLabel } : null, sm.perspLabel ? { k: '투시', v: sm.perspLabel } : null].filter((x): x is BaeFactView => !!x),
@@ -167,15 +202,22 @@ export function recordResultFacts(j: BaeJob, rate: number): BaeFactView[] {
   return [j.result.w ? { k: '크기', v: `${j.result.w}×${j.result.h}` } : null, j.result.sec != null ? { k: '그림', v: tookText(j.result.sec) } : null, { k: '비용', v: wonOf(j.costUsd, rate) }]
     .filter((x): x is BaeFactView => !!x);
 }
-export function recordBench(j: BaeJob, rate: number, localResult: string | null): BaeBenchView {
+/** 기록 한 건의 다듬기 줄. 이 PC 원본이 없으면 away (색 맞춤은 못 바꾸고, 노이즈 제거는 창으로). 실패 · 진행 중이면 null. */
+export function recordTools(j: BaeJob, localResult: string | null, busy?: { what: 'noise' | 'lock'; step: string }): BaeResultToolsView | null {
+  if (j.status !== 'done') return null;
+  const f = j.result.finish;
+  return toolsView({ variant: baeJobVariant(j), hasLock: baeJobHasLock(j) && !!localResult, moved: f?.lock?.moved ?? 0, noiseSec: f?.noise?.sec, note: f?.note ?? '', busy, away: !localResult });
+}
+const recordTitle = (j: BaeJob) => j.name || titleOf(j.summary.request ?? '') || (j.summary.source ? `${KIND_LABEL[j.kind]}: ${j.summary.source}` : '') || KIND_LABEL[j.kind];
+export function recordBench(j: BaeJob, rate: number, localResult: string | null, busy?: { what: 'noise' | 'lock'; step: string }): BaeBenchView {
   const pd = j.pd;
   const src = localResult ?? j.images.result ?? null;
   return {
-    id: j.id, title: j.name || titleOf(j.summary.request ?? '') || KIND_LABEL[j.kind], named: !!j.name, kindLabel: KIND_LABEL[j.kind], when: whenText(j.createdAt),
+    id: j.id, title: recordTitle(j), named: !!j.name, kindLabel: KIND_LABEL[j.kind], when: whenText(j.createdAt),
     mat: recordMaterials(j), matAct: '',
-    order: pd?.summaryKo ? { summary: pd.summaryKo, ask: pd.revisions?.at(-1) ?? '', notes: pd.notesKo ?? [], style: pd.reason ?? '', pdNote: '', head: [] } : null,
+    order: pd?.summaryKo ? { summary: pd.summaryKo, ask: pd.revisions?.at(-1) ?? '', notes: pd.notesKo ?? [], style: j.summary.base ? PLACE_STYLE : pd.reason ?? '', pdNote: '', head: [] } : null,
     orderReady: false,
-    result: src && j.status === 'done' ? { src, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : 16 / 9, facts: recordResultFacts(j, rate) } : null,
+    result: src && j.status === 'done' ? { src, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : 16 / 9, facts: recordResultFacts(j, rate), tools: recordTools(j, localResult, busy) } : null,
     review: reviewOf(j),
     failed: j.status === 'failed' ? { title: '그림을 만들지 못했어요', text: j.result.error ?? '' } : j.status === 'stopped' ? { title: '그만뒀어요', text: j.result.error ?? '' } : null,
   };
@@ -188,7 +230,7 @@ export function recordRow(j: BaeJob, rate: number, liveSeconds: number | null): 
   const live = j.status === 'drawing' || j.status === 'ordering' || j.status === 'ordered';
   return {
     id: j.id, thumb: j.images.thumb ?? j.images.result ?? j.images.rough ?? null, thumbAlt: j.images.rough ?? null,
-    title: titleOf(j.summary.request ?? '') || KIND_LABEL[j.kind], name: j.name ?? '',
+    title: titleOf(j.summary.request ?? '') || (j.summary.source ? `${KIND_LABEL[j.kind]}: ${j.summary.source}` : '') || KIND_LABEL[j.kind], name: j.name ?? '',
     sub: j.status === 'failed' ? `실패: ${j.result.error ?? ''}` : j.summary.roughNotes ? `메모 ${j.summary.roughNotes.split('\n').filter(Boolean).length}개` : '',
     kindLabel: KIND_LABEL[j.kind], when: whenText(j.createdAt),
     took: live && liveSeconds != null ? `${liveSeconds}초째` : tookText(j.result.sec), cost: wonOf(j.costUsd, rate),
@@ -197,17 +239,18 @@ export function recordRow(j: BaeJob, rate: number, liveSeconds: number | null): 
     stamp: j.stamp ? { label: j.stamp === 'good' ? '좋아요' : j.stamp === 'again' ? '다시' : '봤어요', tone: j.stamp } : null,
   };
 }
-export function jobViewProps(j: BaeJob, rate: number, localResult: string | null, extra: Pick<BaeJobViewProps, 'backLabel' | 'onBack' | 'review' | 'onSave'>): BaeJobViewProps {
+export function jobViewProps(j: BaeJob, rate: number, localResult: string | null, extra: Pick<BaeJobViewProps, 'backLabel' | 'onBack' | 'review' | 'onSave' | 'onNoise' | 'onLock' | 'onUseBase' | 'onLater'>,
+  busy?: { what: 'noise' | 'lock'; step: string }): BaeJobViewProps {
   const pd = j.pd;
   const src = localResult ?? j.images.result ?? null;
   return {
-    ...extra, title: j.name || titleOf(j.summary.request ?? '') || KIND_LABEL[j.kind], kindLabel: KIND_LABEL[j.kind], when: whenText(j.createdAt),
+    ...extra, title: recordTitle(j), kindLabel: KIND_LABEL[j.kind], when: whenText(j.createdAt),
     live: j.status === 'drawing' ? { main: '그리는 중', sub: '이 PC 나 다른 PC 에서 아직 그리는 중이에요' } : null,
-    result: src && j.status === 'done' ? { src, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : 16 / 9, facts: recordResultFacts(j, rate) } : null,
+    result: src && j.status === 'done' ? { src, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : 16 / 9, facts: recordResultFacts(j, rate), tools: recordTools(j, localResult, busy) } : null,
     failed: j.status === 'failed' ? { title: '그림을 만들지 못했어요', text: j.result.error ?? '' } : j.status === 'stopped' ? { title: '그만뒀어요', text: j.result.error ?? '' } : null,
     facts: [...recordResultFacts(j, rate), { k: '만든 때', v: whenText(j.createdAt) }, { k: '만든 사람', v: j.userName }, ...(j.result.model ? [{ k: '그림 모델', v: j.result.model }] : [])],
     mat: recordMaterials(j),
-    pd: pd ? { summary: pd.summaryKo ?? '', ask: pd.revisions?.at(-1) ?? '', notes: pd.notesKo ?? [], style: pd.reason ?? '', pdNote: '', head: [],
+    pd: pd ? { summary: pd.summaryKo ?? '', ask: pd.revisions?.at(-1) ?? '', notes: pd.notesKo ?? [], style: j.summary.base ? PLACE_STYLE : pd.reason ?? '', pdNote: '', head: [],
       prompt: pd.prompt ?? '', revisions: pd.revisions ?? [], director: pd.director ? { ko: pd.director.ko, en: pd.director.en } : null } : null,
   };
 }

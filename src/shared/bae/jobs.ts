@@ -14,9 +14,33 @@ export function baeStatusRank(s: BaeJobStatus): number {
 }
 export const isBaeJobFinished = (s: BaeJobStatus) => baeStatusRank(s) === 3;
 
-/** 저장소(scene-images 버킷) 안 미리보기 자리. 사용자가 쓴 글자는 경로에 넣지 않는다 — 작업 id 와 정해 둔 이름만. */
-export const BAE_PREVIEW_NAMES = ['result_1600.jpg', 'result_320.jpg', 'gpt_1600.jpg', 'rough.jpg', 'rough_notes.jpg', 'ref_1.jpg', 'ref_2.jpg', 'ref_3.jpg', 'ref_4.jpg'] as const;
+/**
+ * 저장소(scene-images 버킷) 안 미리보기 자리. 사용자가 쓴 글자는 경로에 넣지 않는다 — 작업 id 와 정해 둔 이름만.
+ * 저장소는 덮어쓰지 않으므로(baePreviews.ts) 결과의 판마다 이름이 따로 있다: result(처음 마무리한 그림) · alt(색 맞춤을 바꾼 그림) ·
+ * noise · altnoise(그 둘의 노이즈 제거). 재료는 rough · rough_notes · ref_N · base_N(기준 배경 통째로) · sheet(부품 시트).
+ */
+export const BAE_PREVIEW_NAMES = [
+  'result_1600.jpg', 'result_320.jpg', 'gpt_1600.jpg', 'alt_1600.jpg', 'alt_320.jpg', 'noise_1600.jpg', 'noise_320.jpg', 'altnoise_1600.jpg', 'altnoise_320.jpg',
+  'rough.jpg', 'rough_notes.jpg', 'ref_1.jpg', 'ref_2.jpg', 'ref_3.jpg', 'ref_4.jpg', 'base_1.jpg', 'base_2.jpg', 'base_3.jpg', 'sheet.jpg',
+] as const;
 export type BaePreviewName = (typeof BAE_PREVIEW_NAMES)[number];
+
+/**
+ * 결과의 판 (HTML rec.blob · altBlob · noiseSrc · noiseClean 을 파일로): alt = 색 맞춤을 바꾼 쪽(처음 마무리한 그림이 색 맞춘 그림이면
+ * 맞추기 전 그림), noise = 노이즈 제거한 것. 처음 마무리한 그림은 { alt: false, noise: false }.
+ */
+export interface BaeVariant { alt: boolean; noise: boolean }
+/** 이 PC 보관함의 판 파일. 처음 그림은 null — 메인이 final.png → gpt.png → source.png 순서로 찾는다 (따로 적지 않은 작업도 있어서). */
+export function baeVariantFile(v: BaeVariant): string | null {
+  return v.alt ? (v.noise ? 'alt_noise.png' : 'alt.png') : v.noise ? 'final_noise.png' : null;
+}
+/** 처음 그림 파일을 찾는 순서: 화면이 마무리한 그림 · GPT 가 준 그대로 · 도구 작업에 불러온 그림. */
+export const BAE_BASE_VARIANT_FILES = ['final.png', 'gpt.png', 'source.png'] as const;
+/** 판마다 미리보기 이름 (1600 · 320). */
+export function baeVariantPreviews(v: BaeVariant): { big: BaePreviewName; small: BaePreviewName } {
+  const stem = v.alt ? (v.noise ? 'altnoise' : 'alt') : v.noise ? 'noise' : 'result';
+  return { big: `${stem}_1600.jpg` as BaePreviewName, small: `${stem}_320.jpg` as BaePreviewName };
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const isBaeJobId = (v: unknown): v is string => typeof v === 'string' && UUID_RE.test(v);
 export function baePreviewPath(jobId: string, name: BaePreviewName): string {
@@ -31,6 +55,23 @@ export interface BaeJobSummary {
   time?: string; timeLabel?: string; place?: string; persp?: string; perspLabel?: string; tilt?: number; guideKo?: string; camera?: string;
   refNotes?: string[]; roughNotes?: string; styleMode?: 'auto' | 'manual'; picks?: string[];
   manualVer?: string; fixedVer?: string; guidanceVer?: string; settingsRev?: Record<string, number>;
+  /** 기준 배경 (HTML 기록의 base): 방식 · 장 수 · 칠한 러프 · 어느 쪽 메모 · 부품 수. 없으면 null. */
+  base?: { mode: 'sheet' | 'base'; n: number; painted: boolean; notes: string[]; parts: number } | null;
+  /** 그릴 때 '그린 뒤 색 맞춤'이 켜져 있었는지 */
+  lockOn?: boolean;
+  /** 도구 작업(노이즈 제거 등)의 그림 이름 (불러온 파일 이름 또는 원래 작업 이름) */
+  source?: string;
+}
+/** 그린 뒤 한 일 (plan 14 5-2 '뒤에 한 일'): 기울기 되돌림 · 색 맞춤 · 노이즈 제거. */
+export interface BaeJobFinish {
+  /** 기울기만큼 되돌려 자른 각도 (0 이면 안 함) */
+  tilt?: number;
+  /** 색 맞춤: 옮긴 넓은 면 수, 지금 보이는 것이 맞춘 그림인지. 맞춘 면이 없거나 안 했으면 null */
+  lock?: { moved: number; on: boolean } | null;
+  /** 노이즈 제거: 지금 켜져 있는지 · 걸린 초 */
+  noise?: { on: boolean; sec?: number } | null;
+  /** 색 맞춤을 못 했을 때의 안내 (HTML finishPicture 의 note) */
+  note?: string;
 }
 export interface BaeJobPd {
   summaryKo?: string; notesKo?: string[]; reason?: string; prompt?: string; raw?: string;
@@ -38,8 +79,18 @@ export interface BaeJobPd {
 }
 export interface BaeJobResult {
   w?: number; h?: number; model?: string; quality?: string; sec?: number; error?: string; stoppedAt?: string; usdOrder?: number; usdImage?: number;
+  finish?: BaeJobFinish;
 }
-export type BaeJobImages = Partial<Record<'result' | 'thumb' | 'gpt' | 'rough' | 'roughNotes', string>> & { refs?: string[] };
+/** 미리보기 주소. source = 도구 작업의 원래 그림 · 판을 바꾼 작업의 처음 그림, bases · sheet = 기준 배경 재료. */
+export type BaeJobImages = Partial<Record<'result' | 'thumb' | 'gpt' | 'rough' | 'roughNotes' | 'sheet' | 'source', string>> & { refs?: string[]; bases?: string[] };
+
+/** 기록의 '지금 보이는 판' (색 맞춤을 바꿨는지 · 노이즈를 지웠는지). */
+export function baeJobVariant(j: Pick<BaeJob, 'result'>): BaeVariant {
+  const f = j.result?.finish;
+  return { alt: !!f?.lock && f.lock.on === false, noise: !!f?.noise?.on };
+}
+/** 색 맞춤을 켜고 끌 수 있는 작업인지 (HTML syncLockRow: altBlob 이 있을 때만). */
+export const baeJobHasLock = (j: Pick<BaeJob, 'result'>): boolean => !!j.result?.finish?.lock && (j.result.finish.lock.moved ?? 0) > 0;
 
 export interface BaeJob {
   id: string; userId: string; userName: string; kind: BaeJobKind; status: BaeJobStatus; name: string | null; parentJobId: string | null;

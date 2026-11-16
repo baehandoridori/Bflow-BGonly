@@ -1,9 +1,10 @@
 // 한 건 보기 (시안 Zoom 바탕): 결과 그림을 크게, 그 아래 재료와 PD 글을 모두, 오른쪽에 숫자 · 만든 때 · 검수 · 내보내기.
 // 기록에서 한 건을 누르거나 작업대의 '크게 보기'로 연다. 보여 주기만 하고 바뀐 것은 콜백으로 알린다.
-import { AlertTriangle, ArrowLeft, Download, Loader2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CopyPlus, Download, Layers, Loader2, Rotate3d, Scaling } from 'lucide-react';
 import type { BaeJobViewProps } from '../home/benchTypes';
-import { FactsDl, InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ReviewPanel } from '../home/BenchParts';
+import { FactsDl, InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ResultTools, ReviewPanel } from '../home/BenchParts';
 import '../home/bench.css';
+import '../windows/bae-stage3.css';
 
 export function JobView(p: BaeJobViewProps) {
   const pd = p.pd;
@@ -37,6 +38,29 @@ export function JobView(p: BaeJobViewProps) {
               )}
             </div>
           )}
+
+          {p.result && (p.result.tools || p.onUseBase) ? (
+            <div className="bae-jv-tools">
+              {p.result.tools ? (
+                <div className="bae-tool-group" role="group" aria-labelledby="bae-jv-trim">
+                  <p className="bae-tool-name" id="bae-jv-trim">다듬기</p>
+                  <div className="bae-tool-row">
+                    <ResultTools tools={p.result.tools} onNoise={p.onNoise} onLock={p.onLock} />
+                    {p.onLater ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-upscale" onClick={() => p.onLater!('upscale')}><Scaling size={14} aria-hidden="true" />4K로 키우기</button> : null}
+                  </div>
+                </div>
+              ) : null}
+              <div className="bae-tool-group" role="group" aria-labelledby="bae-jv-next">
+                <p className="bae-tool-name" id="bae-jv-next">이어서 만들기</p>
+                <div className="bae-tool-row">
+                  {p.onLater ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-layers" onClick={() => p.onLater!('layers')}><Layers size={14} aria-hidden="true" />레이어로 나누기</button> : null}
+                  {p.onLater ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-angle" onClick={() => p.onLater!('angle')}><Rotate3d size={14} aria-hidden="true" />다른 각도로</button> : null}
+                  {p.onUseBase ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-same" onClick={p.onUseBase}><CopyPlus size={14} aria-hidden="true" />기준 배경으로 새 컷</button> : null}
+                </div>
+              </div>
+              {p.result.tools?.note ? <p className="bae-res-note" role="note">{p.result.tools.note}</p> : null}
+            </div>
+          ) : null}
 
           <div className="bae-jv-cols">
             <section className="bae-jv-sec" aria-labelledby="bae-jv-mat-h">

@@ -20,7 +20,7 @@ export interface PreviewOptions {
   /** 만들기 흐름(가짜 PD · 가짜 그림 모델). 화면 쪽(previewMake.ts)이 넣는다 — node 시험에서는 비워 둔다. */
   make?: (ctx: PreviewMakeContext) => PreviewMakeMethods;
 }
-export type PreviewMakeMethods = Pick<BaeGateway, 'order' | 'draw' | 'abort' | 'jobPatch' | 'active' | 'localFile' | 'saveAs' | 'draftSave' | 'draftLoad' | 'draftClear' | 'online' | 'onProgress'>;
+export type PreviewMakeMethods = Pick<BaeGateway, 'order' | 'draw' | 'drawFinish' | 'resultSet' | 'toolJob' | 'abort' | 'jobPatch' | 'active' | 'localFile' | 'saveAs' | 'draftSave' | 'draftLoad' | 'draftClear' | 'online' | 'onProgress'>;
 export interface PreviewMakeContext {
   me(): PreviewIdentity;
   requireUse(): void;
@@ -29,7 +29,7 @@ export interface PreviewMakeContext {
 }
 const notReady = () => Promise.reject(new Error('테스트 모드의 만들기가 준비되지 않았어요.'));
 const noMake: PreviewMakeMethods = {
-  order: notReady, draw: notReady, abort: async () => false, jobPatch: notReady, active: async () => [], localFile: async () => null, saveAs: async () => null,
+  order: notReady, draw: notReady, drawFinish: notReady, resultSet: notReady, toolJob: notReady, abort: async () => false, jobPatch: notReady, active: async () => [], localFile: async () => null, saveAs: async () => null,
   draftSave: async () => false, draftLoad: async () => null, draftClear: async () => true, online: async () => true, onProgress: () => () => {},
 };
 

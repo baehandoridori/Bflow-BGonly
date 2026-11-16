@@ -4,7 +4,7 @@
  */
 import { isBaeJobId } from '../../src/shared/bae/jobs';
 import { maskSecrets } from '../../src/shared/bae/secrets';
-import type { BaeDrawCall, BaeJobs, BaeOrderCall } from './baeJobs';
+import type { BaeDrawCall, BaeDrawFinishCall, BaeJobs, BaeOrderCall, BaeResultSetCall, BaeToolJobCall } from './baeJobs';
 import type { BaeLocalStore } from './localStore';
 
 export interface BaeJobsIpcDeps {
@@ -19,7 +19,13 @@ export interface BaeJobsIpcDeps {
 }
 
 const MAX_ORDER_JSON = 40 * 1024 * 1024;
-const LOCAL_READ_NAMES = new Set(['result.png', 'gpt.png', 'rough.jpg', 'rough_notes.jpg', 'ref_1.jpg', 'ref_2.jpg', 'ref_3.jpg', 'ref_4.jpg']);
+const MAX_PICTURE_BYTES = 64 * 1024 * 1024;
+/** 화면이 읽을 수 있는 이 PC 보관 그림: 지금 결과 · 판 파일(색 맞춤 · 노이즈 제거) · 재료 미리보기. */
+const LOCAL_READ_NAMES = new Set([
+  'result.png', 'gpt.png', 'final.png', 'alt.png', 'final_noise.png', 'alt_noise.png', 'source.png',
+  'rough.jpg', 'rough_notes.jpg', 'ref_1.jpg', 'ref_2.jpg', 'ref_3.jpg', 'ref_4.jpg', 'base_1.jpg', 'base_2.jpg', 'base_3.jpg', 'sheet.jpg',
+]);
+const picture = (b: unknown, nullable = false) => (nullable && b == null) || (b instanceof Uint8Array && b.byteLength > 0 && b.byteLength <= MAX_PICTURE_BYTES);
 
 export function registerBaeJobsIpc(deps: BaeJobsIpcDeps): void {
   function originFor(requestEpoch: unknown) {
@@ -52,6 +58,36 @@ export function registerBaeJobsIpc(deps: BaeJobsIpcDeps): void {
     if (typeof q.createdAt !== 'string' || !Number.isFinite(Date.parse(q.createdAt))) throw new Error('작업 시각이 올바르지 않아요.');
     await useOrThrow(origin.userId);
     const r = await deps.jobs.draw(origin, q);
+    return same(origin) ? r : gone;
+  });
+  /** 화면이 그린 뒤 마무리한 그림 (기울기 되돌리기 · 색 맞춤). 그때 작업이 끝난다. */
+  deps.ipc.handle('bae:draw-finish', async (_e, call, epoch) => {
+    const origin = originFor(epoch);
+    const q = call as BaeDrawFinishCall;
+    if (!q || typeof q !== 'object' || !isBaeJobId(q.jobId)) throw new Error('BAE경 작업 번호가 올바르지 않아요.');
+    if (!picture(q.png) || !picture(q.alt, true)) throw new Error('마무리한 그림이 올바르지 않아요.');
+    await useOrThrow(origin.userId);
+    const r = await deps.jobs.drawFinish(origin, q);
+    return same(origin) ? r : gone;
+  });
+  /** 결과 판 바꾸기: 색 맞춤 켜고 끄기 · 노이즈 제거와 되돌리기. */
+  deps.ipc.handle('bae:result-set', async (_e, call, epoch) => {
+    const origin = originFor(epoch);
+    const q = call as BaeResultSetCall;
+    if (!q || typeof q !== 'object' || !isBaeJobId(q.jobId) || !q.variant || typeof q.variant !== 'object') throw new Error('BAE경 작업 번호가 올바르지 않아요.');
+    if (!picture(q.png, true)) throw new Error('보낸 그림이 올바르지 않아요.');
+    await useOrThrow(origin.userId);
+    const r = await deps.jobs.setResult(origin.userId, q);
+    return same(origin) ? r : gone;
+  });
+  /** 도구만 쓴 작업 (노이즈 제거 창). */
+  deps.ipc.handle('bae:tool-job', async (_e, call, epoch) => {
+    const origin = originFor(epoch);
+    const q = call as BaeToolJobCall;
+    if (!q || typeof q !== 'object' || !isBaeJobId(q.jobId)) throw new Error('BAE경 작업 번호가 올바르지 않아요.');
+    if (!picture(q.source) || !picture(q.png)) throw new Error('보낸 그림이 올바르지 않아요.');
+    await useOrThrow(origin.userId);
+    const r = await deps.jobs.toolJob(origin.userId, q);
     return same(origin) ? r : gone;
   });
   deps.ipc.handle('bae:abort', async (_e, jobId, epoch) => {

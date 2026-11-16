@@ -102,3 +102,19 @@ test('the keyring keeps one key per login in memory and fetches again after forg
   kr.forget(); assert.equal(kr.holds(), false);
   await kr.keyFor({ userId: 'u1', epoch: 2 }); assert.equal(fetches, 3);
 });
+
+test('the stage-3 make channels (finish · result versions · tool job) are open in preload, each with the session epoch, and none reads the key', () => {
+  const preload = readFileSync('electron/preload.ts', 'utf8');
+  const bae = preload.slice(preload.indexOf("exposeInMainWorld('baeGyeongAPI'"));
+  const api = bae.slice(0, bae.indexOf('});') + 3);
+  for (const [name, channel] of [['drawFinish', 'bae:draw-finish'], ['resultSet', 'bae:result-set'], ['toolJob', 'bae:tool-job']] as const) {
+    assert.match(api, new RegExp(`${name}: \\(call: unknown\\) => ipcRenderer\\.invoke\\('${channel}', call, canonicalSessionEpoch\\)`), name);
+  }
+  const ipcSrc = readFileSync('electron/bae/baeJobsIpc.ts', 'utf8');
+  for (const channel of ['bae:draw-finish', 'bae:result-set', 'bae:tool-job']) assert.ok(ipcSrc.includes(`'${channel}'`), channel);
+  assert.doesNotMatch(api, /get-key|getKey/);
+  // 화면이 읽을 수 있는 이 PC 그림: 판 파일과 재료 미리보기뿐 (input_N · job.json 은 아님)
+  const names = /LOCAL_READ_NAMES = new Set\(\[([\s\S]*?)\]\)/.exec(ipcSrc)![1];
+  for (const n of ['final.png', 'alt.png', 'final_noise.png', 'alt_noise.png', 'source.png', 'base_1.jpg', 'sheet.jpg']) assert.ok(names.includes(`'${n}'`), n);
+  assert.ok(!names.includes('input_') && !names.includes('job.json'));
+});

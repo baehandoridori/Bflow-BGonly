@@ -1,7 +1,7 @@
 // 작업대와 한 건 보기가 같이 쓰는 작은 부품: 숫자 줄, 재료 묶음, PD 글, 결과 틀, 검수.
 import { useEffect, useState, type ReactNode } from 'react';
-import { AlertTriangle, ClipboardCheck, Palette } from 'lucide-react';
-import type { BaeFactView, BaeMaterialsView, BaeOrderTextView, BaeReviewRate, BaeReviewView } from './benchTypes';
+import { AlertTriangle, ClipboardCheck, Eraser, Loader2, Palette, Pipette } from 'lucide-react';
+import type { BaeFactView, BaeMaterialsView, BaeOrderTextView, BaeResultToolsView, BaeReviewRate, BaeReviewView } from './benchTypes';
 import './bench.css';
 
 /** 이름 아래 값 (시안 .bae-dl) */
@@ -49,6 +49,25 @@ export function MaterialsBlock({ mat, onOpenStyle, full }: { mat: BaeMaterialsVi
           </ul>
         ) : null}
       </section>
+      {mat.bases.length || mat.sheet ? (
+        <section className="bae-mgroup" aria-label="기준 배경">
+          <div className="bae-mhead"><p className="bae-mhead-name">기준 배경</p>{mat.bases.length ? <span className="bae-mcount bae-num">{mat.bases.length}/{mat.baseMax}</span> : null}</div>
+          <ul className="bae-mats">
+            {mat.bases.map((r) => (
+              <li key={r.id} className="bae-mrow">
+                <span className="bae-mthumb"><img src={r.src} alt={r.alt} /></span>
+                <p className="bae-mnote">{r.note}</p>
+              </li>
+            ))}
+            {mat.sheet && !mat.bases.length ? (
+              <li className="bae-mrow">
+                <span className="bae-mthumb"><img src={mat.sheet} alt="부품 시트" /></span>
+                <p className="bae-mnote">부품 시트로 보냈어요</p>
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
       {mat.styleRow ? (
         <div className="bae-style">
           <span className="bae-style-thumb"><img src={mat.stripSrc} alt="" /></span>
@@ -77,6 +96,26 @@ export function OrderBlock({ order, children }: { order: BaeOrderTextView; child
       {order.pdNote ? <div className="bae-fact bae-wide"><dt className="bae-vh">참고</dt><dd className="bae-note">{order.pdNote}</dd></div> : null}
       {children}
     </dl>
+  );
+}
+
+/** 결과 다듬기 (14b 10-2): 노이즈 제거 켜고 끄기 · 색 맞춤 켜고 끄기 (기준 배경 색을 맞춘 그림만). */
+export function ResultTools({ tools, onNoise, onLock }: { tools: BaeResultToolsView; onNoise?: () => void; onLock?: () => void }) {
+  const n = tools.noise; const l = tools.lock;
+  return (
+    <>
+      {onNoise ? (
+        <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-denoise bae-tool-toggle" aria-pressed={n.on} aria-busy={!!n.busy || undefined} disabled={!!n.busy}
+          title={tools.away ? '이 PC에 원본이 없어서, 미리보기 그림을 노이즈 제거 창에서 지워요' : n.title} onClick={onNoise}>
+          {n.busy ? <Loader2 size={14} className="bae-spin" aria-hidden="true" /> : <Eraser size={14} aria-hidden="true" />}{n.busy || n.label}
+        </button>
+      ) : null}
+      {l && onLock ? (
+        <button type="button" className="bae-btn bae-btn-s bae-tool-toggle" aria-pressed={l.on} aria-busy={!!l.busy || undefined} disabled={!!l.busy} title={l.title} onClick={onLock}>
+          {l.busy ? <Loader2 size={14} className="bae-spin" aria-hidden="true" /> : <Pipette size={14} aria-hidden="true" />}{l.busy || l.label}
+        </button>
+      ) : null}
+    </>
   );
 }
 

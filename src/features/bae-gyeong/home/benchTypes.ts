@@ -13,6 +13,9 @@ export interface BaeMaterialsView {
   rough: { src: string; alt: string; name: string; sub: string } | null; // name '러프와 빨간 메모', sub '빨간 메모 2개'
   refs: BaeMatPicView[];
   refMax: number;                // 4
+  bases: BaeMatPicView[];        // 기준 배경 (같은 장소). 없으면 []
+  baseMax: number;               // 3
+  sheet: string | null;          // 부품 시트로 보냈으면 그 그림 (기록)
   stripSrc: string;              // 그림체 기준 띠 그림
   styleRow: string;              // '스타일 띠, 예시 L2' ('' 이면 그림체 기준 줄을 숨긴다)
   descLabel: string;             // '설명'
@@ -41,6 +44,15 @@ export interface BaeResultView {
   alt: string;
   aspect: number;                // 너비 / 높이 (25:16 칸보다 넓으면 너비에 맞춘다)
   facts: BaeFactView[];          // 크기 · 그림 · 비용
+  tools?: BaeResultToolsView | null;  // 다듬기 (없으면 버튼 없음)
+}
+/** 결과 다듬기 (14b 10-2 '다듬기', HTML btnDenoise · lockSw). busy = 지금 하는 일의 글 ('' 이면 아님). */
+export interface BaeResultToolsView {
+  noise: { on: boolean; label: string; title: string; busy: string };
+  lock: { on: boolean; label: string; title: string; busy: string } | null; // 기준 배경 색 맞춤을 한 그림만
+  note: string;                  // 색 맞춤을 못 했을 때 안내 (HTML finishPicture note)
+  /** 이 PC 에 원본이 없다 (다른 PC 에서 만듦): 노이즈 제거는 창으로 열고, 색 맞춤은 못 바꾼다 */
+  away: boolean;
 }
 export type BaeReviewRate = '좋음' | '보통' | '다시';
 export interface BaeReviewView { rate: BaeReviewRate | ''; good: string; bad: string }
@@ -82,6 +94,18 @@ export interface BaeBenchActions {
   onRetry?(): void;              // 실패한 작업 다시 시도
   onExpand?(): void;             // 진행 줄의 '크게 보기'
   onStop?(): void;               // 진행 줄의 '그만두기'
+  onNoise?(): void;              // 다듬기: 노이즈 제거 켜고 끄기
+  onLock?(): void;               // 다듬기: 색 맞춤 켜고 끄기
+  onUseBase?(): void;            // 기준 배경으로 새 컷
+}
+
+/** 그림을 끌어다 놓는 여섯 칸 (14b 10-2, 시안 Dropping): 왼쪽 둘은 재료, 오른쪽 넷은 도구. */
+export type BaeDropZone = 'rough' | 'base' | 'layers' | 'angle' | 'upscale' | 'denoise';
+export interface BaeDropView {
+  /** 'drag' = 끌고 오는 중 (놓으면 그 칸), 'paste' = 붙여 넣은 그림 (칸을 눌러 고름) */
+  mode: 'drag' | 'paste';
+  onZone(zone: BaeDropZone, file: File | null): void;
+  onCancel(): void;
 }
 
 /** 작업대 전체. bench 가 없으면 1단계의 빈 작업대, log 가 없으면 빈 기록. */
@@ -94,6 +118,8 @@ export interface BaeWorkbenchProps {
   onBenchRetry?(): void;
   actions?: BaeBenchActions;
   log?: BaeRecordListProps;
+  /** 그림을 끌어 오거나 붙여 넣었을 때 작업판 자리에 놓는 칸 여섯 */
+  drop?: BaeDropView | null;
 }
 
 /** 기록 한 줄 */
@@ -147,6 +173,10 @@ export interface BaeJobViewProps {
   pd: BaeJobPdView | null;
   review?: { value: BaeReviewView; startOpen?: boolean; saving?: boolean; onSave(v: BaeReviewView): void } | null;
   onSave?(): void;               // PNG 저장
+  onNoise?(): void;              // 다듬기: 노이즈 제거
+  onLock?(): void;               // 다듬기: 색 맞춤 켜고 끄기
+  onUseBase?(): void;            // 이어서 만들기: 기준 배경으로 새 컷
+  onLater?(tool: 'upscale' | 'layers' | 'angle'): void; // 아직 열리지 않은 도구 (알림만)
 }
 
 /** 기록 찾기 (시안과 같은 규칙: 이름 · 설명 · 둘째 줄 · 종류에 찾는 말이 들어 있으면). 상태 쪽이 쓴다. */
