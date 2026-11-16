@@ -8,8 +8,10 @@
 -- Realtime: no table goes into the publication. A save sends a contentless broadcast on channel 'bae-gyeong'
 -- ('settings-changed' / 'members-changed' / 'jobs-changed'); every app reads again through its session.
 -- Rerunning this file is safe (IF NOT EXISTS / OR REPLACE); it does not drop data.
--- Not yet applied anywhere. Apply on the dev branch first, then production at stop 1 with Hansol watching
--- (BEGIN ... ROLLBACK dry run first, then compare function bodies, per tasks/lessons.md 2026-10-08).
+-- Applied: dev branch bae-gyeong-dev 2026-11-16 (on DEVLOG/verification/2026-11-16-bae-gyeong-dev-base.sql), then
+-- production 2026-11-16 as migration 20261116070152 bae_gyeong_base, with Hansol's OK, after a rolled-back dry run
+-- ('BAE SMOKE OK'). The 28 function bodies match this file (fingerprint ccc3c47f7abc4de9a46918d48d4704aa, query in
+-- DEVLOG/verification/2026-11-13-bae-gyeong-smoke.sql's notes). Rerun only as the whole file; it keeps data.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '45s';

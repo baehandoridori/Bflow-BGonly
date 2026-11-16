@@ -4,6 +4,13 @@
 --   2) 끝의 'BAE SMOKE OK' 오류가 나오면 모든 확인이 통과했고, 그 묶음은 모두 되돌려졌다.
 --   3) 뒤에 SELECT count(*) FROM pg_stat_activity WHERE state = 'idle in transaction'; 이 0인지 본다.
 -- 시험용 사용자 · 세션은 이 묶음 안에서만 만든다. 진짜 키는 넣지 않는다 (가짜 키 sk-test-local-only…).
+-- 본문 대조 (tasks/lessons.md 2026-10-08): 깔린 함수 28개가 기본 SQL 파일과 글자까지 같은지는 아래 지문으로 본다.
+--   지금 파일의 값 ccc3c47f7abc4de9a46918d48d4704aa (PGlite · 개발 브랜치 · 운영 20261116070152 모두 같음, 2026-11-16).
+--   SELECT md5(string_agg(proname || ':' || src || ':' || sig, ',' ORDER BY proname)), count(*) FROM (
+--     SELECT p.proname, md5(p.prosrc) src, md5(pg_get_function_identity_arguments(p.oid) || '|' || pg_get_function_result(p.oid)
+--       || '|' || p.provolatile::text || p.prosecdef::text || '|' || coalesce(array_to_string(p.proconfig, ','), '')) sig
+--     FROM pg_proc p JOIN pg_namespace s ON s.oid = p.pronamespace WHERE s.nspname = 'public' AND p.proname LIKE 'bae_gyeong_%') f;
+--   함수 본문을 고치면 이 값도 바뀐다 — 고친 파일을 PGlite 에 깔아 새 값을 낸 뒤 여기와 예행연습 묶음에 같이 고친다.
 DO $$
 DECLARE
   t_admin TEXT := repeat('a', 64); t_user TEXT := repeat('b', 64); t_out TEXT := repeat('c', 64);
