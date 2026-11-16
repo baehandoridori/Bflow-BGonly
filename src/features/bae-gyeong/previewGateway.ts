@@ -310,7 +310,8 @@ export function createBaePreviewGateway(opts: PreviewOptions): BaeGateway {
     },
     onChanged(callback) {
       listeners.add(callback);
-      const onMsg = (e: { data: unknown }) => { const w = (e.data as { bae?: unknown } | null)?.bae; if (w === 'settings' || w === 'members' || w === 'jobs' || w === 'stamps') callback(w); };
+      // 'pc-checks' 는 테스트 모드의 모델 통로(previewModels)가 같은 이름의 통로로 알린다
+      const onMsg = (e: { data: unknown }) => { const w = (e.data as { bae?: unknown } | null)?.bae; if (w === 'settings' || w === 'members' || w === 'jobs' || w === 'stamps' || w === 'pc-checks') callback(w); };
       opts.channel?.addEventListener('message', onMsg);
       return () => { listeners.delete(callback); opts.channel?.removeEventListener('message', onMsg); };
     },

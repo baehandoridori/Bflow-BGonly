@@ -18,8 +18,11 @@ export interface BaeSettingsView {
   defaults: { manual: string | null; fixed: string | null };
 }
 
-/** 'stamps' = 이 PC 의 다른 창에서 새 도장을 봤다 (景 숫자를 다시 읽는다). 나머지는 서버의 내용 없는 신호. */
-export type BaeChange = 'settings' | 'members' | 'jobs' | 'stamps';
+/**
+ * 'stamps' = 이 PC 의 다른 창에서 새 도장을 봤다 (景 숫자를 다시 읽는다). 나머지는 서버의 내용 없는 신호.
+ * 'pc-checks' = 누군가 이 PC 점검을 올렸다 (설정의 팀 PC 점검 표만 다시 읽는다).
+ */
+export type BaeChange = 'settings' | 'members' | 'jobs' | 'stamps' | 'pc-checks';
 
 /** preload 가 `window.baeGyeongAPI` 로 여는 통로, 그리고 테스트 모드의 가짜 저장소가 같은 모양으로 흉내 낸다. */
 export interface BaeGateway {

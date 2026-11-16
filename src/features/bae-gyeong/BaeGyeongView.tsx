@@ -17,9 +17,11 @@ import { MakingStage } from './make/MakingStage';
 import { BaeSettingsTab } from './settings/BaeSettingsTab';
 import { baeBoard, useBaeMake } from './state/useBaeMake';
 import { useBaeLocal, useBaeTools, type BaeToolTarget } from './state/useBaeTools';
+import { baeUpRunning, useBaeUpscale } from './state/useBaeUpscale';
+import { useBaePcCheck } from './state/useBaePcCheck';
 import { useBaeJobs, visibleBaeJobs } from './state/useBaeJobs';
 import { BaeMakeLayer, useSeconds } from './state/BaeMakeLayer';
-import { KIND_LABEL, activeBench, jobViewProps, makingProps, recordBench, recordRow, reviewOf, stampPanelView, wonOf } from './state/baeViewModel';
+import { KIND_LABEL, activeBench, jobViewProps, makingProps, recordBench, recordRow, reviewOf, stampPanelView, upscaleChildFact, wonOf } from './state/baeViewModel';
 import { TeamRecords } from './records/TeamRecords';
 import { CostTab } from './costs/CostTab';
 import { useBaeTeam } from './state/useBaeTeam';
@@ -28,8 +30,8 @@ import { BAE_STAMP_LABEL, type BaeStamp } from '@/shared/bae/review';
 import './bae-gyeong.css';
 
 /** 아직 열리지 않은 도구 (그 단계에서 열린다) */
-const LATER: Record<'layers' | 'angle' | 'upscale', string> = {
-  layers: '레이어로 나누기는 5단계에서 열려요.', angle: '다른 각도로는 7단계에서 열려요.', upscale: '4K로 키우기는 4단계에서 열려요.',
+const LATER: Record<'layers' | 'angle', string> = {
+  layers: '레이어로 나누기는 5단계에서 열려요.', angle: '다른 각도로는 7단계에서 열려요.',
 };
 
 /** 기록 목록을 받은 계정 — 다른 계정으로 바뀌면 목록을 비운다 (화면을 다시 열 때마다 비우지는 않는다). */
@@ -50,8 +52,12 @@ export default function BaeGyeongView() {
   const make = useBaeMake();
   const jobs = useBaeJobs();
   const tools = useBaeTools();
+  const upscale = useBaeUpscale();
+  /** 4K로 키우는 중인 그림이 나온 기록 (그 기록의 4K 버튼이 '키우는 중') */
+  const upParent = upscale.up && baeUpRunning(upscale.up.phase) ? upscale.up.parentJobId : null;
   const [drop, setDrop] = useState<{ mode: 'drag' | 'paste'; file: File | null } | null>(null);
   const denoiseFileRef = useRef<HTMLInputElement>(null);
+  const upscaleFileRef = useRef<HTMLInputElement>(null);
   const [selId, setSelId] = useState<string | null>(null);
   const [recSel, setRecSel] = useState<string | null>(null);
   const [view, setView] = useState<'grid' | 'list'>('grid');
@@ -71,7 +77,7 @@ export default function BaeGyeongView() {
 
   useEffect(() => {
     const id = currentUser?.id ?? null;
-    if (jobsActor !== id) { useBaeJobs.getState().reset(); useBaeTeam.getState().reset(); jobsActor = id; }
+    if (jobsActor !== id) { useBaeJobs.getState().reset(); useBaeTeam.getState().reset(); useBaePcCheck.getState().reset(); jobsActor = id; }
     void start(id);
   }, [currentUser?.id, start]);
   // 이 화면이 보이는 동안: 만드는 창이 저절로 뜰 수 있고, 기록은 신호가 올 때만 '바뀐 것만' 다시 받는다.
@@ -156,6 +162,7 @@ export default function BaeGyeongView() {
     if (kind === 'new') { setSelId(null); make.openMaterial('new'); }
     else if (kind === 'same') { setSelId(null); void make.openSame(); }
     else if (kind === 'denoise') denoiseFileRef.current?.click();   // 14d 8장 6번: 먼저 그림을 고르고, 고르면 창
+    else if (kind === 'upscale') { if (!upscaleBusyShown(null)) upscaleFileRef.current?.click(); }
     else toast.message(LATER[kind]);
   };
   // 그림 파일을 끌고 오거나(Ctrl+V 로 붙여 넣으면) 작업판이 '놓는 자리' 여섯 칸으로 (14b 10-2). 창이 떠 있으면 그 창이 받는다.
@@ -186,6 +193,7 @@ export default function BaeGyeongView() {
     if (zone === 'rough') { setSelId(null); make.openMaterial('new'); void baeBoard().loadFile(file); }
     else if (zone === 'base') { setSelId(null); void make.openSame(file); }
     else if (zone === 'denoise') void tools.openDenoise({ blob: file, label: file.name });
+    else if (zone === 'upscale') void upscale.open({ blob: file, label: file.name });
     else toast.message(LATER[zone]);
   };
   const dropView: BaeDropView | null = drop && benchFree ? { mode: drop.mode, onZone, onCancel: () => setDrop(null) } : null;
@@ -197,6 +205,29 @@ export default function BaeGyeongView() {
     // 다른 PC 에서 만든 그림: 미리보기로 노이즈 제거 창을 연다 (새 도구 작업)
     const src = j.images.result; if (!src) { toast('이 그림의 원본도 미리보기도 없어요'); return; }
     void blobOf(src).then((b) => tools.openDenoise({ blob: b, label: title, parentJobId: j.id })).catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
+  };
+  /** 4K로 키우는 중이면 그 창을 다시 띄운다 (같은 기록이면 알림 없이). 띄웠으면 true. */
+  const upscaleBusyShown = (jobId: string | null) => {
+    const cur = useBaeUpscale.getState().up;
+    if (!cur || !baeUpRunning(cur.phase)) return false;
+    useBaeUpscale.getState().show();
+    if (!jobId || cur.parentJobId !== jobId) toast('지금 키우는 그림이 끝나면 다른 그림을 키울 수 있어요');
+    return true;
+  };
+  /** 결과 도구의 4K로 키우기: 이 PC 원본(없으면 서버 미리보기)으로 4K 창 (14d 2장 '결과 크게 보기의 4K로 키우기'). */
+  const upscaleFrom = (src: string | null, a: { jobId: string; label: string; ratio: string | null; fromPreview: boolean }) => {
+    if (upscaleBusyShown(a.jobId)) return;
+    if (!src) { toast('이 그림의 원본도 미리보기도 없어요'); return; }
+    void blobOf(src).then((b) => upscale.open({ blob: b, label: a.label, parentJobId: a.jobId, ratio: a.ratio, fromPreview: a.fromPreview }))
+      .catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
+  };
+  const upscaleRecord = (j: BaeJob, local: string | null, title: string) => {
+    const desc = (j.summary.request ?? '').replace(/[{｛][^}｝]*[}｝]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    upscaleFrom(local ?? j.images.result ?? null, { jobId: j.id, label: title || j.name || desc || j.summary.source || KIND_LABEL[j.kind] || '그림', ratio: j.summary.ratio ?? null, fromPreview: !local });
+  };
+  /** 한 건 보기의 숫자에 '뒤에 한 일: 4K' 를 붙인다 (이 기록에서 나온 4K 기록이 있으면). */
+  const withUpscaleFact = <T extends { facts: { k: string; v: string }[] }>(p: T, j: BaeJob): T => {
+    const f = upscaleChildFact(j, rows); return f ? { ...p, facts: [...p.facts, f] } : p;
   };
   const useBaseFrom = (src: string | null) => {
     if (!src) { toast('기준 배경으로 쓸 그림이 없어요'); return; }
@@ -241,10 +272,11 @@ export default function BaeGyeongView() {
       review: null,
       onNoise: mine ? () => noiseFor(targetOf(j), localTeam, j, j.name ?? '') : undefined,
       onLock: mine ? () => { const t = targetOf(j); if (t) void tools.toggleLock(t); } : undefined,
+      onUpscale: mine ? () => upscaleRecord(j, localTeam, j.name ?? '') : undefined,
       onUseBase: () => useBaseFrom((mine ? localTeam : null) ?? j.images.result ?? null),
       onLater: (tool) => toast.message(LATER[tool]),
-    }, tools.busy[j.id]);
-    return { ...p, result: p.result && !mine ? { ...p.result, tools: null } : p.result, stamp: stampFor(j) };
+    }, tools.busy[j.id], upParent === j.id);
+    return { ...withUpscaleFact(p, j), result: p.result && !mine ? { ...p.result, tools: null } : p.result, stamp: stampFor(j) };
   };
 
   if (error) {
@@ -270,8 +302,8 @@ export default function BaeGyeongView() {
   }
 
   let bench = null; let busy = null;
-  if (showActive && active) { const b = activeBench(rate, sec, tools.busy[active.id]); bench = b.bench; busy = b.busy; }
-  else if (benchRecord) bench = recordBench(benchRecord, rate, localBench, tools.busy[benchRecord.id]);
+  if (showActive && active) { const b = activeBench(rate, sec, tools.busy[active.id], upParent === active.id); bench = b.bench; busy = b.busy; }
+  else if (benchRecord) bench = recordBench(benchRecord, rate, localBench, tools.busy[benchRecord.id], upParent === benchRecord.id);
   const activeTarget: BaeToolTarget | null = showActive && active?.result ? { jobId: active.id, variant: active.result.variant, hasLock: active.result.hasLock } : null;
   const big = !!live && make.makingBig && showActive;
 
@@ -311,6 +343,10 @@ export default function BaeGyeongView() {
               onReview: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) { setRecSel(id); setTab('records'); } },
               onNoise: () => { if (activeTarget) void tools.toggleNoise(activeTarget); else noiseFor(targetOf(benchRecord), localBench, benchRecord, bench?.title ?? ''); },
               onLock: () => { const t = activeTarget ?? targetOf(benchRecord); if (t) void tools.toggleLock(t); },
+              onUpscale: () => {
+                if (showActive && active) upscaleFrom(active.result?.url ?? null, { jobId: active.id, label: bench?.title ?? '', ratio: make.ratio, fromPreview: false });
+                else if (benchRecord) upscaleRecord(benchRecord, localBench, bench?.title ?? '');
+              },
               onUseBase: () => useBaseFrom(showActive ? active?.result?.url ?? null : localBench ?? benchRecord?.images.result ?? null),
             }}
             log={log((id) => setSelId(id === active?.id ? null : id), '작업판에 올리기')}
@@ -320,18 +356,22 @@ export default function BaeGyeongView() {
         ? <JobView {...teamJobView(teamPicked)} />
         : <TeamRecords scope={scopeSeg} rate={rate} actorId={currentUser.id} selectedId={teamSel} onPick={(id) => setTeamSel(id)} />)}
       {activeTab === 'records' && !(recScope === 'team' && access.canReview) && (recordPicked
-        ? <JobView {...jobViewProps(recordPicked, rate, localRec, {
+        ? <JobView {...withUpscaleFact(jobViewProps(recordPicked, rate, localRec, {
           backLabel: '기록으로', onBack: () => setRecSel(null), onSave: () => { void saveAs(recordPicked.id, recordPicked.name ?? ''); },
           review: recordPicked.userId === currentUser?.id && recordPicked.status === 'done' ? { value: reviewOf(recordPicked), onSave: (v) => { void saveReview(recordPicked, v); } } : null,
           onNoise: () => noiseFor(targetOf(recordPicked), localRec, recordPicked, recordPicked.name ?? ''),
           onLock: () => { const t = targetOf(recordPicked); if (t) void tools.toggleLock(t); },
+          onUpscale: () => upscaleRecord(recordPicked, localRec, recordPicked.name ?? ''),
           onUseBase: () => useBaseFrom(localRec ?? recordPicked.images.result ?? null),
           onLater: (tool) => toast.message(LATER[tool]),
-        }, tools.busy[recordPicked.id])} stamp={stampFor(recordPicked)} />
+        }, tools.busy[recordPicked.id], upParent === recordPicked.id), recordPicked)} stamp={stampFor(recordPicked)} />
         : <RecordList {...log((id) => setRecSel(id), '자세히 보기')} title="내 기록" onAll={undefined} scope={scopeSeg} />)}
       {activeTab === 'costs' && access.canReview && <CostTab rate={rate} />}
       {activeTab === 'settings' && <BaeSettingsTab />}
-      <input ref={denoiseFileRef} className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
+      {/* 그림 고르기 (시작 줄의 도구). 노이즈 제거 칸이 맨 뒤 — 3단계 화면 시험이 마지막 칸을 쓴다 */}
+      <input ref={upscaleFileRef} data-pick="upscale" className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
+        onChange={(e) => { const f = imageOf(e.target.files ? Array.from(e.target.files) : null); e.target.value = ''; if (f) void upscale.open({ blob: f, label: f.name }); }} />
+      <input ref={denoiseFileRef} data-pick="denoise" className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
         onChange={(e) => { const f = imageOf(e.target.files ? Array.from(e.target.files) : null); e.target.value = ''; if (f) void tools.openDenoise({ blob: f, label: f.name }); }} />
       <BaeMakeLayer />
     </div>

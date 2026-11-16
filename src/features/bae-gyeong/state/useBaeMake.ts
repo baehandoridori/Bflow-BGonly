@@ -62,7 +62,7 @@ export interface BaeActiveJob {
   reviseError: string | null;
   revisions: string[];
 }
-type Win = null | 'material' | 'make' | 'style' | 'parts' | 'denoise';
+type Win = null | 'material' | 'make' | 'style' | 'parts' | 'denoise' | 'upscale';
 
 interface MakeState {
   kind: 'new' | 'same';

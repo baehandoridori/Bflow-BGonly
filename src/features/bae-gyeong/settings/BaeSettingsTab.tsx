@@ -1,5 +1,5 @@
 /**
- * BAE경 '설정' 탭 (계획 14b 10-5). 팀원에게는 지금 쓰는 판 번호와 그림 모델 이름만,
+ * BAE경 '설정' 탭 (계획 14b 10-5). 팀원에게는 지금 쓰는 판 번호와 그림 모델 이름, 이 PC 점검 (관리자 · 검수자는 팀 PC 점검 표도),
  * 관리자에게는 키 · 그림 모델 · 매뉴얼 · 고정 문장 · 덧붙일 지침 · 가격표 · API 주소 · 지평선 보정 · '모두에게 열기'.
  * 저장은 판 번호를 맞춰 보낸다 (다른 관리자가 먼저 바꿨으면 거절). 화면에 먼저 보이고, 실패하면 되돌린다.
  */
@@ -8,6 +8,7 @@ import { AlertTriangle, History, KeyRound, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { BAE_SETTING_DEFAULTS, baeSettingProblem, type BaeSettingKey, type BaeSettingRow } from '@/shared/bae/settings';
 import { useBaeStore, baeGw } from '../useBaeStore';
+import { PcCheckCard, PcCheckTeamCard } from './PcCheckCard';
 
 const errText = (e: unknown) => (e instanceof Error && e.message ? e.message : String(e));
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : '');
@@ -211,6 +212,8 @@ export function BaeSettingsTab() {
         </p>
         <p className="bae-card-sub">관리자가 고치면 다음 주문서부터 모두에게 같은 판이 쓰여요. 어떤 그림이 어느 판으로 그려졌는지 기록에 남아요.</p>
       </section>
+      <PcCheckCard />
+      {access.canReview ? <PcCheckTeamCard /> : null}
       {access.isAdmin ? (
         <>
           <KeyCard />

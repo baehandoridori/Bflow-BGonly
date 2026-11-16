@@ -1,5 +1,5 @@
-// 만들기 창들 (재료 창 · 만드는 창 · 그림체 기준 창 · 부품 자르기 창 · 노이즈 제거 창). 창은 한 번에 하나 (14d 1장).
-// 상태는 useBaeMake · useBaeTools, 글자는 baeViewModel.
+// 만들기 창들 (재료 창 · 만드는 창 · 그림체 기준 창 · 부품 자르기 창 · 노이즈 제거 창 · 4K로 키우기 창). 창은 한 번에 하나 (14d 1장).
+// 상태는 useBaeMake · useBaeTools · useBaeUpscale, 글자는 baeViewModel.
 import { useEffect, useState } from 'react';
 import { useBaeMake } from './useBaeMake';
 import { baeBoard, baeReswatch, BAE_STRIP_SRC } from './useBaeMake';
@@ -11,6 +11,8 @@ import { MakeWindow } from '../windows/MakeWindow';
 import { StyleWindow } from '../windows/StyleWindow';
 import { PartsWindow } from '../windows/PartsWindow';
 import { DenoiseWindow } from '../windows/DenoiseWindow';
+import { UpscaleWindow } from '../windows/UpscaleWindow';
+import { useBaeUpscale } from './useBaeUpscale';
 import { BoardView } from '../make/board';
 
 /** startedAt 부터 흐른 초 (켜 둔 동안만 1초마다). */
@@ -28,6 +30,7 @@ export function useSeconds(startedAt: number | null, on: boolean): number {
 export function BaeMakeLayer() {
   const s = useBaeMake();   // 창 · 재료 · 작업이 바뀌면 다시 그린다
   const tools = useBaeTools();
+  const upscale = useBaeUpscale();
   const settings = useBaeStore();
   const rate = Number((settings.row('prices')?.value as { krwPerUsd?: unknown } | undefined)?.krwPerUsd) || 1400;
   const imageLabel = String((settings.row('models')?.value as { imageLabel?: unknown } | undefined)?.imageLabel ?? '2.5 Sunburst (정교함)');
@@ -54,6 +57,14 @@ export function BaeMakeLayer() {
       <DenoiseWindow
         label={d.label} w={d.w} h={d.h} sourceSrc={d.sourceUrl} cleanSrc={d.cleanUrl} on={d.on} busy={d.busy ? d.step || '지우는 중' : ''} sec={d.sec}
         onToggle={() => { void tools.toggleDenoise(); }} onReplace={(f) => { void tools.openDenoise({ blob: f, label: f.name }); }} onClose={tools.closeDenoise}
+      />
+    );
+  }
+  if (s.win === 'upscale' && upscale.up) {
+    return (
+      <UpscaleWindow
+        up={upscale.up} onMode={upscale.setMode} onRun={() => { void upscale.run(); }} onAgain={upscale.again} onSave={() => { void upscale.save(); }}
+        onReplace={(f) => { void upscale.open({ blob: f, label: f.name }); }} onClose={upscale.close}
       />
     );
   }

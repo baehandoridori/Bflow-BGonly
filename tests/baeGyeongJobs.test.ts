@@ -312,6 +312,49 @@ test('a denoise tool job: original and result on this PC, one done record at 0 w
   assert.equal((await h.jobs.toolJob('u1', { jobId: '0b9d4f6a-6666-4c2d-8e3f-123456789abc', kind: 'denoise', parentJobId: null, createdAt: new Date().toISOString(), source: new Uint8Array([1]), png: clean, sec: 1, label: '' })).ok, false);
 });
 
+test('a 4K tool job (stage 4): source and the enlarged picture on this PC, previews at the usual sizes, one done record at 0 won that points at its job', async () => {
+  const h = await harness('http://127.0.0.1:9/v1');
+  const J = '0b9d4f6a-7777-4c2d-8e3f-123456789abc'; const PARENT = '0b9d4f6a-1111-4c2d-8e3f-123456789abc';
+  const src = pngOf(16, 9, [40, 90, 160]); const big = pngOf(30, 17, [41, 91, 161]);
+  const call = { jobId: J, kind: 'upscale', parentJobId: PARENT, createdAt: new Date().toISOString(), source: src, png: big, sec: 12.34, label: '주차장 낮.png',
+    upscale: { mode: 'A', ep: 'dml', fellBack: false } };
+  const r = await h.jobs.toolJob('u1', call);
+  assert.equal(r.ok, true, r.message); assert.equal(r.w, 30); assert.equal(r.h, 17);
+  assert.ok(same(await h.local.readJobFile(J, 'source.png'), src), 'the picture before 4K stays on this PC');
+  assert.ok(same(await h.local.readJobFile(J, 'final.png'), big), 'the 4K picture is a version file (never rewritten)');
+  assert.ok(same(await h.local.readJobFile(J, 'result.png'), big), 'and the visible picture (PNG 저장 saves this)');
+  assert.deepEqual(previewsOf(h), ['result_1600.jpg<final.png', 'result_320.jpg<final.png'], 'only the usual 1600 and 320 previews go to the server');
+  const w = writesOf(h); assert.equal(w.length, 1);
+  assert.equal(w[0].kind, 'upscale'); assert.equal(w[0].status, 'done'); assert.equal(w[0].costUsd, 0); assert.equal(w[0].parentJobId, PARENT);
+  assert.deepEqual(w[0].summary, { source: '주차장 낮.png' });
+  assert.deepEqual(w[0].result, { w: 30, h: 17, sec: 12, model: 'Real-ESRGAN animevideov3',
+    finish: { tilt: 0, lock: null, noise: null, upscale: { mode: 'A', ep: 'dml', fellBack: false, from: [16, 9] } } });
+  assert.equal(w[0].images.result, `https://storage.example/bae/${J}/result_1600.jpg`); assert.equal(w[0].images.thumb, `https://storage.example/bae/${J}/result_320.jpg`);
+  assert.equal(h.queued.filter((q) => q.kind === 'usage').length, 0, 'no ledger line: it cost nothing');
+  // 키운 그림의 노이즈 제거는 키운 그림(final.png)에서 — 키우기 전 그림(source.png)으로 돌아가지 않는다
+  const clean = pngOf(30, 17, [42, 92, 162]);
+  assert.equal((await h.jobs.setResult('u1', { jobId: J, variant: { alt: false, noise: true }, png: clean, sec: 3 })).ok, true);
+  assert.equal((await h.jobs.setResult('u1', { jobId: J, variant: { alt: false, noise: false }, png: null })).ok, true);
+  assert.ok(same(await h.local.readJobFile(J, 'result.png'), big), 'back to the 4K picture, not the small source');
+  // B · 미리보기를 키운 것: 계산한 곳과 안내가 기록에 남는다
+  const J2 = '0b9d4f6a-8888-4c2d-8e3f-123456789abc';
+  const r2 = await h.jobs.toolJob('u1', { ...call, jobId: J2, parentJobId: null, upscale: { mode: 'B', ep: 'wasm', fellBack: true }, fromPreview: true });
+  assert.equal(r2.ok, true, r2.message);
+  const w2 = writesOf(h).at(-1);
+  assert.equal(w2.result.model, 'waifu2x swin_unet art'); assert.deepEqual(w2.result.finish.upscale, { mode: 'B', ep: 'wasm', fellBack: true, from: [16, 9] });
+  assert.match(w2.result.finish.note, /미리보기 그림\(1600px\)을 키웠어요/);
+  // 막는 것: 같은 번호 두 번 · 모르는 방식 · 작아진 그림 · 8K 넘는 그림 · PNG 가 아닌 것
+  assert.equal((await h.jobs.toolJob('u1', call)).ok, false, 'one job id once');
+  const J3 = '0b9d4f6a-9999-4c2d-8e3f-123456789abc';
+  assert.match((await h.jobs.toolJob('u1', { ...call, jobId: J3, upscale: { mode: 'C', ep: 'dml', fellBack: false } })).message, /방식/);
+  assert.match((await h.jobs.toolJob('u1', { ...call, jobId: J3, upscale: { mode: 'A', ep: 'cuda', fellBack: false } })).message, /방식/);
+  assert.match((await h.jobs.toolJob('u1', { ...call, jobId: J3, png: pngOf(8, 4, [1, 2, 3]) })).message, /크기/);
+  const huge = pngOf(1, 1, [1, 2, 3]); new DataView(huge.buffer, huge.byteOffset).setUint32(16, 8000); new DataView(huge.buffer, huge.byteOffset).setUint32(20, 4500);  // 머리만 8000×4500
+  assert.match((await h.jobs.toolJob('u1', { ...call, jobId: J3, png: huge })).message, /크기/);
+  assert.equal((await h.jobs.toolJob('u1', { ...call, jobId: J3, upscale: undefined })).ok, false, 'a 4K job says how it was made');
+  assert.equal(await h.local.readJobMeta(J3), null, 'nothing was kept for the refused ones');
+});
+
 test('preview names: every result version and place material has its own fixed name under the job', async () => {
   const { BAE_PREVIEW_NAMES, baePreviewPath, baeVariantFile, baeVariantPreviews, baeJobVariant, baeJobHasLock } = await load('src/shared/bae/jobs.ts');
   for (const n of ['alt_1600.jpg', 'alt_320.jpg', 'noise_1600.jpg', 'noise_320.jpg', 'altnoise_1600.jpg', 'altnoise_320.jpg', 'base_1.jpg', 'base_2.jpg', 'base_3.jpg', 'sheet.jpg', 'gpt_1600.jpg'])

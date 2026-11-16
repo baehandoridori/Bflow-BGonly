@@ -1,6 +1,6 @@
 // 한 건 보기 (시안 Zoom 바탕): 결과 그림을 크게, 그 아래 재료와 PD 글을 모두, 오른쪽에 숫자 · 만든 때 · 검수 · 내보내기.
 // 기록에서 한 건을 누르거나 작업대의 '크게 보기'로 연다. 보여 주기만 하고 바뀐 것은 콜백으로 알린다.
-import { AlertTriangle, ArrowLeft, CopyPlus, Download, Layers, Loader2, Rotate3d, Scaling } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CopyPlus, Download, Layers, Loader2, Rotate3d } from 'lucide-react';
 import type { BaeJobViewProps } from '../home/benchTypes';
 import { FactsDl, InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ResultTools, ReviewPanel } from '../home/BenchParts';
 import { StampPanel } from './StampPanel';
@@ -46,8 +46,7 @@ export function JobView(p: BaeJobViewProps) {
                 <div className="bae-tool-group" role="group" aria-labelledby="bae-jv-trim">
                   <p className="bae-tool-name" id="bae-jv-trim">다듬기</p>
                   <div className="bae-tool-row">
-                    <ResultTools tools={p.result.tools} onNoise={p.onNoise} onLock={p.onLock} />
-                    {p.onLater ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-upscale" onClick={() => p.onLater!('upscale')}><Scaling size={14} aria-hidden="true" />4K로 키우기</button> : null}
+                    <ResultTools tools={p.result.tools} onNoise={p.onNoise} onLock={p.onLock} onUpscale={p.onUpscale} />
                   </div>
                 </div>
               ) : null}

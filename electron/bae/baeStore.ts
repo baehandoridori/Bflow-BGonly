@@ -93,12 +93,18 @@ export function createBaeStore(client: BaeRpcClient, sessions: BaeSessionResolve
 }
 export type BaeStore = ReturnType<typeof createBaeStore>;
 
-/** 내용 없는 신호만 받는다. 받은 쪽은 자기 세션으로 다시 읽는다. */
-export function startBaeRealtime(client: Pick<SupabaseClient, 'channel' | 'removeChannel'>, onSignal: (what: 'settings' | 'members' | 'jobs') => void): () => void {
+/**
+ * 내용 없는 신호만 받는다. 받은 쪽은 자기 세션으로 다시 읽는다.
+ * 'pc-checks' = 누군가 이 PC 점검을 올렸다 (DEVLOG/migrations/2026-11-16-bae-gyeong-pc-check.sql 의 pc-check-changed): 관리자 표만 듣는다.
+ */
+export type BaeRealtimeSignal = 'settings' | 'members' | 'jobs' | 'pc-checks';
+export function startBaeRealtime(client: Pick<SupabaseClient, 'channel' | 'removeChannel'>, onSignal: (what: BaeRealtimeSignal) => void): () => void {
   const channel = client.channel('bae-gyeong')
     .on('broadcast', { event: 'settings-changed' }, () => onSignal('settings'))
     .on('broadcast', { event: 'members-changed' }, () => onSignal('members'))
     .on('broadcast', { event: 'jobs-changed' }, () => onSignal('jobs'))
-    .subscribe((status) => { if (status === 'SUBSCRIBED') { onSignal('settings'); onSignal('members'); onSignal('jobs'); } });
+    .on('broadcast', { event: 'pc-check-changed' }, () => onSignal('pc-checks'))
+    // 다시 이어졌을 때: 놓쳤을 수 있는 것을 다시 읽게 한다 (듣는 화면이 열려 있을 때만 읽는다)
+    .subscribe((status) => { if (status === 'SUBSCRIBED') { onSignal('settings'); onSignal('members'); onSignal('jobs'); onSignal('pc-checks'); } });
   return () => { void client.removeChannel(channel); };
 }

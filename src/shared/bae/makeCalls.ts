@@ -1,6 +1,6 @@
 // BAE경 만들기 통로의 모양 (화면 ↔ 메인 ↔ 테스트 모드). DOM · Electron · '@/' 없이.
 import type { OrderMaterials, OrderInputs, StyleMode, LibEntry, BaeOrder, RatioId, TierId } from './order';
-import type { BaeJobImages, BaeJobKind, BaeJobPd, BaeJobResult, BaeJobSummary } from './jobs';
+import type { BaeJobImages, BaeJobKind, BaeJobPd, BaeJobResult, BaeJobSummary, BaeUpscaleDone } from './jobs';
 
 export interface BaeOrderCall {
   jobId: string;
@@ -74,10 +74,13 @@ export interface BaeResultSetCall {
   sec?: number;
 }
 export interface BaeResultSetOutcome { ok: true; jobId: string; w: number; h: number; result: BaeJobResult; images: BaeJobImages }
-/** 도구만 쓴 작업 (노이즈 제거 창): 불러온 그림과 결과를 이 PC 에 두고 기록 한 줄. 0원. */
+/**
+ * 도구만 쓴 작업 (노이즈 제거 창 · 4K로 키우기 창): 불러온 그림과 결과를 이 PC 에 두고 기록 한 줄. 0원.
+ * 4K 는 기록의 결과 그림을 키웠을 때도 따로 한 줄이고, parentJobId 가 그 기록을 가리킨다 (뒤에 한 일: 4K).
+ */
 export interface BaeToolJobCall {
   jobId: string;
-  kind: 'denoise';
+  kind: 'denoise' | 'upscale';
   parentJobId: string | null;
   createdAt: string;
   /** 불러온 그림 (PNG) */
@@ -87,6 +90,10 @@ export interface BaeToolJobCall {
   sec: number;
   /** 그림 이름 (불러온 파일 이름 · 원래 작업 이름). 경로에는 쓰지 않는다. */
   label: string;
+  /** 4K 만: 방식 · 계산한 곳 (from 은 메인이 source 에서 잰다) */
+  upscale?: Omit<BaeUpscaleDone, 'from'>;
+  /** 4K 만: 이 PC 에 원본이 없어서 서버 미리보기 그림을 키웠다 */
+  fromPreview?: boolean;
 }
 export interface BaeToolJobOutcome { ok: true; jobId: string; w: number; h: number }
 export interface BaeFailure { ok: false; aborted: boolean; message: string; code: string | null }

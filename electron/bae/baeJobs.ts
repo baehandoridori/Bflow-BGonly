@@ -20,6 +20,7 @@ import {
   type BaeJobWrite, type BaeUsageLine, type BaePreviewName, type BaeJobImages, type BaeJobFinish, type BaeJobResult,
 } from '../../src/shared/bae/jobs';
 import { maskSecrets } from '../../src/shared/bae/secrets';
+import { BAE_UPSCALE_MAX_PIXELS, BAE_UPSCALE_MODES, BAE_UPSCALE_PREVIEW_NOTE as UPSCALE_PREVIEW_NOTE } from '../../src/shared/bae/upscaleView';
 import { postResponses, postImageEdit, type BaeImageFieldName, type BaeImageFormField } from './openaiClient';
 import type { BaeSettingsCache } from './baeSettingsCache';
 import type { BaeLocalStore } from './localStore';
@@ -61,6 +62,7 @@ interface Materials { shots: Array<[BaePreviewName, string, number]>; images: Ba
 type LocalMeta = BaeJobWrite & { requestPrompt?: string; size?: [number, number]; ownerId?: string };
 
 const FINISH_FAIL_NOTE = '그린 뒤 마무리를 하지 못해서 GPT가 그린 그대로 뒀어요.';
+const UPSCALE_EPS = new Set(['dml', 'cpu', 'webgpu', 'wasm']);
 
 const decodeDataUrl = (u: string | null | undefined): Uint8Array | null => {
   const m = typeof u === 'string' ? /^data:image\/(?:png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/.exec(u) : null;
@@ -320,13 +322,17 @@ export function createBaeJobs(deps: BaeJobsDeps) {
     });
   }
 
-  /** 도구만 쓴 작업 (노이즈 제거 창): 불러온 그림 · 결과를 이 PC 에, 미리보기 줄, 작업 줄 한 번에 '완성'. 0원이라 장부 줄은 없다. */
+  /**
+   * 도구만 쓴 작업 (노이즈 제거 창 · 4K로 키우기 창): 불러온 그림 · 결과를 이 PC 에, 미리보기 줄, 작업 줄 한 번에 '완성'. 0원이라 장부 줄은 없다.
+   * 4K: source.png = 키우기 전, final.png · result.png = 키운 그림 (판 파일은 한 번 쓰면 그대로라 미리보기는 final.png 에서).
+   */
   async function toolJob(owner: string, c: BaeToolJobCall): Promise<BaeToolJobOutcome | BaeFailure> {
     try {
-      if (!c || !isBaeJobId(c.jobId) || c.kind !== 'denoise') throw new Error('BAE경 작업 번호가 올바르지 않아요.');
+      if (!c || !isBaeJobId(c.jobId) || (c.kind !== 'denoise' && c.kind !== 'upscale')) throw new Error('BAE경 작업 번호가 올바르지 않아요.');
       if (c.parentJobId !== null && !isBaeJobId(c.parentJobId)) throw new Error('BAE경 작업 번호가 올바르지 않아요.');
       if (typeof c.createdAt !== 'string' || !Number.isFinite(Date.parse(c.createdAt))) throw new Error('작업 시각이 올바르지 않아요.');
       if (!isPng(c.source) || !isPng(c.png)) throw new Error('보낸 그림이 올바르지 않아요.');
+      if (c.kind === 'upscale') return await upscaleJob(owner, c);
       if (running.has(c.jobId) || pending.has(c.jobId) || (await deps.local.readJobMeta(c.jobId))) throw new Error('이 작업은 이미 있어요.');
       await deps.local.saveJobFile(c.jobId, c.createdAt, 'source.png', c.source);
       await deps.local.saveJobFile(c.jobId, c.createdAt, 'final_noise.png', c.png);
@@ -347,6 +353,31 @@ export function createBaeJobs(deps: BaeJobsDeps) {
       await jobWrite(owner, write);
       return { ok: true, jobId: c.jobId, w, h };
     } catch (e) { return failure(e); }
+  }
+  async function upscaleJob(owner: string, c: BaeToolJobCall): Promise<BaeToolJobOutcome | BaeFailure> {
+    const u = c.upscale;
+    if (!u || (u.mode !== 'A' && u.mode !== 'B') || !UPSCALE_EPS.has(u.ep)) throw new Error('4K로 키운 방식이 올바르지 않아요.');
+    const from = pngSize(c.source); const { w, h } = pngSize(c.png);
+    if (!from.w || !from.h || w < from.w || h < from.h || w * h > BAE_UPSCALE_MAX_PIXELS) throw new Error('키운 그림의 크기가 올바르지 않아요.');
+    if (running.has(c.jobId) || pending.has(c.jobId) || (await deps.local.readJobMeta(c.jobId))) throw new Error('이 작업은 이미 있어요.');
+    await deps.local.saveJobFile(c.jobId, c.createdAt, 'source.png', c.source);
+    await deps.local.saveJobFile(c.jobId, c.createdAt, 'final.png', c.png);
+    await deps.local.saveJobFile(c.jobId, c.createdAt, 'result.png', c.png);
+    const sec = Number.isFinite(c.sec) && c.sec >= 0 ? Math.round(c.sec) : 0;
+    // 미리보기는 다른 결과와 같은 크기 (1600 · 320). 키운 원본 PNG 는 이 PC 에만.
+    for (const [name, max] of [['result_1600.jpg', 1600], ['result_320.jpg', 320]] as const) await preview(owner, c.jobId, name, 'final.png', max);
+    const label = typeof c.label === 'string' ? c.label.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+    const done = { mode: u.mode, ep: u.ep, fellBack: u.fellBack === true, from: [from.w, from.h] as [number, number] };
+    const write: BaeJobWrite = {
+      id: c.jobId, kind: 'upscale', status: 'done', parentJobId: c.parentJobId, name: null, summary: label ? { source: label } : {}, pd: {},
+      result: { w, h, sec, model: BAE_UPSCALE_MODES[u.mode].modelName,
+        finish: { tilt: 0, lock: null, noise: null, upscale: done, ...(c.fromPreview === true ? { note: UPSCALE_PREVIEW_NOTE } : {}) } },
+      images: { result: urlOf(c.jobId, 'result_1600.jpg'), thumb: urlOf(c.jobId, 'result_320.jpg') },
+      costUsd: 0, origin: deps.origin, appVersion: deps.appVersion, createdAt: c.createdAt, finishedAt: new Date(now()).toISOString(),
+    };
+    await deps.local.writeJobMeta(c.jobId, c.createdAt, { ...write, ownerId: owner } as LocalMeta);
+    await jobWrite(owner, write);
+    return { ok: true, jobId: c.jobId, w, h };
   }
 
   /** 만든 사람이 붙이는 것: 그림 이름 · 검수 (줄을 거쳐 서버로). 상태는 지금 상태를 그대로 보낸다 (서버가 되돌리지 않는다). */

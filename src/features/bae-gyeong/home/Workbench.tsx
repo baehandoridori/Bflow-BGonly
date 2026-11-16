@@ -181,7 +181,7 @@ function FullPanes({ bench: b, busy, a }: { bench: BaeBenchView; busy: BaeBusyVi
             <div className="bae-res-bar">
               <div className="bae-res-view">
                 {a.onZoom ? <button type="button" className="bae-btn bae-btn-s" onClick={a.onZoom}><Maximize2 size={14} aria-hidden="true" />크게 보기</button> : null}
-                {b.result.tools ? <ResultTools tools={b.result.tools} onNoise={a.onNoise} onLock={a.onLock} /> : null}
+                {b.result.tools ? <ResultTools tools={b.result.tools} onNoise={a.onNoise} onLock={a.onLock} onUpscale={a.onUpscale} /> : null}
               </div>
               {b.review && a.onReview ? (
                 <button type="button" className={`bae-btn bae-btn-ghost bae-btn-s${rate ? ' is-on' : ''}`} onClick={a.onReview}><ClipboardCheck size={14} aria-hidden="true" />{rate ? `검수: ${rate}` : '검수 남기기 (선택)'}</button>

@@ -1,6 +1,6 @@
 // 작업대와 한 건 보기가 같이 쓰는 작은 부품: 숫자 줄, 재료 묶음, PD 글, 결과 틀, 검수.
 import { useEffect, useState, type ReactNode } from 'react';
-import { AlertTriangle, ClipboardCheck, Eraser, Loader2, Palette, Pipette } from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, Eraser, Loader2, Palette, Pipette, Scaling } from 'lucide-react';
 import type { BaeFactView, BaeMaterialsView, BaeOrderTextView, BaeResultToolsView, BaeReviewRate, BaeReviewView } from './benchTypes';
 import './bench.css';
 
@@ -100,8 +100,8 @@ export function OrderBlock({ order, children }: { order: BaeOrderTextView; child
 }
 
 /** 결과 다듬기 (14b 10-2): 노이즈 제거 켜고 끄기 · 색 맞춤 켜고 끄기 (기준 배경 색을 맞춘 그림만). */
-export function ResultTools({ tools, onNoise, onLock }: { tools: BaeResultToolsView; onNoise?: () => void; onLock?: () => void }) {
-  const n = tools.noise; const l = tools.lock;
+export function ResultTools({ tools, onNoise, onLock, onUpscale }: { tools: BaeResultToolsView; onNoise?: () => void; onLock?: () => void; onUpscale?: () => void }) {
+  const n = tools.noise; const l = tools.lock; const u = tools.upscale;
   return (
     <>
       {onNoise ? (
@@ -113,6 +113,13 @@ export function ResultTools({ tools, onNoise, onLock }: { tools: BaeResultToolsV
       {l && onLock ? (
         <button type="button" className="bae-btn bae-btn-s bae-tool-toggle" aria-pressed={l.on} aria-busy={!!l.busy || undefined} disabled={!!l.busy} title={l.title} onClick={onLock}>
           {l.busy ? <Loader2 size={14} className="bae-spin" aria-hidden="true" /> : <Pipette size={14} aria-hidden="true" />}{l.busy || l.label}
+        </button>
+      ) : null}
+      {u && onUpscale ? (
+        // 키우는 중에도 누를 수 있다: 누르면 진행 중인 4K 창이 다시 뜬다
+        <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-upscale" disabled={u.disabled} aria-busy={!!u.busy || undefined}
+          title={tools.away && !u.disabled && !u.busy ? '이 PC에 원본이 없어서, 미리보기 그림으로 4K 창을 열어요' : u.title} onClick={onUpscale}>
+          {u.busy ? <Loader2 size={14} className="bae-spin" aria-hidden="true" /> : <Scaling size={14} aria-hidden="true" />}{u.busy || '4K로 키우기'}
         </button>
       ) : null}
     </>

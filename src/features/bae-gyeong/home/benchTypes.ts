@@ -54,6 +54,8 @@ export interface BaeResultToolsView {
   note: string;                  // 색 맞춤을 못 했을 때 안내 (HTML finishPicture note)
   /** 이 PC 에 원본이 없다 (다른 PC 에서 만듦): 노이즈 제거는 창으로 열고, 색 맞춤은 못 바꾼다 */
   away: boolean;
+  /** 4K로 키우기 (HTML upSync): 이미 그 크기 이상이면 꺼짐. busy = 이 그림을 키우는 중 ('' 이면 아님). 없으면 버튼 없음 */
+  upscale?: { disabled: boolean; title: string; busy: string } | null;
 }
 export type BaeReviewRate = '좋음' | '보통' | '다시';
 export interface BaeReviewView { rate: BaeReviewRate | ''; good: string; bad: string }
@@ -97,6 +99,7 @@ export interface BaeBenchActions {
   onStop?(): void;               // 진행 줄의 '그만두기'
   onNoise?(): void;              // 다듬기: 노이즈 제거 켜고 끄기
   onLock?(): void;               // 다듬기: 색 맞춤 켜고 끄기
+  onUpscale?(): void;            // 다듬기: 4K로 키우기 (창)
   onUseBase?(): void;            // 기준 배경으로 새 컷
 }
 
@@ -197,8 +200,9 @@ export interface BaeJobViewProps {
   onSave?(): void;               // PNG 저장
   onNoise?(): void;              // 다듬기: 노이즈 제거
   onLock?(): void;               // 다듬기: 색 맞춤 켜고 끄기
+  onUpscale?(): void;            // 다듬기: 4K로 키우기 (창)
   onUseBase?(): void;            // 이어서 만들기: 기준 배경으로 새 컷
-  onLater?(tool: 'upscale' | 'layers' | 'angle'): void; // 아직 열리지 않은 도구 (알림만)
+  onLater?(tool: 'layers' | 'angle'): void; // 아직 열리지 않은 도구 (알림만)
   stamp?: BaeStampPanelView | null; // 확인 도장 (8단계)
 }
 

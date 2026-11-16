@@ -70,8 +70,17 @@ export interface BaeJobFinish {
   lock?: { moved: number; on: boolean } | null;
   /** 노이즈 제거: 지금 켜져 있는지 · 걸린 초 */
   noise?: { on: boolean; sec?: number } | null;
-  /** 색 맞춤을 못 했을 때의 안내 (HTML finishPicture 의 note) */
+  /** 색 맞춤을 못 했을 때의 안내 (HTML finishPicture 의 note) · 4K 를 미리보기 그림으로 키웠을 때의 안내 */
   note?: string;
+  /** 4K로 키운 작업 (kind 'upscale'): 방식 · 계산한 곳 · 그래픽카드에서 CPU 로 이어 갔나 · 키우기 전 크기 */
+  upscale?: BaeUpscaleDone | null;
+}
+/** 4K로 키우기 한 번 (계획 14 5-2 '뒤에 한 일: 4K'). A = 선명하게(모델 일꾼), B = 원본 그대로(화면 쪽 일꾼). */
+export interface BaeUpscaleDone {
+  mode: 'A' | 'B';
+  ep: 'dml' | 'cpu' | 'webgpu' | 'wasm';
+  fellBack: boolean;
+  from: [number, number];
 }
 export interface BaeJobPd {
   summaryKo?: string; notesKo?: string[]; reason?: string; prompt?: string; raw?: string;

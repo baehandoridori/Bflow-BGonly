@@ -16,6 +16,7 @@ import type {
   BaeDrawFinishCall, BaeDrawFinishOutcome, BaeResultSetCall, BaeResultSetOutcome, BaeToolJobCall, BaeToolJobOutcome,
 } from '@/shared/bae/makeCalls';
 import { baeVariantFile, BAE_BASE_VARIANT_FILES, type BaeJobFinish, type BaeJobImages, type BaeJobResult, type BaeJobWrite } from '@/shared/bae/jobs';
+import { BAE_UPSCALE_MAX_PIXELS, BAE_UPSCALE_MODES, BAE_UPSCALE_PREVIEW_NOTE as UPSCALE_PREVIEW_NOTE } from '@/shared/bae/upscaleView';
 import { PREVIEW_DEFAULT_TEXTS, type PreviewMakeContext, type PreviewMakeMethods } from './previewGateway';
 import type { BaeDraftData } from './types';
 
@@ -222,6 +223,7 @@ export function createPreviewMake(ctx: PreviewMakeContext): PreviewMakeMethods {
     try {
       ctx.requireUse();
       if (metas.has(c.jobId) || files.has(c.jobId)) throw new Error('이 작업은 이미 있어요.');
+      if (c.kind === 'upscale') return await upscaleJob(c);
       files.set(c.jobId, { 'source.png': c.source, 'final_noise.png': c.png, 'result.png': c.png });
       const { w, h } = pngSize(c.png); const thumb = await shrinkJpeg(c.png, 320);
       const result: BaeJobResult = { w, h, sec: Math.round(c.sec), finish: { tilt: 0, lock: null, noise: { on: true, sec: Math.round(c.sec) } } };
@@ -232,6 +234,22 @@ export function createPreviewMake(ctx: PreviewMakeContext): PreviewMakeMethods {
         costUsd: 0, origin: '테스트 모드', appVersion: 'preview', createdAt: c.createdAt, finishedAt: new Date().toISOString() });
       return { ok: true, jobId: c.jobId, w, h };
     } catch (err) { return fail(err); }
+  }
+  /** 4K 도구 작업: 앱(baeJobs upscaleJob)과 같은 파일 · 기록 모양. 미리보기는 테스트 모드라 작게(320). */
+  async function upscaleJob(c: BaeToolJobCall): Promise<BaeToolJobOutcome> {
+    const u = c.upscale; if (!u || (u.mode !== 'A' && u.mode !== 'B')) throw new Error('4K로 키운 방식이 올바르지 않아요.');
+    const from = pngSize(c.source); const { w, h } = pngSize(c.png);
+    if (!from.w || w < from.w || h < from.h || w * h > BAE_UPSCALE_MAX_PIXELS) throw new Error('키운 그림의 크기가 올바르지 않아요.');
+    files.set(c.jobId, { 'source.png': c.source, 'final.png': c.png, 'result.png': c.png });
+    const sec = Math.round(c.sec); const thumb = await shrinkJpeg(c.png, 320);
+    const result: BaeJobResult = { w, h, sec, model: BAE_UPSCALE_MODES[u.mode].modelName,
+      finish: { tilt: 0, lock: null, noise: null, upscale: { mode: u.mode, ep: u.ep, fellBack: !!u.fellBack, from: [from.w, from.h] }, ...(c.fromPreview ? { note: UPSCALE_PREVIEW_NOTE } : {}) } };
+    const images: BaeJobImages = { result: thumb, thumb };
+    metas.set(c.jobId, { result, images });
+    const label = c.label.replace(/\s+/g, ' ').trim().slice(0, 120);
+    ctx.writeJob({ id: c.jobId, kind: 'upscale', status: 'done', parentJobId: c.parentJobId, name: null, summary: label ? { source: label } : {}, pd: {}, result, images,
+      costUsd: 0, origin: '테스트 모드', appVersion: 'preview', createdAt: c.createdAt, finishedAt: new Date().toISOString() });
+    return { ok: true, jobId: c.jobId, w, h };
   }
 
   return {
