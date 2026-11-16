@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { isNavItemHiddenForUser } from './navVisibility';
 import { canAccessBackgroundLibrary, canAccessBaeGyeong, canAccessPlayground } from '@/features/playground/featureFlag';
 import { BaeGyeongIcon } from '@/features/bae-gyeong/icons/BaeGyeongIcon';
+import { BaeStampBadge } from '@/features/bae-gyeong/records/BaeStampBadge';
 import { BackgroundKeptDot } from '@/features/backgrounds/BackgroundKeptDot';
 import { originFromActivation } from '@/features/playground/transition/dotWipeMath';
 import { usePlaygroundEntryStore } from '@/features/playground/transition/usePlaygroundEntryStore';
@@ -476,6 +477,8 @@ export function Sidebar() {
                 </span>
               )}
               {item.id === 'background-library' && <BackgroundKeptDot userId={currentUser?.id ?? null} />}
+              {/* BAE경: 내 작업에 온 새 확인 도장 수 (8단계) */}
+              {item.id === 'bae-gyeong' && <BaeStampBadge userId={currentUser?.id ?? null} />}
               {/* 숫자 배지: 늘면 '톡', 0 이 되면 작게 줄며 사라진다(움직임 폴리싱 7번). */}
               {item.id === 'compositing-revisions' && (
                 <CountBadge

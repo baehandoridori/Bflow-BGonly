@@ -2598,6 +2598,14 @@ registerBaeIpc({
   keyring: baeKeyring,
   getSessionOriginOrThrow,
   onChanged: what => broadcastToAllWindows('bae:changed', { what }),
+  // 팀 비용 CSV (8단계): 글은 메인이 서버 표로 만들고, 자리는 사용자가 저장 창에서 고른다.
+  saveText: async (defaultName, text) => {
+    const opts = { defaultPath: path.join(app.getPath('downloads'), defaultName), filters: [{ name: 'CSV', extensions: ['csv'] }] };
+    const r = mainWindow && !mainWindow.isDestroyed() ? await dialog.showSaveDialog(mainWindow, opts) : await dialog.showSaveDialog(opts);
+    if (r.canceled || !r.filePath) return null;
+    await fs.promises.writeFile(r.filePath, text, 'utf8');
+    return r.filePath;
+  },
 });
 // BAE경 만들기: 이 PC 보관함(%LOCALAPPDATA%) · 못 보낸 것 줄 · 작업 흐름 (계획 14의 5장).
 const baeMain = startBaeMain({

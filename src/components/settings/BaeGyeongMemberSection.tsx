@@ -6,7 +6,7 @@
  * 화면에 먼저 반영 → 저장 → 실패하면 되돌림. 관리자는 명단과 관계없이 늘 둘 다 할 수 있어 '관리자'로 보인다.
  * 이 화면을 여는 것만으로 BAE경 메뉴가 보이지는 않는다 — 옮기는 동안 메뉴는 시험 계정에만 있다(featureFlag.ts).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { SettingsSection } from './SettingsSection';
@@ -26,14 +26,19 @@ export function BaeGyeongMemberSection() {
   const [loadError, setLoadError] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
 
+  const savingRef = useRef(false);
   useEffect(() => {
     if (!isAdmin) return;
     let alive = true;
     const toMap = (list: BaeMember[]) => new Map(list.map((m) => [m.userId, m.role] as const));
-    baeGateway().membersList()
-      .then((list) => { if (alive) { setMembers(toMap(list)); setLoadError(''); } })
+    const g = baeGateway();
+    const load = () => g.membersList()
+      .then((list) => { if (alive && !savingRef.current) { setMembers(toMap(list)); setLoadError(''); } })
       .catch((error: unknown) => { if (alive) setLoadError(errorText(error)); });
-    return () => { alive = false; };
+    void load();
+    // 다른 관리자가 바꿔도 곧바로: 내용 없는 'members' 신호가 오면 다시 읽는다 (8단계 끝 기준 '곧바로 반영')
+    const off = g.onChanged((what) => { if (what === 'members') void load(); });
+    return () => { alive = false; off(); };
   }, [isAdmin]);
 
   if (!isAdmin) return null;
@@ -42,7 +47,7 @@ export function BaeGyeongMemberSection() {
     if (savingId || !members) return;
     const before = members; const next = new Map(before);
     if (role) next.set(id, role); else next.delete(id);
-    setMembers(next); setSavingId(id);
+    setMembers(next); setSavingId(id); savingRef.current = true;
     try {
       const saved = await baeGateway().membersSet(id, role);
       setMembers(new Map(saved.map((m) => [m.userId, m.role] as const)));
@@ -50,7 +55,7 @@ export function BaeGyeongMemberSection() {
     } catch (error) {
       setMembers(before);
       toast.error(`저장하지 못했어요: ${errorText(error)}`);
-    } finally { setSavingId(null); }
+    } finally { setSavingId(null); savingRef.current = false; }
   }
 
   const sortedUsers = [...allUsers].sort((a, b) => a.name.localeCompare(b.name, 'ko'));

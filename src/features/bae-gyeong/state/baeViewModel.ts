@@ -7,9 +7,10 @@ import {
 } from '@/shared/bae/order';
 import { BAE_LIBRARY_DEFAULT } from '@/shared/bae/library';
 import { baeJobHasLock, baeJobVariant, type BaeJob, type BaeVariant } from '@/shared/bae/jobs';
+import { BAE_STAMP_LABEL, type BaeStamp, type BaeStampEvent } from '@/shared/bae/review';
 import { BAE_BASE_MAX, baeBaseFieldView, baeStyleForPlace, baePlaceMode } from '@/shared/bae/place';
 import type { MakeWindowProps, MaterialWindowProps, MakingStageProps, BaeStepView } from '../make/ui';
-import type { BaeBenchView, BaeBusyView, BaeFactView, BaeJobViewProps, BaeMaterialsView, BaeRecordRowView, BaeResultToolsView, BaeReviewView } from '../home/benchTypes';
+import type { BaeBenchView, BaeBusyView, BaeFactView, BaeJobViewProps, BaeMaterialsView, BaeRecordRowView, BaeResultToolsView, BaeReviewView, BaeStampPanelView } from '../home/benchTypes';
 import type { BaeStyleEntryView } from '../make/ui';
 import { BAE_STRIP_SRC, baeActiveLibrary, baeBoard, baeLibSrc, baeMisfit, baeOrderStale, useBaeMake, type BaeActiveJob } from './useBaeMake';
 import { baeLockText, baeNoiseText, baeStyleRowForBases } from './baeBases';
@@ -208,7 +209,9 @@ export function recordTools(j: BaeJob, localResult: string | null, busy?: { what
   const f = j.result.finish;
   return toolsView({ variant: baeJobVariant(j), hasLock: baeJobHasLock(j) && !!localResult, moved: f?.lock?.moved ?? 0, noiseSec: f?.noise?.sec, note: f?.note ?? '', busy, away: !localResult });
 }
-const recordTitle = (j: BaeJob) => j.name || titleOf(j.summary.request ?? '') || (j.summary.source ? `${KIND_LABEL[j.kind]}: ${j.summary.source}` : '') || KIND_LABEL[j.kind];
+/** 기록의 설명 한 줄: 설명이 없으면 (도구 작업) '노이즈 제거: 파일 이름', 그것도 없으면 종류. titleOf 는 빈 설명에 '새 배경'을 주므로 먼저 거른다. */
+const recordDesc = (j: BaeJob) => ((j.summary.request ?? '').trim() ? titleOf(j.summary.request!) : '') || (j.summary.source ? `${KIND_LABEL[j.kind]}: ${j.summary.source}` : '') || KIND_LABEL[j.kind];
+const recordTitle = (j: BaeJob) => j.name || recordDesc(j);
 export function recordBench(j: BaeJob, rate: number, localResult: string | null, busy?: { what: 'noise' | 'lock'; step: string }): BaeBenchView {
   const pd = j.pd;
   const src = localResult ?? j.images.result ?? null;
@@ -230,13 +233,34 @@ export function recordRow(j: BaeJob, rate: number, liveSeconds: number | null): 
   const live = j.status === 'drawing' || j.status === 'ordering' || j.status === 'ordered';
   return {
     id: j.id, thumb: j.images.thumb ?? j.images.result ?? j.images.rough ?? null, thumbAlt: j.images.rough ?? null,
-    title: titleOf(j.summary.request ?? '') || (j.summary.source ? `${KIND_LABEL[j.kind]}: ${j.summary.source}` : '') || KIND_LABEL[j.kind], name: j.name ?? '',
+    title: recordDesc(j), name: j.name ?? '',
     sub: j.status === 'failed' ? `실패: ${j.result.error ?? ''}` : j.summary.roughNotes ? `메모 ${j.summary.roughNotes.split('\n').filter(Boolean).length}개` : '',
     kindLabel: KIND_LABEL[j.kind], when: whenText(j.createdAt),
     took: live && liveSeconds != null ? `${liveSeconds}초째` : tookText(j.result.sec), cost: wonOf(j.costUsd, rate),
     state: live ? 'live' : j.status === 'failed' ? 'failed' : j.status === 'stopped' ? 'stopped' : 'done',
     stateLabel: live ? (j.status === 'drawing' ? '그리는 중' : '주문서 쓰는 중') : j.status === 'failed' ? '실패' : j.status === 'stopped' ? '그만둠' : '',
-    stamp: j.stamp ? { label: j.stamp === 'good' ? '좋아요' : j.stamp === 'again' ? '다시' : '봤어요', tone: j.stamp } : null,
+    stamp: j.stamp ? { label: BAE_STAMP_LABEL[j.stamp], tone: j.stamp } : null,
+  };
+}
+/** 팀 기록 한 줄: 내 기록 줄 + 만든 사람, 여러 건 '확인함'으로 고를 수 있는지. */
+export function teamRow(j: BaeJob, rate: number): BaeRecordRowView {
+  const finished = j.status === 'done' || j.status === 'failed' || j.status === 'stopped';
+  return { ...recordRow(j, rate, null), maker: j.userName || '(지운 사용자)', pickable: finished && !j.stamp };
+}
+/**
+ * 한 건 보기의 확인 도장 칸. 지금 도장은 작업 줄에서, 누가는 이름으로 (차례에 이름이 있으면 그것, 아니면 사람 목록).
+ * 검수자에게만 찍는 곳이 있고, 아직 만드는 중이면 까닭을 적는다.
+ */
+export function stampPanelView(j: BaeJob, history: BaeStampEvent[] | undefined, a: {
+  nameOf(id: string): string; fresh: boolean; canStamp: boolean; saving: boolean; onStamp(stamp: BaeStamp | null, note: string): void;
+}): BaeStampPanelView {
+  const finished = j.status === 'done' || j.status === 'failed' || j.status === 'stopped';
+  const latest = history?.find((h) => h.stamp === j.stamp && (!j.stampBy || h.by === j.stampBy));
+  return {
+    current: j.stamp ? { id: latest?.id ?? 0, tone: j.stamp, label: BAE_STAMP_LABEL[j.stamp], by: latest?.byName || (j.stampBy ? a.nameOf(j.stampBy) : ''), when: whenText(j.stampAt), note: j.stampNote ?? latest?.note ?? '' } : null,
+    history: (history ?? []).map((h) => ({ id: h.id, tone: h.stamp, label: h.stamp ? BAE_STAMP_LABEL[h.stamp] : '도장 뺌', by: h.byName || a.nameOf(h.by), when: whenText(h.at), note: h.note ?? '' })),
+    fresh: a.fresh,
+    edit: a.canStamp ? { saving: a.saving, blocked: finished ? '' : '아직 만드는 중이라 도장을 찍을 수 없어요. 다 그린 뒤에 찍어 주세요.', onStamp: a.onStamp } : null,
   };
 }
 export function jobViewProps(j: BaeJob, rate: number, localResult: string | null, extra: Pick<BaeJobViewProps, 'backLabel' | 'onBack' | 'review' | 'onSave' | 'onNoise' | 'onLock' | 'onUseBase' | 'onLater'>,

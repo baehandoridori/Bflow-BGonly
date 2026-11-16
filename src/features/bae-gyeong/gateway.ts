@@ -6,9 +6,13 @@ import { isExplicitPlaygroundPreviewMode } from '@/features/playground/featureFl
 import { useAuthStore } from '@/stores/useAuthStore';
 import { createBaePreviewGateway } from './previewGateway';
 import { createPreviewMake } from './previewMake';
+import { baePreviewSeed } from './previewSeed';
 import type { BaeGateway } from './types';
 
 let preview: BaeGateway | null = null;
+/** 테스트 모드 8단계 시험 자료의 그림: 앱에 들어 있는 스타일 예시 그림 (띠 그림 빼고). */
+const SEED_PICS = Object.entries(import.meta.glob('./assets/library/L*.jpg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>)
+  .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, url]) => url);
 
 export function baeGateway(): BaeGateway {
   if (typeof window !== 'undefined' && window.baeGyeongAPI) return window.baeGyeongAPI;
@@ -20,6 +24,8 @@ export function baeGateway(): BaeGateway {
         return u ? { id: u.id, name: u.name, role: u.role ?? 'user' } : null;
       },
       knownUserIds: () => useAuthStore.getState().users.map((u) => u.id),
+      userName: (id) => useAuthStore.getState().users.find((u) => u.id === id)?.name,
+      seed: () => baePreviewSeed(new Date(), SEED_PICS),
       channel: typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('bflow-preview-bae-gyeong'),
       make: createPreviewMake,
     });

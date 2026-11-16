@@ -1,5 +1,6 @@
 // 작업대 · 기록 목록 · 한 건 보기 · 그림체 기준 창 부품의 약속 (props). 부품은 보여 주기만 하고,
 // 글자와 숫자(언제 · 걸린 시간 · 비용 · 요약)는 상태 쪽이 만들어 넘긴다. 버튼 이름 같은 고정 글자만 부품이 쓴다.
+import type { ReactNode } from 'react';
 
 export type BaeStartKind = 'new' | 'same' | 'layers' | 'angle' | 'upscale' | 'denoise';
 
@@ -137,6 +138,9 @@ export interface BaeRecordRowView {
   state: 'done' | 'live' | 'failed' | 'stopped';
   stateLabel: string;            // '그리는 중' · '주문서 쓰는 중' · '실패' · '그만둠' (done 이면 '')
   stamp: { label: string; tone: 'seen' | 'good' | 'again' } | null; // 관리자 확인 도장
+  maker?: string;                // 만든 사람 (팀 기록)
+  fresh?: boolean;               // 내 기록: 이번에 새로 온 도장 (좋아요 · 다시)
+  pickable?: boolean;            // 팀 기록: 여러 건 '확인함'으로 고를 수 있음 (끝났고 도장이 없음)
 }
 
 export interface BaeRecordListProps {
@@ -156,6 +160,24 @@ export interface BaeRecordListProps {
   error?: string | null;
   onRetry?(): void;
   emptyText?: string;            // '위의 새 배경 만들기로 시작하면 여기에 쌓여요.'
+  emptyTitle?: string;           // '아직 만든 그림이 없어요'
+  // ── 팀 기록 (8단계) ──
+  scope?: ReactNode;             // 제목 자리의 '내 기록 | 팀 기록' (있으면 제목은 읽어 주기만)
+  toolbar?: ReactNode;           // 머리 아래 거르기 줄
+  maker?: boolean;               // 만든 사람 칸
+  select?: { picked: ReadonlySet<string>; onToggle(id: string): void } | null; // 여러 건 고르기 (pickable 줄만)
+  searchLabel?: string;          // 찾기 칸 안내 ('이름, 설명에서 찾기')
+  more?: { onMore(): void; loading: boolean } | null; // 다음 쪽
+}
+
+/** 도장 한 번 (지금 도장 · 차례 한 줄). tone 이 null 이면 도장을 뺀 줄. */
+export interface BaeStampMarkView { id: number; tone: 'seen' | 'good' | 'again' | null; label: string; by: string; when: string; note: string }
+/** 한 건 보기의 확인 도장 칸: 지금 도장과 누가 · 언제, 차례, 그리고 검수자에게만 찍는 곳. */
+export interface BaeStampPanelView {
+  current: BaeStampMarkView | null;
+  history: BaeStampMarkView[];
+  fresh: boolean;                // 만든 사람: 이번에 새로 온 도장
+  edit: { saving: boolean; blocked: string; onStamp(stamp: 'seen' | 'good' | 'again' | null, note: string): void } | null; // blocked: 찍을 수 없는 까닭 ('' = 찍을 수 있음)
 }
 
 /** 한 건 보기 (시안 Zoom 바탕) */
@@ -177,6 +199,7 @@ export interface BaeJobViewProps {
   onLock?(): void;               // 다듬기: 색 맞춤 켜고 끄기
   onUseBase?(): void;            // 이어서 만들기: 기준 배경으로 새 컷
   onLater?(tool: 'upscale' | 'layers' | 'angle'): void; // 아직 열리지 않은 도구 (알림만)
+  stamp?: BaeStampPanelView | null; // 확인 도장 (8단계)
 }
 
 /** 기록 찾기 (시안과 같은 규칙: 이름 · 설명 · 둘째 줄 · 종류에 찾는 말이 들어 있으면). 상태 쪽이 쓴다. */

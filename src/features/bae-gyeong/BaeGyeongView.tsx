@@ -19,7 +19,12 @@ import { baeBoard, useBaeMake } from './state/useBaeMake';
 import { useBaeLocal, useBaeTools, type BaeToolTarget } from './state/useBaeTools';
 import { useBaeJobs, visibleBaeJobs } from './state/useBaeJobs';
 import { BaeMakeLayer, useSeconds } from './state/BaeMakeLayer';
-import { KIND_LABEL, activeBench, jobViewProps, makingProps, recordBench, recordRow, reviewOf, wonOf } from './state/baeViewModel';
+import { KIND_LABEL, activeBench, jobViewProps, makingProps, recordBench, recordRow, reviewOf, stampPanelView, wonOf } from './state/baeViewModel';
+import { TeamRecords } from './records/TeamRecords';
+import { CostTab } from './costs/CostTab';
+import { useBaeTeam } from './state/useBaeTeam';
+import { useBaeStamps } from './state/useBaeStamps';
+import { BAE_STAMP_LABEL, type BaeStamp } from '@/shared/bae/review';
 import './bae-gyeong.css';
 
 /** 아직 열리지 않은 도구 (그 단계에서 열린다) */
@@ -53,10 +58,20 @@ export default function BaeGyeongView() {
   const [query, setQuery] = useState('');
   const [usage, setUsage] = useState<BaeUsageSummary | null>(null);
   const rate = Number((row('prices')?.value as { krwPerUsd?: unknown } | undefined)?.krwPerUsd) || 1400;
+  // ── 8단계: 내 기록 | 팀 기록 (검수자), 확인 도장, 새 도장 표시 ──
+  const [recScope, setRecScope] = useState<'mine' | 'team'>('mine');
+  const [teamSel, setTeamSel] = useState<string | null>(null);
+  const team = useBaeTeam();
+  const users = useAuthStore((s) => s.users);
+  const stampIds = useBaeStamps((s) => s.ids);
+  const stampFresh = useBaeStamps((s) => s.fresh);
+  const stampCount = useBaeStamps((s) => s.count);
+  const marked = useMemo(() => new Set([...stampIds, ...stampFresh]), [stampIds, stampFresh]);
+  const nameOf = (id: string) => users.find((u) => u.id === id)?.name ?? '검수자';
 
   useEffect(() => {
     const id = currentUser?.id ?? null;
-    if (jobsActor !== id) { useBaeJobs.getState().reset(); jobsActor = id; }
+    if (jobsActor !== id) { useBaeJobs.getState().reset(); useBaeTeam.getState().reset(); jobsActor = id; }
     void start(id);
   }, [currentUser?.id, start]);
   // 이 화면이 보이는 동안: 만드는 창이 저절로 뜰 수 있고, 기록은 신호가 올 때만 '바뀐 것만' 다시 받는다.
@@ -72,7 +87,11 @@ export default function BaeGyeongView() {
       void g.usageSummary(from, null).then(setUsage).catch(() => undefined);
     };
     void jobs.load(); loadUsage(); void g.online().catch(() => undefined);
-    const off = g.onChanged((what) => { if (what === 'jobs') { void useBaeJobs.getState().load(); loadUsage(); } });
+    const off = g.onChanged((what) => {
+      if (what !== 'jobs') return;
+      void useBaeJobs.getState().load(); loadUsage();
+      if (useBaeTeam.getState().loaded) void useBaeTeam.getState().refresh();   // 팀 기록도 '바뀐 것만'
+    });
     const onOnline = () => { void g.online().catch(() => undefined); };
     window.addEventListener('online', onOnline);
     return () => { off(); window.removeEventListener('online', onOnline); };
@@ -93,6 +112,38 @@ export default function BaeGyeongView() {
   useEffect(() => { if (benchRecord) void jobs.loadDetail(benchRecord.id, benchRecord.updatedAt); }, [benchRecord?.id, benchRecord?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (recordPicked) void jobs.loadDetail(recordPicked.id, recordPicked.updatedAt); }, [recordPicked?.id, recordPicked?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const localRec = useLocalResult(recordPicked?.id ?? null, recordPicked?.updatedAt ?? null);
+  // 팀 기록 한 건: 목록에서 빠져도(예: '도장 없음'에서 도장을 찍음) 연 채로 둔다
+  const teamBase: BaeJob | null = recScope === 'team' && teamSel ? (team.rows.find((r) => r.id === teamSel) ?? team.details[teamSel] ?? null) : null;
+  const teamDetail = teamBase ? team.details[teamBase.id] : undefined;
+  const teamPicked: BaeJob | null = teamBase
+    ? (teamDetail && teamDetail.updatedAt >= teamBase.updatedAt ? teamDetail : { ...teamBase, pd: teamBase.pd ?? teamDetail?.pd, stampBy: teamBase.stampBy ?? teamDetail?.stampBy, stampNote: teamBase.stampNote ?? teamDetail?.stampNote })
+    : null;
+  const localTeam = useLocalResult(teamPicked && teamPicked.userId === currentUser?.id ? teamPicked.id : null, teamPicked?.updatedAt ?? null);
+  useEffect(() => { if (teamPicked) { void useBaeTeam.getState().loadDetail(teamPicked.id, teamPicked.updatedAt); void useBaeTeam.getState().loadHistory(teamPicked.id); } }, [teamPicked?.id, teamPicked?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (recordPicked) void useBaeTeam.getState().loadHistory(recordPicked.id); }, [recordPicked?.id, recordPicked?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 검수자에서 빠지면 곧바로 팀 기록을 닫는다 ('members' 신호 → 권리 다시 읽기)
+  useEffect(() => { if (!access.canReview) { setRecScope('mine'); setTeamSel(null); useBaeTeam.getState().reset(); } }, [access.canReview]);
+  // 내 기록을 보면 새 도장(좋아요 · 다시)을 본 것으로 적는다 — 景 숫자가 사라지고, 줄의 '새 도장' 표시는 이 화면을 떠날 때까지 남는다
+  useEffect(() => { if (tab === 'records' && recScope === 'mine' && access.canUse && stampCount > 0) void useBaeStamps.getState().markSeen(); }, [tab, recScope, access.canUse, stampCount]);
+  useEffect(() => () => useBaeStamps.getState().clearFresh(), []);
+  const doStamp = async (j: BaeJob, s: BaeStamp | null, note: string) => {
+    if (!currentUser) return;
+    try {
+      const saved = await useBaeTeam.getState().stamp(j, s, s === null ? null : note.trim() || null, currentUser.id);
+      if (saved.userId === currentUser.id) useBaeJobs.getState().putLocal(saved);
+      toast.success(s === null ? '도장을 뺐어요' : `${BAE_STAMP_LABEL[s]} 도장을 찍었어요`);
+    } catch (e) { toast.error(`도장을 찍지 못했어요: ${e instanceof Error ? e.message : String(e)}`); }
+  };
+  const stampFor = (j: BaeJob) => stampPanelView(j, team.history[j.id], {
+    nameOf, fresh: marked.has(j.id) && j.userId === currentUser?.id, canStamp: access.canReview, saving: !!team.stamping[j.id],
+    onStamp: (s, note) => { void doStamp(j, s, note); },
+  });
+  const scopeSeg = access.canReview ? (
+    <div className="bae-seg bae-scope" role="group" aria-label="누구의 기록">
+      <button type="button" className="bae-btn bae-btn-s" aria-pressed={recScope === 'mine'} onClick={() => { setRecScope('mine'); setTeamSel(null); }}>내 기록</button>
+      <button type="button" className="bae-btn bae-btn-s" aria-pressed={recScope === 'team'} onClick={() => { setRecScope('team'); setRecSel(null); }}>팀 기록</button>
+    </div>
+  ) : undefined;
 
   const tabs: Array<{ id: BaeTab; label: string; show: boolean }> = [
     { id: 'bench', label: '작업대', show: true },
@@ -152,7 +203,7 @@ export default function BaeGyeongView() {
     setSelId(null); void make.openSame(src);
   };
 
-  const rowViews = rows.map((j) => recordRow(j, rate, null));
+  const rowViews = rows.map((j) => ({ ...recordRow(j, rate, null), fresh: marked.has(j.id) }));
   const activeRow = active && !rows.some((r) => r.id === active.id) && (live || active.phase === 'ordered')
     ? [{ id: active.id, thumb: active.inputs?.rough.small ?? null, thumbAlt: null, title: active.order?.summary?.slice(0, 40) || '새 배경', name: '', sub: '',
       kindLabel: KIND_LABEL[active.kind], when: '', took: live ? `${sec}초째` : '', cost: wonOf(active.orderCostUsd ?? 0, rate), state: 'live' as const,
@@ -180,6 +231,20 @@ export default function BaeGyeongView() {
   const saveReview = async (j: BaeJob, v: BaeReviewView) => {
     useBaeJobs.getState().putLocal({ ...j, selfReview: { ...v }, updatedAt: new Date().toISOString() });
     try { await baeGw().jobPatch(j.id, j.status, { selfReview: { ...v } }); toast.success('검수를 남겼어요'); } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
+  };
+  /** 팀 기록 한 건 (검수자): 도장 칸이 오른쪽에. 다른 사람의 원본은 이 PC 에 없어서 PNG 저장 · 다듬기는 내 작업일 때만. */
+  const teamJobView = (j: BaeJob) => {
+    const mine = j.userId === currentUser?.id;
+    const p = jobViewProps(j, rate, mine ? localTeam : null, {
+      backLabel: '팀 기록으로', onBack: () => setTeamSel(null),
+      onSave: mine ? () => { void saveAs(j.id, j.name ?? ''); } : undefined,
+      review: null,
+      onNoise: mine ? () => noiseFor(targetOf(j), localTeam, j, j.name ?? '') : undefined,
+      onLock: mine ? () => { const t = targetOf(j); if (t) void tools.toggleLock(t); } : undefined,
+      onUseBase: () => useBaseFrom((mine ? localTeam : null) ?? j.images.result ?? null),
+      onLater: (tool) => toast.message(LATER[tool]),
+    }, tools.busy[j.id]);
+    return { ...p, result: p.result && !mine ? { ...p.result, tools: null } : p.result, stamp: stampFor(j) };
   };
 
   if (error) {
@@ -251,7 +316,10 @@ export default function BaeGyeongView() {
             log={log((id) => setSelId(id === active?.id ? null : id), '작업판에 올리기')}
           />
         ))}
-      {activeTab === 'records' && (recordPicked
+      {activeTab === 'records' && recScope === 'team' && access.canReview && currentUser && (teamPicked
+        ? <JobView {...teamJobView(teamPicked)} />
+        : <TeamRecords scope={scopeSeg} rate={rate} actorId={currentUser.id} selectedId={teamSel} onPick={(id) => setTeamSel(id)} />)}
+      {activeTab === 'records' && !(recScope === 'team' && access.canReview) && (recordPicked
         ? <JobView {...jobViewProps(recordPicked, rate, localRec, {
           backLabel: '기록으로', onBack: () => setRecSel(null), onSave: () => { void saveAs(recordPicked.id, recordPicked.name ?? ''); },
           review: recordPicked.userId === currentUser?.id && recordPicked.status === 'done' ? { value: reviewOf(recordPicked), onSave: (v) => { void saveReview(recordPicked, v); } } : null,
@@ -259,13 +327,9 @@ export default function BaeGyeongView() {
           onLock: () => { const t = targetOf(recordPicked); if (t) void tools.toggleLock(t); },
           onUseBase: () => useBaseFrom(localRec ?? recordPicked.images.result ?? null),
           onLater: (tool) => toast.message(LATER[tool]),
-        }, tools.busy[recordPicked.id])} />
-        : <RecordList {...log((id) => setRecSel(id), '자세히 보기')} title="내 기록" onAll={undefined} />)}
-      {activeTab === 'costs' && (
-        <section className="bae-log" aria-label="비용">
-          <div className="bae-log-msg"><p className="bae-msg-title">팀 비용 표는 8단계에서 열려요</p><p className="bae-msg-text">이번 달 내 사용: {usage?.images ?? 0}장 · {wonOf(usage?.usd ?? 0, rate)}</p></div>
-        </section>
-      )}
+        }, tools.busy[recordPicked.id])} stamp={stampFor(recordPicked)} />
+        : <RecordList {...log((id) => setRecSel(id), '자세히 보기')} title="내 기록" onAll={undefined} scope={scopeSeg} />)}
+      {activeTab === 'costs' && access.canReview && <CostTab rate={rate} />}
       {activeTab === 'settings' && <BaeSettingsTab />}
       <input ref={denoiseFileRef} className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
         onChange={(e) => { const f = imageOf(e.target.files ? Array.from(e.target.files) : null); e.target.value = ''; if (f) void tools.openDenoise({ blob: f, label: f.name }); }} />

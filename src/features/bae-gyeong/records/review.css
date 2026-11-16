@@ -1,0 +1,103 @@
+/*
+ * BAE경 8단계: 팀 기록 · 확인 도장 · 비용 표 (계획 14 6-1 · 6-2). 기록 목록(bench.css)과 같은 모양 위에 얹는다.
+ * 색은 Bflow 토큰과 .bae-root 의 BAE경 색(라이트에서 다시 정해짐)만. 움직임은 색 바뀜뿐, '움직임: 최소'에서는 없앤다.
+ */
+
+/* '내 기록 | 팀 기록' — 기록 머리의 제목 자리 */
+.bae-scope .bae-btn { font-weight: 600; }
+
+/* 새 도장 표시 (내 기록 · 한 건 보기) */
+.bae-fresh {
+  display: inline-flex; align-items: center; height: 18px; margin-left: 6px; padding: 0 6px; border-radius: 999px;
+  background: rgb(var(--color-accent)); color: #fff; font-size: 0.6875rem; font-weight: 600; line-height: 1; vertical-align: 1px; white-space: nowrap;
+}
+.bae-stamp-cell { display: inline-flex; align-items: center; gap: 2px; }
+
+/* 팀 기록 — 목록 보기: 고르기 · 그림 · 설명 · 만든 사람 · 종류 · 언제 · 비용 · 도장 */
+.bae-rtable.is-team .bae-rtr { grid-template-columns: 24px 80px minmax(0, 1fr) 96px 104px 132px 68px 104px; }
+.bae-pick-cell { justify-content: center; }
+.bae-pick { width: 16px; height: 16px; margin: 0; accent-color: rgb(var(--color-accent)); cursor: pointer; }
+.bae-shotcell { position: relative; }
+.bae-pick-shot { position: absolute; top: 10px; right: 10px; z-index: 1; width: 18px; height: 18px; }
+.bae-shotcell.is-picked .bae-shotbtn { border-color: rgb(var(--color-accent)); }
+.bae-maker { overflow: hidden; max-width: 7em; font-weight: 500; color: rgb(var(--color-text-primary)); text-overflow: ellipsis; }
+.bae-state.is-none { color: rgb(var(--color-text-secondary)); font-weight: 400; }
+
+/* 거르기 줄 */
+.bae-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 10px; background: rgb(var(--color-bg-card)); }
+.bae-filter { display: inline-flex; align-items: center; gap: 6px; }
+.bae-select {
+  height: var(--bae-control-s); padding: 0 28px 0 10px; border: 1px solid rgb(var(--bae-field-edge)); border-radius: 8px;
+  background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); font-size: 0.8125rem; cursor: pointer;
+}
+.bae-select:focus-visible, .bae-pick:focus-visible, .bae-check input:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-toggle[aria-pressed="true"] { border-color: color-mix(in srgb, rgb(var(--color-accent)) 35%, rgb(var(--color-bg-card))); background: color-mix(in srgb, rgb(var(--color-accent)) 10%, rgb(var(--color-bg-card))); color: rgb(var(--bae-accent-text)); }
+.bae-filters-end { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-left: auto; }
+.bae-check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: rgb(var(--color-text-secondary)); cursor: pointer; white-space: nowrap; }
+.bae-check input { width: 16px; height: 16px; margin: 0; accent-color: rgb(var(--color-accent)); }
+.bae-more { display: flex; justify-content: center; padding: 8px 0; }
+
+/* 확인 도장 칸 (한 건 보기 오른쪽) */
+.bae-stampbox { gap: 10px; padding: 14px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 10px; background: rgb(var(--color-bg-card)); }
+.bae-stamp-now { display: flex; flex-direction: column; gap: 4px; }
+.bae-seal.bae-seal-l { width: 36px; height: 36px; }
+.bae-stamp-big { font-size: 1rem; font-weight: 700; }
+.bae-stamp-who { margin: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-stamp-note { margin: 0; font-size: 0.8125rem; line-height: 1.5; color: rgb(var(--color-text-primary)); overflow-wrap: anywhere; }
+.bae-stamp-now.is-again .bae-stamp-note { padding: 6px 8px; border-left: 2px solid rgb(var(--bae-warn)); border-radius: 0 6px 6px 0; background: color-mix(in srgb, rgb(var(--bae-warn)) 9%, rgb(var(--color-bg-card))); }
+.bae-stamp-edit { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgb(var(--color-bg-border)); }
+.bae-stamp-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.bae-stamp-btn { gap: 6px; padding: 0 8px; }
+.bae-stamp-btn .bae-seal { width: 18px; height: 18px; }
+.bae-stamp-btn .bae-seal-cut { stroke: rgb(var(--color-bg-card)); }
+.bae-stamp-btn.is-seen .bae-seal { color: rgb(var(--color-text-secondary)); }
+.bae-stamp-btn.is-good .bae-seal { color: rgb(var(--bae-accent-text)); }
+.bae-stamp-btn.is-again .bae-seal { color: rgb(var(--bae-warn)); }
+.bae-stamp-btn[aria-pressed="true"] { border-color: currentColor; }
+.bae-stamp-btn.is-seen[aria-pressed="true"] { color: rgb(var(--color-text-primary)); background: color-mix(in srgb, rgb(var(--color-text-secondary)) 14%, rgb(var(--color-bg-card))); }
+.bae-stamp-btn.is-good[aria-pressed="true"] { color: rgb(var(--bae-accent-text)); background: color-mix(in srgb, rgb(var(--color-accent)) 14%, rgb(var(--color-bg-card))); }
+.bae-stamp-btn.is-again[aria-pressed="true"] { color: rgb(var(--bae-warn)); background: color-mix(in srgb, rgb(var(--bae-warn)) 12%, rgb(var(--color-bg-card))); }
+.bae-stamp-memo { display: flex; flex-direction: column; gap: 4px; }
+.bae-stamp-warn { margin: 0; font-size: 0.75rem; }
+.bae-stamp.is-off { color: rgb(var(--color-text-secondary)); font-weight: 400; }
+.bae-stamp-hist > summary { display: flex; align-items: center; gap: 6px; min-height: 28px; font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-text-secondary)); cursor: pointer; list-style: none; }
+.bae-stamp-hist > summary::-webkit-details-marker { display: none; }
+.bae-stamp-hist > summary::before { content: ""; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid currentColor; transition: transform var(--motion-fast) var(--ease-snap); }
+.bae-stamp-hist[open] > summary::before { transform: rotate(90deg); }
+.bae-stamp-hist > summary:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 4px; }
+.bae-stamp-hist ol { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 0; padding: 0; list-style: none; }
+.bae-stamp-hist li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-top: 8px; border-top: 1px solid rgb(var(--color-bg-border)); }
+.bae-stamp-hist li .bae-seal { width: 18px; height: 18px; }
+.bae-stamp-hist .bae-stamp-note { flex-basis: 100%; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+
+/* 비용 탭 */
+.bae-cost-cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+.bae-cost-card { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 14px 16px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 10px; background: rgb(var(--color-bg-card)); }
+.bae-cost-card dt { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-cost-card dd { margin: 0; }
+.bae-cost-big { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.01em; }
+.bae-cost-kinds { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-top: 2px; }
+.bae-cost-kind { display: inline-flex; align-items: baseline; gap: 6px; font-size: 0.875rem; font-weight: 600; }
+.bae-cost-check { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 0.75rem; }
+.bae-cost-check.is-ok { color: rgb(var(--bae-ok)); }
+.bae-cost-check.is-bad { color: rgb(var(--bae-error)); }
+.bae-cost-scroll { overflow-x: auto; border: 1px solid rgb(var(--color-bg-border)); border-radius: 10px; background: rgb(var(--color-bg-card)); }
+.bae-cost-scroll:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-cost-table { min-width: 100%; width: max-content; }
+.bae-cost-table th, .bae-cost-table td { white-space: nowrap; }
+.bae-cost-table td.c-num, .bae-cost-table th.c-num { text-align: right; }
+.bae-cost-table td.is-empty { color: rgb(var(--color-text-secondary)); opacity: 0.6; }
+.bae-cost-name { position: sticky; left: 0; z-index: 1; min-width: 96px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); font-weight: 500; text-align: left; }
+.bae-cost-table thead .bae-cost-name { color: rgb(var(--color-text-secondary)); }
+.bae-cost-sum { font-weight: 600; }
+.bae-cost-table tfoot th, .bae-cost-table tfoot td { border-bottom: 0; border-top: 1px solid rgb(var(--color-bg-border)); font-weight: 600; }
+
+@media (max-width: 1100px) {
+  .bae-rtable.is-team .bae-rtr { grid-template-columns: 24px 80px minmax(0, 1fr) 96px 68px 104px; }
+  .bae-rtable.is-team .c-kind, .bae-rtable.is-team .c-when { display: none; }
+  .bae-cost-cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .bae-cost-cards .bae-cost-card:last-child { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bae-stamp-hist > summary::before { transition: none; }
+}

@@ -7,9 +7,13 @@ import { parseBaeAccess, parseBaeMembers, type BaeAccess, type BaeMember, type B
 import { isBaeSettingKey, type BaeSettingKey, type BaeSettingRow } from '../../src/shared/bae/settings';
 import { maskSecrets, parseBaeKeyStatus, type BaeKeyStatus } from '../../src/shared/bae/secrets';
 import {
-  parseBaeJob, parseBaeJobPage, parseBaeUsageSummary,
-  type BaeJob, type BaeJobPage, type BaeJobWrite, type BaeUsageLine, type BaeUsageSummary,
+  parseBaeJob, parseBaeJobPage, parseBaeTeamPage, parseBaeUsageSummary,
+  type BaeJob, type BaeJobPage, type BaeJobWrite, type BaeTeamCursor, type BaeTeamFilter, type BaeTeamPage, type BaeUsageLine, type BaeUsageSummary,
 } from '../../src/shared/bae/jobs';
+import {
+  parseBaeStampBulk, parseBaeStampEvents, parseBaeStampUnseen, parseBaeUsageTeam,
+  type BaeCostBucket, type BaeStamp, type BaeStampBulkResult, type BaeStampEvent, type BaeStampUnseen, type BaeUsageTeam,
+} from '../../src/shared/bae/review';
 
 export interface BaeRpcClient {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>;
@@ -71,6 +75,20 @@ export function createBaeStore(client: BaeRpcClient, sessions: BaeSessionResolve
       call(actorId, 'bae_gyeong_session_usage_log', { p_row: line }, (d) => ({ duplicate: !!(d && (d as Record<string, unknown>).duplicate) })),
     usageSummary: (actorId: string, from: string | null, to: string | null): Promise<BaeUsageSummary> =>
       call(actorId, 'bae_gyeong_session_usage_summary', { p_from: from, p_to: to }, parseBaeUsageSummary),
+    // ── 관리자 화면 (8단계): 팀 기록 · 확인 도장 · 새 도장 숫자 · 팀 비용. 검수자인지는 서버가 정한다. ──
+    jobFindTeam: (actorId: string, filter: BaeTeamFilter, before: BaeTeamCursor | null, limit = 60): Promise<BaeTeamPage> =>
+      call(actorId, 'bae_gyeong_session_job_find_team', { p_filter: filter, p_before: before, p_limit: limit }, parseBaeTeamPage),
+    jobStamp: (actorId: string, jobId: string, stamp: BaeStamp | null, note: string | null): Promise<BaeJob> =>
+      call(actorId, 'bae_gyeong_session_job_stamp', { p_job_id: jobId, p_stamp: stamp, p_note: note }, parseBaeJob),
+    jobStampBulk: (actorId: string, jobIds: string[]): Promise<BaeStampBulkResult> =>
+      call(actorId, 'bae_gyeong_session_job_stamp_bulk', { p_job_ids: jobIds, p_stamp: 'seen' }, parseBaeStampBulk),
+    jobStamps: (actorId: string, jobId: string): Promise<BaeStampEvent[]> =>
+      call(actorId, 'bae_gyeong_session_job_stamps', { p_job_id: jobId }, parseBaeStampEvents),
+    stampUnseen: (actorId: string): Promise<BaeStampUnseen> => call(actorId, 'bae_gyeong_session_stamp_unseen', {}, parseBaeStampUnseen),
+    stampSeen: (actorId: string, upto: number | null): Promise<BaeStampUnseen> =>
+      call(actorId, 'bae_gyeong_session_stamp_seen', { p_upto: upto }, parseBaeStampUnseen),
+    usageTeam: (actorId: string, from: string | null, to: string | null, bucket: BaeCostBucket): Promise<BaeUsageTeam> =>
+      call(actorId, 'bae_gyeong_session_usage_team', { p_from: from, p_to: to, p_bucket: bucket }, parseBaeUsageTeam),
   };
 }
 export type BaeStore = ReturnType<typeof createBaeStore>;

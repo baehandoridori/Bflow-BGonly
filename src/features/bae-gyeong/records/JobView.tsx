@@ -3,6 +3,7 @@
 import { AlertTriangle, ArrowLeft, CopyPlus, Download, Layers, Loader2, Rotate3d, Scaling } from 'lucide-react';
 import type { BaeJobViewProps } from '../home/benchTypes';
 import { FactsDl, InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ResultTools, ReviewPanel } from '../home/BenchParts';
+import { StampPanel } from './StampPanel';
 import '../home/bench.css';
 import '../windows/bae-stage3.css';
 
@@ -103,6 +104,7 @@ export function JobView(p: BaeJobViewProps) {
 
         <div className="bae-view-side">
           <FactsDl facts={p.facts} />
+          {p.stamp ? <StampPanel v={p.stamp} /> : null}
           {p.review ? <ReviewPanel value={p.review.value} startOpen={p.review.startOpen} saving={p.review.saving} onSave={p.review.onSave} /> : null}
           {p.onSave && p.result ? (
             <div className="bae-tool-group bae-end" role="group" aria-labelledby="bae-jv-out">

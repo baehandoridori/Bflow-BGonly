@@ -152,6 +152,82 @@ export function mergeBaeJobs(have: BaeJob[], got: BaeJob[]): BaeJob[] {
   }
   return [...byId.values()].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
 }
+// ── 팀 기록 (8단계, 서버 bae_gyeong_session_job_find_team 의 짝) ──
+/** 팀 기록 거르기: 사람 · 기간(만든 때 from 이상 to 미만) · 종류 · 도장 없음(끝났고 도장이 없음) · 찾는 말(이름 · 설명 · PD 요약 · 영어 주문서). */
+export interface BaeTeamFilter { userId?: string | null; from?: string | null; to?: string | null; kind?: BaeJobKind | null; unstamped?: boolean; q?: string }
+/** 다음 쪽 위치: 서버가 준 마지막 줄의 createdAt · id 그대로 (글자를 바꾸지 않고 돌려준다). */
+export interface BaeTeamCursor { createdAt: string; id: string }
+export interface BaeTeamPage { rows: BaeJob[]; more: boolean; next: BaeTeamCursor | null; serverTime: string }
+
+const isIsoTime = (v: unknown) => typeof v === 'string' && v.length <= 40 && Number.isFinite(Date.parse(v));
+export function baeTeamFilterProblem(v: unknown): string | null {
+  const f = v as Record<string, unknown> | null;
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return '팀 기록 거르기 값이 올바르지 않아요.';
+  const known = ['userId', 'from', 'to', 'kind', 'unstamped', 'q'];
+  if (Object.keys(f).some((k) => !known.includes(k))) return '팀 기록 거르기 값이 올바르지 않아요.';
+  if (f.userId != null && (typeof f.userId !== 'string' || f.userId.length > 200)) return '팀 기록 거르기 값이 올바르지 않아요.';
+  if ((f.from != null && !isIsoTime(f.from)) || (f.to != null && !isIsoTime(f.to))) return '팀 기록 기간이 올바르지 않아요.';
+  if (f.kind != null && !(BAE_JOB_KINDS as readonly unknown[]).includes(f.kind)) return '팀 기록 거르기 값이 올바르지 않아요.';
+  if (f.unstamped != null && typeof f.unstamped !== 'boolean') return '팀 기록 거르기 값이 올바르지 않아요.';
+  if (f.q != null && (typeof f.q !== 'string' || f.q.trim().length > 100)) return '찾는 말은 100자까지 쓸 수 있어요.';
+  return null;
+}
+export function baeTeamCursorProblem(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  const c = v as Record<string, unknown>;
+  return typeof c === 'object' && isIsoTime(c.createdAt) && isBaeJobId(c.id) && Object.keys(c).length === 2 ? null : '팀 기록 위치가 올바르지 않아요.';
+}
+export function parseBaeTeamPage(v: unknown): BaeTeamPage {
+  const r = obj(v);
+  if (!Array.isArray(r.rows) || r.rows.length > 200) throw new Error('BAE경 팀 기록이 올바르지 않아요.');
+  const n = obj(r.next);
+  const next = typeof n.createdAt === 'string' && isBaeJobId(n.id) ? { createdAt: n.createdAt, id: n.id } : null;
+  return { rows: r.rows.map(parseBaeJob), more: r.more === true && !!next, next: r.more === true ? next : null, serverTime: str(r.serverTime) ?? '' };
+}
+/** 팀 기록 줄 순서: 만든 때가 늦은 것부터 (같으면 id 큰 것부터 — 서버와 같음). */
+export function sortBaeTeamRows(rows: BaeJob[]): BaeJob[] {
+  return [...rows].sort((a, b) => (a.createdAt !== b.createdAt ? (a.createdAt < b.createdAt ? 1 : -1) : a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+}
+/** 글이 아닌 거르기(사람 · 기간 · 종류 · 도장 없음)에 맞는지. 시각은 같은 모양이 아닐 수 있어 수로 견준다. */
+function baeTeamRowFits(j: BaeJob, f: BaeTeamFilter): boolean {
+  const made = Date.parse(j.createdAt);
+  if (f.userId && j.userId !== f.userId) return false;
+  if (f.kind && j.kind !== f.kind) return false;
+  if (f.from && !(made >= Date.parse(f.from))) return false;
+  if (f.to && !(made < Date.parse(f.to))) return false;
+  if (f.unstamped && (j.stamp !== null || !isBaeJobFinished(j.status))) return false;
+  return true;
+}
+/**
+ * 받은 줄이 거르기에 맞는지 (화면에서 고칠 수 있는 만큼). 찾는 말은 이름과 설명에서만 본다 — 주문서 글은 목록에 없어서 서버만 본다.
+ */
+export function baeTeamRowMatches(j: BaeJob, f: BaeTeamFilter): boolean {
+  if (!baeTeamRowFits(j, f)) return false;
+  const q = (f.q ?? '').trim().toLowerCase();
+  return !q || `${j.name ?? ''}\n${j.summary.request ?? ''}`.toLowerCase().includes(q);
+}
+/**
+ * 'jobs' 신호로 받은 바뀐 줄(서버 job_list_team 의 '바뀐 것만')을 지금 보이는 팀 목록에 끼워 넣는다.
+ * - 이미 있는 줄: 글이 아닌 거르기에 아직 맞으면 새것으로, 아니면 뺀다 (예: '도장 없음'에서 도장을 받은 줄). 찾는 말은 서버가 이미 본 줄이라 다시 보지 않는다.
+ * - 없던 줄: 거르기에 맞고, 다 받은 목록이거나 받은 줄 중 가장 오래된 것보다 나중에 만든 것만 (아직 받지 않은 아래쪽 쪽에 속한 줄은 넣지 않는다).
+ */
+export function mergeBaeTeamRows(have: BaeJob[], changed: BaeJob[], f: BaeTeamFilter, complete: boolean): BaeJob[] {
+  const byId = new Map(have.map((j) => [j.id, j] as const));
+  let oldest = Infinity;
+  for (const j of have) { const t = Date.parse(j.createdAt); if (t < oldest) oldest = t; }
+  for (const c of changed) {
+    const old = byId.get(c.id);
+    if (old) {
+      if (old.updatedAt > c.updatedAt) continue;
+      if (baeTeamRowFits(c, f)) byId.set(c.id, old.pd && !c.pd ? { ...c, pd: old.pd, stampBy: old.stampBy, stampNote: old.stampNote } : c);
+      else byId.delete(c.id);
+    } else if (baeTeamRowMatches(c, f) && (complete || Date.parse(c.createdAt) >= oldest)) {
+      byId.set(c.id, c);
+    }
+  }
+  return sortBaeTeamRows([...byId.values()]);
+}
+
 /** 다음 '바뀐 것만' 요청의 커서: 가진 것 중 가장 늦은 updated_at 에서 2분 겹침 (늦게 커밋된 줄 대비). */
 export function baeJobCursor(rows: BaeJob[]): string | null {
   let max = '';
