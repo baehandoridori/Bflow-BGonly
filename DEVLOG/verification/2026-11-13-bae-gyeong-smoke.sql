@@ -33,7 +33,7 @@ BEGIN
   n := COALESCE((SELECT revision FROM public.bae_gyeong_settings WHERE key = 'guidance'), 0);
   r := public.bae_gyeong_session_settings_save(t_admin, 'guidance', '{"text":"smoke"}'::jsonb, n);
   IF (r->>'revision')::int <> n + 1 THEN RAISE EXCEPTION 'revision wrong'; END IF;
-  BEGIN PERFORM public.bae_gyeong_session_settings_save(t_admin, 'guidance', '{"text":"smoke2"}'::jsonb, n); RAISE EXCEPTION 'stale save passed'; EXCEPTION WHEN serialization_failure THEN NULL; END;
+  BEGIN PERFORM public.bae_gyeong_session_settings_save(t_admin, 'guidance', '{"text":"smoke2"}'::jsonb, n); RAISE EXCEPTION 'stale save passed'; EXCEPTION WHEN SQLSTATE 'PT409' THEN NULL; END;
   BEGIN PERFORM public.bae_gyeong_session_settings_save(t_user, 'guidance', '{"text":"x"}'::jsonb, n + 1); RAISE EXCEPTION 'user saved settings'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 
   -- 4. 키: 상태에는 글자가 없고, 권리가 없으면 못 받음 (가짜 키로만)

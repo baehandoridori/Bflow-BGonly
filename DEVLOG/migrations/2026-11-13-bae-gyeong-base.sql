@@ -203,7 +203,10 @@ BEGIN
  END IF;
  IF p_expected_revision IS NULL OR p_expected_revision < 0 THEN RAISE EXCEPTION '설정 판 번호가 올바르지 않습니다.' USING ERRCODE = '22023'; END IF;
  SELECT * INTO cur FROM public.bae_gyeong_settings WHERE key = p_key FOR UPDATE;
- IF COALESCE(cur.revision, 0) <> p_expected_revision THEN RAISE EXCEPTION '다른 관리자가 먼저 바꿨습니다. 다시 불러와 주세요.' USING ERRCODE = '40001'; END IF;
+ -- Not 40001 (serialization_failure): the Data API retries that code on its own, about once a second, and the caller
+ -- never gets an answer (seen on the dev branch 2026-11-16: one stale save ran 360+ times in 6 minutes until the
+ -- connection was cut). PT409 is answered at once as HTTP 409 with this message.
+ IF COALESCE(cur.revision, 0) <> p_expected_revision THEN RAISE EXCEPTION '다른 관리자가 먼저 바꿨습니다. 다시 불러와 주세요.' USING ERRCODE = 'PT409'; END IF;
  next_rev := COALESCE(cur.revision, 0) + 1;
  INSERT INTO public.bae_gyeong_settings(key, value, revision, updated_by, updated_at) VALUES (p_key, p_value, next_rev, actor, now())
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, revision = EXCLUDED.revision, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at;

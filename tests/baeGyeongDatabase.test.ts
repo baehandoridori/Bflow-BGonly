@@ -22,6 +22,9 @@ test('every table is closed (RLS on, no policy) and only the session wrappers ar
   // the actor comes from the session token, never from an id the caller sends
   assert.doesNotMatch(sql, /p_actor_id|p_user_name/);
   assert.match(sql, /public\.app_session_user_id\(p_session_token\)/);
+  // a conflict is never raised with a code the Data API retries by itself (40001 · 40P01): the caller would wait
+  // forever while the server repeats the call about once a second (dev branch, 2026-11-16)
+  assert.doesNotMatch(sql, /ERRCODE\s*=\s*'40(001|P01)'/);
 });
 
 const tokens = { admin: 'a'.repeat(64), member: 'b'.repeat(64), reviewer: 'c'.repeat(64), outsider: 'd'.repeat(64) };
@@ -85,7 +88,7 @@ test('the base file runs: rights, revisions, the key vault and contentless signa
       await assert.rejects(rpc(db, 'bae_gyeong_session_settings_save', 'member', ',$2,$3::jsonb,$4', ['manual', JSON.stringify({ text: '# BAE PD manual v1.7' }), 0]), /관리자만/);
       const r1 = await rpc(db, 'bae_gyeong_session_settings_save', 'admin', ',$2,$3::jsonb,$4', ['manual', JSON.stringify({ text: '# BAE PD manual v1.7\nA' }), 0]);
       assert.equal(r1.revision, 1);
-      await assert.rejects(rpc(db, 'bae_gyeong_session_settings_save', 'admin', ',$2,$3::jsonb,$4', ['manual', JSON.stringify({ text: '# BAE PD manual v1.8\nB' }), 0]), /먼저 바꿨습니다/);
+      await assert.rejects(rpc(db, 'bae_gyeong_session_settings_save', 'admin', ',$2,$3::jsonb,$4', ['manual', JSON.stringify({ text: '# BAE PD manual v1.8\nB' }), 0]), (e: { code?: string; message?: string }) => e.code === 'PT409' && /먼저 바꿨습니다/.test(e.message ?? ''));
       const r2 = await rpc(db, 'bae_gyeong_session_settings_save', 'admin', ',$2,$3::jsonb,$4', ['manual', JSON.stringify({ text: '# BAE PD manual v1.8\nB' }), 1]);
       assert.equal(r2.revision, 2);
       await assert.rejects(rpc(db, 'bae_gyeong_session_settings_save', 'admin', ',$2,$3::jsonb,$4', ['nope', JSON.stringify({}), 0]), /알 수 없는/);
