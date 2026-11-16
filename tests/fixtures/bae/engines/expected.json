@@ -1,0 +1,1002 @@
+{
+ "source": "BAE경 v0.4.11 script_4.js COLOR_WORKER_SRC / NOISE_WORKER_SRC (evaluated with a fake self)",
+ "inputs": {
+  "base": {
+   "file": "base_a.rgba.gz",
+   "w": 160,
+   "h": 90,
+   "bytes": 19503
+  },
+  "result": {
+   "file": "result_h2.rgba.gz",
+   "w": 168,
+   "h": 112,
+   "bytes": 16279
+  },
+  "noise": {
+   "file": "noise_leaves.rgba.gz",
+   "w": 256,
+   "h": 160,
+   "bytes": 60137
+  },
+  "noise2": {
+   "file": "noise_gradient.rgba.gz",
+   "w": 224,
+   "h": 168,
+   "bytes": 36906
+  }
+ },
+ "palette": [
+  {
+   "name": "base, autoSwatches opts",
+   "input": "base",
+   "opts": {
+    "top": 6
+   },
+   "colors": [
+    {
+     "rgb": [
+      232,
+      201,
+      154
+     ],
+     "share": 0.332,
+     "L": 83
+    },
+    {
+     "rgb": [
+      245,
+      243,
+      225
+     ],
+     "share": 0.234,
+     "L": 96
+    },
+    {
+     "rgb": [
+      149,
+      73,
+      55
+     ],
+     "share": 0.061,
+     "L": 40
+    },
+    {
+     "rgb": [
+      235,
+      229,
+      204
+     ],
+     "share": 0.057,
+     "L": 91
+    },
+    {
+     "rgb": [
+      209,
+      210,
+      211
+     ],
+     "share": 0.027,
+     "L": 84
+    },
+    {
+     "rgb": [
+      178,
+      220,
+      252
+     ],
+     "share": 0.026,
+     "L": 86
+    }
+   ]
+  },
+  {
+   "name": "base, parts skipped",
+   "input": "base",
+   "opts": {
+    "skip": [
+     [
+      0.33,
+      0.5,
+      0.5,
+      0.66
+     ],
+     [
+      0.7,
+      0.05,
+      0.95,
+      0.4
+     ]
+    ],
+    "top": 6
+   },
+   "colors": [
+    {
+     "rgb": [
+      232,
+      201,
+      154
+     ],
+     "share": 0.376,
+     "L": 83
+    },
+    {
+     "rgb": [
+      245,
+      243,
+      225
+     ],
+     "share": 0.261,
+     "L": 96
+    },
+    {
+     "rgb": [
+      235,
+      229,
+      204
+     ],
+     "share": 0.068,
+     "L": 91
+    },
+    {
+     "rgb": [
+      149,
+      73,
+      55
+     ],
+     "share": 0.049,
+     "L": 40
+    },
+    {
+     "rgb": [
+      188,
+      167,
+      142
+     ],
+     "share": 0.025,
+     "L": 70
+    },
+    {
+     "rgb": [
+      219,
+      214,
+      205
+     ],
+     "share": 0.02,
+     "L": 86
+    }
+   ]
+  },
+  {
+   "name": "result, autoSwatches opts",
+   "input": "result",
+   "opts": {
+    "top": 6
+   },
+   "colors": [
+    {
+     "rgb": [
+      245,
+      244,
+      224
+     ],
+     "share": 0.206,
+     "L": 96
+    },
+    {
+     "rgb": [
+      57,
+      56,
+      61
+     ],
+     "share": 0.199,
+     "L": 24
+    },
+    {
+     "rgb": [
+      237,
+      230,
+      211
+     ],
+     "share": 0.179,
+     "L": 91
+    },
+    {
+     "rgb": [
+      235,
+      199,
+      146
+     ],
+     "share": 0.149,
+     "L": 82
+    },
+    {
+     "rgb": [
+      197,
+      153,
+      108
+     ],
+     "share": 0.067,
+     "L": 66
+    },
+    {
+     "rgb": [
+      223,
+      214,
+      191
+     ],
+     "share": 0.05,
+     "L": 86
+    }
+   ]
+  },
+  {
+   "name": "result, part colors opts",
+   "input": "result",
+   "opts": {
+    "k": 8,
+    "top": 2,
+    "minShare": 0.12,
+    "minL": 0
+   },
+   "colors": [
+    {
+     "rgb": [
+      245,
+      244,
+      224
+     ],
+     "share": 0.392,
+     "L": 96
+    },
+    {
+     "rgb": [
+      57,
+      56,
+      61
+     ],
+     "share": 0.202,
+     "L": 24
+    }
+   ]
+  },
+  {
+   "name": "noise crop, defaults",
+   "input": "noise",
+   "opts": {},
+   "colors": [
+    {
+     "rgb": [
+      244,
+      242,
+      223
+     ],
+     "share": 0.373,
+     "L": 95
+    },
+    {
+     "rgb": [
+      90,
+      119,
+      68
+     ],
+     "share": 0.152,
+     "L": 47
+    },
+    {
+     "rgb": [
+      119,
+      152,
+      74
+     ],
+     "share": 0.138,
+     "L": 59
+    },
+    {
+     "rgb": [
+      147,
+      71,
+      53
+     ],
+     "share": 0.082,
+     "L": 40
+    },
+    {
+     "rgb": [
+      107,
+      139,
+      72
+     ],
+     "share": 0.078,
+     "L": 54
+    },
+    {
+     "rgb": [
+      107,
+      61,
+      40
+     ],
+     "share": 0.058,
+     "L": 31
+    }
+   ]
+  }
+ ],
+ "lock": [
+  {
+   "name": "small (every pixel sampled)",
+   "scale": 1,
+   "w": 168,
+   "h": 112,
+   "sha256": "7c16451f22dd3cc5ce9fb4bb6acfccc0cb495542d037e15891d967a15b86f3cf",
+   "info": {
+    "flatA": 24,
+    "flat": 17,
+    "moved": [
+     {
+      "from": [
+       245,
+       244,
+       224
+      ],
+      "to": [
+       245,
+       243,
+       225
+      ],
+      "dE": 0.95,
+      "share": 0.207
+     },
+     {
+      "from": [
+       180,
+       221,
+       253
+      ],
+      "to": [
+       178,
+       220,
+       252
+      ],
+      "dE": 0.36,
+      "share": 0.021
+     },
+     {
+      "from": [
+       235,
+       199,
+       146
+      ],
+      "to": [
+       232,
+       201,
+       154
+      ],
+      "dE": 1.77,
+      "share": 0.149
+     }
+    ],
+    "kept": [
+     {
+      "rgb": [
+       57,
+       56,
+       61
+      ],
+      "dE": 26.6,
+      "share": 0.199,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       171,
+       130,
+       90
+      ],
+      "dE": 20.13,
+      "share": 0.021,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       125,
+       178,
+       132
+      ],
+      "dE": null,
+      "share": 0.011,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       228,
+       221,
+       208
+      ],
+      "dE": null,
+      "share": 0.01,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       197,
+       153,
+       108
+      ],
+      "dE": 12.93,
+      "share": 0.067,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       237,
+       230,
+       211
+      ],
+      "dE": 2.26,
+      "share": 0.177,
+      "why": "would merge with another surface"
+     },
+     {
+      "rgb": [
+       223,
+       214,
+       191
+      ],
+      "dE": 3.65,
+      "share": 0.049,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       247,
+       249,
+       250
+      ],
+      "dE": null,
+      "share": 0.01,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       204,
+       206,
+       204
+      ],
+      "dE": null,
+      "share": 0.007,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       251,
+       248,
+       237
+      ],
+      "dE": null,
+      "share": 0.006,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       212,
+       172,
+       126
+      ],
+      "dE": null,
+      "share": 0.008,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       232,
+       243,
+       252
+      ],
+      "dE": null,
+      "share": 0.008,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       216,
+       208,
+       196
+      ],
+      "dE": null,
+      "share": 0.013,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       201,
+       209,
+       216
+      ],
+      "dE": null,
+      "share": 0.007,
+      "why": "no match"
+     }
+    ]
+   }
+  },
+  {
+   "name": "x3 (sampling path)",
+   "scale": 3,
+   "w": 504,
+   "h": 336,
+   "sha256": "d05fbe0acf37e7b9f05e24dd5ef9f6a2bd8b55455820a7be25de453906a78ddf",
+   "info": {
+    "flatA": 24,
+    "flat": 18,
+    "moved": [
+     {
+      "from": [
+       246,
+       245,
+       225
+      ],
+      "to": [
+       245,
+       243,
+       225
+      ],
+      "dE": 1,
+      "share": 0.207
+     },
+     {
+      "from": [
+       235,
+       199,
+       146
+      ],
+      "to": [
+       232,
+       201,
+       154
+      ],
+      "dE": 1.77,
+      "share": 0.149
+     },
+     {
+      "from": [
+       178,
+       219,
+       251
+      ],
+      "to": [
+       178,
+       220,
+       252
+      ],
+      "dE": 0.32,
+      "share": 0.021
+     },
+     {
+      "from": [
+       237,
+       230,
+       211
+      ],
+      "to": [
+       232,
+       225,
+       211
+      ],
+      "dE": 2.26,
+      "share": 0.177
+     }
+    ],
+    "kept": [
+     {
+      "rgb": [
+       171,
+       130,
+       90
+      ],
+      "dE": 20.13,
+      "share": 0.025,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       58,
+       57,
+       62
+      ],
+      "dE": 26.44,
+      "share": 0.199,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       197,
+       153,
+       108
+      ],
+      "dE": 12.93,
+      "share": 0.067,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       223,
+       214,
+       191
+      ],
+      "dE": 3.65,
+      "share": 0.039,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       231,
+       242,
+       251
+      ],
+      "dE": null,
+      "share": 0.008,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       203,
+       211,
+       218
+      ],
+      "dE": null,
+      "share": 0.008,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       127,
+       179,
+       133
+      ],
+      "dE": null,
+      "share": 0.011,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       246,
+       248,
+       249
+      ],
+      "dE": null,
+      "share": 0.01,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       211,
+       170,
+       124
+      ],
+      "dE": null,
+      "share": 0.007,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       218,
+       214,
+       197
+      ],
+      "dE": null,
+      "share": 0.011,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       216,
+       205,
+       181
+      ],
+      "dE": null,
+      "share": 0.009,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       202,
+       204,
+       202
+      ],
+      "dE": null,
+      "share": 0.007,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       214,
+       207,
+       195
+      ],
+      "dE": null,
+      "share": 0.012,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       251,
+       248,
+       237
+      ],
+      "dE": null,
+      "share": 0.007,
+      "why": "no match"
+     }
+    ]
+   }
+  },
+  {
+   "name": "x11 (over 1.8M px: groups from every second pixel)",
+   "scale": 11,
+   "w": 1848,
+   "h": 1232,
+   "sha256": "a1c58889dba68608bbd0a2a9532c55dd5366c9b46f5b8973af9e30d250a20855",
+   "info": {
+    "flatA": 24,
+    "flat": 18,
+    "moved": [
+     {
+      "from": [
+       245,
+       244,
+       224
+      ],
+      "to": [
+       245,
+       243,
+       225
+      ],
+      "dE": 0.95,
+      "share": 0.208
+     },
+     {
+      "from": [
+       180,
+       221,
+       253
+      ],
+      "to": [
+       178,
+       220,
+       252
+      ],
+      "dE": 0.36,
+      "share": 0.021
+     },
+     {
+      "from": [
+       235,
+       199,
+       146
+      ],
+      "to": [
+       232,
+       201,
+       154
+      ],
+      "dE": 1.77,
+      "share": 0.148
+     },
+     {
+      "from": [
+       236,
+       229,
+       210
+      ],
+      "to": [
+       232,
+       225,
+       211
+      ],
+      "dE": 2.18,
+      "share": 0.181
+     }
+    ],
+    "kept": [
+     {
+      "rgb": [
+       215,
+       208,
+       196
+      ],
+      "dE": null,
+      "share": 0.011,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       57,
+       56,
+       61
+      ],
+      "dE": 26.6,
+      "share": 0.199,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       196,
+       152,
+       107
+      ],
+      "dE": 13.21,
+      "share": 0.067,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       126,
+       178,
+       132
+      ],
+      "dE": null,
+      "share": 0.011,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       232,
+       243,
+       252
+      ],
+      "dE": null,
+      "share": 0.008,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       222,
+       213,
+       190
+      ],
+      "dE": 3.86,
+      "share": 0.038,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       249,
+       246,
+       235
+      ],
+      "dE": null,
+      "share": 0.006,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       217,
+       213,
+       196
+      ],
+      "dE": null,
+      "share": 0.011,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       216,
+       205,
+       181
+      ],
+      "dE": null,
+      "share": 0.007,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       203,
+       205,
+       203
+      ],
+      "dE": null,
+      "share": 0.007,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       246,
+       248,
+       249
+      ],
+      "dE": null,
+      "share": 0.01,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       202,
+       210,
+       217
+      ],
+      "dE": null,
+      "share": 0.008,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       171,
+       130,
+       90
+      ],
+      "dE": 20.13,
+      "share": 0.025,
+      "why": "no match"
+     },
+     {
+      "rgb": [
+       212,
+       171,
+       125
+      ],
+      "dE": null,
+      "share": 0.007,
+      "why": "no match"
+     }
+    ]
+   }
+  }
+ ],
+ "denoise": [
+  {
+   "name": "plant leaves, sofa, floor of 소나무 거실",
+   "input": "noise",
+   "w": 256,
+   "h": 160,
+   "sha256": "3d0d7c8258b08faaee16cd3175fb67d7bac401c43ecd5ad0c735a55adfce0c73",
+   "info": {
+    "fills": 86,
+    "faint": 0,
+    "links": 2,
+    "leaks": 0,
+    "streaks": 10,
+    "snapped": 11,
+    "gradients": 0,
+    "origPx": 0.105,
+    "zone": 0.217,
+    "mixOk": 0.873
+   },
+   "steps": [
+    "색 읽기",
+    "경계 찾기",
+    "선 찾기",
+    "칸 나누기",
+    "샌 면 찾기",
+    "칠하기"
+   ]
+  },
+  {
+   "name": "air conditioner and wall (one gradient face)",
+   "input": "noise2",
+   "w": 224,
+   "h": 168,
+   "sha256": "236ded728da4bb0fc276d2a59cb6fe376c73e46ee57de05329173e8f332b293f",
+   "info": {
+    "fills": 24,
+    "faint": 4,
+    "links": 0,
+    "leaks": 0,
+    "streaks": 1,
+    "snapped": 1,
+    "gradients": 1,
+    "origPx": 0.025,
+    "zone": 0.131,
+    "mixOk": 0.995
+   },
+   "steps": [
+    "색 읽기",
+    "경계 찾기",
+    "선 찾기",
+    "칸 나누기",
+    "샌 면 찾기",
+    "칠하기"
+   ]
+  }
+ ]
+}

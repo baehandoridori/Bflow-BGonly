@@ -1,0 +1,2208 @@
+{
+ "engine": {
+  "electron": "33.4.11",
+  "chrome": "130.0.6723.191",
+  "mode": "gpu"
+ },
+ "summary": {
+  "cases": 10,
+  "images": 88,
+  "sameBytes": 88,
+  "samePixels": 88,
+  "sizeErrors": 0,
+  "worstMean": 0,
+  "worstMax": 0,
+  "sheetImages": 16,
+  "sheetSamePixels": 16,
+  "checks": 266,
+  "checksFailed": 0
+ },
+ "regression": {
+  "checks": [
+   [
+    "ok",
+    "new, no bases key = stage-2 HEAD"
+   ],
+   [
+    "ok",
+    "new, no bases order = stage-2 HEAD"
+   ],
+   [
+    "ok",
+    "new, no bases kinds = stage-2 HEAD"
+   ],
+   [
+    "ok",
+    "new, no bases shas = stage-2 HEAD"
+   ],
+   [
+    "ok",
+    "new, bases [] key = stage-2 HEAD"
+   ],
+   [
+    "ok",
+    "new, bases [] order = stage-2 HEAD"
+   ],
+   [
+    "ok",
+    "new, bases [] kinds = stage-2 HEAD"
+   ],
+   [
+    "ok",
+    "new, bases [] shas = stage-2 HEAD"
+   ],
+   [
+    "ok",
+    "place null without bases"
+   ]
+  ],
+  "kinds": "rough:,example:L2,example:L8,style:",
+  "images": 4
+ },
+ "cases": {
+  "place_a_base1": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "fdd53c6989817ddb",
+     "bflowSha16": "fdd53c6989817ddb",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "a283c663bb5bd9ef",
+     "bflowSha16": "a283c663bb5bd9ef",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "92839e36e934afac",
+     "bflowSha16": "92839e36e934afac",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x864",
+      "1536x864"
+     ],
+     "htmlSha16": "7222905ac6c50ac0",
+     "bflowSha16": "7222905ac6c50ac0",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] basebg png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "a283c663bb5bd9ef",
+     "bflowSha16": "a283c663bb5bd9ef",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.007425938414820229 = HTML Board.paintShare 0.007425938414820229"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"\""
+    ],
+    [
+     "ok",
+     "rough.hasColor false"
+    ],
+    [
+     "ok",
+     "rough.tilt 0"
+    ],
+    [
+     "ok",
+     "rough.noteCount 0"
+    ],
+    [
+     "ok",
+     "rough.painted false"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x864"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted base/1/false"
+    ],
+    [
+     "ok",
+     "place items 1"
+    ],
+    [
+     "ok",
+     "place[0] meta basebg 기준 배경 \"\" 1536x1024"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 3"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] basebg"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] style"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ]
+   ]
+  },
+  "place_b_base3": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "fdd53c6989817ddb",
+     "bflowSha16": "fdd53c6989817ddb",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "rough.annotated",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "1c1e01c56e1ca924",
+     "bflowSha16": "1c1e01c56e1ca924",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "a283c663bb5bd9ef",
+     "bflowSha16": "a283c663bb5bd9ef",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "92839e36e934afac",
+     "bflowSha16": "92839e36e934afac",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[1] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "40d9c5ce8efc750f",
+     "bflowSha16": "40d9c5ce8efc750f",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[1] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "7003d75d0128f6d4",
+     "bflowSha16": "7003d75d0128f6d4",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[2] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "208aabd13233a6e8",
+     "bflowSha16": "208aabd13233a6e8",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[2] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "bf7af617dce2eee8",
+     "bflowSha16": "bf7af617dce2eee8",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x864",
+      "1536x864"
+     ],
+     "htmlSha16": "7222905ac6c50ac0",
+     "bflowSha16": "7222905ac6c50ac0",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] basebg png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "a283c663bb5bd9ef",
+     "bflowSha16": "a283c663bb5bd9ef",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] basebg png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "40d9c5ce8efc750f",
+     "bflowSha16": "40d9c5ce8efc750f",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[3] basebg png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "208aabd13233a6e8",
+     "bflowSha16": "208aabd13233a6e8",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[4] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.007425938414820229 = HTML Board.paintShare 0.007425938414820229"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"- text \\\"소파 (빨간색)\\\" at (x 14%, y 71%)\\n- arrow from (x 46%, y 23%) to (x 49%, y 44%)\\n- circled or marked area around (x 59%, y 49%), about 12% wide and 14% tall\""
+    ],
+    [
+     "ok",
+     "rough.hasColor false"
+    ],
+    [
+     "ok",
+     "rough.tilt 0"
+    ],
+    [
+     "ok",
+     "rough.noteCount 3"
+    ],
+    [
+     "ok",
+     "rough.painted false"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x864"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted base/3/false"
+    ],
+    [
+     "ok",
+     "place items 3"
+    ],
+    [
+     "ok",
+     "place[0] meta basebg 기준 배경 \"창문 쪽 (정면)\" 1536x1024"
+    ],
+    [
+     "ok",
+     "place[1] meta basebg 기준 배경 \"소파 쪽\" 1536x1024"
+    ],
+    [
+     "ok",
+     "place[2] meta basebg 기준 배경 \"  TV 쪽  \" 1536x1024"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 5"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] basebg"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] basebg"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[3] basebg"
+    ],
+    [
+     "ok",
+     "list[3] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[4] style"
+    ],
+    [
+     "ok",
+     "list[4] html file = the one sent"
+    ]
+   ]
+  },
+  "place_c_sheet": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "fdd53c6989817ddb",
+     "bflowSha16": "fdd53c6989817ddb",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] sheet png (pixels)",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "8906315b0cb6930d",
+     "bflowSha16": "8906315b0cb6930d",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] sheet small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "0e4d7803353f3cfe",
+     "bflowSha16": "0e4d7803353f3cfe",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "sheet preview (placeSheetPreview)",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "8906315b0cb6930d",
+     "bflowSha16": "8906315b0cb6930d",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x864",
+      "1536x864"
+     ],
+     "htmlSha16": "7222905ac6c50ac0",
+     "bflowSha16": "7222905ac6c50ac0",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] sheet png",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "8906315b0cb6930d",
+     "bflowSha16": "8906315b0cb6930d",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.007425938414820229 = HTML Board.paintShare 0.007425938414820229"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"\""
+    ],
+    [
+     "ok",
+     "rough.hasColor false"
+    ],
+    [
+     "ok",
+     "rough.tilt 0"
+    ],
+    [
+     "ok",
+     "rough.noteCount 0"
+    ],
+    [
+     "ok",
+     "rough.painted false"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x864"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted sheet/1/false"
+    ],
+    [
+     "ok",
+     "place items 1"
+    ],
+    [
+     "ok",
+     "place[0] meta sheet 부품 시트 (기준 배경) \"창문 쪽\" 2048x1152"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 3"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] sheet"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] style"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ]
+   ]
+  },
+  "place_d2_painted_sheet": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "83d5b3ebf28279bc",
+     "bflowSha16": "83d5b3ebf28279bc",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] sheet png (pixels)",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "778de4ab97d6c0db",
+     "bflowSha16": "778de4ab97d6c0db",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] sheet small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "3e7519c013dd02ec",
+     "bflowSha16": "3e7519c013dd02ec",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "sheet preview (placeSheetPreview)",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "778de4ab97d6c0db",
+     "bflowSha16": "778de4ab97d6c0db",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "ca57366d894bab80",
+     "bflowSha16": "ca57366d894bab80",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] sheet png",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "778de4ab97d6c0db",
+     "bflowSha16": "778de4ab97d6c0db",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.8009714756193316 = HTML Board.paintShare 0.8009714756193316"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"\""
+    ],
+    [
+     "ok",
+     "rough.hasColor true"
+    ],
+    [
+     "ok",
+     "rough.tilt 0"
+    ],
+    [
+     "ok",
+     "rough.noteCount 0"
+    ],
+    [
+     "ok",
+     "rough.painted true"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x1024"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted sheet/1/true"
+    ],
+    [
+     "ok",
+     "place items 1"
+    ],
+    [
+     "ok",
+     "place[0] meta sheet 부품 시트 (기준 배경) \"\" 2048x1152"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 3"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] sheet"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] style"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ]
+   ]
+  },
+  "place_d_painted": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "0b2f950a68a354b3",
+     "bflowSha16": "0b2f950a68a354b3",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "40d9c5ce8efc750f",
+     "bflowSha16": "40d9c5ce8efc750f",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "7003d75d0128f6d4",
+     "bflowSha16": "7003d75d0128f6d4",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "0ce1f77d6b7a587d",
+     "bflowSha16": "0ce1f77d6b7a587d",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] basebg png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "40d9c5ce8efc750f",
+     "bflowSha16": "40d9c5ce8efc750f",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.9236329882094141 = HTML Board.paintShare 0.9236329882094141"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"\""
+    ],
+    [
+     "ok",
+     "rough.hasColor true"
+    ],
+    [
+     "ok",
+     "rough.tilt 0"
+    ],
+    [
+     "ok",
+     "rough.noteCount 0"
+    ],
+    [
+     "ok",
+     "rough.painted true"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x1024"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted base/1/true"
+    ],
+    [
+     "ok",
+     "place items 1"
+    ],
+    [
+     "ok",
+     "place[0] meta basebg 기준 배경 \"소파 쪽\" 1536x1024"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 3"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] basebg"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] style"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ]
+   ]
+  },
+  "place_e_tilt7": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x663",
+      "1024x663"
+     ],
+     "htmlSha16": "342cdbe7231de0ad",
+     "bflowSha16": "342cdbe7231de0ad",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "rough.annotated",
+     "size": [
+      "1024x663",
+      "1024x663"
+     ],
+     "htmlSha16": "8c454f1f3cd8247e",
+     "bflowSha16": "8c454f1f3cd8247e",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "40d9c5ce8efc750f",
+     "bflowSha16": "40d9c5ce8efc750f",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "7003d75d0128f6d4",
+     "bflowSha16": "7003d75d0128f6d4",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x994",
+      "1536x994"
+     ],
+     "htmlSha16": "e3265cb0e83cc405",
+     "bflowSha16": "e3265cb0e83cc405",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] basebg png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "40d9c5ce8efc750f",
+     "bflowSha16": "40d9c5ce8efc750f",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.007425938414820229 = HTML Board.paintShare 0.007425938414820229"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프 · 수평으로 돌림\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"- text \\\"소파 (빨간색)\\\" at (x 15%, y 60%)\\n- arrow from (x 48%, y 27%) to (x 50%, y 45%)\\n- circled or marked area around (x 58%, y 51%), about 12% wide and 14% tall\""
+    ],
+    [
+     "ok",
+     "rough.hasColor false"
+    ],
+    [
+     "ok",
+     "rough.tilt 7"
+    ],
+    [
+     "ok",
+     "rough.noteCount 3"
+    ],
+    [
+     "ok",
+     "rough.painted false"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x994"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted base/1/false"
+    ],
+    [
+     "ok",
+     "place items 1"
+    ],
+    [
+     "ok",
+     "place[0] meta basebg 기준 배경 \"소파 쪽\" 1536x1024"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 3"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] basebg"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] style"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ]
+   ]
+  },
+  "place_e_tilt_m12": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x712",
+      "1024x712"
+     ],
+     "htmlSha16": "b5816bd46f7e7e1e",
+     "bflowSha16": "b5816bd46f7e7e1e",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] sheet png (pixels)",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "778de4ab97d6c0db",
+     "bflowSha16": "778de4ab97d6c0db",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] sheet small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "3e7519c013dd02ec",
+     "bflowSha16": "3e7519c013dd02ec",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "sheet preview (placeSheetPreview)",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "778de4ab97d6c0db",
+     "bflowSha16": "778de4ab97d6c0db",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x1068",
+      "1536x1068"
+     ],
+     "htmlSha16": "3836ec6207b2f888",
+     "bflowSha16": "3836ec6207b2f888",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] sheet png",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "778de4ab97d6c0db",
+     "bflowSha16": "778de4ab97d6c0db",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.007425938414820229 = HTML Board.paintShare 0.007425938414820229"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프 · 수평으로 돌림\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"\""
+    ],
+    [
+     "ok",
+     "rough.hasColor false"
+    ],
+    [
+     "ok",
+     "rough.tilt -12"
+    ],
+    [
+     "ok",
+     "rough.noteCount 0"
+    ],
+    [
+     "ok",
+     "rough.painted false"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x1068"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted sheet/1/false"
+    ],
+    [
+     "ok",
+     "place items 1"
+    ],
+    [
+     "ok",
+     "place[0] meta sheet 부품 시트 (기준 배경) \"창문 쪽\" 2048x1152"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 3"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] sheet"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] style"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ]
+   ]
+  },
+  "place_f_sheet_refs": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "fdd53c6989817ddb",
+     "bflowSha16": "fdd53c6989817ddb",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "refs[0].small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "ed85ee98d2186557",
+     "bflowSha16": "ed85ee98d2186557",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "refs[1].small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "1e3ecebbcec0f681",
+     "bflowSha16": "1e3ecebbcec0f681",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] sheet png (pixels)",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "23c7384d4367c898",
+     "bflowSha16": "23c7384d4367c898",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] sheet small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "e793a477b6c6b891",
+     "bflowSha16": "e793a477b6c6b891",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "sheet preview (placeSheetPreview)",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "23c7384d4367c898",
+     "bflowSha16": "23c7384d4367c898",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x864",
+      "1536x864"
+     ],
+     "htmlSha16": "7222905ac6c50ac0",
+     "bflowSha16": "7222905ac6c50ac0",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] sheet png",
+     "size": [
+      "2048x1152",
+      "2048x1152"
+     ],
+     "htmlSha16": "23c7384d4367c898",
+     "bflowSha16": "23c7384d4367c898",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] ref png",
+     "size": [
+      "1536x864",
+      "1536x864"
+     ],
+     "htmlSha16": "5177f4fa59bcd527",
+     "bflowSha16": "5177f4fa59bcd527",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[3] ref png",
+     "size": [
+      "1536x864",
+      "1536x864"
+     ],
+     "htmlSha16": "2c9feeecbb9548f5",
+     "bflowSha16": "2c9feeecbb9548f5",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[4] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.007425938414820229 = HTML Board.paintShare 0.007425938414820229"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"\""
+    ],
+    [
+     "ok",
+     "rough.hasColor false"
+    ],
+    [
+     "ok",
+     "rough.tilt 0"
+    ],
+    [
+     "ok",
+     "rough.noteCount 0"
+    ],
+    [
+     "ok",
+     "rough.painted false"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x864"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted sheet/1/false"
+    ],
+    [
+     "ok",
+     "place items 1"
+    ],
+    [
+     "ok",
+     "place[0] meta sheet 부품 시트 (기준 배경) \"창문 쪽 · TV 쪽\" 2048x1152"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 5"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] sheet"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] ref"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[3] ref"
+    ],
+    [
+     "ok",
+     "list[3] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[4] style"
+    ],
+    [
+     "ok",
+     "list[4] html file = the one sent"
+    ]
+   ]
+  },
+  "place_g_base": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "fdd53c6989817ddb",
+     "bflowSha16": "fdd53c6989817ddb",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "a283c663bb5bd9ef",
+     "bflowSha16": "a283c663bb5bd9ef",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "92839e36e934afac",
+     "bflowSha16": "92839e36e934afac",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[1] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "208aabd13233a6e8",
+     "bflowSha16": "208aabd13233a6e8",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[1] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "bf7af617dce2eee8",
+     "bflowSha16": "bf7af617dce2eee8",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.007425938414820229 = HTML Board.paintShare 0.007425938414820229"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"\""
+    ],
+    [
+     "ok",
+     "rough.hasColor false"
+    ],
+    [
+     "ok",
+     "rough.tilt 0"
+    ],
+    [
+     "ok",
+     "rough.noteCount 0"
+    ],
+    [
+     "ok",
+     "rough.painted false"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x864"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted base/2/false"
+    ],
+    [
+     "ok",
+     "place items 2"
+    ],
+    [
+     "ok",
+     "place[0] meta basebg 기준 배경 \"창문 쪽\" 1536x1024"
+    ],
+    [
+     "ok",
+     "place[1] meta basebg 기준 배경 \"TV 쪽\" 1536x1024"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ]
+   ]
+  },
+  "place_g_revise": {
+   "images": [
+    {
+     "what": "rough.small",
+     "size": [
+      "1024x576",
+      "1024x576"
+     ],
+     "htmlSha16": "fdd53c6989817ddb",
+     "bflowSha16": "fdd53c6989817ddb",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "base.small",
+     "size": [
+      "1024x264",
+      "1024x264"
+     ],
+     "htmlSha16": "2b11c0642bfaf997",
+     "bflowSha16": "2b11c0642bfaf997",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "a283c663bb5bd9ef",
+     "bflowSha16": "a283c663bb5bd9ef",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[0] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "92839e36e934afac",
+     "bflowSha16": "92839e36e934afac",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[1] basebg png (pixels)",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "208aabd13233a6e8",
+     "bflowSha16": "208aabd13233a6e8",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "place[1] basebg small",
+     "size": [
+      "1024x683",
+      "1024x683"
+     ],
+     "htmlSha16": "bf7af617dce2eee8",
+     "bflowSha16": "bf7af617dce2eee8",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[0] rough png",
+     "size": [
+      "1536x864",
+      "1536x864"
+     ],
+     "htmlSha16": "7222905ac6c50ac0",
+     "bflowSha16": "7222905ac6c50ac0",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[1] basebg png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "a283c663bb5bd9ef",
+     "bflowSha16": "a283c663bb5bd9ef",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[2] basebg png",
+     "size": [
+      "1536x1024",
+      "1536x1024"
+     ],
+     "htmlSha16": "208aabd13233a6e8",
+     "bflowSha16": "208aabd13233a6e8",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    },
+    {
+     "what": "list[3] style png",
+     "size": [
+      "1536x396",
+      "1536x396"
+     ],
+     "htmlSha16": "99b8345c04f8a44a",
+     "bflowSha16": "99b8345c04f8a44a",
+     "sameBytes": true,
+     "max": 0,
+     "mean": 0
+    }
+   ],
+   "checks": [
+    [
+     "ok",
+     "paintShare (Bflow fillMath on the composite) 0.007425938414820229 = HTML Board.paintShare 0.007425938414820229"
+    ],
+    [
+     "ok",
+     "rough.kind \"rough\""
+    ],
+    [
+     "ok",
+     "rough.label \"러프\""
+    ],
+    [
+     "ok",
+     "rough.notesText \"\""
+    ],
+    [
+     "ok",
+     "rough.hasColor false"
+    ],
+    [
+     "ok",
+     "rough.tilt 0"
+    ],
+    [
+     "ok",
+     "rough.noteCount 0"
+    ],
+    [
+     "ok",
+     "rough.painted false"
+    ],
+    [
+     "ok",
+     "rough canvas 1536x864"
+    ],
+    [
+     "ok",
+     "rough.key (hashStr of the same JPEG)"
+    ],
+    [
+     "ok",
+     "place mode/n/painted base/2/false"
+    ],
+    [
+     "ok",
+     "place items 2"
+    ],
+    [
+     "ok",
+     "place[0] meta basebg 기준 배경 \"창문 쪽\" 1536x1024"
+    ],
+    [
+     "ok",
+     "place[1] meta basebg 기준 배경 \"TV 쪽\" 1536x1024"
+    ],
+    [
+     "ok",
+     "orderInputsOf place.bases"
+    ],
+    [
+     "ok",
+     "orderInputsOf place notes"
+    ],
+    [
+     "ok",
+     "placeKey cache = HTML placeKey()"
+    ],
+    [
+     "ok",
+     "same key: the same items are reused"
+    ],
+    [
+     "ok",
+     "same key: notes follow the bases"
+    ],
+    [
+     "ok",
+     "list length 4"
+    ],
+    [
+     "ok",
+     "list[0] rough"
+    ],
+    [
+     "ok",
+     "list[0] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[1] basebg"
+    ],
+    [
+     "ok",
+     "list[1] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[2] basebg"
+    ],
+    [
+     "ok",
+     "list[2] html file = the one sent"
+    ],
+    [
+     "ok",
+     "list[3] style"
+    ],
+    [
+     "ok",
+     "list[3] html file = the one sent"
+    ]
+   ]
+  }
+ }
+}

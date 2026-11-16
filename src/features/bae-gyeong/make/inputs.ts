@@ -2,6 +2,10 @@
 // 그림판은 BoardLike 로만 부른다. 만든 그림의 순서 · 크기 · 형식은 HTML 과 같아야 한다 (C:\BAE_stage0\order_port\compare_inputs.mjs 가 견준다).
 import { currentPickIds, drawSizes, finalList, hashStr, levelMap } from '@/shared/bae/order';
 import type { BaeOrder, DrawSizes, GuideState, LibEntry, OrderInputs, RatioId, StyleMode, TierId } from '@/shared/bae/order';
+import { BAE_BASE_SEND_SIDE, BAE_PLACE_LABEL, baePlaceItemNotes, baePlaceKey, baePlaceMode, baePlaceOrderBases } from '@/shared/bae/place';
+import type { BaePlaceBase } from '@/shared/bae/place';
+import { composeSheet, loadBaseImages } from './place';
+import type { BaeBaseImages } from './place';
 
 /** 그림판이 내주는 것 (HTML Board 의 같은 이름 함수와 같은 값). */
 export interface BoardLike {
@@ -73,6 +77,11 @@ export interface InputsSources {
   /** 기준 배경(3단계): 없으면 null. */
   place?: (() => Promise<BaePlaceItems | null>) | null;
   placeKey?: string;
+  /**
+   * 기준 배경들 (HTML state.bases, 최대 3장). 하나라도 있으면 Image 2 부터 '같은 장소' 그림(부품 시트 한 장 또는 기준 배경 통째로)이 들어가고
+   * place · placeKey 대신 이것으로 만든다 (HTML placeItems · placeKey). 없거나 빈 목록이면 2단계와 글자까지 같은 요청.
+   */
+  bases?: readonly BaePlaceBase[];
 }
 
 /* ---------- 캔버스 도우미 (HTML 그대로) ---------- */
@@ -122,13 +131,57 @@ export interface InputsCache {
   job: Promise<BaeInputs> | null;
   jobKey: string;
   lib: Record<string, BaeInputItem>;
+  /** HTML itemCache.place · itemCache.placeKey · placeJob · placeJobKey (기준 배경, 3단계). */
+  place?: BaeInputItem[] | null;
+  placeKey?: string;
+  placeJob?: Promise<BaeInputItem[]> | null;
+  placeJobKey?: string;
+  /** 기준 배경 그림 (주소 → 연 그림). */
+  baseImgs?: BaeBaseImages;
 }
-export const createInputsCache = (): InputsCache => ({ refs: {}, base: null, baseKey: '', inputs: null, inputsKey: '', job: null, jobKey: '', lib: {} });
+export const createInputsCache = (): InputsCache => ({ refs: {}, base: null, baseKey: '', inputs: null, inputsKey: '', job: null, jobKey: '', lib: {}, place: null, placeKey: '', placeJob: null, placeJobKey: '', baseImgs: new Map() });
+
+/** 기준 배경이 하나라도 있는지 (없으면 2단계 그대로). */
+const hasBases = (s: InputsSources): s is InputsSources & { bases: readonly BaePlaceBase[] } => !!s.bases && s.bases.length > 0;
 
 /** HTML prepareInputs 의 열쇠: 그림판 판 · 비율 · 레퍼런스 · 그림체 띠 · 기준 배경 · 기울기/크기. */
 export function inputsKey(s: InputsSources): string {
   const b = s.board;
-  return [b.rev(), b.ratio(), s.refs.map((r) => r.id).join(','), s.styleKey === 'default' ? 0 : s.styleKey.replace(/^u/, ''), s.placeKey || '', b.tilt() ? b.tilt() + '/' + s.tier : ''].join('|');
+  return [b.rev(), b.ratio(), s.refs.map((r) => r.id).join(','), s.styleKey === 'default' ? 0 : s.styleKey.replace(/^u/, ''), hasBases(s) ? baePlaceKey(s.bases) : (s.placeKey || ''), b.tilt() ? b.tilt() + '/' + s.tier : ''].join('|');
+}
+
+/* ---------- 같은 장소 (HTML buildPlace · placeItems, 3단계) ---------- */
+/** HTML buildPlace(mode): 부품 시트 한 장, 또는 기준 배경마다 긴 변 1536 그림. 부품 시트가 종이에 들어가지 않으면 빈 목록. */
+export async function buildPlace(mode: 'sheet' | 'base', bases: readonly BaePlaceBase[], cache: InputsCache): Promise<BaeInputItem[]> {
+  const imgs = await loadBaseImages(bases, cache.baseImgs || (cache.baseImgs = new Map()));
+  if (mode === 'sheet') { const sc = composeSheet(bases, (b) => imgs.get(b.src) as HTMLImageElement); return sc ? [await makeItem('sheet', BAE_PLACE_LABEL.sheet, sc)] : []; }
+  const items: BaeInputItem[] = []; for (const b of bases.slice()) items.push(await makeItem('basebg', BAE_PLACE_LABEL.basebg, scaled(imgs.get(b.src) as HTMLImageElement, BAE_BASE_SEND_SIDE), b.note)); return items;
+}
+
+/**
+ * HTML placeItems(): Image 1 다음에 들어갈 것 — 부품 시트 한 장, 또는 기준 배경 통째로. 같은 열쇠(baePlaceKey)면 만든 그림을 다시 쓰고
+ * 메모만 지금 것으로 바꾼다. 같은 열쇠로 만드는 중이면 그것을 기다린다. 부를 때마다 제 열쇠의 그림만 받는다 (둘이 섞이지 않는다).
+ * 기준 배경이 없거나 그림이 없으면 null. bases 는 부품 시트 문장(sheetLine)에 쓰는 메모 · 부품 이름.
+ */
+export async function placeItems(bases: readonly BaePlaceBase[], cache: InputsCache): Promise<BaePlaceItems | null> {
+  const mode = baePlaceMode(bases); if (!mode) return null; const key = baePlaceKey(bases);
+  let items: BaeInputItem[];
+  if (cache.place && cache.placeKey === key) items = cache.place;
+  else {
+    if (!cache.placeJob || cache.placeJobKey !== key) {
+      const job: Promise<BaeInputItem[]> = buildPlace(mode, bases, cache).then((built) => {
+        if (cache.placeJobKey === key) { const old = cache.place || []; setTimeout(() => old.forEach((it) => URL.revokeObjectURL(it.url)), 15000); cache.place = built; cache.placeKey = key; }
+        else setTimeout(() => built.forEach((it) => URL.revokeObjectURL(it.url)), 15000);   // 그사이 기준 배경이 바뀌었다: 기억해 두지 않는다
+        return built;
+      }).finally(() => { if (cache.placeJob === job) cache.placeJob = null; });
+      cache.placeJob = job; cache.placeJobKey = key;
+    }
+    items = await (cache.placeJob as Promise<BaeInputItem[]>);
+  }
+  const notes = baePlaceItemNotes(mode, bases);
+  if (mode === 'base') items.forEach((it, i) => { it.note = notes[i] !== undefined ? notes[i] : ''; });
+  if (mode === 'sheet' && items[0]) items[0].note = notes[0];
+  return items.length ? { mode, items, n: items.length, bases: baePlaceOrderBases(bases) } : null;
 }
 
 /** HTML prepareInputs: 같은 재료면 만든 것을 다시 쓰고(메모 글만 새로), 만드는 중이면 그것을 기다린다. 러프가 비었으면 null. */
@@ -137,7 +190,8 @@ export async function prepareInputs(s: InputsSources, cache: InputsCache): Promi
   const key = inputsKey(s);
   if (cache.inputs && cache.inputsKey === key) {
     cache.inputs.refs.forEach((it, i) => { if (s.refs[i]) it.note = s.refs[i].note; });
-    if (cache.inputs.place && s.place) { const pl = await s.place(); if (pl) cache.inputs.place.items = pl.items; }
+    if (cache.inputs.place && hasBases(s)) { const pl = await placeItems(s.bases, cache); if (pl) { cache.inputs.place.items = pl.items; cache.inputs.place.bases = pl.bases; } }
+    else if (cache.inputs.place && s.place) { const pl = await s.place(); if (pl) cache.inputs.place.items = pl.items; }
     return cache.inputs;
   }
   if (cache.job && cache.jobKey === key) return cache.job;
@@ -161,7 +215,7 @@ export async function buildInputs(s: InputsSources, cache: InputsCache, key: str
   for (const r of refsNow) { let it = cache.refs[String(r.id)]; if (!it) { it = await makeItem('ref', '레퍼런스', scaled(r.img, 1536), r.note); cache.refs[String(r.id)] = it; } it.note = r.note; refs.push(it); }
   if (!cache.base || cache.baseKey !== s.styleKey) { cache.base = await makeItem('style', '그림체 기준 (원경)', scaled(await loadImg(s.styleSrc), 1536)); cache.baseKey = s.styleKey; }
   if (cache.inputs && cache.inputs.rough && cache.inputs.rough.url) { const old = cache.inputs.rough.url; setTimeout(() => URL.revokeObjectURL(old), 15000); }
-  const pl = s.place ? await s.place() : null; const place = pl ? Object.assign(pl, { painted: rough.painted }) : null;
+  const pl = hasBases(s) ? await placeItems(s.bases, cache) : s.place ? await s.place() : null; const place = pl ? Object.assign(pl, { painted: rough.painted }) : null;
   cache.inputs = { rough, refs, base: cache.base, refIds: refsNow.map((r) => r.id), place }; cache.inputsKey = key;
   return cache.inputs;
 }
@@ -177,7 +231,8 @@ export async function libItem(e: LibEntry & { src: string }, cache: InputsCache)
 
 /** HTML currentList: 그림 모델에게 보낼 그림 (finalList 순서). 고른 예시를 아직 모르면 null. */
 export async function currentList(s: InputsSources, cache: InputsCache, pick: { styleMode: StyleMode; manualPicks: string[]; order: Pick<BaeOrder, 'picks'> | null; library: Array<LibEntry & { src: string }> }): Promise<BaeInputItem[] | null> {
-  const inp = await prepareInputs(s, cache); const ids = currentPickIds(inp && inp.place ? inp.place.mode : '', pick.styleMode, pick.manualPicks, pick.order, pick.library);
+  // HTML currentPickIds 는 기준 배경이 있으면(placeMode) 예시를 넣지 않는다 — 부품 시트가 종이에 들어가지 않아 place 가 null 이어도.
+  const inp = await prepareInputs(s, cache); const ids = currentPickIds(hasBases(s) ? baePlaceMode(s.bases) : inp && inp.place ? inp.place.mode : '', pick.styleMode, pick.manualPicks, pick.order, pick.library);
   if (!inp || ids === null) return null;
   const picks: BaeInputItem[] = []; for (const id of ids) picks.push(await libItem(pick.library.find((e) => e.id === id)!, cache));
   return finalList<BaeInputItem>(inp, picks);
