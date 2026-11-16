@@ -1,0 +1,485 @@
+{
+ "pdModel": "gpt-6.1-sol",
+ "imgModel": "gpt-image-2.5-sunburst",
+ "png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR4nGP4z8DwnwEIGBgYGBgYAQBXVgP9cX6YjAAAAABJRU5ErkJggg==",
+ "mask": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+ "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+ "out": [
+  {
+   "kind": "pd",
+   "label": "inventory",
+   "args": {
+    "prompt": "Image A is a finished background illustration for an animated show, exactly 1024 x 576 pixels.\nAn animator wants it split into layers: one empty background plus every prop on its own layer, grouped the way an artist would note them.\n\nProps are things placed in the scene that could be moved, hidden or recolored on their own: furniture, vehicles, signs, standing poles and lamps, traffic lights, fences and railings, bins, bags, boxes, cushions and bedding, statues, plants in pots, things hung on walls (boards, frames, clocks, mirrors), and small items.\nNot props: the room or building itself (walls, floor, ceiling, built-in doors, windows and stairs), the sky, mountains, distant buildings, the road and sidewalk surface, and trees or bushes growing in the ground.\n\nReturn:\n1. groups: similar props share one group. For each group: group = a short Korean noun (e.g. 의자); en = a short English phrase naming all of them (e.g. \"the maroon school chairs\"); see_through = true if the background shows through gaps in these props (chairs or desks with open legs, railings, fences, scaffolding, ladders), else false.\n2. objects: every single prop, one entry each, small ones too. For each: group = one of the group names; name = a short Korean layer name that tells it apart (e.g. 앞줄 의자 2, 파란 방수포); en = an English phrase that tells it apart by color and position (e.g. \"the maroon chair in the front row, second from the left\"); box = a tight bounding box around its whole visible part in Image A pixel coordinates [x0, y0, x1, y1].\n3. background_en: one English sentence naming what stays as the background (e.g. \"the green walls, the wooden floor, the windows and the curtains\").\n4. For each object also: layer = \"OL\" if it stands in the foreground, in front of where the characters would stand and act, so it would hide part of a character (props at the very bottom of the picture or cut off by its bottom edge, the front row of desks and chairs, a plant right at the front); else \"ML\". Most props are ML.\n   on = the name, exactly as you wrote it in objects, of the bigger prop it sits on, hangs on, is pinned to or stands inside (a card on the bulletin board, a book on the shelf, a cushion on the sofa, papers on a desk); else \"\".\n5. far: the far view beyond the room or the street, seen through windows and doors or above the buildings: sky, distant buildings, mountains, trees far away. One entry per separate area (each window's view is its own entry). For each: name = a short Korean name (e.g. 창밖 풍경, 하늘); en = an English phrase; box = a tight box around the visible part of the view only, inside the window frame. An empty list if there is none.\nReturn only JSON.",
+    "images": [
+     {
+      "label": "Image A:",
+      "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "detail": "high"
+     }
+    ],
+    "schema": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "background_en",
+      "groups",
+      "objects",
+      "far"
+     ],
+     "properties": {
+      "background_en": {
+       "type": "string"
+      },
+      "groups": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "group",
+         "en",
+         "see_through"
+        ],
+        "properties": {
+         "group": {
+          "type": "string"
+         },
+         "en": {
+          "type": "string"
+         },
+         "see_through": {
+          "type": "boolean"
+         }
+        }
+       }
+      },
+      "objects": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "group",
+         "name",
+         "en",
+         "box",
+         "layer",
+         "on"
+        ],
+        "properties": {
+         "group": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "en": {
+          "type": "string"
+         },
+         "box": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          }
+         },
+         "layer": {
+          "type": "string",
+          "enum": [
+           "OL",
+           "ML"
+          ]
+         },
+         "on": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "far": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "name",
+         "en",
+         "box"
+        ],
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "en": {
+          "type": "string"
+         },
+         "box": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "name": "inventory"
+   },
+   "sent": {
+    "kind": "pd",
+    "url": "/v1/responses",
+    "auth": "Bearer sk-test-local-only-0123456789abcdef",
+    "ctype": "application/json",
+    "body": "{\"model\":\"gpt-6.1-sol\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Image A is a finished background illustration for an animated show, exactly 1024 x 576 pixels.\\nAn animator wants it split into layers: one empty background plus every prop on its own layer, grouped the way an artist would note them.\\n\\nProps are things placed in the scene that could be moved, hidden or recolored on their own: furniture, vehicles, signs, standing poles and lamps, traffic lights, fences and railings, bins, bags, boxes, cushions and bedding, statues, plants in pots, things hung on walls (boards, frames, clocks, mirrors), and small items.\\nNot props: the room or building itself (walls, floor, ceiling, built-in doors, windows and stairs), the sky, mountains, distant buildings, the road and sidewalk surface, and trees or bushes growing in the ground.\\n\\nReturn:\\n1. groups: similar props share one group. For each group: group = a short Korean noun (e.g. 의자); en = a short English phrase naming all of them (e.g. \\\"the maroon school chairs\\\"); see_through = true if the background shows through gaps in these props (chairs or desks with open legs, railings, fences, scaffolding, ladders), else false.\\n2. objects: every single prop, one entry each, small ones too. For each: group = one of the group names; name = a short Korean layer name that tells it apart (e.g. 앞줄 의자 2, 파란 방수포); en = an English phrase that tells it apart by color and position (e.g. \\\"the maroon chair in the front row, second from the left\\\"); box = a tight bounding box around its whole visible part in Image A pixel coordinates [x0, y0, x1, y1].\\n3. background_en: one English sentence naming what stays as the background (e.g. \\\"the green walls, the wooden floor, the windows and the curtains\\\").\\n4. For each object also: layer = \\\"OL\\\" if it stands in the foreground, in front of where the characters would stand and act, so it would hide part of a character (props at the very bottom of the picture or cut off by its bottom edge, the front row of desks and chairs, a plant right at the front); else \\\"ML\\\". Most props are ML.\\n   on = the name, exactly as you wrote it in objects, of the bigger prop it sits on, hangs on, is pinned to or stands inside (a card on the bulletin board, a book on the shelf, a cushion on the sofa, papers on a desk); else \\\"\\\".\\n5. far: the far view beyond the room or the street, seen through windows and doors or above the buildings: sky, distant buildings, mountains, trees far away. One entry per separate area (each window's view is its own entry). For each: name = a short Korean name (e.g. 창밖 풍경, 하늘); en = an English phrase; box = a tight box around the visible part of the view only, inside the window frame. An empty list if there is none.\\nReturn only JSON.\"},{\"type\":\"input_text\",\"text\":\"Image A:\"},{\"type\":\"input_image\",\"image_url\":\"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=\",\"detail\":\"high\"}]}],\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"inventory\",\"strict\":true,\"schema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"background_en\",\"groups\",\"objects\",\"far\"],\"properties\":{\"background_en\":{\"type\":\"string\"},\"groups\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"group\",\"en\",\"see_through\"],\"properties\":{\"group\":{\"type\":\"string\"},\"en\":{\"type\":\"string\"},\"see_through\":{\"type\":\"boolean\"}}}},\"objects\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"group\",\"name\",\"en\",\"box\",\"layer\",\"on\"],\"properties\":{\"group\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"en\":{\"type\":\"string\"},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"layer\":{\"type\":\"string\",\"enum\":[\"OL\",\"ML\"]},\"on\":{\"type\":\"string\"}}}},\"far\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"en\",\"box\"],\"properties\":{\"name\":{\"type\":\"string\"},\"en\":{\"type\":\"string\"},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}}}}}},\"store\":false}"
+   },
+   "usd": 0.01
+  },
+  {
+   "kind": "pd",
+   "label": "inventory+notes",
+   "args": {
+    "prompt": "Image A is a finished background illustration for an animated show, exactly 1024 x 576 pixels.\nAn animator wants it split into layers: one empty background plus every prop on its own layer, grouped the way an artist would note them.\n\nProps are things placed in the scene that could be moved, hidden or recolored on their own: furniture, vehicles, signs, standing poles and lamps, traffic lights, fences and railings, bins, bags, boxes, cushions and bedding, statues, plants in pots, things hung on walls (boards, frames, clocks, mirrors), and small items.\nNot props: the room or building itself (walls, floor, ceiling, built-in doors, windows and stairs), the sky, mountains, distant buildings, the road and sidewalk surface, and trees or bushes growing in the ground.\n\nThe artist's notes for this picture (Korean; they may name props and say how to group them; follow them for the groups and the names):\n왼쪽 화분은 OL\n\nReturn:\n1. groups: similar props share one group. For each group: group = a short Korean noun (e.g. 의자); en = a short English phrase naming all of them (e.g. \"the maroon school chairs\"); see_through = true if the background shows through gaps in these props (chairs or desks with open legs, railings, fences, scaffolding, ladders), else false.\n2. objects: every single prop, one entry each, small ones too. For each: group = one of the group names; name = a short Korean layer name that tells it apart (e.g. 앞줄 의자 2, 파란 방수포); en = an English phrase that tells it apart by color and position (e.g. \"the maroon chair in the front row, second from the left\"); box = a tight bounding box around its whole visible part in Image A pixel coordinates [x0, y0, x1, y1].\n3. background_en: one English sentence naming what stays as the background (e.g. \"the green walls, the wooden floor, the windows and the curtains\").\n4. For each object also: layer = \"OL\" if it stands in the foreground, in front of where the characters would stand and act, so it would hide part of a character (props at the very bottom of the picture or cut off by its bottom edge, the front row of desks and chairs, a plant right at the front); else \"ML\". Most props are ML.\n   on = the name, exactly as you wrote it in objects, of the bigger prop it sits on, hangs on, is pinned to or stands inside (a card on the bulletin board, a book on the shelf, a cushion on the sofa, papers on a desk); else \"\".\n5. far: the far view beyond the room or the street, seen through windows and doors or above the buildings: sky, distant buildings, mountains, trees far away. One entry per separate area (each window's view is its own entry). For each: name = a short Korean name (e.g. 창밖 풍경, 하늘); en = an English phrase; box = a tight box around the visible part of the view only, inside the window frame. An empty list if there is none.\nReturn only JSON.",
+    "images": [
+     {
+      "label": "Image A:",
+      "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "detail": "high"
+     }
+    ],
+    "schema": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "background_en",
+      "groups",
+      "objects",
+      "far"
+     ],
+     "properties": {
+      "background_en": {
+       "type": "string"
+      },
+      "groups": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "group",
+         "en",
+         "see_through"
+        ],
+        "properties": {
+         "group": {
+          "type": "string"
+         },
+         "en": {
+          "type": "string"
+         },
+         "see_through": {
+          "type": "boolean"
+         }
+        }
+       }
+      },
+      "objects": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "group",
+         "name",
+         "en",
+         "box",
+         "layer",
+         "on"
+        ],
+        "properties": {
+         "group": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "en": {
+          "type": "string"
+         },
+         "box": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          }
+         },
+         "layer": {
+          "type": "string",
+          "enum": [
+           "OL",
+           "ML"
+          ]
+         },
+         "on": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "far": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "name",
+         "en",
+         "box"
+        ],
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "en": {
+          "type": "string"
+         },
+         "box": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "name": "inventory"
+   },
+   "sent": {
+    "kind": "pd",
+    "url": "/v1/responses",
+    "auth": "Bearer sk-test-local-only-0123456789abcdef",
+    "ctype": "application/json",
+    "body": "{\"model\":\"gpt-6.1-sol\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Image A is a finished background illustration for an animated show, exactly 1024 x 576 pixels.\\nAn animator wants it split into layers: one empty background plus every prop on its own layer, grouped the way an artist would note them.\\n\\nProps are things placed in the scene that could be moved, hidden or recolored on their own: furniture, vehicles, signs, standing poles and lamps, traffic lights, fences and railings, bins, bags, boxes, cushions and bedding, statues, plants in pots, things hung on walls (boards, frames, clocks, mirrors), and small items.\\nNot props: the room or building itself (walls, floor, ceiling, built-in doors, windows and stairs), the sky, mountains, distant buildings, the road and sidewalk surface, and trees or bushes growing in the ground.\\n\\nThe artist's notes for this picture (Korean; they may name props and say how to group them; follow them for the groups and the names):\\n왼쪽 화분은 OL\\n\\nReturn:\\n1. groups: similar props share one group. For each group: group = a short Korean noun (e.g. 의자); en = a short English phrase naming all of them (e.g. \\\"the maroon school chairs\\\"); see_through = true if the background shows through gaps in these props (chairs or desks with open legs, railings, fences, scaffolding, ladders), else false.\\n2. objects: every single prop, one entry each, small ones too. For each: group = one of the group names; name = a short Korean layer name that tells it apart (e.g. 앞줄 의자 2, 파란 방수포); en = an English phrase that tells it apart by color and position (e.g. \\\"the maroon chair in the front row, second from the left\\\"); box = a tight bounding box around its whole visible part in Image A pixel coordinates [x0, y0, x1, y1].\\n3. background_en: one English sentence naming what stays as the background (e.g. \\\"the green walls, the wooden floor, the windows and the curtains\\\").\\n4. For each object also: layer = \\\"OL\\\" if it stands in the foreground, in front of where the characters would stand and act, so it would hide part of a character (props at the very bottom of the picture or cut off by its bottom edge, the front row of desks and chairs, a plant right at the front); else \\\"ML\\\". Most props are ML.\\n   on = the name, exactly as you wrote it in objects, of the bigger prop it sits on, hangs on, is pinned to or stands inside (a card on the bulletin board, a book on the shelf, a cushion on the sofa, papers on a desk); else \\\"\\\".\\n5. far: the far view beyond the room or the street, seen through windows and doors or above the buildings: sky, distant buildings, mountains, trees far away. One entry per separate area (each window's view is its own entry). For each: name = a short Korean name (e.g. 창밖 풍경, 하늘); en = an English phrase; box = a tight box around the visible part of the view only, inside the window frame. An empty list if there is none.\\nReturn only JSON.\"},{\"type\":\"input_text\",\"text\":\"Image A:\"},{\"type\":\"input_image\",\"image_url\":\"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=\",\"detail\":\"high\"}]}],\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"inventory\",\"strict\":true,\"schema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"background_en\",\"groups\",\"objects\",\"far\"],\"properties\":{\"background_en\":{\"type\":\"string\"},\"groups\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"group\",\"en\",\"see_through\"],\"properties\":{\"group\":{\"type\":\"string\"},\"en\":{\"type\":\"string\"},\"see_through\":{\"type\":\"boolean\"}}}},\"objects\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"group\",\"name\",\"en\",\"box\",\"layer\",\"on\"],\"properties\":{\"group\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"en\":{\"type\":\"string\"},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"layer\":{\"type\":\"string\",\"enum\":[\"OL\",\"ML\"]},\"on\":{\"type\":\"string\"}}}},\"far\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"en\",\"box\"],\"properties\":{\"name\":{\"type\":\"string\"},\"en\":{\"type\":\"string\"},\"box\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}}}}}}}},\"store\":false}"
+   },
+   "usd": 0.01
+  },
+  {
+   "kind": "pd",
+   "label": "depth",
+   "args": {
+    "prompt": "Image A is a finished background illustration, 1024 x 576 pixels. Image B is the same picture with some props outlined and numbered.\nBelow are pairs of props that touch or overlap. For each pair decide which one is in front: nearer to the viewer, drawn over the other where they meet. Something placed on, hung on or pinned to another thing is in front of it. If they only touch side by side and neither covers the other, answer 0.\n\nProps:\n#0: 소파 - the sofa\n#1: 화분 - the plant\n\nPairs (a & b):\n0 & 1\n\nReturn JSON: pairs = one entry for every pair above, in the same order, with a, b and front (= a, b or 0).",
+    "images": [
+     {
+      "label": "Image A:",
+      "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "detail": "high"
+     },
+     {
+      "label": "Image B:",
+      "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "detail": "high"
+     }
+    ],
+    "schema": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "pairs"
+     ],
+     "properties": {
+      "pairs": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "a",
+         "b",
+         "front"
+        ],
+        "properties": {
+         "a": {
+          "type": "integer"
+         },
+         "b": {
+          "type": "integer"
+         },
+         "front": {
+          "type": "integer"
+         }
+        }
+       }
+      }
+     }
+    },
+    "name": "depth"
+   },
+   "sent": {
+    "kind": "pd",
+    "url": "/v1/responses",
+    "auth": "Bearer sk-test-local-only-0123456789abcdef",
+    "ctype": "application/json",
+    "body": "{\"model\":\"gpt-6.1-sol\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Image A is a finished background illustration, 1024 x 576 pixels. Image B is the same picture with some props outlined and numbered.\\nBelow are pairs of props that touch or overlap. For each pair decide which one is in front: nearer to the viewer, drawn over the other where they meet. Something placed on, hung on or pinned to another thing is in front of it. If they only touch side by side and neither covers the other, answer 0.\\n\\nProps:\\n#0: 소파 - the sofa\\n#1: 화분 - the plant\\n\\nPairs (a & b):\\n0 & 1\\n\\nReturn JSON: pairs = one entry for every pair above, in the same order, with a, b and front (= a, b or 0).\"},{\"type\":\"input_text\",\"text\":\"Image A:\"},{\"type\":\"input_image\",\"image_url\":\"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=\",\"detail\":\"high\"},{\"type\":\"input_text\",\"text\":\"Image B:\"},{\"type\":\"input_image\",\"image_url\":\"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=\",\"detail\":\"high\"}]}],\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"depth\",\"strict\":true,\"schema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"pairs\"],\"properties\":{\"pairs\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"a\",\"b\",\"front\"],\"properties\":{\"a\":{\"type\":\"integer\"},\"b\":{\"type\":\"integer\"},\"front\":{\"type\":\"integer\"}}}}}}}},\"store\":false}"
+   },
+   "usd": 0.01
+  },
+  {
+   "kind": "pd",
+   "label": "describe",
+   "args": {
+    "prompt": "Image A is a finished background illustration for an animated show, exactly 1024 x 576 pixels. The artist drew a box around one prop: [369, 104, 420, 150] in Image A pixel coordinates [x0, y0, x1, y1].\nReturn: name = a short Korean layer name for that prop; group = a short Korean noun for its kind; en = an English phrase that tells it apart by color and position (e.g. \"the white floor-standing air conditioner on the right\"); see_through = true if the background shows through gaps in it (open legs, railings, fences), else false.\nReturn only JSON.",
+    "images": [
+     {
+      "label": "Image A:",
+      "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=",
+      "detail": "high"
+     }
+    ],
+    "schema": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "name",
+      "group",
+      "en",
+      "see_through"
+     ],
+     "properties": {
+      "name": {
+       "type": "string"
+      },
+      "group": {
+       "type": "string"
+      },
+      "en": {
+       "type": "string"
+      },
+      "see_through": {
+       "type": "boolean"
+      }
+     }
+    },
+    "name": "describe"
+   },
+   "sent": {
+    "kind": "pd",
+    "url": "/v1/responses",
+    "auth": "Bearer sk-test-local-only-0123456789abcdef",
+    "ctype": "application/json",
+    "body": "{\"model\":\"gpt-6.1-sol\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Image A is a finished background illustration for an animated show, exactly 1024 x 576 pixels. The artist drew a box around one prop: [369, 104, 420, 150] in Image A pixel coordinates [x0, y0, x1, y1].\\nReturn: name = a short Korean layer name for that prop; group = a short Korean noun for its kind; en = an English phrase that tells it apart by color and position (e.g. \\\"the white floor-standing air conditioner on the right\\\"); see_through = true if the background shows through gaps in it (open legs, railings, fences), else false.\\nReturn only JSON.\"},{\"type\":\"input_text\",\"text\":\"Image A:\"},{\"type\":\"input_image\",\"image_url\":\"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=\",\"detail\":\"high\"}]}],\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"describe\",\"strict\":true,\"schema\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"name\",\"group\",\"en\",\"see_through\"],\"properties\":{\"name\":{\"type\":\"string\"},\"group\":{\"type\":\"string\"},\"en\":{\"type\":\"string\"},\"see_through\":{\"type\":\"boolean\"}}}}},\"store\":false}"
+   },
+   "usd": 0.01
+  },
+  {
+   "kind": "edit",
+   "label": "plate",
+   "args": {
+    "prompt": "Edit this picture: remove these objects completely and redraw what was behind them.\nRemove: the reddish-brown upholstered sofa.\nWhere they were, continue the scene that was behind them in the same flat hand-drawn style: the cream walls.\nKeep everything else exactly as it is: same composition, same size, same positions, same shapes, same colors, same drawing style. Do not add anything new. No people, no text.",
+    "size": "1024x576",
+    "mask": false
+   },
+   "sent": {
+    "kind": "edit",
+    "url": "/v1/images/edits",
+    "auth": "Bearer sk-test-local-only-0123456789abcdef",
+    "fields": [
+     {
+      "name": "model",
+      "value": "gpt-image-2.5-sunburst"
+     },
+     {
+      "name": "prompt",
+      "value": "Edit this picture: remove these objects completely and redraw what was behind them.\r\nRemove: the reddish-brown upholstered sofa.\r\nWhere they were, continue the scene that was behind them in the same flat hand-drawn style: the cream walls.\r\nKeep everything else exactly as it is: same composition, same size, same positions, same shapes, same colors, same drawing style. Do not add anything new. No people, no text."
+     },
+     {
+      "name": "size",
+      "value": "1024x576"
+     },
+     {
+      "name": "quality",
+      "value": "high"
+     },
+     {
+      "name": "n",
+      "value": "1"
+     },
+     {
+      "name": "output_format",
+      "value": "png"
+     },
+     {
+      "name": "background",
+      "value": "opaque"
+     },
+     {
+      "name": "image[]",
+      "filename": "image1.png",
+      "type": "image/png",
+      "sha256": "1988ff19704152364d3506f582b1063d355ee762015c21654c3ed65939a82bc5",
+      "bytes": 79
+     }
+    ]
+   },
+   "usd": 0.0569
+  },
+  {
+   "kind": "edit",
+   "label": "plate_add",
+   "args": {
+    "prompt": "Edit this picture: remove these objects completely and redraw what was behind them.\nRemove: the small added prop on the wall.\nWhere they were, continue the scene that was behind them in the same flat hand-drawn style.\nKeep everything else exactly as it is: same composition, same size, same positions, same shapes, same colors, same drawing style. Do not add anything new. No people, no text. Only change the masked areas.",
+    "size": "2048x1152",
+    "mask": true
+   },
+   "sent": {
+    "kind": "edit",
+    "url": "/v1/images/edits",
+    "auth": "Bearer sk-test-local-only-0123456789abcdef",
+    "fields": [
+     {
+      "name": "model",
+      "value": "gpt-image-2.5-sunburst"
+     },
+     {
+      "name": "prompt",
+      "value": "Edit this picture: remove these objects completely and redraw what was behind them.\r\nRemove: the small added prop on the wall.\r\nWhere they were, continue the scene that was behind them in the same flat hand-drawn style.\r\nKeep everything else exactly as it is: same composition, same size, same positions, same shapes, same colors, same drawing style. Do not add anything new. No people, no text. Only change the masked areas."
+     },
+     {
+      "name": "size",
+      "value": "2048x1152"
+     },
+     {
+      "name": "quality",
+      "value": "high"
+     },
+     {
+      "name": "n",
+      "value": "1"
+     },
+     {
+      "name": "output_format",
+      "value": "png"
+     },
+     {
+      "name": "background",
+      "value": "opaque"
+     },
+     {
+      "name": "image[]",
+      "filename": "image1.png",
+      "type": "image/png",
+      "sha256": "1988ff19704152364d3506f582b1063d355ee762015c21654c3ed65939a82bc5",
+      "bytes": 79
+     },
+     {
+      "name": "mask",
+      "filename": "mask.png",
+      "type": "image/png",
+      "sha256": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+      "bytes": 70
+     }
+    ]
+   },
+   "usd": 0.0569
+  }
+ ]
+}
