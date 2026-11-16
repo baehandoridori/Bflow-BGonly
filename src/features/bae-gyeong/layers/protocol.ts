@@ -5,7 +5,8 @@
 import type { LayerPlan } from './engine/planview';
 import type { LayersDoneSummary, LayersProposal, PackedAdded } from './session';
 
-export type LayersRpcMethod = 'pd' | 'edit' | 'storeGet' | 'storeSet';
+/** edgesReady (6단계): 나누기의 윤곽 단계에서 '가장자리 모델(BiRefNet)을 쓸 수 있나' — 화면이 모델을 받는 중이면 잠시 기다렸다 답한다. */
+export type LayersRpcMethod = 'pd' | 'edit' | 'storeGet' | 'storeSet' | 'edgesReady';
 
 export type LayersToWorker =
   | { type: 'port' }                                           // ports[0] = 모델 일꾼 전용 통로 (앞 통로는 닫는다)

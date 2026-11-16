@@ -3,13 +3,14 @@
  * 엔진 한 판이 그대로 남아 있다. 일꾼의 GPT · 저장 부탁은 여기서 메인 통로(BaeLayersGateway)로 보낸다 — 지금 작업 번호를 붙여서.
  * DOM 은 쓰지 않는다 (Worker 와 crypto 만). 시험은 makeWorker 로 가짜 일꾼을 넣는다.
  */
-import type { BaeLayersGateway } from '../../../shared/bae/layers';
+import type { BaeLayersEdgesWhy, BaeLayersGateway } from '../../../shared/bae/layers';
 import type { LayerPlan } from './engine/planview';
 import type { LayersFromWorker, LayersToWorker } from './protocol';
 import type { LayersDoneSummary, LayersProposal, PackedAdded } from './session';
 
 export interface WorkerLike { postMessage(m: unknown, transfer?: Transferable[]): void; onmessage: ((e: MessageEvent) => void) | null; onerror: ((e: ErrorEvent) => void) | null; terminate(): void }
 export type LayersStepListener = (step: string, state: string, info: Record<string, unknown>) => void;
+export type LayersEdgesReady = () => Promise<{ ok: true } | { ok: false; why: BaeLayersEdgesWhy }>;
 
 export class LayersRunError extends Error {
   constructor(message: string, readonly step: 'plan' | 'add' | 'split', readonly aborted: boolean) { super(message); this.name = aborted ? 'AbortError' : 'Error'; }
@@ -29,6 +30,8 @@ export function createLayersClient(opts: { gateway: () => BaeLayersGateway; make
   const stepListeners = new Set<LayersStepListener>();
   const logs: string[] = [];
   let workerPic: string | null = null;
+  /** 6단계: 일꾼이 나누기의 윤곽 단계에서 묻는 '가장자리 모델을 쓸 수 있나' (창이 정한다 — 받는 중이면 잠시 기다린다). */
+  let edgesReady: LayersEdgesReady | null = null;
 
   function worker(): WorkerLike {
     if (w) return w;
@@ -55,7 +58,8 @@ export function createLayersClient(opts: { gateway: () => BaeLayersGateway; make
           : await g.edit({ jobId, prompt: String(a.prompt), image: a.image as Uint8Array, mask: (a.mask as Uint8Array | null) ?? null, size: String(a.size) });
         if (!r.ok) { reply({ type: 'rpc-reply', id, ok: false, error: r.message, name: r.aborted ? 'AbortError' : 'Error' }); return; }
         value = method === 'pd' ? { json: (r as { json: unknown }).json, usd: r.usd } : { png: (r as { png: Uint8Array }).png, usd: r.usd };
-      } else if (method === 'storeGet') value = await g.storeGet(String(a.pic), String(a.key));
+      } else if (method === 'edgesReady') value = edgesReady ? await edgesReady() : { ok: false, why: 'off' };
+      else if (method === 'storeGet') value = await g.storeGet(String(a.pic), String(a.key));
       else if (method === 'storeSet') value = await g.storeSet(String(a.pic), String(a.key), a.value);
       else throw new Error('알 수 없는 부탁: ' + method);
       reply({ type: 'rpc-reply', id, ok: true, value });
@@ -92,6 +96,8 @@ export function createLayersClient(opts: { gateway: () => BaeLayersGateway; make
     get workerPic() { return workerPic; },
     get logs() { return logs.slice(); },
     setJob(id: string | null) { jobId = id; },
+    /** 6단계: '가장자리 모델을 쓸 수 있나'에 답할 함수 (창이 열릴 때 넣는다). 없으면 지금 방식 (off). */
+    setEdges(fn: LayersEdgesReady | null) { edgesReady = fn; },
     get jobId() { return jobId; },
     onStep(l: LayersStepListener) { stepListeners.add(l); return () => { stepListeners.delete(l); }; },
     usePort(port: MessagePort) { post({ type: 'port' }, [port as unknown as Transferable]); },

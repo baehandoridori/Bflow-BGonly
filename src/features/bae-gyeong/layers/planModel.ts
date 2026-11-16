@@ -15,7 +15,8 @@ export type { LayerBin, LayerPlan, PlanViewResult, ViewRow };
 /** 윤곽 후보: 0~2 = SAM 의 세 답, 3 = 한 장짜리 답 (엔진 DEFAULT_PICK). 'auto' 는 나눌 때 빈 배경과 가장 맞는 것. */
 export const LAYERS_DEFAULT_PICK = 3;
 export const LAYERS_FIND_STEPS: Array<[string, string]> = [['engine', '레이어 엔진 준비'], ['inventory', 'PD가 물건 찾기'], ['outlines', '물건 윤곽 따기 (이 PC)']];
-export const LAYERS_SPLIT_STEPS: Array<[string, string]> = [['plate', '빈 배경 그리기 (GPT)'], ['outlines', '윤곽 다시 맞추기 (이 PC)'], ['depth', 'PD가 앞뒤 판단'], ['edits', '가려진 부분 그리기 (GPT)'], ['build', '레이어 조립 (이 PC)'], ['psd', 'PSD 만들기']];
+/** 'edges' (6단계): SAM 윤곽 다음에 가장자리 모델(BiRefNet)이 물건마다 윤곽을 다시 따요. 모델을 못 쓰면 '지금 방식'으로 넘어가요. */
+export const LAYERS_SPLIT_STEPS: Array<[string, string]> = [['plate', '빈 배경 그리기 (GPT)'], ['outlines', '윤곽 다시 맞추기 (이 PC)'], ['edges', '가장자리 다듬기 (이 PC)'], ['depth', 'PD가 앞뒤 판단'], ['edits', '가려진 부분 그리기 (GPT)'], ['build', '레이어 조립 (이 PC)'], ['psd', 'PSD 만들기']];
 export const LAYERS_AGAIN_STEPS: Array<[string, string]> = [['psd', 'PSD 다시 조립 (0원)']];
 /** GPT Image 한 장 · PD 한 번의 대강 (HTML lpEstimate) */
 const IMG_USD = 0.056;

@@ -53,6 +53,48 @@ export interface BaeLayersSummaryLite {
   again: boolean;
   /** 물건 수 */
   props: number;
+  /** (6단계) 가장자리를 어떤 방식으로 땄나: 새 방식(BiRefNet) · 지금 방식(SAM 만). 없으면 5단계 화면이 보낸 것 = SAM 만 */
+  edges?: BaeLayersEdgesMethod;
+  /** (6단계) 그 까닭을 쉬운 말로 (baeLayersEdgesNote) */
+  edgesNote?: string;
+}
+
+/* ---------------------------------------------------------------- 6단계: 가장자리 (BiRefNet 새 방식) */
+
+export type BaeLayersEdgesMethod = 'birefnet' | 'sam';
+/**
+ * 지금 방식(SAM 만)으로 나눈 까닭. off = 가장자리 모델을 쓰는 길이 없음 (시험 · 미리보기) · missing = 모델을 받지 못함 ·
+ * downloading = 아직 받는 중 · failed = 불러오거나 돌리다 실패 · cpu = 그래픽카드로 돌릴 수 없음 (계획 14 9-1 '그래픽카드가 모자라면 SAM만') ·
+ * crashed = 앞서 이 PC 에서 모델 일꾼이 멈춤 · nomatch = 모델의 윤곽이 어느 물건과도 맞지 않음
+ */
+export type BaeLayersEdgesWhy = 'off' | 'missing' | 'downloading' | 'failed' | 'cpu' | 'crashed' | 'nomatch';
+export const BAE_LAYERS_EDGES_WHY: readonly BaeLayersEdgesWhy[] = ['off', 'missing', 'downloading', 'failed', 'cpu', 'crashed', 'nomatch'];
+const EDGES_WHY_KO: Record<BaeLayersEdgesWhy, string> = {
+  off: '이 화면에서는 가장자리 모델을 쓰지 않아요',
+  missing: '모델을 받지 못했어요',
+  downloading: '모델을 아직 받는 중이에요',
+  failed: '이 PC에서 모델이 돌지 않았어요',
+  cpu: '그래픽카드로 돌릴 수 없어요',
+  crashed: '앞서 이 PC에서 모델이 멈췄어요',
+  nomatch: '모델이 그린 윤곽이 물건과 맞지 않았어요',
+};
+/** 방식 이름 (창 · 기록) */
+export function baeLayersEdgesLabel(method: BaeLayersEdgesMethod): string {
+  return method === 'birefnet' ? '새 방식 (가장자리 다듬기)' : '지금 방식 (윤곽 모델만)';
+}
+/** 기록 줄에 남기는 가장자리 (메인이 화면에서 받은 것을 고른다: 모르는 방식 · 너무 긴 글은 받지 않음). */
+export function baeLayersEdgesRecord(method: unknown, note: unknown): { edges: BaeLayersEdgesMethod; edgesNote: string } {
+  const edges: BaeLayersEdgesMethod = method === 'birefnet' ? 'birefnet' : 'sam';
+  const text = typeof note === 'string' ? note.replace(/\s+/g, ' ').trim() : '';
+  return { edges, edgesNote: text && text.length <= 200 ? text : baeLayersEdgesNote(edges, null) };
+}
+/** 어떤 방식으로 나눴나를 쉬운 말로 (창의 안내 · 기록 줄). */
+export function baeLayersEdgesNote(method: BaeLayersEdgesMethod, why: BaeLayersEdgesWhy | null, used = 0, props = 0): string {
+  if (method === 'birefnet') {
+    const rest = props - used;
+    return '가장자리를 새 방식으로 다듬었어요' + (props ? ` (물건 ${props}개 중 ${used}개${rest > 0 ? `, 나머지 ${rest}개는 지금 방식` : ''})` : '') + '.';
+  }
+  return '가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요' + (why ? ` (${EDGES_WHY_KO[why]})` : '') + '.';
 }
 
 export interface BaeLayersPdOutcome { ok: true; json: unknown; usd: number }

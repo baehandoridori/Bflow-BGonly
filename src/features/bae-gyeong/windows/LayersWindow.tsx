@@ -4,6 +4,8 @@
 // 오른쪽 위: PSD 에 들어갈 레이어 (폴더 OL · ML · UL, ML 맨 아래 '배경 (빈 방)', 그림자 줄, '나누지 않음' 묶음).
 // 오른쪽 아래: 고른 물건 고치기 (이름 · 층 · 그림자 따로 · 나누지 않음 · 하나씩 따로 · 합치기 · 윤곽 후보) + '작은 것 합치기'.
 // 흐름과 상태는 layers/useLayersSession.ts, 규칙은 layers/planModel.ts. 이 파일은 그리기만 한다.
+// 6단계: 그림 아래 '가장자리' 줄 — 나눈 뒤에는 어떤 방식으로 나눴는지(새 방식 · 지금 방식과 그 까닭), 그 전에는 가장자리 모델 받기 상태.
+// 나누는 중 단계 목록에 '가장자리 다듬기 (이 PC)'. 설정 · 켜고 끄기는 없다 (계획에 없음 — 지금 방식과 견주기는 시험 PSD 두 개로).
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { BoxSelect, Check, Eye, Folder, FolderOpen, Layers, Loader2, Pencil, RotateCcw, Square, AlertTriangle } from 'lucide-react';
 import { BaeWindow } from './BaeWindow';
@@ -11,7 +13,8 @@ import type { BaeLayersGateway } from '@/shared/bae/layers';
 import { baeLayersGateway, unavailableLayersGateway } from '../layers/layersApi';
 import { baeModelGateway, type BaeModelGateway } from '../modelApi';
 import type { LayersClient } from '../layers/layersClient';
-import { useLayersSession, type LayersPicture } from '../layers/useLayersSession';
+import { useLayersSession, edgesGetText, type LayersPicture } from '../layers/useLayersSession';
+import { baeLayersEdgesLabel } from '@/shared/bae/layers';
 import {
   allIds, binOfId, candsOf, editorState, estimate, groupOf, headOf, labelsOf, legendCounts, mergeRows, pickOf, sumOf, treeRows, boxOfDrag,
   setName, setBin, setMode as setBundleMode, toggleKeep, toggleShadow, setPick, unmerge, remerge, unmergeAll, toggleMergeGroup, removeBoxed,
@@ -137,6 +140,15 @@ export function LayersWindow(p: LayersWindowProps) {
     : failed && plan && s.phase !== 'adding' ? { cls: 'is-error', text: '나누지 못했어요. 다시 누르면 이어서 해요' }
     : { cls: 'is-wait', text: s.plated ? '빈 방은 저장해 둔 것이라 0원, PSD로 저장해요' : '빈 방을 다시 그려서 PSD로 저장해요. 약 80원' };
 
+  /* ---------- 가장자리 (6단계): 나눈 방식, 아니면 모델 받기 상태 ---------- */
+  const edgeSum = showDone ? s.summary!.edges : null;
+  const method: { kind: 'new' | 'old' | 'get'; text: string; title?: string } | null = edgeSum
+    ? { kind: edgeSum.method === 'birefnet' ? 'new' : 'old', text: `${baeLayersEdgesLabel(edgeSum.method)} · ${edgeSum.text}` }
+    : L.edges.broken ? { kind: 'old', text: '가장자리 다듬기 모델이 이 PC에서 멈춘 적이 있어 이번에 켠 동안은 지금 방식으로 나눠요.' }
+    : L.edges.phase === 'getting' ? { kind: 'get', text: `${edgesGetText(L.edges)} · 다 받으면 나눌 때 가장자리를 새 방식으로 다듬어요.` }
+    : L.edges.phase === 'failed' ? { kind: 'old', text: '가장자리 다듬기 모델을 받지 못했어요. 나누면 지금 방식으로 나눠요.', title: L.edges.message }
+    : null;
+
   /* ---------- 발 ---------- */
   const note = L.busy ? `${s.phase === 'finding' ? '물건을 찾는 중' : s.phase === 'adding' ? 'PD가 네모 안의 물건에 이름을 붙이는 중' : '나누는 중'} · ${L.elapsed}초`
     : showDone ? `나눴어요. 레이어 ${s.summary!.layers + 1}장${s.summary!.shadows ? ` + 그림자 ${s.summary!.shadows}장` : ''}을 PSD로 이 PC에 저장했어요.`
@@ -259,6 +271,11 @@ export function LayersWindow(p: LayersWindowProps) {
           <p className={`bae-hint bae-lp-info${s.info.kind === 'err' ? ' is-error' : ''}`} role="status">
             {s.mode === 'add' && !s.pendBox ? '그림 위에 빠진 물건을 네모로 감싸 그려요. PD가 이름을 붙여요 (약 5원).' : s.info.text}
           </p>
+          {method ? (
+            <p className={`bae-hint bae-lp-method is-${method.kind}`} title={method.title}>
+              <span className="bae-lp-method-tag">가장자리</span>{method.text}
+            </p>
+          ) : null}
         </div>
 
         <div className="bw-side bae-lp-side">

@@ -59,6 +59,20 @@ export async function splitWithPlan({ P, plan, gpt, codec, sam, store = null, on
   const forced = {}; for (const o of objs0) { const k = pickOf(plan, o.id); if (k != null) forced[o.id] = k; }
   const out = await findOutlines({ W, H, orig, plate, inventory: inv, scale: 1, sam, log, forced, progress: (d, n) => step('outlines', 'run', { done: d, total: n }) });
   const { objs, ms, pairs } = out; if (!objs.length) throw new Error('물건 윤곽을 하나도 따지 못했어요.');
+  // (BAE 6단계) BiRefNet 새 방식: 시험 폴더의 bir/split_bir.js 가 여기 끼운 한 군데와 같은 일. 엔진에서 바뀐 곳은 이 표시가 붙은 줄뿐이다.   // (BAE 6단계)
+  // refineOutlines 를 넘기면 SAM 윤곽을 그것이 준 윤곽으로 바꾸고, findOutlines 가 윤곽에서 셈한 것(아래 자리 · 넓이 · 맞닿은 쌍 · 빈 배경 확인)을   // (BAE 6단계)
+  // 새 윤곽으로 다시 셈한다 — 그 뒤(앞뒤 · GPT 가려진 부분 · 레이어 · BG 보정)는 모두 새 윤곽으로. 같은 윤곽을 돌려주면 SAM 만과 같다.   // (BAE 6단계)
+  const refineOutlines = (arguments[0] && arguments[0].refineOutlines) || null;   // (BAE 6단계)
+  if (refineOutlines) {   // (BAE 6단계)
+    const r = await refineOutlines({ W, H, orig, plate, objs, ms }); ms.splice(0, ms.length, ...r.ms); out.refine = r.report;   // (BAE 6단계)
+    objs.forEach((o, i) => { const b = ms[i].box(); o.bottom = b[3] - 1; o.area = B.count(ms[i]); o.mbox = b; });   // (BAE 6단계)
+    pairs.length = 0; const dm = ms.map(m => B.dil(m, 3, W, H));   // (BAE 6단계)
+    for (let a = 0; a < objs.length; a++) for (let b = a + 1; b < objs.length; b++) {   // (BAE 6단계)
+      const A = objs[a].mbox, Bb = objs[b].mbox; if (A[0] > Bb[2] + 4 || Bb[0] > A[2] + 4 || A[1] > Bb[3] + 4 || Bb[1] > A[3] + 4) continue;   // (BAE 6단계)
+      if (B.countAnd(dm[a], ms[b]) > 0) pairs.push([a, b]);   // (BAE 6단계)
+    }   // (BAE 6단계)
+    out.plateCheck = plateDrift(orig, plate, ms, W, H);   // (BAE 6단계)
+  }   // (BAE 6단계)
   step('outlines', 'ok', { props: objs.length, pairs: pairs.length });
 
   // ---- 4 front/back (PD) ; the empty background drawn again inside a mask when it changed too much ----

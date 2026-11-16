@@ -5,12 +5,20 @@
  *   2 계획 고치기 (0원): planModel 의 함수로만 계획을 바꾸고, 0.4초 뒤 그림과 함께 저장 (닫았다 열거나 앱을 다시 켜도 그대로)
  *   3 나누기: 레이어가 기대는 것이 같으면 조립만 다시 (0원, 몇 초), 아니면 GPT 단계 → PSD → 메인이 이 PC 에 저장 · 기록 줄
  * 같은 그림을 다시 열면 (앱을 끄지 않았다면) 일꾼에 남은 엔진 한 판과 이 계획으로 바로 이어 간다.
+ * 6단계 가장자리 모델(BiRefNet, 약 490MB): 처음 레이어를 쓸 때 SAM 다음에 이어서 받기 시작한다 (계획 14 9-1). 나누기가 윤곽 단계에
+ * 오면 일꾼이 '쓸 수 있나' 묻고, 받는 중이면 EDGES_WAIT_MS 까지 기다린다. 못 쓰면 지금 방식(SAM 만)으로 끝까지 가고 그 까닭을 적는다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BaeLayersGateway, BaeLayersSummaryLite } from '@/shared/bae/layers';
+import { baeLayersEdgesNote, type BaeLayersEdgesWhy, type BaeLayersGateway, type BaeLayersSummaryLite } from '@/shared/bae/layers';
 import type { BaeModelGateway } from '../modelApi';
 import { baeModelPort } from '../modelApi';
 import { layersClient, layersPictureHash, LayersRunError, type LayersClient } from './layersClient';
+import {
+  EDGES_WAIT_MS, edgesGetText, edgesWhyShort, layersEdgesProgress, layersEdgesReady, layersEdgesState, markLayersEdgesBroken, onLayersEdges, startLayersEdges,
+  type LayersEdgesModelState,
+} from './edgesModel';
+
+export { edgesGetText };
 import type { LayersDoneSummary, LayersProposal } from './session';
 import {
   planFromProposal, planToSaved, planForEngine, planDirty, viewOf, layersBuildKey, addBoxed, wonOf,
@@ -59,6 +67,7 @@ async function sizeOf(src: string): Promise<{ w: number; h: number }> {
 }
 const lite = (s: LayersDoneSummary): BaeLayersSummaryLite => ({
   W: s.W, H: s.H, layers: s.layers, shadows: s.shadows, bins: s.bins, left: s.left, merged: s.merged, stackDiff: s.stack?.mean_diff ?? 0, sec: s.sec, again: s.again, props: s.props,
+  edges: s.edges?.method ?? 'sam', edgesNote: s.edges?.text ?? baeLayersEdgesNote('sam', 'off'),
 });
 
 export interface UseLayersOptions {
@@ -69,6 +78,8 @@ export interface UseLayersOptions {
   client?: LayersClient;
   /** 원/달러 (안내 금액) */
   rate?: number;
+  /** 시험용: 가장자리 모델을 받는 중일 때 기다리는 시간 (기본 EDGES_WAIT_MS) */
+  edgesWaitMs?: number;
 }
 
 export function useLayersSession(o: UseLayersOptions) {
@@ -97,8 +108,16 @@ export function useLayersSession(o: UseLayersOptions) {
       const prev = cur.st[id] || { state: '' as const }; const nx: LayersStepState = { ...prev };
       if (state === 'run' && prev.state !== 'run') nx.t0 = performance.now();
       nx.state = state === 'ok' ? 'ok' : state === 'run' ? 'run' : prev.state;
-      const i = info as { props?: number; far?: number; done?: number; total?: number; pairs?: number; added?: number; ep?: string };
-      if (id === 'engine' && state === 'ok') nx.sub = epLabel(String(i.ep || '')) || prev.sub;
+      const i = info as { props?: number; far?: number; done?: number; total?: number; pairs?: number; added?: number; ep?: string; method?: string; why?: BaeLayersEdgesWhy | null; used?: number };
+      // 가장자리 단계가 시작되면 SAM 윤곽 단계는 끝난 것 (엔진은 가장자리까지 마친 뒤에 윤곽 '끝'을 알린다)
+      if (id === 'edges' && state === 'run' && cur.st.outlines?.state === 'run') {
+        const o = cur.st.outlines; const t = o.t0 ? Math.round((performance.now() - o.t0) / 1000) + '초' : o.t;
+        cur = { ...cur, st: { ...cur.st, outlines: { ...o, state: 'ok', t } } };
+      }
+      if (id === 'outlines' && state === 'ok' && cur.st.edges?.state) return { st: { ...cur.st, outlines: { ...(cur.st.outlines || { state: 'ok' }), state: 'ok', sub: i.pairs != null ? '맞닿은 쌍 ' + i.pairs + '개' : '' } } };
+      if (id === 'edges' && state === 'run') nx.sub = i.total ? (i.done ? '물건 ' + i.done + '/' + i.total : layersEdgesState().phase === 'getting' ? edgesGetText() : '모델 준비') : prev.sub;
+      else if (id === 'edges' && state === 'ok') nx.sub = i.method === 'birefnet' ? '새 방식 · 물건 ' + (i.used ?? 0) + '/' + (i.props ?? 0) : '지금 방식' + (i.why ? ' (' + edgesWhyShort(i.why) + ')' : '');
+      else if (id === 'engine' && state === 'ok') nx.sub = epLabel(String(i.ep || '')) || prev.sub;
       else if (id === 'inventory' && state === 'ok') nx.sub = '물건 ' + i.props + '개' + (i.far ? ' · 원경 ' + i.far + '곳' : '');
       else if (id === 'outlines' && i.total) nx.sub = i.done + '/' + i.total;
       else if (id === 'outlines' && state === 'ok') nx.sub = i.pairs != null ? '맞닿은 쌍 ' + i.pairs + '개' : '';
@@ -110,9 +129,31 @@ export function useLayersSession(o: UseLayersOptions) {
   }), [client, set]);
   // 모델 일꾼이 내려가면 기다리던 SAM 요청을 실패로, 다음 일 전에 통로를 새로 받는다
   useEffect(() => {
-    const off = mg.current.onWorker((w) => { if (!w.running) { portStale.current = true; client.samGone(w.expected ? '모델 일꾼을 쉬게 했어요. 다시 해 주세요.' : '모델 일꾼이 멈췄어요. 다시 누르면 새로 띄워서 해요.'); } });
+    const off = mg.current.onWorker((w) => {
+      if (!w.running) {
+        // 가장자리를 다듬다가 일꾼이 멈췄으면 (그래픽카드 메모리 등) 이번에 켠 동안은 지금 방식으로 — 다시 눌러도 또 멈추지 않게
+        const e = ref.current.st.edges;
+        const broke = !w.expected && e?.state === 'run' && markLayersEdgesBroken();
+        portStale.current = true; client.samGone(w.expected ? '모델 일꾼을 쉬게 했어요. 다시 해 주세요.' : '모델 일꾼이 멈췄어요. 다시 누르면 새로 띄워서 해요.' + (broke ? ' 이번에는 가장자리 다듬기 없이 지금 방식으로 나눠요.' : ''));
+      }
+    });
     return off;
   }, [client]);
+  // 6단계: 일꾼이 묻는 '가장자리 모델을 쓸 수 있나'에 답하고, 받는 중이면 진행을 보인다
+  const edgesWait = o.edgesWaitMs ?? EDGES_WAIT_MS;
+  const [edges, setEdges] = useState<LayersEdgesModelState>(layersEdgesState);
+  useEffect(() => {
+    client.setEdges(() => layersEdgesReady(mg.current, edgesWait));
+    const sync = () => setEdges(layersEdgesState());
+    const offEdges = onLayersEdges(sync); sync();
+    const off = mg.current.onProgress((p) => {
+      if (p.id !== 'birefnet') return;
+      if (p.phase === 'download' || p.phase === 'copy' || p.phase === 'verify' || p.phase === 'check') layersEdgesProgress(p.doneBytes, p.totalBytes);
+      // 나누기가 모델을 기다리는 중이면 그 단계에 받는 양을 적는다
+      if (ref.current.st.edges?.state === 'run' && layersEdgesState().phase === 'getting') set((cur) => (cur.st.edges ? { st: { ...cur.st, edges: { ...cur.st.edges, sub: edgesGetText() } } } : {}));
+    });
+    return () => { offEdges(); off(); };
+  }, [client, edgesWait, set]);
   // 바쁜 동안 '진행 중 n초'
   const busy = s.phase === 'finding' || s.phase === 'adding' || s.phase === 'splitting';
   useEffect(() => { if (!busy) return; const t = window.setInterval(() => setTick((x) => x + 1), 500); return () => window.clearInterval(t); }, [busy]);
@@ -168,6 +209,7 @@ export function useLayersSession(o: UseLayersOptions) {
     set({ phase: 'finding', info: { text: '', kind: '' }, proposal: null, plan: null, summary: null, splitPlan: null, order: null, sel: null, found: null, done: null, psdPath: null });
     try {
       await ensureSam();
+      startLayersEdges(mg.current);   // 6단계: 가장자리 모델(약 490MB)을 SAM 다음에 이어서 받기 시작 (기다리지 않음 — 나눌 때 쓴다)
       const p = await client.plan(bytes, cur.pic, cur.notes);
       const { plan, restored } = planFromProposal(p);
       set((c) => ({
@@ -257,6 +299,7 @@ export function useLayersSession(o: UseLayersOptions) {
         info: {
           text: 'PSD로 저장했어요 · 레이어 ' + (sm.layers + 1) + '장' + (sm.shadows ? ' + 그림자 ' + sm.shadows + '장' : '') + ' (' + ([['OL', sm.bins.OL], ['ML', sm.bins.ML + 1], ['UL', sm.bins.UL]] as Array<[string, number]>).filter((x) => x[1]).map((x) => x[0] + ' ' + x[1]).join(' · ') + ') · ' + sm.sec + '초 · ' +
             (sm.again ? '조립만 다시라 0원' : sm.usd ? 'GPT ' + wonOf(sm.usd, rate) : '저장해 둔 GPT 단계를 써서 0원') + (sm.check && sm.check.length ? ' · 확인해 주세요: ' + sm.check.map((n) => n + ' (윤곽의 ' + Math.round(((sm.lost || {})[n] || 0) * 100) + '%가 빈 배경으로 감)').join(', ') : ''),
+          // 가장자리 방식(새 방식 · 지금 방식과 그 까닭)은 이 줄 아래 '가장자리' 줄에 (LayersWindow) — 같은 말을 두 번 쓰지 않는다
           kind: 'ok',
         },
         st: cur.st,
@@ -297,6 +340,8 @@ export function useLayersSession(o: UseLayersOptions) {
   const elapsed = busy && s.startedAt ? Math.round((performance.now() - s.startedAt) / 1000) : 0;
   return {
     s, view, dirty, busy, elapsed, tick,
+    /** 6단계 가장자리 모델 받기 상태 (창의 안내 줄) */
+    edges,
     select: (id: string | null) => set({ sel: id }),
     setMode: (mode: 'pick' | 'add') => set({ mode }),
     /** 나눈 뒤 '계획 다시 고치기': 계획 화면으로 (바꾸면 '바꾼 계획으로 다시 나누기') */

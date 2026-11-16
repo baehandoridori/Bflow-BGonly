@@ -14,8 +14,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   baeLayersPdBody, baeLayersEditFields, baeLayersPdProblem, baeLayersEditProblem, baeLayersStoreFile, baeLayersJobSummary,
-  isBaeLayersJobId, isPngBytes, isPictureBytes, BAE_LAYERS_PIC_RE, BAE_LAYERS_MAX_JSON, BAE_LAYERS_MAX_PSD,
-  type BaeLayersBeginCall, type BaeLayersPdCall, type BaeLayersEditCall, type BaeLayersDoneCall,
+  isBaeLayersJobId, isPngBytes, isPictureBytes, BAE_LAYERS_PIC_RE, BAE_LAYERS_MAX_JSON, BAE_LAYERS_MAX_PSD, baeLayersEdgesRecord,
+  type BaeLayersEdgesMethod, type BaeLayersBeginCall, type BaeLayersPdCall, type BaeLayersEditCall, type BaeLayersDoneCall,
   type BaeLayersPdOutcome, type BaeLayersEditOutcome, type BaeLayersDoneOutcome, type BaeLayersSummaryLite,
 } from '../../src/shared/bae/layers';
 import type { BaeFailure } from '../../src/shared/bae/makeCalls';
@@ -46,7 +46,7 @@ export interface BaeLayersDeps {
 }
 
 /** 기록 줄의 result 에 더 적는 것 (BaeJobResult 에 없는 칸 — 화면이 읽으려면 jobs.ts 에 같은 이름으로 더하면 된다). */
-export interface BaeLayersResultExtra { layers?: { count: number; shadows: number; bins: { OL: number; ML: number; UL: number }; left: number; merged: number; props: number; stackDiff: number; again: boolean; file: 'layers.psd' } }
+export interface BaeLayersResultExtra { layers?: { count: number; shadows: number; bins: { OL: number; ML: number; UL: number }; left: number; merged: number; props: number; stackDiff: number; again: boolean; file: 'layers.psd'; edges: BaeLayersEdgesMethod; edgesNote: string } }
 
 interface Job {
   owner: string; createdAt: string; parentJobId: string | null; label: string; w: number; h: number; t0: number;
@@ -220,7 +220,9 @@ export function createBaeLayers(deps: BaeLayersDeps) {
         const sec = Math.round((now() - j.t0) / 1000);
         const result: BaeJobResult & BaeLayersResultExtra = {
           w: n(s.W) || j.w || undefined, h: n(s.H) || j.h || undefined, sec, usdOrder: j.pdUsd, usdImage: j.imageUsd,
-          layers: { count: n(s.layers), shadows: n(s.shadows), bins: { OL: n(s.bins?.OL), ML: n(s.bins?.ML), UL: n(s.bins?.UL) }, left: n(s.left), merged: n(s.merged), props: n(s.props), stackDiff: typeof s.stackDiff === 'number' && Number.isFinite(s.stackDiff) ? Math.round(s.stackDiff * 100) / 100 : 0, again: s.again === true, file: 'layers.psd' },
+          layers: { count: n(s.layers), shadows: n(s.shadows), bins: { OL: n(s.bins?.OL), ML: n(s.bins?.ML), UL: n(s.bins?.UL) }, left: n(s.left), merged: n(s.merged), props: n(s.props), stackDiff: typeof s.stackDiff === 'number' && Number.isFinite(s.stackDiff) ? Math.round(s.stackDiff * 100) / 100 : 0, again: s.again === true, file: 'layers.psd',
+            // 6단계: 가장자리 방식과 그 까닭 (쉬운 말). 모르는 값은 지금 방식으로 적는다
+            ...baeLayersEdgesRecord(s.edges, s.edgesNote) },
         };
         if (!j.rowWritten) {
           j.rowWritten = true;

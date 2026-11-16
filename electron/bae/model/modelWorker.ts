@@ -186,18 +186,28 @@ async function depthRun(m: Extract<BaeWorkerRequest, { type: 'depth.run' }>) {
   const y = r[Object.keys(r)[0]] as OrtNs.Tensor;
   return { data: toF32(y), dims: y.dims, ep: made.ep, ms: Date.now() - t0, fellBack };
 }
+/*
+ * BiRefNet (6단계, 레이어 가장자리 새 방식): 2026-11-03 시험 poc_main6.mjs 의 birRun 과 같은 셈 — 1×3×1024×1024 float32 를 넣고
+ * (모델이 float16 입력만 받으면 한 번 바꿔서 다시), 첫 출력(outputNames[0])을 float32 로. 앞뒤 셈(잘라 넣기 · 되돌리기)은 화면 쪽
+ * 레이어 일꾼(src/features/bae-gyeong/layers/birefnet.js)이 한다. 실패하면 화면이 SAM 만(지금 방식)으로 끝까지 간다.
+ * 시험 전용 (BAE_MODEL_TEST=1): BAE_MODEL_FAKE_BIR 'load' = 모델을 불러오지 못한 것처럼 · 'run' = 계산이 실패한 것처럼.
+ */
+const FAKE_BIR = TEST && (env.BAE_MODEL_FAKE_BIR === 'load' || env.BAE_MODEL_FAKE_BIR === 'run') ? env.BAE_MODEL_FAKE_BIR : null;
 const birHalf = { v: false };
 async function birRun(m: Extract<BaeWorkerRequest, { type: 'bir.run' }>) {
   const o = await getOrt(); const file = modelFile('birefnet', 'birefnet/birefnet_full_fp16.onnx');
   const x32 = new Float32Array(m.input);
   if (x32.length !== 3 * 1024 * 1024) throw new Error('BiRefNet 입력 크기가 맞지 않아요.');
+  if (FAKE_BIR === 'load') throw Object.assign(new Error('시험: 가장자리 모델을 불러오지 못한 것처럼'), { code: 'MODEL_LOAD' });
   const feed = (s: Session, half: boolean) => ({ [s.inputNames[0]]: half ? new o.Tensor('float16', f32ToF16(x32), [1, 3, 1024, 1024]) : new o.Tensor('float32', x32, [1, 3, 1024, 1024]) });
   const t0 = Date.now();
-  const { r, m: made, fellBack } = await runOn('birefnet', file, async (x) => {
-    try { return await x.s.run(feed(x.s, birHalf.v)); }
-    catch (e) { if (birHalf.v || !/type|float16|tensor\(float16\)/i.test(String(e))) throw e; birHalf.v = true; return x.s.run(feed(x.s, true)); }
+  const { r: y, m: made, fellBack } = await runOn('birefnet', file, async (x) => {
+    if (FAKE_BIR === 'run') throw new Error('시험: 가장자리 모델 계산이 실패한 것처럼');
+    let out: OrtNs.InferenceSession.ReturnType;
+    try { out = await x.s.run(feed(x.s, birHalf.v)); }
+    catch (e) { if (birHalf.v || !/type|float16|tensor\(float16\)/i.test(String(e))) throw e; birHalf.v = true; out = await x.s.run(feed(x.s, true)); }
+    return out[x.s.outputNames[0]] as OrtNs.Tensor;
   });
-  const y = r[Object.keys(r)[0]] as OrtNs.Tensor;
   return { data: toF32(y), dims: y.dims, half: birHalf.v, ep: made.ep, ms: Date.now() - t0, fellBack };
 }
 

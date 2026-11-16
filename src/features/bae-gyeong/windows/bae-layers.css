@@ -69,6 +69,11 @@
 .bae-lp-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .bae-lp-info { min-height: 1.5em; line-height: 1.5; }
 .bae-lp-info.is-error { color: rgb(var(--bae-error)); }
+/* 6단계: 가장자리를 어떤 방식으로 땄나 (새 방식 · 지금 방식 · 모델 받는 중) */
+.bae-lp-method { display: flex; align-items: baseline; gap: 6px; margin-top: -2px; line-height: 1.5; }
+.bae-lp-method-tag { flex: none; padding: 0 6px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 18px; color: rgb(var(--color-text-secondary)); }
+.bae-lp-method.is-new .bae-lp-method-tag { border-color: color-mix(in srgb, rgb(var(--bae-ok)) 45%, rgb(var(--color-bg-card))); color: rgb(var(--bae-ok)); }
+.bae-lp-method.is-old .bae-lp-method-tag { border-color: color-mix(in srgb, rgb(var(--bae-warn)) 55%, rgb(var(--color-bg-card))); color: rgb(var(--bae-warn)); }
 
 /* 오른쪽: 레이어 목록 (줄이 많으면 목록 안에서만 스크롤) */
 .bae-lp-side { gap: 12px; }

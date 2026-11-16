@@ -37,4 +37,6 @@ export interface Built {
   addedIds: string[]; usd: number; costs: Record<string, number>; sec: number; edits: number;
 }
 export const hashOf: (s: string) => string;
-export function splitWithPlan(o: { P: Planned; plan: LayerPlan; gpt: EngineGpt; codec: EngineCodec; sam: EngineSam; store?: EngineStore | null; onStep?: EngineStep; log?: (t: string) => void; signal?: AbortSignal | null; maxEdits?: number }): Promise<Built>;
+/** (BAE 6단계) 윤곽 바꾸기 (split.js 에 표시를 붙여 끼운 한 군데, ../birefnet.js 가 넘긴다). 같은 ms 를 돌려주면 SAM 만과 같다. */
+export type RefineOutlines = (o: { W: number; H: number; orig: Uint8Array; plate: Uint8Array; objs: Array<{ id?: string | null; name: string; [k: string]: unknown }>; ms: BM[] }) => Promise<{ ms: BM[]; report: unknown }>;
+export function splitWithPlan(o: { P: Planned; plan: LayerPlan; gpt: EngineGpt; codec: EngineCodec; sam: EngineSam; store?: EngineStore | null; onStep?: EngineStep; log?: (t: string) => void; signal?: AbortSignal | null; maxEdits?: number; refineOutlines?: RefineOutlines | null }): Promise<Built>;

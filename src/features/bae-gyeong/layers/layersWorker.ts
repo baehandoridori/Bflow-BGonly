@@ -3,8 +3,10 @@
  *   - 엔진 한 판(session.ts)을 여기 둔다: 그림 · SAM · 만든 레이어가 말 사이에 남아, 계획만 바뀌면 몇 초 만에 다시 묶는다.
  *   - SAM 은 모델 일꾼에게 전용 통로로 (remoteSam.ts). GPT · 저장소는 화면에게 부탁한다(rpc) — 화면이 메인으로 보낸다 (키는 메인만).
  *   - 그만두기: 지금 하는 일의 AbortController 를 끊는다. 기다리던 GPT · 저장 부탁도 바로 그만둔다.
+ *   - 6단계 가장자리(BiRefNet): 쓸 수 있나는 화면에게 묻고(edgesReady), 계산은 SAM 과 같은 전용 통로로 (bir.run).
  */
-import { createLayersSession } from './session';
+import { createLayersSession, type LayersEdgeModel } from './session';
+import { BAE_LAYERS_EDGES_WHY, type BaeLayersEdgesWhy } from '../../../shared/bae/layers';
 import { remoteSam } from './remoteSam';
 import { browserCodec, browserThumbs } from './codec';
 import type { EngineGpt, EngineStore } from './engine/split';
@@ -40,8 +42,21 @@ const storeFor = (pic: string): EngineStore => ({
 });
 
 const sam = remoteSam(null, { log });
+/** 6단계 가장자리 모델: 쓸 수 있나는 화면에게 (모델 받기는 화면 · 메인의 일), 계산은 SAM 과 같은 전용 통로로 모델 일꾼에게. */
+const edges: LayersEdgeModel = {
+  async ready(signal) {
+    const r = (await rpc('edgesReady', {}, signal)) as { ok?: unknown; why?: unknown } | null;
+    if (r && r.ok === true) return { ok: true };
+    const why = r && typeof r.why === 'string' && (BAE_LAYERS_EDGES_WHY as readonly string[]).includes(r.why) ? (r.why as BaeLayersEdgesWhy) : 'missing';
+    return { ok: false, why };
+  },
+  async run(x) {
+    const r = await sam.call({ type: 'bir.run', input: x });
+    return { data: r.data as Float32Array, ep: String(r.ep || '') };
+  },
+};
 const session = createLayersSession({
-  gpt, storeFor, sam, codec: browserCodec, thumbs: browserThumbs, log,
+  gpt, storeFor, sam, codec: browserCodec, thumbs: browserThumbs, log, edges,
   onStep: (step, state, info) => post({ type: 'step', step, state, info: info || {} }),
 });
 let ctl: AbortController | null = null;
