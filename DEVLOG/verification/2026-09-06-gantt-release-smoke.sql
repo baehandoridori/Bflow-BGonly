@@ -68,7 +68,7 @@ BEGIN
   BEGIN
     PERFORM public.gantt_session_execute(owner_token,fixture.run_id||':undo-space-create',
       jsonb_build_object('type','deleteSpace','spaceId',space_id,'expectedRevision',1,'requireEmpty',true));
-  EXCEPTION WHEN serialization_failure THEN rejected:=true;
+  EXCEPTION WHEN serialization_failure OR SQLSTATE 'PT409' THEN rejected:=true;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'folder undo deleted a concurrently-created project'; END IF;
 
@@ -110,7 +110,7 @@ BEGIN
   BEGIN
     PERFORM public.gantt_session_execute(owner_token,fixture.run_id||':stale',
       jsonb_build_object('type','saveProject','project',saved,'expectedRevision',2));
-  EXCEPTION WHEN serialization_failure THEN rejected:=true;
+  EXCEPTION WHEN serialization_failure OR SQLSTATE 'PT409' THEN rejected:=true;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'stale project revision accepted'; END IF;
 

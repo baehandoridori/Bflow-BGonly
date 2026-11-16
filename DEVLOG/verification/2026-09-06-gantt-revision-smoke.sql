@@ -36,7 +36,7 @@ BEGIN
   rejected:=false;
   BEGIN
     PERFORM public.gantt_session_execute(token,'retired',jsonb_build_object('type','saveSpace','space',jsonb_set(space_doc,'{id}',to_jsonb(f.retired_id)),'expectedRevision',NULL));
-  EXCEPTION WHEN serialization_failure THEN rejected:=true; END;
+  EXCEPTION WHEN serialization_failure OR SQLSTATE 'PT409' THEN rejected:=true; END;
   IF rejected IS DISTINCT FROM true THEN RAISE EXCEPTION 'retired ID recreated'; END IF;
   PERFORM public.gantt_session_execute(token,'space',jsonb_build_object('type','saveSpace','space',space_doc,'expectedRevision',NULL));
 
@@ -75,11 +75,11 @@ BEGIN
   END LOOP;
   rejected:=false;
   BEGIN PERFORM public.gantt_session_execute(token,'stale-save',jsonb_build_object('type','saveProject','project',old_doc,'expectedRevision',1));
-    EXCEPTION WHEN serialization_failure THEN rejected:=true; END;
+    EXCEPTION WHEN serialization_failure OR SQLSTATE 'PT409' THEN rejected:=true; END;
   IF rejected IS DISTINCT FROM true THEN RAISE EXCEPTION 'stale save accepted'; END IF;
   rejected:=false;
   BEGIN PERFORM public.gantt_session_execute(token,'stale-delete',jsonb_build_object('type','deleteProject','projectId',project_id,'expectedRevision',2));
-    EXCEPTION WHEN serialization_failure THEN rejected:=true; END;
+    EXCEPTION WHEN serialization_failure OR SQLSTATE 'PT409' THEN rejected:=true; END;
   IF rejected IS DISTINCT FROM true THEN RAISE EXCEPTION 'stale delete accepted'; END IF;
 
   previous_revision:=(project_doc->>'revision')::INTEGER;

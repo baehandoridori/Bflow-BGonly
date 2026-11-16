@@ -2,6 +2,8 @@
 -- B flow 공유 캘린더 (PM 일정관리) — PR2 데이터 계층
 -- 설계서: docs/superpowers/specs/2026-08-24-calendar-pm-shared-calendars-design.md §4·§4.1
 -- 재실행 안전(idempotent). 라이브 적용은 PR2 머지 직후·배포 전 별도 게이트(한솔 확인 후).
+-- 2026-11-16: 이 파일을 다시 실행하면 '먼저 바뀜' 충돌 번호가 40001 로 돌아간다(서버 API 가 끝없이 다시 시도한다).
+-- 그 뒤에 2026-11-16-conflict-errcode-pt409.sql 도 다시 실행한다(모든 사슬의 마지막).
 
 -- ── 1) 신규 테이블 5개 (설계서 §4 DDL 그대로) ──────────────────
 CREATE TABLE IF NOT EXISTS calendars (

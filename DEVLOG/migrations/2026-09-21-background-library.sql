@@ -11,6 +11,8 @@
 -- Last, run 2026-10-16-background-editors.sql again too: this file puts back the admin-only
 -- background_library_snapshot and background_library_execute, which take the listed editors' right away
 -- (fail closed: they can still read) until that file runs again.
+-- 2026-11-16: a re-run of this file brings back ERRCODE '40001' for stale writes, which the server API (PostgREST) retries without end;
+-- run 2026-11-16-conflict-errcode-pt409.sql again after it (last in every chain).
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '45s';

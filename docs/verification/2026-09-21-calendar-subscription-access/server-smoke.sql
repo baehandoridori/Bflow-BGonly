@@ -55,7 +55,7 @@ BEGIN
  IF public.calendar_session_feed_manage(owner_token,source_id,'rotate',primary_b,(first->>'revision')::UUID) IS DISTINCT FROM rotated THEN RAISE EXCEPTION 'SMOKE retry changed alias'; END IF;
  denied:=false;
  BEGIN PERFORM public.calendar_session_feed_manage(owner_token,source_id,'revoke',NULL,(first->>'revision')::UUID);
- EXCEPTION WHEN serialization_failure THEN denied:=true; END;
+ EXCEPTION WHEN serialization_failure OR SQLSTATE 'PT409' THEN denied:=true; END;
  IF NOT denied THEN RAISE EXCEPTION 'SMOKE stale CAS accepted'; END IF;
  current_state:=public.calendar_session_feed_manage(owner_token,source_id,'revoke',NULL,(rotated->>'revision')::UUID);
  IF current_state->>'aliasToken' IS NOT NULL OR public.calendar_feed_read(primary_b) IS NOT NULL OR public.calendar_feed_read(second_hash) IS NOT NULL THEN RAISE EXCEPTION 'SMOKE revoke failed'; END IF;
