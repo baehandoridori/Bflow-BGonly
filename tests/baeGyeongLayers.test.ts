@@ -82,13 +82,16 @@ async function mainLayers(apiBase: string) {
   const local = createBaeLocalStore({ root });
   const queued: Array<{ kind: string; payload: any; opt: any }> = []; const shown: string[] = [];
   let prefs: { imageField: 'image[]' | 'image'; stream: boolean } = { imageField: 'image[]', stream: true };
-  const layers = createBaeLayers({
+  const make = () => createBaeLayers({
     settings: { get: async () => ({ ...effectiveBaeSettings([]), apiBase }) }, keyFor: async () => FAKE_KEY, local,
     outbox: { enqueue: async (kind: string, payload: unknown, opt: unknown) => { queued.push({ kind, payload, opt }); return { id: 'x', status: 'queued' }; } },
     imagePrefs: { get: () => prefs, set: (p: typeof prefs) => { prefs = p; } },
     publicUrl: (p: string) => `https://storage.example/${p}`, showItemInFolder: (p: string) => { shown.push(p); }, appVersion: 'test', origin: 'PC',
   });
-  return { layers, local, root, queued, shown };
+  const layers = make();
+  /** 앱을 다시 켠 것처럼: 같은 이 PC 보관함, 기억은 비어 있음 */
+  const restarted = () => make();
+  return { layers, local, root, queued, shown, restarted };
 }
 const newId = () => crypto.randomUUID();
 const isoNow = () => new Date().toISOString();
@@ -162,7 +165,7 @@ test('장부 · 기록: 돈이 처음 나갈 때 기록 줄(그리는 중), 다 
   const scene = sonamuScene(); const plate = encodePng(rgbToRgba(scene.plate, SCENE_W * SCENE_H), SCENE_W, SCENE_H);
   const srv = await fakeOpenAI({ plate });
   try {
-    const { layers, queued, shown } = await mainLayers(srv.base);
+    const { layers, queued, shown, restarted } = await mainLayers(srv.base);
     const free = newId();
     await layers.begin(OWNER, { jobId: free, createdAt: isoNow(), parentJobId: null, label: '무료.png', source: new Uint8Array(SRC_1x1), w: 2, h: 2 });
     assert.equal(await layers.end(OWNER, free, 'closed', ''), true);
@@ -182,8 +185,12 @@ test('장부 · 기록: 돈이 처음 나갈 때 기록 줄(그리는 중), 다 
     assert.ok(fs.existsSync((d as { psdPath: string }).psdPath) && (d as { psdPath: string }).psdPath.endsWith('layers.psd'));
     const doneRow = queued.filter((q) => q.kind === 'job').at(-1)!.payload;
     assert.equal(doneRow.status, 'done'); assert.equal(doneRow.result.layers.count, 5); assert.equal(doneRow.result.layers.file, 'layers.psd'); assert.ok(doneRow.costUsd > 0);
-    assert.equal(layers.showPsd(OWNER, jobId), true); assert.equal(shown.length, 1);
-    assert.equal(layers.showPsd('someone-else', jobId), false, '남의 작업 폴더는 열지 않는다');
+    assert.equal(await layers.showPsd(OWNER, jobId), true); assert.equal(shown.length, 1);
+    assert.equal(await layers.showPsd('someone-else', jobId), false, '남의 작업 폴더는 열지 않는다');
+    const after = restarted();
+    assert.equal(await after.showPsd(OWNER, jobId), true, '앱을 다시 켠 뒤에도 이 PC 작업 폴더의 PSD 를 연다');
+    assert.ok(shown.at(-1)!.endsWith('layers.psd')); assert.equal(shown.length, 2);
+    assert.equal(await after.showPsd(OWNER, newId()), false, 'PSD 가 없는 작업(다른 PC 기록)은 false');
     const failed = newId();
     await layers.begin(OWNER, { jobId: failed, createdAt: isoNow(), parentJobId: null, label: 'f.png', source: new Uint8Array(SRC_1x1), w: 2, h: 2 });
     await layers.end(OWNER, failed, 'failed', 'OpenAI에 연결하지 못했어요. sk-test-local-only-0123456789abcdef');

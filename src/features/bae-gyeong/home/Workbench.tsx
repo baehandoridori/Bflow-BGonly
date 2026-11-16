@@ -191,9 +191,11 @@ function FullPanes({ bench: b, busy, a }: { bench: BaeBenchView; busy: BaeBusyVi
 
           <div className="bae-res-foot">
             <InlineFacts facts={busy ? busy.facts : b.result ? b.result.facts : []} />
-            {b.result && !busy && (a.onSave || a.onUseBase) ? (
+            {b.result && !busy && (a.onSave || a.onUseBase || a.onLayers || a.onAngle) ? (
               <div className="bae-res-acts">
                 {a.onSave ? <button type="button" className="bae-btn bae-btn-s" onClick={a.onSave}><Download size={14} aria-hidden="true" />PNG 저장</button> : null}
+                {a.onLayers ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-layers" title="물건을 찾아 레이어 세 층으로 나누고 PSD로 저장해요" onClick={a.onLayers}><Layers size={14} aria-hidden="true" />레이어로 나누기</button> : null}
+                {a.onAngle ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-angle" title="같은 곳을 다른 카메라에서 다시 그려요" onClick={a.onAngle}><Rotate3d size={14} aria-hidden="true" />다른 각도로</button> : null}
                 {a.onUseBase ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-same" title="이 그림을 기준 배경 칸에 넣어서, 같은 장소의 다른 컷을 그려요" onClick={a.onUseBase}><CopyPlus size={14} aria-hidden="true" />기준 배경으로 새 컷</button> : null}
               </div>
             ) : null}

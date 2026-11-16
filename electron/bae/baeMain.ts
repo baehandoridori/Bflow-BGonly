@@ -13,9 +13,11 @@ import { createBaeOutbox } from './outbox';
 import { createBaeSettingsCache } from './baeSettingsCache';
 import { createBaeJobs, type BaeProgress } from './baeJobs';
 import { registerBaeJobsIpc } from './baeJobsIpc';
+import { registerBaeAngleIpc } from './baeAngleIpc';
+import { registerBaeLayersIpc } from './baeLayersIpc';
 import { makeJpegPreview, uploadBaePreview, type BaeStorageLike } from './baePreviews';
 import type { BaeImageFieldName } from './openaiClient';
-import { app, MessageChannelMain, utilityProcess } from 'electron';
+import { app, MessageChannelMain, shell, utilityProcess } from 'electron';
 import type { BaeRpcClient } from './baeStore';
 import { startBaeModelMain } from './model/modelIpc';
 import { baeModelWarehouseDir } from './model/modelPaths';
@@ -72,23 +74,42 @@ export function startBaeMain(deps: BaeMainDeps) {
     },
   };
 
+  const canUse = async (u: string) => (await deps.store.access(u)).canUse;
+  const keyFor = async (o: { userId: string; epoch: number }) => (await deps.keyring.keyFor(o)).key;
+  const publicUrl = (p: string) => deps.storage().getPublicUrl(p).data.publicUrl;
+  const origin = os.hostname().slice(0, 120);
+
   const jobs = createBaeJobs({
     settings,
-    keyFor: async (origin) => (await deps.keyring.keyFor(origin)).key,
+    keyFor,
     local,
     outbox,
     progress: (p: BaeProgress) => deps.broadcast('bae:progress', p),
     imagePrefs,
-    publicUrl: (p) => deps.storage().getPublicUrl(p).data.publicUrl,
+    publicUrl,
     appVersion: deps.appVersion,
-    origin: os.hostname().slice(0, 120),
+    origin,
+  });
+
+  // 7단계 '다른 각도로': 화면이 입체 판에서 만든 재료로 PD메모 → 그림 (기록 kind 'angle', 장부 'note' · 'angle'). 진행 알림은 같은 'bae:progress' (+ memo).
+  const angle = registerBaeAngleIpc({
+    ipc: deps.ipc, getSessionOriginOrThrow: deps.getSessionOriginOrThrow, canUse, settings, keyFor, local, outbox,
+    progress: (p) => deps.broadcast('bae:progress', p),
+    imagePrefs, publicUrl, appVersion: deps.appVersion, origin,
+  });
+  // 5단계 '레이어로 나누기': 엔진은 화면 쪽 일꾼, 여기는 GPT · 기록 kind 'layers' · PSD 저장과 폴더 열기.
+  const layers = registerBaeLayersIpc({
+    ipc: deps.ipc, getSessionOriginOrThrow: deps.getSessionOriginOrThrow, canUse, settings, keyFor, local, outbox, imagePrefs, publicUrl,
+    showItemInFolder: (p) => shell.showItemInFolder(p),
+    appVersion: deps.appVersion, origin,
   });
 
   registerBaeJobsIpc({
     ipc: deps.ipc,
     getSessionOriginOrThrow: deps.getSessionOriginOrThrow,
-    canUse: async (u) => (await deps.store.access(u)).canUse,
-    jobs,
+    canUse,
+    // '지금 진행 중'에 다른 각도로 그리는 것도 넣는다
+    jobs: { ...jobs, active: (owner: string) => [...jobs.active(owner), ...angle.active(owner)] },
     local,
     flushOutbox: () => { void outbox.flush({ all: true }); },
     saveAs: deps.saveAs,
@@ -99,7 +120,7 @@ export function startBaeMain(deps: BaeMainDeps) {
     electron: { utilityProcess, MessageChannelMain, app },
     ipc: deps.ipc,
     getSessionOriginOrThrow: deps.getSessionOriginOrThrow,
-    canUse: async (u) => (await deps.store.access(u)).canUse,
+    canUse,
     rpc: deps.rpc,
     tokenFor: deps.tokenFor,
     broadcast: deps.broadcast,
@@ -113,6 +134,6 @@ export function startBaeMain(deps: BaeMainDeps) {
     /** 'settings' 신호: 매뉴얼 · 모델 · 가격을 다음 호출 때 다시 읽는다. */
     settingsChanged() { settings.forget(); },
     flush() { void outbox.flush({ all: true }); },
-    stop() { jobs.abortAll(); outbox.stop(); models.stop(); },
+    stop() { jobs.abortAll(); angle.abortAll(); layers.abortAll(); outbox.stop(); models.stop(); },
   };
 }

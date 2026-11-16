@@ -6,6 +6,7 @@
  * - 모델 이름 · 품질은 여기서 정하지 않는다 (메인이 설정 책장에서). 화면에는 이름표 글자만.
  * - 3단계 '같은 장소': 기준 배경(최대 3장 · 메모 · 부품 · 색 견본)과 '그린 뒤 색 맞춤'. 기울기나 색 맞춤이 있으면 그림이 온 뒤
  *   이 화면이 HTML finishPicture 대로 마무리해서(engines) 메인에 보낸다 (bae:draw-finish).
+ * - 7단계 '다른 각도로': 각도 창이 만든 재료(drawAngle)로 같은 만드는 화면(그리는 중 · PD메모 읽는 중)을 띄우고, 결과는 작업판에 (kind 'angle').
  */
 import { create } from 'zustand';
 import { toast } from 'sonner';
@@ -21,6 +22,8 @@ import { baeBasesFromDraft, baeBasesToDraft, baeEmptySwatches, baePartsKey } fro
 import { BAE_LIBRARY_DEFAULT } from '@/shared/bae/library';
 import type { BaeJob } from '@/shared/bae/jobs';
 import type { BaeProgress } from '@/shared/bae/makeCalls';
+import type { BaeAngleDrawCall } from '@/shared/bae/angle/calls';
+import { baeAngleGw } from '../angleAccess';
 import { createBoard, type Board } from '../make/board';
 import { createInputsCache, prepareInputs, currentList, libThumbs, orderInputsOf, listPngBytes, type BaeInputs, type InputsSources } from '../make/inputs';
 import { baeGw, useBaeStore } from '../useBaeStore';
@@ -42,9 +45,17 @@ export interface BaeActiveResult {
   /** 색 맞춤을 못 했을 때의 안내 (HTML finishPicture note) */
   note: string; tilt: number;
 }
+/** 다른 각도로 그리는 작업 (주문서 대신): 밑그림 · 결과 줄 이름 · 요약 줄 · 그림 크기 · 같은 공간 그림 수 · PD메모 상태. */
+export interface BaeActiveAngle {
+  rough: string; label: string; line: string; size: [number, number]; extra: number; parentJobId: string | null;
+  /** 원래 그림과 보낸 같은 공간 그림 (1024 JPEG, 작업판 1 재료) */
+  refs: string[];
+  /** PD메모: null = 메모 없음, 'reading' = PD가 읽는 중, 'done' = 읽음, 'raw' = PD를 못 불러 메모를 그대로 넣음 */
+  memo: 'reading' | 'done' | 'raw' | null;
+}
 export interface BaeActiveJob {
   id: string;
-  kind: 'new' | 'same';
+  kind: 'new' | 'same' | 'angle';
   createdAt: string;
   phase: BaeMakePhase;
   startedAt: number;
@@ -61,8 +72,10 @@ export interface BaeActiveJob {
   error: string | null;
   reviseError: string | null;
   revisions: string[];
+  /** kind 'angle' 일 때만 */
+  angle?: BaeActiveAngle | null;
 }
-type Win = null | 'material' | 'make' | 'style' | 'parts' | 'denoise' | 'upscale';
+type Win = null | 'material' | 'make' | 'style' | 'parts' | 'denoise' | 'upscale' | 'angle' | 'layers';
 
 interface MakeState {
   kind: 'new' | 'same';
@@ -119,6 +132,8 @@ interface MakeState {
   submitOrder(): Promise<void>;
   revise(text?: string): Promise<void>;
   draw(): Promise<void>;
+  /** 다른 각도로: 각도 창의 '이 각도로 그리기' (창은 부르는 쪽이 닫는다) */
+  drawAngle(call: BaeAngleDrawCall): Promise<void>;
   stop(): Promise<void>;
   fold(): void;
   unfold(): void;
@@ -287,8 +302,13 @@ function ensureProgress() {
   try {
     progressOff = baeGw().onProgress((p: BaeProgress) => {
       const j = useBaeMake.getState().job;
-      if (!j || j.id !== p.jobId || j.phase !== 'drawing' || !p.partial) return;
-      useBaeMake.setState({ job: { ...j, partial: p.partial.dataUrl, partialCount: j.partialCount + 1 } });
+      if (!j || j.id !== p.jobId || j.phase !== 'drawing') return;
+      // 다른 각도로: 'PD가 메모 읽는 중' → 읽음 · 그대로 넣음
+      const memo = (p as BaeProgress & { memo?: unknown }).memo;
+      if (j.angle && (memo === 'reading' || memo === 'done' || memo === 'raw')) useBaeMake.setState({ job: { ...j, angle: { ...j.angle, memo } } });
+      if (!p.partial) return;
+      const cur = useBaeMake.getState().job!;
+      useBaeMake.setState({ job: { ...cur, partial: p.partial.dataUrl, partialCount: cur.partialCount + 1 } });
     });
   } catch { /* 통로가 아직 없으면 다음에 */ }
 }
@@ -434,7 +454,7 @@ export const useBaeMake = create<MakeState>((set, get) => ({
   revise: async (text) => {
     const s = get(); const j = s.job; const t = (text ?? s.reviseText).trim();
     if (!j?.order || !t) { toast('고칠 내용을 한국어로 써주세요'); return; }
-    if (j.phase === 'revising' || j.phase === 'drawing' || j.phase === 'ordering') return;
+    if (j.phase === 'revising' || j.phase === 'drawing' || j.phase === 'ordering' || j.kind === 'angle') return;
     const b = baeBoard(); let inp: BaeInputs | null;
     try { inp = await prepareInputs(sources(), cache); } catch (e) { set({ job: { ...j, reviseError: msg(e) } }); return; }
     if (!inp) { set({ job: { ...j, reviseError: '러프가 비어 있어요. 러프를 다시 넣어주세요.' } }); return; }
@@ -521,8 +541,36 @@ export const useBaeMake = create<MakeState>((set, get) => ({
     void useBaeJobs.getState().load();
   },
 
+  drawAngle: async (call) => {
+    const s = get(); const j = s.job;
+    if (j && (j.phase === 'ordering' || j.phase === 'revising' || j.phase === 'drawing')) { toast('지금 하던 작업이 끝나면 다시 눌러 주세요'); return; }
+    ensureProgress();
+    const angle: BaeActiveAngle = { rough: call.previews.rough, label: call.label, line: call.line, size: [call.size[0], call.size[1]], extra: call.order.n, parentJobId: call.parentJobId,
+      refs: call.previews.refs.slice(0, 4),
+      memo: call.memo ? 'reading' : null };
+    const job: BaeActiveJob = { id: call.jobId, kind: 'angle', createdAt: call.createdAt, phase: 'drawing', startedAt: Date.now(), order: null, promptText: '', orderCostUsd: null, orderSec: null,
+      inputs: null, partial: null, partialCount: 0, finishing: null, result: null, error: null, reviseError: null, revisions: [], angle };
+    set({ job, win: null, winAuto: false, makingBig: true, waitingCheck: false });
+    const r = await (async () => baeAngleGw().draw(call))().catch((e) => ({ ok: false as const, aborted: false, message: msg(e), code: null }));
+    const cur = get().job; if (!cur || cur.id !== call.jobId) return;
+    if (!r.ok) {
+      set({ job: { ...cur, phase: r.aborted ? 'stopped' : 'failed', error: r.message, partial: null } });
+      if (!r.aborted) notifyDone('다른 각도로 그리지 못했어요', r.message);
+      void useBaeJobs.getState().load();
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([r.png as BlobPart], { type: 'image/png' }));
+    const result: BaeActiveResult = { url, w: r.w, h: r.h, sec: r.sec, costUsd: r.costUsd, model: r.model, hasLock: false, moved: 0, variant: { alt: false, noise: false }, noiseSec: null, note: '', tilt: 0 };
+    const memo = cur.angle?.memo === 'reading' ? (r.memo ? (r.memo.raw ? 'raw' : 'done') : null) : cur.angle?.memo ?? null;
+    set({ job: { ...cur, phase: 'done', partial: null, result, angle: cur.angle ? { ...cur.angle, memo } : cur.angle } });
+    if (r.memo?.raw) toast.warning('PD를 부르지 못해서 메모 글을 그대로 넣어 그렸어요.');
+    notifyDone('다른 각도로 다 그렸어요', 'BAE경에서 결과를 확인해 주세요.');
+    void useBaeJobs.getState().load();
+  },
+
   stop: async () => {
     const j = get().job; if (!j) return;
+    if (j.kind === 'angle') { if (j.phase === 'drawing') await baeAngleGw().abort(j.id).catch(() => false); return; }
     if (j.phase === 'ordering' || j.phase === 'revising' || j.phase === 'drawing') await baeGw().abort(j.id).catch(() => false);
   },
   fold: () => set({ makingBig: false }),

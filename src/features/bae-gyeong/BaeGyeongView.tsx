@@ -21,18 +21,15 @@ import { baeUpRunning, useBaeUpscale } from './state/useBaeUpscale';
 import { useBaePcCheck } from './state/useBaePcCheck';
 import { useBaeJobs, visibleBaeJobs } from './state/useBaeJobs';
 import { BaeMakeLayer, useSeconds } from './state/BaeMakeLayer';
-import { KIND_LABEL, activeBench, jobViewProps, makingProps, recordBench, recordRow, reviewOf, stampPanelView, upscaleChildFact, wonOf } from './state/baeViewModel';
+import { KIND_LABEL, activeBench, baeRecordTitle, jobViewProps, makingProps, recordBench, recordRow, reviewOf, stampPanelView, upscaleChildFact, wonOf } from './state/baeViewModel';
+import { useBaeAngle, baeAngleActiveTarget, baeAngleRecordTarget, baeLayersFromActive, baeLayersFromRecord } from './state/useBaeAngle';
+import type { AngleTarget } from './angle/controller';
 import { TeamRecords } from './records/TeamRecords';
 import { CostTab } from './costs/CostTab';
 import { useBaeTeam } from './state/useBaeTeam';
 import { useBaeStamps } from './state/useBaeStamps';
 import { BAE_STAMP_LABEL, type BaeStamp } from '@/shared/bae/review';
 import './bae-gyeong.css';
-
-/** 아직 열리지 않은 도구 (그 단계에서 열린다) */
-const LATER: Record<'layers' | 'angle', string> = {
-  layers: '레이어로 나누기는 5단계에서 열려요.', angle: '다른 각도로는 7단계에서 열려요.',
-};
 
 /** 기록 목록을 받은 계정 — 다른 계정으로 바뀌면 목록을 비운다 (화면을 다시 열 때마다 비우지는 않는다). */
 let jobsActor: string | null = null;
@@ -58,6 +55,8 @@ export default function BaeGyeongView() {
   const [drop, setDrop] = useState<{ mode: 'drag' | 'paste'; file: File | null } | null>(null);
   const denoiseFileRef = useRef<HTMLInputElement>(null);
   const upscaleFileRef = useRef<HTMLInputElement>(null);
+  const layersFileRef = useRef<HTMLInputElement>(null);
+  const angleFileRef = useRef<HTMLInputElement>(null);
   const [selId, setSelId] = useState<string | null>(null);
   const [recSel, setRecSel] = useState<string | null>(null);
   const [view, setView] = useState<'grid' | 'list'>('grid');
@@ -163,7 +162,8 @@ export default function BaeGyeongView() {
     else if (kind === 'same') { setSelId(null); void make.openSame(); }
     else if (kind === 'denoise') denoiseFileRef.current?.click();   // 14d 8장 6번: 먼저 그림을 고르고, 고르면 창
     else if (kind === 'upscale') { if (!upscaleBusyShown(null)) upscaleFileRef.current?.click(); }
-    else toast.message(LATER[kind]);
+    else if (kind === 'layers') layersFileRef.current?.click();   // 레이어 · 각도도 먼저 그림을 고르고, 고르면 창
+    else angleFileRef.current?.click();
   };
   // 그림 파일을 끌고 오거나(Ctrl+V 로 붙여 넣으면) 작업판이 '놓는 자리' 여섯 칸으로 (14b 10-2). 창이 떠 있으면 그 창이 받는다.
   const benchFree = tab === 'bench' && !make.win && !(make.job && (make.job.phase === 'ordering' || make.job.phase === 'drawing') && make.makingBig);
@@ -194,7 +194,8 @@ export default function BaeGyeongView() {
     else if (zone === 'base') { setSelId(null); void make.openSame(file); }
     else if (zone === 'denoise') void tools.openDenoise({ blob: file, label: file.name });
     else if (zone === 'upscale') void upscale.open({ blob: file, label: file.name });
-    else toast.message(LATER[zone]);
+    else if (zone === 'layers') void useBaeAngle.getState().openLayersFile(file);
+    else void useBaeAngle.getState().openAngleFile(file);
   };
   const dropView: BaeDropView | null = drop && benchFree ? { mode: drop.mode, onZone, onCancel: () => setDrop(null) } : null;
   // 결과 도구 (다듬기 · 기준 배경으로 새 컷): 지금 작업이거나 기록 한 건
@@ -233,10 +234,39 @@ export default function BaeGyeongView() {
     if (!src) { toast('기준 배경으로 쓸 그림이 없어요'); return; }
     setSelId(null); void make.openSame(src);
   };
+  // ── 이어서 만들기: 다른 각도로 (7단계) · 레이어로 나누기 (5단계) ──
+  const angleOpen = (p: Promise<AngleTarget | null>) => {
+    void p.then((t) => { if (t) useBaeAngle.getState().openAngle(t); else toast('이 그림의 원본도 미리보기도 없어요'); })
+      .catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
+  };
+  const angleRecord = (j: BaeJob, title: string) => angleOpen(baeAngleRecordTarget(j, title || baeRecordTitle(j)));
+  const layersRecord = (j: BaeJob, title: string) => { void baeLayersFromRecord(j, title || baeRecordTitle(j)); };
+  /** 지금 작업의 결과: 기록 줄이 이미 왔으면 그것으로 (다른 각도 기록 · 영어 주문서가 같이 간다), 아니면 이 화면의 그림으로. */
+  const angleActive = (title: string) => {
+    const a = useBaeMake.getState().job; if (!a?.result) return;
+    const rec = rows.find((r) => r.id === a.id && r.status === 'done');
+    if (rec) { angleRecord(rec, title); return; }
+    angleOpen(baeAngleActiveTarget({ jobId: a.id, url: a.result.url, name: title || '지금 그림', variant: a.result.variant, place: a.kind === 'angle' ? null : make.place, prompt: a.promptText || null }));
+  };
+  const layersActive = (title: string) => {
+    const a = useBaeMake.getState().job; if (!a?.result) return;
+    void baeLayersFromActive({ jobId: a.id, url: a.result.url, label: title || '지금 그림', notes: a.kind === 'angle' ? '' : make.request });
+  };
+  /** 레이어 작업의 PSD 가 있는 폴더 (이 PC). 메인은 이번에 앱을 켠 뒤 나눈 작업만 안다. */
+  const showPsd = async (jobId: string) => {
+    const gw = window.baeLayersAPI;
+    if (!gw) { toast.message('테스트 모드에서는 폴더를 열지 않아요.'); return; }
+    const ok = await gw.showPsd(jobId).catch(() => false);
+    if (!ok) toast('PSD 폴더를 열지 못했어요. 이 PC에서 이번에 앱을 켠 뒤 나눈 그림만 열 수 있어요.');
+  };
+  const psdFor = (j: BaeJob) => (j.kind === 'layers' && j.status === 'done' && j.result.layers && j.userId === currentUser?.id ? () => { void showPsd(j.id); } : undefined);
+  /** 각도 작업이 실패했거나 각도를 다시 맞출 때: 마지막에 연 그림으로 각도 창 */
+  const reopenAngle = () => { if (!useBaeAngle.getState().reopenAngle()) toast('다시 열 그림이 없어요. 결과나 그림 파일로 다른 각도로를 열어 주세요.'); };
 
   const rowViews = rows.map((j) => ({ ...recordRow(j, rate, null), fresh: marked.has(j.id) }));
   const activeRow = active && !rows.some((r) => r.id === active.id) && (live || active.phase === 'ordered')
-    ? [{ id: active.id, thumb: active.inputs?.rough.small ?? null, thumbAlt: null, title: active.order?.summary?.slice(0, 40) || '새 배경', name: '', sub: '',
+    ? [{ id: active.id, thumb: active.angle?.rough ?? active.inputs?.rough.small ?? null, thumbAlt: null,
+      title: active.angle ? `다른 각도 ${active.angle.label}` : active.order?.summary?.slice(0, 40) || '새 배경', name: '', sub: '',
       kindLabel: KIND_LABEL[active.kind], when: '', took: live ? `${sec}초째` : '', cost: wonOf(active.orderCostUsd ?? 0, rate), state: 'live' as const,
       stateLabel: active.phase === 'drawing' ? '그리는 중' : active.phase === 'ordering' ? '주문서 쓰는 중' : '주문서 확인 대기', stamp: null }]
     : [];
@@ -274,7 +304,9 @@ export default function BaeGyeongView() {
       onLock: mine ? () => { const t = targetOf(j); if (t) void tools.toggleLock(t); } : undefined,
       onUpscale: mine ? () => upscaleRecord(j, localTeam, j.name ?? '') : undefined,
       onUseBase: () => useBaseFrom((mine ? localTeam : null) ?? j.images.result ?? null),
-      onLater: (tool) => toast.message(LATER[tool]),
+      onLayers: mine ? () => layersRecord(j, j.name ?? '') : undefined,
+      onAngle: mine ? () => angleRecord(j, j.name ?? '') : undefined,
+      onShowPsd: psdFor(j),
     }, tools.busy[j.id], upParent === j.id);
     return { ...withUpscaleFact(p, j), result: p.result && !mine ? { ...p.result, tools: null } : p.result, stamp: stampFor(j) };
   };
@@ -332,12 +364,12 @@ export default function BaeGyeongView() {
             busy={showActive ? busy : null}
             drop={dropView}
             actions={{
-              onEditMat: () => make.openMaterial(),
+              onEditMat: () => { if (active?.kind === 'angle') reopenAngle(); else make.openMaterial(); },
               onOpenStyle: () => make.openStyle(),
               onOpenOrder: () => make.openMake(),
               onExpand: () => make.unfold(),
               onStop: () => { void make.stop(); },
-              onRetry: () => { if (active?.phase === 'order-failed') void make.submitOrder(); else if (active?.order) make.openMake(); else make.openMaterial(); },
+              onRetry: () => { if (active?.kind === 'angle') reopenAngle(); else if (active?.phase === 'order-failed') void make.submitOrder(); else if (active?.order) make.openMake(); else make.openMaterial(); },
               onSave: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) void saveAs(id, bench?.title ?? ''); },
               onZoom: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) { setRecSel(id); setTab('records'); } },
               onReview: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) { setRecSel(id); setTab('records'); } },
@@ -348,6 +380,8 @@ export default function BaeGyeongView() {
                 else if (benchRecord) upscaleRecord(benchRecord, localBench, bench?.title ?? '');
               },
               onUseBase: () => useBaseFrom(showActive ? active?.result?.url ?? null : localBench ?? benchRecord?.images.result ?? null),
+              onLayers: () => { if (showActive) layersActive(bench?.title ?? ''); else if (benchRecord) layersRecord(benchRecord, bench?.title ?? ''); },
+              onAngle: () => { if (showActive) angleActive(bench?.title ?? ''); else if (benchRecord) angleRecord(benchRecord, bench?.title ?? ''); },
             }}
             log={log((id) => setSelId(id === active?.id ? null : id), '작업판에 올리기')}
           />
@@ -363,12 +397,18 @@ export default function BaeGyeongView() {
           onLock: () => { const t = targetOf(recordPicked); if (t) void tools.toggleLock(t); },
           onUpscale: () => upscaleRecord(recordPicked, localRec, recordPicked.name ?? ''),
           onUseBase: () => useBaseFrom(localRec ?? recordPicked.images.result ?? null),
-          onLater: (tool) => toast.message(LATER[tool]),
+          onLayers: () => layersRecord(recordPicked, recordPicked.name ?? ''),
+          onAngle: () => angleRecord(recordPicked, recordPicked.name ?? ''),
+          onShowPsd: psdFor(recordPicked),
         }, tools.busy[recordPicked.id], upParent === recordPicked.id), recordPicked)} stamp={stampFor(recordPicked)} />
         : <RecordList {...log((id) => setRecSel(id), '자세히 보기')} title="내 기록" onAll={undefined} scope={scopeSeg} />)}
       {activeTab === 'costs' && access.canReview && <CostTab rate={rate} />}
       {activeTab === 'settings' && <BaeSettingsTab />}
       {/* 그림 고르기 (시작 줄의 도구). 노이즈 제거 칸이 맨 뒤 — 3단계 화면 시험이 마지막 칸을 쓴다 */}
+      <input ref={layersFileRef} data-pick="layers" className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
+        onChange={(e) => { const f = imageOf(e.target.files ? Array.from(e.target.files) : null); e.target.value = ''; if (f) void useBaeAngle.getState().openLayersFile(f); }} />
+      <input ref={angleFileRef} data-pick="angle" className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
+        onChange={(e) => { const f = imageOf(e.target.files ? Array.from(e.target.files) : null); e.target.value = ''; if (f) void useBaeAngle.getState().openAngleFile(f); }} />
       <input ref={upscaleFileRef} data-pick="upscale" className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
         onChange={(e) => { const f = imageOf(e.target.files ? Array.from(e.target.files) : null); e.target.value = ''; if (f) void upscale.open({ blob: f, label: f.name }); }} />
       <input ref={denoiseFileRef} data-pick="denoise" className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"

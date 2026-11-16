@@ -216,7 +216,7 @@ export function createBaePreviewGateway(opts: PreviewOptions): BaeGateway {
       const u = me(); const rows = read<Array<BaeUsageLine & { userId: string }>>(K.usage, []).filter((x) => x.userId === u.id && (!from || x.at >= from) && (!to || x.at < to));
       const groups = new Map<string, { kind: string; model: string; n: number; usd: number }>();
       for (const r of rows) { const k = r.kind + '|' + r.model; const g = groups.get(k) ?? { kind: r.kind, model: r.model, n: 0, usd: 0 }; g.n++; g.usd += r.usd; groups.set(k, g); }
-      return { usd: rows.reduce((a, r) => a + r.usd, 0), images: rows.filter((r) => r.kind === 'image').length, orders: rows.filter((r) => r.kind === 'order').length,
+      return { usd: rows.reduce((a, r) => a + r.usd, 0), images: rows.filter((r) => r.kind === 'image' || r.kind === 'angle').length, orders: rows.filter((r) => r.kind === 'order').length,
         lines: [...groups.values()].sort((a, b) => (a.kind + a.model).localeCompare(b.kind + b.model)) };
     },
     async jobsTeam(since, limit = 100) {

@@ -1081,3 +1081,21 @@ contextBridge.exposeInMainWorld('baeModelAPI', {
 ipcRenderer.on('bae:model-port', (event, data: { nonce?: unknown } | undefined) => {
   window.postMessage({ type: 'bae-model-port', nonce: data?.nonce }, '*', event.ports);
 });
+// BAE경 '다른 각도로' (7단계): 그리기 · 그만두기. PD메모 · 그림 요청 · 기록 · 장부는 메인이 한다 (키는 메인만). 진행 알림은 'bae:progress'.
+contextBridge.exposeInMainWorld('baeAngleAPI', {
+  draw: (call: unknown) => ipcRenderer.invoke('bae:angle-draw', call, canonicalSessionEpoch),
+  abort: (jobId: string) => ipcRenderer.invoke('bae:angle-abort', jobId, canonicalSessionEpoch),
+});
+// BAE경 '레이어로 나누기' (5단계): 작업 시작 · PD · 그림 요청 · 다 나눔 · 끝 · 그만두기 · 그림별 저장 · PSD 폴더 열기.
+contextBridge.exposeInMainWorld('baeLayersAPI', {
+  begin: (call: unknown) => ipcRenderer.invoke('bae:layers-begin', call, canonicalSessionEpoch),
+  pd: (call: unknown) => ipcRenderer.invoke('bae:layers-pd', call, canonicalSessionEpoch),
+  edit: (call: unknown) => ipcRenderer.invoke('bae:layers-edit', call, canonicalSessionEpoch),
+  done: (call: unknown) => ipcRenderer.invoke('bae:layers-done', call, canonicalSessionEpoch),
+  end: (jobId: string, how: string, message: string) => ipcRenderer.invoke('bae:layers-end', jobId, how, message, canonicalSessionEpoch),
+  abort: (jobId: string) => ipcRenderer.invoke('bae:layers-abort', jobId, canonicalSessionEpoch),
+  storeGet: (pic: string, key: string) => ipcRenderer.invoke('bae:layers-store-get', pic, key, canonicalSessionEpoch),
+  storeSet: (pic: string, key: string, value: unknown) => ipcRenderer.invoke('bae:layers-store-set', pic, key, value, canonicalSessionEpoch),
+  storeForget: (pic: string) => ipcRenderer.invoke('bae:layers-store-forget', pic, canonicalSessionEpoch),
+  showPsd: (jobId: string) => ipcRenderer.invoke('bae:layers-show-psd', jobId, canonicalSessionEpoch),
+});

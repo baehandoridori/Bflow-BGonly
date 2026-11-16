@@ -36,8 +36,8 @@ export function MaterialsBlock({ mat, onOpenStyle, full }: { mat: BaeMaterialsVi
           </li>
         </ul>
       ) : null}
-      <section className="bae-mgroup" aria-label="레퍼런스">
-        <div className="bae-mhead"><p className="bae-mhead-name">레퍼런스</p><span className="bae-mcount bae-num">{mat.refs.length}/{mat.refMax}</span></div>
+      <section className="bae-mgroup" aria-label={mat.refsLabel ?? '레퍼런스'}>
+        <div className="bae-mhead"><p className="bae-mhead-name">{mat.refsLabel ?? '레퍼런스'}</p>{mat.refsLabel ? <span className="bae-mcount bae-num">{mat.refs.length}장</span> : <span className="bae-mcount bae-num">{mat.refs.length}/{mat.refMax}</span>}</div>
         {mat.refs.length ? (
           <ul className="bae-mats">
             {mat.refs.map((r) => (

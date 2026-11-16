@@ -1,5 +1,6 @@
 // BAE경 작업 기록과 장부의 모양 (서버 bae_gyeong_session_job_* · usage_* 함수의 짝). 화면 · 메인 · 테스트 모드가 같이 쓴다.
 // DOM · Electron · '@/' 없이 상대 경로만.
+import type { BaeAngleRecord } from './angle/calls';
 
 export const BAE_JOB_KINDS = ['new', 'same', 'edit', 'angle', 'layers', 'import', 'upscale', 'denoise'] as const;
 export type BaeJobKind = (typeof BAE_JOB_KINDS)[number];
@@ -61,6 +62,8 @@ export interface BaeJobSummary {
   lockOn?: boolean;
   /** 도구 작업(노이즈 제거 등)의 그림 이름 (불러온 파일 이름 또는 원래 작업 이름) */
   source?: string;
+  /** 다른 각도로 (kind 'angle', 7단계): 카메라 · 같은 공간 그림 · PD메모 기록 + 요약 줄(line, HTML 의 요약 글) · 파일 이름 */
+  angle?: BaeAngleRecord & { line: string; fileName: string };
 }
 /** 그린 뒤 한 일 (plan 14 5-2 '뒤에 한 일'): 기울기 되돌림 · 색 맞춤 · 노이즈 제거. */
 export interface BaeJobFinish {
@@ -89,6 +92,16 @@ export interface BaeJobPd {
 export interface BaeJobResult {
   w?: number; h?: number; model?: string; quality?: string; sec?: number; error?: string; stoppedAt?: string; usdOrder?: number; usdImage?: number;
   finish?: BaeJobFinish;
+  /** 레이어로 나누기 (kind 'layers', 5단계): PSD 에 든 것. count 는 물건 레이어 수 (빈 방 '배경' 한 장은 따로) */
+  layers?: BaeLayersDone;
+}
+/** 다 나눈 레이어 작업의 숫자 (electron/bae/baeLayers.ts done 의 result.layers). */
+export interface BaeLayersDone {
+  count: number; shadows: number; bins: { OL: number; ML: number; UL: number }; left: number; merged: number; props: number; stackDiff: number; again: boolean;
+  /** 이 PC 작업 폴더의 PSD 파일 이름 ('layers.psd') */
+  file: string;
+  /** 6단계: 가장자리 방식과 그 까닭 (쉬운 말) */
+  edges?: string; edgesNote?: string;
 }
 /** 미리보기 주소. source = 도구 작업의 원래 그림 · 판을 바꾼 작업의 처음 그림, bases · sheet = 기준 배경 재료. */
 export type BaeJobImages = Partial<Record<'result' | 'thumb' | 'gpt' | 'rough' | 'roughNotes' | 'sheet' | 'source', string>> & { refs?: string[]; bases?: string[] };

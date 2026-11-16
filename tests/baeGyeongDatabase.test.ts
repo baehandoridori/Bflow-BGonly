@@ -186,3 +186,24 @@ test('the base file runs: rights, revisions, the key vault and contentless signa
     });
   } finally { await db.close(); }
 });
+
+// 7단계 연결: '이번 달 내 사용 N장'에 다른 각도로 그린 그림('angle')도 센다 (DEVLOG/migrations/2026-11-16-bae-gyeong-usage-angle.sql).
+test('usage-angle file: angle drawings count as pictures, notes and layers do not', { skip: !runtime }, async () => {
+  const db = await boot();
+  try {
+    const angleSql = readFileSync(new URL('../DEVLOG/migrations/2026-11-16-bae-gyeong-usage-angle.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    assert.doesNotMatch(angleSql, /ERRCODE\s*=\s*'40(001|P01)'/);
+    await db.exec(angleSql);
+    await rpc(db, 'bae_gyeong_session_members_set', 'admin', ',$2,$3', ['member', 'user']);
+    const log = (row: unknown) => rpc(db, 'bae_gyeong_session_usage_log', 'member', ',$2::jsonb', [JSON.stringify(row)]);
+    await log({ kind: 'image', model: 'm', usd: 0.07, requestId: 'a-1' });
+    await log({ kind: 'angle', model: 'm', usd: 0.08, requestId: 'a-2' });
+    await log({ kind: 'note', model: 'm', usd: 0.01, requestId: 'a-3' });
+    await log({ kind: 'layers', model: 'm', usd: 0.05, requestId: 'a-4' });
+    await log({ kind: 'order', model: 'm', usd: 0.02, requestId: 'a-5' });
+    const sum = await rpc(db, 'bae_gyeong_session_usage_summary', 'member', ',$2,$3', [null, null]);
+    assert.equal(sum.images, 2, 'image + angle'); assert.equal(sum.orders, 1); assert.equal(Number(sum.usd).toFixed(2), '0.23'); assert.equal(sum.lines.length, 5);
+    const acl = (await db.query("SELECT has_function_privilege('anon','public.bae_gyeong_session_usage_summary(text,timestamptz,timestamptz)','EXECUTE') a, has_function_privilege('public','public.bae_gyeong_session_usage_summary(text,timestamptz,timestamptz)','EXECUTE') p")).rows[0];
+    assert.deepEqual(acl, { a: true, p: false });
+  } finally { await db.close(); }
+});

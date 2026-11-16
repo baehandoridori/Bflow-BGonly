@@ -221,3 +221,107 @@ test('stage 8: the new channels are open in preload, each with the session epoch
   const main = readFileSync('electron/main.ts', 'utf8');
   assert.match(main, /saveText: async \(defaultName, text\) => \{[\s\S]{0,400}showSaveDialog/);
 });
+
+// ── 5단계 레이어로 나누기 · 7단계 다른 각도로: 통로 연결 ──
+function channelHarness(canUse = true) {
+  const handlers = new Map<string, (...a: unknown[]) => Promise<unknown>>();
+  let origin = { userId: 'u1', epoch: 7 };
+  const unused = () => { throw new Error('not in this test'); };
+  return {
+    handlers, setOrigin: (o: typeof origin) => { origin = o; },
+    deps: {
+      ipc: { handle: (c: string, h: (...a: unknown[]) => Promise<unknown>) => handlers.set(c, h) },
+      getSessionOriginOrThrow: () => origin, canUse: async () => canUse,
+      settings: { get: unused, forget: () => {} }, keyFor: unused, local: { saveJobFile: unused, writeJobMeta: unused, jobDir: unused, cacheDir: 'C:\\nowhere' },
+      outbox: { enqueue: unused }, progress: () => {}, imagePrefs: { get: () => ({ imageField: 'image[]', stream: true }), set: () => {} },
+      publicUrl: (p: string) => 'https://example.invalid/' + p, showItemInFolder: () => {}, appVersion: 'test', origin: 'test-pc',
+    },
+    invoke: (c: string, ...a: unknown[]) => handlers.get(c)!(null, ...a),
+  };
+}
+/** preload 의 한 묶음 (exposeInMainWorld('이름', { … });) */
+const preloadApi = (preload: string, name: string) => { const from = preload.slice(preload.indexOf(`exposeInMainWorld('${name}'`)); return from.slice(0, from.indexOf('});') + 3); };
+
+test('stages 5 · 7: main opens exactly the angle and layers channels, and every one is in preload with the session epoch (args in main\'s order)', async () => {
+  const { registerBaeAngleIpc, BAE_ANGLE_CHANNELS } = await load('electron/bae/baeAngleIpc.ts');
+  const { registerBaeLayersIpc, BAE_LAYERS_CHANNELS } = await load('electron/bae/baeLayersIpc.ts');
+  const ha = channelHarness(); registerBaeAngleIpc(ha.deps);
+  assert.deepEqual([...ha.handlers.keys()].sort(), ['bae:angle-abort', 'bae:angle-draw']);
+  assert.deepEqual([...BAE_ANGLE_CHANNELS].sort(), ['bae:angle-abort', 'bae:angle-draw']);
+  const hl = channelHarness(); registerBaeLayersIpc(hl.deps);
+  const layers = ['bae:layers-abort', 'bae:layers-begin', 'bae:layers-done', 'bae:layers-edit', 'bae:layers-end', 'bae:layers-pd', 'bae:layers-show-psd', 'bae:layers-store-forget', 'bae:layers-store-get', 'bae:layers-store-set'];
+  assert.deepEqual([...hl.handlers.keys()].sort(), layers);
+  assert.deepEqual([...BAE_LAYERS_CHANNELS].sort(), layers);
+
+  const preload = readFileSync('electron/preload.ts', 'utf8');
+  const angle = preloadApi(preload, 'baeAngleAPI');
+  for (const [name, args] of [['draw', 'call'], ['abort', 'jobId']] as const)
+    assert.match(angle, new RegExp(`${name}: \\([^)]*\\) => ipcRenderer\\.invoke\\('bae:angle-${name}', ${args}, canonicalSessionEpoch\\)`), name);
+  const lay = preloadApi(preload, 'baeLayersAPI');
+  for (const [name, ch, args] of [['begin', 'begin', 'call'], ['pd', 'pd', 'call'], ['edit', 'edit', 'call'], ['done', 'done', 'call'], ['end', 'end', 'jobId, how, message'], ['abort', 'abort', 'jobId'],
+    ['storeGet', 'store-get', 'pic, key'], ['storeSet', 'store-set', 'pic, key, value'], ['storeForget', 'store-forget', 'pic'], ['showPsd', 'show-psd', 'jobId']] as const)
+    assert.match(lay, new RegExp(`${name}: \\([^)]*\\) => ipcRenderer\\.invoke\\('bae:layers-${ch}', ${args}, canonicalSessionEpoch\\)`), name);
+  // 묶음마다 통로 수가 같다 (preload 에만 있는 통로가 없다)
+  assert.equal((angle.match(/ipcRenderer\.invoke\('bae:angle-/g) ?? []).length, 2);
+  assert.equal((lay.match(/ipcRenderer\.invoke\('bae:layers-/g) ?? []).length, layers.length);
+  for (const api of [angle, lay]) assert.doesNotMatch(api, /get-key|getKey|token/i, 'no key or token goes to the screen');
+});
+
+test('stages 5 · 7: the new channels check the session epoch and the BAE경 right before doing anything', async () => {
+  const { registerBaeAngleIpc } = await load('electron/bae/baeAngleIpc.ts');
+  const { registerBaeLayersIpc } = await load('electron/bae/baeLayersIpc.ts');
+  const a = channelHarness(); registerBaeAngleIpc(a.deps);
+  await assert.rejects(a.invoke('bae:angle-draw', { jobId: J1 }, 6), /세션/);
+  await assert.rejects(a.invoke('bae:angle-draw', { jobId: 'nope' }, 7), /작업 번호/);
+  assert.equal(await a.invoke('bae:angle-abort', J1, 7), false, 'nothing running');
+  const out = channelHarness(false); registerBaeAngleIpc(out.deps);
+  await assert.rejects(out.invoke('bae:angle-draw', { jobId: J1, images: [] }, 7), /권한/);
+  const l = channelHarness(); registerBaeLayersIpc(l.deps);
+  await assert.rejects(l.invoke('bae:layers-begin', { jobId: J1 }, 6), /세션/);
+  await assert.rejects(l.invoke('bae:layers-show-psd', J1, 8), /세션/);
+  assert.equal(await l.invoke('bae:layers-show-psd', J1, 7), false, 'no PSD for a job this PC did not split');
+  const lo = channelHarness(false); registerBaeLayersIpc(lo.deps);
+  await assert.rejects(lo.invoke('bae:layers-show-psd', J1, 7), /권한/);
+});
+
+test('stages 5 · 7: baeMain registers both (same session · right · key · store · outbox as the make flow) and stops them on logout', () => {
+  const src = readFileSync('electron/bae/baeMain.ts', 'utf8');
+  assert.match(src, /const angle = registerBaeAngleIpc\(\{[\s\S]{0,400}progress: \(p\) => deps\.broadcast\('bae:progress', p\)/);
+  assert.match(src, /const layers = registerBaeLayersIpc\(\{[\s\S]{0,400}showItemInFolder: \(p\) => shell\.showItemInFolder\(p\)/);
+  for (const dep of ['canUse', 'settings', 'keyFor', 'local', 'outbox', 'imagePrefs', 'publicUrl', 'origin']) {
+    assert.match(src, new RegExp(`registerBaeAngleIpc\\(\\{[\\s\\S]{0,400}\\b${dep}\\b`), 'angle ' + dep);
+    assert.match(src, new RegExp(`registerBaeLayersIpc\\(\\{[\\s\\S]{0,400}\\b${dep}\\b`), 'layers ' + dep);
+  }
+  assert.match(src, /const keyFor = async \(o: \{ userId: string; epoch: number \}\) => \(await deps\.keyring\.keyFor\(o\)\)\.key;/);
+  assert.match(src, /active: \(owner: string\) => \[\.\.\.jobs\.active\(owner\), \.\.\.angle\.active\(owner\)\]/, "'bae:active' lists angle drawings too");
+  assert.match(src, /stop\(\) \{[^}]*angle\.abortAll\(\);[^}]*layers\.abortAll\(\);/);
+});
+
+test('stages 5 · 7: the screen opens both tools from the start row, the drop zones, the bench result and the job view (no more "N단계에서 열려요")', () => {
+  const view = readFileSync('src/features/bae-gyeong/BaeGyeongView.tsx', 'utf8');
+  assert.doesNotMatch(view, /단계에서 열려요|onLater|LATER/);
+  assert.match(view, /kind === 'layers'\) layersFileRef\.current\?\.click\(\)/);
+  assert.match(view, /else angleFileRef\.current\?\.click\(\)/);
+  assert.match(view, /zone === 'layers'\) void useBaeAngle\.getState\(\)\.openLayersFile\(file\)/);
+  assert.match(view, /else void useBaeAngle\.getState\(\)\.openAngleFile\(file\)/);
+  assert.equal((view.match(/onLayers:/g) ?? []).length, 3, 'bench result, my record, my team record');
+  assert.equal((view.match(/onAngle:/g) ?? []).length, 3, 'bench result, my record, my team record');
+  // 그림 고르기 칸 순서: 레이어 · 각도 · 4K · 노이즈 제거 (3단계 화면 시험이 마지막 칸 = 노이즈 제거를 쓴다)
+  const picks = [...view.matchAll(/data-pick="([a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(picks, ['layers', 'angle', 'upscale', 'denoise']);
+  const job = readFileSync('src/features/bae-gyeong/records/JobView.tsx', 'utf8');
+  assert.match(job, /onClick=\{p\.onLayers\}/); assert.match(job, /onClick=\{p\.onAngle\}/); assert.match(job, /onClick=\{p\.onShowPsd\}/);
+  assert.match(job, /이어서 만들기/); assert.match(job, /PSD가 있는 폴더 열기/);
+  const bench = readFileSync('src/features/bae-gyeong/home/Workbench.tsx', 'utf8');
+  assert.match(bench, /bae-tool-layers" title="[^"]+" onClick=\{a\.onLayers\}/); assert.match(bench, /bae-tool-angle" title="[^"]+" onClick=\{a\.onAngle\}/);
+  const layer = readFileSync('src/features/bae-gyeong/state/BaeMakeLayer.tsx', 'utf8');
+  assert.match(layer, /s\.win === 'angle' && ag\.target/); assert.match(layer, /s\.win === 'layers' && ag\.layers/);
+  assert.match(layer, /depth: previewAngleDepth/, 'test mode: fake depth');
+  assert.match(layer, /gateway: previewLayers\(\)/, 'test mode: the layers window opens and says why it cannot split');
+  const access = readFileSync('src/features/bae-gyeong/angleAccess.ts', 'utf8');
+  assert.match(access, /테스트 모드에서는 레이어 나누기를 쓸 수 없어요/);
+  // 결과 그림은 이 PC 원본(result.png)을 blob 주소로 (입체 판은 http 미리보기를 못 쓴다)
+  const ag = readFileSync('src/features/bae-gyeong/state/useBaeAngle.ts', 'utf8');
+  assert.match(ag, /localFile\(jobId, 'result\.png'\)/); assert.match(ag, /URL\.createObjectURL\(new Blob/);
+  assert.match(ag, /const key = 'r' \+ a\.id \+ a\.variant \+ '_' \+ a\.bytes\.length/);
+});

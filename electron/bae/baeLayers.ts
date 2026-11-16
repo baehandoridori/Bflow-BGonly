@@ -10,7 +10,7 @@
  * electron 을 import 하지 않는다 (폴더 열기는 주입받는다).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   baeLayersPdBody, baeLayersEditFields, baeLayersPdProblem, baeLayersEditProblem, baeLayersStoreFile, baeLayersJobSummary,
@@ -282,10 +282,21 @@ export function createBaeLayers(deps: BaeLayersDeps) {
       return serial(root, async () => { const g = await generation(root); await writeFileAtomic(join(root, 'current.json'), JSON.stringify({ g: g + 1, at: new Date(now()).toISOString() })); return true; });
     },
 
-    showPsd(owner: string, jobId: unknown): boolean {
-      let j: Job; try { j = jobOf(owner, jobId); } catch { return false; }
-      if (!j.psdPath) return false;
-      deps.showItemInFolder(j.psdPath);
+    /** PSD 가 있는 폴더 열기. 이번에 나눈 작업은 기억한 자리, 앱을 다시 켠 뒤에는 이 PC 작업 폴더의 layers.psd
+     *  (이 PC 보관함은 bae:local-file 처럼 세션만 확인한다 — 다른 PC 의 기록이면 폴더가 없어 false). */
+    async showPsd(owner: string, jobId: unknown): Promise<boolean> {
+      if (!isBaeLayersJobId(jobId)) return false;
+      const live = jobs.get(jobId);
+      if (live && live.owner !== owner) return false; // 이번에 다른 사람이 나눈 작업은 열지 않는다
+      let psdPath = live?.psdPath;
+      if (!psdPath) {
+        let dir: string | null = null;
+        try { dir = await deps.local.jobDir(jobId); } catch { dir = null; }
+        if (!dir) return false;
+        try { await access(join(dir, 'layers.psd')); } catch { return false; }
+        psdPath = join(dir, 'layers.psd');
+      }
+      deps.showItemInFolder(psdPath);
       return true;
     },
 

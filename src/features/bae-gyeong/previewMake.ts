@@ -4,6 +4,7 @@
  *   그림:   작업 줄 '그리는 중' → 중간 그림 두 장 → 가짜 완성 그림(러프를 바탕으로 그림) → 장부 줄 → 작업 줄 '완성'
  *   마무리: 기울기 · 기준 배경이 있으면 앱처럼 작업을 끝내지 않고 GPT 그림을 돌려준 뒤, 화면이 마무리한 그림(drawFinish)으로 끝낸다
  *   결과 판: 색 맞춤 켜고 끄기 · 노이즈 제거(resultSet), 노이즈 제거 창의 도구 작업(toolJob) — 판 파일은 이 탭의 메모리에
+ *   다른 각도로(7단계): previewAngle 의 흉내 그림 + 앱(electron/bae/baeAngle.ts)과 같은 작업 줄 · 장부 줄('note' · 'angle') · 판 파일 (0원)
  * 을 흉내 낸다. 그만두기 · 화면 떠나기 · 기록이 앱과 같게 움직이는지 보려는 것이다.
  */
 import {
@@ -17,8 +18,15 @@ import type {
 } from '@/shared/bae/makeCalls';
 import { baeVariantFile, BAE_BASE_VARIANT_FILES, type BaeJobFinish, type BaeJobImages, type BaeJobResult, type BaeJobWrite } from '@/shared/bae/jobs';
 import { BAE_UPSCALE_MAX_PIXELS, BAE_UPSCALE_MODES, BAE_UPSCALE_PREVIEW_NOTE as UPSCALE_PREVIEW_NOTE } from '@/shared/bae/upscaleView';
+import { baeAngleCallProblem, type BaeAngleDrawCall, type BaeAngleDrawOutcome, type BaeAngleSummary } from '@/shared/bae/angle/calls';
 import { PREVIEW_DEFAULT_TEXTS, type PreviewMakeContext, type PreviewMakeMethods } from './previewGateway';
 import type { BaeDraftData } from './types';
+import { createPreviewAngleGateway } from './angle/previewAngle';
+import type { BaeAngleGateway } from './angle/gateway';
+
+/** 테스트 모드의 '다른 각도로' 통로 (테스트 모드 저장소가 선 뒤에 있다 — angleAccess.ts 의 baeAngleGw 가 쓴다). */
+let previewAngle: BaeAngleGateway | null = null;
+export const previewAngleNow = (): BaeAngleGateway | null => previewAngle;
 
 const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
   if (signal.aborted) { reject(new DOMException('그만뒀어요', 'AbortError')); return; }
@@ -251,6 +259,39 @@ export function createPreviewMake(ctx: PreviewMakeContext): PreviewMakeMethods {
       costUsd: 0, origin: '테스트 모드', appVersion: 'preview', createdAt: c.createdAt, finishedAt: new Date().toISOString() });
     return { ok: true, jobId: c.jobId, w, h };
   }
+
+  /** 다른 각도로 (앱의 baeAngle.draw 와 같은 순서: 작업 줄 '그리는 중' → 메모 · 그림 → 장부 → 판 파일 → 작업 줄 '완성'). */
+  const angleFake = createPreviewAngleGateway({ onProgress: (p) => { for (const l of [...listeners]) l(p as BaeProgress); } });
+  async function angleDraw(q: BaeAngleDrawCall): Promise<BaeAngleDrawOutcome | BaeFailure> {
+    try { ctx.requireUse(); } catch (err) { return fail(err, true); }
+    const bad = baeAngleCallProblem(q); if (bad) return fail(new Error(bad));
+    if (metas.has(q.jobId) || files.has(q.jobId)) return fail(new Error('이 작업은 이미 있어요.'));
+    const model = models.imageModel;
+    const summary: BaeAngleSummary = { size: [q.size[0], q.size[1]], place: q.order.kind, source: q.record.fromName || undefined,
+      angle: { ...q.record, memo: null, line: q.line.slice(0, 600), fileName: q.fileName.slice(0, 200) } };
+    const base: BaeJobWrite = { id: q.jobId, kind: 'angle', status: 'drawing', parentJobId: q.parentJobId, name: null, summary, pd: {}, costUsd: 0,
+      origin: '테스트 모드', appVersion: 'preview', createdAt: q.createdAt };
+    ctx.writeJob(base);
+    const r = await angleFake.draw(q);
+    if (!r.ok) {
+      try { ctx.writeJob({ ...base, status: r.aborted ? 'stopped' : 'failed', result: { error: r.message, model }, finishedAt: new Date().toISOString() }); } catch { /* 기록 실패는 화면 오류로 덮지 않는다 */ }
+      return r.aborted ? r : { ...r, message: '다른 각도로 그리지 못했어요: ' + r.message };
+    }
+    const at = new Date().toISOString();
+    if (q.memo) ctx.logUsage({ requestId: uuid(), jobId: q.jobId, kind: 'note', model: models.pdModel, tokens: {}, usd: 0, at });
+    ctx.logUsage({ requestId: uuid(), jobId: q.jobId, kind: 'angle', model, tokens: {}, usd: 0, at });
+    files.set(q.jobId, { 'gpt.png': r.png, 'result.png': r.png });
+    const thumb = await shrinkJpeg(r.png, 320);
+    const rough = await smallOf(q.previews.rough); const roughNotes = await smallOf(q.previews.roughNotes);
+    const refs = (await Promise.all(q.previews.refs.slice(0, 4).map(smallOf))).filter((x): x is string => !!x);
+    const images: BaeJobImages = { result: thumb, thumb, ...(rough ? { rough } : {}), ...(roughNotes ? { roughNotes } : {}), refs };
+    const result: BaeJobResult = { w: r.w, h: r.h, model, quality: models.imageQuality, sec: r.sec, usdImage: 0, ...(q.memo ? { usdOrder: 0 } : {}) };
+    metas.set(q.jobId, { result, images });
+    ctx.writeJob({ ...base, status: 'done', summary: { ...summary, angle: { ...summary.angle, memo: r.memo } },
+      pd: { prompt: r.prompt, notesKo: r.memo?.ko ? [r.memo.ko] : [], ...(q.memo ? { model: models.pdModel } : {}) }, result, images, costUsd: 0, finishedAt: new Date().toISOString() });
+    return { ...r, model };
+  }
+  previewAngle = { draw: angleDraw, abort: (jobId) => angleFake.abort(jobId) };
 
   return {
     order, draw, drawFinish, resultSet, toolJob,

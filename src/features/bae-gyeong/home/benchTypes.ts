@@ -14,6 +14,7 @@ export interface BaeMaterialsView {
   rough: { src: string; alt: string; name: string; sub: string } | null; // name '러프와 빨간 메모', sub '빨간 메모 2개'
   refs: BaeMatPicView[];
   refMax: number;                // 4
+  refsLabel?: string;            // 레퍼런스 묶음 이름을 바꿀 때 (다른 각도로: '원래 그림 · 같은 공간') — 있으면 최대 장수 없이 장수만
   bases: BaeMatPicView[];        // 기준 배경 (같은 장소). 없으면 []
   baseMax: number;               // 3
   sheet: string | null;          // 부품 시트로 보냈으면 그 그림 (기록)
@@ -101,6 +102,8 @@ export interface BaeBenchActions {
   onLock?(): void;               // 다듬기: 색 맞춤 켜고 끄기
   onUpscale?(): void;            // 다듬기: 4K로 키우기 (창)
   onUseBase?(): void;            // 기준 배경으로 새 컷
+  onLayers?(): void;             // 이어서 만들기: 레이어로 나누기 (창)
+  onAngle?(): void;              // 이어서 만들기: 다른 각도로 (창)
 }
 
 /** 그림을 끌어다 놓는 여섯 칸 (14b 10-2, 시안 Dropping): 왼쪽 둘은 재료, 오른쪽 넷은 도구. */
@@ -202,7 +205,9 @@ export interface BaeJobViewProps {
   onLock?(): void;               // 다듬기: 색 맞춤 켜고 끄기
   onUpscale?(): void;            // 다듬기: 4K로 키우기 (창)
   onUseBase?(): void;            // 이어서 만들기: 기준 배경으로 새 컷
-  onLater?(tool: 'layers' | 'angle'): void; // 아직 열리지 않은 도구 (알림만)
+  onLayers?(): void;             // 이어서 만들기: 레이어로 나누기 (창)
+  onAngle?(): void;              // 이어서 만들기: 다른 각도로 (창)
+  onShowPsd?(): void;            // 레이어 작업: PSD가 있는 폴더 열기
   stamp?: BaeStampPanelView | null; // 확인 도장 (8단계)
 }
 

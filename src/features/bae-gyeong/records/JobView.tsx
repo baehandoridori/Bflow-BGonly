@@ -1,6 +1,6 @@
 // 한 건 보기 (시안 Zoom 바탕): 결과 그림을 크게, 그 아래 재료와 PD 글을 모두, 오른쪽에 숫자 · 만든 때 · 검수 · 내보내기.
 // 기록에서 한 건을 누르거나 작업대의 '크게 보기'로 연다. 보여 주기만 하고 바뀐 것은 콜백으로 알린다.
-import { AlertTriangle, ArrowLeft, CopyPlus, Download, Layers, Loader2, Rotate3d } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CopyPlus, Download, FolderOpen, Layers, Loader2, Rotate3d } from 'lucide-react';
 import type { BaeJobViewProps } from '../home/benchTypes';
 import { FactsDl, InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ResultTools, ReviewPanel } from '../home/BenchParts';
 import { StampPanel } from './StampPanel';
@@ -40,7 +40,7 @@ export function JobView(p: BaeJobViewProps) {
             </div>
           )}
 
-          {p.result && (p.result.tools || p.onUseBase) ? (
+          {p.result && (p.result.tools || p.onUseBase || p.onLayers || p.onAngle) ? (
             <div className="bae-jv-tools">
               {p.result.tools ? (
                 <div className="bae-tool-group" role="group" aria-labelledby="bae-jv-trim">
@@ -50,14 +50,16 @@ export function JobView(p: BaeJobViewProps) {
                   </div>
                 </div>
               ) : null}
-              <div className="bae-tool-group" role="group" aria-labelledby="bae-jv-next">
-                <p className="bae-tool-name" id="bae-jv-next">이어서 만들기</p>
-                <div className="bae-tool-row">
-                  {p.onLater ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-layers" onClick={() => p.onLater!('layers')}><Layers size={14} aria-hidden="true" />레이어로 나누기</button> : null}
-                  {p.onLater ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-angle" onClick={() => p.onLater!('angle')}><Rotate3d size={14} aria-hidden="true" />다른 각도로</button> : null}
-                  {p.onUseBase ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-same" onClick={p.onUseBase}><CopyPlus size={14} aria-hidden="true" />기준 배경으로 새 컷</button> : null}
+              {p.onLayers || p.onAngle || p.onUseBase ? (
+                <div className="bae-tool-group" role="group" aria-labelledby="bae-jv-next">
+                  <p className="bae-tool-name" id="bae-jv-next">이어서 만들기</p>
+                  <div className="bae-tool-row">
+                    {p.onLayers ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-layers" title="물건을 찾아 레이어 세 층으로 나누고 PSD로 저장해요" onClick={p.onLayers}><Layers size={14} aria-hidden="true" />레이어로 나누기</button> : null}
+                    {p.onAngle ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-angle" title="같은 곳을 다른 카메라에서 다시 그려요" onClick={p.onAngle}><Rotate3d size={14} aria-hidden="true" />다른 각도로</button> : null}
+                    {p.onUseBase ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-same" onClick={p.onUseBase}><CopyPlus size={14} aria-hidden="true" />기준 배경으로 새 컷</button> : null}
+                  </div>
                 </div>
-              </div>
+              ) : null}
               {p.result.tools?.note ? <p className="bae-res-note" role="note">{p.result.tools.note}</p> : null}
             </div>
           ) : null}
@@ -105,11 +107,12 @@ export function JobView(p: BaeJobViewProps) {
           <FactsDl facts={p.facts} />
           {p.stamp ? <StampPanel v={p.stamp} /> : null}
           {p.review ? <ReviewPanel value={p.review.value} startOpen={p.review.startOpen} saving={p.review.saving} onSave={p.review.onSave} /> : null}
-          {p.onSave && p.result ? (
+          {(p.onSave || p.onShowPsd) && p.result ? (
             <div className="bae-tool-group bae-end" role="group" aria-labelledby="bae-jv-out">
               <p className="bae-tool-name" id="bae-jv-out">내보내기</p>
               <div className="bae-tool-row">
-                <button type="button" className="bae-btn bae-btn-s" onClick={p.onSave}><Download size={14} aria-hidden="true" />PNG 저장</button>
+                {p.onShowPsd ? <button type="button" className="bae-btn bae-btn-s bae-tool bae-tool-layers" onClick={p.onShowPsd}><FolderOpen size={14} aria-hidden="true" />PSD가 있는 폴더 열기</button> : null}
+                {p.onSave ? <button type="button" className="bae-btn bae-btn-s" onClick={p.onSave}><Download size={14} aria-hidden="true" />PNG 저장</button> : null}
               </div>
             </div>
           ) : null}
