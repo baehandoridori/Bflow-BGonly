@@ -39,6 +39,8 @@ test('shared subscription aliases preserve legacy feeds, enforce source ACL and 
  const admin=async(query:string,args:unknown[]=[])=>{await db.exec('RESET ROLE');try{return await db.query(query,args);}finally{await db.exec('SET ROLE anon');}};
  const before=await manage('enable',legacy,null);
  await db.exec(sql(migration));
+ // Last of the chain (2026-11-16): a stale revision answers PT409, never 40001 (the server API retries 40001 without end).
+ await db.exec(sql('2026-11-16-conflict-errcode-pt409.sql'));
  await db.exec('SET ROLE anon');
  let first:any,rotated:any;
  await t.test('existing URL remains active; viewer and owner obtain the same stable alias without changing revision',async()=>{
@@ -63,7 +65,7 @@ test('shared subscription aliases preserve legacy feeds, enforce source ACL and 
  });
  await t.test('old-client rotate and exact retry maintain stable alias and retire both previous URLs',async()=>{
  rotated=await manage('rotate',next,first.revision);assert.notEqual(rotated.aliasToken,first.aliasToken);assert.equal(await read(legacy),null);assert.equal(await read(digest(first.aliasToken)),null);assert.ok(await read(next));assert.ok(await read(digest(rotated.aliasToken)));assert.deepEqual(await manage('rotate',next,first.revision),rotated);
- await assert.rejects(manage('revoke',null,first.revision),{code:'40001'});
+ await assert.rejects(manage('revoke',null,first.revision),{code:'PT409'});
  const secrets=await admin('SELECT count(*)::int AS n FROM vault.secrets');assert.equal(secrets.rows[0].n,1);
  });
  await t.test('revoke removes both URLs and secret; source owner transfer and deletion cannot resurrect either',async()=>{

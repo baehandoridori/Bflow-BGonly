@@ -40,7 +40,7 @@ test('store sends the session token (never an actor id) with the original reques
   const calls: unknown[] = [];
   const store = createGanttStore({ rpc: async (name: string, args: unknown) => {
     calls.push({ name, args });
-    return { data: null, error: { code: '40001', message: '다른 사용자가 먼저 수정했습니다' } };
+    return { data: null, error: { code: 'PT409', message: '다른 사용자가 먼저 수정했습니다' } };
   } }, sessions);
   const request = { requestId: 'request-1', command: { type: 'deleteProject', projectId: 'p', expectedRevision: 2 } };
   await assert.rejects(store.execute('alice', request), /먼저 수정/);

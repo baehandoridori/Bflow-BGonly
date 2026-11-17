@@ -1628,7 +1628,7 @@ test('strict migration delete classifies only a confirmed source-conflict disapp
     deleteEvent: async () => {
       if (deleteOutcome === 'missing-race') {
         current = null;
-        throw new Error('40001 Calendar event source changed; refresh and retry');
+        throw new Error('PT409 Calendar event source changed; refresh and retry');
       }
       throw new Error('42501 Calendar event delete permission denied');
     },
@@ -4545,8 +4545,8 @@ test('calendar event RPC permission and conflict errors do not broadcast success
     {
       channel: 'calendar:events:update',
       args: ['event-1', { title: '수정됨' }],
-      overrides: { updateEvent: async () => { throw new Error('40001 stale source conflict'); } },
-      expected: /40001|conflict/,
+      overrides: { updateEvent: async () => { throw new Error('PT409 stale source conflict'); } },
+      expected: /PT409|conflict/,
     },
     {
       channel: 'calendar:events:delete',

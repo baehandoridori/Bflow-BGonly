@@ -17,6 +17,8 @@ test('recurrence session mutations preserve source ACL, revisions, exceptions, s
  await db.exec('GRANT SELECT,INSERT,UPDATE,DELETE ON calendars,calendar_members,calendar_events,calendar_tags TO anon,authenticated');
  for(const file of ['2026-09-05-gantt-workspaces.sql','2026-09-05-app-sessions-gantt-auth.sql','20260905210416_gantt_calendar_color.sql','2026-09-16-calendar-admin-overview-tags.sql','20260919170351_calendar_external_feed.sql','2026-09-17-calendar-linked-gantt.sql',migration])await db.exec(sql(file));
  await db.exec(sql(migration));
+ // Last of the chain (2026-11-16): stale revisions answer PT409, never 40001 (the server API retries 40001 without end).
+ await db.exec(sql('2026-11-16-conflict-errcode-pt409.sql'));
  const calendar=crypto.randomUUID(),other=crypto.randomUUID();
  await db.query("INSERT INTO calendars(id,name,owner_id,visibility) VALUES($1,'source','owner','members'),($2,'denied','outsider','private')",[calendar,other]);
  await db.query("INSERT INTO calendar_members(calendar_id,user_id,can_edit) VALUES($1,'editor',true),($1,'reader',false)",[calendar]);
@@ -41,7 +43,7 @@ test('recurrence session mutations preserve source ACL, revisions, exceptions, s
  await t.test('single override and cancel maintain identity and CAS; ordinary all edits retain exceptions',async()=>{
   event=(await execute('update',event.id,0,{title:'Moved',start_date:'2026-04-01',end_date:'2026-04-01',location:'room',meeting_url:'https://example.com/meet',reminder_minutes:10},'2026-03-31','this')).event;
   assert.equal(event.recurrence_revision,1);assert.equal(event.recurrence_exceptions[0].occurrence_date,'2026-03-31');assert.equal(event.recurrence_exceptions[0].patch.title,'Moved');
-  await assert.rejects(execute('delete',event.id,0,{},'2026-05-31','this'),{code:'40001'});
+  await assert.rejects(execute('delete',event.id,0,{},'2026-05-31','this'),{code:'PT409'});
   event=(await execute('delete',event.id,1,{},'2026-05-31','this')).event;assert.equal(event.recurrence_exceptions[1].cancelled,true);
   event=(await execute('update',event.id,2,{memo:'new memo'})).event;assert.equal(event.recurrence_exceptions.length,2);
  });
@@ -60,7 +62,7 @@ test('recurrence session mutations preserve source ACL, revisions, exceptions, s
  });
  await t.test('source moves verify both calendars and prior calendar; session expiry rejects all operations',async()=>{
   await assert.rejects(execute('update',event.id,1,{calendar_id:other}),{code:'42501'});
-  await assert.rejects(execute('update',event.id,1,{expected_calendar_id:other,title:'stale'}),{code:'40001'});
+  await assert.rejects(execute('update',event.id,1,{expected_calendar_id:other,title:'stale'}),{code:'PT409'});
   await assert.rejects(db.query('SELECT calendar_session_recurrence_events($1)',['invalid']),{code:'42501'});
  });
  await t.test('SQL membership indexes exactly match the shared engine for weekly, leap, last-day and nth-weekday rules',async()=>{
@@ -76,7 +78,7 @@ test('recurrence session mutations preserve source ACL, revisions, exceptions, s
  await t.test('normal events retain old-client updates and revision conflicts; direct recurring writes are denied',async()=>{
   const normal=(await create({recurrence_rule:null,title:'normal'})).event;
   const legacy=(await db.query('SELECT * FROM calendar_session_event_update($1,$2,$3,$4)',[tokens.owner,normal.id,calendar,{title:'old client edit'}])).rows[0];assert.equal(legacy.recurrence_revision,1);
-  await assert.rejects(execute('update',normal.id,0,{memo:'stale'}),{code:'40001'});
+  await assert.rejects(execute('update',normal.id,0,{memo:'stale'}),{code:'PT409'});
   await assert.rejects(db.query("UPDATE calendar_events SET title='direct' WHERE id=$1",[event.id]),{code:'42501'});
   await assert.rejects(db.query('DELETE FROM calendar_events WHERE id=$1',[event.id]),{code:'42501'});
   await assert.rejects(execute('update',event.id,1,{calendar_id:calendar},'2026-03-31','this'),{code:'22023'});

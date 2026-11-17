@@ -143,7 +143,7 @@ BEGIN
   BEGIN
     PERFORM public.gantt_execute(owner_id, run_id || ':stale-denied',
       jsonb_build_object('type', 'saveProject', 'project', project_doc, 'expectedRevision', 1));
-  EXCEPTION WHEN SQLSTATE '40001' THEN
+  EXCEPTION WHEN SQLSTATE '40001' OR SQLSTATE 'PT409' THEN
     GET STACKED DIAGNOSTICS received_message = MESSAGE_TEXT;
     IF received_message <> '다른 사용자가 프로젝트를 먼저 수정했습니다' THEN RAISE; END IF;
     rejected := true;

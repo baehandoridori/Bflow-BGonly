@@ -12,6 +12,8 @@ import { planMapDelete } from '../src/features/backgrounds/mapDelete.ts';
 const migration=(name:string)=>readFileSync(new URL(`../DEVLOG/migrations/${name}`,import.meta.url),'utf8');
 // The 3D file replaces one function of the base file and the elements file replaces it again, so every run applies them in this order.
 const sql=migration('2026-09-21-background-library.sql'),sql3d=migration('2026-10-07-background-map-3d.sql'),sqlElements=migration('2026-10-09-background-map-elements.sql');
+// Last of every chain (2026-11-16): a stale write is PT409, never 40001, which the server API retries without end.
+const sqlPt409=migration('2026-11-16-conflict-errcode-pt409.sql');
 const runtime=process.env.BFLOW_PGLITE_MODULE;
 const id=()=>randomUUID();
 const place=(name='교실',parentId:string|null=null)=>({id:id(),revision:0,name,parentId,folderPath:''});
@@ -230,7 +232,7 @@ const openTo=async(db:any,role:string):Promise<string[]>=>(await db.query("SELEC
 test('background RPC runtime validates sessions, permissions, CAS, idempotency and every entity reference',{skip:!runtime},async(t)=>{
   const db=await boot();
   try {
-    await db.exec(sql);await db.exec(sql);await db.exec(sql3d);await db.exec(sql3d);await db.exec(sqlElements);await db.exec(sqlElements);await db.exec('SET ROLE anon');
+    await db.exec(sql);await db.exec(sql);await db.exec(sql3d);await db.exec(sql3d);await db.exec(sqlElements);await db.exec(sqlElements);await db.exec(sqlPt409);await db.exec(sqlPt409);await db.exec('SET ROLE anon');
     const read=async(who:'admin'|'member'='admin')=>(await db.query('SELECT background_library_read($1) AS value',[tokens[who]])).rows[0].value;
     const run=async(command:any,who:'admin'|'member'='admin',requestId=id())=>(await db.query('SELECT background_library_execute($1,$2,$3) AS value',[tokens[who],requestId,command])).rows[0].value;
     const save=(kind:string,entity:any,expectedRevision:number|null=null,who:'admin'|'member'='admin')=>run({type:'save',kind,entity,expectedRevision},who);
@@ -251,12 +253,12 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       assert.deepEqual(await run(command,'admin',requestId),first);
       await assert.rejects(run({...command,entity:{...classroom,name:'다른 이름'}},'admin',requestId),{code:'22023'});
       await save('place',place('독립된 장소'));const updated=await save('place',{...classroom,name:'교실 수정'},1);classroom=updated.places.find((p:any)=>p.id===classroom.id);
-      assert.equal(classroom.revision,2);await assert.rejects(save('place',{...classroom,name:'늦은 수정'},1),{code:'40001'});
+      assert.equal(classroom.revision,2);await assert.rejects(save('place',{...classroom,name:'늦은 수정'},1),{code:'PT409'});
       assert.equal((await run(command,'admin',requestId)).places.find((p:any)=>p.id===classroom.id).name,'교실 수정');
     });
     await t.test('deleted entity IDs remain tombstoned and cannot be recreated by stale tabs',async()=>{
       const p=place('삭제할 장소');await save('place',p);await remove('place',p,1);
-      await assert.rejects(save('place',p),{code:'40001'});await assert.rejects(save('place',p,1),{code:'40001'});
+      await assert.rejects(save('place',p),{code:'PT409'});await assert.rejects(save('place',p,1),{code:'PT409'});
     });
     await t.test('usage edits are available to members and copy group selections independently',async()=>{
       asset=view(classroom.id);await save('view',asset);asset.revision=1;
@@ -345,7 +347,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
     await t.test('file-link writes reject non-admins, stale revisions, bad optional values and extra keys without changing data',async()=>{
       const base=view(classroom.id);await save('view',base);const before=await read(),variant=base.variants[0],revision=variant.revisions[0];
       const linked={...base,variants:[{...variant,workFilePath:'C:\\BG\\교실.psd',revisions:[{...revision,sourceImagePath:'C:\\BG\\교실.png'}]}]};
-      await assert.rejects(save('view',linked,1,'member'),{code:'42501'});await assert.rejects(save('view',linked,2),{code:'40001'});
+      await assert.rejects(save('view',linked,1,'member'),{code:'42501'});await assert.rejects(save('view',linked,2),{code:'PT409'});
       for(const value of [null,42,true,[],{},'x'.repeat(4097)]){
         await assert.rejects(save('view',{...base,variants:[{...variant,workFilePath:value}]},1),{code:'22023'});
         await assert.rejects(save('view',{...base,variants:[{...variant,revisions:[{...revision,sourceImagePath:value}]}]},1),{code:'22023'});
@@ -387,7 +389,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
       const a=map(),b=map();await save('map',a);await save('map',b);const before=await read();
       const extra=map(),requestId=id();
       const stale={type:'save-maps',maps:[{entity:extra,expectedRevision:null},{entity:{...a,name:'저장되면 안 됨'},expectedRevision:1},{entity:b,expectedRevision:2}]};
-      await assert.rejects(run(stale,'admin',requestId),{code:'40001'});assert.deepEqual(await read(),before);
+      await assert.rejects(run(stale,'admin',requestId),{code:'PT409'});assert.deepEqual(await read(),before);
       await assert.rejects(run({type:'save-maps',maps:[{entity:{...a,parentId:b.id},expectedRevision:1},{entity:{...b,parentId:a.id},expectedRevision:1}]}),{code:'22023'});assert.deepEqual(await read(),before);
       await assert.rejects(run({type:'save-maps',maps:[{entity:extra,expectedRevision:null},{entity:{...a,nodes:[{...space(),childMapId:id()}]},expectedRevision:1}]}),{code:'22023'});assert.deepEqual(await read(),before);
       // A rolled-back failed request leaves no receipt, so the corrected save can reuse its identity.
@@ -402,7 +404,7 @@ test('background RPC runtime validates sessions, permissions, CAS, idempotency a
     });
     await t.test('map batches check tombstones for every new map and retain successful receipts after deletion',async()=>{
       const m=map(),command={type:'save-maps',maps:[{entity:m,expectedRevision:null}]},requestId=id();await run(command,'admin',requestId);await remove('map',m,1);
-      const before=await read();await assert.rejects(run({type:'save-maps',maps:[{entity:map(),expectedRevision:null},{entity:m,expectedRevision:null}]}),{code:'40001'});
+      const before=await read();await assert.rejects(run({type:'save-maps',maps:[{entity:map(),expectedRevision:null},{entity:m,expectedRevision:null}]}),{code:'PT409'});
       assert.deepEqual(await read(),before);assert.deepEqual(await run(command,'admin',requestId),before);
     });
     let tall:any;
@@ -668,8 +670,8 @@ test('앞 파일을 다시 돌려도 잃는 것이 없고 사슬을 다시 적�
     await db.exec('RESET ROLE');await db.exec('GRANT EXECUTE ON FUNCTION public.background_library_validate_entity(text,jsonb) TO PUBLIC,anon,authenticated');
     for(const role of ['anon','authenticated'])assert.deepEqual(await openTo(db,role),['background_library_execute','background_library_read','background_library_validate_entity'],role);
     // With the chain whole again new shapes are accepted, and the deleted map stays deleted.
-    await apply(sqlElements);await put({...map(),nodes:[{...symbol(),symbol:'stairs'}]});
-    for(const expected of [null,fresh.revision,fresh.revision+1])await assert.rejects(save('map',fresh,expected),{code:'40001'});
+    await apply(sqlElements);await apply(sqlPt409);await put({...map(),nodes:[{...symbol(),symbol:'stairs'}]});
+    for(const expected of [null,fresh.revision,fresh.revision+1])await assert.rejects(save('map',fresh,expected),{code:'PT409'});
     for(const role of ['anon','authenticated'])assert.deepEqual(await openTo(db,role),['background_library_execute','background_library_read'],role);
   } finally {await db.close();}
 });

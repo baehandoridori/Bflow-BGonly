@@ -1,6 +1,6 @@
 # AGENTS.md — B flow
 
-> **배경 라이브러리 팀 공개 (v1.142.0, 2026-10-16):** 배경 라이브러리(장소·도면·배경·에피소드별 배경)와 평면/3D 공동 도면은 v1.130.0(2026-10-08)부터 main에 있고, v1.142.0부터 **로그인한 팀원 모두에게 메뉴와 화면이 열려 있다**. 사이드바 노출과 화면 진입은 모두 `src/features/playground/featureFlag.ts`의 `canAccessBackgroundLibrary`(로그인한 사람이면 참)를 거치므로 공개 범위를 바꿀 때는 그 함수만 바꾼다. **고치는 권한은 서버가 정한다**: 장소·도면·배경·시점 묶음은 관리자와 관리자가 설정 '권한·노출'의 '배경 편집자 지정'에서 체크한 사람(`background_editors`, 관리자 세션 래퍼 `background_editors_session_list/set`으로만), 에피소드별 사용 기록은 팀원 누구나, 읽기는 로그인한 누구나. 운영 DB 적용 사슬은 기본(`2026-09-21-background-library.sql`) → 3D(`2026-10-07-background-map-3d.sql`) → 요소(`2026-10-09-background-map-elements.sql`) → 편집자(`2026-10-16-background-editors.sql` — 2026-10-16에 20261016105647로 적용)이며, **앞 파일을 다시 실행하면 그 뒤 파일을 모두 순서대로 다시 실행한다**(기본 파일만 돌리면 배경 편집이 사실상 모두 막히고 편집자 권한도 빠진다. 그때 도면을 지워서 풀지 않는다 — AGENTS.md '배경 라이브러리 데이터 경계'). 결정·미검증 항목은 [구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md) §13~§14, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)을 본다.
+> **배경 라이브러리 팀 공개 (v1.142.0, 2026-10-16):** 배경 라이브러리(장소·도면·배경·에피소드별 배경)와 평면/3D 공동 도면은 v1.130.0(2026-10-08)부터 main에 있고, v1.142.0부터 **로그인한 팀원 모두에게 메뉴와 화면이 열려 있다**. 사이드바 노출과 화면 진입은 모두 `src/features/playground/featureFlag.ts`의 `canAccessBackgroundLibrary`(로그인한 사람이면 참)를 거치므로 공개 범위를 바꿀 때는 그 함수만 바꾼다. **고치는 권한은 서버가 정한다**: 장소·도면·배경·시점 묶음은 관리자와 관리자가 설정 '권한·노출'의 '배경 편집자 지정'에서 체크한 사람(`background_editors`, 관리자 세션 래퍼 `background_editors_session_list/set`으로만), 에피소드별 사용 기록은 팀원 누구나, 읽기는 로그인한 누구나. 운영 DB 적용 사슬은 기본(`2026-09-21-background-library.sql`) → 3D(`2026-10-07-background-map-3d.sql`) → 요소(`2026-10-09-background-map-elements.sql`) → 편집자(`2026-10-16-background-editors.sql` — 2026-10-16에 20261016105647로 적용) → 충돌 번호(`2026-11-16-conflict-errcode-pt409.sql` — 간트·캘린더 함수도 함께 고친다, 2026-11-16에 20261116110612로 적용)이며, **앞 파일을 다시 실행하면 그 뒤 파일을 모두 순서대로 다시 실행한다**(기본 파일만 돌리면 배경 편집이 사실상 모두 막히고 편집자 권한도 빠진다. 그때 도면을 지워서 풀지 않는다 — AGENTS.md '배경 라이브러리 데이터 경계'). 결정·미검증 항목은 [구현 인수인계](DEVLOG/background-3d-opus-handoff-2026-10-07.md) §13~§14, 검증 내역은 [누적 검증 기록](DEVLOG/background-library-verification-2026-09-21.md)을 본다.
 
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
@@ -21,6 +21,7 @@
 3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → Supabase 동기화 → 실패 시 롤백
 4. **테스트 모드 동등성**: 모든 기능은 테스트 모드에서도 100% 동작해야 함
 5. **자동 업데이트 배포 원칙**: G드라이브에는 빌드 파일을 먼저 모두 올리고 `manifest.json`을 마지막에 갱신할 것. 앱은 manifest를 보고 최신 버전을 감지하므로, 반쯤 올라간 빌드가 최신으로 보이면 안 됨.
+6. **RPC 충돌은 40001 로 내지 않는다**: '다른 사용자가 먼저 바꿈' 같은 판정은 `RAISE ... USING ERRCODE='PT409'`(HTTP 409)로 낸다. `40001` 을 내면 서버 API(PostgREST 14)가 같은 요청을 끝없이 다시 실행한다. 기존 함수는 `DEVLOG/migrations/2026-11-16-conflict-errcode-pt409.sql` 로 바꿨고 `tests/conflictErrcodeMigration.test.ts` 가 지킨다.
 
 ---
 
