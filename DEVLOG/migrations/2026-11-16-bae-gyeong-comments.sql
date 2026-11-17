@@ -40,8 +40,12 @@
 -- After applying, md5(prosrc): comment_notifications_on_insert c00f1da6204c908f6ccc06cdbc31150f · _on_mentions 7be5c193ecd42521e6cb7bb9ffb95f4d ·
 --   _session_list 9ece94abbd77d43a833e46a690258610; 17 new bae_gyeong_* functions (58 in all with base + pc-check + review). Every other comment
 --   function keeps its production md5 (C:\BAE_stage0\comments_port\prod_shape.md). After the rollback the three are c1653f8c… · 987f05de… · a0bd8a79….
--- Not yet applied anywhere (2026-11-16): dev branch first (on DEVLOG/verification/2026-11-16-bae-gyeong-dev-comments-base.sql), production
---   only with Hansol's OK, after a rolled-back dry run (body + DEVLOG/verification/2026-11-16-bae-gyeong-comments-smoke.sql → 'BAE COMMENTS SMOKE OK').
+-- Applied: dev branch bae-gyeong-dev 2026-11-16 (20261116113432, on DEVLOG/verification/2026-11-16-bae-gyeong-dev-comments-base.sql), then
+--   production 2026-11-17 as migration 20261117083810 bae_gyeong_comments, with Hansol's OK, after a rolled-back production dry run
+--   (body + DEVLOG/verification/2026-11-16-bae-gyeong-comments-smoke.sql → 'BAE COMMENTS SMOKE OK'). Sent text = this file without
+--   BEGIN; / COMMIT; and without comment or blank lines outside $$ (bodies unchanged), led by a DO that checked the text's md5 before
+--   anything ran. After applying: the three md5s above, 58 bae_gyeong_* functions, both RESTRICTIVE policies, and the app key still sees
+--   every scene and character comment and reaction (2,024 · 347).
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
