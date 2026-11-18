@@ -13,6 +13,7 @@ import { Workbench, type BaeStartKind } from './home/Workbench';
 import { filterBaeRecordRows, type BaeDropView, type BaeDropZone, type BaeRecordListProps, type BaeReviewView } from './home/benchTypes';
 import { RecordList } from './records/RecordList';
 import { JobView } from './records/JobView';
+import { useImageViewer } from './view/ImageViewer';
 import { MakingStage } from './make/MakingStage';
 import { BaeSettingsTab } from './settings/BaeSettingsTab';
 import { baeBoard, useBaeMake } from './state/useBaeMake';
@@ -112,7 +113,11 @@ export default function BaeGyeongView() {
 
   const active = make.job;
   const live = active && (active.phase === 'ordering' || active.phase === 'drawing');
-  const sec = useSeconds(active?.startedAt ?? null, !!live);
+  const sec = useSeconds(active?.startedAt ?? null, !!live || active?.phase === 'revising');
+  const zoom = useImageViewer();
+  // 크게 보며 그리던 작업이 다 되면 만드는 화면에 잠깐 남아 마무리 장면(점이 풀리며 완성 그림)을 보여 주고 작업대로 (2026-11-18)
+  const bigDrawId = useRef<string | null>(null);
+  const [finaleOver, setFinaleOver] = useState<string | null>(null);
   const rows = useMemo(() => visibleBaeJobs(jobs), [jobs]);
   const withPd = (j: BaeJob | null): BaeJob | null => { if (!j) return null; const d = jobs.details[j.id]; return d && (d.updatedAt >= j.updatedAt || !j.pd) ? { ...j, pd: d.pd, stampBy: d.stampBy, stampNote: d.stampNote } : j; };
   const picked: BaeJob | null = rows.find((r) => r.id === (selId ?? '')) ?? null;
@@ -380,7 +385,12 @@ export default function BaeGyeongView() {
   if (showActive && active) { const b = activeBench(rate, sec, tools.busy[active.id], upParent === active.id); bench = b.bench; busy = b.busy; }
   else if (benchRecord) bench = recordBench(benchRecord, rate, localBench, tools.busy[benchRecord.id], upParent === benchRecord.id);
   const activeTarget: BaeToolTarget | null = showActive && active?.result ? { jobId: active.id, variant: active.result.variant, hasLock: active.result.hasLock } : null;
-  const big = !!live && make.makingBig && showActive;
+  const bigLive = !!live && make.makingBig && showActive;
+  if (bigLive && active?.phase === 'drawing') bigDrawId.current = active.id;
+  const finale = !bigLive && showActive && make.makingBig && !!active && active.phase === 'done' && !!active.result && bigDrawId.current === active.id
+    && finaleOver !== active.id && Date.now() - (active.doneAt ?? 0) < 10_000;
+  const big = bigLive || finale;
+  const endFinale = () => { if (active) setFinaleOver(active.id); bigDrawId.current = null; };
 
   return (
     <div className="bae-root" data-bae-tab={activeTab}>
@@ -399,7 +409,7 @@ export default function BaeGyeongView() {
         </div>
       </nav>
       {activeTab === 'bench' && (big
-        ? <MakingStage {...makingProps(sec)} />
+        ? <MakingStage {...makingProps(sec, endFinale)} />
         : (
           <Workbench
             onStart={onStart}
@@ -409,12 +419,14 @@ export default function BaeGyeongView() {
             actions={{
               onEditMat: () => { if (active?.kind === 'angle') reopenAngle(); else make.openMaterial(); },
               onOpenStyle: () => make.openStyle(),
-              onOpenOrder: () => make.openMake(),
               onExpand: () => make.unfold(),
               onStop: () => { void make.stop(); },
-              onRetry: () => { if (active?.kind === 'angle') reopenAngle(); else if (active?.phase === 'order-failed') void make.submitOrder(); else if (active?.order) make.openMake(); else make.openMaterial(); },
+              // 그리다 실패한 작업은 2 주문서 칸의 '그림 만들기'로 다시 그린다 (다시 시도 버튼이 돈을 바로 쓰지 않게)
+              onRetry: showActive && active?.order && active.kind !== 'angle' && active.phase !== 'order-failed' ? undefined
+                : () => { if (active?.kind === 'angle') reopenAngle(); else if (active?.phase === 'order-failed') void make.submitOrder(); else make.openMaterial(); },
               onSave: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) void saveAs(id, bench?.title ?? ''); },
-              onZoom: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) { setRecSel(id); setTab('records'); } },
+              // 결과 크게 보기: 작업판 그대로 두고 확대 보기 (휠 · 끌기 · 작은 지도 · 원본 크기)
+              onZoom: () => { if (bench?.result) zoom.open({ src: bench.result.src, alt: bench.result.alt, title: bench.title }); },
               onReview: () => { const id = showActive ? active?.id : benchRecord?.id; if (id) { setRecSel(id); setTab('records'); } },
               onNoise: () => { if (activeTarget) void tools.toggleNoise(activeTarget); else noiseFor(targetOf(benchRecord), localBench, benchRecord, bench?.title ?? ''); },
               onLock: () => { const t = activeTarget ?? targetOf(benchRecord); if (t) void tools.toggleLock(t); },
@@ -458,6 +470,7 @@ export default function BaeGyeongView() {
       <input ref={denoiseFileRef} data-pick="denoise" className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
         onChange={(e) => { const f = imageOf(e.target.files ? Array.from(e.target.files) : null); e.target.value = ''; if (f) void tools.openDenoise({ blob: f, label: f.name }); }} />
       <BaeMakeLayer />
+      {zoom.viewer}
     </div>
   );
 }

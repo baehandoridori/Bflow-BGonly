@@ -12,6 +12,7 @@ import {
   type OrderMaterials, type PdAnswer,
 } from '@/shared/bae/order';
 import { BAE_SETTING_DEFAULTS } from '@/shared/bae/settings';
+import { baePickModel, baePickQuality } from '@/shared/bae/imageChoice';
 import type {
   BaeDrawCall, BaeDrawOutcome, BaeFailure, BaeOrderCall, BaeOrderOutcome, BaeProgress,
   BaeDrawFinishCall, BaeDrawFinishOutcome, BaeResultSetCall, BaeResultSetOutcome, BaeToolJobCall, BaeToolJobOutcome,
@@ -81,7 +82,7 @@ async function smallOf(dataUrl: string | null | undefined): Promise<string | nul
   try { const blob = await (await fetch(dataUrl)).blob(); return await shrinkJpeg(blob, 320); } catch { return null; }
 }
 
-interface PreviewPending { base: BaeJobWrite; t0: number; gpt: Uint8Array; model: string; imageUsd: number | null; orderUsd: number | null; images: BaeJobImages }
+interface PreviewPending { base: BaeJobWrite; t0: number; gpt: Uint8Array; model: string; quality: string; imageUsd: number | null; orderUsd: number | null; images: BaeJobImages }
 
 export function createPreviewMake(ctx: PreviewMakeContext): PreviewMakeMethods {
   const running = new Map<string, { ctl: AbortController; phase: 'order' | 'draw'; startedAt: number }>();
@@ -109,7 +110,7 @@ export function createPreviewMake(ctx: PreviewMakeContext): PreviewMakeMethods {
     const thumb = await shrinkJpeg(png, 320);
     const images: BaeJobImages = { result: thumb, thumb, ...(differs ? { gpt: await shrinkJpeg(p.gpt, 320) } : {}), ...p.images };
     const finish: BaeJobFinish | null = fin ? { tilt: fin.tilt || 0, lock, noise: null, ...(fin.note ? { note: fin.note } : {}) } : null;
-    const result: BaeJobResult = { w, h, model: p.model, quality: models.imageQuality, sec, usdOrder: p.orderUsd ?? undefined, usdImage: p.imageUsd ?? undefined, ...(finish ? { finish } : {}) };
+    const result: BaeJobResult = { w, h, model: p.model, quality: p.quality, sec, usdOrder: p.orderUsd ?? undefined, usdImage: p.imageUsd ?? undefined, ...(finish ? { finish } : {}) };
     metas.set(jobId, { result, images });
     ctx.writeJob({ ...p.base, status: 'done', result, images, costUsd: total, finishedAt: new Date().toISOString() });
     return { ok: true, jobId, w, h, sec, costUsd: total, imageUsd: p.imageUsd, model: p.model };
@@ -155,7 +156,7 @@ export function createPreviewMake(ctx: PreviewMakeContext): PreviewMakeMethods {
 
   async function draw(q: BaeDrawCall): Promise<BaeDrawOutcome | BaeFailure> {
     let e; try { ctx.requireUse(); e = begin(q.jobId, 'draw'); } catch (err) { return fail(err, true); }
-    const t0 = Date.now(); const model = models.imageModel;
+    const t0 = Date.now(); const model = baePickModel(q.imageModel, models.imageModel); const quality = baePickQuality(q.quality, models.imageQuality);
     const base: BaeJobWrite = { id: q.jobId, kind: q.kind, status: 'drawing', parentJobId: q.parentJobId, name: q.name, summary: q.summary, pd: q.pd, costUsd: q.orderCostUsd ?? 0,
       origin: '테스트 모드', appVersion: 'preview', createdAt: q.createdAt };
     try {
@@ -175,7 +176,7 @@ export function createPreviewMake(ctx: PreviewMakeContext): PreviewMakeMethods {
       const imageUsd = imageCost(usage, prices.image);
       ctx.logUsage({ requestId: uuid(), jobId: q.jobId, kind: 'image', model, tokens: { input_tokens: 1600, output_tokens: 1631 }, usd: imageUsd ?? 0, at: new Date().toISOString() });
       put(q.jobId, 'gpt.png', png);
-      const p: PreviewPending = { base, t0, gpt: png, model, imageUsd, orderUsd: q.orderCostUsd, images: await materialImages(q) };
+      const p: PreviewPending = { base, t0, gpt: png, model, quality, imageUsd, orderUsd: q.orderCostUsd, images: await materialImages(q) };
       if (q.finish === true) {
         // 앱처럼: 화면이 마무리할 때까지 끝내지 않는다. 오지 않으면 3분 뒤 GPT 그림 그대로.
         pending.set(q.jobId, p);

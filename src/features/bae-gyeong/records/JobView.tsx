@@ -1,18 +1,27 @@
 // 한 건 보기 (시안 Zoom 바탕): 결과 그림을 크게, 그 아래 재료와 PD 글을 모두, 오른쪽에 숫자 · 만든 때 · 검수 · 내보내기.
 // 기록에서 한 건을 누르거나 작업대의 '크게 보기'로 연다. 보여 주기만 하고 바뀐 것은 콜백으로 알린다.
-import { AlertTriangle, ArrowLeft, CopyPlus, Download, FolderOpen, Layers, Loader2, Rotate3d } from 'lucide-react';
+// 결과 그림을 누르거나 '크게 보기'를 누르면 그림 크게 보기(확대 · 옮기기 · 길잡이 · 원본 크기)가 창 전체로 뜬다.
+// 코멘트는 오른쪽 가장자리의 접는 칸 — 기본은 접힘, 손잡이에 코멘트 수가 보이고, 알림으로 들어오면 저절로 펼친다.
+import { useState } from 'react';
+import { AlertTriangle, ArrowLeft, CopyPlus, Download, FolderOpen, Layers, Loader2, Maximize2, Rotate3d } from 'lucide-react';
+import { isBaeCommentJobId } from '@/shared/bae/comments';
 import type { BaeJobViewProps } from '../home/benchTypes';
 import { FactsDl, InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ResultTools, ReviewPanel } from '../home/BenchParts';
+import { OrderPane } from '../home/OrderPane';
 import { StampPanel } from './StampPanel';
-import { BaeJobComments } from '../comments/BaeJobComments';
+import { BaeJobCommentsDock } from '../comments/BaeJobCommentsDock';
+import { ImageViewer } from '../view/ImageViewer';
 import '../home/bench.css';
 import '../windows/bae-stage3.css';
 
 export function JobView(p: BaeJobViewProps) {
   const pd = p.pd;
   const dirPair = !!pd?.director && pd.director.en.length === pd.director.ko.length;
+  // 코멘트 칸이 붙을 자리 — 칸은 이 화면의 자식이라 ref 객체 대신 요소를 state 로 넘긴다(처음 그릴 때도 잴 수 있게).
+  const [viewEl, setViewEl] = useState<HTMLElement | null>(null);
+  const [zoom, setZoom] = useState(false);
   return (
-    <section className="bae-view bae-jv" aria-labelledby="bae-jv-h">
+    <section ref={setViewEl} className="bae-view bae-jv" aria-labelledby="bae-jv-h">
       <div className="bae-view-head">
         <button type="button" className="bae-btn bae-btn-s" onClick={p.onBack}><ArrowLeft size={14} aria-hidden="true" />{p.backLabel}</button>
         <h2 className="bae-view-title" id="bae-jv-h">{p.title}</h2>
@@ -31,6 +40,9 @@ export function JobView(p: BaeJobViewProps) {
               {p.result ? (
                 <ResultFrame aspect={p.result.aspect} boxAspect={16 / 9}>
                   <img className="bae-shot" src={p.result.src} alt={p.result.alt} />
+                  <button type="button" className="bae-hit" aria-label="결과 그림 크게 보기" title="눌러서 크게 보기" onClick={() => setZoom(true)}>
+                    <span className="bae-hit-chip"><Maximize2 size={14} aria-hidden="true" /></span>
+                  </button>
                 </ResultFrame>
               ) : (
                 <div className="bae-well bae-stage-empty">
@@ -41,8 +53,14 @@ export function JobView(p: BaeJobViewProps) {
             </div>
           )}
 
-          {p.result && (p.result.tools || p.onUseBase || p.onLayers || p.onAngle) ? (
+          {p.result ? (
             <div className="bae-jv-tools">
+              <div className="bae-tool-group" role="group" aria-labelledby="bae-jv-see">
+                <p className="bae-tool-name" id="bae-jv-see">보기</p>
+                <div className="bae-tool-row">
+                  <button type="button" className="bae-btn bae-btn-s" title="확대하고 옮겨 가며 자세히 봐요" onClick={() => setZoom(true)}><Maximize2 size={14} aria-hidden="true" />크게 보기</button>
+                </div>
+              </div>
               {p.result.tools ? (
                 <div className="bae-tool-group" role="group" aria-labelledby="bae-jv-trim">
                   <p className="bae-tool-name" id="bae-jv-trim">다듬기</p>
@@ -75,7 +93,7 @@ export function JobView(p: BaeJobViewProps) {
                 <h3 className="bae-side-title" id="bae-jv-pd-h">PD 글</h3>
                 {pd ? <InlineFacts facts={pd.head} /> : null}
               </div>
-              {pd ? (
+              {p.orderPane ? <OrderPane v={p.orderPane} /> : pd ? (
                 <>
                   <OrderBlock order={pd} />
                   {pd.director && pd.director.ko.length ? (
@@ -102,10 +120,6 @@ export function JobView(p: BaeJobViewProps) {
               ) : <p className="bae-empty-text">재료를 넣으면 PD가 한국어 요약과 주문서를 여기에 써요.</p>}
             </section>
           </div>
-
-          {p.comments ? (
-            <BaeJobComments jobId={p.comments.jobId} jobName={p.comments.jobName} focusCommentId={p.comments.focusCommentId ?? null} />
-          ) : null}
         </div>
 
         <div className="bae-view-side">
@@ -123,6 +137,13 @@ export function JobView(p: BaeJobViewProps) {
           ) : null}
         </div>
       </div>
+
+      {p.comments && isBaeCommentJobId(p.comments.jobId) ? (
+        <BaeJobCommentsDock key={p.comments.jobId} anchor={viewEl} jobId={p.comments.jobId} jobName={p.comments.jobName} focusCommentId={p.comments.focusCommentId ?? null} />
+      ) : null}
+      {zoom && p.result ? (
+        <ImageViewer key={p.result.src} src={p.result.src} alt={p.result.alt} title={p.title} onClose={() => setZoom(false)} />
+      ) : null}
     </section>
   );
 }

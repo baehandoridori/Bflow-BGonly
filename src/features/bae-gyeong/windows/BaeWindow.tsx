@@ -26,9 +26,11 @@ export interface BaeWindowProps {
   initialFocus?: RefObject<HTMLElement>;
   /** 사용자가 누르지 않았는데 저절로 떠오른 창 */
   autoOpened?: boolean;
+  /** 창 틀 바깥(.bae-pop)에 더할 이름. 한 창만 크기를 따로 정할 때 쓴다 (재료 창의 bae-pop-material). */
+  className?: string;
 }
 
-export function BaeWindow({ tool, icon, title, sub, headActions, footNote, footActions, children, onClose, initialFocus, autoOpened }: BaeWindowProps) {
+export function BaeWindow({ tool, icon, title, sub, headActions, footNote, footActions, children, onClose, initialFocus, autoOpened, className }: BaeWindowProps) {
   const winRef = useRef<HTMLElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const openedAt = useRef(performance.now());
@@ -55,7 +57,7 @@ export function BaeWindow({ tool, icon, title, sub, headActions, footNote, footA
   };
 
   return createPortal(
-    <div className="bae-root bae-pop">
+    <div className={'bae-root bae-pop' + (className ? ' ' + className : '')}>
       <button type="button" className="bae-pop-scrim bf-scrim-in" aria-label="창 닫기" tabIndex={-1} onClick={onScrim} />
       <section
         ref={winRef}

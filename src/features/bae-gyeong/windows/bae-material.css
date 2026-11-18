@@ -1,0 +1,24 @@
+/*
+ * 재료 창(새 배경 만들기 · 같은 장소 다른 컷)만의 크기. 다른 창은 bae-windows.css 의 1240 × 820 그대로.
+ * 한솔 피드백 2026-11-18 '러프 그리기 창이 좀 작아': 앱 창의 96% × 94% 까지 넓히고, 오른쪽 칸은 조금 좁게 해서
+ * 남는 자리를 그림판(종이)이 모두 쓴다. 종이 크기는 그림판 엔진이 무대 크기를 재서 비율대로 맞춘다 (Board.ts layout).
+ */
+.bae-root.bae-pop.bae-pop-material {
+  --bae-win-w: 96vw;
+  --bae-win-h: 94vh;
+  --bae-win-side: clamp(300px, 24vw, 360px);
+  padding-right: 2vw;
+  padding-left: 2vw;
+}
+.bae-pop-material .bae-mt-main { padding: 12px 16px; }
+
+/* 장소 · 시간대 (투시는 아래 '투시 가이드' 묶음으로 옮겼다) */
+.bae-mt-row2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+/* 그림판이 '투시 가이드' 묶음을 그려 넣기 전에는 빈자리 간격을 만들지 않는다 */
+.bae-mt-guideslot:empty { display: none; }
+
+/* 좁은 앱 창: 두 칸이 위아래로 쌓이면 그림판 칸의 높이가 정해지지 않으니 종이 무대에 높이를 준다.
+   창 높이(94vh)에서 머리 · 발 · 그림판 줄들을 뺀 만큼이라 그림판 전체가 한눈에 들어온다 (아주 작은 창은 몸이 스크롤) */
+@media (max-width: 1100px) {
+  .bae-pop-material .bb-stage { flex: none; height: clamp(280px, calc(94vh - 280px), 640px); }
+}

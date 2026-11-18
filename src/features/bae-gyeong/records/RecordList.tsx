@@ -5,6 +5,7 @@ import { useId, useState, type KeyboardEvent } from 'react';
 import { AlertTriangle, LayoutGrid, List, Loader2, Search, Tag } from 'lucide-react';
 import type { BaeRecordListProps, BaeRecordRowView } from '../home/benchTypes';
 import { Seal } from './Seal';
+import { FeedbackExportButton } from './FeedbackExport';
 import '../home/bench.css';
 import './review.css';
 
@@ -196,6 +197,8 @@ export function RecordList(p: BaeRecordListProps) {
           </div>
           <span className="bae-search"><Search size={16} aria-hidden="true" /><input className="bae-search-input" type="search" autoComplete="off" aria-label={`${title}에서 찾기`} placeholder={p.searchLabel ?? '이름, 설명에서 찾기'} value={p.query} onChange={(e) => p.onQuery(e.target.value)} /></span>
           {p.onAll ? <button type="button" className="bae-btn bae-btn-ghost bae-btn-s" onClick={p.onAll}>전체 기록</button> : null}
+          {/* 피드백 내보내기는 '기록' 탭의 내 기록에만: 작업대 아래 목록은 '전체 기록'(onAll)이 있고, 팀 기록은 만든 사람 칸(maker)이 있다 */}
+          {!team && !p.onAll ? <FeedbackExportButton /> : null}
         </div>
       </div>
       {p.toolbar}

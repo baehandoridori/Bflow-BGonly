@@ -47,6 +47,7 @@ export interface BaeResultView {
   aspect: number;                // 너비 / 높이 (25:16 칸보다 넓으면 너비에 맞춘다)
   facts: BaeFactView[];          // 크기 · 그림 · 비용
   tools?: BaeResultToolsView | null;  // 다듬기 (없으면 버튼 없음)
+  fresh?: boolean;               // 막 다 된 그림 (작업판에 처음 나타날 때 한 번 드러나는 효과)
 }
 /** 결과 다듬기 (14b 10-2 '다듬기', HTML btnDenoise · lockSw). busy = 지금 하는 일의 글 ('' 이면 아님). */
 export interface BaeResultToolsView {
@@ -71,10 +72,45 @@ export interface BaeBenchView {
   mat: BaeMaterialsView;
   matAct: string;                // '재료 바꿔 다시 그리기' ('' = 버튼 없음)
   order: BaeOrderTextView | null;
-  orderReady: boolean;           // 주문서가 다 됐고 아직 안 그림 → '주문서 확인하고 그리기'
+  /** 있으면 2 주문서 칸을 HTML '2 주문서 확인' 판처럼 (보낼 이미지 · PD가 이해한 것 · 고치기 · 영어 주문서 · 크기 · 품질 · 모델 · 그림 만들기) */
+  orderPane?: BaeOrderPaneView | null;
+  orderReady: boolean;           // 주문서가 다 됐고 아직 안 그림
   result: BaeResultView | null;
   review: BaeReviewView | null;  // 내가 남긴 검수 (null = 남길 수 없음)
   failed: { title: string; text: string } | null;
+}
+
+/** 고르기 칸 한 줄 */
+export interface BaeChoiceView { id: string; label: string }
+/**
+ * 2 주문서 칸의 확인 판 (2026-11-18 한솔: 만드는 창 대신 작업대에서, HTML '2 주문서 확인'처럼).
+ * revise = null 이면 고칠 수 없음(기록), draw = null 이면 그리기 칸 없음(다 그림 · 기록).
+ */
+export interface BaeOrderPaneView {
+  state: 'ready' | 'revising' | 'stale' | 'misfit' | 'error' | 'done';
+  statusText: string;                       // 상태 한 줄 ('주문서 완료 · 해석 비용 약 41원 …', 재료가 바뀜 · 맞지 않음 · 오류)
+  sendList: { src: string; label: string }[]; // 보낼 이미지 순서 (없으면 [])
+  summary: string;                          // PD가 이렇게 이해했어요
+  style: string;                            // 스타일 예시와 고른 까닭 (한 줄)
+  notes: string[];                          // PD 메모 (노란 줄)
+  director: { ko: string[]; en: string[]; replacedKo: string[] } | null;
+  revisions: string[];                      // 고친 기록
+  prompt: string;                           // 영어 주문서 (보기만)
+  promptCount: string;
+  revise: {
+    text: string; onText(t: string): void; onRevise(): void;
+    busySec: number | null; onStop(): void;  // 고치는 중이면 초
+    again: boolean;                          // 다 그린 뒤: 고치면 새 그림
+    onRemake?: () => void;                   // 재료가 맞지 않을 때 '주문서 다시 만들기'
+  } | null;
+  draw: {
+    tier: string; tiers: { id: string; label: string; size: [number, number]; note: string }[]; onTier(id: string): void;
+    quality: string; qualities: BaeChoiceView[]; onQuality(id: string): void;
+    model: string; models: BaeChoiceView[]; onModel(id: string): void;
+    hint: string;                             // 크기 · 비용 안내 한 줄
+    canDraw: boolean; onDraw(): void;
+  } | null;
+  flashAt: number;                          // 주문서가 막 다 된 때 (칸을 잠깐 빛나게, 0 = 아님)
 }
 
 /** 진행 중 (작게 접은 진행 줄, 시안 OrderingSmall · Drawing) */
@@ -91,7 +127,6 @@ export interface BaeBusyView {
 export interface BaeBenchActions {
   onEditMat?(): void;            // 재료 바꿔 다시 그리기
   onOpenStyle?(): void;          // 그림체 기준 '설정'
-  onOpenOrder?(): void;          // 주문서 확인하고 그리기
   onZoom?(): void;               // 결과 크게 보기 (한 건 보기)
   onReview?(): void;             // 검수 남기기 (한 건 보기를 검수 펼친 채로)
   onSave?(): void;               // PNG 저장
@@ -199,6 +234,8 @@ export interface BaeJobViewProps {
   facts: BaeFactView[];          // 크기 · 그림 · 비용 · 만든 때 · 만든 사람
   mat: BaeMaterialsView;
   pd: BaeJobPdView | null;
+  /** 있으면 PD 글을 작업대 2 주문서 칸과 같은 모양으로 (PD가 이렇게 이해했어요 · 노란 칸 · 영어 주문서 보기) */
+  orderPane?: BaeOrderPaneView | null;
   review?: { value: BaeReviewView; startOpen?: boolean; saving?: boolean; onSave(v: BaeReviewView): void } | null;
   onSave?(): void;               // PNG 저장
   onNoise?(): void;              // 다듬기: 노이즈 제거

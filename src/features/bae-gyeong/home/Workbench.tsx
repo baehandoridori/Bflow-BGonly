@@ -8,6 +8,7 @@ import { useState } from 'react';
 import type { BaeBenchActions, BaeBenchView, BaeBusyView, BaeStartKind, BaeWorkbenchProps } from './benchTypes';
 import { InlineFacts, MaterialsBlock, OrderBlock, ResultFrame, ResultTools } from './BenchParts';
 import { DropZones } from './DropZones';
+import { OrderPane } from './OrderPane';
 import { RecordList } from '../records/RecordList';
 import './bench.css';
 import '../windows/bae-stage3.css';
@@ -111,7 +112,7 @@ function FullPanes({ bench: b, busy, a }: { bench: BaeBenchView; busy: BaeBusyVi
           <h3 className="bae-pane-title">1 재료</h3>
           {b.matAct && a.onEditMat ? <button type="button" className="bae-btn bae-btn-s bae-push" onClick={a.onEditMat}><Pencil size={14} aria-hidden="true" />{b.matAct}</button> : null}
         </div>
-        <div className="bae-pane-body"><MaterialsBlock mat={b.mat} onOpenStyle={a.onOpenStyle} /></div>
+        <div className="bae-pane-body"><MaterialsBlock mat={b.mat} onOpenStyle={a.onOpenStyle} big /></div>
       </li>
 
       <li className="bae-pane">
@@ -126,14 +127,7 @@ function FullPanes({ bench: b, busy, a }: { bench: BaeBenchView; busy: BaeBusyVi
               <span className="bae-sk-lines" aria-hidden="true"><span className="bae-sk bae-sk-w30" /><span className="bae-sk bae-sk-w90" /><span className="bae-sk bae-sk-w90" /><span className="bae-sk bae-sk-w70" /></span>
               <p className="bae-empty-text">다 쓰면 한국어 요약이 여기에 나와요. 읽어 보고 그림을 만들어요.</p>
             </>
-          ) : b.order ? (
-            <>
-              <OrderBlock order={b.order} />
-              {b.orderReady && !busy && a.onOpenOrder ? (
-                <div className="bae-pane-foot"><button type="button" className="bae-btn bae-btn-primary bae-btn-block bae-btn-center" onClick={a.onOpenOrder}>주문서 확인하고 그리기</button></div>
-              ) : null}
-            </>
-          ) : <p className="bae-empty-text">재료를 넣으면 PD가 한국어 요약과 주문서를 여기에 써요.</p>}
+          ) : b.orderPane ? <OrderPane v={b.orderPane} /> : b.order ? <OrderBlock order={b.order} /> : <p className="bae-empty-text">재료를 넣으면 PD가 한국어 요약과 주문서를 여기에 써요.</p>}
         </div>
       </li>
 
@@ -158,7 +152,7 @@ function FullPanes({ bench: b, busy, a }: { bench: BaeBenchView; busy: BaeBusyVi
               </div>
             </>
           ) : b.result ? (
-            <div className="bae-stage">
+            <div className={`bae-stage${b.result.fresh ? ' is-fresh' : ''}`}>
               <ResultFrame aspect={b.result.aspect} boxAspect={BOX}>
                 <img className="bae-shot" src={b.result.src} alt={b.result.alt} />
                 {a.onZoom ? <button type="button" className="bae-hit" aria-label="결과 그림 크게 보기" onClick={a.onZoom}><span className="bae-hit-chip"><Maximize2 size={14} aria-hidden="true" /></span></button> : null}

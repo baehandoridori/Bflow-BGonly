@@ -1,0 +1,87 @@
+/*
+ * 작업대 2 주문서 칸의 확인 판 (OrderPane). HTML '2 주문서 확인' 판의 배치를 Bflow 토큰으로.
+ * 움직임: 막 다 된 주문서는 칸 테두리가 한 번 빛나고, 보낼 그림이 차례로 올라온다 (transform · opacity 만).
+ */
+.bae-op { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.bae-op-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0; font-size: 0.8125rem; font-weight: 600; color: rgb(var(--color-text-primary)); }
+.bae-op-h-sub { font-size: 0.75rem; font-weight: 400; color: rgb(var(--color-text-secondary)); }
+
+/* 보낼 이미지 순서 */
+.bae-op-send { display: flex; flex-direction: column; gap: 8px; }
+.bae-op-send-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.bae-op-send-item { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-primary)); }
+.bae-op-send-pic { display: block; aspect-ratio: 16 / 10; overflow: hidden; background: rgb(var(--color-bg-primary)); }
+.bae-op-send-pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bae-op-send-label { padding: 5px 7px 6px; overflow: hidden; font-size: 0.6875rem; font-weight: 500; line-height: 1.35; color: rgb(var(--color-text-primary)); text-overflow: ellipsis; white-space: nowrap; }
+
+/* 상태 한 줄 */
+.bae-op-status { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border-radius: 8px; background: rgb(var(--color-bg-primary)); font-size: 0.75rem; line-height: 1.5; color: rgb(var(--color-text-secondary)); }
+.bae-op-status svg { flex: none; }
+.bae-op-status.is-warn { background: color-mix(in srgb, rgb(var(--bae-warn)) 12%, rgb(var(--color-bg-card))); color: rgb(var(--color-text-primary)); }
+.bae-op-status.is-warn svg { color: rgb(var(--bae-warn)); }
+.bae-op-status.is-error { background: color-mix(in srgb, rgb(var(--bae-error)) 12%, rgb(var(--color-bg-card))); color: rgb(var(--color-text-primary)); }
+.bae-op-status.is-error svg { color: rgb(var(--bae-error)); }
+
+/* PD가 이렇게 이해했어요 */
+.bae-op-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid color-mix(in srgb, rgb(var(--color-accent)) 40%, rgb(var(--color-bg-border))); border-radius: 10px; background: color-mix(in srgb, rgb(var(--color-accent)) 9%, rgb(var(--color-bg-card))); }
+.bae-op-card-h { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 0.8125rem; font-weight: 600; color: rgb(var(--bae-accent-text)); }
+.bae-op-card-h:focus { outline: none; }
+.bae-op-card-h:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 4px; }
+.bae-op-card-text { margin: 0; font-size: 0.875rem; line-height: 1.7; color: rgb(var(--color-text-primary)); white-space: pre-wrap; overflow-wrap: break-word; }
+.bae-op-card-style { margin: 0; font-size: 0.75rem; line-height: 1.6; color: rgb(var(--bae-accent-text)); }
+
+/* PD 메모 (노란 칸) */
+.bae-op-notes { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 10px 14px 10px 28px; border-radius: 10px; background: color-mix(in srgb, rgb(var(--bae-warn)) 13%, rgb(var(--color-bg-card))); list-style: disc; }
+.bae-op-notes li { font-size: 0.8125rem; line-height: 1.6; color: rgb(var(--color-text-primary)); }
+.bae-op-notes li::marker { color: rgb(var(--bae-warn)); }
+
+/* 개발자 지문 */
+.bae-op-dir { display: flex; flex-direction: column; gap: 6px; }
+.bae-op-dir-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 18px; font-size: 0.8125rem; line-height: 1.6; }
+.bae-op-dir-en { display: block; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+
+/* 고치기 */
+.bae-op-revise { display: flex; flex-direction: column; gap: 6px; }
+.bae-op-revise-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: 0; }
+.bae-op-busy { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgb(var(--color-bg-primary)); font-size: 0.8125rem; }
+.bae-op-busy svg { color: rgb(var(--bae-accent-text)); }
+.bae-op-revs { display: flex; flex-direction: column; gap: 4px; }
+.bae-op-rev-list { margin: 0; padding-left: 18px; font-size: 0.8125rem; line-height: 1.6; color: rgb(var(--color-text-secondary)); }
+
+/* 영어 주문서 보기 (보기만) */
+.bae-op-prompt { border: 1px solid rgb(var(--color-bg-border)); border-radius: 10px; background: rgb(var(--color-bg-card)); }
+.bae-op-prompt > summary { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; font-size: 0.8125rem; font-weight: 500; color: rgb(var(--color-text-primary)); cursor: pointer; list-style: none; }
+.bae-op-prompt > summary::-webkit-details-marker { display: none; }
+.bae-op-chev { transform: rotate(-90deg); transition: transform var(--motion-fast, 120ms) var(--ease-snap, ease); color: rgb(var(--color-text-secondary)); }
+.bae-op-prompt[open] .bae-op-chev { transform: none; }
+.bae-op-prompt-text { max-height: 280px; margin: 0; padding: 0 12px 10px; overflow: auto; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.75rem; line-height: 1.55; color: rgb(var(--color-text-secondary)); white-space: pre-wrap; overflow-wrap: break-word; user-select: text; }
+.bae-op-prompt > .bae-hint { margin: 0; padding: 0 12px 10px; }
+
+/* 크기 · 품질 · 그림 모델 · 그림 만들기 */
+.bae-op-draw { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid rgb(var(--color-bg-border)); }
+/* 좁은 칸이라 한 줄에 하나씩 (크기 글자 '보통 · 2048×1152'가 잘리지 않게) */
+.bae-op-opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.bae-op-opt { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.bae-op-go { min-height: 44px; font-size: 0.9375rem; }
+
+/* 막 다 된 주문서: 칸 테두리가 한 번 빛나고, 보낼 그림이 차례로 올라온다 */
+.bae-pane:has(> .bae-pane-body > .bae-op.is-flash) { animation: bae-op-glow 2.2s var(--ease-out, ease-out) 1; }
+@keyframes bae-op-glow {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, rgb(var(--color-accent)) 0%, transparent); }
+  18% { box-shadow: 0 0 0 3px color-mix(in srgb, rgb(var(--color-accent)) 55%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, rgb(var(--color-accent)) 0%, transparent); }
+}
+.bae-op.is-flash .bae-op-send-item, .bae-op.is-flash .bae-op-card { animation: bae-op-rise var(--motion-slow, 260ms) var(--ease-out, ease-out) both; }
+.bae-op.is-flash .bae-op-send-item { animation-delay: calc(var(--i, 0) * 50ms); }
+.bae-op.is-flash .bae-op-card { animation-delay: 120ms; }
+@keyframes bae-op-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .bae-pane:has(> .bae-pane-body > .bae-op.is-flash) { animation: none; }
+  .bae-op.is-flash .bae-op-send-item, .bae-op.is-flash .bae-op-card { animation: none; }
+  .bae-op-chev { transition: none; }
+}
+
+/* 주문서 칸이 길어지면 3 결과 칸은 내용 높이만큼 위에 붙어 스크롤을 따라온다 (아래가 휑하지 않게) */
+.bae-pane:has(> .bae-pane-body > .bae-op) + .bae-pane > .bae-pane-body { flex: none; position: sticky; top: 0; }
+.bae-pane:has(> .bae-pane-body > .bae-op) + .bae-pane .bae-res-foot { margin-top: 0; }

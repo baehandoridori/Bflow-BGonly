@@ -30,6 +30,9 @@ export interface BaeDrawCall {
   parentJobId: string | null;
   promptText: string;
   ratio: RatioId; tier: TierId; tilt: number;
+  /** 이 그림의 품질 · 그림 모델 (HTML 의 고르기 칸). 메인은 imageChoice 목록 안의 값만 받고, 없거나 목록 밖이면 설정 책장 값. */
+  quality?: string;
+  imageModel?: string;
   /** 그림 모델에 보낼 PNG (finalList 순서). */
   images: Uint8Array[];
   /** 기록에 남길 재료 미리보기 (JPEG 데이터 주소): 러프 · 메모 러프 · 레퍼런스 · 기준 배경(통째로) · 부품 시트. */

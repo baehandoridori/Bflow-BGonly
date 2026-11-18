@@ -1,17 +1,20 @@
 /**
- * 재료 창 왼쪽 칸의 그림판 (시안 WinNew 왼쪽 칸 배치: 위 줄 · 도구 줄 · 종이 · 비율과 기울기 · 고른 도구 한 줄).
- * 엔진은 Board.ts. 투시 고르기와 '지평선 및 투시 참고하게 하기' 스위치는 재료 창 오른쪽이 board.setGuideType ·
- * board.setGuideParam('use', …) 로 다루고, board.guide() · onGuide 로 읽는다.
+ * 재료 창 왼쪽 칸의 그림판. 위에서부터: 비율 · 불러온 그림 줄, 도구 줄(그림 도구 → 색 → 굵기 → 메모 → 옮기기 → 되돌리기),
+ * 종이, 고른 도구 한 줄. 남는 높이는 모두 종이가 쓴다 (한솔 피드백 2026-11-18: 그림판이 작다 · 색과 굵기는 도구 옆에).
+ * '투시 가이드' 묶음(BoardGuidePanel)은 창이 BoardWindowContext 로 자리를 주면 거기(재료 창 오른쪽 칸)에, 아니면 그림판 아래에 그린다.
+ * 엔진은 Board.ts. 투시 종류는 재료 창이 가게(setPersp → board.setGuideType)로 정하고, board.guide() · onGuide 로 읽는다.
  */
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  type LucideIcon, ArrowUpRight, Circle, Eraser, Eye, EyeOff, Highlighter, Image as ImageIcon, MousePointer2, Move, PaintBucket, Pencil, Pipette, Redo2, Slash, Square, Trash2, Type, Undo2, Upload,
+  type LucideIcon, ArrowUpRight, Circle, Eraser, Highlighter, Image as ImageIcon, MousePointer2, Move, PaintBucket, Pencil, Pipette, Redo2, Slash, Square, Trash2, Type, Undo2, Upload,
 } from 'lucide-react';
 import { RATIOS, RATIO_ORDER, SWATCHES } from '@/shared/bae/order/constants';
 import { createBoard, type Board, type BoardOptions, type BoardTool, type PlaceColor } from './Board';
-import { guideCtl, tiltLabel } from './guideMath';
+import { BoardGuidePanel } from './BoardGuidePanel';
+import { BoardWindowContext } from './boardWindow';
 import {
-  CLEAR_TOAST, COLOR_TOOLS, DRAW_TOOLS, FILLS, GAPS, GUIDE_AUTO_HINT, MODE_HINT, NOTE_FOOT, NOTE_TOOLS, PHOTO_HINT, PHOTO_SWITCH, PHOTO_TOAST, TILT_HINT, TOOL_TEXT, WIDTHS, WIDTH_TOOLS,
+  CLEAR_TOAST, DRAW_TOOLS, FILLS, GAPS, GUIDE_AUTO_HINT, MODE_HINT, NOTE_FOOT, NOTE_TOOLS, PHOTO_HINT, PHOTO_SWITCH, PHOTO_TOAST, TOOL_TEXT, WIDTHS,
 } from './boardText';
 import './board.css';
 
@@ -37,6 +40,7 @@ export interface BoardViewProps {
 
 export function BoardView({ board, className }: BoardViewProps) {
   const u = useSyncExternalStore(board.subscribe, board.ui, board.ui);
+  const link = useContext(BoardWindowContext);
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null), frameRef = useRef<HTMLDivElement>(null);
   const guideRef = useRef<HTMLCanvasElement>(null), textRef = useRef<HTMLTextAreaElement>(null), selRef = useRef<HTMLDivElement>(null), fileRef = useRef<HTMLInputElement>(null);
@@ -46,8 +50,8 @@ export function BoardView({ board, className }: BoardViewProps) {
     return () => board.detach();
   }, [board]);
 
-  const ctl = guideCtl(u.guide);
   const t = TOOL_TEXT[u.tool];
+  const guidePanel = <BoardGuidePanel board={board} u={u} persp={link?.persp ?? null} />;
   const toast = (text: string) => board.toast(text);
   const toolBtn = (k: BoardTool, note = false) => {
     const I = TOOL_ICON[k];
@@ -60,13 +64,19 @@ export function BoardView({ board, className }: BoardViewProps) {
 
   return (
     <div ref={rootRef} className={'bb-root' + (className ? ' ' + className : '')}>
-      {/* 위 줄: 레이아웃 고르기 · 가이드 보이기 · 그림 불러오기 */}
+      {/* 위 줄: 비율 · 불러온 그림 (레이아웃으로 쓸 재료 · 맞추는 방법 · 빼기 · 불러오기) */}
       <div className="bb-bar">
-        <div className="bae-seg" role="group" aria-label="레이아웃으로 쓸 재료" title="불러온 이미지의 종류">
-          <button type="button" className="bae-btn bae-btn-s" aria-pressed={u.mode === 'rough'} title={MODE_HINT.rough} onClick={() => board.setMode('rough')}><Pencil size={14} aria-hidden="true" />러프 스케치</button>
-          <button type="button" className="bae-btn bae-btn-s" aria-pressed={u.mode === 'guide'} title={MODE_HINT.guide} onClick={() => board.setMode('guide')}><ImageIcon size={14} aria-hidden="true" />AI 이미지·사진 (흐리게)</button>
+        <span className="bae-label" id={id + 'ratio'}>비율</span>
+        <div className="bb-chips" role="group" aria-labelledby={id + 'ratio'}>
+          {RATIO_ORDER.map((r) => (
+            <button key={r} type="button" className="bae-btn bae-btn-s bb-chip" aria-pressed={u.ratio === r} title={(RATIOS[r].hint ? RATIOS[r].hint + ' · ' : '') + '그림판과 결과 그림이 이 비율로 맞춰져요.'} onClick={() => board.setRatio(r)}>{r}</button>
+          ))}
         </div>
         <div className="bb-bar-end">
+          <div className="bae-seg" role="group" aria-label="레이아웃으로 쓸 재료" title="불러온 이미지의 종류">
+            <button type="button" className="bae-btn bae-btn-s" aria-pressed={u.mode === 'rough'} title={MODE_HINT.rough} onClick={() => board.setMode('rough')}><Pencil size={14} aria-hidden="true" />러프 스케치</button>
+            <button type="button" className="bae-btn bae-btn-s" aria-pressed={u.mode === 'guide'} title={MODE_HINT.guide} onClick={() => board.setMode('guide')}><ImageIcon size={14} aria-hidden="true" />AI 이미지·사진 (흐리게)</button>
+          </div>
           {u.hasBg && (
             <div className="bae-seg" role="group" aria-label="불러온 이미지를 비율에 맞추는 방법" title="불러온 이미지를 비율에 맞추는 방법">
               <button type="button" className="bae-btn bae-btn-s" aria-pressed={u.fit === 'contain'} onClick={() => board.setFit('contain')}>전체 보이기</button>
@@ -74,19 +84,22 @@ export function BoardView({ board, className }: BoardViewProps) {
             </div>
           )}
           {u.hasBg && <button type="button" className="bae-btn bae-btn-ghost bae-btn-s" onClick={() => board.clearBg()}>불러온 이미지 빼기</button>}
-          <button type="button" className="bae-btn bae-btn-s bb-toggle" aria-pressed={u.showGuide} onClick={() => board.setShowGuide(!u.showGuide)}>
-            {u.showGuide ? <Eye size={14} aria-hidden="true" /> : <EyeOff size={14} aria-hidden="true" />}가이드 보이기
-          </button>
           <button type="button" className="bae-btn bae-btn-ghost bae-btn-s" onClick={() => fileRef.current?.click()}><Upload size={14} aria-hidden="true" />그림 불러오기</button>
           <input ref={fileRef} className="bae-vh" type="file" accept="image/*" tabIndex={-1} aria-hidden="true"
             onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) void board.loadFile(f); }} />
         </div>
       </div>
 
-      {/* 도구 줄 */}
+      {/* 도구 줄: 그림 도구 바로 뒤에 색과 굵기 (그림판 프로그램처럼 왼쪽부터) */}
       <div className="bb-bar">
         <div className="bb-tools" role="group" aria-label="그림판 도구">
           <div className="bb-tgroup" role="group" aria-label="그림">{DRAW_TOOLS.map((k) => toolBtn(k))}</div>
+          <span className="bb-sep" aria-hidden="true" />
+          <div className="bb-tgroup bb-paint" role="group" aria-label="색 · 굵기">
+            <ColorPicker board={board} color={u.color} />
+            {u.placeColors.length > 0 && <PlaceColors board={board} id={id} color={u.color} list={u.placeColors} />}
+            <Seg label="굵기" items={WIDTHS} value={u.width} onPick={(v) => board.setWidth(v)} className="bb-seg-tight" />
+          </div>
           <span className="bb-sep" aria-hidden="true" />
           <div className="bb-tgroup" role="group" aria-label="메모 · PD만 봐요" title={NOTE_FOOT}>{NOTE_TOOLS.map((k) => toolBtn(k, true))}</div>
           <span className="bb-sep" aria-hidden="true" />
@@ -98,13 +111,12 @@ export function BoardView({ board, className }: BoardViewProps) {
             })}
           </div>
           <span className="bb-sep" aria-hidden="true" />
-          <button type="button" className="bb-ib" aria-label="되돌리기" title="되돌리기 (Ctrl+Z)" disabled={!u.canUndo} onClick={() => void board.undo()}><Undo2 size={16} aria-hidden="true" /></button>
-          <button type="button" className="bb-ib" aria-label="다시 하기" title="다시 하기 (Ctrl+Shift+Z)" disabled={!u.canRedo} onClick={() => void board.redo()}><Redo2 size={16} aria-hidden="true" /></button>
-          <button type="button" className="bb-ib" aria-label="모두 지우기" title="모두 지우기" disabled={!u.hasContent && !u.tilt} onClick={() => { board.clearAll(); toast(CLEAR_TOAST); }}><Trash2 size={16} aria-hidden="true" /></button>
-        </div>
-        <div className="bb-bar-end">
-          {u.placeColors.length > 0 && <PlaceColors board={board} id={id} color={u.color} list={u.placeColors} />}
-          <ColorPicker board={board} color={u.color} />
+          {/* 좁은 창에서 줄이 넘치면 셋이 함께 다음 줄로 */}
+          <div className="bb-tgroup">
+            <button type="button" className="bb-ib" aria-label="되돌리기" title="되돌리기 (Ctrl+Z)" disabled={!u.canUndo} onClick={() => void board.undo()}><Undo2 size={16} aria-hidden="true" /></button>
+            <button type="button" className="bb-ib" aria-label="다시 하기" title="다시 하기 (Ctrl+Shift+Z)" disabled={!u.canRedo} onClick={() => void board.redo()}><Redo2 size={16} aria-hidden="true" /></button>
+            <button type="button" className="bb-ib" aria-label="모두 지우기" title="모두 지우기" disabled={!u.hasContent && !u.tilt} onClick={() => { board.clearAll(); toast(CLEAR_TOAST); }}><Trash2 size={16} aria-hidden="true" /></button>
+          </div>
         </div>
       </div>
 
@@ -116,29 +128,10 @@ export function BoardView({ board, className }: BoardViewProps) {
         <div ref={selRef} className="bb-selbar"><button type="button" onClick={() => board.deleteSelected()}>메모 지우기</button></div>
       </div>
 
-      {/* 비율 · 화면 기울기 */}
-      <div className="bb-bar">
-        <span className="bae-label" id={id + 'ratio'}>비율</span>
-        <div className="bb-chips" role="group" aria-labelledby={id + 'ratio'}>
-          {RATIO_ORDER.map((r) => (
-            <button key={r} type="button" className="bae-btn bae-btn-s bb-chip" aria-pressed={u.ratio === r} title={(RATIOS[r].hint ? RATIOS[r].hint + ' · ' : '') + '그림판과 결과 그림이 이 비율로 맞춰져요.'} onClick={() => board.setRatio(r)}>{r}</button>
-          ))}
-        </div>
-        <div className="bb-bar-end">
-          <label className="bae-label" htmlFor={id + 'tilt'} title="화면 기울기 · 러프를 기울여 그렸을 때">화면 기울기</label>
-          <input className="bb-range" id={id + 'tilt'} type="range" min={-15} max={15} step={0.5} value={u.tilt} aria-valuetext={tiltLabel(u.tilt)} onChange={(e) => board.setTilt(Number(e.target.value))} />
-          <span className="bb-sval bae-num">{tiltLabel(u.tilt)}</span>
-          <button type="button" className={'bae-btn bae-btn-ghost bae-btn-s' + (u.tilt ? '' : ' bb-keep')} tabIndex={u.tilt ? 0 : -1} aria-hidden={!u.tilt} onClick={() => board.setTilt(0)}>0°로</button>
-        </div>
-      </div>
-
-      {/* 고른 도구 한 줄: 설명 + 도구 손잡이 */}
+      {/* 고른 도구 한 줄: 설명 + 그 도구만의 손잡이. 투시 가이드 손잡이는 '투시 가이드' 묶음에 늘 있다 */}
       <div className="bb-bar bb-toolline">
         <p className="bae-hint bb-desc"><b>{t.name}</b>: {u.tool === 'guide' && u.guide.type === 'auto' ? GUIDE_AUTO_HINT : t.desc}</p>
         <div className="bb-bar-end">
-          {WIDTH_TOOLS.includes(u.tool) && (
-            <Seg label="굵기" items={WIDTHS} value={u.width} onPick={(v) => board.setWidth(v)} />
-          )}
           {(u.tool === 'rect' || u.tool === 'ellipse') && <Seg label="네모·동그라미" items={FILLS} value={u.fillMode} onPick={(v) => board.setFillMode(v)} />}
           {u.tool === 'fill' && <Seg label="선 사이 틈" items={GAPS} value={u.gap} onPick={(v) => board.setGap(v)} />}
           {u.tool === 'eraser' && <button type="button" className="bae-btn bae-btn-ghost bae-btn-s" disabled={!u.painted} onClick={() => board.clearPaint()}>그린 것 다 지우기</button>}
@@ -148,40 +141,21 @@ export function BoardView({ board, className }: BoardViewProps) {
               <button type="button" className="bae-btn bae-btn-ghost bae-btn-s" disabled={!u.noteCount} onClick={() => board.clearNotes()}>메모 다 지우기</button>
             </>
           )}
-          {u.tool === 'guide' && ctl.showSpread && (
-            <div className="bb-gctl">
-              <label htmlFor={id + 'sp'}>소실점 간격</label><span>강하게</span>
-              <input className="bb-range" id={id + 'sp'} type="range" min={0.8} max={5} step={0.1} value={ctl.spread} aria-valuetext={ctl.spreadLabel} onChange={(e) => board.setGuideParam('spread', Number(e.target.value))} />
-              <span>약하게</span><b>{ctl.spreadLabel}</b>
-            </div>
-          )}
-          {u.tool === 'guide' && ctl.showDepth && (
-            <div className="bb-gctl">
-              <label htmlFor={id + 'dp'}>복도 길이</label><span>짧게</span>
-              <input className="bb-range" id={id + 'dp'} type="range" min={1} max={10} step={1} value={ctl.depthStep} aria-valuetext={ctl.depthLabel} onChange={(e) => board.setGuideParam('depth', Number(e.target.value))} />
-              <span>길게</span><b>{ctl.depthLabel}</b>
-            </div>
-          )}
         </div>
       </div>
-      {u.tool === 'guide' && ctl.showLegend && (
-        <p className="bae-hint bb-legend">
-          <b>지평선은 눈높이예요.</b> 서 있는 사람 눈이나 차 지붕 근처를 지나요. 땅이 끝나는 선과는 달라요.{' '}
-          <span className="bb-key-blue">파란 선</span>은 소실점으로 모이는 선이에요.
-          {ctl.showCornerKey && <> <span className="bb-key-corner">주황 선</span>은 두 면이 만나는 모서리예요. 선을 끌면 좌우로, 위·아래 점을 끌면 길이가 바뀌어요.</>}
-        </p>
-      )}
-      {u.tilt !== 0 && <p className="bae-hint">{TILT_HINT}</p>}
       {u.photoLike && u.hasBg && u.mode === 'rough' && (
         <p className="bae-hint bb-photo">{PHOTO_HINT} <button type="button" className="bae-btn bae-btn-s" onClick={() => { board.setMode('guide'); toast(PHOTO_TOAST); }}>{PHOTO_SWITCH}</button></p>
       )}
+
+      {/* 투시 가이드 묶음: 창이 준 자리(재료 창 오른쪽 칸)에, 연결이 없으면 여기 */}
+      {link ? (link.guideSlot ? createPortal(guidePanel, link.guideSlot) : null) : guidePanel}
     </div>
   );
 }
 
-function Seg<T extends string | number>({ label, items, value, onPick }: { label: string; items: [T, string][]; value: T; onPick: (v: T) => void }) {
+function Seg<T extends string | number>({ label, items, value, onPick, className }: { label: string; items: [T, string][]; value: T; onPick: (v: T) => void; className?: string }) {
   return (
-    <div className="bb-seg-row" role="group" aria-label={label}>
+    <div className={'bb-seg-row' + (className ? ' ' + className : '')} role="group" aria-label={label}>
       <span className="bae-label">{label}</span>
       <div className="bae-seg">
         {items.map(([v, name]) => <button key={String(v)} type="button" className="bae-btn bae-btn-s" aria-pressed={value === v} onClick={() => onPick(v)}>{name}</button>)}

@@ -311,10 +311,22 @@ test('phase B: preload opens exactly the comment channels main handles, each wit
 
 test('phase B: the one-job view draws the comment thread in one place, only for jobs the server has', () => {
   const view = text('src/features/bae-gyeong/records/JobView.tsx');
-  assert.match(view, /import \{ BaeJobComments \} from '\.\.\/comments\/BaeJobComments';/);
-  assert.equal((view.match(/<BaeJobComments /g) ?? []).length, 1);
-  assert.match(view, /\{p\.comments \? \(\n\s+<BaeJobComments jobId=\{p\.comments\.jobId\} jobName=\{p\.comments\.jobName\} focusCommentId=\{p\.comments\.focusCommentId \?\? null\} \/>\n\s+\) : null\}/);
-  assert.ok(view.indexOf('className="bae-jv-cols"') < view.indexOf('<BaeJobComments ') && view.indexOf('<BaeJobComments ') < view.indexOf('className="bae-view-side"'), 'under materials · PD, in the wide column');
+  // 한 건 보기는 오른쪽 접는 칸(BaeJobCommentsDock)을 한 번 붙이고, 그 칸이 댓글 패널을 한 번 그린다.
+  assert.match(view, /import \{ BaeJobCommentsDock \} from '\.\.\/comments\/BaeJobCommentsDock';/);
+  assert.doesNotMatch(view, /<BaeJobComments /, 'the thread is no longer drawn under the left column');
+  assert.equal((view.match(/<BaeJobCommentsDock /g) ?? []).length, 1);
+  assert.match(view, /\{p\.comments && isBaeCommentJobId\(p\.comments\.jobId\) \? \(\n\s+<BaeJobCommentsDock key=\{p\.comments\.jobId\} anchor=\{viewEl\} jobId=\{p\.comments\.jobId\} jobName=\{p\.comments\.jobName\} focusCommentId=\{p\.comments\.focusCommentId \?\? null\} \/>\n\s+\) : null\}/);
+  assert.ok(view.indexOf('className="bae-view-side"') < view.indexOf('<BaeJobCommentsDock '), 'after both columns — it floats over the right edge, not inside a column');
+  const dock = text('src/features/bae-gyeong/comments/BaeJobCommentsDock.tsx');
+  assert.equal((dock.match(/<BaeJobComments\n/g) ?? []).length, 1);
+  assert.match(dock, /focusCommentId=\{focusCommentId\}\n\s+heightClass="h-full"\n\s+onCount=\{setCount\}/, 'the count comes from the list the panel already loaded');
+  assert.match(dock, /const \[open, setOpen\] = useState\(\(\) => !!focusCommentId\);/, 'collapsed by default, open when a notification points at a comment');
+  assert.match(dock, /useEffect\(\(\) => \{\n\s+if \(focusCommentId\) setOpen\(true\);\n\s+\}, \[focusCommentId\]\);/, 'a new notification on the same job opens it again');
+  assert.match(dock, /el\.inert = !open;/, 'collapsed panel stays mounted (count · realtime) but cannot be reached');
+  assert.doesNotMatch(dock, /localStorage/, 'default must stay collapsed — no remembered state');
+  const panel = text('src/features/bae-gyeong/comments/BaeJobComments.tsx');
+  assert.match(panel, /onCountChange=\{handleCount\}/);
+  assert.match(panel, /onCountRef\.current\?\.\(n\);/);
   const types = text('src/features/bae-gyeong/home/benchTypes.ts');
   assert.match(types, /comments\?: \{ jobId: string; jobName: string \| null; focusCommentId\?: string \| null \} \| null;/);
   const bae = text('src/features/bae-gyeong/BaeGyeongView.tsx');
