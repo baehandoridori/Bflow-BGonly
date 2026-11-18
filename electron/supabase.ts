@@ -18,6 +18,7 @@ import {
   POSTGREST_PAGE_SIZE,
 } from '../src/shared/postgrestPaging';
 import { defaultEpisodeTitle } from '../src/shared/episodeTitle';
+import { EPISODE_KEYED_METADATA_TYPES, PART_KEYED_METADATA_TYPES, episodeNumberMetadata, parkedEpisodeNumber, sheetNamePrefix } from '../src/shared/episodeNumberReuse';
 import { withHttpStatusMark } from '../src/shared/saveFailureMark';
 import type {
   PersonalTodoLabelColorKey,
@@ -480,11 +481,61 @@ export async function readEpisodesWithScenes(filter: {
   });
 }
 
+/**
+ * 지운 에피소드가 이 번호를 쥐고 있으면 번호만 음수 자리로 비켜 둔다(내용은 그대로).
+ * 진행 중 · 보관함 에피소드가 쥐고 있으면 알기 쉬운 오류로 멈춘다.
+ */
+async function freeEpisodeNumber(episodeNumber: number): Promise<void> {
+  const { data: holder, error } = await supabase
+    .from('episodes')
+    .select('id, status')
+    .eq('episode_number', episodeNumber)
+    .maybeSingle();
+  throwIfError(error);
+  if (!holder) return;
+  if (holder.status !== 'deleted') {
+    throw new Error(`EP${episodeNumber} 번호는 이미 ${holder.status === 'archived' ? '보관함에 있는 에피소드가' : '다른 에피소드가'} 쓰고 있어요. 화면을 새로 고친 뒤 다시 추가해 주세요.`);
+  }
+  const { data: negatives, error: negErr } = await supabase
+    .from('episodes')
+    .select('episode_number')
+    .lt('episode_number', 0);
+  throwIfError(negErr);
+  const parked = parkedEpisodeNumber(episodeNumber, (negatives || []).map((r) => r.episode_number as number));
+
+  // 번호로 묶인 제목 · 메모 · 파트 메모 (새 에피소드가 옛 제목을 물려받지 않게 지운다)
+  const { data: metaRows, error: metaErr } = await supabase
+    .from('metadata')
+    .select('id, type, key, value')
+    .in('type', [...EPISODE_KEYED_METADATA_TYPES, ...PART_KEYED_METADATA_TYPES])
+    .or(`key.eq.${episodeNumber},key.like.${sheetNamePrefix(episodeNumber)}*`);
+  throwIfError(metaErr);
+  const meta = episodeNumberMetadata(metaRows || [], episodeNumber);
+
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = { episode_number: parked, updated_at: now };
+  if (meta.title) patch.title = meta.title;   // 옛 제목 · 메모는 비켜 둔 에피소드 줄에 남김
+  if (meta.memo) patch.memo = meta.memo;
+  const { error: moveErr } = await supabase
+    .from('episodes')
+    .update(patch)
+    .eq('id', holder.id)
+    .eq('status', 'deleted');
+  throwIfError(moveErr);
+  if (meta.deleteIds.length > 0) {
+    const { error: delErr } = await supabase.from('metadata').delete().in('id', meta.deleteIds);
+    throwIfError(delErr);
+    broadcastDataChange('metadata', 'DELETE');
+  }
+  broadcastDataChange('episodes', 'UPDATE');
+}
+
 /** 에피소드 추가 */
 export async function addEpisode(
   episodeNumber: number,
   department?: string,
 ): Promise<void> {
+  await freeEpisodeNumber(episodeNumber);
   // 에피소드 생성
   const { data: ep, error: epErr } = await supabase
     .from('episodes')
