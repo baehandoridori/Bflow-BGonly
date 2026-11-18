@@ -1,0 +1,106 @@
+/*
+ * 기록 한 건 보기의 코멘트 칸 (comments/BaeJobCommentsDock). 손잡이는 기록 화면 오른쪽 가장자리에 붙은 세로 탭,
+ * 칸은 오른쪽에서 밀려 나와 화면 위에 겹친다(오른쪽 숫자 · 도장 · 검수 · 내보내기 열을 덮고, 접으면 그대로 돌아온다).
+ * 둘 다 고정 위치 — 자리(top · right …)는 화면이 잰 값을 style 로 받는다. 색은 Bflow 토큰과 .bae-root 의 BAE경 토큰만.
+ * 움직임은 transform · opacity 만, 동작 줄이기(와 빌드가 만드는 '움직임: 최소' 짝)에서는 움직임 없이 바로 열고 닫는다.
+ */
+@keyframes bae-cmt-pop { from { opacity: 0; transform: scale(0.6); } }
+
+/* ── 손잡이: 아이콘 · 개수 · 세로 글자 ── */
+.bae-cmt-tab {
+  position: fixed;
+  z-index: 31;
+  top: 112px;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 34px;
+  padding: 10px 0 8px;
+  border: 1px solid color-mix(in srgb, rgb(var(--color-accent)) 45%, rgb(var(--color-bg-border)));
+  border-radius: 0 10px 10px 0;
+  background: color-mix(in srgb, rgb(var(--color-accent)) 12%, rgb(var(--color-bg-card)));
+  color: rgb(var(--bae-accent-text, var(--color-accent-sub)));
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+  cursor: pointer;
+  transition: background-color var(--motion-base, 180ms) var(--ease-std, ease), border-color var(--motion-base, 180ms) var(--ease-std, ease), color var(--motion-base, 180ms) var(--ease-std, ease), transform var(--motion-fast, 120ms) var(--ease-snap, ease);
+}
+.bae-cmt-tab.is-inside { border-radius: 10px 0 0 10px; }
+.bae-cmt-tab.has-count { border-color: rgb(var(--color-accent)); background: rgb(var(--color-accent)); color: #fff; }
+.bae-cmt-tab:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-cmt-tab:active { transform: translateX(1px); }
+.bae-cmt-tab-label { writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 0.04em; white-space: nowrap; }
+.bae-cmt-tab-count {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #fff;
+  color: rgb(var(--color-accent));
+  font-size: 0.6875rem;
+  font-weight: 700;
+  animation: bae-cmt-pop var(--motion-slow, 260ms) var(--ease-spring, ease-out) backwards;
+}
+@media (hover: hover) {
+  .bae-cmt-tab:hover { border-color: rgb(var(--color-accent)); background: color-mix(in srgb, rgb(var(--color-accent)) 22%, rgb(var(--color-bg-card))); }
+  .bae-cmt-tab.has-count:hover { background: color-mix(in srgb, rgb(var(--color-accent)) 86%, rgb(15 17 23)); }
+}
+
+/* ── 칸: 오른쪽에서 밀려 나온다. 접힌 동안은 보이지 않고(그러나 살아 있다) 누를 수 없다 ── */
+.bae-cmt-dock {
+  position: fixed;
+  z-index: 30;
+  top: 12px;
+  right: 0;
+  bottom: 12px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(calc(100% + 48px));
+  transition: transform var(--motion-slow, 260ms) var(--ease-out, ease-out), opacity var(--motion-base, 180ms) var(--ease-std, ease), visibility 0s linear var(--motion-slow, 260ms);
+}
+.bae-cmt-dock.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: transform var(--motion-slow, 260ms) var(--ease-out, ease-out), opacity var(--motion-base, 180ms) var(--ease-std, ease), visibility 0s linear 0s;
+}
+.bae-cmt-dock:focus { outline: none; }
+.bae-cmt-dock .bae-comments-unavailable { align-self: flex-start; width: 360px; }
+.bae-cmt-fold {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgb(var(--color-bg-border));
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--color-text-secondary));
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--motion-fast, 120ms) var(--ease-std, ease), background-color var(--motion-fast, 120ms) var(--ease-std, ease);
+}
+.bae-cmt-fold:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+@media (hover: hover) {
+  .bae-cmt-fold:hover { background: color-mix(in srgb, rgb(var(--color-bg-border)) 50%, transparent); color: rgb(var(--color-text-primary)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bae-cmt-dock, .bae-cmt-dock.is-open, .bae-cmt-tab, .bae-cmt-fold { transition: none; }
+  .bae-cmt-tab:active { transform: none; }
+  .bae-cmt-tab-count { animation: none; }
+}

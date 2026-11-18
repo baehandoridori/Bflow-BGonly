@@ -21,10 +21,11 @@ const ORDER = { summary_ko: '거실 그림', notes_ko: [], style_picks: ['L1'], 
 const sse = (o: Record<string, unknown>) => `event: ${o.type}\ndata: ${JSON.stringify(o)}\n\n`;
 
 function server(mode: { image?: 'ok' | '503' | 'stall' }) {
-  const calls: string[] = [];
+  const calls: string[] = []; const bodies: string[] = [];
   const srv = http.createServer((req, res) => {
     const parts: Buffer[] = []; req.on('data', (d) => parts.push(d));
     req.on('end', async () => {
+      bodies.push(Buffer.concat(parts).toString('latin1'));
       const auth = String(req.headers.authorization || ''); calls.push(req.url + (auth === `Bearer ${FAKE_KEY}` ? ' key-ok' : ' key-bad'));
       if (req.url?.endsWith('/responses')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -39,9 +40,9 @@ function server(mode: { image?: 'ok' | '503' | 'stall' }) {
       res.end(sse({ type: 'image_edit.completed', b64_json: PNG_1x1, usage: { input_tokens: 1600, output_tokens: 1631, input_tokens_details: { text_tokens: 300, image_tokens: 1300 } } }));
     });
   });
-  return new Promise<{ base: string; calls: string[]; close: () => void }>((resolve) => srv.listen(0, '127.0.0.1', () => {
+  return new Promise<{ base: string; calls: string[]; bodies: string[]; close: () => void }>((resolve) => srv.listen(0, '127.0.0.1', () => {
     const port = (srv.address() as { port: number }).port;
-    resolve({ base: `http://127.0.0.1:${port}/v1`, calls, close: () => { srv.closeAllConnections?.(); srv.close(); } });
+    resolve({ base: `http://127.0.0.1:${port}/v1`, calls, bodies, close: () => { srv.closeAllConnections?.(); srv.close(); } });
   }));
 }
 
@@ -94,6 +95,32 @@ test('order then draw: the ledger gets a line per call, the record goes drawing 
     assert.ok(await h.local.readJobFile(JOB, 'result.png'), 'the original is kept on this PC');
     const text = JSON.stringify(h.queued);
     assert.ok(!text.includes('0123456789abcdef'), 'no key in anything queued');
+  } finally { srv.close(); }
+});
+
+/** multipart 몸에서 글 칸 하나의 값 */
+const formValue = (body: string, name: string) => { const m = new RegExp(`name="${name}"\r\n\r\n([^\r]*)\r\n`).exec(body); return m ? m[1] : null; };
+
+test('each picture can choose its quality and picture model from the HTML list; anything else falls back to the settings', async () => {
+  const srv = await server({ image: 'ok' }); const h = await harness(srv.base);
+  try {
+    const o = await h.jobs.order(origin, orderCall());
+    assert.equal(o.ok, true, o.message);
+    const d1 = await h.jobs.draw(origin, { ...drawCall(o.promptText), quality: 'max', imageModel: 'gpt-image-2.5-flare' });
+    assert.equal(d1.ok, true, d1.message);
+    const img1 = srv.bodies[srv.bodies.length - 1];
+    assert.equal(formValue(img1, 'quality'), 'max');
+    assert.equal(formValue(img1, 'model'), 'gpt-image-2.5-flare');
+    assert.equal(d1.model, 'gpt-image-2.5-flare');
+    const done1 = h.queued.filter((q) => q.kind === 'job' && q.payload.status === 'done').at(-1)!.payload;
+    assert.equal(done1.result.quality, 'max', 'the record says which quality was used');
+    const JOB2 = '0b9d4f6a-2222-4c2d-8e3f-123456789abc';
+    const o2 = await h.jobs.order(origin, orderCall(JOB2));
+    const d2 = await h.jobs.draw(origin, { ...drawCall(o2.promptText, JOB2), quality: 'ultra', imageModel: 'dall-e-9' });
+    assert.equal(d2.ok, true, d2.message);
+    const img2 = srv.bodies[srv.bodies.length - 1];
+    assert.equal(formValue(img2, 'quality'), 'high', 'unknown quality → the settings value');
+    assert.equal(formValue(img2, 'model'), 'gpt-image-2.5-sunburst', 'unknown model → the settings model');
   } finally { srv.close(); }
 });
 

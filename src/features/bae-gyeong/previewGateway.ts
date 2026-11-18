@@ -12,6 +12,11 @@ import {
   type BaeJob, type BaeJobWrite, type BaeTeamFilter, type BaeUsageLine, type BaeUsageSummary,
 } from '../../shared/bae/jobs.ts';
 import { BAE_COST_BUCKETS, baeStampNote, baeStampProblem, type BaeCostBucket, type BaeStampEvent, type BaeStampUnseen, type BaeUsageTeam } from '../../shared/bae/review.ts';
+import {
+  baeFeedbackCandidates, baeFeedbackDoneText, baeFeedbackHead, baeFeedbackItem, baeFeedbackJson, baeFeedbackKey, baeFeedbackMarkdown, baeFeedbackRequestProblem,
+  baeFeedbackWants, baeFeedbackZipName, baeFeedbackZipPath, type BaeFeedbackGot, type BaeFeedbackItem, type BaeFeedbackMiss, type BaeFeedbackResult,
+} from '../../shared/bae/feedbackExport.ts';
+import { concatBytes, createStoredZip } from '../../shared/bae/storedZip.ts';
 import type { PreviewSeedData, PreviewStampLine } from './previewSeed.ts';
 import type { BaeChange, BaeGateway, BaeSettingsView } from './types.ts';
 
@@ -315,6 +320,60 @@ export function createBaePreviewGateway(opts: PreviewOptions): BaeGateway {
       requireReview('팀 비용 보기');
       if (!(BAE_COST_BUCKETS as readonly string[]).includes(bucket)) throw new Error('비용 표의 기간 단위가 올바르지 않아요.');
       return null;
+    },
+    /**
+     * 피드백 내보내기: 메인과 같은 규칙(내 기록 · 다 그린 것 · 숨기지 않은 것, 그림은 이 창의 원본 → 미리보기 주소)으로 zip 을 만들고,
+     * 화면이 있으면 브라우저 내려받기로 저장한다 (저장 창 대신). 미리보기 주소는 data: 그림과 같은 곳의 주소만 받는다.
+     */
+    async feedbackExport(request): Promise<BaeFeedbackResult> {
+      const { u } = requireUse();
+      const problem = baeFeedbackRequestProblem(request); if (problem) throw new Error(problem);
+      const { mode, ids } = request;
+      const byId = new Map(jobs().filter((j) => j.userId === u.id).map((j) => [j.id, j] as const));
+      const picked = baeFeedbackCandidates(ids.map((id) => byId.get(id)).filter((j): j is BaeJob => !!j));
+      const skipped = ids.length - picked.length;
+      const blank = { mode, count: 0, images: 0, previews: 0, missing: 0, skipped, bytes: 0 };
+      if (!picked.length) return { ...blank, status: 'empty', path: null, message: '내보낼 그림을 찾지 못했어요.' };
+      const at = new Date(now());
+      const fetchable = (url: string) => url.startsWith('data:image/') || (url.startsWith('/') && !url.startsWith('//'))
+        || (typeof location !== 'undefined' && url.startsWith(`${location.origin}/`));
+      const fetchBytes = async (url: string): Promise<Uint8Array | null> => {
+        if (!fetchable(url) || typeof fetch !== 'function') return null;
+        try { const r = await fetch(url); if (!r.ok) return null; const b = new Uint8Array(await r.arrayBuffer()); return b.byteLength ? b : null; } catch { return null; }
+      };
+      const zip = createStoredZip(at); const parts: Uint8Array[] = []; const items: BaeFeedbackItem[] = [];
+      let images = 0; let previews = 0; let missing = 0;
+      for (let i = 0; i < picked.length; i++) {
+        const j = picked[i]; const key = baeFeedbackKey(i, j.id);
+        const got: BaeFeedbackGot[] = []; const missed: BaeFeedbackMiss[] = [];
+        for (const w of baeFeedbackWants(j, key)) {
+          let bytes: Uint8Array | null = null; let path = ''; let preview = false;
+          for (const name of w.local) {
+            const b = typeof make.localFile === 'function' ? await make.localFile(j.id, name).catch(() => null) : null;
+            if (b && b.byteLength) { bytes = b; path = baeFeedbackZipPath(w, name); break; }
+          }
+          if (!bytes && w.url) { bytes = await fetchBytes(w.url); if (bytes) { path = baeFeedbackZipPath(w, null); preview = true; } }
+          if (!bytes || !zip.fits(path, bytes.byteLength)) { if (w.required || bytes) missed.push({ slot: w.slot, n: w.n, label: w.label }); continue; }
+          parts.push(...zip.entry(path, bytes)); got.push({ slot: w.slot, n: w.n, path, preview }); images++; if (preview) previews++;
+        }
+        missing += missed.length;
+        items.push(baeFeedbackItem(j, key, got, missed));
+      }
+      const text = (k: BaeSettingKey) => { const v = rows()[k]?.value as { text?: unknown } | undefined; return typeof v?.text === 'string' ? v.text : null; };
+      const versions = { manual: textVersion(text('manual') ?? PREVIEW_DEFAULT_TEXTS.manual), fixed: textVersion(text('fixed') ?? PREVIEW_DEFAULT_TEXTS.fixed), guidance: text('guidance') ? String(rows().guidance?.revision ?? '') : null };
+      const head = baeFeedbackHead({ app: 'BAE경 (B flow 테스트 모드)', now: at, versions, mode, count: items.length, skipped });
+      const enc = new TextEncoder();
+      parts.push(...zip.entry('feedback.json', enc.encode(baeFeedbackJson(head, items))), ...zip.entry('feedback.md', enc.encode(baeFeedbackMarkdown(head, items))), zip.end(['feedback.json', 'feedback.md']));
+      const bytes = concatBytes(parts); const name = baeFeedbackZipName(at);
+      let saved = false;
+      if (typeof document !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        const href = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+        const a = document.createElement('a'); a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(href), 60_000); saved = true;
+      }
+      const done = baeFeedbackDoneText(mode, items.length, missing);
+      return { status: 'saved', path: saved ? name : null, mode, count: items.length, images, previews, missing, skipped, bytes: bytes.byteLength,
+        message: saved ? `${done} (테스트 모드라서 내려받기로 저장했어요)` : `${done} (테스트 모드라서 파일로 저장하지 않았어요)` };
     },
     onChanged(callback) {
       listeners.add(callback);

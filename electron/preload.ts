@@ -1032,6 +1032,8 @@ contextBridge.exposeInMainWorld('baeGyeongAPI', {
   stampSeen: (upto: number | null) => ipcRenderer.invoke('bae:stamp-seen', upto, canonicalSessionEpoch),
   usageTeam: (from: string | null, to: string | null, bucket: string) => ipcRenderer.invoke('bae:usage-team', from, to, bucket, canonicalSessionEpoch),
   usageExport: (from: string | null, to: string | null, bucket: string) => ipcRenderer.invoke('bae:usage-export', from, to, bucket, canonicalSessionEpoch),
+  // 피드백 내보내기: 고른 방식과 기록 id 만 간다. 글 · 그림은 메인이 다시 읽고, 자리는 저장 창에서 고른다.
+  feedbackExport: (request: unknown) => ipcRenderer.invoke('bae:feedback-export', request, canonicalSessionEpoch),
   order: (call: unknown) => ipcRenderer.invoke('bae:order', call, canonicalSessionEpoch),
   draw: (call: unknown) => ipcRenderer.invoke('bae:draw', call, canonicalSessionEpoch),
   drawFinish: (call: unknown) => ipcRenderer.invoke('bae:draw-finish', call, canonicalSessionEpoch),

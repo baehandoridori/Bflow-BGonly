@@ -24,11 +24,19 @@ export function InlineFacts({ facts, className }: { facts: BaeFactView[]; classN
   );
 }
 
-/** 재료: 러프 · 레퍼런스 · 그림체 기준 줄 · 설명과 비율 · 장소 · 시간대 · 투시 */
-export function MaterialsBlock({ mat, onOpenStyle, full }: { mat: BaeMaterialsView; onOpenStyle?: () => void; full?: boolean }) {
+/**
+ * 재료: 러프 · 레퍼런스 · 그림체 기준 줄 · 설명과 비율 · 장소 · 시간대 · 투시.
+ * big = 작업대 1 재료 칸: 러프를 칸 너비로 크게, 레퍼런스 · 기준 배경은 두 줄 격자로 (2026-11-18 한솔: 칸 아래가 휑함).
+ */
+export function MaterialsBlock({ mat, onOpenStyle, full, big }: { mat: BaeMaterialsView; onOpenStyle?: () => void; full?: boolean; big?: boolean }) {
   return (
-    <>
-      {mat.rough ? (
+    <div className={big ? 'bae-mat-big' : 'bae-mat-col'}>
+      {mat.rough && big ? (
+        <figure className="bae-mrough">
+          <span className="bae-mrough-pic"><img src={mat.rough.src} alt={mat.rough.alt} /></span>
+          <figcaption className="bae-mtext"><span className="bae-mname">{mat.rough.name}</span>{mat.rough.sub ? <span className="bae-msub">{mat.rough.sub}</span> : null}</figcaption>
+        </figure>
+      ) : mat.rough ? (
         <ul className="bae-mats">
           <li className="bae-mrow">
             <span className="bae-mthumb bae-mthumb-l"><img src={mat.rough.src} alt={mat.rough.alt} /></span>
@@ -76,10 +84,10 @@ export function MaterialsBlock({ mat, onOpenStyle, full }: { mat: BaeMaterialsVi
         </div>
       ) : null}
       <dl className="bae-dl">
-        {mat.desc ? <div className="bae-fact bae-wide"><dt>{mat.descLabel}</dt><dd className={full ? 'bae-pre' : 'bae-clamp'}>{mat.desc}</dd></div> : null}
+        {mat.desc ? <div className="bae-fact bae-wide"><dt>{mat.descLabel}</dt><dd className={full || big ? 'bae-pre' : 'bae-clamp'}>{mat.desc}</dd></div> : null}
         {mat.facts.map((f, i) => <div key={i} className="bae-fact"><dt>{f.k}</dt><dd className="bae-num">{f.v}</dd></div>)}
       </dl>
-    </>
+    </div>
   );
 }
 

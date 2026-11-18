@@ -57,59 +57,20 @@ export interface MaterialWindowProps {
   onClose(): void;
 }
 
-export type BaeMakeWindowState = 'ready' | 'revising' | 'stale' | 'misfit' | 'error';
-/** 만드는 창 (14e 4장). */
-export interface MakeWindowProps {
-  state: BaeMakeWindowState;
-  autoOpened: boolean;
-  roughSrc: string;            // 러프 미리보기 (메모 포함판)
-  roughPlainSrc: string;       // 메모 없는 판
-  showNotes: boolean;
-  onShowNotes(on: boolean): void;
-  hasNotes: boolean;
-  ratio: RatioId;
-  ratios: { id: RatioId; hint: string }[];
-  onRatio(r: RatioId): void;
-  tier: TierId;
-  tiers: { id: TierId; label: string; size: [number, number]; note: string }[];
-  onTier(t: TierId): void;
-  sizeNote: string;            // 크기에 딸린 안내 한 줄 (HTML renderSizeSel 문장: 기울기 · 1920 저장 · 최대 경고)
-  sendList: { src: string; label: string }[]; // 보낼 이미지 순서
-  summary: string;
-  notes: string[];             // PD 메모 (노란 줄)
-  picks: { id: string; name: string; src: string }[];
-  reason: string;              // 스타일 예시를 고른 까닭
-  director: { ko: string[]; en: string[]; replacedKo: string[] } | null;
-  revisions: string[];         // 고친 기록
-  reviseText: string;
-  onReviseText(t: string): void;
-  onRevise(): void;
-  prompt: string;              // 영어 주문서 (접혀 있음, 고칠 수 있음)
-  onPrompt(t: string): void;
-  promptCount: string;         // 글자 수 표시
-  revisingSeconds: number;
-  onStopRevise(): void;
-  statusText: string;          // 상태 한 줄 (재료가 바뀜 · 맞지 않음 · 오류 문장, HTML 그대로)
-  onRemake(): void;            // 주문서 다시 만들기
-  footNote: string;            // "그림 모델은 2.5 Sunburst (정교함)이에요. 이 크기로 …"
-  canDraw: boolean;
-  onDraw(): void;
-  onBack(): void;              // 재료로 돌아가기
-  onClose(): void;
-  onCopyForChat?: () => void;  // 관리자만 ('ChatGPT용 글 복사')
-}
-
 export interface BaeStepView { name: string; text: string; state: 'ok' | 'now' | 'wait' }
-/** 만드는 화면 (크게 보기, 4판). 2단계에서는 점 효과 없이 흐린 중간 그림. */
+/** 만드는 화면 (크게 보기, 4판). 숨쉬는 점(WebGL2) 아래로 그림이 드러난다. WebGL2 가 없으면 점 없이 흐린 중간 그림. */
 export interface MakingStageProps {
-  phase: 'order' | 'draw';
+  phase: 'order' | 'draw' | 'done'; // done = 완성 효과 (점이 풀리고 빛) 뒤 onFinaleEnd
   title: string;
   kindLabel: string;           // "새 배경"
   label: string;               // "주문서 쓰는 중, 12초째"
-  src: string | null;          // 주문서 쓰는 중 = 러프, 그리는 중 = 중간 그림(없으면 러프)
-  partial: boolean;            // 중간 그림이면 흐리게
+  src: string | null;          // 주문서 쓰는 중 = 메모가 있는 러프, 그리는 중 = 중간 그림(없으면 러프), 완성 = 완성 그림
+  partial: boolean;            // 중간 그림이면 (WebGL2 가 없을 때) 흐리게
   aspect: number;
   steps: BaeStepView[];
   onFold(): void;              // 작게 보기
   onStop(): void;              // 그만두기
+  phrases?: string[];          // 그림 위 오려 붙인 글자로 4.3초마다 바꿔 보여 줄 문구 (없으면 단계별 기본 문구)
+  partialCount?: number;       // 지금까지 온 중간 그림 수 — 늘면 '중간 그림 n장 도착' · 점이 앞으로 자란다
+  onFinaleEnd?: () => void;    // phase 'done' 의 완성 효과가 끝남 (약 1.4초, 움직임 줄이기에서는 바로)
 }

@@ -3,6 +3,7 @@ import type { BaeSettingKey, BaeSettingRow } from '../../shared/bae/settings';
 import type { BaeKeyStatus } from '../../shared/bae/secrets';
 import type { BaeJob, BaeJobPage, BaeTeamCursor, BaeTeamFilter, BaeTeamPage, BaeUsageSummary } from '../../shared/bae/jobs';
 import type { BaeCostBucket, BaeStamp, BaeStampBulkResult, BaeStampEvent, BaeStampUnseen, BaeUsageTeam } from '../../shared/bae/review';
+import type { BaeFeedbackRequest, BaeFeedbackResult } from '../../shared/bae/feedbackExport';
 import type {
   BaeDrawCall, BaeDrawOutcome, BaeFailure, BaeOrderCall, BaeOrderOutcome, BaeProgress,
   BaeDrawFinishCall, BaeDrawFinishOutcome, BaeResultSetCall, BaeResultSetOutcome, BaeToolJobCall, BaeToolJobOutcome,
@@ -58,6 +59,8 @@ export interface BaeGateway {
   usageTeam(from: string | null, to: string | null, bucket: BaeCostBucket): Promise<BaeUsageTeam>;
   /** 팀 비용 CSV 를 저장 창으로 (메인이 만든다). 고른 자리, 그만두면 null. */
   usageExport(from: string | null, to: string | null, bucket: BaeCostBucket): Promise<string | null>;
+  /** 피드백 내보내기 (HTML exportFeedback): 고른 기록을 zip 하나로. 메인이 글을 다시 읽고 저장 창을 띄운다. 내 기록만. */
+  feedbackExport(request: BaeFeedbackRequest): Promise<BaeFeedbackResult>;
   // ── 만들기 (메인이 PD · 그림 모델을 부른다. 화면을 떠나도 계속된다) ──
   order(call: BaeOrderCall): Promise<BaeOrderOutcome | BaeFailure>;
   draw(call: BaeDrawCall): Promise<BaeDrawOutcome | BaeFailure>;

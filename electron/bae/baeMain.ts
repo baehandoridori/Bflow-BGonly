@@ -17,7 +17,8 @@ import { registerBaeAngleIpc } from './baeAngleIpc';
 import { registerBaeLayersIpc } from './baeLayersIpc';
 import { makeJpegPreview, uploadBaePreview, type BaeStorageLike } from './baePreviews';
 import type { BaeImageFieldName } from './openaiClient';
-import { app, MessageChannelMain, shell, utilityProcess } from 'electron';
+import { registerBaeFeedbackExportIpc } from './baeFeedbackExport';
+import { app, BrowserWindow, dialog, MessageChannelMain, shell, utilityProcess } from 'electron';
 import type { BaeRpcClient } from './baeStore';
 import { startBaeModelMain } from './model/modelIpc';
 import { baeModelWarehouseDir } from './model/modelPaths';
@@ -113,6 +114,25 @@ export function startBaeMain(deps: BaeMainDeps) {
     local,
     flushOutbox: () => { void outbox.flush({ all: true }); },
     saveAs: deps.saveAs,
+  });
+
+  // 피드백 내보내기 (HTML exportFeedback): 검수한 그림을 설명과 함께 zip 하나로. 글은 서버에서 내 세션으로, 그림은 이 PC 에서. 돈 드는 호출 없음.
+  registerBaeFeedbackExportIpc({
+    ipc: deps.ipc,
+    getSessionOriginOrThrow: deps.getSessionOriginOrThrow,
+    canUse,
+    jobGet: (u, id) => deps.store.jobGet(u, id),
+    versions: async (u) => (await settings.get(u)).versions,
+    local,
+    publicUrl,
+    appVersion: deps.appVersion,
+    pickZipPath: async (event, defaultName) => {
+      const sender = (event as { sender?: Electron.WebContents } | null)?.sender;
+      const win = (sender ? BrowserWindow.fromWebContents(sender) : null) ?? BrowserWindow.getFocusedWindow();
+      const opts = { defaultPath: path.join(app.getPath('downloads'), defaultName), filters: [{ name: 'ZIP', extensions: ['zip'] }] };
+      const r = win && !win.isDestroyed() ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
+      return r.canceled || !r.filePath ? null : r.filePath;
+    },
   });
 
   // 4단계: 모델 일꾼 프로세스(SAM · BiRefNet · 깊이 · 4K A) · 모델 창고 · 이 PC 점검. 일꾼은 처음 쓸 때 뜨고 5분 쉬면 내려간다.

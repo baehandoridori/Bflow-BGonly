@@ -1,11 +1,15 @@
-// 재료 창 (계획 14d 3-1 · 14e 5-5, 시안 WinNew): 왼쪽은 그림판(board)을 그대로, 오른쪽은 설명 · 장소 · 시간대 · 투시 ·
+// 재료 창 (계획 14d 3-1 · 14e 5-5, 시안 WinNew): 왼쪽은 그림판(board)을 그대로, 오른쪽은 설명 · 장소 · 시간대 · 투시 가이드 ·
 // 기준 배경 · 레퍼런스 · 그림체 기준 · 이어 가기 · 알림. 발의 '주문서 만들기'. 보여 주기만 하고 바뀐 것은 콜백으로 알린다.
+// 창은 앱 창의 96% × 94% 까지 넓고(bae-material.css), '투시 가이드' 묶음은 그림판이 BoardWindowContext 로 받은 자리
+// (오른쪽 칸, 그림판 바로 옆)에 그린다. 투시 종류와 '참고하게 하기'는 여기 콜백(onPersp · onGuideUse)으로 가게에 간다.
 import { useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown, CopyPlus, Info, Loader2, Palette, Plus, Scissors, X } from 'lucide-react';
 import { BaeWindow } from './BaeWindow';
 import type { BaePlace, MaterialWindowProps } from '../make/ui';
+import { BoardWindowContext, type BoardWindowLink } from '../make/board/boardWindow';
 import './bae-stage2-windows.css';
 import './bae-stage3.css';
+import './bae-material.css';
 
 const PLACES: { id: BaePlace; label: string }[] = [{ id: 'auto', label: '자동' }, { id: 'interior', label: '실내' }, { id: 'exterior', label: '실외' }];
 const DIR_HELP = '이번 화만의 특별한 지시는 { }로 감싸 주세요. 개발자 지문이 되어 매뉴얼과 고정 문장보다 먼저 따라요. 예) {이번 화는 회상 장면이라 전체를 세피아 톤으로}';
@@ -20,9 +24,16 @@ export function MaterialWindow(p: MaterialWindowProps) {
   const imageFiles = (list: FileList | null | undefined) => Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
   const refFull = p.refs.length >= p.refMax;
   const msgIcon = p.message?.tone === 'info' ? <Info size={16} aria-hidden="true" /> : <AlertTriangle size={16} aria-hidden="true" />;
+  // 그림판의 '투시 가이드' 묶음이 들어올 자리 (오른쪽 칸). 자리가 생기면 다시 그려서 그림판에 알린다.
+  const [guideSlot, setGuideSlot] = useState<HTMLDivElement | null>(null);
+  const boardLink: BoardWindowLink = {
+    guideSlot,
+    persp: { value: p.persp, options: p.persps, hint: p.perspHint, onPick: p.onPersp, onUse: p.onGuideUse, useText: p.guideUseText },
+  };
 
   return (
     <BaeWindow
+      className="bae-pop-material"
       tool={same ? 'same' : 'new'}
       icon={same ? <CopyPlus size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
       title={same ? '같은 장소 다른 컷' : '새 배경 만들기'}
@@ -36,7 +47,7 @@ export function MaterialWindow(p: MaterialWindowProps) {
       onClose={p.onClose}
     >
       <div className="bw-cols">
-        <div className="bw-main bae-mt-main">{p.board}</div>
+        <div className="bw-main bae-mt-main"><BoardWindowContext.Provider value={boardLink}>{p.board}</BoardWindowContext.Provider></div>
         <div className="bw-side">
           <div className="bae-field">
             <label className="bae-label" htmlFor="bae-mt-desc">설명</label>
@@ -56,7 +67,7 @@ export function MaterialWindow(p: MaterialWindowProps) {
           </div>
 
           <div className="bae-mt-pick">
-            <div className="bw-row3">
+            <div className="bae-mt-row2">
               <div className="bae-field">
                 <label className="bae-label" htmlFor="bae-mt-place">장소</label>
                 <span className="bw-sel">
@@ -75,27 +86,11 @@ export function MaterialWindow(p: MaterialWindowProps) {
                   <ChevronDown size={14} aria-hidden="true" />
                 </span>
               </div>
-              <div className="bae-field">
-                <label className="bae-label" htmlFor="bae-mt-persp">투시</label>
-                <span className="bw-sel">
-                  <select className="bw-select" id="bae-mt-persp" value={p.persp} onChange={(e) => p.onPersp(e.target.value as MaterialWindowProps['persp'])}>
-                    {p.persps.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                  </select>
-                  <ChevronDown size={14} aria-hidden="true" />
-                </span>
-              </div>
             </div>
-            {p.perspHint ? <p className="bae-hint">{p.perspHint}</p> : null}
-            {p.guideUse !== null ? (
-              <button type="button" className="bw-switch bae-mt-guide" role="switch" aria-checked={p.guideUse} onClick={() => p.onGuideUse(!p.guideUse)}>
-                <span className="bw-switch-track" />
-                <span className="bae-mt-guide-text">
-                  <span>지평선 및 투시 참고하게 하기</span>
-                  <span className="bae-mt-guide-sub">{p.guideUse && p.guideUseText ? `${p.guideUseText}를 숫자로 보내요` : '켜면 가이드 위치를 숫자로 PD에게 보내요'}</span>
-                </span>
-              </button>
-            ) : null}
           </div>
+
+          {/* 투시 가이드: 투시 종류 · 가이드 보이기 · 참고하게 하기 · 소실점 간격/복도 길이 · 화면 기울기 (그림판이 그려 넣는다) */}
+          <div ref={setGuideSlot} className="bae-mt-guideslot" />
 
           <section
             className={`bae-mgroup bae-mt-bases${baseOver ? ' is-over' : ''}`}

@@ -94,7 +94,7 @@
 .bae-group-label { margin-right: 4px; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); white-space: nowrap; }
 
 /* the bench: 1 재료 · 2 주문서 · 3 결과 = 3 : 3 : 6, 높이 32cqw + 154px (어떤 상태에서도 같음) */
-.bae-bench { position: relative; overflow: hidden; container-type: inline-size; border: 1px solid rgb(var(--color-bg-border)); border-radius: 12px; background: rgb(var(--color-bg-card)); }
+.bae-bench { position: relative; overflow: clip; container-type: inline-size; border: 1px solid rgb(var(--color-bg-border)); border-radius: 12px; background: rgb(var(--color-bg-card)); }
 .bae-panes { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 3fr) minmax(0, 6fr); min-height: calc(32cqw + 154px); margin: 0; padding: 0; list-style: none; }
 .bae-pane { display: flex; flex-direction: column; min-width: 0; }
 .bae-pane + .bae-pane { border-left: 1px solid rgb(var(--color-bg-border)); }

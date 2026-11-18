@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   dimsFor, dragGuide, frameGeo, guideCtl, guideFor, guideHit, guideScene, tiltLabel, tiltStep, turn, unturn, withGuideParam, type Geo, type GuideOp,
 } from '../src/features/bae-gyeong/make/board/guideMath.ts';
@@ -97,6 +98,24 @@ test('the paper is laid out with wider margins for two- and three-point guides',
   assert.deepEqual(frameGeo(1000, 600, 1536, 864, '3pd', false), plain, 'a hidden guide needs no room');
   const small = frameGeo(300, 200, 1536, 864, 'auto', true);
   assert.ok(near(small.s, Math.min((300 - 56) / 1536, (200 - 56) / 864)), 'at least 28px around');
+});
+
+// 한솔 피드백 2026-11-18: 그림판이 작다 · 투시 가이드 설정이 안 보인다 · 색과 굵기는 도구처럼 왼쪽에
+const src = (p: string) => readFileSync(new URL('../src/features/bae-gyeong/' + p, import.meta.url), 'utf8');
+test('material window: a wide window, guide settings always beside the board, color and size right after the drawing tools', () => {
+  assert.match(src('windows/bae-material.css'), /\.bae-root\.bae-pop\.bae-pop-material\s*\{[^}]*--bae-win-w:\s*96vw;[^}]*--bae-win-h:\s*94vh;/);
+  assert.doesNotMatch(src('windows/bae-windows.css'), /bae-pop-material/, 'the other windows keep their size');
+  const win = src('windows/MaterialWindow.tsx');
+  assert.match(win, /className="bae-pop-material"/);
+  assert.match(win, /BoardWindowContext\.Provider/);
+  assert.match(win, /ref=\{setGuideSlot\}/, 'the guide settings get a place in the right column');
+  const view = src('make/board/BoardView.tsx');
+  const row = view.slice(view.indexOf('aria-label="그림판 도구"'), view.indexOf('className="bb-stage"'));
+  const at = (s: string) => { const i = row.indexOf(s); assert.ok(i >= 0, s); return i; };
+  assert.ok(at('DRAW_TOOLS') < at('<ColorPicker') && at('<ColorPicker') < at('label="굵기"') && at('label="굵기"') < at('NOTE_TOOLS'), 'tools, then color, then size, then notes');
+  const panel = src('make/board/BoardGuidePanel.tsx');
+  assert.doesNotMatch(panel + view, /u\.tool === 'guide' && ctl\./, 'guide settings do not hide behind the guide tool');
+  for (const s of ['투시 가이드', '가이드 보이기', '지평선 및 투시 참고하게 하기', '소실점 간격', '복도 길이', '화면 기울기']) assert.ok(panel.includes(s), s);
 });
 
 test('ratios give the HTML board sizes', () => {

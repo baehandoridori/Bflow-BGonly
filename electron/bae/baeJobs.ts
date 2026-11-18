@@ -20,6 +20,7 @@ import {
   type BaeJobWrite, type BaeUsageLine, type BaePreviewName, type BaeJobImages, type BaeJobFinish, type BaeJobResult,
 } from '../../src/shared/bae/jobs';
 import { maskSecrets } from '../../src/shared/bae/secrets';
+import { baePickModel, baePickQuality } from '../../src/shared/bae/imageChoice';
 import { BAE_UPSCALE_MAX_PIXELS, BAE_UPSCALE_MODES, BAE_UPSCALE_PREVIEW_NOTE as UPSCALE_PREVIEW_NOTE } from '../../src/shared/bae/upscaleView';
 import { postResponses, postImageEdit, type BaeImageFieldName, type BaeImageFormField } from './openaiClient';
 import type { BaeSettingsCache } from './baeSettingsCache';
@@ -219,7 +220,8 @@ export function createBaeJobs(deps: BaeJobsDeps) {
       if (!Array.isArray(q.images) || !q.images.length || q.images.some((b) => !(b instanceof Uint8Array))) throw new Error('보낼 이미지를 준비하지 못했어요. 주문서를 다시 만들어 주세요.');
       const s = await deps.settings.get(owner);
       const key = await deps.keyFor(origin);
-      model = s.models.imageModel;
+      model = baePickModel(q.imageModel, s.models.imageModel);
+      const quality = baePickQuality(q.quality, s.models.imageQuality);
       const prompt = drawPrompt(q.promptText, q.ratio, q.tier, q.tilt);
       if (!prompt) throw new Error('주문서가 비어 있어요');
       const size = drawSizes(q.ratio, q.tier, q.tilt).gen;
@@ -229,7 +231,7 @@ export function createBaeJobs(deps: BaeJobsDeps) {
       const mats = await saveMaterials(q);
 
       const prefs = deps.imagePrefs.get();
-      const fields: BaeImageFormField[] = imageFields({ model, prompt, size, quality: s.models.imageQuality, stream: false, imageCount: q.images.length }, 'image[]')
+      const fields: BaeImageFormField[] = imageFields({ model, prompt, size, quality, stream: false, imageCount: q.images.length }, 'image[]')
         .map((f) => ('file' in f ? { name: f.name, file: { bytes: q.images[f.file], filename: f.filename, type: f.type } } : f));
       const requestId = randomUUID(); const at = new Date(now()).toISOString();
       const r = await postImageEdit({
@@ -241,7 +243,7 @@ export function createBaeJobs(deps: BaeJobsDeps) {
       await usage(owner, { requestId, jobId: q.jobId, kind: 'image', model, tokens: numbers(r.usage), usd: imageUsd ?? 0, at });
       const png = new Uint8Array(Buffer.from(r.b64, 'base64'));
       await deps.local.saveJobFile(q.jobId, q.createdAt, 'gpt.png', png);
-      const p: PendingFinish = { owner, base, createdAt: q.createdAt, t0, gpt: png, model, quality: s.models.imageQuality, imageUsd, orderUsd: q.orderCostUsd,
+      const p: PendingFinish = { owner, base, createdAt: q.createdAt, t0, gpt: png, model, quality, imageUsd, orderUsd: q.orderCostUsd,
         prompt, size: [size[0], size[1]], mats, timer: null };
       if (q.finish === true) {
         // 화면이 마무리한다 (기울기 되돌리기 · 색 맞춤): 작업은 끝내지 않고 GPT 그림을 돌려준다. 오지 않으면 GPT 그림 그대로 끝낸다.

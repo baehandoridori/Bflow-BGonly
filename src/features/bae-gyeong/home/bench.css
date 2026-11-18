@@ -30,6 +30,16 @@
 .bae-mthumb-l { width: 104px; height: 66px; }
 .bae-mthumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .bae-mtext { min-width: 0; }
+/* 재료 묶음 껍데기는 자리를 차지하지 않는다 (예전처럼 칸의 줄 간격을 그대로 쓴다) */
+.bae-mat-col, .bae-mat-big { display: contents; }
+/* 작업대 1 재료 칸: 러프를 칸 너비로 크게, 레퍼런스 · 기준 배경은 두 줄 격자 */
+.bae-mrough { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.bae-mrough-pic { display: block; overflow: hidden; border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--bae-paper, 255 255 255)); }
+.bae-mrough-pic img { display: block; width: 100%; height: auto; max-height: 260px; object-fit: contain; }
+.bae-mrough .bae-mtext { display: flex; align-items: baseline; gap: 8px; }
+.bae-mat-big .bae-mgroup > .bae-mats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.bae-mat-big .bae-mgroup .bae-mrow { grid-template-columns: minmax(0, 1fr); gap: 4px; align-items: start; }
+.bae-mat-big .bae-mgroup .bae-mthumb { width: 100%; height: auto; aspect-ratio: 16 / 10; }
 .bae-mname { margin: 0; font-size: 0.8125rem; font-weight: 500; }
 .bae-msub { margin: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
 .bae-mnote { display: -webkit-box; overflow: hidden; margin: 0; font-size: 0.8125rem; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
@@ -213,4 +223,19 @@
 @media (prefers-reduced-motion: reduce) {
   .bae-spin, .bae-sk, .bae-view { animation: none; }
   .bae-thumb-alt, .bae-rrow, .bae-rtable .bae-ib, .bae-jv-prompt > summary::before { transition: none; }
+}
+
+/* 막 다 된 그림이 작업판에 처음 나타날 때: 살짝 커졌다 자리 잡고, 밝은 띠가 한 번 지나간다 (transform · opacity 만) */
+.bae-stage.is-fresh { overflow: hidden; border-radius: 8px; }
+.bae-stage.is-fresh .bae-shot { animation: bae-fresh-in 620ms var(--ease-out, ease-out) both; }
+.bae-stage.is-fresh::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgb(255 255 255 / 0.32) 50%, transparent 65%);
+  transform: translateX(-110%); animation: bae-fresh-sweep 1100ms 260ms var(--ease-std, ease) both;
+}
+@keyframes bae-fresh-in { from { opacity: 0; transform: scale(1.035); } to { opacity: 1; transform: none; } }
+@keyframes bae-fresh-sweep { from { transform: translateX(-110%); opacity: 1; } 80% { opacity: 1; } to { transform: translateX(110%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .bae-stage.is-fresh .bae-shot { animation: none; }
+  .bae-stage.is-fresh::after { display: none; animation: none; }
 }

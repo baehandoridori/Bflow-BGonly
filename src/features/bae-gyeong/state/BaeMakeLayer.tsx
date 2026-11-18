@@ -1,13 +1,12 @@
-// 만들기 창들 (재료 창 · 만드는 창 · 그림체 기준 창 · 부품 자르기 창 · 노이즈 제거 창 · 4K로 키우기 창 · 다른 각도로 창 · 레이어로 나누기 창).
+// 만들기 창들 (재료 창 · 그림체 기준 창 · 부품 자르기 창 · 노이즈 제거 창 · 4K로 키우기 창 · 다른 각도로 창 · 레이어로 나누기 창).
 // 창은 한 번에 하나 (14d 1장). 상태는 useBaeMake · useBaeTools · useBaeUpscale · useBaeAngle, 글자는 baeViewModel.
 import { useEffect, useState } from 'react';
 import { useBaeMake } from './useBaeMake';
 import { baeBoard, baeReswatch, BAE_STRIP_SRC } from './useBaeMake';
 import { useBaeTools } from './useBaeTools';
-import { makeProps, materialProps, styleEntries, stylePlaceHint } from './baeViewModel';
+import { materialProps, styleEntries, stylePlaceHint } from './baeViewModel';
 import { useBaeStore } from '../useBaeStore';
 import { MaterialWindow } from '../windows/MaterialWindow';
-import { MakeWindow } from '../windows/MakeWindow';
 import { StyleWindow } from '../windows/StyleWindow';
 import { PartsWindow } from '../windows/PartsWindow';
 import { DenoiseWindow } from '../windows/DenoiseWindow';
@@ -46,15 +45,9 @@ export function BaeMakeLayer() {
   const ag = useBaeAngle();
   const settings = useBaeStore();
   const rate = Number((settings.row('prices')?.value as { krwPerUsd?: unknown } | undefined)?.krwPerUsd) || 1400;
-  const imageLabel = String((settings.row('models')?.value as { imageLabel?: unknown } | undefined)?.imageLabel ?? '2.5 Sunburst (정교함)');
-  const revising = s.job?.phase === 'revising';
-  const sec = useSeconds(s.job?.startedAt ?? null, revising);
 
   if (s.win === 'material') {
     return <MaterialWindow {...materialProps({ onAddRefs: (files) => { void s.addRefs(files); }, isAdmin: settings.access.isAdmin })} board={<BoardView board={baeBoard()} />} />;
-  }
-  if (s.win === 'make' && s.job?.order) {
-    return <MakeWindow {...makeProps({ revisingSeconds: sec, imageLabel, rate })} />;
   }
   if (s.win === 'parts' && s.bases.length) {
     return (

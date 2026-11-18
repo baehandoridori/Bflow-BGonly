@@ -1,16 +1,53 @@
 /*
  * 만드는 화면 크게 보기 (시안 .bae-make-*). 머리 · 틀은 home/bench.css 의 .bae-view.
- * 그림 판은 늘 어두운 무대 색(--bae-stage). 뒤에 같은 그림을 크게 흐려 깔고, 가운데에 그림 비율대로 놓는다.
- * 흐림은 움직이지 않는 그림에만 한 번 (반복 요소에 backdrop-filter 를 쓰지 않는다).
+ * 그림 판은 라이트 모드에서도 늘 어두운 무대 색(--bae-stage). 겹 순서(아래부터):
+ *   그림 두 겹 .bae-make-layer (흐리게 깔아 무대를 채운 뒤판 · 가운데 그림 비율대로 놓은 선명한 그림)
+ *   → 숨쉬는 점 캔버스 .bae-make-dots ('곱하기' — 점이 흰색으로 커진 자리로 그림이 보인다)
+ *   → 완성 빛 → 오려 붙인 글자 · 안내 · 상태 칩.
+ * 흐림은 움직이지 않는 그림에만 (반복 요소에 backdrop-filter 를 쓰지 않는다). 움직임은 transform · opacity 만.
+ * 점 판(WebGL2)이 없거나 잃으면 .is-flat: 점 없이 흐린 그림(접힌 화면과 같음), 주문서 쓰는 중에는 CSS 띠가 지나간다.
+ * 걸음 줄(.bae-make-steps)은 레이어로 나누기 창도 쓴다 — 움직임은 .bae-making 안으로만 좁혔다.
  */
 .bae-make-stage { position: relative; isolation: isolate; display: grid; place-items: center; overflow: hidden; aspect-ratio: 2.05 / 1; min-height: 320px; container-type: size; background: rgb(var(--bae-stage)); }
+.bae-make-layer { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity 420ms var(--ease-out); }
+.bae-make-layer.is-ready { opacity: 1; }
 .bae-make-back { position: absolute; top: -8%; left: -8%; width: 116%; height: 116%; max-width: none; object-fit: cover; opacity: 0.55; filter: blur(36px) saturate(1.2); }
+.bae-make-stage.is-dots .bae-make-back { opacity: 1; }
 .bae-make-fit { position: relative; max-width: 100%; max-height: 100%; overflow: hidden; }
 .bae-make-pic { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity var(--motion-slow, 260ms) var(--ease-std); }
 .bae-make-pic.is-faint { opacity: 0.45; }
 .bae-make-pic.is-partial { opacity: 0.9; filter: blur(7px) saturate(0.85); transform: scale(1.06); }
-.bae-make-now { position: absolute; bottom: 12px; left: 12px; display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 4px 10px; border-radius: 6px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); font-size: 0.75rem; font-weight: 500; }
+
+/* 숨쉬는 점: 셰이더가 그리기 전에도 무대 색이라 그림이 먼저 비치지 않는다. 완성 뒤에는 걷힌다. */
+.bae-make-dots { position: absolute; inset: 0; display: block; width: 100%; height: 100%; background: rgb(var(--bae-stage)); mix-blend-mode: multiply; touch-action: none; transition: opacity 300ms var(--ease-out); }
+.bae-make-dots.is-off { display: none; }
+.bae-make-stage.is-shown .bae-make-dots { opacity: 0; }
+
+/* 완성 빛: 점이 거의 다 풀릴 무렵 한 번 퍼졌다 사라진다 (약 1.4초에 끝) */
+.bae-make-glow { position: absolute; inset: 0; background: radial-gradient(closest-side, rgb(255 255 255 / 0.5), rgb(162 155 254 / 0.22) 55%, transparent); mix-blend-mode: screen; opacity: 0; pointer-events: none; animation: bae-make-glow 800ms var(--ease-out) 600ms both; }
+@keyframes bae-make-glow { 0% { opacity: 0; transform: scale(0.85); } 35% { opacity: 1; } 100% { opacity: 0; transform: scale(1.1); } }
+
+/* 점 판이 없을 때 주문서 쓰는 중: 밝은 띠가 왼쪽에서 오른쪽으로 (PD가 읽는 느낌) */
+.bae-make-band { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.bae-make-band::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 22%; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.18), transparent); transform: translateX(-100%); animation: bae-make-read 7s linear infinite; }
+@keyframes bae-make-read { to { transform: translateX(560%); } }
+:root[data-motion-lite] .bae-make-band::before { animation: none; opacity: 0; }
+
+/* 오려 붙인 글자 (HTML 기다림 화면 .ktext). 종이 색은 무대가 늘 어두워 두 모드 같은 값. */
+.bae-make-words { position: absolute; right: 16px; bottom: 52px; left: 16px; display: flex; flex-wrap: wrap; gap: 0.06em; margin: 0; font-size: clamp(18px, 3.1cqw, 40px); font-weight: 800; line-height: 1.2; letter-spacing: -0.02em; pointer-events: none; }
+.bae-make-words span { display: inline-block; padding: 0.02em 0.12em 0.06em; border-radius: 3px; background: #fbf7ec; color: #26251f; box-shadow: 0.05em 0.07em 0 rgb(30 29 25 / 0.28); transform: rotate(calc(var(--r) * 0.15)); transform-origin: 50% 100%; animation: bae-make-kin 500ms cubic-bezier(0.2, 1.6, 0.4, 1) calc(var(--i) * 32ms) both; }
+.bae-make-words span.is-sp { width: 0.3em; padding: 0; background: none; box-shadow: none; transform: none; animation: none; }
+.bae-make-words.is-out span { animation: bae-make-kout 300ms var(--ease-in) calc(var(--i) * 14ms) both; }
+@keyframes bae-make-kin { from { opacity: 0; transform: translateY(0.7em) rotate(var(--r)) scale(0.55); } to { opacity: 1; transform: rotate(calc(var(--r) * 0.15)); } }
+@keyframes bae-make-kout { from { opacity: 1; transform: rotate(calc(var(--r) * 0.15)); } to { opacity: 0; transform: translateY(-0.6em) rotate(calc(var(--r) * -1)); } }
+
+.bae-make-tip { position: absolute; right: 12px; bottom: 12px; margin: 0; padding: 4px 10px; border-radius: 6px; background: rgb(var(--color-bg-card) / 0.9); color: rgb(var(--color-text-secondary)); font-size: 0.75rem; pointer-events: none; }
+.bae-make-now { position: absolute; bottom: 12px; left: 12px; display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 4px 10px; border-radius: 6px; background: rgb(var(--color-bg-card)); color: rgb(var(--color-text-primary)); font-size: 0.75rem; font-weight: 500; pointer-events: none; }
 .bae-make-now svg { color: rgb(var(--bae-accent-text)); }
+.bae-make-now .bae-make-ok { color: rgb(var(--bae-ok)); }
+.bae-make-arrive { padding-left: 8px; border-left: 1px solid rgb(var(--color-bg-border)); color: rgb(var(--bae-accent-text)); animation: bae-make-arrive 520ms var(--ease-spring) both; }
+@keyframes bae-make-arrive { from { opacity: 0; transform: translateY(4px) scale(0.94); } to { opacity: 1; transform: none; } }
+
 .bae-make-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; border-top: 1px solid rgb(var(--color-bg-border)); list-style: none; }
 .bae-make-step { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 12px 16px; }
 .bae-make-step + .bae-make-step { border-left: 1px solid rgb(var(--color-bg-border)); }
@@ -20,10 +57,24 @@
 .bae-make-step.is-now .bae-make-step-name { color: rgb(var(--bae-accent-text)); }
 .bae-make-step.is-wait .bae-make-step-name { color: rgb(var(--color-text-secondary)); }
 
+/* 걸음이 바뀌면 (부품이 걸음 상태마다 새로 붙는다) 살짝 떠오르고, 지금 걸음 위에 띠가 차오르고, 끝난 걸음의 체크가 톡 */
+.bae-making .bae-make-step { position: relative; animation: bae-make-step-in var(--motion-slow, 260ms) var(--ease-out) both; }
+.bae-making .bae-make-step::before { content: ''; position: absolute; top: -1px; right: 0; left: 0; height: 2px; transform-origin: 0 50%; pointer-events: none; }
+.bae-making .bae-make-step.is-now::before { background: rgb(var(--color-accent)); animation: bae-make-bar 700ms var(--ease-out) both; }
+.bae-making .bae-make-step.is-ok::before { background: rgb(var(--bae-ok) / 0.55); }
+.bae-making .bae-make-step.is-ok .bae-make-step-name svg { animation: bae-make-pop 320ms var(--ease-spring) both; }
+@keyframes bae-make-step-in { from { opacity: 0.35; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@keyframes bae-make-bar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes bae-make-pop { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: none; } }
+
 @media (max-width: 640px) {
   .bae-make-steps { grid-template-columns: minmax(0, 1fr); }
   .bae-make-step + .bae-make-step { border-top: 1px solid rgb(var(--color-bg-border)); border-left: 0; }
+  .bae-make-tip { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bae-make-pic { transition: none; }
+  .bae-make-pic, .bae-make-layer, .bae-make-dots { transition: none; }
+  .bae-making .bae-make-step, .bae-making .bae-make-step.is-now::before, .bae-making .bae-make-step.is-ok .bae-make-step-name svg,
+  .bae-make-words span, .bae-make-words.is-out span, .bae-make-arrive { animation: none; }
+  .bae-make-glow, .bae-make-band { display: none; }
 }

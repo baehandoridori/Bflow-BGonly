@@ -20,6 +20,7 @@ import { baeAutoSwatches, baeFinishPicture, baePlaceColors, type BaeFinished } f
 import { normalizeSrc } from '../make/board/image';
 import { baeBasesFromDraft, baeBasesToDraft, baeEmptySwatches, baePartsKey } from './baeBases';
 import { BAE_LIBRARY_DEFAULT } from '@/shared/bae/library';
+import { BAE_DEFAULT_QUALITY, BAE_IMAGE_QUALITIES } from '@/shared/bae/imageChoice';
 import type { BaeJob } from '@/shared/bae/jobs';
 import type { BaeProgress } from '@/shared/bae/makeCalls';
 import type { BaeAngleDrawCall } from '@/shared/bae/angle/calls';
@@ -74,8 +75,10 @@ export interface BaeActiveJob {
   revisions: string[];
   /** kind 'angle' 일 때만 */
   angle?: BaeActiveAngle | null;
+  /** 그림이 다 된 때 (만드는 화면의 마무리 효과 · 작업판 결과가 처음 나타날 때) */
+  doneAt?: number;
 }
-type Win = null | 'material' | 'make' | 'style' | 'parts' | 'denoise' | 'upscale' | 'angle' | 'layers';
+type Win = null | 'material' | 'style' | 'parts' | 'denoise' | 'upscale' | 'angle' | 'layers';
 
 interface MakeState {
   kind: 'new' | 'same';
@@ -98,6 +101,11 @@ interface MakeState {
   viewVisible: boolean;
   /** 주문서가 다 됐는데 창이 저절로 뜨지 않은 것 (景 표시 · 작업판 버튼) */
   waitingCheck: boolean;
+  /** 이 그림의 품질 · 그림 모델 (작업대 2 주문서 칸에서 고름, 이 PC 에 기억). imageModel null = 설정 책장의 모델 */
+  quality: string;
+  imageModel: string | null;
+  /** 주문서가 막 다 된 때 (작업대 2 주문서 칸을 잠깐 빛나게) */
+  orderDoneAt: number;
   // 동작
   openMaterial(kind?: 'new' | 'same'): void;
   closeWin(): void;
@@ -111,6 +119,8 @@ interface MakeState {
   setGuideUse(on: boolean): void;
   setRatio(r: RatioId): void;
   setTier(t: TierId): void;
+  setQuality(q: string): void;
+  setImageModel(m: string): void;
   setStyleMode(m: StyleMode): void;
   togglePick(id: string): void;
   addRefs(files: File[]): Promise<void>;
@@ -137,7 +147,6 @@ interface MakeState {
   stop(): Promise<void>;
   fold(): void;
   unfold(): void;
-  openMake(): void;
   backToMaterials(): void;
   setPrompt(t: string): void;
   dismissResult(): void;
@@ -145,6 +154,10 @@ interface MakeState {
 
 const TIER_KEY = 'bae-gyeong.tier';
 const readTier = (): TierId => { try { const v = localStorage.getItem(TIER_KEY); return v === 's' || v === 'm' || v === 'l' || v === 'x' ? v : 'm'; } catch { return 'm'; } };
+const QUALITY_KEY = 'bae-gyeong.quality';
+const readQuality = (): string => { try { const v = localStorage.getItem(QUALITY_KEY); return v && BAE_IMAGE_QUALITIES.some((q) => q.id === v) ? v : BAE_DEFAULT_QUALITY; } catch { return BAE_DEFAULT_QUALITY; } };
+const MODEL_KEY = 'bae-gyeong.imageModel';
+const readModel = (): string | null => { try { const v = localStorage.getItem(MODEL_KEY); return v && v.length <= 120 ? v : null; } catch { return null; } };
 const LOCK_KEY = 'bae-gyeong.lockOn';
 const readLock = (): boolean => { try { return localStorage.getItem(LOCK_KEY) !== 'false'; } catch { return true; } };
 
@@ -327,6 +340,7 @@ export const useBaeMake = create<MakeState>((set, get) => ({
   guide: { ...GUIDE_INITIAL }, tilt: 0, boardRev: 0,
   win: null, winAuto: false, styleBack: null,
   job: null, makingBig: true, showNotes: true, reviseText: '', message: null, submitting: false, viewVisible: false, waitingCheck: false,
+  quality: readQuality(), imageModel: readModel(), orderDoneAt: 0,
 
   set: (k, v) => set({ [k]: v } as Partial<MakeState>),
   openMaterial: (kind) => { ensureProgress(); baeBoard(); void loadDraftOnce(); set({ win: 'material', winAuto: false, kind: kind ?? get().kind, message: null }); },
@@ -351,6 +365,8 @@ export const useBaeMake = create<MakeState>((set, get) => ({
     const j = get().job;   // 크기는 주문서를 다시 쓰지 않는다 (0원). 비율 글자만 (기울기일 때 달라짐).
     if (j?.order) { const p = j.promptText.replace(/Aspect ratio\s*\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?/gi, () => 'Aspect ratio ' + effRatio(get().ratio, t, baeBoard().tilt())); set({ job: { ...j, promptText: p } }); }
   },
+  setQuality: (q) => { if (!BAE_IMAGE_QUALITIES.some((x) => x.id === q)) return; set({ quality: q }); try { localStorage.setItem(QUALITY_KEY, q); } catch { /* 기억 못 해도 된다 */ } },
+  setImageModel: (m) => { set({ imageModel: m }); try { localStorage.setItem(MODEL_KEY, m); } catch { /* 기억 못 해도 된다 */ } },
   setStyleMode: (m) => { set({ styleMode: m }); markStale(); },
   togglePick: (id) => {
     const cur = get().manualPicks;
@@ -445,26 +461,32 @@ export const useBaeMake = create<MakeState>((set, get) => ({
     }
     const order = { ...r.order, dirty: r.order.dirty || snapAll() !== before };
     set({ job: { ...cur, phase: 'ordered', order, promptText: r.promptText, orderCostUsd: r.costUsd, orderSec: r.sec, startedAt: Date.now() }, manualPicks: r.manualPicks });
-    // 14e 8장: BAE경 화면이 보이고, 만드는 화면이 펼쳐져 있고, 다른 창이 없을 때만 저절로 뜬다
     const now = get();
-    if (now.viewVisible && !document.hidden && now.makingBig && now.win === null) set({ win: 'make', winAuto: true, waitingCheck: false });
-    else { set({ waitingCheck: true }); notifyDone('주문서가 다 됐어요', '요약을 읽고 그림을 만들어 주세요.'); }
+    // 2026-11-18 한솔: 주문서가 다 되면 창 없이 작업대로 — 2 주문서 칸에서 읽고 크기 · 품질 · 모델을 골라 그린다
+    if (now.viewVisible && !document.hidden) set({ waitingCheck: false, orderDoneAt: Date.now() });
+    else { set({ waitingCheck: true, orderDoneAt: Date.now() }); notifyDone('주문서가 다 됐어요', '요약을 읽고 그림을 만들어 주세요.'); }
   },
 
   revise: async (text) => {
-    const s = get(); const j = s.job; const t = (text ?? s.reviseText).trim();
+    const s = get(); let j = s.job; const t = (text ?? s.reviseText).trim();
     if (!j?.order || !t) { toast('고칠 내용을 한국어로 써주세요'); return; }
     if (j.phase === 'revising' || j.phase === 'drawing' || j.phase === 'ordering' || j.kind === 'angle') return;
     const b = baeBoard(); let inp: BaeInputs | null;
     try { inp = await prepareInputs(sources(), cache); } catch (e) { set({ job: { ...j, reviseError: msg(e) } }); return; }
     if (!inp) { set({ job: { ...j, reviseError: '러프가 비어 있어요. 러프를 다시 넣어주세요.' } }); return; }
+    if (get().job?.id !== j.id) return;
+    // 다 그린 뒤(또는 그리다 멈춘 뒤) 고치기는 새 작업으로: 앞 그림은 기록에 그대로 두고, 고친 주문서로 새 그림을 그린다 (HTML 처럼)
+    if (j.phase === 'done' || j.phase === 'failed' || j.phase === 'stopped') {
+      j = { ...j, id: uuid(), createdAt: new Date().toISOString(), phase: 'ordered', orderCostUsd: null, result: null, error: null, partial: null, partialCount: 0, finishing: null };
+      set({ job: j });
+    }
     const lib = baeActiveLibrary(); const oi = orderInputsOf(inp);
     const shown = shownLibrary(oi, s.styleMode, lib, s.manualPicks) as Array<LibEntry & { src: string }>;
     const thumbs = await libThumbs(shown, cache).catch(() => ({}));
     const before = snapAll();
     set({ job: { ...j, phase: 'revising', startedAt: Date.now(), reviseError: null, inputs: inp }, reviseText: '' });
     const r = await baeGw().order({
-      jobId: j.id, kind: j.kind, materials: { ratio: s.ratio, tier: s.tier, tilt: b.tilt(), time: s.time, place: s.place, persp: s.persp, guide: { ...b.guide() }, request: s.request },
+      jobId: j.id, kind: j.kind === 'same' ? 'same' : 'new', materials: { ratio: s.ratio, tier: s.tier, tilt: b.tilt(), time: s.time, place: s.place, persp: s.persp, guide: { ...b.guide() }, request: s.request },
       inputs: oi, styleMode: s.styleMode, manualIds: s.manualPicks, manualPicks: s.manualPicks, library: lib.map(({ src: _src, ...e }) => e), libThumbs: thumbs,
       revise: { text: t }, prevOrder: j.order, prevPrompt: j.promptText, carry: [], carryExtra: [],
     }).catch((e) => ({ ok: false as const, aborted: false, message: msg(e), code: null }));
@@ -493,6 +515,7 @@ export const useBaeMake = create<MakeState>((set, get) => ({
     set({ win: null, winAuto: false, makingBig: true, waitingCheck: false, job: { ...j, phase: 'drawing', startedAt: Date.now(), partial: null, partialCount: 0, finishing: null, error: null } });
     const r = await baeGw().draw({
       jobId: j.id, kind: j.kind, parentJobId: null, promptText: j.promptText, ratio: s.ratio, tier: s.tier, tilt: b.tilt(), images,
+      quality: s.quality, ...(s.imageModel ? { imageModel: s.imageModel } : {}),
       previews: { rough: inp?.rough.small ?? null, roughNotes: inp?.rough.annotated ?? null, refs: (inp?.refs ?? []).map((x) => x.small),
         bases: place?.mode === 'base' ? place.items.map((x) => x.small) : [], sheet: place?.mode === 'sheet' ? place.items[0]?.small ?? null : null },
       summary: { request: s.request, ratio: s.ratio, tier: s.tier, size, time: s.time, timeLabel: time?.label ?? s.time, place: s.place, persp: s.persp, perspLabel: persp?.label ?? s.persp,
@@ -536,7 +559,7 @@ export const useBaeMake = create<MakeState>((set, get) => ({
       if (fin.note) toast.warning(fin.note);
     }
     result.url = URL.createObjectURL(shown);
-    set({ job: { ...cur, phase: 'done', partial: null, finishing: null, result } });
+    set({ job: { ...cur, phase: 'done', partial: null, finishing: null, result, doneAt: Date.now() } });
     notifyDone('그림이 다 됐어요', 'BAE경에서 결과를 확인해 주세요.');
     void useBaeJobs.getState().load();
   },
@@ -562,7 +585,7 @@ export const useBaeMake = create<MakeState>((set, get) => ({
     const url = URL.createObjectURL(new Blob([r.png as BlobPart], { type: 'image/png' }));
     const result: BaeActiveResult = { url, w: r.w, h: r.h, sec: r.sec, costUsd: r.costUsd, model: r.model, hasLock: false, moved: 0, variant: { alt: false, noise: false }, noiseSec: null, note: '', tilt: 0 };
     const memo = cur.angle?.memo === 'reading' ? (r.memo ? (r.memo.raw ? 'raw' : 'done') : null) : cur.angle?.memo ?? null;
-    set({ job: { ...cur, phase: 'done', partial: null, result, angle: cur.angle ? { ...cur.angle, memo } : cur.angle } });
+    set({ job: { ...cur, phase: 'done', partial: null, result, angle: cur.angle ? { ...cur.angle, memo } : cur.angle, doneAt: Date.now() } });
     if (r.memo?.raw) toast.warning('PD를 부르지 못해서 메모 글을 그대로 넣어 그렸어요.');
     notifyDone('다른 각도로 다 그렸어요', 'BAE경에서 결과를 확인해 주세요.');
     void useBaeJobs.getState().load();
@@ -575,7 +598,6 @@ export const useBaeMake = create<MakeState>((set, get) => ({
   },
   fold: () => set({ makingBig: false }),
   unfold: () => set({ makingBig: true }),
-  openMake: () => { const j = get().job; if (j?.order) set({ win: 'make', winAuto: false, waitingCheck: false }); },
   backToMaterials: () => set({ win: 'material', winAuto: false }),
   setPrompt: (t) => { const j = get().job; if (j) set({ job: { ...j, promptText: t } }); },
   dismissResult: () => set({ job: null }),

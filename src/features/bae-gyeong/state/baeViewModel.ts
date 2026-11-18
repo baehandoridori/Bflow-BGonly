@@ -9,12 +9,15 @@ import { BAE_LIBRARY_DEFAULT } from '@/shared/bae/library';
 import { baeJobHasLock, baeJobVariant, type BaeJob, type BaeJobSummary, type BaeLayersDone, type BaeVariant } from '@/shared/bae/jobs';
 import { BAE_STAMP_LABEL, type BaeStamp, type BaeStampEvent } from '@/shared/bae/review';
 import { BAE_BASE_MAX, baeBaseFieldView, baeStyleForPlace, baePlaceMode } from '@/shared/bae/place';
-import type { MakeWindowProps, MaterialWindowProps, MakingStageProps, BaeStepView } from '../make/ui';
-import type { BaeBenchView, BaeBusyView, BaeFactView, BaeJobViewProps, BaeMaterialsView, BaeRecordRowView, BaeResultToolsView, BaeReviewView, BaeStampPanelView } from '../home/benchTypes';
+import type { MaterialWindowProps, MakingStageProps, BaeStepView } from '../make/ui';
+import type { BaeOrderPaneView, BaeBenchView, BaeBusyView, BaeFactView, BaeJobViewProps, BaeMaterialsView, BaeRecordRowView, BaeResultToolsView, BaeReviewView, BaeStampPanelView } from '../home/benchTypes';
 import type { BaeStyleEntryView } from '../make/ui';
 import { BAE_STRIP_SRC, baeActiveLibrary, baeBoard, baeLibSrc, baeMisfit, baeOrderStale, useBaeMake, type BaeActiveAngle, type BaeActiveJob } from './useBaeMake';
 import { baeLockText, baeNoiseText, baeStyleRowForBases } from './baeBases';
 import { BAE_UPSCALE_MODES, baeUpscaleButton, baeUpscaleEngineLabel, baeUpscalePlan } from '@/shared/bae/upscaleView';
+import { BAE_IMAGE_QUALITIES, baeModelChoices, baeQualityLabel } from '@/shared/bae/imageChoice';
+import type { TierId } from '@/shared/bae/order';
+import { useBaeStore } from '../useBaeStore';
 
 export const KIND_LABEL: Record<string, string> = { new: '새 배경', same: '같은 장소', edit: '고친 그림', angle: '다른 각도', layers: '레이어', import: '불러온 그림', upscale: '4K', denoise: '노이즈 제거' };
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -119,40 +122,101 @@ function sendList(j: BaeActiveJob): { src: string; label: string }[] {
   return out;
 }
 
-/** 만드는 창 */
-export function makeProps(a: { revisingSeconds: number; imageLabel: string; rate: number }): MakeWindowProps & { onRetry?: () => void } {
-  const s = useBaeMake.getState(); const j = s.job!; const o = j.order;
+/** 스타일 예시 한 줄 (HTML '레퍼런스 이미지 예시: L2 아파트 집 안 (현관에서 본 거실) · 까닭'). */
+function styleLine(picks: string[], reason: string): string {
+  const names = picks.map((id) => { const e = BAE_LIBRARY_DEFAULT.find((x) => x.id === id); return e ? `${id} ${e.name}` : id; });
+  return names.length ? `레퍼런스 이미지 예시: ${names.join(' · ')}${reason ? ' · ' + reason : ''}` : reason;
+}
+/** 설정 책장의 그림 모델 (관리자가 정한 것). */
+function teamImageModel(): { model: string; label: string } {
+  const v = useBaeStore.getState().row('models')?.value as { imageModel?: unknown; imageLabel?: unknown } | undefined;
+  return { model: typeof v?.imageModel === 'string' && v.imageModel ? v.imageModel : 'gpt-image-2.5-sunburst', label: typeof v?.imageLabel === 'string' ? v.imageLabel : '' };
+}
+/** 그림 값 · 시간 안내 (크기와 품질에 따라). '보통 · 높음'만 재 봤다 (2026-11-17 진짜 GPT 확인: 한 장 약 135원, 그림 28~34초). */
+function drawCostHint(tier: string, quality: string): string {
+  if (quality === 'max' || quality === 'xhigh') return `'${baeQualityLabel(quality)}' 품질은 '높음'보다 값과 시간이 더 들어요. 처음 몇 장은 비용 탭에서 금액을 확인해 주세요.`;
+  if (tier === 'l' || tier === 'x') return '이 크기는 아직 재 본 적이 없어서, 값과 시간이 더 들 수 있어요.';
+  if (quality === 'medium') return '중간 품질은 빠르고 저렴해요.';
+  return '이 크기 · 품질로 한 장에 약 100~135원, 30~55초쯤 걸려요.';
+}
+
+/** 작업대 2 주문서 칸의 확인 판 — 지금 작업 (만드는 창 대신, 2026-11-18). 주문서가 없으면 null. */
+export function activeOrderPane(j: BaeActiveJob, seconds: number): BaeOrderPaneView | null {
+  const s = useBaeMake.getState(); const o = j.order;
+  if (!o || j.angle) return null;
+  const drawn = j.phase === 'done' || j.phase === 'drawing';
   const why = baeMisfit(); const stale = baeOrderStale();
-  const state: MakeWindowProps['state'] = j.phase === 'revising' ? 'revising' : j.reviseError ? 'error' : why ? 'misfit' : stale ? 'stale' : 'ready';
-  const statusText = state === 'misfit' ? why : state === 'stale' ? '재료가 바뀌었어요. 주문서를 다시 만들거나, 지금 주문서 그대로 그려도 돼요.' : state === 'error' ? (j.reviseError ?? '') : (o?.doneMsg ?? '');
-  const tilt = baeBoard().tilt(); const sz = sizeChoices(s.ratio, s.tier, tilt);
-  const cost = s.tier === 'l' || s.tier === 'x' ? '이 크기는 아직 재 본 적이 없어서, 값과 시간이 더 들 수 있어요.' : '이 크기로 한 장에 100~125원, 35~55초쯤 걸려요.';
+  const state: BaeOrderPaneView['state'] = j.phase === 'revising' ? 'revising' : j.reviseError ? 'error' : drawn ? 'done' : why ? 'misfit' : stale ? 'stale' : 'ready';
+  const statusText = state === 'misfit' ? why : state === 'stale' ? '재료가 바뀌었어요. 주문서를 다시 만들거나, 지금 주문서 그대로 그려도 돼요.' : state === 'error' ? (j.reviseError ?? '') : state === 'ready' ? (o.doneMsg ?? '') : '';
   const lib = baeActiveLibrary();
+  const team = teamImageModel();
+  const sz = sizeChoices(s.ratio, s.tier, baeBoard().tilt());
+  const canOrderAgain = j.phase !== 'drawing' && j.phase !== 'ordering';
   return {
-    state, autoOpened: s.winAuto,
-    roughSrc: j.inputs?.rough.annotated ?? j.inputs?.rough.small ?? '', roughPlainSrc: j.inputs?.rough.small ?? '',
-    showNotes: s.showNotes ?? true, onShowNotes: (on) => s.set('showNotes', on), hasNotes: (j.inputs?.rough.noteCount ?? 0) > 0,
-    ratio: s.ratio, ratios: RATIO_ORDER.map((id) => ({ id, hint: RATIOS[id].hint })), onRatio: s.setRatio,
-    tier: s.tier, tiers: TIERS.map(([id, label, note]) => ({ id, label, size: RATIOS[s.ratio].sizes[id], note })), onTier: s.setTier,
-    sizeNote: sz.hint, sendList: sendList(j),
-    summary: o?.summary ?? '', notes: o?.notes ?? [],
-    picks: (o?.picks ?? []).map((id) => { const e = lib.find((x) => x.id === id); return { id, name: e?.name ?? id, src: e?.src ?? '' }; }),
-    reason: o?.reason ?? '',
-    director: o?.director ? { ko: o.director.ko, en: o.director.en, replacedKo: o.director.replaced.map((k) => DIR_MARKER_KO[k] ?? k) } : null,
-    revisions: o?.revisions ?? [],
-    reviseText: s.reviseText, onReviseText: (t) => s.set('reviseText', t), onRevise: () => { void s.revise(); },
-    prompt: j.promptText, onPrompt: s.setPrompt, promptCount: promptCountText(j.promptText).text,
-    revisingSeconds: a.revisingSeconds, onStopRevise: () => { void s.stop(); },
-    statusText, onRemake: () => { void s.submitOrder(); }, onRetry: () => { void s.revise(s.job?.revisions.at(-1) ?? ''); },
-    footNote: `그림 모델은 ${a.imageLabel}이에요. ${cost}`,
-    canDraw: !!o && !why && j.phase === 'ordered', onDraw: () => { void s.draw(); },
-    onBack: s.backToMaterials, onClose: s.closeWin,
+    state, statusText, sendList: sendList(j),
+    summary: o.summary, style: o.place ? PLACE_STYLE : styleLine(o.picks.filter((id) => lib.some((e) => e.id === id) || BAE_LIBRARY_DEFAULT.some((e) => e.id === id)), o.reason),
+    notes: o.notes,
+    director: o.director ? { ko: o.director.ko, en: o.director.en, replacedKo: o.director.replaced.map((k) => DIR_MARKER_KO[k] ?? k) } : null,
+    revisions: o.revisions, prompt: j.promptText, promptCount: promptCountText(j.promptText).text,
+    revise: canOrderAgain ? {
+      text: s.reviseText, onText: (t) => s.set('reviseText', t), onRevise: () => { void s.revise(); },
+      busySec: j.phase === 'revising' ? seconds : null, onStop: () => { void s.stop(); },
+      again: j.phase === 'done' || j.phase === 'failed' || j.phase === 'stopped',
+      onRemake: () => { void s.submitOrder(); },
+    } : null,
+    draw: drawn ? null : {
+      tier: s.tier, tiers: TIERS.map(([id, label, note]) => ({ id, label, size: RATIOS[s.ratio].sizes[id], note })), onTier: (id) => s.setTier(id as TierId),
+      quality: s.quality, qualities: BAE_IMAGE_QUALITIES.map((q) => ({ id: q.id, label: q.label })), onQuality: s.setQuality,
+      model: s.imageModel ?? team.model, models: baeModelChoices(team.model, team.label), onModel: s.setImageModel,
+      hint: [sz.hint, drawCostHint(s.tier, s.quality)].filter(Boolean).map((t) => (/[.!?]$/.test(t.trim()) ? t.trim() : t.trim() + '.')).join(' '),
+      canDraw: !why && (j.phase === 'ordered' || j.phase === 'failed' || j.phase === 'stopped'), onDraw: () => { void s.draw(); },
+    },
+    flashAt: s.orderDoneAt,
   };
 }
 
+/** 작업대 2 주문서 칸 — 기록 한 건 (보기만: 요약 · 스타일 예시 · PD 메모 · 지문 · 고친 기록 · 영어 주문서). */
+export function recordOrderPane(j: BaeJob): BaeOrderPaneView | null {
+  const pd = j.pd;
+  if (!pd?.summaryKo || j.kind === 'angle') return null;
+  return {
+    state: 'done', statusText: '', sendList: [],
+    summary: pd.summaryKo, style: j.summary.base ? PLACE_STYLE : styleLine(j.summary.picks ?? [], pd.reason ?? ''),
+    notes: pd.notesKo ?? [],
+    director: pd.director && pd.director.ko.length ? { ko: pd.director.ko, en: pd.director.en, replacedKo: (pd.director.replaced ?? []).map((k) => DIR_MARKER_KO[k] ?? k) } : null,
+    revisions: pd.revisions ?? [], prompt: pd.prompt ?? '', promptCount: pd.prompt ? promptCountText(pd.prompt).text : '',
+    revise: null, draw: null, flashAt: 0,
+  };
+}
+
+/** 만드는 화면에서 돌아가며 보일 짧은 말 (HTML orderPhrases · PHR_DRAW 그대로). */
+export function makingPhrases(j: BaeActiveJob): string[] {
+  if (j.angle) return j.angle.memo === 'reading' ? ['PD가 메모 읽는 중', '그림 모델에게 할 말 쓰는 중'] : ['입체 판 따라 구도 잡는 중', '원래 그림 색 맞추는 중', '새로 보이는 곳 칠하는 중'];
+  if (j.phase !== 'ordering') return ['러프 따라 구도 잡는 중', '그림체 기준 맞추는 중', '단색 면으로 칠하는 중', '손맛 넣는 중'];
+  const inp = j.inputs; const s = useBaeMake.getState();
+  const p = ['PD가 러프를 읽는 중'];
+  if (inp?.rough.noteCount) p.push('빨간 메모 읽는 중');
+  if (inp?.place) p.push(inp.place.mode === 'sheet' ? '부품 시트 보는 중' : '기준 배경 보는 중');
+  if (inp?.refs.length) p.push('레퍼런스 보는 중');
+  if (!inp?.place && s.styleMode === 'auto' && baeActiveLibrary().length) p.push('비슷한 팀 배경 찾는 중');
+  p.push('영어 주문서 쓰는 중');
+  return p;
+}
+
 /** 만드는 화면 (크게) */
-export function makingProps(seconds: number): MakingStageProps {
+export function makingProps(seconds: number, onFinaleEnd?: () => void): MakingStageProps {
   const s = useBaeMake.getState(); const j = s.job!;
+  // 다 그렸으면 마무리 장면 (점이 풀리며 완성 그림이 드러난 뒤 onFinaleEnd → 작업대)
+  if (j.phase === 'done' && j.result) {
+    const steps: BaeStepView[] = j.angle
+      ? [{ name: '1 재료', text: '원래 그림, 입체 판 밑그림', state: 'ok' }, { name: '2 PD메모', text: j.angle.memo === null ? '메모 없이 카메라 문장만 보냈어요' : 'PD가 메모를 읽었어요', state: 'ok' }, { name: '3 결과', text: `다 그렸어요, ${tookText(j.result.sec)}`, state: 'ok' }]
+      : [{ name: '1 재료', text: materialsLine(j), state: 'ok' }, { name: '2 주문서', text: `PD ${tookText(j.orderSec)}`, state: 'ok' }, { name: '3 결과', text: `다 그렸어요, ${tookText(j.result.sec)}`, state: 'ok' }];
+    return {
+      phase: 'done', title: j.angle ? '다른 각도 ' + j.angle.label : titleOf(s.request), kindLabel: j.angle ? KIND_LABEL.angle : KIND_LABEL[j.kind], label: '다 그렸어요',
+      src: j.result.url, partial: false, aspect: j.result.w && j.result.h ? j.result.w / j.result.h : 16 / 9, steps,
+      partialCount: j.partialCount, onFinaleEnd, onFold: s.fold, onStop: () => { onFinaleEnd?.(); },
+    };
+  }
   if (j.angle) {
     // 다른 각도로: 재료(원래 그림 · 입체 판) → PD메모(있으면) → 그림
     const a = j.angle; const reading = a.memo === 'reading';
@@ -164,6 +228,7 @@ export function makingProps(seconds: number): MakingStageProps {
     return {
       phase: 'draw', title: '다른 각도 ' + a.label, kindLabel: KIND_LABEL.angle, label: reading ? `PD가 메모 읽는 중, ${seconds}초째` : `그리는 중, ${seconds}초째`,
       src: j.partial ?? a.rough, partial: !!j.partial, aspect: a.size[0] / Math.max(1, a.size[1]), steps, onFold: s.fold, onStop: () => { void s.stop(); },
+      phrases: makingPhrases(j), partialCount: j.partialCount,
     };
   }
   const ordering = j.phase === 'ordering';
@@ -176,8 +241,9 @@ export function makingProps(seconds: number): MakingStageProps {
   return {
     phase: ordering ? 'order' : 'draw', title: titleOf(s.request), kindLabel: KIND_LABEL[j.kind],
     label: ordering ? `주문서 쓰는 중, ${seconds}초째` : j.finishing ? `${j.finishing}, ${seconds}초째` : `그리는 중, ${seconds}초째`,
-    src: ordering ? (j.inputs?.rough.small ?? null) : (j.partial ?? j.inputs?.rough.small ?? null), partial: !ordering && !!j.partial,
+    src: ordering ? (j.inputs?.rough.annotated ?? j.inputs?.rough.small ?? null) : (j.partial ?? j.inputs?.rough.small ?? null), partial: !ordering && !!j.partial,
     aspect: w / h, steps, onFold: s.fold, onStop: () => { void s.stop(); },
+    phrases: makingPhrases(j), partialCount: j.partialCount,
   };
 }
 function materialsLine(j: BaeActiveJob): string {
@@ -212,8 +278,9 @@ export function activeBench(rate: number, seconds = 0, toolBusy?: { what: 'noise
   const bench: BaeBenchView = {
     id: j.id, title: titleOf(s.request), named: false, kindLabel: KIND_LABEL[j.kind], when: whenText(j.createdAt), mat, matAct: '재료 바꿔 다시 그리기',
     order: o ? { summary: o.summary, ask: o.revisions.at(-1) ?? '', notes: o.notes, style: o.place ? PLACE_STYLE : o.reason ? `예시 ${o.picks.join(' · ')}: ${o.reason}` : '', pdNote: '', head } : null,
+    orderPane: activeOrderPane(j, seconds),
     orderReady: j.phase === 'ordered' && !!o,
-    result: j.result ? { src: j.result.url, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : w / h,
+    result: j.result ? { src: j.result.url, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : w / h, fresh: !!j.doneAt && Date.now() - j.doneAt < 8000,
       facts: [{ k: '크기', v: `${j.result.w}×${j.result.h}` }, { k: '그림', v: tookText(j.result.sec) }, { k: '비용', v: wonOf(j.result.costUsd, rate) }],
       tools: toolsView({ variant: j.result.variant, hasLock: j.result.hasLock, moved: j.result.moved, noiseSec: j.result.noiseSec, note: j.result.note, busy: toolBusy, away: false,
         size: { w: j.result.w, h: j.result.h, ratio: s.ratio }, upBusy }) } : null,
@@ -238,7 +305,7 @@ function angleBench(j: BaeActiveJob, a: BaeActiveAngle, rate: number, seconds: n
     id: j.id, title: '다른 각도 ' + a.label, named: false, kindLabel: '다른 각도 ' + a.label, when: whenText(j.createdAt),
     mat: angleMaterials({ id: j.id, rough: a.rough, refs: a.refs, line: a.line, label: a.label }), matAct: '각도 다시 맞추기',
     order: { summary: angleOrderText(a.memo), ask: '', notes: [], style: '', pdNote: '', head: [] }, orderReady: false,
-    result: j.result ? { src: j.result.url, alt: '다른 각도로 그린 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : w / h,
+    result: j.result ? { src: j.result.url, alt: '다른 각도로 그린 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : w / h, fresh: !!j.doneAt && Date.now() - j.doneAt < 8000,
       facts: [{ k: '크기', v: `${j.result.w}×${j.result.h}` }, { k: '그림', v: tookText(j.result.sec) }, { k: '비용', v: wonOf(j.result.costUsd, rate) }],
       tools: toolsView({ variant: j.result.variant, hasLock: false, moved: 0, noiseSec: j.result.noiseSec, note: j.result.note, busy: toolBusy, away: false, size: { w: j.result.w, h: j.result.h, ratio: null }, upBusy }) } : null,
     review: null,
@@ -318,6 +385,7 @@ export function recordBench(j: BaeJob, rate: number, localResult: string | null,
     mat: recordMaterials(j), matAct: '',
     order: j.kind === 'angle' && j.summary.angle ? { summary: angleOrderText(j.summary.angle.memo), ask: '', notes: pd?.notesKo ?? [], style: '', pdNote: '', head: [] }
       : pd?.summaryKo ? { summary: pd.summaryKo, ask: pd.revisions?.at(-1) ?? '', notes: pd.notesKo ?? [], style: j.summary.base ? PLACE_STYLE : pd.reason ?? '', pdNote: '', head: [] } : null,
+    orderPane: recordOrderPane(j),
     orderReady: false,
     result: src && j.status === 'done' ? { src, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : 16 / 9, facts: recordResultFacts(j, rate), tools: recordTools(j, localResult, busy, upBusy) } : null,
     review: reviewOf(j),
@@ -374,6 +442,7 @@ export function jobViewProps(j: BaeJob, rate: number, localResult: string | null
     facts: [...recordResultFacts(j, rate), { k: '만든 때', v: whenText(j.createdAt) }, { k: '만든 사람', v: j.userName },
       ...(j.result.model ? [{ k: j.result.finish?.upscale ? '4K 모델' : '그림 모델', v: j.result.model }] : [])],
     mat: recordMaterials(j),
+    orderPane: recordOrderPane(j),
     pd: pd ? { summary: j.kind === 'angle' && j.summary.angle ? angleOrderText(j.summary.angle.memo) : pd.summaryKo ?? '', ask: pd.revisions?.at(-1) ?? '', notes: pd.notesKo ?? [], style: j.summary.base ? PLACE_STYLE : pd.reason ?? '', pdNote: '', head: [],
       prompt: pd.prompt ?? '', revisions: pd.revisions ?? [], director: pd.director ? { ko: pd.director.ko, en: pd.director.en } : null } : null,
   };
