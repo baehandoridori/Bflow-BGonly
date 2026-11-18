@@ -11,6 +11,7 @@ import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhas
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
 import { updateEpisodeReelPath, updateScenePhaseInSupabase, dispatchActingFeedbackNotification, readArchivedEpisodeDetail } from '@/services/supabaseService';
 import { sceneProgress, isFullyDone, progressGradient } from '@/utils/calcStats';
+import { nextEpisodeNumberFrom } from '@/shared/episodeNumberReuse';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { findPartById, getCanonicalPartIds, partIdMatches } from '@/utils/partId';
 import { formatPartDisplayName, formatPartOriginSuffix } from '@/utils/partDisplayName';
@@ -4091,10 +4092,12 @@ export function ScenesView() {
     return items;
   }, [sceneGroupMode, sceneViewMode, searchQuery, selectedAssignee, sortDir, sortKey, statusFilter]);
 
-  // 다음 에피소드 번호 계산
-  const nextEpisodeNumber = episodes.length > 0
-    ? Math.max(...episodes.map((ep) => ep.episodeNumber)) + 1
-    : 1;
+  // 다음 에피소드 번호 계산 — 보관함 번호도 함께 본다(보관한 번호와 겹치면 서버가 거절함).
+  // 지운 에피소드가 쥔 번호는 서버(addEpisode)가 비켜 두고 다시 쓴다.
+  const nextEpisodeNumber = nextEpisodeNumberFrom(
+    episodes.map((ep) => ep.episodeNumber),
+    archivedEpisodes.map((ep) => ep.episodeNumber),
+  );
 
   // 다음 파트 ID 계산 (현재 부서의 파트 기준, 중복 방지)
   // 다음 파트 ID 계산 (unique partId 기준, 중복 방지)
@@ -5030,9 +5033,11 @@ export function ScenesView() {
     addEpisodeOptimistic(nextEpisodeNumber);
     setSelectedEpisode(nextEpisodeNumber);
 
-    // 제목 저장 (즉시 UI 반영)
-    if (epName) {
-      const next = { ...episodeTitles, [nextEpisodeNumber]: epName };
+    // 제목 저장 (즉시 UI 반영). 이름이 없으면 지운 옛 에피소드의 제목이 남아 있어도 비운다(서버도 지움).
+    if (epName || episodeTitles[nextEpisodeNumber] !== undefined) {
+      const next = { ...episodeTitles };
+      if (epName) next[nextEpisodeNumber] = epName;
+      else delete next[nextEpisodeNumber];
       setEpisodeTitles(next);
     }
 
