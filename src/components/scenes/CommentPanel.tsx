@@ -18,8 +18,19 @@ import {
   removeReaction,
   fetchReactionsBulk,
   fetchReactionsBulkResult,
+  getBaeJobThread,
+  takeBaeMentionedIds,
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
+import {
+  BAE_COMMENTS_INVALIDATED_EVENT,
+  baeCommentPlaceLabel,
+  baeMentionedPeople,
+  buildBaeCommentKey,
+  newBaeCommentId,
+  type BaeCommentPerson,
+} from '@/shared/bae/comments';
+import { baeCommentsGateway } from '@/features/bae-gyeong/comments/baeCommentsApi';
 import { isCommentsInvalidationRelevant, type CommentsInvalidatedDetail } from '@/utils/commentRowCache';
 import type { AppUser, CommentReaction, CompRevision } from '@/types';
 import { groupReactionsByEmoji } from '@/utils/commentReactionUtils';
@@ -56,7 +67,7 @@ import {
 } from './comments/CommentFeedParts';
 import { useCommentThreadFollowStore } from '@/stores/useCommentThreadFollowStore';
 import { buildCommentThreadKey, commentThreadIdOf, resolveThreadPreference, type ThreadPreference } from '@/utils/commentThreadFollow';
-import { buildCommentDeepLink } from '@/shared/bflowDeepLink';
+import { buildBaeJobDeepLink, buildCommentDeepLink } from '@/shared/bflowDeepLink';
 import { canFinalResolveRevision } from '@/utils/revisionWorkflow';
 import { buildRevisionAssigneeCompletionNotifyUserIds } from '@/utils/revisionNotificationRecipients';
 import { EntityText } from '@/components/common/EntityText';
@@ -176,6 +187,12 @@ interface CommentPanelProps {
    * 씬(sceneKey/secondarySceneKey) 경로는 이 prop 이 있을 때 전혀 사용되지 않는다.
    */
   characterThread?: { characterId: string; characterName?: string };
+  /**
+   * BAE경 9단계: BAE경 기록 한 건의 코멘트 스레드 모드(스레드 이름 bae:{작업 id}). 값이 있으면 댓글 읽기 · 쓰기 · 반응이
+   * 세션 래퍼(bae_gyeong_session_comment_*) 길로만 간다 — 만든 사람과 검수자만 보는 스레드라서 팀 할 일 · 팔로우 · /re · 씬 링크는
+   * 쓰지 않고, @ 목록은 그 스레드를 읽을 수 있는 사람만이다. 씬(sceneKey/secondarySceneKey) 경로는 쓰지 않는다.
+   */
+  baeThread?: { jobId: string; jobName?: string | null };
   /** 통합 뷰 전용 — 이 키의 댓글도 함께 보여주되, 저장은 primary(sceneKey)에만 한다 */
   secondarySceneKey?: string;
   /** 사용자별 읽음 상태 저장에 쓰는 canonical 씬 대화 키 */
@@ -609,6 +626,7 @@ function centerInScrollParent(node: HTMLElement, behavior: ScrollBehavior) {
 export function CommentPanel({
   sceneKey,
   characterThread,
+  baeThread,
   secondarySceneKey,
   sceneThreadKey,
   onCountChange,
@@ -641,11 +659,24 @@ export function CommentPanel({
     () => (characterId ? buildCharacterCommentKey(characterId) : null),
     [characterId],
   );
-  // 새 댓글이 저장될 키 — 캐릭터 모드면 char:{id}, 아니면 씬 키. addComment/대댓글/스레드가 공통으로 쓴다.
-  const primaryStorageKey = characterCommentKey ?? sceneKey;
+  // BAE경 기록 스레드 모드(9단계) — 이 키가 있으면 댓글 읽기 · 쓰기 · 반응이 bae:{작업 id} 길(세션 래퍼)로만 흐른다.
+  const baeJobId = baeThread?.jobId ?? null;
+  const baeCommentKey = useMemo(() => (baeJobId ? buildBaeCommentKey(baeJobId) : null), [baeJobId]);
+  // 이 스레드를 읽을 수 있는 사람(만든 사람 · 검수자 · 관리자) — @ 목록과 슬랙 받는 사람. 목록을 읽을 때 서버가 함께 준다.
+  const [baeAudience, setBaeAudience] = useState<BaeCommentPerson[] | null>(null);
+  useEffect(() => { setBaeAudience(null); }, [baeJobId]);
+  // 새 댓글이 저장될 키 — 캐릭터 모드면 char:{id}, BAE경 기록이면 bae:{id}, 아니면 씬 키. addComment/대댓글/스레드가 공통으로 쓴다.
+  const primaryStorageKey = characterCommentKey ?? baeCommentKey ?? sceneKey;
 
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(primaryStorageKey), [primaryStorageKey]);
-  const effectiveSceneThreadKey = characterCommentKey ?? sceneThreadKey ?? sceneKey;
+  // BAE경 기록 스레드는 씬 대화 키를 쓰지 않는다 — 팀 할 일 · 팔로우는 키만 알면 로그인한 누구나 읽는 표라서 기록 내용이 새지 않게 끈다.
+  //   읽음 표시만 bae:{작업 id} 키로 남긴다(readStateKey).
+  const effectiveSceneThreadKey = characterCommentKey ?? (baeCommentKey ? '' : (sceneThreadKey ?? sceneKey));
+  const readStateKey = effectiveSceneThreadKey || (baeCommentKey ?? '');
+  const mentionUsers = useMemo(
+    () => (baeAudience ? users.filter((u) => baeAudience.some((p) => p.id === u.id)) : users),
+    [users, baeAudience],
+  );
   const sceneKeyRef = useRef(sceneKey);
   sceneKeyRef.current = sceneKey;
 
@@ -783,7 +814,7 @@ export function CommentPanel({
 
   // v1.147.0(씬 댓글 B안 §5.1): 're만'·'활동 감추기' 대신 탭 — 전체 · 안 읽음 · 리테이크 · @나. 씬이 바뀌면 '전체'로.
   const [feedFilter, setFeedFilter] = useState<CommentFeedFilter>('all');
-  useEffect(() => { setFeedFilter('all'); }, [sceneKey, secondarySceneKey, characterCommentKey]);
+  useEffect(() => { setFeedFilter('all'); }, [sceneKey, secondarySceneKey, characterCommentKey, baeCommentKey]);
 
   // 드래그 + 라이트박스
   const [draggingOver, setDraggingOver] = useState(false);
@@ -961,14 +992,19 @@ export function CommentPanel({
     // 실패를 '댓글 없음'과 구분해 받는다. 더 새 조회가 시작됐으면 늦게 온 옛 결과는 버린다.
     const seq = ++loadSeqRef.current;
     const readOptions = { throwOnError: true };
-    const primaryPromise = characterId
+    const primaryPromise = baeJobId
+      ? getBaeJobThread(baeJobId, readOptions).then((thread) => {
+          if (seq === loadSeqRef.current) setBaeAudience(thread.audience);
+          return thread.comments.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: baeCommentKey ?? undefined }));
+        })
+      : characterId
       ? getCommentsForCharacter(characterId, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: characterCommentKey ?? undefined })),
         )
       : getComments(sceneKey, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
         );
-    const secondaryPromise = !characterId && secondarySceneKey
+    const secondaryPromise = !characterId && !baeJobId && secondarySceneKey
       ? getComments(secondarySceneKey, readOptions).then((list) =>
           list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: secondarySceneKey })),
         )
@@ -1036,7 +1072,7 @@ export function CommentPanel({
       // 이미 보여 준 목록은 실시간 재조회 실패로 지우지 않는다.
       setLoadStatus((prev) => commentLoadStatusAfter(prev, 'failure'));
     });
-  }, [sceneKey, secondarySceneKey, characterId, characterCommentKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sceneKey, secondarySceneKey, characterId, characterCommentKey, baeJobId, baeCommentKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 씬·캐릭터가 바뀌면(같은 패널을 다시 쓰는 경우) '불러오는 중'부터 다시 — 처음 자리·새 댓글 줄·알약도 새로 잡는다.
   // 상대 부서 키(secondarySceneKey)만 늦게 정해졌으면 보이던 목록·자리를 그대로 두고 조용히 다시 불러온다
@@ -1169,7 +1205,7 @@ export function CommentPanel({
     let cancelled = false;
     const load = () => {
       void getCommentReadStateForUser(currentUser.id).then((state) => {
-        if (!cancelled) setLastReadAt(state[effectiveSceneThreadKey] ?? null);
+        if (!cancelled) setLastReadAt(state[readStateKey] ?? null);
       }).catch((err) => {
         console.warn('[댓글 읽음] 상태를 불러오지 못했습니다:', err);
       }).finally(() => {
@@ -1183,7 +1219,7 @@ export function CommentPanel({
       if (detail?.userId && detail.userId !== currentUser.id) return;
       // 이 창에서 방금 읽음 처리했으면 새 값이 이미 캐시에 있다 — 서버에 다시 묻지 않는다.
       if (detail?.source === 'local') {
-        setLastReadAt(peekCommentReadStateForUser(currentUser.id)[effectiveSceneThreadKey] ?? null);
+        setLastReadAt(peekCommentReadStateForUser(currentUser.id)[readStateKey] ?? null);
         return;
       }
       load();
@@ -1194,25 +1230,26 @@ export function CommentPanel({
       cancelled = true;
       window.removeEventListener(COMMENT_READ_STATE_EVENT, handler);
     };
-  }, [currentUser?.id, effectiveSceneThreadKey]);
+  }, [currentUser?.id, readStateKey]);
 
   const markUnreadCommentsRead = useCallback(() => {
-    if (!currentUser?.id || !effectiveSceneThreadKey || !latestOtherUserCommentAt) return;
+    if (!currentUser?.id || !readStateKey || !latestOtherUserCommentAt) return;
     if (readMarkedRef.current === latestOtherUserCommentAt) return;
 
     readMarkedRef.current = latestOtherUserCommentAt;
     setLastReadAt(latestOtherUserCommentAt);
     void markSceneThreadReadForUser({
       userId: currentUser.id,
-      sceneThreadKey: effectiveSceneThreadKey,
+      sceneThreadKey: readStateKey,
       readAt: latestOtherUserCommentAt,
     });
-  }, [currentUser?.id, effectiveSceneThreadKey, latestOtherUserCommentAt]);
+  }, [currentUser?.id, readStateKey, latestOtherUserCommentAt]);
 
   // 다른 PC 변경 시 자동 리로드 (300ms 디바운스)
   // v1.145.0(씬 댓글 B안 §7.2): 이 패널이 보여 주는 시트(상대 부서 포함)·캐릭터의 신호만 받는다.
   //   받은 댓글을 캐시에 끼워 넣은 신호만 모였으면 캐시를 다시 볼 뿐 서버에 묻지 않는다(반응도 그대로).
   useEffect(() => {
+    if (baeJobId) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let onlyPatched = true;
     const sheetOf = (key: string | null | undefined) => (key && key.includes(':') ? key.slice(0, key.lastIndexOf(':')) : null);
@@ -1236,7 +1273,30 @@ export function CommentPanel({
       window.removeEventListener('bflow:comments-invalidated', handler);
       if (timer) clearTimeout(timer);
     };
-  }, [loadComments, characterId, sceneKey, secondarySceneKey]);
+  }, [loadComments, characterId, sceneKey, secondarySceneKey, baeJobId]);
+
+  // BAE경 기록 스레드(9단계): 씬 신호가 아니라 이 창의 'bflow:bae-comments-invalidated' 와 메인의 내용 없는 'bae-comments:changed'
+  //   (다른 창 · 다른 PC — 서버 신호)만 듣는다. 0.3초 묶어 세션 래퍼로 다시 읽는다(반응도 함께).
+  useEffect(() => {
+    if (!baeJobId) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => loadComments(), 300);
+    };
+    const onLocal = (event: Event) => {
+      const detail = (event as CustomEvent<{ jobId?: string } | undefined>).detail;
+      if (!detail?.jobId || detail.jobId === baeJobId) schedule();
+    };
+    window.addEventListener(BAE_COMMENTS_INVALIDATED_EVENT, onLocal);
+    let off: () => void = () => {};
+    try { off = baeCommentsGateway()?.onChanged(schedule) ?? off; } catch { /* 통로가 없으면 이 창의 신호만 */ }
+    return () => {
+      window.removeEventListener(BAE_COMMENTS_INVALIDATED_EVENT, onLocal);
+      off();
+      if (timer) clearTimeout(timer);
+    };
+  }, [baeJobId, loadComments]);
 
   // v1.24.0: focusCommentId prop 변경 시 → 자동 스크롤 + 일시 펄스. 답글이면 부모 자동 펼침.
   // P0 #2 fix: cleanup 누수 + comments 의존성으로 인한 펄스 무한 재시작 회귀 방지.
@@ -1352,12 +1412,12 @@ export function CommentPanel({
   // 3단계: @멘션 자동완성 공통 훅(caret 기반 중간 멘션 + DOM 직접 읽기)
   const mention = useMentionAutocomplete({
     onChange: setInput,
-    users,
+    users: mentionUsers,
     inputRef,
   });
   const threadMention = useMentionAutocomplete({
     onChange: (next) => { setThreadInput(next); threadInputValueRef.current = next; },
-    users,
+    users: mentionUsers,
     inputRef: threadInputRef,
   });
   // 4c: #태그 자동완성 — @멘션 옆에 나란히 공존(EntityAwareInput 패턴). users 불필요(episodes 자체 구독).
@@ -1550,12 +1610,17 @@ export function CommentPanel({
   const [slackDelivery, setSlackDelivery] = useState<Map<string, MentionDeliveryEntry>>(() => new Map());
   const notifyCommentMentions = (comment: SceneComment, webhookSceneKey: string, onlyNames?: readonly string[]) => {
     if (!currentUser || characterCommentKey) return;
-    const names = onlyNames ?? comment.mentions;
-    const revision = !onlyNames && comment.revisionId ? revisions.find((r) => r.id === comment.revisionId) : null;
-    const extraTargetIds = revision?.requesterId && revision.requesterId !== currentUser.id ? [revision.requesterId] : [];
+    // BAE경 기록 스레드(9단계): 서버가 '그 스레드를 읽을 수 있는 사람'으로 고른 @ 대상에게만(응답이 없으면 같은 규칙으로 목록에서).
+    //   바로가기는 bflow://bae/{작업 id}?comment={id}, 위치 칸은 'BAE경 · 기록 이름'. 씬 댓글은 아래 예전 그대로.
+    const baeReached = baeJobId
+      ? (takeBaeMentionedIds(comment.id) ?? baeMentionedPeople(onlyNames ?? comment.mentions, baeAudience ?? [], currentUser.id))
+      : null;
+    const names = baeReached ? [] : (onlyNames ?? comment.mentions);
+    const revision = !baeReached && !onlyNames && comment.revisionId ? revisions.find((r) => r.id === comment.revisionId) : null;
+    const extraTargetIds = baeReached ?? (revision?.requesterId && revision.requesterId !== currentUser.id ? [revision.requesterId] : []);
     if (names.length === 0 && extraTargetIds.length === 0) return;
-    const { sheetName: hookSheetName, sceneId: hookSceneId } = parseSceneKey(webhookSceneKey);
-    const hookPart = useDataStore.getState().episodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === hookSheetName);
+    const { sheetName: hookSheetName, sceneId: hookSceneId } = baeReached ? { sheetName: '', sceneId: '' } : parseSceneKey(webhookSceneKey);
+    const hookPart = baeReached ? undefined : useDataStore.getState().episodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === hookSheetName);
     const hookScene = hookPart?.scenes.find((sc) => String(sc.no) === String(hookSceneId));
     startMentionDelivery({
       comment: { text: comment.text, images: comment.images, mentions: names },
@@ -1565,6 +1630,7 @@ export function CommentPanel({
       me: currentUser,
       users,
       extraTargetIds,
+      place: baeJobId ? { EP: 'BAE경', part: '', scene: baeCommentPlaceLabel(baeThread?.jobName), deepLink: buildBaeJobDeepLink(baeJobId, comment.id) } : null,
     }, (entry) => setSlackDelivery((prev) => new Map(prev).set(comment.id, entry)));
   };
 
@@ -1711,7 +1777,7 @@ export function CommentPanel({
     const mentions = extractMentions(input, userNames);
     const targetSceneKey = primaryStorageKey;
     const comment: SceneCommentWithSource = {
-      id: createUuid(),
+      id: baeJobId ? newBaeCommentId(createUuid()) : createUuid(),
       userId: currentUser.id,
       userName: currentUser.name,
       text: input.trim(),
@@ -2021,7 +2087,7 @@ export function CommentPanel({
     //   리테이크 댓글 알림(revision) 으로 받는다 — 보이지 않는 자동 멘션은 넣지 않는다(답글마다 슬랙이 가던 문제).
     const mentions = extractMentions(text, userNames);
     const comment: SceneCommentWithSource = {
-      id: createUuid(),
+      id: baeJobId ? newBaeCommentId(createUuid()) : createUuid(),
       userId: currentUser.id,
       userName: currentUser.name,
       text,
@@ -2378,7 +2444,9 @@ export function CommentPanel({
 
   const composerPlaceholder = characterCommentKey
     ? `${characterThread?.characterName || '이 캐릭터'}에 댓글 남기기`
-    : `${(sceneLabel?.split('#').pop() ?? '').trim() || '이 씬'}에 댓글 남기기`;
+    : baeCommentKey
+      ? `${baeThread?.jobName?.trim() || '이 기록'}에 코멘트 남기기`
+      : `${(sceneLabel?.split('#').pop() ?? '').trim() || '이 씬'}에 댓글 남기기`;
 
   /** 입력창 커서 자리에 글자를 넣는다(@ 단추·이모지·스레드의 '@이름'). 넣은 뒤 멘션·태그 목록을 다시 본다. */
   const insertIntoComposer = (target: 'main' | 'thread', text: string) => {
@@ -2432,6 +2500,7 @@ export function CommentPanel({
   };
   /** 댓글 링크 — 씬 링크 + ?comment=id(누르면 그 씬 상세를 열고 그 댓글로). 캐릭터 댓글은 씬 링크가 없다. */
   const commentLinkFor = (comment: SceneCommentWithSource): string | null => {
+    if (baeJobId) return buildBaeJobDeepLink(baeJobId, comment.id);
     if (characterCommentKey) return null;
     const key = comment.storageKey ?? comment._sourceKey ?? primaryStorageKey;
     if (!key || !key.includes(':')) return null;
@@ -2837,6 +2906,7 @@ export function CommentPanel({
         filter={feedFilter}
         counts={feedCounts}
         onChange={setFeedFilter}
+        hideRetake={!!baeJobId}
         extra={(canReopenLastThread || followSceneKey) ? (
           <>
             {canReopenLastThread && (

@@ -1,0 +1,61 @@
+/*
+ * BAE경 4K로 키우기 창 (계획 14d 3-4, 시안 WinUpscale 의 bw-cards · bw-card · bw-scale 를 Bflow 토큰으로).
+ * 움직임은 진행 막대의 transform 하나와 색 전환만 (CLAUDE.md 움직임 규칙), 동작 줄이기는 맨 아래.
+ */
+.bae-up-board { background: rgb(var(--bae-stage)); }
+.bae-up-fit {
+  position: relative; aspect-ratio: var(--ar); width: min(100cqw, calc(100cqh * var(--ar))); max-height: 100cqh;
+  overflow: hidden; border-radius: 6px; background: rgb(var(--bae-paper));
+}
+.bae-up-img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: fill; user-select: none; -webkit-user-drag: none; }
+.bae-up-fit .bae-tag { z-index: 1; }
+
+/* 키우는 방식 카드 둘 */
+.bw-cards { display: flex; flex-direction: column; gap: 8px; }
+.bw-card {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 12px 10px;
+  border: 1px solid rgb(var(--color-bg-border)); border-radius: 8px; background: rgb(var(--color-bg-card));
+  transition: background-color var(--motion-base) var(--ease-std), border-color var(--motion-base) var(--ease-std);
+}
+.bw-card.is-on { border-color: color-mix(in srgb, rgb(var(--color-accent)) 45%, rgb(var(--color-bg-card))); background: color-mix(in srgb, rgb(var(--color-accent)) 12%, rgb(var(--color-bg-card))); }
+.bw-card-btn {
+  display: flex; align-items: center; min-height: 32px; padding: 0; border: 0; background: transparent;
+  color: rgb(var(--color-text-primary)); font: inherit; font-size: 0.875rem; font-weight: 600; text-align: left; cursor: pointer;
+}
+.bw-card-btn::after { content: ""; position: absolute; inset: 0; border-radius: 8px; }
+.bw-card-btn:disabled { cursor: not-allowed; }
+.bw-card-btn:focus-visible { outline: none; }
+.bw-card-btn:focus-visible::after { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: -2px; }
+.bw-card.is-on .bw-card-btn { color: rgb(var(--bae-accent-text)); }
+.bw-card-text { margin: 0; font-size: 0.8125rem; }
+.bw-card-meta { margin: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+@media (hover: hover) { .bw-card:not(.is-on):has(.bw-card-btn:not(:disabled)):hover { border-color: color-mix(in srgb, rgb(var(--color-accent)) 30%, rgb(var(--color-bg-border))); } }
+
+.bae-dl.bae-up-dl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.bae-dl.bae-up-dl .bae-fact { grid-column: span 1; }
+
+/* 두 크기를 같은 비율로 견준 그림 */
+.bw-scale { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+/* 1400×900 · 1280×800 에서 오른쪽 칸이 스크롤되지 않게 견준 그림은 너비 300px 까지 (14d 1장 '스크롤 막대') */
+.bw-scale-box { position: relative; width: 100%; max-width: 300px; border: 1px dashed rgb(var(--bae-field-edge)); border-radius: 6px; }
+.bw-scale-now { position: absolute; bottom: 0; left: 0; overflow: hidden; border-radius: 4px; }
+.bw-scale-now img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bw-scale-tag { position: absolute; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bw-scale-tag-out { top: 8px; right: 8px; }
+.bw-scale-tag-in { left: 4px; }
+.bae-hint.bae-up-license { font-size: 0.6875rem; }
+
+/* 발의 진행 줄 */
+.bae-up-progress { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bae-up-line { display: flex; align-items: center; gap: 8px; min-width: 0; color: rgb(var(--color-text-primary)); }
+.bae-up-line svg { flex: none; color: rgb(var(--bae-tool-upscale)); }
+.bae-up-line > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bae-up-sec { flex: none; color: rgb(var(--color-text-secondary)); }
+.bae-up-bar { position: relative; display: block; overflow: hidden; height: 4px; border-radius: 999px; background: color-mix(in srgb, rgb(var(--bae-field-edge)) 45%, transparent); }
+.bae-up-bar > i { position: absolute; inset: 0; display: block; border-radius: inherit; background: rgb(var(--bae-tool-upscale)); transform-origin: left center; transition: transform var(--motion-base) var(--ease-std); }
+.bae-up-sub { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-up-err { color: rgb(var(--bae-error)); white-space: pre-wrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bw-card, .bae-up-bar > i { transition: none; }
+}

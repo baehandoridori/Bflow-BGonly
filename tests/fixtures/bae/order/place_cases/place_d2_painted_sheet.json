@@ -1,0 +1,703 @@
+{
+ "id": "place_d2_painted_sheet",
+ "kind": "pd",
+ "html": {
+  "ver": "v0.4.11",
+  "manual": "# BAE PD manual v1.7"
+ },
+ "call": {
+  "revText": null,
+  "label": null,
+  "carryExtra": [],
+  "rejectDeveloper": false
+ },
+ "snap": {
+  "materials": {
+   "ratio": "3:2",
+   "time": "day",
+   "place": "auto",
+   "persp": "auto",
+   "styleMode": "auto",
+   "manualPicks": [],
+   "request": "칠한 방에 부품 시트의 가구를 놓아 주세요.",
+   "refs": [],
+   "guide": {
+    "type": "auto",
+    "placed": false,
+    "hy": 0.5,
+    "v1": 0.5,
+    "v2": 1.6,
+    "v3": -0.9,
+    "depth": 0.16,
+    "cx": 0.42,
+    "ct": 0.14,
+    "cb": 0.86
+   },
+   "tilt": 0,
+   "tier": "m",
+   "calib": 0,
+   "rulesKo": "",
+   "timeUser": [],
+   "pdModel": "gpt-6.1-sol",
+   "imgModel": "gpt-image-2.5-sunburst",
+   "quality": "high",
+   "stream": true,
+   "rate": 1400,
+   "manualCustom": false,
+   "blocksCustom": false,
+   "library": [
+    {
+     "id": "L1",
+     "name": "학교 앞 횡단보도",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L2",
+     "name": "아파트 집 안 (현관에서 본 거실)",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L3",
+     "name": "공원 벤치",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L4",
+     "name": "작은 집 방 (소파, 에어컨)",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L5",
+     "name": "아파트 공동현관 (낮)",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L6",
+     "name": "아파트 공동현관 (밤)",
+     "place": "exterior",
+     "tod": "night"
+    },
+    {
+     "id": "L7",
+     "name": "아파트 단지와 거리",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L8",
+     "name": "초등학교 교실",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L9",
+     "name": "나무 아지트 안",
+     "place": "interior",
+     "tod": "any"
+    },
+    {
+     "id": "L10",
+     "name": "공중화장실",
+     "place": "interior",
+     "tod": "any"
+    },
+    {
+     "id": "L11",
+     "name": "공원 정자",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L12",
+     "name": "놀이터",
+     "place": "exterior",
+     "tod": "day"
+    }
+   ]
+  },
+  "board": {
+   "hasColor": true,
+   "noteCount": 0,
+   "notesPlain": "",
+   "notesLevel": null,
+   "isGuide": false,
+   "mode": "rough",
+   "hasBg": false,
+   "hasContent": true,
+   "rev": 2,
+   "ratio": "3:2",
+   "tilt": 0,
+   "guide": {
+    "type": "auto",
+    "placed": false,
+    "hy": 0.5,
+    "v1": 0.5,
+    "v2": 1.6,
+    "v3": -0.9,
+    "depth": 0.16,
+    "cx": 0.42,
+    "ct": 0.14,
+    "cb": 0.86
+   },
+   "paintShare": 0.8009714756193316,
+   "photoLike": false,
+   "levelSamples": null
+  },
+  "inputs": {
+   "rough": {
+    "kind": "rough",
+    "label": "러프",
+    "small": "img:83d5b3ebf28279bc.jpg",
+    "annotated": null,
+    "notesText": "",
+    "hasColor": true,
+    "tilt": 0,
+    "noteCount": 0,
+    "key": "885o3w:43995",
+    "painted": true,
+    "orig": null,
+    "w": 1536,
+    "h": 1024
+   },
+   "refs": [],
+   "base": {
+    "kind": "style",
+    "label": "그림체 기준 (원경)",
+    "note": null,
+    "small": "img:2b11c0642bfaf997.jpg",
+    "w": 1536,
+    "h": 396
+   },
+   "refIds": [],
+   "place": {
+    "mode": "sheet",
+    "n": 1,
+    "painted": true,
+    "items": [
+     {
+      "kind": "sheet",
+      "label": "부품 시트 (기준 배경)",
+      "note": "",
+      "small": "img:3e7519c013dd02ec.jpg",
+      "w": 2048,
+      "h": 1152
+     }
+    ]
+   }
+  },
+  "prevOrder": null,
+  "promptBefore": "",
+  "carryChecked": true,
+  "misc": {
+   "manualVersion": "v1.7",
+   "blocksVersion": "v1",
+   "carryList": [],
+   "orderPhrases": [
+    "PD가 러프를 읽는 중",
+    "부품 시트 보는 중",
+    "영어 주문서 쓰는 중"
+   ],
+   "mapping": null,
+   "guideSummaryKo": "",
+   "cameraSentence": "",
+   "effRatio": "3:2",
+   "drawSizes": {
+    "gen": [
+     1536,
+     1024
+    ],
+    "out": [
+     1536,
+     1024
+    ],
+    "tilt": 0
+   },
+   "currentPickIds": [],
+   "timeForPD": "day"
+  },
+  "place": {
+   "bases": [
+    {
+     "id": 1,
+     "note": "",
+     "parts": [
+      {
+       "x0": 0,
+       "y0": 0.43,
+       "x1": 0.235,
+       "y1": 0.73,
+       "name": "소파"
+      },
+      {
+       "x0": 0.78,
+       "y0": 0.25,
+       "x1": 1,
+       "y1": 0.62,
+       "name": ""
+      }
+     ],
+     "sw": {
+      "autoRgb": [
+       [
+        232,
+        197,
+        143
+       ],
+       [
+        244,
+        241,
+        224
+       ],
+       [
+        169,
+        217,
+        253
+       ],
+       [
+        224,
+        216,
+        193
+       ],
+       [
+        199,
+        204,
+        207
+       ],
+       [
+        119,
+        167,
+        127
+       ]
+      ],
+      "auto": [
+       "#E8C58F",
+       "#F4F1E0",
+       "#A9D9FD",
+       "#E0D8C1",
+       "#C7CCCF",
+       "#77A77F"
+      ],
+      "off": [],
+      "add": []
+     },
+     "w": 1536,
+     "h": 1024
+    }
+   ],
+   "mode": "sheet",
+   "count": 1,
+   "key": "sheet|[[1,[[0,430,235,730],[780,250,1000,620]],[\"#E8C58F\",\"#F4F1E0\",\"#A9D9FD\",\"#E0D8C1\",\"#C7CCCF\",\"#77A77F\"]]]",
+   "sheetSwatches": [
+    "#E8C58F",
+    "#F4F1E0",
+    "#A9D9FD",
+    "#E0D8C1",
+    "#C7CCCF",
+    "#77A77F"
+   ],
+   "baseSwatches": [
+    [
+     "#E8C58F",
+     "#F4F1E0",
+     "#A9D9FD",
+     "#E0D8C1",
+     "#C7CCCF",
+     "#77A77F"
+    ]
+   ],
+   "ui": {
+    "baseHint": "부품 2개와 색 견본 6개를 부품 시트 한 장으로 보내요.",
+    "btnParts": "부품 고치기 (2개)",
+    "baseRowHidden": false,
+    "styleModeHidden": true,
+    "libPickHidden": true,
+    "styleHint": "기준 배경이 이 장소의 그림체 기준이라 레퍼런스 이미지 예시는 보내지 않아요.",
+    "styleMode": "auto"
+   },
+   "misfit": "",
+   "currentPickIds": [],
+   "lockOn": true
+  }
+ },
+ "answer": {
+  "obj": {
+   "notes_ko": [
+    "바닥선은 왼쪽 아래에서 오른쪽으로 올라가요."
+   ],
+   "style_picks": [],
+   "style_reason_ko": "",
+   "summary_ko": "칠한 러프의 방 그대로 그려요.",
+   "prompt": "Generate an image of the same living room. 1. Layout: follow image 1; the floor line runs from the bottom left up to the right. [SAME PLACE] [STYLE] [TIME interior] Text: no text. [AVOID] Aspect ratio 3:2."
+  },
+  "usage": {
+   "input_tokens": 12000,
+   "output_tokens": 900
+  }
+ },
+ "requests": [
+  {
+   "status": 200,
+   "body": {
+    "model": "gpt-6.1-sol",
+    "instructions": "@@MANUAL@@\n\n## Model sheet of the place (기준 배경 부품 시트)\nSometimes the app sends a model sheet of this place instead of base backgrounds: Image 2 shows the furniture and fittings of this place, each cut out from a finished background of it and boxed on a grey sheet, and plain swatches of its colors (wall, side wall, floor, baseboard). Image 1 is a rough of this place.\n- Image 1 decides the camera, the layout and what is in the picture. The sheet has no room and no camera: the position, size and angle of every object come only from Image 1. A sofa that Image 1 shows from the side or at an angle is drawn from the side or at that angle, never turned to face the camera like on the sheet.\n- Find every object of Image 1 on the sheet and describe it with its design, colors and two to four key features there (for example \"the wine-red tufted sofa with gold claw feet from image 2\"). Describe the walls, the floor and the baseboard with the swatch colors.\n- Objects of Image 1 that are not on the sheet are drawn as Image 1 shows them, in the same plain look as the furniture on the sheet.\n- Never add an object from the sheet where Image 1 shows none.\n- Write the marker [SAME PLACE] right after the layout rule (item 5); the app replaces it with the team's sentence about the sheet. Item 6 is for reference images only: do not write it for the sheet.\n- The sheet already shows our style for this place, so the app sends no style examples: style_picks must be [] and item 8 is left out.\n\n## Painted rough\nThe artist painted Image 1 with the flat colors of this place. The painted walls, floor and ceiling and the painted window and door openings are the exact room: keep exactly where the floor meets the walls (the floor line and its slope), the corners of the walls and the ceiling, and the position and size of every window and door opening. In the layout, say where these borders run in plain words (for example \"the floor line runs from the bottom left up to the right\").\n- Furniture and other objects, whether painted or drawn only as pencil lines over the room, show only where each object stands, how big it is and how it is turned (for example a sofa seen at an angle). Describe each one at that place, size and angle, but with its real design, shape and proportions from image 2. The rough outline of an object in the sketch is not its shape: never copy it.\n- A painted window or door opening holds a complete window or door like the ones of image 2, with its frame along every edge of the opening.\n- These colors are the colors of the place: this wins over the color hint rule, so do not make them clearer or more saturated.",
+    "input": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "input_text",
+        "text": "Aspect ratio: 3:2 (the image will be 1536x1024).\nTime of day: day\nPlace: auto (decide from the sketch)\nPerspective: auto (follow the sketch; there is no camera sentence).\nImage 1: rough sketch by our artist (layout source). The artist painted flat color areas in it as color hints.\nImage 2: model sheet (기준 배경 부품 시트) of this same place: its furniture and fittings cut out from a finished background of it, and swatches of its wall, side wall, floor and baseboard colors. Parts the artist named (Korean): 소파.\nStyle examples: a model sheet is given, so the app sends no style examples this time; style_picks must be [].\nBase style strip: always sent as the last image. In the prompt write {BASE} for its number and {S1}, {S2} for the style examples.\nArtist's request (Korean): 칠한 방에 부품 시트의 가구를 놓아 주세요.\nWrite the order sheet now. Follow the manual exactly: its markers or verbatim sentences, the numbers of Image 1 and the model sheet, the placeholders, and the section \"Model sheet of the place (기준 배경 부품 시트)\" with its [SAME PLACE] marker and the section \"Painted rough\"."
+       },
+       {
+        "type": "input_text",
+        "text": "Image 1:"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:83d5b3ebf28279bc.jpg",
+        "detail": "high"
+       },
+       {
+        "type": "input_text",
+        "text": "Image 2 (model sheet):"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:3e7519c013dd02ec.jpg",
+        "detail": "high"
+       },
+       {
+        "type": "input_text",
+        "text": "Base style strip (always the last image):"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:2b11c0642bfaf997.jpg",
+        "detail": "auto"
+       }
+      ]
+     }
+    ],
+    "text": {
+     "format": {
+      "type": "json_schema",
+      "name": "bae_order",
+      "strict": true,
+      "schema": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "summary_ko",
+        "notes_ko",
+        "style_picks",
+        "style_reason_ko",
+        "prompt"
+       ],
+       "properties": {
+        "summary_ko": {
+         "type": "string"
+        },
+        "notes_ko": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "style_picks": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "style_reason_ko": {
+         "type": "string"
+        },
+        "prompt": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    },
+    "store": false
+   }
+  }
+ ],
+ "after": {
+  "order": {
+   "summary": "칠한 러프의 방 그대로 그려요.",
+   "notes": [
+    "바닥선은 왼쪽 아래에서 오른쪽으로 올라가요."
+   ],
+   "raw": "Generate an image of the same living room. 1. Layout: follow image 1; the floor line runs from the bottom left up to the right. [SAME PLACE] [STYLE] [TIME interior] Text: no text. [AVOID] Aspect ratio 3:2.",
+   "prompt": "Generate an image of the same living room. 1. Layout: follow image 1; the floor line runs from the bottom left up to the right. Image 2 is the model sheet of this place: its furniture and fittings have exactly these designs and colors, and the walls, floor and baseboard use exactly its swatch colors. Image 2 has no camera and no layout: follow image 1 for the camera, the layout and the position, size and angle of every object. The painted walls, floor, ceiling and openings of image 1 are the exact room: keep the floor line and its slope, the corners of the walls and the ceiling, and every window and door opening exactly where they are. The furniture and objects of image 1 only mark their place, size and angle: draw each one there with its real design, shape and proportions from image 2, never with the rough outline of the sketch. Image 3 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 3. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors. Text: no text. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 3, people. Aspect ratio 3:2.",
+   "picks": [],
+   "refIds": [],
+   "reason": "",
+   "cost": 0.033,
+   "doneMsg": "주문서 완료 · 해석 비용 약 46원. 확인하고 '그림 만들기'를 눌러주세요.",
+   "dirty": false,
+   "revisions": [],
+   "revTexts": [],
+   "carried": [],
+   "roughKey": "885o3w:43995",
+   "manualVer": "v1.7",
+   "blocksVer": "v1",
+   "rulesKo": "",
+   "director": null,
+   "place": {
+    "mode": "sheet",
+    "n": 1,
+    "painted": true
+   },
+   "tilt": 0
+  },
+  "promptText": "Generate an image of the same living room. 1. Layout: follow image 1; the floor line runs from the bottom left up to the right. Image 2 is the model sheet of this place: its furniture and fittings have exactly these designs and colors, and the walls, floor and baseboard use exactly its swatch colors. Image 2 has no camera and no layout: follow image 1 for the camera, the layout and the position, size and angle of every object. The painted walls, floor, ceiling and openings of image 1 are the exact room: keep the floor line and its slope, the corners of the walls and the ceiling, and every window and door opening exactly where they are. The furniture and objects of image 1 only mark their place, size and angle: draw each one there with its real design, shape and proportions from image 2, never with the rough outline of the sketch. Image 3 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 3. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors. Text: no text. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 3, people. Aspect ratio 3:2.",
+  "orderMsg": "",
+  "manualPicks": [],
+  "promptCount": "영어 주문서 330단어",
+  "currentPickIds": [],
+  "place": {
+   "bases": [
+    {
+     "id": 1,
+     "note": "",
+     "parts": [
+      {
+       "x0": 0,
+       "y0": 0.43,
+       "x1": 0.235,
+       "y1": 0.73,
+       "name": "소파"
+      },
+      {
+       "x0": 0.78,
+       "y0": 0.25,
+       "x1": 1,
+       "y1": 0.62,
+       "name": ""
+      }
+     ],
+     "sw": {
+      "autoRgb": [
+       [
+        232,
+        197,
+        143
+       ],
+       [
+        244,
+        241,
+        224
+       ],
+       [
+        169,
+        217,
+        253
+       ],
+       [
+        224,
+        216,
+        193
+       ],
+       [
+        199,
+        204,
+        207
+       ],
+       [
+        119,
+        167,
+        127
+       ]
+      ],
+      "auto": [
+       "#E8C58F",
+       "#F4F1E0",
+       "#A9D9FD",
+       "#E0D8C1",
+       "#C7CCCF",
+       "#77A77F"
+      ],
+      "off": [],
+      "add": []
+     },
+     "w": 1536,
+     "h": 1024
+    }
+   ],
+   "mode": "sheet",
+   "count": 1,
+   "key": "sheet|[[1,[[0,430,235,730],[780,250,1000,620]],[\"#E8C58F\",\"#F4F1E0\",\"#A9D9FD\",\"#E0D8C1\",\"#C7CCCF\",\"#77A77F\"]]]",
+   "sheetSwatches": [
+    "#E8C58F",
+    "#F4F1E0",
+    "#A9D9FD",
+    "#E0D8C1",
+    "#C7CCCF",
+    "#77A77F"
+   ],
+   "baseSwatches": [
+    [
+     "#E8C58F",
+     "#F4F1E0",
+     "#A9D9FD",
+     "#E0D8C1",
+     "#C7CCCF",
+     "#77A77F"
+    ]
+   ],
+   "ui": {
+    "baseHint": "부품 2개와 색 견본 6개를 부품 시트 한 장으로 보내요.",
+    "btnParts": "부품 고치기 (2개)",
+    "baseRowHidden": false,
+    "styleModeHidden": true,
+    "libPickHidden": true,
+    "styleHint": "기준 배경이 이 장소의 그림체 기준이라 레퍼런스 이미지 예시는 보내지 않아요.",
+    "styleMode": "auto"
+   },
+   "misfit": "",
+   "currentPickIds": [],
+   "lockOn": true
+  }
+ },
+ "draw": {
+  "mode": "ok",
+  "attempts": [
+   {
+    "status": 200,
+    "fields": [
+     {
+      "name": "model",
+      "value": "gpt-image-2.5-sunburst"
+     },
+     {
+      "name": "prompt",
+      "value": "Generate an image of the same living room. 1. Layout: follow image 1; the floor line runs from the bottom left up to the right. Image 2 is the model sheet of this place: its furniture and fittings have exactly these designs and colors, and the walls, floor and baseboard use exactly its swatch colors. Image 2 has no camera and no layout: follow image 1 for the camera, the layout and the position, size and angle of every object. The painted walls, floor, ceiling and openings of image 1 are the exact room: keep the floor line and its slope, the corners of the walls and the ceiling, and every window and door opening exactly where they are. The furniture and objects of image 1 only mark their place, size and angle: draw each one there with its real design, shape and proportions from image 2, never with the rough outline of the sketch. Image 3 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 3. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors. Text: no text. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 3, people. Aspect ratio 3:2."
+     },
+     {
+      "name": "size",
+      "value": "1536x1024"
+     },
+     {
+      "name": "quality",
+      "value": "high"
+     },
+     {
+      "name": "n",
+      "value": "1"
+     },
+     {
+      "name": "output_format",
+      "value": "png"
+     },
+     {
+      "name": "stream",
+      "value": "true"
+     },
+     {
+      "name": "partial_images",
+      "value": "2"
+     },
+     {
+      "name": "image[]",
+      "filename": "image1.png",
+      "type": "image/png",
+      "bytes": 106020,
+      "sha256": "ca57366d894bab80a2b788399f724f6fceceba93792246ef65808cc4c3f4c93c",
+      "format": "png",
+      "width": 1536,
+      "height": 1024
+     },
+     {
+      "name": "image[]",
+      "filename": "image2.png",
+      "type": "image/png",
+      "bytes": 483958,
+      "sha256": "778de4ab97d6c0db3c8864028d1c216c3afa61f4c737d1b0c6414bf69576c002",
+      "format": "png",
+      "width": 2048,
+      "height": 1152
+     },
+     {
+      "name": "image[]",
+      "filename": "image3.png",
+      "type": "image/png",
+      "bytes": 585031,
+      "sha256": "99b8345c04f8a44a0b93e8d395098ecb5bb8acf7ca91529fca3e1833f7a05053",
+      "format": "png",
+      "width": 1536,
+      "height": 396
+     }
+    ]
+   }
+  ],
+  "list": [
+   {
+    "kind": "rough",
+    "label": "러프",
+    "note": null,
+    "id": null,
+    "w": 1536,
+    "h": 1024,
+    "small": "img:83d5b3ebf28279bc.jpg",
+    "thumb": null,
+    "sha256": "ca57366d894bab80a2b788399f724f6fceceba93792246ef65808cc4c3f4c93c",
+    "bytes": 106020,
+    "format": "png",
+    "width": 1536,
+    "height": 1024
+   },
+   {
+    "kind": "sheet",
+    "label": "부품 시트 (기준 배경)",
+    "note": "",
+    "id": null,
+    "w": 2048,
+    "h": 1152,
+    "small": "img:3e7519c013dd02ec.jpg",
+    "thumb": null,
+    "sha256": "778de4ab97d6c0db3c8864028d1c216c3afa61f4c737d1b0c6414bf69576c002",
+    "bytes": 483958,
+    "format": "png",
+    "width": 2048,
+    "height": 1152
+   },
+   {
+    "kind": "style",
+    "label": "그림체 기준 (원경)",
+    "note": null,
+    "id": null,
+    "w": 1536,
+    "h": 396,
+    "small": "img:2b11c0642bfaf997.jpg",
+    "thumb": null,
+    "sha256": "99b8345c04f8a44a0b93e8d395098ecb5bb8acf7ca91529fca3e1833f7a05053",
+    "bytes": 585031,
+    "format": "png",
+    "width": 1536,
+    "height": 396
+   }
+  ],
+  "done": {
+   "drawMsg": "색 맞춤: 기준 배경과 같은 넓은 면을 찾지 못해서 GPT가 그린 색 그대로 뒀어요.",
+   "busy": false,
+   "result": {
+    "cost": 0.2031,
+    "total": 0.2361,
+    "model": "gpt-image-2.5-sunburst",
+    "quality": "high",
+    "w": 64,
+    "h": 36,
+    "prompt": "Generate an image of the same living room. 1. Layout: follow image 1; the floor line runs from the bottom left up to the right. Image 2 is the model sheet of this place: its furniture and fittings have exactly these designs and colors, and the walls, floor and baseboard use exactly its swatch colors. Image 2 has no camera and no layout: follow image 1 for the camera, the layout and the position, size and angle of every object. The painted walls, floor, ceiling and openings of image 1 are the exact room: keep the floor line and its slope, the corners of the walls and the ceiling, and every window and door opening exactly where they are. The furniture and objects of image 1 only mark their place, size and angle: draw each one there with its real design, shape and proportions from image 2, never with the rough outline of the sketch. Image 3 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 3. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors. Text: no text. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 3, people. Aspect ratio 3:2.",
+    "tilt": 0,
+    "gen": null
+   }
+  }
+ }
+}

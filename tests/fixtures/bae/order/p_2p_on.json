@@ -1,0 +1,471 @@
+{
+ "id": "p_2p_on",
+ "kind": "pd",
+ "html": {
+  "ver": "v0.4.11",
+  "manual": "# BAE PD manual v1.7"
+ },
+ "call": {
+  "revText": null,
+  "label": null,
+  "carryExtra": [],
+  "rejectDeveloper": false
+ },
+ "snap": {
+  "materials": {
+   "ratio": "16:9",
+   "time": "day",
+   "place": "auto",
+   "persp": "2p",
+   "styleMode": "auto",
+   "manualPicks": [],
+   "request": "긴 복도",
+   "refs": [],
+   "guide": {
+    "type": "2p",
+    "placed": true,
+    "hy": 0.55,
+    "v1": -0.6,
+    "v2": 1.6,
+    "v3": -0.9,
+    "depth": 0.16,
+    "cx": 0.42,
+    "ct": 0.14,
+    "cb": 0.86
+   },
+   "tilt": 0,
+   "tier": "m",
+   "calib": 0,
+   "rulesKo": "",
+   "timeUser": [],
+   "pdModel": "gpt-6.1-sol",
+   "imgModel": "gpt-image-2.5-sunburst",
+   "quality": "high",
+   "stream": true,
+   "rate": 1400,
+   "manualCustom": false,
+   "blocksCustom": false,
+   "library": [
+    {
+     "id": "L1",
+     "name": "학교 앞 횡단보도",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L2",
+     "name": "아파트 집 안 (현관에서 본 거실)",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L3",
+     "name": "공원 벤치",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L4",
+     "name": "작은 집 방 (소파, 에어컨)",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L5",
+     "name": "아파트 공동현관 (낮)",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L6",
+     "name": "아파트 공동현관 (밤)",
+     "place": "exterior",
+     "tod": "night"
+    },
+    {
+     "id": "L7",
+     "name": "아파트 단지와 거리",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L8",
+     "name": "초등학교 교실",
+     "place": "interior",
+     "tod": "day"
+    },
+    {
+     "id": "L9",
+     "name": "나무 아지트 안",
+     "place": "interior",
+     "tod": "any"
+    },
+    {
+     "id": "L10",
+     "name": "공중화장실",
+     "place": "interior",
+     "tod": "any"
+    },
+    {
+     "id": "L11",
+     "name": "공원 정자",
+     "place": "exterior",
+     "tod": "day"
+    },
+    {
+     "id": "L12",
+     "name": "놀이터",
+     "place": "exterior",
+     "tod": "day"
+    }
+   ]
+  },
+  "board": {
+   "hasColor": false,
+   "noteCount": 0,
+   "notesPlain": "",
+   "notesLevel": null,
+   "isGuide": false,
+   "mode": "rough",
+   "hasBg": true,
+   "hasContent": true,
+   "rev": 1,
+   "ratio": "16:9",
+   "tilt": 0,
+   "guide": {
+    "type": "2p",
+    "placed": true,
+    "hy": 0.55,
+    "v1": -0.6,
+    "v2": 1.6,
+    "v3": -0.9,
+    "depth": 0.16,
+    "cx": 0.42,
+    "ct": 0.14,
+    "cb": 0.86
+   },
+   "paintShare": 0.007467382008205832,
+   "photoLike": false,
+   "levelSamples": null
+  },
+  "inputs": {
+   "rough": {
+    "kind": "rough",
+    "label": "러프",
+    "small": "img:7eadbd5f12a005d3.jpg",
+    "annotated": null,
+    "notesText": "",
+    "hasColor": false,
+    "tilt": 0,
+    "noteCount": 0,
+    "key": "ppe5k6:29939",
+    "painted": false,
+    "orig": null,
+    "w": 1536,
+    "h": 864
+   },
+   "refs": [],
+   "base": {
+    "kind": "style",
+    "label": "그림체 기준 (원경)",
+    "note": null,
+    "small": "img:69e32b6362305593.jpg",
+    "w": 1536,
+    "h": 396
+   },
+   "refIds": [],
+   "place": null
+  },
+  "prevOrder": {
+   "summary": "투시 시험.",
+   "notes": [],
+   "raw": "Generate an image of a long school hallway. 1. Layout: image 1. Camera: as chosen. [STYLE] [TIME interior] [AVOID] Aspect ratio 16:9.",
+   "prompt": "Generate an image of a long school hallway. 1. Layout: image 1. Camera: as chosen. Image 3 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 3. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 3, the objects, layout or text of the style examples, people. Aspect ratio 16:9.",
+   "picks": [
+    "L1"
+   ],
+   "refIds": [],
+   "reason": "",
+   "cost": 0.033,
+   "doneMsg": "주문서 완료 · 해석 비용 약 46원. 확인하고 '그림 만들기'를 눌러주세요.",
+   "dirty": true,
+   "revisions": [],
+   "revTexts": [],
+   "carried": [],
+   "roughKey": "ppe5k6:29939",
+   "manualVer": "v1.7",
+   "blocksVer": "v1",
+   "rulesKo": "",
+   "director": null,
+   "place": null,
+   "tilt": 0
+  },
+  "promptBefore": "Generate an image of a long school hallway. 1. Layout: image 1. Camera: as chosen. Image 3 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 3. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 3, the objects, layout or text of the style examples, people. Aspect ratio 16:9.",
+  "carryChecked": true,
+  "misc": {
+   "manualVersion": "v1.7",
+   "blocksVersion": "v1",
+   "carryList": [],
+   "orderPhrases": [
+    "PD가 러프를 읽는 중",
+    "비슷한 팀 배경 찾는 중",
+    "영어 주문서 쓰는 중"
+   ],
+   "mapping": "image 2 = {S1}, image 3 = {BASE}",
+   "guideSummaryKo": "지평선 45%, 소실점 왼쪽 밖·오른쪽 밖, 모서리 42%",
+   "cameraSentence": "Camera: two-point perspective looking at a corner: the horizon line is at about 45% of the image height from the bottom, one vanishing point is far outside the picture on the left and the other is far outside the picture on the right; vertical lines stay vertical. The corner where the two main sides meet is a vertical line at about 42% of the image width from the left, running from about 14% up to about 86% of the image height from the bottom.",
+   "effRatio": "16:9",
+   "drawSizes": {
+    "gen": [
+     2048,
+     1152
+    ],
+    "out": [
+     2048,
+     1152
+    ],
+    "tilt": 0
+   },
+   "currentPickIds": [
+    "L1"
+   ],
+   "timeForPD": "day"
+  }
+ },
+ "answer": {
+  "obj": {
+   "notes_ko": [],
+   "style_picks": [
+    "L1"
+   ],
+   "style_reason_ko": "",
+   "summary_ko": "투시 시험.",
+   "prompt": "Generate an image of a long school hallway. 1. Layout: image 1. Camera: as chosen. [STYLE] [TIME interior] [AVOID] Aspect ratio 16:9."
+  },
+  "usage": {
+   "input_tokens": 12000,
+   "output_tokens": 900
+  }
+ },
+ "requests": [
+  {
+   "status": 200,
+   "body": {
+    "model": "gpt-6.1-sol",
+    "instructions": "@@MANUAL@@",
+    "input": [
+     {
+      "role": "user",
+      "content": [
+       {
+        "type": "input_text",
+        "text": "Aspect ratio: 16:9 (the image will be 2048x1152).\nTime of day: day\nPlace: auto (decide from the sketch)\nPerspective chosen by the artist: two-point perspective. Camera sentence, copy it verbatim as item 4: \"Camera: two-point perspective looking at a corner: the horizon line is at about 45% of the image height from the bottom, one vanishing point is far outside the picture on the left and the other is far outside the picture on the right; vertical lines stay vertical. The corner where the two main sides meet is a vertical line at about 42% of the image width from the left, running from about 14% up to about 86% of the image height from the bottom.\"\nImage 1: rough sketch by our artist (layout source).\nStyle examples: auto mode. Choose up to two from this style library (their small thumbnails follow the input images):\n  L1: 학교 앞 횡단보도 (exterior, day)\n  L2: 아파트 집 안 (현관에서 본 거실) (interior, day)\n  L3: 공원 벤치 (exterior, day)\n  L4: 작은 집 방 (소파, 에어컨) (interior, day)\n  L5: 아파트 공동현관 (낮) (exterior, day)\n  L6: 아파트 공동현관 (밤) (exterior, night)\n  L7: 아파트 단지와 거리 (exterior, day)\n  L8: 초등학교 교실 (interior, day)\n  L9: 나무 아지트 안 (interior, any)\n  L10: 공중화장실 (interior, any)\n  L11: 공원 정자 (exterior, day)\n  L12: 놀이터 (exterior, day)\nBase style strip: always sent as the last image. In the prompt write {BASE} for its number and {S1}, {S2} for the style examples.\nArtist's request (Korean): 긴 복도\nWrite the order sheet now. Follow the manual exactly: its markers or verbatim sentences, the numbers of Image 1 and the references, and the placeholders."
+       },
+       {
+        "type": "input_text",
+        "text": "Image 1:"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:7eadbd5f12a005d3.jpg",
+        "detail": "high"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L1: 학교 앞 횡단보도"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:57858f088f1aee90.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L2: 아파트 집 안 (현관에서 본 거실)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:1188a06f8038034b.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L3: 공원 벤치"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:70ece9abf5268ed2.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L4: 작은 집 방 (소파, 에어컨)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:287df56c609ab8da.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L5: 아파트 공동현관 (낮)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:2390699e7d15dc90.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L6: 아파트 공동현관 (밤)"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:c842a60f1ae7d4fc.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L7: 아파트 단지와 거리"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:cbee0b58e5805bef.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L8: 초등학교 교실"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:d4a118ba3f0678ac.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L9: 나무 아지트 안"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:de32c7f07adb39df.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L10: 공중화장실"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:883c1b4fc23cf3c1.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L11: 공원 정자"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:ffb7eeb807d9858c.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Style library L12: 놀이터"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:eabc9359cff55b8e.jpg",
+        "detail": "low"
+       },
+       {
+        "type": "input_text",
+        "text": "Base style strip (always the last image):"
+       },
+       {
+        "type": "input_image",
+        "image_url": "img:69e32b6362305593.jpg",
+        "detail": "auto"
+       }
+      ]
+     }
+    ],
+    "text": {
+     "format": {
+      "type": "json_schema",
+      "name": "bae_order",
+      "strict": true,
+      "schema": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "summary_ko",
+        "notes_ko",
+        "style_picks",
+        "style_reason_ko",
+        "prompt"
+       ],
+       "properties": {
+        "summary_ko": {
+         "type": "string"
+        },
+        "notes_ko": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "style_picks": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "style_reason_ko": {
+         "type": "string"
+        },
+        "prompt": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    },
+    "store": false
+   }
+  }
+ ],
+ "after": {
+  "order": {
+   "summary": "투시 시험.",
+   "notes": [],
+   "raw": "Generate an image of a long school hallway. 1. Layout: image 1. Camera: as chosen. [STYLE] [TIME interior] [AVOID] Aspect ratio 16:9.",
+   "prompt": "Generate an image of a long school hallway. 1. Layout: image 1. Camera: as chosen. Image 3 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 3. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 3, the objects, layout or text of the style examples, people. Aspect ratio 16:9.",
+   "picks": [
+    "L1"
+   ],
+   "refIds": [],
+   "reason": "",
+   "cost": 0.033,
+   "doneMsg": "주문서 완료 · 해석 비용 약 46원. 확인하고 '그림 만들기'를 눌러주세요.",
+   "dirty": false,
+   "revisions": [],
+   "revTexts": [],
+   "carried": [],
+   "roughKey": "ppe5k6:29939",
+   "manualVer": "v1.7",
+   "blocksVer": "v1",
+   "rulesKo": "",
+   "director": null,
+   "place": null,
+   "tilt": 0
+  },
+  "promptText": "Generate an image of a long school hallway. 1. Layout: image 1. Camera: as chosen. Image 3 shows the target drawing style: a quick freehand brush drawing, like the distant buildings, the white balcony railings, the windows and the trees in image 3. Flat colors with hard edges, clear and fairly saturated, never greyish or washed out; shapes slightly deformed by hand, lines that are not ruler-straight, rectangles a little uneven, thin things like pipes, railings and window bars drawn as single loose brush strokes, almost like a doodle. It must not look wavy or warped. Flat cel shading, no gradients, no glow, no texture, no black outlines. Time: daytime. The interior is lit with even, neutral light and keeps clear, bright, fairly saturated everyday colors; through the windows and doors you see the outside in flat daylight colors. Avoid: sketch lines, labels or handwriting from image 1, ruler-straight vector lines, perfect geometry, wavy distortion, fisheye distortion, black outlines, photorealism, glossy highlights, gradients, soft airbrush, glow, light falloff, light rays, painterly texture, dull greyish or washed-out colors, the playground objects of image 3, the objects, layout or text of the style examples, people. Aspect ratio 16:9.",
+  "orderMsg": "",
+  "manualPicks": [],
+  "promptCount": "영어 주문서 196단어",
+  "currentPickIds": [
+   "L1"
+  ]
+ }
+}

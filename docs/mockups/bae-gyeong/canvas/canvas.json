@@ -1,0 +1,224 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-11T09:50:00Z"
+  },
+  "title": "BAE경 작업대 시안 (Bflow 메인 화면 · 景 아이콘)",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1400,
+      "h": 1375,
+      "title": "작업대 (기본)",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "SideOpen.dc.html": {
+      "x": 1480,
+      "y": 0,
+      "w": 1400,
+      "h": 1444,
+      "title": "작업대, 사이드바 펼침",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Light.dc.html": {
+      "x": 2960,
+      "y": 0,
+      "w": 1400,
+      "h": 1375,
+      "title": "작업대, 라이트",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "OrderingSmall.dc.html": {
+      "x": 0,
+      "y": 1564,
+      "w": 1400,
+      "h": 1375,
+      "title": "작업대, 주문서 쓰는 중",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Drawing.dc.html": {
+      "x": 1480,
+      "y": 1564,
+      "w": 1400,
+      "h": 1375,
+      "title": "작업대, 그리는 중",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Dropping.dc.html": {
+      "x": 2960,
+      "y": 1564,
+      "w": 1400,
+      "h": 1375,
+      "title": "작업대, 그림을 끌어다 놓는 중",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Ordering.dc.html": {
+      "x": 0,
+      "y": 3059,
+      "w": 1400,
+      "h": 933,
+      "title": "만드는 화면, 주문서 쓰는 중",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Making.dc.html": {
+      "x": 1480,
+      "y": 3059,
+      "w": 1400,
+      "h": 933,
+      "title": "만드는 화면, 그리는 중",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Zoom.dc.html": {
+      "x": 2960,
+      "y": 3059,
+      "w": 1400,
+      "h": 933,
+      "title": "작업대, 결과 크게 보기",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Empty.dc.html": {
+      "x": 0,
+      "y": 4112,
+      "w": 1400,
+      "h": 935,
+      "title": "작업대, 비어 있음",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Loading.dc.html": {
+      "x": 1480,
+      "y": 4112,
+      "w": 1400,
+      "h": 1055,
+      "title": "작업대, 불러오는 중",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Error.dc.html": {
+      "x": 2960,
+      "y": 4112,
+      "w": 1400,
+      "h": 933,
+      "title": "작업대, 오류",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "WinNew.dc.html": {
+      "x": 0,
+      "y": 5547,
+      "w": 1400,
+      "h": 933,
+      "title": "창, 새 배경 만들기",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "WinSame.dc.html": {
+      "x": 1480,
+      "y": 5547,
+      "w": 1400,
+      "h": 933,
+      "title": "창, 같은 장소 다른 컷",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "WinStyle.dc.html": {
+      "x": 2960,
+      "y": 5547,
+      "w": 1400,
+      "h": 933,
+      "title": "창, 그림체 기준",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "WinLayers.dc.html": {
+      "x": 0,
+      "y": 6600,
+      "w": 1400,
+      "h": 933,
+      "title": "창, 레이어로 나누기",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "WinAngle.dc.html": {
+      "x": 1480,
+      "y": 6600,
+      "w": 1400,
+      "h": 933,
+      "title": "창, 다른 각도로",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "WinUpscale.dc.html": {
+      "x": 2960,
+      "y": 6600,
+      "w": 1400,
+      "h": 933,
+      "title": "창, 4K로 키우기",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "WinDenoise.dc.html": {
+      "x": 0,
+      "y": 7653,
+      "w": 1400,
+      "h": 933,
+      "title": "창, 노이즈 제거",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Icon.dc.html": {
+      "x": 0,
+      "y": 8706,
+      "w": 1400,
+      "h": 744,
+      "title": "景 아이콘과 낙관"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "SideOpen.dc.html",
+    "Light.dc.html",
+    "OrderingSmall.dc.html",
+    "Drawing.dc.html",
+    "Dropping.dc.html",
+    "Ordering.dc.html",
+    "Making.dc.html",
+    "Zoom.dc.html",
+    "Empty.dc.html",
+    "Loading.dc.html",
+    "Error.dc.html",
+    "WinNew.dc.html",
+    "WinSame.dc.html",
+    "WinStyle.dc.html",
+    "WinLayers.dc.html",
+    "WinAngle.dc.html",
+    "WinUpscale.dc.html",
+    "WinDenoise.dc.html",
+    "Icon.dc.html"
+  ],
+  "notes": {
+    "wins": {
+      "x": 0,
+      "y": 5287,
+      "text": "팝업 창: 시작 줄의 기능과 그림체 기준",
+      "kind": "title1",
+      "maxW": 4360
+    }
+  },
+  "designSystems": []
+}

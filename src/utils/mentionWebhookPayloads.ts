@@ -15,8 +15,21 @@ export interface MentionWebhookUser {
   slackId?: string | null;
 }
 
+/**
+ * 씬이 아닌 곳의 댓글(BAE경 기록 코멘트, 9단계) — 워크플로 변수 EP · part · scene · deep_link 를 직접 채운다.
+ * 없으면 예전처럼 시트 이름 · 씬 번호로 만든다.
+ */
+export interface MentionWebhookPlace {
+  EP: string;
+  part: string;
+  scene: string;
+  deepLink: string;
+}
+
 export interface MentionWebhookInput {
   comment: { text: string; images?: readonly string[] | null };
+  /** 씬 밖의 댓글이면 위치 · 바로가기(있으면 sheetName · sceneNo 대신). */
+  place?: MentionWebhookPlace | null;
   /** 'EP05_A_BG' 같은 저장 시트 이름. */
   sheetName: string;
   /** 바로가기용 scene.no 문자열. */
@@ -84,16 +97,16 @@ export function slackCommentText(comment: MentionWebhookInput['comment'], plainT
 }
 
 export function buildMentionWebhookPayloads(input: MentionWebhookInput): MentionWebhookPlan {
-  const { EP, part } = slackEpisodeAndPart(input.sheetName);
+  const { EP, part } = input.place ? { EP: input.place.EP, part: input.place.part } : slackEpisodeAndPart(input.sheetName);
   const base = {
     comment: slackCommentText(input.comment, input.plainText),
     EP,
     time: formatSlackTime(input.now ?? Date.now()),
-    scene: (input.sceneLabel || input.sceneNo || '').trim(),
+    scene: (input.place ? input.place.scene : (input.sceneLabel || input.sceneNo || '')).trim(),
     // 작성자 슬랙 ID 가 없어도 받는 사람에게는 보낸다(이름으로 표시).
     name_my: input.me.slackId || input.me.name,
     part,
-    deep_link: buildDeepLinkForScene(input.sheetName, input.sceneNo),
+    deep_link: input.place ? input.place.deepLink : buildDeepLinkForScene(input.sheetName, input.sceneNo),
   };
   const payloads: MentionWebhookPlan['payloads'] = [];
   const missing: string[] = [];

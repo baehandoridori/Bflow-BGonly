@@ -1,0 +1,20 @@
+{
+ "engine": {
+  "electron": "33.4.11",
+  "chrome": "130.0.6723.191"
+ },
+ "ver": "v0.4.11",
+ "manual": "# BAE PD manual v1.7",
+ "imgModel": "gpt-image-2.5-sunburst",
+ "quality": "high",
+ "tier": "m",
+ "control": {
+  "ctl_m1_basic": {
+   "requestsSame": true,
+   "afterSame": true,
+   "instructionsSame": true,
+   "userTextSame": true
+  }
+ },
+ "authHeadersSeen": 20
+}

@@ -21,6 +21,14 @@ import {
   type CommentsInvalidatedDetail,
   type RemoteCommentChange,
 } from '../utils/commentRowCache';
+import {
+  BAE_COMMENTS_INVALIDATED_EVENT,
+  buildBaeCommentKey,
+  looksLikeBaeCommentId,
+  parseBaeCommentKey,
+  type BaeCommentPerson,
+} from '../shared/bae/comments';
+import { requireBaeCommentsGateway } from '../features/bae-gyeong/comments/baeCommentsApi';
 
 const COMMENTS_FILE = 'comments.json';
 
@@ -403,6 +411,12 @@ export function peekPartCommentRows(partUuid: string): readonly CommentRow[] | u
  * 그 키의 캐시에는 이 댓글이 없으니 비워서 다음 조회가 서버 목록을 쓰게 하고, 열려 있는 패널에 다시 불러오라고 알린다.
  */
 export function invalidateCommentsForKey(sceneKey: string): void {
+  // BAE경 기록 스레드(9단계) — 씬 캐시와 상관없이 그 기록의 코멘트 칸만 다시 읽게.
+  const baeJobId = parseBaeCommentKey(sceneKey);
+  if (baeJobId) {
+    dispatchBaeCommentsInvalidated(baeJobId);
+    return;
+  }
   const characterId = parseCharacterCommentKey(sceneKey);
   if (characterId) {
     window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { characterId } }));
@@ -484,6 +498,69 @@ export async function getCommentsForCharacter(characterId: string, options: Comm
   }
 }
 
+// ─── BAE경 기록 코멘트 (9단계, 기록 한 건 = 스레드 하나) ─────────────────
+//
+// 같은 comments 표 · 같은 SceneComment 모양 · 같은 CommentPanel 을 쓰지만, 길은 따로다: 메인의 bae_gyeong_session_comment_* 래퍼만 부르고
+// (표에서는 BAE 댓글이 보이지 않는다 — DEVLOG/migrations/2026-11-16-bae-gyeong-comments.sql), 씬 행 캐시 · 'comment-added' 방송을 타지 않는다.
+// 저장 키는 `bae:{작업 id}`, 댓글 id 는 'baec_' + UUID. 바뀌면 'bflow:bae-comments-invalidated'(씬 화면들은 듣지 않는다).
+
+export interface BaeCommentThreadView {
+  comments: SceneComment[];
+  /** 이 스레드를 읽을 수 있는 사람(만든 사람 · 검수자 · 관리자) — @ 목록. */
+  audience: BaeCommentPerson[];
+  canModerate: boolean;
+}
+
+function dispatchBaeCommentsInvalidated(jobId: string, commentId?: string, commentAction?: 'add' | 'edit' | 'delete'): void {
+  window.dispatchEvent(new CustomEvent(BAE_COMMENTS_INVALIDATED_EVENT, {
+    detail: { jobId, ...(commentId ? { commentId } : {}), ...(commentAction ? { commentAction } : {}) },
+  }));
+}
+
+/** 저장 · 수정 응답의 '@ 가 닿은 사람'(서버가 스레드를 읽을 수 있는 사람만 고른 것) — 슬랙 알림이 한 번 꺼내 쓴다. */
+const baeMentionedById = new Map<string, string[]>();
+function rememberBaeMentioned(commentId: string, ids: string[]): void {
+  baeMentionedById.set(commentId, ids);
+  if (baeMentionedById.size > 100) {
+    const first = baeMentionedById.keys().next().value;
+    if (first !== undefined) baeMentionedById.delete(first);
+  }
+}
+export function takeBaeMentionedIds(commentId: string): string[] | null {
+  const ids = baeMentionedById.get(commentId) ?? null;
+  baeMentionedById.delete(commentId);
+  return ids;
+}
+
+/** 기록 한 건의 스레드. throwOnError 면 '불러오지 못함'을 예외로(댓글 패널), 아니면 빈 스레드. */
+export async function getBaeJobThread(jobId: string, options: CommentReadOptions = {}): Promise<BaeCommentThreadView> {
+  try {
+    const thread = await requireBaeCommentsGateway().list(jobId);
+    const storageKey = buildBaeCommentKey(jobId);
+    return {
+      comments: thread.comments.map((c) => ({
+        id: c.id,
+        userId: c.userId,
+        userName: c.userName,
+        text: c.text,
+        mentions: c.mentions,
+        images: c.images,
+        createdAt: c.createdAt,
+        editedAt: c.editedAt || undefined,
+        revisionId: null,
+        parentCommentId: c.parentCommentId ?? null,
+        storageKey,
+      })),
+      audience: thread.audience,
+      canModerate: thread.canModerate,
+    };
+  } catch (err) {
+    console.warn('[댓글] BAE경 기록 코멘트 로드 실패:', err);
+    if (options.throwOnError) throw new CommentLoadError();
+    return { comments: [], audience: [], canModerate: false };
+  }
+}
+
 export async function getCommentStoreForPart(sheetName: string): Promise<CommentsStore> {
   if (sheetsMode) return loadPartComments(sheetName);
 
@@ -497,6 +574,20 @@ export async function getCommentStoreForPart(sheetName: string): Promise<Comment
 }
 
 export async function addComment(sceneKey: string, comment: SceneComment): Promise<void> {
+  // BAE경 기록 스레드 — bae:{작업 id} 키면 세션 래퍼로만 저장한다(누가 · 언제는 서버가 정한다). 씬 · 캐릭터 길은 아래 그대로.
+  const baeJobId = parseBaeCommentKey(sceneKey);
+  if (baeJobId) {
+    const result = await requireBaeCommentsGateway().add(baeJobId, {
+      id: comment.id,
+      text: comment.text,
+      mentions: comment.mentions ?? [],
+      images: comment.images ?? [],
+      parentCommentId: comment.parentCommentId ?? null,
+    });
+    rememberBaeMentioned(comment.id, result.mentioned);
+    dispatchBaeCommentsInvalidated(baeJobId, comment.id, 'add');
+    return;
+  }
   // 캐릭터 스레드 — char:{characterId} sentinel 키면 character_id 경로로 저장.
   // 씬 분기(parseSceneKey/sheetsMode/local)는 아래 그대로 두고 여기서 일찍 분기한다.
   const characterId = parseCharacterCommentKey(sceneKey);
@@ -558,6 +649,15 @@ export async function updateComment(
   const imagesPatch: Pick<SceneComment, 'images'> | Record<string, never> =
     images !== undefined ? { images } : {};
 
+  // BAE경 기록 스레드 — 쓴 사람만 고친다(서버가 정한다). 그림은 넘긴 것이 없으면 그대로.
+  const editBaeJobId = parseBaeCommentKey(sceneKey);
+  if (editBaeJobId) {
+    const result = await requireBaeCommentsGateway().edit(commentId, text, mentions, images ?? null);
+    rememberBaeMentioned(commentId, result.addedMentioned);
+    dispatchBaeCommentsInvalidated(editBaeJobId, commentId, 'edit');
+    return;
+  }
+
   // 캐릭터 스레드 댓글 — commentId 기준 Supabase 수정. 패널은 invalidation 으로 리로드.
   const editCharacterId = parseCharacterCommentKey(sceneKey);
   if (editCharacterId) {
@@ -588,6 +688,13 @@ export async function updateComment(
 }
 
 export async function deleteComment(sceneKey: string, commentId: string): Promise<void> {
+  // BAE경 기록 스레드 — 쓴 사람 또는 관리자만(서버가 정한다). 그림 정리는 메인이 한다.
+  const deleteBaeJobId = parseBaeCommentKey(sceneKey);
+  if (deleteBaeJobId) {
+    await requireBaeCommentsGateway().remove(commentId);
+    dispatchBaeCommentsInvalidated(deleteBaeJobId, commentId, 'delete');
+    return;
+  }
   // 캐릭터 스레드 댓글 — commentId 기준 Supabase 삭제. 패널은 invalidation 으로 리로드.
   const deleteCharacterId = parseCharacterCommentKey(sceneKey);
   if (deleteCharacterId) {
@@ -691,6 +798,11 @@ export async function addReaction(
   userId: string,
   userName: string,
 ): Promise<void> {
+  // BAE경 기록 댓글('baec_')의 반응은 세션 래퍼로만(표에서는 보이지 않는다). 누가는 서버가 정한다.
+  if (looksLikeBaeCommentId(commentId)) {
+    await requireBaeCommentsGateway().react(commentId, emoji, true);
+    return;
+  }
   await window.electronAPI.supabaseAddCommentReaction(commentId, emoji, userId, userName);
 }
 
@@ -699,6 +811,10 @@ export async function removeReaction(
   emoji: string,
   userId: string,
 ): Promise<void> {
+  if (looksLikeBaeCommentId(commentId)) {
+    await requireBaeCommentsGateway().react(commentId, emoji, false);
+    return;
+  }
   await window.electronAPI.supabaseRemoveCommentReaction(commentId, emoji, userId);
 }
 
@@ -713,6 +829,23 @@ export async function fetchReactionsBulk(commentIds: string[]): Promise<Map<stri
 /** 리액션 일괄 조회 — 실패를 빈 결과와 구분한다(댓글 패널이 '반응을 다 불러왔다'고 잘못 기억하지 않게, v1.145.0). */
 export async function fetchReactionsBulkResult(commentIds: string[]): Promise<{ ok: boolean; map: Map<string, CommentReaction[]> }> {
   if (commentIds.length === 0) return { ok: true, map: new Map() };
+  // BAE경 기록 댓글은 세션 래퍼로 따로 읽고(표에서는 보이지 않는다) 나머지는 예전 길 그대로.
+  const baeIds = commentIds.filter((id) => looksLikeBaeCommentId(id));
+  if (baeIds.length > 0) {
+    const rest = commentIds.filter((id) => !looksLikeBaeCommentId(id));
+    try {
+      const [bae, other] = await Promise.all([
+        requireBaeCommentsGateway().reactions(baeIds),
+        rest.length > 0 ? fetchReactionsBulkResult(rest) : Promise.resolve({ ok: true, map: new Map<string, CommentReaction[]>() }),
+      ]);
+      const map = new Map(other.map);
+      for (const [cid, list] of Object.entries(bae)) map.set(cid, list as CommentReaction[]);
+      return { ok: other.ok, map };
+    } catch (err) {
+      console.error('[commentService] BAE경 반응 조회 실패', err);
+      return { ok: false, map: new Map() };
+    }
+  }
   try {
     const raw = await window.electronAPI.supabaseGetCommentReactionsBulk(commentIds);
     const map = new Map<string, CommentReaction[]>();

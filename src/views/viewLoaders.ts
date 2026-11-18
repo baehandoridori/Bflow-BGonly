@@ -20,6 +20,7 @@ export const loadCompositingDashboardView = () => import('@/views/CompositingDas
 export const loadRetakeHubView = () => import('@/views/RetakeHubView');
 export const loadCharacterBoardView = () => import('@/views/CharacterBoardView');
 export const loadBackgroundLibraryView = () => import('@/features/backgrounds/BackgroundLibraryView');
+export const loadBaeGyeongView = () => import('@/features/bae-gyeong/BaeGyeongView');
 export const loadSettingsView = () => import('@/views/SettingsView');
 
 const VIEW_LOADERS: Partial<Record<ViewMode, () => Promise<unknown>>> = {
@@ -36,6 +37,7 @@ const VIEW_LOADERS: Partial<Record<ViewMode, () => Promise<unknown>>> = {
   'retake-hub': loadRetakeHubView,
   'character-board': loadCharacterBoardView,
   'background-library': loadBackgroundLibraryView,
+  'bae-gyeong': loadBaeGyeongView,
   settings: loadSettingsView,
 };
 

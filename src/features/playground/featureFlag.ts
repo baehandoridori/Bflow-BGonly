@@ -37,9 +37,21 @@ export function canAccessBackgroundLibrary(
   return typeof user?.id === 'string' && user.id.length > 0 && typeof user.name === 'string';
 }
 
+/**
+ * BAE경 (AI 배경 작업실, 계획 14의 7장). 옮기는 동안은 배플레이그라운드처럼 시험 계정(배한솔)에게만 메뉴와 화면을 연다.
+ * 실제로 쓸 수 있는지는 서버가 정한다(관리자 · 'BAE경 사용자' · '모두에게 열기' — bae_gyeong_can_use). 이 장치는 화면 노출용이다.
+ * 메뉴 노출과 화면 진입이 모두 이 함수를 거치므로, 공개 범위를 넓힐 때(시험 인원 → 팀)는 여기만 바꾼다.
+ */
+export function canAccessBaeGyeong(
+  user: PlaygroundIdentity,
+  previewMode = isExplicitPlaygroundPreviewMode(),
+): boolean {
+  return canAccessPlayground(user, previewMode);
+}
+
 const KNOWN_VIEWS = new Set<ViewMode>([
   'dashboard', 'episode', 'scenes', 'assignee', 'team', 'calendar', 'schedule', 'vacation',
-  'compositing', 'compositing-revisions', 'retake-hub', 'character-board', 'background-library', 'playground', 'settings',
+  'compositing', 'compositing-revisions', 'retake-hub', 'character-board', 'background-library', 'bae-gyeong', 'playground', 'settings',
 ]);
 
 export function resolveAllowedView(
@@ -50,5 +62,6 @@ export function resolveAllowedView(
   if (typeof value !== 'string' || !KNOWN_VIEWS.has(value as ViewMode)) return 'dashboard';
   if (value === 'playground' && !canAccessPlayground(user, previewMode)) return 'dashboard';
   if (value === 'background-library' && !canAccessBackgroundLibrary(user, previewMode)) return 'dashboard';
+  if (value === 'bae-gyeong' && !canAccessBaeGyeong(user, previewMode)) return 'dashboard';
   return value as ViewMode;
 }

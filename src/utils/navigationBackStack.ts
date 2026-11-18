@@ -46,6 +46,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   'retake-hub': '리테이크 허브',
   'character-board': '캐릭터 보드',
   'background-library': '배경 라이브러리',
+  'bae-gyeong': 'BAE경',
   playground: '배플레이그라운드',
   settings: '설정',
 };

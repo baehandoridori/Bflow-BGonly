@@ -1007,3 +1007,109 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('character-board:realtime-status', listener);
   },
 });
+
+// BAE경 (AI 배경 작업실). 화면 → 메인 → 세션 래퍼. 키를 돌려받는 통로는 없다 (넣기와 '있음/없음'만).
+contextBridge.exposeInMainWorld('baeGyeongAPI', {
+  access: () => ipcRenderer.invoke('bae:access', canonicalSessionEpoch),
+  settings: () => ipcRenderer.invoke('bae:settings', canonicalSessionEpoch),
+  settingsSave: (key: string, value: unknown, expectedRevision: number) => ipcRenderer.invoke('bae:settings-save', key, value, expectedRevision, canonicalSessionEpoch),
+  settingsSeed: (key: 'manual' | 'fixed', expectedRevision: number) => ipcRenderer.invoke('bae:settings-seed', key, expectedRevision, canonicalSessionEpoch),
+  settingsHistory: (key: string) => ipcRenderer.invoke('bae:settings-history', key, canonicalSessionEpoch),
+  keyStatus: () => ipcRenderer.invoke('bae:key-status', canonicalSessionEpoch),
+  keySet: (key: string) => ipcRenderer.invoke('bae:key-set', key, canonicalSessionEpoch),
+  membersList: () => ipcRenderer.invoke('bae:members-list', canonicalSessionEpoch),
+  membersSet: (userId: string, role: 'user' | 'reviewer' | null) => ipcRenderer.invoke('bae:members-set', userId, role, canonicalSessionEpoch),
+  jobsMine: (since: string | null, limit?: number) => ipcRenderer.invoke('bae:jobs-mine', since, limit, canonicalSessionEpoch),
+  jobGet: (jobId: string) => ipcRenderer.invoke('bae:job-get', jobId, canonicalSessionEpoch),
+  jobHide: (jobId: string, hidden: boolean) => ipcRenderer.invoke('bae:job-hide', jobId, hidden, canonicalSessionEpoch),
+  usageSummary: (from: string | null, to: string | null) => ipcRenderer.invoke('bae:usage-summary', from, to, canonicalSessionEpoch),
+  jobsTeam: (since: string | null, limit?: number) => ipcRenderer.invoke('bae:jobs-team', since, limit, canonicalSessionEpoch),
+  jobsTeamFind: (filter: unknown, before: unknown, limit?: number) => ipcRenderer.invoke('bae:jobs-team-find', filter, before, limit, canonicalSessionEpoch),
+  jobStamp: (jobId: string, stamp: string | null, note: string | null) => ipcRenderer.invoke('bae:job-stamp', jobId, stamp, note, canonicalSessionEpoch),
+  jobStampBulk: (jobIds: string[]) => ipcRenderer.invoke('bae:job-stamp-bulk', jobIds, canonicalSessionEpoch),
+  jobStamps: (jobId: string) => ipcRenderer.invoke('bae:job-stamps', jobId, canonicalSessionEpoch),
+  stampUnseen: () => ipcRenderer.invoke('bae:stamp-unseen', canonicalSessionEpoch),
+  stampSeen: (upto: number | null) => ipcRenderer.invoke('bae:stamp-seen', upto, canonicalSessionEpoch),
+  usageTeam: (from: string | null, to: string | null, bucket: string) => ipcRenderer.invoke('bae:usage-team', from, to, bucket, canonicalSessionEpoch),
+  usageExport: (from: string | null, to: string | null, bucket: string) => ipcRenderer.invoke('bae:usage-export', from, to, bucket, canonicalSessionEpoch),
+  order: (call: unknown) => ipcRenderer.invoke('bae:order', call, canonicalSessionEpoch),
+  draw: (call: unknown) => ipcRenderer.invoke('bae:draw', call, canonicalSessionEpoch),
+  drawFinish: (call: unknown) => ipcRenderer.invoke('bae:draw-finish', call, canonicalSessionEpoch),
+  resultSet: (call: unknown) => ipcRenderer.invoke('bae:result-set', call, canonicalSessionEpoch),
+  toolJob: (call: unknown) => ipcRenderer.invoke('bae:tool-job', call, canonicalSessionEpoch),
+  abort: (jobId: string) => ipcRenderer.invoke('bae:abort', jobId, canonicalSessionEpoch),
+  jobPatch: (jobId: string, status: string, patch: unknown) => ipcRenderer.invoke('bae:job-patch', jobId, status, patch, canonicalSessionEpoch),
+  active: () => ipcRenderer.invoke('bae:active', canonicalSessionEpoch),
+  localFile: (jobId: string, name: string) => ipcRenderer.invoke('bae:local-file', jobId, name, canonicalSessionEpoch),
+  saveAs: (jobId: string, defaultName: string) => ipcRenderer.invoke('bae:save-as', jobId, defaultName, canonicalSessionEpoch),
+  draftSave: (draft: unknown) => ipcRenderer.invoke('bae:draft-save', draft, canonicalSessionEpoch),
+  draftLoad: () => ipcRenderer.invoke('bae:draft-load', canonicalSessionEpoch),
+  draftClear: () => ipcRenderer.invoke('bae:draft-clear', canonicalSessionEpoch),
+  online: () => ipcRenderer.invoke('bae:online', canonicalSessionEpoch),
+  onProgress: (callback: (p: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('bae:progress', listener);
+    return () => ipcRenderer.removeListener('bae:progress', listener);
+  },
+  onChanged: (callback: (what: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { what?: unknown } | undefined) => callback(typeof payload?.what === 'string' ? payload.what : 'settings');
+    ipcRenderer.on('bae:changed', listener);
+    return () => ipcRenderer.removeListener('bae:changed', listener);
+  },
+});
+
+// BAE경 모델 일꾼 (4단계): 모델 받기 · 4K A · 이 PC 점검 · 화면 쪽 일꾼과의 전용 통로(MessagePort).
+const baeModelListen = (channel: string) => (callback: (payload: any) => void) => {
+  const listener = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+contextBridge.exposeInMainWorld('baeModelAPI', {
+  status: () => ipcRenderer.invoke('bae:model-status', canonicalSessionEpoch),
+  ensure: (id: string) => ipcRenderer.invoke('bae:model-ensure', id, canonicalSessionEpoch),
+  files: (id: string) => ipcRenderer.invoke('bae:model-files', id, canonicalSessionEpoch),
+  upscaleA: (rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, ticket: string) => ipcRenderer.invoke('bae:upscale-a', rgba, w, h, ticket, canonicalSessionEpoch),
+  pcCheck: (webgpu: unknown) => ipcRenderer.invoke('bae:pc-check', webgpu, canonicalSessionEpoch),
+  pcCheckPut: () => ipcRenderer.invoke('bae:pc-check-put', canonicalSessionEpoch),
+  pcCheckList: () => ipcRenderer.invoke('bae:pc-check-list', canonicalSessionEpoch),
+  portRequest: () => ipcRenderer.invoke('bae:model-port', canonicalSessionEpoch),
+  onProgress: baeModelListen('bae:model-progress'),
+  onUpscaleProgress: baeModelListen('bae:upscale-progress'),
+  onWorker: baeModelListen('bae:model-worker'),
+});
+// 전용 통로: 메인이 보낸 MessagePort 를 화면으로 넘긴다 (contextBridge 로는 포트를 못 넘김).
+ipcRenderer.on('bae:model-port', (event, data: { nonce?: unknown } | undefined) => {
+  window.postMessage({ type: 'bae-model-port', nonce: data?.nonce }, '*', event.ports);
+});
+// BAE경 '다른 각도로' (7단계): 그리기 · 그만두기. PD메모 · 그림 요청 · 기록 · 장부는 메인이 한다 (키는 메인만). 진행 알림은 'bae:progress'.
+contextBridge.exposeInMainWorld('baeAngleAPI', {
+  draw: (call: unknown) => ipcRenderer.invoke('bae:angle-draw', call, canonicalSessionEpoch),
+  abort: (jobId: string) => ipcRenderer.invoke('bae:angle-abort', jobId, canonicalSessionEpoch),
+});
+// BAE경 '레이어로 나누기' (5단계): 작업 시작 · PD · 그림 요청 · 다 나눔 · 끝 · 그만두기 · 그림별 저장 · PSD 폴더 열기.
+contextBridge.exposeInMainWorld('baeLayersAPI', {
+  begin: (call: unknown) => ipcRenderer.invoke('bae:layers-begin', call, canonicalSessionEpoch),
+  pd: (call: unknown) => ipcRenderer.invoke('bae:layers-pd', call, canonicalSessionEpoch),
+  edit: (call: unknown) => ipcRenderer.invoke('bae:layers-edit', call, canonicalSessionEpoch),
+  done: (call: unknown) => ipcRenderer.invoke('bae:layers-done', call, canonicalSessionEpoch),
+  end: (jobId: string, how: string, message: string) => ipcRenderer.invoke('bae:layers-end', jobId, how, message, canonicalSessionEpoch),
+  abort: (jobId: string) => ipcRenderer.invoke('bae:layers-abort', jobId, canonicalSessionEpoch),
+  storeGet: (pic: string, key: string) => ipcRenderer.invoke('bae:layers-store-get', pic, key, canonicalSessionEpoch),
+  storeSet: (pic: string, key: string, value: unknown) => ipcRenderer.invoke('bae:layers-store-set', pic, key, value, canonicalSessionEpoch),
+  storeForget: (pic: string) => ipcRenderer.invoke('bae:layers-store-forget', pic, canonicalSessionEpoch),
+  showPsd: (jobId: string) => ipcRenderer.invoke('bae:layers-show-psd', jobId, canonicalSessionEpoch),
+});
+// BAE경 9단계 코멘트: 기록 한 건 = 댓글 스레드 하나. 화면 → 메인 → bae_gyeong_session_comment_* (세션 토큰은 메인 밖으로 나가지 않는다).
+contextBridge.exposeInMainWorld('baeCommentsAPI', {
+  list: (jobId: string) => ipcRenderer.invoke('bae-comments:list', jobId, canonicalSessionEpoch),
+  add: (jobId: string, draft: unknown) => ipcRenderer.invoke('bae-comments:add', jobId, draft, canonicalSessionEpoch),
+  edit: (commentId: string, text: string, mentions: string[], images: string[] | null) => ipcRenderer.invoke('bae-comments:edit', commentId, text, mentions, images, canonicalSessionEpoch),
+  remove: (commentId: string) => ipcRenderer.invoke('bae-comments:delete', commentId, canonicalSessionEpoch),
+  react: (commentId: string, emoji: string, on: boolean) => ipcRenderer.invoke('bae-comments:react', commentId, emoji, on, canonicalSessionEpoch),
+  reactions: (commentIds: string[]) => ipcRenderer.invoke('bae-comments:reactions', commentIds, canonicalSessionEpoch),
+  onChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('bae-comments:changed', listener);
+    return () => ipcRenderer.removeListener('bae-comments:changed', listener);
+  },
+});

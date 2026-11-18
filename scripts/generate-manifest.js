@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { checkReleaseVacationToken } = require('./vacation-token.cjs');
+const { checkInstallerSize } = require('./installer-size.cjs');
 
 const root = path.resolve(__dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
@@ -59,6 +60,19 @@ if (fs.existsSync(installerPath)) {
     fileName: installerFileName,
     sizeBytes: fs.statSync(installerPath).size,
   };
+  /**
+   * 설치 파일 크기 기준 (scripts/installer-size.cjs, BAE경 0단계에서 정한 140MB).
+   * 배포용 manifest 만 막는다 — 넘으면 거의 언제나 build.files 의 제외 규칙이 빠진 것이라 팀 PC 로 내보내지 않는다.
+   */
+  if (!allowMissingInstaller) {
+    const sizeCheck = checkInstallerSize(manifest.installer.sizeBytes);
+    if (!sizeCheck.ok) {
+      console.error(`[generate-manifest] ${sizeCheck.message}`);
+      console.error('[generate-manifest] 배포용 manifest를 만들지 않았습니다.');
+      process.exit(1);
+    }
+    console.log(`[generate-manifest] ${sizeCheck.message}`);
+  }
 } else {
   const message = '[generate-manifest] BFLOW-Setup.exe 없음 — 배포용 manifest를 만들 수 없습니다.';
   if (!allowMissingInstaller) {

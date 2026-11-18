@@ -59,6 +59,8 @@ interface CommentPanelResizableProps {
   onHashContextMenu?: React.ComponentProps<typeof CommentPanel>['onHashContextMenu'];
   /** 캐릭터 현황판 — 씬 대신 캐릭터 댓글 스레드(char:{id} 키)로 동작. */
   characterThread?: React.ComponentProps<typeof CommentPanel>['characterThread'];
+  /** BAE경 9단계 — 씬 대신 BAE경 기록 한 건의 코멘트 스레드(bae:{작업 id} 키, 세션 래퍼 길)로 동작. */
+  baeThread?: React.ComponentProps<typeof CommentPanel>['baeThread'];
 }
 
 export function CommentPanelResizable(props: CommentPanelResizableProps) {
@@ -82,6 +84,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
     extraHashCandidates,
     onHashContextMenu,
     characterThread,
+    baeThread,
   } = props;
 
   const { width, setWidth, isUserOverride } = useCommentPanelWidth(commentCount);
@@ -280,7 +283,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
           {headerTitle}
           {feedSummary && (
             <span className="text-[12px] font-normal text-text-secondary tabular-nums whitespace-nowrap">
-              원댓글 {feedSummary.roots}{feedSummary.retakes > 0 || !characterThread ? ` · 리테이크 ${feedSummary.retakes}` : ''}
+              원댓글 {feedSummary.roots}{feedSummary.retakes > 0 || (!characterThread && !baeThread) ? ` · 리테이크 ${feedSummary.retakes}` : ''}
             </span>
           )}
           {isUserOverride && (
@@ -306,6 +309,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
           extraHashCandidates={extraHashCandidates}
           onHashContextMenu={onHashContextMenu}
           characterThread={characterThread}
+          baeThread={baeThread}
           onThreadPanelOpenChange={setThreadPanelOpen}
           threadWidth={effectiveThreadWidth}
           threadResizeActive={threadDragging}

@@ -24,6 +24,8 @@ const ActingSupervisorSection = lazy(() => import('@/components/settings/ActingS
 const AdminRoleSection = lazy(() => import('@/components/settings/AdminRoleSection').then(m => ({ default: m.AdminRoleSection })));
 // v1.142.0~: 어드민 전용 — 배경 편집자 지정
 const BackgroundEditorSection = lazy(() => import('@/components/settings/BackgroundEditorSection').then(m => ({ default: m.BackgroundEditorSection })));
+// BAE경 — 어드민 전용 사용자 · 검수자 지정 (배경 편집자 옆, 계획 14의 7장)
+const BaeGyeongMemberSection = lazy(() => import('@/components/settings/BaeGyeongMemberSection').then(m => ({ default: m.BaeGyeongMemberSection })));
 const CharacterFolderRootSection = lazy(() => import('@/components/settings/CharacterFolderRootSection').then(m => ({ default: m.CharacterFolderRootSection })));
 import { loadPreferences } from '@/services/settingsService';
 import {
@@ -108,6 +110,7 @@ export function SettingsView() {
           <div className="flex flex-col gap-6">
             <AdminRoleSection />
             <BackgroundEditorSection />
+            <BaeGyeongMemberSection />
             <CharacterFolderRootSection />
           </div>
         );

@@ -1,0 +1,25 @@
+/* BAE경 설정의 '이 PC 점검' 줄 (HTML .pcrow 그대로: 점 · 굵은 이름 · 흐린 글, 문제는 빨간 글) 과 관리자 표. */
+/* 줄마다 같은 칸 (점 · 이름 · 글): 이름 칸은 가장 긴 이름에 맞춘다 (subgrid — 앱 엔진 Chromium 130 에서 됨) */
+.bae-pcrows { display: grid; grid-template-columns: 9px minmax(160px, max-content) minmax(0, 1fr); gap: 6px 8px; margin: 0; padding: 0; list-style: none; }
+.bae-pcrow { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: baseline; font-size: 0.8125rem; line-height: 1.5; }
+.bae-pcrow > i, .bae-pcdot { flex: none; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--color-text-secondary)); transform: translateY(1px); }
+.bae-pcrow.is-ok > i, .bae-pcdot.is-ok { background: rgb(var(--bae-ok)); }
+.bae-pcrow.is-warn > i, .bae-pcdot.is-warn { background: rgb(var(--bae-warn)); }
+.bae-pcrow.is-bad > i, .bae-pcdot.is-bad { background: rgb(var(--bae-error)); }
+.bae-pcrow > b { font-weight: 650; }
+.bae-pcrow > span:last-child { min-width: 0; color: rgb(var(--color-text-secondary)); overflow-wrap: anywhere; }
+.bae-pcrow.is-bad > span:last-child { color: rgb(var(--bae-error)); }
+.bae-pcrow.is-sum { padding-bottom: 6px; border-bottom: 1px solid rgb(var(--color-bg-border)); }
+.bae-pcrow.is-sum > span:last-child { color: rgb(var(--color-text-primary)); }
+.bae-pc-quiet { color: rgb(var(--color-text-secondary)); }
+
+.bae-pct-wrap { overflow-x: auto; }
+.bae-pct td { vertical-align: middle; white-space: nowrap; }
+.bae-pct .bae-pcdot { margin-right: 8px; transform: none; }
+.bae-pct-pc, .bae-pct-gpu { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.bae-pct tr.is-open td { border-bottom-color: transparent; }
+.bae-pct-detail td { padding: 4px 8px 12px 26px; white-space: normal; background: color-mix(in srgb, rgb(var(--color-bg-primary)) 50%, transparent); }
+@media (max-width: 900px) {
+  .bae-pcrows { grid-template-columns: 9px minmax(0, 1fr); }
+  .bae-pcrow > span:last-child { grid-column: 2; }
+}

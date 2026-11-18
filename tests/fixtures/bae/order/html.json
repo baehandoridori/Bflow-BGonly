@@ -1,0 +1,22 @@
+{
+ "ver": "v0.4.11",
+ "manual": "# BAE PD manual v1.7",
+ "imgModel": "gpt-image-2.5-sunburst",
+ "quality": "high",
+ "tier": "m",
+ "styleSha": "ffd1abc5b7d18910",
+ "libSha": {
+  "L1": "8d12f036fa0c447f",
+  "L2": "14eaf3c710fbb381",
+  "L3": "8fc88b24f0155cd6",
+  "L4": "74d85c4275b20fd8",
+  "L5": "92d58616088cfcc5",
+  "L6": "1ad1eb878b2a4192",
+  "L7": "bcbe22a9a5c23a34",
+  "L8": "8d76c041c743bb96",
+  "L9": "b338929253481408",
+  "L10": "6daf0c6b9d4a28f9",
+  "L11": "e3b52b427d56c557",
+  "L12": "e1f4bf30ea720fed"
+ }
+}

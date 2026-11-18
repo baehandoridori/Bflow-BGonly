@@ -9,6 +9,8 @@
  *   캐릭터 댓글: mention 만. 리테이크 댓글: mention → retake(요청자·알림 대상, 담당자는 알림 대상 안에 있을 때만).
  *   일반 댓글: mention → reply(원댓글 작성자) → auto(담당 > 상대 부서 담당 > 그 씬·상대 부서 같은 씬에 댓글 단 사람).
  *   자동은 활성 에피소드·활성 파트의 씬만. 작성자 본인과 users 에 없는 사람은 뺀다. 이름이 같으면 모두 받는다.
+ *   BAE경 기록 댓글(9단계, bae_job_id 가 있는 댓글 — SQL 은 bae_gyeong_comment_notify): mention → reply → 만든 사람(auto · assignee)
+ *   → 그 스레드에 쓴 사람(auto · participant). 스레드를 읽을 수 없는 사람(만든 사람 · 검수자 · 관리자가 아닌 사람)은 늘 뺀다.
  * 런타임 import 가 없다.
  */
 
@@ -43,7 +45,11 @@ export interface RecipientWorldComment {
   parentCommentId: string | null;
   revisionId: string | null;
   characterId: string | null;
+  /** BAE경 9단계: BAE경 기록(작업 id)의 스레드 댓글이면 그 id. */
+  baeJobId?: string | null;
 }
+/** BAE경 기록 한 건 — 만든 사람. */
+export interface RecipientWorldBaeJob { id: string; makerId: string }
 export interface RecipientWorldRevision {
   id: string;
   requesterId: string | null;
@@ -57,6 +63,10 @@ export interface RecipientWorld {
   scenes: readonly RecipientWorldScene[];
   comments: readonly RecipientWorldComment[];
   revisions: readonly RecipientWorldRevision[];
+  /** BAE경 기록들(9단계). 없으면 BAE 댓글은 아무도 받지 않는다. */
+  baeJobs?: readonly RecipientWorldBaeJob[];
+  /** BAE경 기록을 모두 읽는 사람(Bflow 관리자 + 'BAE경 검수자'). */
+  baeReviewerIds?: readonly string[];
 }
 
 export interface CommentNotificationRecipient {
@@ -80,10 +90,49 @@ function sceneNo(sceneId: string | null): number | null {
   return /^-?[0-9]{1,9}$/.test(trimmed) ? Number(trimmed) : null;
 }
 
+/**
+ * BAE경 기록 스레드를 읽을 수 있는가 — SQL bae_gyeong_comment_can_read 의 짝: users 에 있고, 그 기록을 만든 사람이거나 검수자(관리자 포함).
+ */
+export function canReadBaeThread(world: RecipientWorld, userId: string, jobId: string): boolean {
+  if (!world.users.some((user) => user.id === userId)) return false;
+  const job = world.baeJobs?.find((item) => item.id === jobId);
+  return (!!job && job.makerId === userId) || (world.baeReviewerIds ?? []).includes(userId);
+}
+
+/**
+ * BAE경 기록 댓글의 받는 사람 — SQL bae_gyeong_comment_notify('add') 의 짝(DEVLOG/migrations/2026-11-16-bae-gyeong-comments.sql).
+ * 멘션 > 답글(같은 스레드의 원댓글 작성자) > 기록을 만든 사람(auto · assignee) > 스레드에 쓴 다른 사람(auto · participant).
+ * 쓴 사람 본인과 스레드를 읽을 수 없는 사람은 뺀다.
+ */
+function baeCommentRecipients(world: RecipientWorld, comment: RecipientWorldComment & { baeJobId: string }): CommentNotificationRecipient[] {
+  const jobId = comment.baeJobId;
+  const candidates: Array<CommentNotificationRecipient & { rank: number }> = [];
+  const push = (recipientId: string | null | undefined, reason: CommentNotificationReason, detail: CommentNotificationDetail | null, rank: number) => {
+    if (recipientId) candidates.push({ recipientId, reason, detail, rank });
+  };
+  for (const name of notificationNames(comment.mentions)) for (const user of world.users) if (user.name === name) push(user.id, 'mention', null, 1);
+  if (comment.parentCommentId) {
+    const parent = world.comments.find((item) => item.id === comment.parentCommentId && item.baeJobId === jobId);
+    push(parent?.userId, 'reply', null, 2);
+  }
+  push(world.baeJobs?.find((job) => job.id === jobId)?.makerId, 'auto', 'assignee', 3);
+  for (const other of world.comments) if (other.id !== comment.id && other.baeJobId === jobId) push(other.userId, 'auto', 'participant', 5);
+  const best = new Map<string, CommentNotificationRecipient & { rank: number }>();
+  for (const candidate of candidates) {
+    if (candidate.recipientId === comment.userId || !canReadBaeThread(world, candidate.recipientId, jobId)) continue;
+    const current = best.get(candidate.recipientId);
+    if (!current || candidate.rank < current.rank) best.set(candidate.recipientId, candidate);
+  }
+  return [...best.values()]
+    .sort((a, b) => (a.recipientId < b.recipientId ? -1 : a.recipientId > b.recipientId ? 1 : 0))
+    .map(({ recipientId, reason, detail }) => ({ recipientId, reason, detail }));
+}
+
 /** 새 댓글 하나의 받는 사람(받는 사람 id 순). */
 export function commentNotificationRecipients(world: RecipientWorld, commentId: string): CommentNotificationRecipient[] {
   const comment = world.comments.find((item) => item.id === commentId);
   if (!comment) return [];
+  if (comment.baeJobId) return baeCommentRecipients(world, comment as RecipientWorldComment & { baeJobId: string });
   const usersById = new Set(world.users.map((user) => user.id));
   const idsByName = (name: string) => world.users.filter((user) => user.name === name).map((user) => user.id);
   const candidates: Array<CommentNotificationRecipient & { rank: number }> = [];
@@ -165,5 +214,8 @@ export function commentNotificationEditRecipients(
   const before = new Set(notificationNames(previousMentions));
   const added = [...new Set(notificationNames(nextMentions).filter((name) => !before.has(name)))];
   const ids = new Set(world.users.filter((user) => added.includes(user.name) && user.id !== comment.userId).map((user) => user.id));
+  // BAE경 기록 댓글은 그 스레드를 읽을 수 있는 사람만(SQL bae_gyeong_comment_notify('edit')).
+  const jobId = comment.baeJobId;
+  if (jobId) for (const id of [...ids]) if (!canReadBaeThread(world, id, jobId)) ids.delete(id);
   return [...ids].sort();
 }

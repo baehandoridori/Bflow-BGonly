@@ -31,6 +31,7 @@ test('manifest generation and reading preserve every valid item and the complete
     const generator = path.join(dir, 'scripts', 'generate-manifest.js');
     await copyFile(new URL('../scripts/generate-manifest.js', import.meta.url), generator);
     await copyFile(new URL('../scripts/vacation-token.cjs', import.meta.url), path.join(dir, 'scripts', 'vacation-token.cjs'));
+    await copyFile(new URL('../scripts/installer-size.cjs', import.meta.url), path.join(dir, 'scripts', 'installer-size.cjs'));
     await writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.115.0' }));
     await writeFile(path.join(dir, 'DEVLOG', 'update-notes.json'), JSON.stringify(notes));
     await writeFile(path.join(dir, 'dist', 'BFLOW-Setup.exe'), installer);

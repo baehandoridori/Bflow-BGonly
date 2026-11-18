@@ -15,6 +15,7 @@ import { RetakeNotificationService } from '../../electron/retakeNotificationServ
 import { addCharacterCommentSummaryRows, createCharacterCommentSummaries, validateCharacterCommentIds } from '../shared/characterCommentSummary';
 import { createThreadTodoPreviewStore, type ThreadTodoPreviewStore } from './threadTodoPreviewStore';
 import { createCommentNotificationPreviewStore, type CommentNotificationPreviewStore } from './commentNotificationPreviewStore';
+import { baePreviewCommentReadable } from '../features/bae-gyeong/comments/previewBaeComments';
 import type { RecipientWorld } from '../shared/commentNotificationRecipients';
 import type { CommentNotificationComment } from '../shared/commentNotification';
 import { createBackgroundPreviewGateway, notifyBackgroundPreview, subscribeBackgroundPreview } from '../features/backgrounds/previewGateway';
@@ -4181,7 +4182,9 @@ export function installDevElectronAPI(): void {
     commentNotificationsList: async (cursor, limit) => {
       const user = requireMockCalendarUser();
       const existing = new Set(getMockCommentRows().map((row) => row.id));
-      return commentNotificationPreviewStore().list(user.id, cursor, limit, (commentId) => existing.has(commentId));
+      // BAE경 기록 코멘트(9단계) 줄도 — 실서버 래퍼처럼 댓글이 아직 있고 내가 그 스레드를 읽을 수 있을 때만.
+      return commentNotificationPreviewStore().list(user.id, cursor, limit, (commentId) => existing.has(commentId)
+        || baePreviewCommentReadable(window.localStorage, getMockUsers().map((u) => ({ id: u.id, name: u.name, role: u.role ?? 'user' })), commentId, user.id));
     },
     commentNotificationsMarkRead: async (target) => commentNotificationPreviewStore().markRead(requireMockCalendarUser().id, target),
     onCommentNotificationsChanged: (callback) => commentNotificationPreviewStore().subscribe(callback),

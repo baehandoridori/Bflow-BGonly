@@ -66,6 +66,19 @@ export default defineConfig(({ mode }) => ({
                 },
               },
             },
+            {
+              // BAE경 모델 일꾼 (utilityProcess) → dist-electron/modelWorker.js. 계산 엔진(onnxruntime-node, 네이티브)은 묶지 않고
+              // 앱의 node_modules 에서 읽는다. onstart 를 두지 않는다 — 이 묶음이 마지막에 끝나면 main 과 같이 앱을 띄워야 한다.
+              entry: 'electron/bae/model/modelWorker.ts',
+              vite: {
+                build: {
+                  outDir: 'dist-electron',
+                  rollupOptions: {
+                    external: ['onnxruntime-node'],
+                  },
+                },
+              },
+            },
           ]),
         ]
       : []),

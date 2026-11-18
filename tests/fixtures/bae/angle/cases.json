@@ -1,0 +1,4522 @@
+{
+ "engine": {
+  "electron": "33.4.11",
+  "chrome": "130.0.6723.191"
+ },
+ "pdAnswer": {
+  "obj": {
+   "notes_en": "Continue the window frame into the grey gap on the right, and put a round rug in the middle of the floor; the wall corner on the left stays straight.",
+   "notes_ko": "오른쪽 회색 틈은 창틀을 이어 주고, 바닥 가운데에 둥근 러그를 놓아 주세요."
+  },
+  "usage": {
+   "input_tokens": 2611,
+   "output_tokens": 214,
+   "input_tokens_details": {
+    "cached_tokens": 0
+   }
+  }
+ },
+ "cases": {
+  "btn_left45": {
+   "setup": {
+    "id": "btn_left45",
+    "place": "living",
+    "cam": "P.left45"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -3.882727102699829,
+      -0.06,
+      -3.8702079350734886
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "left45"
+    },
+    "info": "B: 왼쪽으로 약 34° 돌았어요 · 눈높이 그대로 · 고개 아래로 3° · 거리 72% · 왼쪽 45° 자리는 방 밖이라 벽 안쪽에 섰어요 (실험에서 가장 잘 나온 자리) · GPT가 새로 그릴 곳 약 10% (회색 3% · 늘어난 곳 7%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.028018904320987654,
+     "smear": 0.07310956790123457,
+     "under": 0,
+     "all": 0.10112847222222222
+    },
+    "infoAfter": "B: 왼쪽으로 약 34° 돌았어요 · 눈높이 그대로 · 고개 아래로 3° · 거리 72% · 왼쪽 45° 자리는 방 밖이라 벽 안쪽에 섰어요 (실험에서 가장 잘 나온 자리)",
+    "rec": {
+     "name": "거실_정면_각도_왼쪽45.png",
+     "summary": "다른 각도로: 왼쪽 45° (불러온 그림 거실_정면)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 45 degrees to the left around the middle of the room (it now stands near the left side of the room), at the same eye height, and looks back toward the middle of the room, so we see the room from the left at an angle. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "left45",
+      "pos": [
+       -3.882727102699829,
+       -0.06,
+       -3.8702079350734886
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -33.7,
+      "pitch": -2.8,
+      "floorH": 1.14,
+      "dist": 0.72,
+      "label": "왼쪽 45°",
+      "ko": "왼쪽으로 약 34° 돌았어요 · 눈높이 그대로 · 고개 아래로 3° · 거리 72%",
+      "sentence": "The camera has moved about 45 degrees to the left around the middle of the room (it now stands near the left side of the room), at the same eye height, and looks back toward the middle of the room, so we see the room from the left at an angle.",
+      "unseen": {
+       "grey": 0.028,
+       "smear": 0.073,
+       "under": 0,
+       "all": 0.101
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:21ede2f6f693d99f5ac4811e302ef2e5bcff27f859fee2e9d559329825dddc7b",
+      "roughNotes": null,
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 45 degrees to the left around the middle of the room (it now stands near the left side of the room), at the same eye height, and looks back toward the middle of the room, so we see the room from the left at an angle. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "e25d341607dbe9cf3552c1f3fb96358e8e3539987de91d4c5797ea9be202aa42",
+        "bytes": 1002882,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774",
+        "bytes": 1291414,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -3.882727102699829,
+      -0.06,
+      -3.8702079350734886
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "left45"
+    },
+    "info": "B: 왼쪽으로 약 34° 돌았어요 · 눈높이 그대로 · 고개 아래로 3° · 거리 72% · 왼쪽 45° 자리는 방 밖이라 벽 안쪽에 섰어요 (실험에서 가장 잘 나온 자리) · GPT가 새로 그릴 곳 약 10% (회색 3% · 늘어난 곳 7%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.028018904320987654,
+     "smear": 0.07310956790123457,
+     "under": 0,
+     "all": 0.10112847222222222
+    },
+    "infoAfter": "B: 왼쪽으로 약 34° 돌았어요 · 눈높이 그대로 · 고개 아래로 3° · 거리 72% · 왼쪽 45° 자리는 방 밖이라 벽 안쪽에 섰어요 (실험에서 가장 잘 나온 자리)",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:e25d341607dbe9cf3552c1f3fb96358e8e3539987de91d4c5797ea9be202aa42",
+      "img:7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera has moved about 45 degrees to the left around the middle of the room (it now stands near the left side of the room), at the same eye height, and looks back toward the middle of the room, so we see the room from the left at an angle.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "left45",
+      "pos": [
+       -3.882727102699829,
+       -0.06,
+       -3.8702079350734886
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -33.7,
+      "pitch": -2.8,
+      "floorH": 1.14,
+      "dist": 0.72,
+      "label": "왼쪽 45°",
+      "ko": "왼쪽으로 약 34° 돌았어요 · 눈높이 그대로 · 고개 아래로 3° · 거리 72%",
+      "sentence": "The camera has moved about 45 degrees to the left around the middle of the room (it now stands near the left side of the room), at the same eye height, and looks back toward the middle of the room, so we see the room from the left at an angle.",
+      "unseen": {
+       "grey": 0.028,
+       "smear": 0.073,
+       "under": 0,
+       "all": 0.101
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "왼쪽 45°",
+     "line": "다른 각도로: 왼쪽 45° (불러온 그림 거실_정면)",
+     "fileName": "거실_정면_각도_왼쪽45.png",
+     "previews": {
+      "rough": "img:21ede2f6f693d99f5ac4811e302ef2e5bcff27f859fee2e9d559329825dddc7b",
+      "roughNotes": null,
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.04107253086419753,
+     "greyB": 0.04107253086419753,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.043227961033950615,
+      "greyB": 0.043227961033950615,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "btn_left20": {
+   "setup": {
+    "id": "btn_left20",
+    "place": "living",
+    "cam": "P.left20"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -2.820177126517343,
+      -0.06,
+      -1.9523873692672957
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "left20"
+    },
+    "info": "B: 왼쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.017602237654320986,
+     "smear": 0.007619598765432099,
+     "under": 0,
+     "all": 0.025221836419753087
+    },
+    "infoAfter": "B: 왼쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+    "rec": {
+     "name": "거실_정면_각도_왼쪽20.png",
+     "summary": "다른 각도로: 왼쪽 20° (불러온 그림 거실_정면)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the left side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "left20",
+      "pos": [
+       -2.820177126517343,
+       -0.06,
+       -1.9523873692672957
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -20,
+      "pitch": -2.4,
+      "floorH": 1.14,
+      "dist": 0.85,
+      "label": "왼쪽 20°",
+      "ko": "왼쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+      "sentence": "The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the left side.",
+      "unseen": {
+       "grey": 0.018,
+       "smear": 0.008,
+       "under": 0,
+       "all": 0.025
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:4b4a2883b7715e8471de25269e908466115b48d750f07304ee0c9353474e8081",
+      "roughNotes": null,
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the left side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "ad8bcfb25a187ccf82e417d0bd2e1571a6f20dff35c048f81ef472688eba3b92",
+        "bytes": 1135689,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774",
+        "bytes": 1291414,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -2.820177126517343,
+      -0.06,
+      -1.9523873692672957
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "left20"
+    },
+    "info": "B: 왼쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.017602237654320986,
+     "smear": 0.007619598765432099,
+     "under": 0,
+     "all": 0.025221836419753087
+    },
+    "infoAfter": "B: 왼쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:ad8bcfb25a187ccf82e417d0bd2e1571a6f20dff35c048f81ef472688eba3b92",
+      "img:7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the left side.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "left20",
+      "pos": [
+       -2.820177126517343,
+       -0.06,
+       -1.9523873692672957
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -20,
+      "pitch": -2.4,
+      "floorH": 1.14,
+      "dist": 0.85,
+      "label": "왼쪽 20°",
+      "ko": "왼쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+      "sentence": "The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the left side.",
+      "unseen": {
+       "grey": 0.018,
+       "smear": 0.008,
+       "under": 0,
+       "all": 0.025
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "왼쪽 20°",
+     "line": "다른 각도로: 왼쪽 20° (불러온 그림 거실_정면)",
+     "fileName": "거실_정면_각도_왼쪽20.png",
+     "previews": {
+      "rough": "img:4b4a2883b7715e8471de25269e908466115b48d750f07304ee0c9353474e8081",
+      "roughNotes": null,
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.024506172839506173,
+     "greyB": 0.024506172839506173,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.025814857011959878,
+      "greyB": 0.025814857011959878,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "btn_orig": {
+   "setup": {
+    "id": "btn_orig",
+    "place": "living",
+    "cam": "P.orig",
+    "refuse": true
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      0,
+      0,
+      0
+     ],
+     "target": [
+      0,
+      0,
+      -9.700760343236118
+     ],
+     "preset": "orig"
+    },
+    "info": "원래 카메라 그대로예요. 도면에서 빨간 B를 끌거나 위 버튼을 골라 보세요.",
+    "est": "",
+    "unseen": {
+     "grey": 0.00009645061728395061,
+     "smear": 0,
+     "under": 0,
+     "all": 0.00009645061728395061
+    },
+    "infoAfter": "카메라가 원래 자리예요. 도면에서 빨간 B를 옮기거나 위 버튼을 골라 주세요.",
+    "rec": null,
+    "pd": [],
+    "image": []
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      0,
+      0,
+      0
+     ],
+     "target": [
+      0,
+      0,
+      -9.700760343236118
+     ],
+     "preset": "orig"
+    },
+    "info": "원래 카메라 그대로예요. 도면에서 빨간 B를 끌거나 위 버튼을 골라 보세요.",
+    "est": "",
+    "unseen": {
+     "grey": 0.00009645061728395061,
+     "smear": 0,
+     "under": 0,
+     "all": 0.00009645061728395061
+    },
+    "infoAfter": "카메라가 원래 자리예요. 도면에서 빨간 B를 옮기거나 위 버튼을 골라 주세요.",
+    "call": null
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.0028568672839506173,
+     "greyB": 0.0028568672839506173,
+     "greyIoU": 1
+    },
+    "images": []
+   }
+  },
+  "btn_right20": {
+   "setup": {
+    "id": "btn_right20",
+    "place": "classroom",
+    "cam": "P.right20"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      2.740328972490341,
+      -0.06,
+      -1.9439148899090934
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.6586634248373
+     ],
+     "preset": "right20"
+    },
+    "info": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.06278935185185185,
+     "smear": 0.036313657407407406,
+     "under": 0,
+     "all": 0.09910300925925926
+    },
+    "infoAfter": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+    "rec": {
+     "name": "교실_각도_오른쪽20.png",
+     "summary": "다른 각도로: 오른쪽 20° (불러온 그림 교실)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "교실.png",
+      "fromKind": "file",
+      "preset": "right20",
+      "pos": [
+       2.740328972490341,
+       -0.06,
+       -1.9439148899090934
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.6586634248373
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 19.6,
+      "pitch": -2.4,
+      "floorH": 1.14,
+      "dist": 0.85,
+      "label": "오른쪽 20°",
+      "ko": "오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "unseen": {
+       "grey": 0.063,
+       "smear": 0.036,
+       "under": 0,
+       "all": 0.099
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.6586634248373,
+       "Zback": 9.901859964507768,
+       "xmin": -3.7298810166432155,
+       "xmax": 3.240328972490341,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:b579a87fdcb83dbcb091400db1718bc211f04b675d85de0ae8e9b344e2cc75e2",
+      "roughNotes": null,
+      "refs": [
+       "img:9c95964b77d14c683644f3be152747cb242a093df9cc8c037436f176d65c6239"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "149488f8b32d39cb70767677a1f89cf9c4e5ddcf63e40100c9f911a96d34f747",
+        "bytes": 604412,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "dec9c28f1ad9b5deb5dba2108d1b29511d5c543852e98af143cee6639e94e394",
+        "bytes": 485511,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      2.740328972490341,
+      -0.06,
+      -1.9439148899090934
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.6586634248373
+     ],
+     "preset": "right20"
+    },
+    "info": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.06278935185185185,
+     "smear": 0.036313657407407406,
+     "under": 0,
+     "all": 0.09910300925925926
+    },
+    "infoAfter": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:149488f8b32d39cb70767677a1f89cf9c4e5ddcf63e40100c9f911a96d34f747",
+      "img:dec9c28f1ad9b5deb5dba2108d1b29511d5c543852e98af143cee6639e94e394"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "교실.png",
+      "fromKind": "file",
+      "preset": "right20",
+      "pos": [
+       2.740328972490341,
+       -0.06,
+       -1.9439148899090934
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.6586634248373
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 19.6,
+      "pitch": -2.4,
+      "floorH": 1.14,
+      "dist": 0.85,
+      "label": "오른쪽 20°",
+      "ko": "오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "unseen": {
+       "grey": 0.063,
+       "smear": 0.036,
+       "under": 0,
+       "all": 0.099
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.6586634248373,
+       "Zback": 9.901859964507768,
+       "xmin": -3.7298810166432155,
+       "xmax": 3.240328972490341,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "오른쪽 20°",
+     "line": "다른 각도로: 오른쪽 20° (불러온 그림 교실)",
+     "fileName": "교실_각도_오른쪽20.png",
+     "previews": {
+      "rough": "img:b579a87fdcb83dbcb091400db1718bc211f04b675d85de0ae8e9b344e2cc75e2",
+      "roughNotes": null,
+      "refs": [
+       "img:9c95964b77d14c683644f3be152747cb242a093df9cc8c037436f176d65c6239"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.07229359567901235,
+     "greyB": 0.07229359567901235,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.07378622926311729,
+      "greyB": 0.07378622926311729,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.000014316888503086419,
+      "greyB": 0.000014316888503086419,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "btn_right45": {
+   "setup": {
+    "id": "btn_right45",
+    "place": "parking",
+    "kind": "exterior",
+    "cam": "P.right45"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      5.795438458186362,
+      0,
+      -2.4005492092794096
+     ],
+     "target": [
+      0,
+      0.10000000000000009,
+      -8.195987667465772
+     ],
+     "preset": "right45"
+    },
+    "info": "B: 오른쪽으로 약 45° 돌았어요 · 눈높이 그대로 · 고개 수평 · GPT가 새로 그릴 곳 약 31% (회색 27% · 늘어난 곳 5%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.2652874228395062,
+     "smear": 0.04861111111111111,
+     "under": 0,
+     "all": 0.3138985339506173
+    },
+    "infoAfter": "B: 오른쪽으로 약 45° 돌았어요 · 눈높이 그대로 · 고개 수평",
+    "rec": {
+     "name": "주차장_각도_오른쪽45.png",
+     "summary": "다른 각도로: 오른쪽 45° (불러온 그림 주차장)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the buildings, ground, plants and street). It must clearly be the same place as image 2 (the same buildings, ground, plants and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 45 degrees to the right around the middle of the scene (it now stands far to the right), at the same eye height, and looks back toward the middle of the scene, so we see it from the right at an angle. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "exterior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "주차장.png",
+      "fromKind": "file",
+      "preset": "right45",
+      "pos": [
+       5.795438458186362,
+       0,
+       -2.4005492092794096
+      ],
+      "target": [
+       0,
+       0.10000000000000009,
+       -8.195987667465772
+      ],
+      "shift": null,
+      "kind": "exterior",
+      "hfov": 55,
+      "camH": 1.5,
+      "orbit": 45,
+      "pitch": 0.7,
+      "floorH": 1.5,
+      "dist": 1,
+      "label": "오른쪽 45°",
+      "ko": "오른쪽으로 약 45° 돌았어요 · 눈높이 그대로 · 고개 수평",
+      "sentence": "The camera has moved about 45 degrees to the right around the middle of the scene (it now stands far to the right), at the same eye height, and looks back toward the middle of the scene, so we see it from the right at an angle.",
+      "unseen": {
+       "grey": 0.265,
+       "smear": 0.049,
+       "under": 0,
+       "all": 0.314
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 8.195987667465772,
+       "Zback": 9.17241117289689,
+       "xmin": -4.066087487099899,
+       "xmax": 4.103391042027421,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:16411f1de8d83faf1a6f9906fa20f7a5bfd0b8ba80d656c2bdde7ddee8f8f75f",
+      "roughNotes": null,
+      "refs": [
+       "img:0f46438ed2cc65c31880ebb22f4cd1b36a493a75c31d6523666dbd96754c8393"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the buildings, ground, plants and street). It must clearly be the same place as image 2 (the same buildings, ground, plants and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 45 degrees to the right around the middle of the scene (it now stands far to the right), at the same eye height, and looks back toward the middle of the scene, so we see it from the right at an angle. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "3e00398532e68310cb87a05d8791cf0c258de6becbc34a2d76f4a60df0070dcf",
+        "bytes": 1010812,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "7421c1cccd08ffce244906700a57156056d7fa2d46d9e4043f39f95870538c27",
+        "bytes": 1364617,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      5.795438458186362,
+      0,
+      -2.4005492092794096
+     ],
+     "target": [
+      0,
+      0.10000000000000009,
+      -8.195987667465772
+     ],
+     "preset": "right45"
+    },
+    "info": "B: 오른쪽으로 약 45° 돌았어요 · 눈높이 그대로 · 고개 수평 · GPT가 새로 그릴 곳 약 31% (회색 27% · 늘어난 곳 5%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.2652874228395062,
+     "smear": 0.04861111111111111,
+     "under": 0,
+     "all": 0.3138985339506173
+    },
+    "infoAfter": "B: 오른쪽으로 약 45° 돌았어요 · 눈높이 그대로 · 고개 수평",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:3e00398532e68310cb87a05d8791cf0c258de6becbc34a2d76f4a60df0070dcf",
+      "img:7421c1cccd08ffce244906700a57156056d7fa2d46d9e4043f39f95870538c27"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "exterior",
+      "sentence": "The camera has moved about 45 degrees to the right around the middle of the scene (it now stands far to the right), at the same eye height, and looks back toward the middle of the scene, so we see it from the right at an angle.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "주차장.png",
+      "fromKind": "file",
+      "preset": "right45",
+      "pos": [
+       5.795438458186362,
+       0,
+       -2.4005492092794096
+      ],
+      "target": [
+       0,
+       0.10000000000000009,
+       -8.195987667465772
+      ],
+      "shift": null,
+      "kind": "exterior",
+      "hfov": 55,
+      "camH": 1.5,
+      "orbit": 45,
+      "pitch": 0.7,
+      "floorH": 1.5,
+      "dist": 1,
+      "label": "오른쪽 45°",
+      "ko": "오른쪽으로 약 45° 돌았어요 · 눈높이 그대로 · 고개 수평",
+      "sentence": "The camera has moved about 45 degrees to the right around the middle of the scene (it now stands far to the right), at the same eye height, and looks back toward the middle of the scene, so we see it from the right at an angle.",
+      "unseen": {
+       "grey": 0.265,
+       "smear": 0.049,
+       "under": 0,
+       "all": 0.314
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 8.195987667465772,
+       "Zback": 9.17241117289689,
+       "xmin": -4.066087487099899,
+       "xmax": 4.103391042027421,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "오른쪽 45°",
+     "line": "다른 각도로: 오른쪽 45° (불러온 그림 주차장)",
+     "fileName": "주차장_각도_오른쪽45.png",
+     "previews": {
+      "rough": "img:16411f1de8d83faf1a6f9906fa20f7a5bfd0b8ba80d656c2bdde7ddee8f8f75f",
+      "roughNotes": null,
+      "refs": [
+       "img:0f46438ed2cc65c31880ebb22f4cd1b36a493a75c31d6523666dbd96754c8393"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.2707523148148148,
+     "greyB": 0.2707523148148148,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.2714625229070216,
+      "greyB": 0.2714625229070216,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "btn_high": {
+   "setup": {
+    "id": "btn_high",
+    "place": "living",
+    "cam": "P.high"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      0,
+      2.4674578497504496,
+      0
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "high"
+    },
+    "info": "B: 돌지 않았어요 · 바닥에서 3.7m (눈높이 1.2m) · 고개 아래로 16°",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.050443672839506175,
+     "smear": 0,
+     "under": 0,
+     "all": 0.050443672839506175
+    },
+    "infoAfter": "B: 돌지 않았어요 · 바닥에서 3.7m (눈높이 1.2m) · 고개 아래로 16°",
+    "rec": {
+     "name": "거실_정면_각도_하이앵글.png",
+     "summary": "다른 각도로: 하이 앵글 (불러온 그림 거실_정면)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera stays at the same spot but is raised up near the ceiling and looks down at the middle of the room (about 15 degrees down): a high-angle view that shows more of the floor. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "high",
+      "pos": [
+       0,
+       2.4674578497504496,
+       0
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 0,
+      "pitch": -16.5,
+      "floorH": 3.67,
+      "dist": 1,
+      "label": "하이 앵글",
+      "ko": "돌지 않았어요 · 바닥에서 3.7m (눈높이 1.2m) · 고개 아래로 16°",
+      "sentence": "The camera stays at the same spot but is raised up near the ceiling and looks down at the middle of the room (about 15 degrees down): a high-angle view that shows more of the floor.",
+      "unseen": {
+       "grey": 0.05,
+       "smear": 0,
+       "under": 0,
+       "all": 0.05
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:eec17bdf3d5c11216eb99573a548f6ddad29f907711256dd5cc49a826bbd5912",
+      "roughNotes": null,
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera stays at the same spot but is raised up near the ceiling and looks down at the middle of the room (about 15 degrees down): a high-angle view that shows more of the floor. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "990f20d48db892e94c19edcab72e08713dfd9b396fa13f5d2e31b0fe0d56ca1c",
+        "bytes": 1280965,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774",
+        "bytes": 1291414,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      0,
+      2.4674578497504496,
+      0
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "high"
+    },
+    "info": "B: 돌지 않았어요 · 바닥에서 3.7m (눈높이 1.2m) · 고개 아래로 16°",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.050443672839506175,
+     "smear": 0,
+     "under": 0,
+     "all": 0.050443672839506175
+    },
+    "infoAfter": "B: 돌지 않았어요 · 바닥에서 3.7m (눈높이 1.2m) · 고개 아래로 16°",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:990f20d48db892e94c19edcab72e08713dfd9b396fa13f5d2e31b0fe0d56ca1c",
+      "img:7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera stays at the same spot but is raised up near the ceiling and looks down at the middle of the room (about 15 degrees down): a high-angle view that shows more of the floor.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "high",
+      "pos": [
+       0,
+       2.4674578497504496,
+       0
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 0,
+      "pitch": -16.5,
+      "floorH": 3.67,
+      "dist": 1,
+      "label": "하이 앵글",
+      "ko": "돌지 않았어요 · 바닥에서 3.7m (눈높이 1.2m) · 고개 아래로 16°",
+      "sentence": "The camera stays at the same spot but is raised up near the ceiling and looks down at the middle of the room (about 15 degrees down): a high-angle view that shows more of the floor.",
+      "unseen": {
+       "grey": 0.05,
+       "smear": 0,
+       "under": 0,
+       "all": 0.05
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "하이 앵글",
+     "line": "다른 각도로: 하이 앵글 (불러온 그림 거실_정면)",
+     "fileName": "거실_정면_각도_하이앵글.png",
+     "previews": {
+      "rough": "img:eec17bdf3d5c11216eb99573a548f6ddad29f907711256dd5cc49a826bbd5912",
+      "roughNotes": null,
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.05644868827160494,
+     "greyB": 0.05644868827160494,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.05732934268904321,
+      "greyB": 0.05732934268904321,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "btn_low": {
+   "setup": {
+    "id": "btn_low",
+    "place": "classroom",
+    "cam": "P.low"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      0,
+      -0.8999999999999999,
+      -0.482933171241865
+     ],
+     "target": [
+      0,
+      0.5532929007846281,
+      -9.658663424837298
+     ],
+     "preset": "low"
+    },
+    "info": "B: 돌지 않았어요 · 바닥에서 0.3m (눈높이 1.2m) · 고개 위로 9°",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.07769097222222222,
+     "smear": 0,
+     "under": 0,
+     "all": 0.07769097222222222
+    },
+    "infoAfter": "B: 돌지 않았어요 · 바닥에서 0.3m (눈높이 1.2m) · 고개 위로 9°",
+    "rec": {
+     "name": "교실_각도_로우앵글.png",
+     "summary": "다른 각도로: 로우 앵글 (불러온 그림 교실)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera stays at the same spot but is lowered close to the floor (about knee height) and tilts up slightly: a low-angle view, the floor looks thin and the walls and furniture look taller. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "교실.png",
+      "fromKind": "file",
+      "preset": "low",
+      "pos": [
+       0,
+       -0.8999999999999999,
+       -0.482933171241865
+      ],
+      "target": [
+       0,
+       0.5532929007846281,
+       -9.658663424837298
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 0,
+      "pitch": 9,
+      "floorH": 0.3,
+      "dist": 0.95,
+      "label": "로우 앵글",
+      "ko": "돌지 않았어요 · 바닥에서 0.3m (눈높이 1.2m) · 고개 위로 9°",
+      "sentence": "The camera stays at the same spot but is lowered close to the floor (about knee height) and tilts up slightly: a low-angle view, the floor looks thin and the walls and furniture look taller.",
+      "unseen": {
+       "grey": 0.078,
+       "smear": 0,
+       "under": 0,
+       "all": 0.078
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.6586634248373,
+       "Zback": 9.901859964507768,
+       "xmin": -3.7298810166432155,
+       "xmax": 3.240328972490341,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:3c0a3b6e4247fa71f83997b19bd33fdfb587f5b03c15ead1f348a4ac658ff442",
+      "roughNotes": null,
+      "refs": [
+       "img:9c95964b77d14c683644f3be152747cb242a093df9cc8c037436f176d65c6239"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera stays at the same spot but is lowered close to the floor (about knee height) and tilts up slightly: a low-angle view, the floor looks thin and the walls and furniture look taller. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "ffeae44c190b64f717cf4a2a74cb3bd0cc71ac6c8e8b31bb8fc7f7268b7747a5",
+        "bytes": 583721,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "dec9c28f1ad9b5deb5dba2108d1b29511d5c543852e98af143cee6639e94e394",
+        "bytes": 485511,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      0,
+      -0.8999999999999999,
+      -0.482933171241865
+     ],
+     "target": [
+      0,
+      0.5532929007846281,
+      -9.658663424837298
+     ],
+     "preset": "low"
+    },
+    "info": "B: 돌지 않았어요 · 바닥에서 0.3m (눈높이 1.2m) · 고개 위로 9°",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.07769097222222222,
+     "smear": 0,
+     "under": 0,
+     "all": 0.07769097222222222
+    },
+    "infoAfter": "B: 돌지 않았어요 · 바닥에서 0.3m (눈높이 1.2m) · 고개 위로 9°",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:ffeae44c190b64f717cf4a2a74cb3bd0cc71ac6c8e8b31bb8fc7f7268b7747a5",
+      "img:dec9c28f1ad9b5deb5dba2108d1b29511d5c543852e98af143cee6639e94e394"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera stays at the same spot but is lowered close to the floor (about knee height) and tilts up slightly: a low-angle view, the floor looks thin and the walls and furniture look taller.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "교실.png",
+      "fromKind": "file",
+      "preset": "low",
+      "pos": [
+       0,
+       -0.8999999999999999,
+       -0.482933171241865
+      ],
+      "target": [
+       0,
+       0.5532929007846281,
+       -9.658663424837298
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 0,
+      "pitch": 9,
+      "floorH": 0.3,
+      "dist": 0.95,
+      "label": "로우 앵글",
+      "ko": "돌지 않았어요 · 바닥에서 0.3m (눈높이 1.2m) · 고개 위로 9°",
+      "sentence": "The camera stays at the same spot but is lowered close to the floor (about knee height) and tilts up slightly: a low-angle view, the floor looks thin and the walls and furniture look taller.",
+      "unseen": {
+       "grey": 0.078,
+       "smear": 0,
+       "under": 0,
+       "all": 0.078
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.6586634248373,
+       "Zback": 9.901859964507768,
+       "xmin": -3.7298810166432155,
+       "xmax": 3.240328972490341,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "로우 앵글",
+     "line": "다른 각도로: 로우 앵글 (불러온 그림 교실)",
+     "fileName": "교실_각도_로우앵글.png",
+     "previews": {
+      "rough": "img:3c0a3b6e4247fa71f83997b19bd33fdfb587f5b03c15ead1f348a4ac658ff442",
+      "roughNotes": null,
+      "refs": [
+       "img:9c95964b77d14c683644f3be152747cb242a093df9cc8c037436f176d65c6239"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.0834934413580247,
+     "greyB": 0.0834934413580247,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.08405068479938271,
+      "greyB": 0.08405068479938271,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.000014316888503086419,
+      "greyB": 0.000014316888503086419,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "hand": {
+   "setup": {
+    "id": "hand",
+    "place": "living",
+    "cam": "ANG.setPitch(S, ANG.setHeight(S, ANG.setDist(S, ANG.setOrbit(S, P.orig, -25), 1.15), 2.0), -4)"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -3.882727102699829,
+      0.8,
+      0.4098954923668803
+     ],
+     "target": [
+      0,
+      0.04265378637055006,
+      -9.700760343236118
+     ],
+     "preset": null
+    },
+    "info": "B: 왼쪽으로 약 21° 돌았어요 · 바닥에서 2.0m (눈높이 1.2m) · 고개 아래로 4° · 거리 112% · A보다 0.4m 뒤로 뺐어요 · GPT가 새로 그릴 곳 약 22% (회색 22% · 늘어난 곳 0%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.2224633487654321,
+     "smear": 0.0009162808641975308,
+     "under": 0,
+     "all": 0.22337962962962962
+    },
+    "infoAfter": "B: 왼쪽으로 약 21° 돌았어요 · 바닥에서 2.0m (눈높이 1.2m) · 고개 아래로 4° · 거리 112% · A보다 0.4m 뒤로 뺐어요",
+    "rec": {
+     "name": "거실_정면_각도_왼쪽21높게.png",
+     "summary": "다른 각도로: 왼쪽 21° 높게 (불러온 그림 거실_정면)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the middle of the room, so we see the room a little from the left side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": null,
+      "pos": [
+       -3.882727102699829,
+       0.8,
+       0.4098954923668803
+      ],
+      "target": [
+       0,
+       0.04265378637055006,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -21,
+      "pitch": -4,
+      "floorH": 2,
+      "dist": 1.12,
+      "label": "왼쪽 21° 높게",
+      "ko": "왼쪽으로 약 21° 돌았어요 · 바닥에서 2.0m (눈높이 1.2m) · 고개 아래로 4° · 거리 112%",
+      "sentence": "The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the middle of the room, so we see the room a little from the left side.",
+      "unseen": {
+       "grey": 0.222,
+       "smear": 0.001,
+       "under": 0,
+       "all": 0.223
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:76a5fac180180e4a1320114137406825b23068ff5d3c58857609d8c26cf65cec",
+      "roughNotes": null,
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the middle of the room, so we see the room a little from the left side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "221ee20c983b943311f949ebf2d9ee9119830ac4ed28041e9383b36d004ed8e6",
+        "bytes": 1036203,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774",
+        "bytes": 1291414,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -3.882727102699829,
+      0.8,
+      0.4098954923668803
+     ],
+     "target": [
+      0,
+      0.04265378637055006,
+      -9.700760343236118
+     ],
+     "preset": null
+    },
+    "info": "B: 왼쪽으로 약 21° 돌았어요 · 바닥에서 2.0m (눈높이 1.2m) · 고개 아래로 4° · 거리 112% · A보다 0.4m 뒤로 뺐어요 · GPT가 새로 그릴 곳 약 22% (회색 22% · 늘어난 곳 0%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.2224633487654321,
+     "smear": 0.0009162808641975308,
+     "under": 0,
+     "all": 0.22337962962962962
+    },
+    "infoAfter": "B: 왼쪽으로 약 21° 돌았어요 · 바닥에서 2.0m (눈높이 1.2m) · 고개 아래로 4° · 거리 112% · A보다 0.4m 뒤로 뺐어요",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:221ee20c983b943311f949ebf2d9ee9119830ac4ed28041e9383b36d004ed8e6",
+      "img:7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the middle of the room, so we see the room a little from the left side.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": null,
+      "pos": [
+       -3.882727102699829,
+       0.8,
+       0.4098954923668803
+      ],
+      "target": [
+       0,
+       0.04265378637055006,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -21,
+      "pitch": -4,
+      "floorH": 2,
+      "dist": 1.12,
+      "label": "왼쪽 21° 높게",
+      "ko": "왼쪽으로 약 21° 돌았어요 · 바닥에서 2.0m (눈높이 1.2m) · 고개 아래로 4° · 거리 112%",
+      "sentence": "The camera has moved about 20 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the middle of the room, so we see the room a little from the left side.",
+      "unseen": {
+       "grey": 0.222,
+       "smear": 0.001,
+       "under": 0,
+       "all": 0.223
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "왼쪽 21° 높게",
+     "line": "다른 각도로: 왼쪽 21° 높게 (불러온 그림 거실_정면)",
+     "fileName": "거실_정면_각도_왼쪽21높게.png",
+     "previews": {
+      "rough": "img:76a5fac180180e4a1320114137406825b23068ff5d3c58857609d8c26cf65cec",
+      "roughNotes": null,
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.23533179012345679,
+     "greyB": 0.23533179012345679,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.23678852599344136,
+      "greyB": 0.23678852599344136,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "vp": {
+   "setup": {
+    "id": "vp",
+    "place": "meetA",
+    "cam": "ANG.vpCam(S, [-0.34, 0.2])"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -3.0916060290603506,
+      1.022957877262616,
+      0
+     ],
+     "target": [
+      -3.0916060290603506,
+      1.022957877262616,
+      -17.122828767386753
+     ],
+     "preset": "vp",
+     "shift": [
+      -0.34,
+      0.2
+     ]
+    },
+    "info": "B: 투시만 바꾸기: 소실점 왼쪽으로 17% · 지평선 위로 10% (눈높이 2.2m) · 뒷벽은 그대로 · GPT가 새로 그릴 곳 약 11% (회색 11% · 늘어난 곳 0%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.11284722222222222,
+     "smear": 0.0007233796296296296,
+     "under": 0,
+     "all": 0.11357060185185185
+    },
+    "infoAfter": "B: 투시만 바꾸기: 소실점 왼쪽으로 17% · 지평선 위로 10% (눈높이 2.2m) · 뒷벽은 그대로",
+    "rec": {
+     "name": "BAE경_20261103_135753_각도_소실점왼쪽17%지평선위10%.png",
+     "summary": "다른 각도로: 소실점 왼쪽 17% 지평선 위 10% (불러온 그림 BAE경_20261103_135753)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: Only the perspective changes: the vanishing point moved to the left (about 17 percent of the picture width) and higher (about 10 percent of the picture height). The eye moved to the left and up to about 2.2 m above the floor, and the frame slid with it so that the back wall stays exactly where it is in image 2, with the same size and place in the frame. The side walls, the floor and the nearer things are seen from the new eye position (more of the right side and more of the floor and the tops of things, seen a little from above), and vertical lines stay vertical. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "BAE경_20261103_135753.png",
+      "fromKind": "file",
+      "preset": "vp",
+      "pos": [
+       -3.0916060290603506,
+       1.022957877262616,
+       0
+      ],
+      "target": [
+       -3.0916060290603506,
+       1.022957877262616,
+       -17.122828767386753
+      ],
+      "shift": [
+       -0.34,
+       0.2
+      ],
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -10.2,
+      "pitch": 0,
+      "floorH": 2.22,
+      "dist": 0.98,
+      "label": "소실점 왼쪽 17% 지평선 위 10%",
+      "ko": "투시만 바꾸기: 소실점 왼쪽으로 17% · 지평선 위로 10% (눈높이 2.2m) · 뒷벽은 그대로",
+      "sentence": "Only the perspective changes: the vanishing point moved to the left (about 17 percent of the picture width) and higher (about 10 percent of the picture height). The eye moved to the left and up to about 2.2 m above the floor, and the frame slid with it so that the back wall stays exactly where it is in image 2, with the same size and place in the frame. The side walls, the floor and the nearer things are seen from the new eye position (more of the right side and more of the floor and the tops of things, seen a little from above), and vertical lines stay vertical.",
+      "unseen": {
+       "grey": 0.113,
+       "smear": 0.001,
+       "under": 0,
+       "all": 0.114
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 17.122828767386753,
+       "Zback": 17.467411545474214,
+       "xmin": -8.437020241781749,
+       "xmax": 8.101428330899695,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:61d693379966e4268491964537c4013548b6a2fe64a5e70784ba262d859d53c2",
+      "roughNotes": null,
+      "refs": [
+       "img:1e3ecebbcec0f681111cf5fd48cfddc94f4a18ad6756560289a5d5f9b6760fa5"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: Only the perspective changes: the vanishing point moved to the left (about 17 percent of the picture width) and higher (about 10 percent of the picture height). The eye moved to the left and up to about 2.2 m above the floor, and the frame slid with it so that the back wall stays exactly where it is in image 2, with the same size and place in the frame. The side walls, the floor and the nearer things are seen from the new eye position (more of the right side and more of the floor and the tops of things, seen a little from above), and vertical lines stay vertical. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "97079efe40bcf401a969df299c53094b104f7969bfd6a68932f22249469ec2c2",
+        "bytes": 152498,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "2c9feeecbb9548f575cf355dc4c267b2de837741b3de5de3b1defce93b83a474",
+        "bytes": 152180,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -3.0916060290603506,
+      1.022957877262616,
+      0
+     ],
+     "target": [
+      -3.0916060290603506,
+      1.022957877262616,
+      -17.122828767386753
+     ],
+     "preset": "vp",
+     "shift": [
+      -0.34,
+      0.2
+     ]
+    },
+    "info": "B: 투시만 바꾸기: 소실점 왼쪽으로 17% · 지평선 위로 10% (눈높이 2.2m) · 뒷벽은 그대로 · GPT가 새로 그릴 곳 약 11% (회색 11% · 늘어난 곳 0%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.11284722222222222,
+     "smear": 0.0007233796296296296,
+     "under": 0,
+     "all": 0.11357060185185185
+    },
+    "infoAfter": "B: 투시만 바꾸기: 소실점 왼쪽으로 17% · 지평선 위로 10% (눈높이 2.2m) · 뒷벽은 그대로",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:97079efe40bcf401a969df299c53094b104f7969bfd6a68932f22249469ec2c2",
+      "img:2c9feeecbb9548f575cf355dc4c267b2de837741b3de5de3b1defce93b83a474"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "Only the perspective changes: the vanishing point moved to the left (about 17 percent of the picture width) and higher (about 10 percent of the picture height). The eye moved to the left and up to about 2.2 m above the floor, and the frame slid with it so that the back wall stays exactly where it is in image 2, with the same size and place in the frame. The side walls, the floor and the nearer things are seen from the new eye position (more of the right side and more of the floor and the tops of things, seen a little from above), and vertical lines stay vertical.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "BAE경_20261103_135753.png",
+      "fromKind": "file",
+      "preset": "vp",
+      "pos": [
+       -3.0916060290603506,
+       1.022957877262616,
+       0
+      ],
+      "target": [
+       -3.0916060290603506,
+       1.022957877262616,
+       -17.122828767386753
+      ],
+      "shift": [
+       -0.34,
+       0.2
+      ],
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -10.2,
+      "pitch": 0,
+      "floorH": 2.22,
+      "dist": 0.98,
+      "label": "소실점 왼쪽 17% 지평선 위 10%",
+      "ko": "투시만 바꾸기: 소실점 왼쪽으로 17% · 지평선 위로 10% (눈높이 2.2m) · 뒷벽은 그대로",
+      "sentence": "Only the perspective changes: the vanishing point moved to the left (about 17 percent of the picture width) and higher (about 10 percent of the picture height). The eye moved to the left and up to about 2.2 m above the floor, and the frame slid with it so that the back wall stays exactly where it is in image 2, with the same size and place in the frame. The side walls, the floor and the nearer things are seen from the new eye position (more of the right side and more of the floor and the tops of things, seen a little from above), and vertical lines stay vertical.",
+      "unseen": {
+       "grey": 0.113,
+       "smear": 0.001,
+       "under": 0,
+       "all": 0.114
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 17.122828767386753,
+       "Zback": 17.467411545474214,
+       "xmin": -8.437020241781749,
+       "xmax": 8.101428330899695,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "소실점 왼쪽 17% 지평선 위 10%",
+     "line": "다른 각도로: 소실점 왼쪽 17% 지평선 위 10% (불러온 그림 BAE경_20261103_135753)",
+     "fileName": "BAE경_20261103_135753_각도_소실점왼쪽17%지평선위10%.png",
+     "previews": {
+      "rough": "img:61d693379966e4268491964537c4013548b6a2fe64a5e70784ba262d859d53c2",
+      "roughNotes": null,
+      "refs": [
+       "img:1e3ecebbcec0f681111cf5fd48cfddc94f4a18ad6756560289a5d5f9b6760fa5"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.12624614197530865,
+     "greyB": 0.12624614197530865,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.12753785686728394,
+      "greyB": 0.12753785686728394,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.000047471788194444445,
+      "greyB": 0.000047471788194444445,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "tight": {
+   "setup": {
+    "id": "tight",
+    "place": "living",
+    "cam": "ANG.setOrbit(S, ANG.setDist(S, P.orig, 0.5), -5)"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -0.4227384864658856,
+      0,
+      -4.868837332540877
+     ],
+     "target": [
+      0,
+      0,
+      -9.700760343236118
+     ],
+     "preset": null
+    },
+    "info": "B: 왼쪽으로 약 5° 돌았어요 · 눈높이 그대로 · 고개 수평 · 거리 50% · 가까이 잡은 샷 (원래 그림의 24%만 보여요): GPT에게 그 부분만 잘라 보내고 화면 밖은 그리지 말라고 적어요",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.0015432098765432098,
+     "smear": 0.0035204475308641976,
+     "under": 0,
+     "all": 0.005063657407407407
+    },
+    "infoAfter": "B: 왼쪽으로 약 5° 돌았어요 · 눈높이 그대로 · 고개 수평 · 거리 50% · 가까이 잡은 샷 (원래 그림의 24%만 보여요): GPT에게 그 부분만 잘라 보내고 화면 밖은 그리지 말라고 적어요",
+    "rec": {
+     "name": "거실_정면_각도_왼쪽5가까이.png",
+     "summary": "다른 각도로: 왼쪽 5° 가까이 (불러온 그림 거실_정면)",
+     "prompt": "Image 1 shows part of the place of image 2 from a new, closer camera: image 2 is the part of the original picture that this camera sees (cut out of the original and enlarged), and a 3D copy of the original picture was moved to this camera, so image 1 has the right camera, framing and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its framing, its composition and the positions and sizes of everything in it. Do not zoom out or widen the view, and do not add anything that is not in image 1: what is outside its frame stays out of the picture. Redraw everything cleanly and fill the grey areas by continuing what is next to them. Everything must look exactly as it does in image 2 (the same shapes, colors, materials and light). For reference, the camera move from the original picture's camera is: The camera has moved about 5 degrees to the left around the part of the room shown in image 2 (it now stands to the left of where the reference was drawn), it is closer to the part of the room shown in image 2 (about 50 percent of the distance), it stays at the same eye height, and it looks straight at it. It is a closer, tighter shot: that part fills the whole frame, and nothing outside it is seen. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": null,
+      "pos": [
+       -0.4227384864658856,
+       0,
+       -4.868837332540877
+      ],
+      "target": [
+       0,
+       0,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -5,
+      "pitch": 0,
+      "floorH": 1.2,
+      "dist": 0.5,
+      "label": "왼쪽 5° 가까이",
+      "ko": "왼쪽으로 약 5° 돌았어요 · 눈높이 그대로 · 고개 수평 · 거리 50%",
+      "sentence": "The camera has moved about 5 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), it is closer to the middle of the room (about 50 percent of the distance), it stays at the same eye height, and it looks at the middle of the room, so we see the room a little from the left side.",
+      "unseen": {
+       "grey": 0.002,
+       "smear": 0.004,
+       "under": 0,
+       "all": 0.005
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": {
+       "box": [
+        0.242,
+        0.236,
+        0.733,
+        0.719
+       ],
+       "area": 0.237
+      },
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:f66eb9548d189d56c8df81597520cfbae2a215b5bfee87e838ab0bccda7edee0",
+      "roughNotes": null,
+      "refs": [
+       "img:11765ad69fce78ec3013ae95fc71cbd814e9684916cd2592108fb622f0ec4429"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows part of the place of image 2 from a new, closer camera: image 2 is the part of the original picture that this camera sees (cut out of the original and enlarged), and a 3D copy of the original picture was moved to this camera, so image 1 has the right camera, framing and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Draw the finished background exactly from the camera of image 1: keep its framing, its composition and the positions and sizes of everything in it. Do not zoom out or widen the view, and do not add anything that is not in image 1: what is outside its frame stays out of the picture. Redraw everything cleanly and fill the grey areas by continuing what is next to them. Everything must look exactly as it does in image 2 (the same shapes, colors, materials and light). For reference, the camera move from the original picture's camera is: The camera has moved about 5 degrees to the left around the part of the room shown in image 2 (it now stands to the left of where the reference was drawn), it is closer to the part of the room shown in image 2 (about 50 percent of the distance), it stays at the same eye height, and it looks straight at it. It is a closer, tighter shot: that part fills the whole frame, and nothing outside it is seen. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "ee315479e3025a3a623944be01ad554e5ce01efa5b1e687be666e9594600cfbb",
+        "bytes": 1015084,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "3213b7b5bbe05388cabe679fc858edb9ad3ad3440642d67b2b77188916205690",
+        "bytes": 1100332,
+        "format": "png",
+        "width": 1536,
+        "height": 851
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      -0.4227384864658856,
+      0,
+      -4.868837332540877
+     ],
+     "target": [
+      0,
+      0,
+      -9.700760343236118
+     ],
+     "preset": null
+    },
+    "info": "B: 왼쪽으로 약 5° 돌았어요 · 눈높이 그대로 · 고개 수평 · 거리 50% · 가까이 잡은 샷 (원래 그림의 24%만 보여요): GPT에게 그 부분만 잘라 보내고 화면 밖은 그리지 말라고 적어요",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.0015432098765432098,
+     "smear": 0.0035204475308641976,
+     "under": 0,
+     "all": 0.005063657407407407
+    },
+    "infoAfter": "B: 왼쪽으로 약 5° 돌았어요 · 눈높이 그대로 · 고개 수평 · 거리 50% · 가까이 잡은 샷 (원래 그림의 24%만 보여요): GPT에게 그 부분만 잘라 보내고 화면 밖은 그리지 말라고 적어요",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:ee315479e3025a3a623944be01ad554e5ce01efa5b1e687be666e9594600cfbb",
+      "img:3213b7b5bbe05388cabe679fc858edb9ad3ad3440642d67b2b77188916205690"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera has moved about 5 degrees to the left around the part of the room shown in image 2 (it now stands to the left of where the reference was drawn), it is closer to the part of the room shown in image 2 (about 50 percent of the distance), it stays at the same eye height, and it looks straight at it. It is a closer, tighter shot: that part fills the whole frame, and nothing outside it is seen.",
+      "n": 0,
+      "notes": false,
+      "crop": true,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": null,
+      "pos": [
+       -0.4227384864658856,
+       0,
+       -4.868837332540877
+      ],
+      "target": [
+       0,
+       0,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -5,
+      "pitch": 0,
+      "floorH": 1.2,
+      "dist": 0.5,
+      "label": "왼쪽 5° 가까이",
+      "ko": "왼쪽으로 약 5° 돌았어요 · 눈높이 그대로 · 고개 수평 · 거리 50%",
+      "sentence": "The camera has moved about 5 degrees to the left around the middle of the room (it now stands to the left of where the reference was drawn), it is closer to the middle of the room (about 50 percent of the distance), it stays at the same eye height, and it looks at the middle of the room, so we see the room a little from the left side.",
+      "unseen": {
+       "grey": 0.002,
+       "smear": 0.004,
+       "under": 0,
+       "all": 0.005
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": {
+       "box": [
+        0.242,
+        0.236,
+        0.733,
+        0.719
+       ],
+       "area": 0.237
+      },
+      "memo": null
+     },
+     "label": "왼쪽 5° 가까이",
+     "line": "다른 각도로: 왼쪽 5° 가까이 (불러온 그림 거실_정면)",
+     "fileName": "거실_정면_각도_왼쪽5가까이.png",
+     "previews": {
+      "rough": "img:f66eb9548d189d56c8df81597520cfbae2a215b5bfee87e838ab0bccda7edee0",
+      "roughNotes": null,
+      "refs": [
+       "img:11765ad69fce78ec3013ae95fc71cbd814e9684916cd2592108fb622f0ec4429"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.0036554783950617283,
+     "greyB": 0.0036554783950617283,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.004050925925925926,
+      "greyB": 0.004050925925925926,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 851,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "under": {
+   "setup": {
+    "id": "under",
+    "place": "meetC",
+    "cam": "ANG.setPitch(S, ANG.setHeight(S, ANG.setDist(S, ANG.setOrbit(S, P.orig, 0), 1), 0.15), 5)"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      0,
+      -1.05,
+      0
+     ],
+     "target": [
+      0,
+      1.1372165881481002,
+      -25
+     ],
+     "preset": null
+    },
+    "info": "B: 돌지 않았어요 · 바닥에서 0.15m (눈높이 1.2m) · 고개 위로 5° · 눈보다 높은 것의 밑면 4% (탁자 윗면 같은 것: 어둡게 칠해서 보내고, 주문서에 윗면은 안 보인다고 적어요) · GPT가 새로 그릴 곳 약 28% (회색 23% · 늘어난 곳 0% · 밑면 4%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.2312403549382716,
+     "smear": 0,
+     "under": 0.044126157407407406,
+     "all": 0.275366512345679
+    },
+    "infoAfter": "B: 돌지 않았어요 · 바닥에서 0.15m (눈높이 1.2m) · 고개 위로 5°",
+    "rec": {
+     "name": "BAE경_20261103_140722_각도_낮게.png",
+     "summary": "다른 각도로: 낮게 (불러온 그림 BAE경_20261103_140722)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. The eye is now lower than some things, such as a table top, so their top surfaces are hidden from here. The darker flat shapes in image 1 are their undersides seen from below: draw them as the underside and the front edge of those things, with their legs. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera stays at the same spot, it is lowered close to the floor (about knee height), and it looks at the middle of the room (tilted about 5 degrees up). A low-angle view: the floor looks thin and the walls and furniture look taller. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "BAE경_20261103_140722.png",
+      "fromKind": "file",
+      "preset": null,
+      "pos": [
+       0,
+       -1.05,
+       0
+      ],
+      "target": [
+       0,
+       1.1372165881481002,
+       -25
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 0,
+      "pitch": 5,
+      "floorH": 0.15,
+      "dist": 1,
+      "label": "낮게",
+      "ko": "돌지 않았어요 · 바닥에서 0.15m (눈높이 1.2m) · 고개 위로 5°",
+      "sentence": "The camera stays at the same spot, it is lowered close to the floor (about knee height), and it looks at the middle of the room (tilted about 5 degrees up). A low-angle view: the floor looks thin and the walls and furniture look taller.",
+      "unseen": {
+       "grey": 0.231,
+       "smear": 0,
+       "under": 0.044,
+       "all": 0.275
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 25,
+       "Zback": 25,
+       "xmin": -12.505810003489218,
+       "xmax": 12.505810003489218,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:35282c37fe2d62f12f5a33f384ff81906bd5087b334976d80cd3e4258d1c441e",
+      "roughNotes": null,
+      "refs": [
+       "img:ed85ee98d218655766ff9113f6730c17c83bef24261ef3d538220f33226857a7"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. The eye is now lower than some things, such as a table top, so their top surfaces are hidden from here. The darker flat shapes in image 1 are their undersides seen from below: draw them as the underside and the front edge of those things, with their legs. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera stays at the same spot, it is lowered close to the floor (about knee height), and it looks at the middle of the room (tilted about 5 degrees up). A low-angle view: the floor looks thin and the walls and furniture look taller. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "ef9d1b8a6175e8fe5f6f417e5edffbe77d59f44bb5cb388aab5e993c1e9fef5d",
+        "bytes": 133389,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "5177f4fa59bcd5278294e4a35e1340f02a1ab263ee803bb44bb800002b63eaed",
+        "bytes": 141520,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      0,
+      -1.05,
+      0
+     ],
+     "target": [
+      0,
+      1.1372165881481002,
+      -25
+     ],
+     "preset": null
+    },
+    "info": "B: 돌지 않았어요 · 바닥에서 0.15m (눈높이 1.2m) · 고개 위로 5° · 눈보다 높은 것의 밑면 4% (탁자 윗면 같은 것: 어둡게 칠해서 보내고, 주문서에 윗면은 안 보인다고 적어요) · GPT가 새로 그릴 곳 약 28% (회색 23% · 늘어난 곳 0% · 밑면 4%)",
+    "est": "GPT 그림 1장 약 80~100원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.2312403549382716,
+     "smear": 0,
+     "under": 0.044126157407407406,
+     "all": 0.275366512345679
+    },
+    "infoAfter": "B: 돌지 않았어요 · 바닥에서 0.15m (눈높이 1.2m) · 고개 위로 5°",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:ef9d1b8a6175e8fe5f6f417e5edffbe77d59f44bb5cb388aab5e993c1e9fef5d",
+      "img:5177f4fa59bcd5278294e4a35e1340f02a1ab263ee803bb44bb800002b63eaed"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera stays at the same spot, it is lowered close to the floor (about knee height), and it looks at the middle of the room (tilted about 5 degrees up). A low-angle view: the floor looks thin and the walls and furniture look taller.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": true
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "BAE경_20261103_140722.png",
+      "fromKind": "file",
+      "preset": null,
+      "pos": [
+       0,
+       -1.05,
+       0
+      ],
+      "target": [
+       0,
+       1.1372165881481002,
+       -25
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 0,
+      "pitch": 5,
+      "floorH": 0.15,
+      "dist": 1,
+      "label": "낮게",
+      "ko": "돌지 않았어요 · 바닥에서 0.15m (눈높이 1.2m) · 고개 위로 5°",
+      "sentence": "The camera stays at the same spot, it is lowered close to the floor (about knee height), and it looks at the middle of the room (tilted about 5 degrees up). A low-angle view: the floor looks thin and the walls and furniture look taller.",
+      "unseen": {
+       "grey": 0.231,
+       "smear": 0,
+       "under": 0.044,
+       "all": 0.275
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 25,
+       "Zback": 25,
+       "xmin": -12.505810003489218,
+       "xmax": 12.505810003489218,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "낮게",
+     "line": "다른 각도로: 낮게 (불러온 그림 BAE경_20261103_140722)",
+     "fileName": "BAE경_20261103_140722_각도_낮게.png",
+     "previews": {
+      "rough": "img:35282c37fe2d62f12f5a33f384ff81906bd5087b334976d80cd3e4258d1c441e",
+      "roughNotes": null,
+      "refs": [
+       "img:ed85ee98d218655766ff9113f6730c17c83bef24261ef3d538220f33226857a7"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.24012345679012345,
+     "greyB": 0.24012345679012345,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.2403443889853395,
+      "greyB": 0.2403443889853395,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "same2": {
+   "setup": {
+    "id": "same2",
+    "place": "meetA",
+    "extras": [
+     {
+      "pic": "meetC",
+      "pose": {
+       "pos": [
+        -1.2,
+        0,
+        -3.4
+       ],
+       "yaw": 62,
+       "s": 1
+      }
+     }
+    ],
+    "cam": "ANG.fixCam(S, { pos: [-2.4, 0.3, -1.0], target: [1.6, -0.2, -8.5] })",
+    "strokes": [
+     {
+      "col": "#a9d6f5",
+      "w": 0.035,
+      "pts": [
+       [
+        0.8,
+        0.3
+       ],
+       [
+        0.86,
+        0.32
+       ],
+       [
+        0.92,
+        0.36
+       ],
+       [
+        0.95,
+        0.42
+       ]
+      ],
+      "seq": 1
+     }
+    ]
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [
+     "ready"
+    ],
+    "cam": {
+     "pos": [
+      -2.4,
+      0.3,
+      -1
+     ],
+     "target": [
+      1.6,
+      -0.2,
+      -8.5
+     ],
+     "preset": null
+    },
+    "info": "B: 왼쪽으로 약 17° 돌았어요 · 바닥에서 1.5m (눈높이 1.2m) · 고개 아래로 3° · 가운데보다 오른쪽을 봐요 · 그림 2장 합침 · 러프 덧댄 곳 1획",
+    "est": "GPT 그림 1장 약 90~120원 (보내는 그림 3장) · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.037760416666666664,
+     "smear": 0,
+     "under": 0,
+     "all": 0.037760416666666664
+    },
+    "infoAfter": "B: 왼쪽으로 약 17° 돌았어요 · 바닥에서 1.5m (눈높이 1.2m) · 고개 아래로 3° · 가운데보다 오른쪽을 봐요 · 그림 2장 합침 · 러프 덧댄 곳 1획",
+    "rec": {
+     "name": "BAE경_20261103_135753_각도_왼쪽17.png",
+     "summary": "다른 각도로: 왼쪽 17° + 같은 공간 그림 1장 + 러프 덧대기 (불러온 그림 BAE경_20261103_135753)",
+     "prompt": "Image 1 shows the place of images 2 and 3 from a new camera: images 2 and 3 are two views of the same place, 3D copies of them were put together and moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts none of these pictures showed, and some edges are stretched or smeared. Loose colored brush strokes on image 1 are the artist's rough notes for what is there: follow their colors and placement, but draw those things properly in the style. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as images 2 and 3 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move from the camera of image 2 is: The camera has moved about 15 degrees to the left around the right part of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the right part of the room, so we see the room a little from the left side. Keep the exact drawing style of the references: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "BAE경_20261103_135753.png",
+      "fromKind": "file",
+      "preset": null,
+      "pos": [
+       -2.4,
+       0.3,
+       -1
+      ],
+      "target": [
+       1.6,
+       -0.2,
+       -8.5
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -17.4,
+      "pitch": -3.4,
+      "floorH": 1.5,
+      "dist": 0.98,
+      "label": "왼쪽 17°",
+      "ko": "왼쪽으로 약 17° 돌았어요 · 바닥에서 1.5m (눈높이 1.2m) · 고개 아래로 3° · 가운데보다 오른쪽을 봐요",
+      "sentence": "The camera has moved about 15 degrees to the left around the right part of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the right part of the room, so we see the room a little from the left side.",
+      "unseen": {
+       "grey": 0.038,
+       "smear": 0,
+       "under": 0,
+       "all": 0.038
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 17.122828767386753,
+       "Zback": 17.467411545474214,
+       "xmin": -8.437020241781749,
+       "xmax": 8.101428330899695,
+       "fitOk": true
+      },
+      "sources": [
+       {
+        "letter": "C",
+        "kind": "file",
+        "id": null,
+        "name": "BAE경_20261103_140722.png",
+        "pos": [
+         -1.2,
+         0,
+         -3.4
+        ],
+        "yaw": 62,
+        "size": 1,
+        "eye": null,
+        "wall": "right",
+        "dist": 10.53,
+        "anchors": true,
+        "ep": "cpu",
+        "sent": true,
+        "key": "f0a7d0c93a7c8_212018"
+       }
+      ],
+      "notes": 1,
+      "shares": [
+       0.038,
+       0.636,
+       0.327
+      ],
+      "crop": null,
+      "memo": null
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:f11e9fe5b18938383cdfb0c5970151c57cdd8f4274e4f223437f9f2befccc7bc",
+      "roughNotes": null,
+      "refs": [
+       "img:1e3ecebbcec0f681111cf5fd48cfddc94f4a18ad6756560289a5d5f9b6760fa5",
+       "img:ed85ee98d218655766ff9113f6730c17c83bef24261ef3d538220f33226857a7"
+      ],
+      "notes": ""
+     }
+    },
+    "pd": [],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of images 2 and 3 from a new camera: images 2 and 3 are two views of the same place, 3D copies of them were put together and moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts none of these pictures showed, and some edges are stretched or smeared. Loose colored brush strokes on image 1 are the artist's rough notes for what is there: follow their colors and placement, but draw those things properly in the style. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as images 2 and 3 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move from the camera of image 2 is: The camera has moved about 15 degrees to the left around the right part of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the right part of the room, so we see the room a little from the left side. Keep the exact drawing style of the references: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "2161e7d2f0cd121a82b25987cff70c5e5034f4789ed1ba17925ac80cd9b39837",
+        "bytes": 114966,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "2c9feeecbb9548f575cf355dc4c267b2de837741b3de5de3b1defce93b83a474",
+        "bytes": 152180,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image3.png",
+        "type": "image/png",
+        "sha256": "5177f4fa59bcd5278294e4a35e1340f02a1ab263ee803bb44bb800002b63eaed",
+        "bytes": 141520,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [
+     "ready"
+    ],
+    "cam": {
+     "pos": [
+      -2.4,
+      0.3,
+      -1
+     ],
+     "target": [
+      1.6,
+      -0.2,
+      -8.5
+     ],
+     "preset": null
+    },
+    "info": "B: 왼쪽으로 약 17° 돌았어요 · 바닥에서 1.5m (눈높이 1.2m) · 고개 아래로 3° · 가운데보다 오른쪽을 봐요 · 그림 2장 합침 · 러프 덧댄 곳 1획",
+    "est": "GPT 그림 1장 약 90~120원 (보내는 그림 3장) · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.037760416666666664,
+     "smear": 0,
+     "under": 0,
+     "all": 0.037760416666666664
+    },
+    "infoAfter": "B: 왼쪽으로 약 17° 돌았어요 · 바닥에서 1.5m (눈높이 1.2m) · 고개 아래로 3° · 가운데보다 오른쪽을 봐요 · 그림 2장 합침 · 러프 덧댄 곳 1획",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:2161e7d2f0cd121a82b25987cff70c5e5034f4789ed1ba17925ac80cd9b39837",
+      "img:2c9feeecbb9548f575cf355dc4c267b2de837741b3de5de3b1defce93b83a474",
+      "img:5177f4fa59bcd5278294e4a35e1340f02a1ab263ee803bb44bb800002b63eaed"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera has moved about 15 degrees to the left around the right part of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the right part of the room, so we see the room a little from the left side.",
+      "n": 1,
+      "notes": true,
+      "crop": false,
+      "under": false
+     },
+     "memo": null,
+     "record": {
+      "fromId": null,
+      "fromName": "BAE경_20261103_135753.png",
+      "fromKind": "file",
+      "preset": null,
+      "pos": [
+       -2.4,
+       0.3,
+       -1
+      ],
+      "target": [
+       1.6,
+       -0.2,
+       -8.5
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": -17.4,
+      "pitch": -3.4,
+      "floorH": 1.5,
+      "dist": 0.98,
+      "label": "왼쪽 17°",
+      "ko": "왼쪽으로 약 17° 돌았어요 · 바닥에서 1.5m (눈높이 1.2m) · 고개 아래로 3° · 가운데보다 오른쪽을 봐요",
+      "sentence": "The camera has moved about 15 degrees to the left around the right part of the room (it now stands to the left of where the reference was drawn), it is a little higher than eye height, and it looks at the right part of the room, so we see the room a little from the left side.",
+      "unseen": {
+       "grey": 0.038,
+       "smear": 0,
+       "under": 0,
+       "all": 0.038
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 17.122828767386753,
+       "Zback": 17.467411545474214,
+       "xmin": -8.437020241781749,
+       "xmax": 8.101428330899695,
+       "fitOk": true
+      },
+      "sources": [
+       {
+        "letter": "C",
+        "kind": "file",
+        "id": null,
+        "name": "BAE경_20261103_140722.png",
+        "pos": [
+         -1.2,
+         0,
+         -3.4
+        ],
+        "yaw": 62,
+        "size": 1,
+        "eye": null,
+        "wall": "right",
+        "dist": 10.53,
+        "anchors": true,
+        "ep": "cpu",
+        "sent": true,
+        "key": "f0a7d0c93a7c8_212018"
+       }
+      ],
+      "notes": 1,
+      "shares": [
+       0.038,
+       0.636,
+       0.327
+      ],
+      "crop": null,
+      "memo": null
+     },
+     "label": "왼쪽 17°",
+     "line": "다른 각도로: 왼쪽 17° + 같은 공간 그림 1장 + 러프 덧대기 (불러온 그림 BAE경_20261103_135753)",
+     "fileName": "BAE경_20261103_135753_각도_왼쪽17.png",
+     "previews": {
+      "rough": "img:f11e9fe5b18938383cdfb0c5970151c57cdd8f4274e4f223437f9f2befccc7bc",
+      "roughNotes": null,
+      "refs": [
+       "img:1e3ecebbcec0f681111cf5fd48cfddc94f4a18ad6756560289a5d5f9b6760fa5",
+       "img:ed85ee98d218655766ff9113f6730c17c83bef24261ef3d538220f33226857a7"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.03765817901234568,
+     "greyB": 0.03765817901234568,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.037656430844907406,
+      "greyB": 0.037656430844907406,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.000047471788194444445,
+      "greyB": 0.000047471788194444445,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "memo": {
+   "setup": {
+    "id": "memo",
+    "place": "living",
+    "cam": "P.right20",
+    "strokes": [
+     {
+      "col": "#a9d6f5",
+      "w": 0.035,
+      "pts": [
+       [
+        0.8,
+        0.3
+       ],
+       [
+        0.86,
+        0.32
+       ],
+       [
+        0.92,
+        0.36
+       ],
+       [
+        0.95,
+        0.42
+       ]
+      ],
+      "seq": 1
+     },
+     {
+      "col": "#c8a27a",
+      "w": 0.05,
+      "pts": [
+       [
+        0.3,
+        0.86
+       ],
+       [
+        0.45,
+        0.88
+       ],
+       [
+        0.62,
+        0.87
+       ]
+      ],
+      "seq": 2
+     },
+     {
+      "col": "#000",
+      "w": 0.02,
+      "pts": [
+       [
+        0.5,
+        0.87
+       ],
+       [
+        0.55,
+        0.87
+       ]
+      ],
+      "erase": true,
+      "seq": 3
+     }
+    ],
+    "notes": [
+     {
+      "type": "text",
+      "x": 0.62,
+      "y": 0.22,
+      "text": "여기 창문 이어서",
+      "size": 0.03,
+      "seq": 4
+     },
+     {
+      "type": "arrow",
+      "x1": 0.7,
+      "y1": 0.3,
+      "x2": 0.88,
+      "y2": 0.4,
+      "w": 0.0064,
+      "seq": 5
+     },
+     {
+      "type": "mark",
+      "pts": [
+       [
+        0.4,
+        0.8
+       ],
+       [
+        0.48,
+        0.76
+       ],
+       [
+        0.56,
+        0.8
+       ],
+       [
+        0.52,
+        0.88
+       ],
+       [
+        0.42,
+        0.87
+       ],
+       [
+        0.4,
+        0.8
+       ]
+      ],
+      "w": 0.0064,
+      "seq": 6
+     }
+    ],
+    "pd": "ok"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      2.820177126517343,
+      -0.06,
+      -1.9523873692672957
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "right20"
+    },
+    "info": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85% · 러프 덧댄 곳 3획 · 메모 3개 (PD가 읽어요)",
+    "est": "GPT 그림 1장 약 80~100원 + PD 메모 읽기 약 20원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.006751543209876543,
+     "smear": 0.009500385802469136,
+     "under": 0,
+     "all": 0.01625192901234568
+    },
+    "infoAfter": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85% · 러프 덧댄 곳 3획 · 메모 3개 (PD가 읽어요)",
+    "rec": {
+     "name": "거실_정면_각도_오른쪽20.png",
+     "summary": "다른 각도로: 오른쪽 20° + 러프 덧대기 + 메모 3개 (불러온 그림 거실_정면)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Loose colored brush strokes on image 1 are the artist's rough notes for what is there: follow their colors and placement, but draw those things properly in the style. The art director's notes for this view: Continue the window frame into the grey gap on the right, and put a round rug in the middle of the floor; the wall corner on the left stays straight. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [
+      "오른쪽 회색 틈은 창틀을 이어 주고, 바닥 가운데에 둥근 러그를 놓아 주세요."
+     ],
+     "angle": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "right20",
+      "pos": [
+       2.820177126517343,
+       -0.06,
+       -1.9523873692672957
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 20,
+      "pitch": -2.4,
+      "floorH": 1.14,
+      "dist": 0.85,
+      "label": "오른쪽 20°",
+      "ko": "오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "unseen": {
+       "grey": 0.007,
+       "smear": 0.01,
+       "under": 0,
+       "all": 0.016
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 3,
+      "shares": null,
+      "crop": null,
+      "memo": {
+       "n": 3,
+       "pd": "Continue the window frame into the grey gap on the right, and put a round rug in the middle of the floor; the wall corner on the left stays straight.",
+       "ko": "오른쪽 회색 틈은 창틀을 이어 주고, 바닥 가운데에 둥근 러그를 놓아 주세요.",
+       "raw": false,
+       "err": "",
+       "cost": 0.0073620000000000005
+      }
+     },
+     "cost": 0.2031,
+     "total": 0.210462,
+     "inputs": {
+      "rough": "img:d049c50b7e0d46882189ea4f968f3121b854cbba3e520e596e22d79845e03e6f",
+      "roughNotes": "img:5dc0ca6b04c2400e91d29b41304a08d0e11473be6e9c38f44d15e12fc4d4ea09",
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ],
+      "notes": "- text \"여기 창문 이어서\" at (x 62%, y 22%)\n- arrow from (x 70%, y 30%) to (x 88%, y 40%)\n- circled or marked area around (x 48%, y 82%), about 16% wide and 12% tall"
+     }
+    },
+    "pd": [
+     {
+      "status": 200,
+      "body": {
+       "model": "gpt-6.1-sol",
+       "instructions": "You are the PD of a background art team. The art director is redrawing a place from a new camera.\nImage 1 is the rough of the new view that the picture model will get: a 3D copy of the earlier pictures seen from the new camera. Flat grey areas are parts no picture showed (the picture model fills them). Loose colored brush strokes are the art director's rough paint; they stay in image 1.\nImage 2 is the same rough with the art director's notes in pink-red: handwritten words, arrows and circled areas. The picture model never sees these notes. They are also listed in text, with their places as percent of the picture (x from the left, y from the top).\nWrite what the notes ask for as short, plain English sentences for the picture model (notes_en), saying where by what is there and where it is in the frame (left, right, top, bottom, middle, the grey area ...). Translate Korean. Keep exactly the art director's intent and add nothing else.\nNever mention notes, arrows, circles, marks, pink or red, and never ask for written words in the picture. Give the same in one or two short Korean sentences (notes_ko) for the art director to check.",
+       "input": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "type": "input_text",
+           "text": "The art director's notes on image 1:\n- text \"여기 창문 이어서\" at (x 62%, y 22%)\n- arrow from (x 70%, y 30%) to (x 88%, y 40%)\n- circled or marked area around (x 48%, y 82%), about 16% wide and 12% tall"
+          },
+          {
+           "type": "input_text",
+           "text": "Image 1:"
+          },
+          {
+           "type": "input_image",
+           "image_url": "img:d049c50b7e0d46882189ea4f968f3121b854cbba3e520e596e22d79845e03e6f",
+           "detail": "high"
+          },
+          {
+           "type": "input_text",
+           "text": "Image 2 (image 1 with the notes; only for you):"
+          },
+          {
+           "type": "input_image",
+           "image_url": "img:5dc0ca6b04c2400e91d29b41304a08d0e11473be6e9c38f44d15e12fc4d4ea09",
+           "detail": "high"
+          }
+         ]
+        }
+       ],
+       "text": {
+        "format": {
+         "type": "json_schema",
+         "name": "bae_angle_notes",
+         "strict": true,
+         "schema": {
+          "type": "object",
+          "properties": {
+           "notes_en": {
+            "type": "string"
+           },
+           "notes_ko": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "notes_en",
+           "notes_ko"
+          ],
+          "additionalProperties": false
+         }
+        }
+       },
+       "store": false
+      }
+     }
+    ],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. Loose colored brush strokes on image 1 are the artist's rough notes for what is there: follow their colors and placement, but draw those things properly in the style. The art director's notes for this view: Continue the window frame into the grey gap on the right, and put a round rug in the middle of the floor; the wall corner on the left stays straight. Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "256b2ffa63615e5a08c77f7e6caab164aefd21d7e3199c52b16392caca0980d4",
+        "bytes": 1121171,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774",
+        "bytes": 1291414,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      2.820177126517343,
+      -0.06,
+      -1.9523873692672957
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "right20"
+    },
+    "info": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85% · 러프 덧댄 곳 3획 · 메모 3개 (PD가 읽어요)",
+    "est": "GPT 그림 1장 약 80~100원 + PD 메모 읽기 약 20원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.006751543209876543,
+     "smear": 0.009500385802469136,
+     "under": 0,
+     "all": 0.01625192901234568
+    },
+    "infoAfter": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85% · 러프 덧댄 곳 3획 · 메모 3개 (PD가 읽어요)",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:256b2ffa63615e5a08c77f7e6caab164aefd21d7e3199c52b16392caca0980d4",
+      "img:7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "n": 0,
+      "notes": true,
+      "crop": false,
+      "under": false
+     },
+     "memo": {
+      "clean": "img:d049c50b7e0d46882189ea4f968f3121b854cbba3e520e596e22d79845e03e6f",
+      "noted": "img:5dc0ca6b04c2400e91d29b41304a08d0e11473be6e9c38f44d15e12fc4d4ea09",
+      "summary": "- text \"여기 창문 이어서\" at (x 62%, y 22%)\n- arrow from (x 70%, y 30%) to (x 88%, y 40%)\n- circled or marked area around (x 48%, y 82%), about 16% wide and 12% tall",
+      "raw": [
+       "\"여기 창문 이어서\" at (x 62%, y 22%)",
+       "something pointed at from (x 70%, y 30%) to (x 88%, y 40%)",
+       "the marked area around (x 48%, y 82%), about 16% wide and 12% tall"
+      ],
+      "n": 3
+     },
+     "record": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "right20",
+      "pos": [
+       2.820177126517343,
+       -0.06,
+       -1.9523873692672957
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 20,
+      "pitch": -2.4,
+      "floorH": 1.14,
+      "dist": 0.85,
+      "label": "오른쪽 20°",
+      "ko": "오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "unseen": {
+       "grey": 0.007,
+       "smear": 0.01,
+       "under": 0,
+       "all": 0.016
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 3,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "오른쪽 20°",
+     "line": "다른 각도로: 오른쪽 20° + 러프 덧대기 + 메모 3개 (불러온 그림 거실_정면)",
+     "fileName": "거실_정면_각도_오른쪽20.png",
+     "previews": {
+      "rough": "img:d049c50b7e0d46882189ea4f968f3121b854cbba3e520e596e22d79845e03e6f",
+      "roughNotes": "img:5dc0ca6b04c2400e91d29b41304a08d0e11473be6e9c38f44d15e12fc4d4ea09",
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.00849729938271605,
+     "greyB": 0.00849729938271605,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.008987991898148149,
+      "greyB": 0.008987991898148149,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  },
+  "memo_raw": {
+   "setup": {
+    "id": "memo_raw",
+    "place": "living",
+    "cam": "P.right20",
+    "notes": [
+     {
+      "type": "text",
+      "x": 0.62,
+      "y": 0.22,
+      "text": "여기 창문 이어서",
+      "size": 0.03,
+      "seq": 4
+     },
+     {
+      "type": "arrow",
+      "x1": 0.7,
+      "y1": 0.3,
+      "x2": 0.88,
+      "y2": 0.4,
+      "w": 0.0064,
+      "seq": 5
+     }
+    ],
+    "pd": "fail"
+   },
+   "html": {
+    "app": {
+     "ver": "v0.4.11",
+     "key": true,
+     "base": "http://127.0.0.1:1454/v1",
+     "imgModel": "gpt-image-2.5-sunburst",
+     "quality": "high",
+     "pdModel": "gpt-6.1-sol",
+     "tier": "m",
+     "stream": true
+    },
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      2.820177126517343,
+      -0.06,
+      -1.9523873692672957
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "right20"
+    },
+    "info": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85% · 메모 2개 (PD가 읽어요)",
+    "est": "GPT 그림 1장 약 80~100원 + PD 메모 읽기 약 20원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.006751543209876543,
+     "smear": 0.009500385802469136,
+     "under": 0,
+     "all": 0.01625192901234568
+    },
+    "infoAfter": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85% · 메모 2개 (PD가 읽어요)",
+    "rec": {
+     "name": "거실_정면_각도_오른쪽20.png",
+     "summary": "다른 각도로: 오른쪽 20° + 메모 2개 (불러온 그림 거실_정면)",
+     "prompt": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. The art director's notes for this view, with places in image 1 as x from the left and y from the top (never write these words in the picture): \"여기 창문 이어서\" at (x 62%, y 22%); something pointed at from (x 70%, y 30%) to (x 88%, y 40%). Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs.",
+     "place": "interior",
+     "pdNotes": [],
+     "angle": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "right20",
+      "pos": [
+       2.820177126517343,
+       -0.06,
+       -1.9523873692672957
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 20,
+      "pitch": -2.4,
+      "floorH": 1.14,
+      "dist": 0.85,
+      "label": "오른쪽 20°",
+      "ko": "오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "unseen": {
+       "grey": 0.007,
+       "smear": 0.01,
+       "under": 0,
+       "all": 0.016
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": {
+       "n": 2,
+       "pd": null,
+       "ko": "",
+       "raw": true,
+       "err": "OpenAI 쪽 문제예요. 잠시 후 다시 해보세요.\n(500) no answer queued",
+       "cost": null
+      }
+     },
+     "cost": 0.2031,
+     "total": 0.2031,
+     "inputs": {
+      "rough": "img:aded3c06ed283e76ac3a18a2b028cb0d5275f0155892ae73004b57eab64b332f",
+      "roughNotes": "img:76f5802d8e058448c41f573b6b03cd9cd18a7d746c89ada28666ddf8def43626",
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ],
+      "notes": "- text \"여기 창문 이어서\" at (x 62%, y 22%)\n- arrow from (x 70%, y 30%) to (x 88%, y 40%)"
+     }
+    },
+    "pd": [
+     {
+      "status": 500,
+      "body": {
+       "model": "gpt-6.1-sol",
+       "instructions": "You are the PD of a background art team. The art director is redrawing a place from a new camera.\nImage 1 is the rough of the new view that the picture model will get: a 3D copy of the earlier pictures seen from the new camera. Flat grey areas are parts no picture showed (the picture model fills them). Loose colored brush strokes are the art director's rough paint; they stay in image 1.\nImage 2 is the same rough with the art director's notes in pink-red: handwritten words, arrows and circled areas. The picture model never sees these notes. They are also listed in text, with their places as percent of the picture (x from the left, y from the top).\nWrite what the notes ask for as short, plain English sentences for the picture model (notes_en), saying where by what is there and where it is in the frame (left, right, top, bottom, middle, the grey area ...). Translate Korean. Keep exactly the art director's intent and add nothing else.\nNever mention notes, arrows, circles, marks, pink or red, and never ask for written words in the picture. Give the same in one or two short Korean sentences (notes_ko) for the art director to check.",
+       "input": [
+        {
+         "role": "user",
+         "content": [
+          {
+           "type": "input_text",
+           "text": "The art director's notes on image 1:\n- text \"여기 창문 이어서\" at (x 62%, y 22%)\n- arrow from (x 70%, y 30%) to (x 88%, y 40%)"
+          },
+          {
+           "type": "input_text",
+           "text": "Image 1:"
+          },
+          {
+           "type": "input_image",
+           "image_url": "img:aded3c06ed283e76ac3a18a2b028cb0d5275f0155892ae73004b57eab64b332f",
+           "detail": "high"
+          },
+          {
+           "type": "input_text",
+           "text": "Image 2 (image 1 with the notes; only for you):"
+          },
+          {
+           "type": "input_image",
+           "image_url": "img:76f5802d8e058448c41f573b6b03cd9cd18a7d746c89ada28666ddf8def43626",
+           "detail": "high"
+          }
+         ]
+        }
+       ],
+       "text": {
+        "format": {
+         "type": "json_schema",
+         "name": "bae_angle_notes",
+         "strict": true,
+         "schema": {
+          "type": "object",
+          "properties": {
+           "notes_en": {
+            "type": "string"
+           },
+           "notes_ko": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "notes_en",
+           "notes_ko"
+          ],
+          "additionalProperties": false
+         }
+        }
+       },
+       "store": false
+      }
+     }
+    ],
+    "image": [
+     {
+      "status": 200,
+      "fields": [
+       {
+        "name": "model",
+        "value": "gpt-image-2.5-sunburst"
+       },
+       {
+        "name": "prompt",
+        "value": "Image 1 shows the place of image 2 from a new camera: a 3D copy of image 2 was moved to this camera, so image 1 has the right camera, layout and positions, but it is rough. Flat grey areas are parts the original picture never showed, and some edges are stretched or smeared. The art director's notes for this view, with places in image 1 as x from the left and y from the top (never write these words in the picture): \"여기 창문 이어서\" at (x 62%, y 22%); something pointed at from (x 70%, y 30%) to (x 88%, y 40%). Draw the finished background exactly from the camera of image 1: keep its composition and the positions and sizes of everything in it, redraw everything cleanly, and fill the grey areas with what naturally belongs there (continue the walls, floor and furniture). It must clearly be the same place as image 2 (the same walls, floor, furniture and objects, with the same colors and the same light). For reference, the camera move is: The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side. Keep the exact drawing style of the reference: flat cel colors with hard edges, no gradients, no glow, no texture, no black outlines, shapes slightly hand-drawn and uneven, the same palette and the same brightness. No people, no new text or signs."
+       },
+       {
+        "name": "size",
+        "value": "2048x1152"
+       },
+       {
+        "name": "quality",
+        "value": "high"
+       },
+       {
+        "name": "n",
+        "value": "1"
+       },
+       {
+        "name": "output_format",
+        "value": "png"
+       },
+       {
+        "name": "stream",
+        "value": "true"
+       },
+       {
+        "name": "partial_images",
+        "value": "2"
+       },
+       {
+        "name": "image[]",
+        "filename": "image1.png",
+        "type": "image/png",
+        "sha256": "a2d65f46c9d5e15dbbd2b72a674718a2048dea3d0d61b67a974ba922d9946d99",
+        "bytes": 1155719,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       },
+       {
+        "name": "image[]",
+        "filename": "image2.png",
+        "type": "image/png",
+        "sha256": "7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774",
+        "bytes": 1291414,
+        "format": "png",
+        "width": 1536,
+        "height": 864
+       }
+      ]
+     }
+    ]
+   },
+   "ts": {
+    "open": true,
+    "extras": [],
+    "cam": {
+     "pos": [
+      2.820177126517343,
+      -0.06,
+      -1.9523873692672957
+     ],
+     "target": [
+      0,
+      -0.3999999999999999,
+      -9.700760343236118
+     ],
+     "preset": "right20"
+    },
+    "info": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85% · 메모 2개 (PD가 읽어요)",
+    "est": "GPT 그림 1장 약 80~100원 + PD 메모 읽기 약 20원 · 깊이와 입체 판은 0원",
+    "unseen": {
+     "grey": 0.006751543209876543,
+     "smear": 0.009500385802469136,
+     "under": 0,
+     "all": 0.01625192901234568
+    },
+    "infoAfter": "B: 오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85% · 메모 2개 (PD가 읽어요)",
+    "call": {
+     "jobId": "00000000-0000-4000-8000-000000000001",
+     "parentJobId": null,
+     "createdAt": "2026-11-16T00:00:00.000Z",
+     "images": [
+      "img:a2d65f46c9d5e15dbbd2b72a674718a2048dea3d0d61b67a974ba922d9946d99",
+      "img:7ce09dcfdd023cf841a075a73bd4a3ccd990179855ae25b79b1460588fb78774"
+     ],
+     "size": [
+      2048,
+      1152
+     ],
+     "order": {
+      "kind": "interior",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "n": 0,
+      "notes": false,
+      "crop": false,
+      "under": false
+     },
+     "memo": {
+      "clean": "img:aded3c06ed283e76ac3a18a2b028cb0d5275f0155892ae73004b57eab64b332f",
+      "noted": "img:76f5802d8e058448c41f573b6b03cd9cd18a7d746c89ada28666ddf8def43626",
+      "summary": "- text \"여기 창문 이어서\" at (x 62%, y 22%)\n- arrow from (x 70%, y 30%) to (x 88%, y 40%)",
+      "raw": [
+       "\"여기 창문 이어서\" at (x 62%, y 22%)",
+       "something pointed at from (x 70%, y 30%) to (x 88%, y 40%)"
+      ],
+      "n": 2
+     },
+     "record": {
+      "fromId": null,
+      "fromName": "거실_정면.png",
+      "fromKind": "file",
+      "preset": "right20",
+      "pos": [
+       2.820177126517343,
+       -0.06,
+       -1.9523873692672957
+      ],
+      "target": [
+       0,
+       -0.3999999999999999,
+       -9.700760343236118
+      ],
+      "shift": null,
+      "kind": "interior",
+      "hfov": 55,
+      "camH": 1.2,
+      "orbit": 20,
+      "pitch": -2.4,
+      "floorH": 1.14,
+      "dist": 0.85,
+      "label": "오른쪽 20°",
+      "ko": "오른쪽으로 약 20° 돌았어요 · 눈높이 그대로 · 고개 아래로 2° · 거리 85%",
+      "sentence": "The camera has moved about 20 degrees to the right around the middle of the room (it now stands to the right of where the reference was drawn), at the same eye height, and still looks at the middle of the room, so we see the room a little from the right side.",
+      "unseen": {
+       "grey": 0.007,
+       "smear": 0.01,
+       "under": 0,
+       "all": 0.016
+      },
+      "ep": "cpu",
+      "set": {
+       "Zp": 9.700760343236118,
+       "Zback": 11.368884332227571,
+       "xmin": -4.382727102699829,
+       "xmax": 4.125999339714553,
+       "fitOk": true
+      },
+      "sources": [],
+      "notes": 0,
+      "shares": null,
+      "crop": null,
+      "memo": null
+     },
+     "label": "오른쪽 20°",
+     "line": "다른 각도로: 오른쪽 20° + 메모 2개 (불러온 그림 거실_정면)",
+     "fileName": "거실_정면_각도_오른쪽20.png",
+     "previews": {
+      "rough": "img:aded3c06ed283e76ac3a18a2b028cb0d5275f0155892ae73004b57eab64b332f",
+      "roughNotes": "img:76f5802d8e058448c41f573b6b03cd9cd18a7d746c89ada28666ddf8def43626",
+      "refs": [
+       "img:ab7b403fedc38c19bd315f103015b79d364c7cbdadd68f96540b9e261cce4ad9"
+      ]
+     }
+    }
+   },
+   "render": {
+    "view": {
+     "w": 960,
+     "h": 540,
+     "mean": 0,
+     "max": 0,
+     "diffPx": 0,
+     "greyA": 0.00849729938271605,
+     "greyB": 0.00849729938271605,
+     "greyIoU": 1
+    },
+    "images": [
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0.008987991898148149,
+      "greyB": 0.008987991898148149,
+      "greyIoU": 1
+     },
+     {
+      "same": true,
+      "w": 1536,
+      "h": 864,
+      "mean": 0,
+      "max": 0,
+      "diffPx": 0,
+      "greyA": 0,
+      "greyB": 0,
+      "greyIoU": 1
+     }
+    ]
+   }
+  }
+ }
+}

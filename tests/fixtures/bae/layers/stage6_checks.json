@@ -1,0 +1,1303 @@
+{
+ "made": "2026-11-16T10:57:19.630Z",
+ "by": "C:\\BAE_stage0\\bir_port\\tools\\make_checks.mjs",
+ "psd": "C:\\BAE_stage0\\bir_port\\psd",
+ "pictures": {
+  "meetA": {
+   "W": 2048,
+   "H": 1152,
+   "current": {
+    "layers": [
+     "ML/배경 (빈 방)",
+     "ML/BG 보정 (빈 배경이 달라진 곳)",
+     "ML/의자",
+     "OL/앞쪽 책상"
+    ],
+    "bgFix": 2024,
+    "stack": {
+     "mean": 1.456,
+     "over24": 0.00291
+    },
+    "hideOne": [
+     {
+      "path": "ML/의자",
+      "px": 197818,
+      "leftover": 32,
+      "inBgFix": 32,
+      "box": [
+       1158,
+       891,
+       1167,
+       896
+      ]
+     },
+     {
+      "path": "OL/앞쪽 책상",
+      "px": 530135,
+      "leftover": 1505,
+      "inBgFix": 1505,
+      "box": [
+       600,
+       890,
+       1167,
+       897
+      ]
+     }
+    ]
+   },
+   "new": {
+    "layers": [
+     "ML/배경 (빈 방)",
+     "ML/의자",
+     "OL/앞쪽 책상"
+    ],
+    "bgFix": null,
+    "stack": {
+     "mean": 1.36,
+     "over24": 0.00171
+    },
+    "hideOne": [
+     {
+      "path": "ML/의자",
+      "px": 197532,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/앞쪽 책상",
+      "px": 536836,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     }
+    ]
+   },
+   "desk": {
+    "current": {
+     "all": {
+      "n": 1246,
+      "mean": 2.23,
+      "median": 2.29
+     },
+     "wall": {
+      "n": 790,
+      "mean": 1.81,
+      "median": 1.79
+     },
+     "slanted": {
+      "n": 10,
+      "mean": 1.53,
+      "median": 1.16
+     }
+    },
+    "new": {
+     "all": {
+      "n": 1246,
+      "mean": -0.02,
+      "median": -0.04
+     },
+     "wall": {
+      "n": 790,
+      "mean": -0.09,
+      "median": -0.06
+     },
+     "slanted": {
+      "n": 10,
+      "mean": -0.12,
+      "median": -0.11
+     }
+    },
+    "columns": 1246
+   },
+   "same_as_1103": {
+    "ref": "BAE경_회의실_PSD비교/2_새방식_BiRefNet.psd",
+    "diff_px": {
+     "ML/배경 (빈 방)": 0,
+     "ML/의자": 0,
+     "OL/앞쪽 책상": 0
+    }
+   }
+  },
+  "meetB": {
+   "W": 2048,
+   "H": 1152,
+   "current": {
+    "layers": [
+     "UL/왼쪽 창밖 풍경",
+     "UL/오른쪽 창밖 풍경",
+     "ML/배경 (빈 방)",
+     "ML/BG 보정 (빈 배경이 달라진 곳)",
+     "ML/벽걸이 TV",
+     "ML/스피커/왼쪽 스피커",
+     "ML/스피커/오른쪽 스피커",
+     "ML/의자/왼쪽 의자",
+     "ML/의자/오른쪽 의자",
+     "OL/회의 책상 그림자",
+     "OL/회의 책상"
+    ],
+    "bgFix": 6163,
+    "stack": {
+     "mean": 0.831,
+     "over24": 0.0016
+    },
+    "hideOne": [
+     {
+      "path": "ML/벽걸이 TV",
+      "px": 487239,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/스피커/왼쪽 스피커",
+      "px": 57424,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/스피커/오른쪽 스피커",
+      "px": 55559,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/의자/왼쪽 의자",
+      "px": 58341,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/의자/오른쪽 의자",
+      "px": 81932,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/회의 책상",
+      "px": 673937,
+      "leftover": 4421,
+      "inBgFix": 4421,
+      "box": [
+       0,
+       752,
+       1736,
+       1152
+      ]
+     }
+    ]
+   },
+   "new": {
+    "layers": [
+     "UL/왼쪽 창밖 풍경",
+     "UL/오른쪽 창밖 풍경",
+     "ML/배경 (빈 방)",
+     "ML/벽걸이 TV",
+     "ML/스피커/왼쪽 스피커",
+     "ML/스피커/오른쪽 스피커",
+     "ML/의자/왼쪽 의자",
+     "ML/의자/오른쪽 의자",
+     "OL/회의 책상 그림자",
+     "OL/회의 책상"
+    ],
+    "bgFix": null,
+    "stack": {
+     "mean": 0.766,
+     "over24": 0.001
+    },
+    "hideOne": [
+     {
+      "path": "ML/벽걸이 TV",
+      "px": 489757,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/스피커/왼쪽 스피커",
+      "px": 57877,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/스피커/오른쪽 스피커",
+      "px": 55769,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/의자/왼쪽 의자",
+      "px": 58482,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/의자/오른쪽 의자",
+      "px": 82139,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/회의 책상",
+      "px": 686701,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     }
+    ]
+   },
+   "desk": {
+    "current": {
+     "all": {
+      "n": 1696,
+      "mean": 3.8,
+      "median": 3.89
+     },
+     "wall": {
+      "n": 328,
+      "mean": 2.45,
+      "median": 2.64
+     },
+     "slanted": {
+      "n": 512,
+      "mean": 2.92,
+      "median": 2.99
+     }
+    },
+    "new": {
+     "all": {
+      "n": 1696,
+      "mean": 0,
+      "median": 0.01
+     },
+     "wall": {
+      "n": 328,
+      "mean": -0.09,
+      "median": -0.11
+     },
+     "slanted": {
+      "n": 512,
+      "mean": -0.06,
+      "median": -0.1
+     }
+    },
+    "columns": 1696
+   },
+   "same_as_1103": {
+    "ref": "BAE경_회의실정면_PSD비교/2_새방식_BiRefNet.psd",
+    "diff_px": {
+     "UL/왼쪽 창밖 풍경": 0,
+     "UL/오른쪽 창밖 풍경": 0,
+     "ML/배경 (빈 방)": 0,
+     "ML/벽걸이 TV": 0,
+     "ML/스피커/왼쪽 스피커": 0,
+     "ML/스피커/오른쪽 스피커": 0,
+     "ML/의자/왼쪽 의자": 0,
+     "ML/의자/오른쪽 의자": 0,
+     "OL/회의 책상 그림자": 0,
+     "OL/회의 책상": 0
+    }
+   }
+  },
+  "classroom": {
+   "W": 2048,
+   "H": 1152,
+   "current": {
+    "layers": [
+     "UL/창밖 풍경",
+     "ML/배경 (빈 방)",
+     "ML/BG 보정 (빈 배경이 달라진 곳)",
+     "ML/기타 (자동 보충)",
+     "ML/커튼/창문 왼쪽 커튼",
+     "ML/커튼/창문 오른쪽 커튼",
+     "ML/게시판 왼쪽 거울",
+     "ML/뒤쪽 대형 게시판",
+     "ML/뒤쪽 긴 수납장",
+     "ML/뒷줄 의자 그림자",
+     "ML/뒷줄 의자",
+     "ML/뒷줄 책상 그림자",
+     "ML/뒷줄 책상",
+     "ML/바닥 신문지",
+     "ML/오른쪽 검은 쓰레기통 그림자",
+     "ML/오른쪽 검은 쓰레기통",
+     "OL/가방/왼쪽 책상 가방 그림자",
+     "OL/가방/왼쪽 책상 가방",
+     "OL/가방/두 번째 책상 가방",
+     "OL/앞줄 의자 그림자",
+     "OL/앞줄 의자",
+     "OL/앞줄 책상 그림자",
+     "OL/앞줄 책상"
+    ],
+    "bgFix": 14126,
+    "stack": {
+     "mean": 2.601,
+     "over24": 0.01728
+    },
+    "hideOne": [
+     {
+      "path": "ML/기타 (자동 보충)",
+      "px": 360,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/커튼/창문 왼쪽 커튼",
+      "px": 27991,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/커튼/창문 오른쪽 커튼",
+      "px": 34309,
+      "leftover": 5,
+      "inBgFix": 5,
+      "box": [
+       1949,
+       643,
+       1958,
+       648
+      ]
+     },
+     {
+      "path": "ML/게시판 왼쪽 거울",
+      "px": 23668,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/뒤쪽 대형 게시판",
+      "px": 256889,
+      "leftover": 2342,
+      "inBgFix": 2342,
+      "box": [
+       544,
+       389,
+       1331,
+       667
+      ]
+     },
+     {
+      "path": "ML/뒤쪽 긴 수납장",
+      "px": 111456,
+      "leftover": 32,
+      "inBgFix": 32,
+      "box": [
+       651,
+       825,
+       660,
+       830
+      ]
+     },
+     {
+      "path": "ML/뒷줄 의자",
+      "px": 101273,
+      "leftover": 52,
+      "inBgFix": 52,
+      "box": [
+       582,
+       891,
+       599,
+       895
+      ]
+     },
+     {
+      "path": "ML/뒷줄 책상",
+      "px": 45093,
+      "leftover": 29,
+      "inBgFix": 29,
+      "box": [
+       651,
+       826,
+       1394,
+       947
+      ]
+     },
+     {
+      "path": "ML/바닥 신문지",
+      "px": 5483,
+      "leftover": 28,
+      "inBgFix": 28,
+      "box": [
+       1631,
+       945,
+       1642,
+       949
+      ]
+     },
+     {
+      "path": "ML/오른쪽 검은 쓰레기통",
+      "px": 17678,
+      "leftover": 21,
+      "inBgFix": 21,
+      "box": [
+       1631,
+       940,
+       1634,
+       948
+      ]
+     },
+     {
+      "path": "OL/가방/왼쪽 책상 가방",
+      "px": 1785,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/가방/두 번째 책상 가방",
+      "px": 2724,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/앞줄 의자",
+      "px": 167776,
+      "leftover": 210,
+      "inBgFix": 210,
+      "box": [
+       180,
+       825,
+       1434,
+       996
+      ]
+     },
+     {
+      "path": "OL/앞줄 책상",
+      "px": 91734,
+      "leftover": 55,
+      "inBgFix": 55,
+      "box": [
+       298,
+       891,
+       1421,
+       975
+      ]
+     }
+    ]
+   },
+   "new": {
+    "layers": [
+     "UL/창밖 풍경",
+     "ML/배경 (빈 방)",
+     "ML/BG 보정 (빈 배경이 달라진 곳)",
+     "ML/기타 (자동 보충)",
+     "ML/커튼/창문 왼쪽 커튼",
+     "ML/커튼/창문 오른쪽 커튼",
+     "ML/게시판 왼쪽 거울",
+     "ML/뒤쪽 대형 게시판",
+     "ML/뒤쪽 긴 수납장",
+     "ML/뒷줄 의자 그림자",
+     "ML/뒷줄 의자",
+     "ML/뒷줄 책상 그림자",
+     "ML/뒷줄 책상",
+     "ML/바닥 신문지",
+     "ML/오른쪽 검은 쓰레기통",
+     "OL/가방/왼쪽 책상 가방 그림자",
+     "OL/가방/왼쪽 책상 가방",
+     "OL/가방/두 번째 책상 가방",
+     "OL/앞줄 의자 그림자",
+     "OL/앞줄 의자",
+     "OL/앞줄 책상 그림자",
+     "OL/앞줄 책상"
+    ],
+    "bgFix": 12125,
+    "stack": {
+     "mean": 2.54,
+     "over24": 0.01675
+    },
+    "hideOne": [
+     {
+      "path": "ML/기타 (자동 보충)",
+      "px": 448,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/커튼/창문 왼쪽 커튼",
+      "px": 28441,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/커튼/창문 오른쪽 커튼",
+      "px": 35189,
+      "leftover": 3,
+      "inBgFix": 3,
+      "box": [
+       1949,
+       643,
+       1953,
+       646
+      ]
+     },
+     {
+      "path": "ML/게시판 왼쪽 거울",
+      "px": 23774,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/뒤쪽 대형 게시판",
+      "px": 260984,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/뒤쪽 긴 수납장",
+      "px": 110511,
+      "leftover": 15,
+      "inBgFix": 15,
+      "box": [
+       1146,
+       864,
+       1159,
+       879
+      ]
+     },
+     {
+      "path": "ML/뒷줄 의자",
+      "px": 101174,
+      "leftover": 52,
+      "inBgFix": 52,
+      "box": [
+       582,
+       891,
+       599,
+       895
+      ]
+     },
+     {
+      "path": "ML/뒷줄 책상",
+      "px": 45088,
+      "leftover": 13,
+      "inBgFix": 13,
+      "box": [
+       1388,
+       944,
+       1394,
+       947
+      ]
+     },
+     {
+      "path": "ML/바닥 신문지",
+      "px": 5542,
+      "leftover": 28,
+      "inBgFix": 28,
+      "box": [
+       1631,
+       945,
+       1642,
+       949
+      ]
+     },
+     {
+      "path": "ML/오른쪽 검은 쓰레기통",
+      "px": 17507,
+      "leftover": 58,
+      "inBgFix": 58,
+      "box": [
+       1631,
+       920,
+       1636,
+       948
+      ]
+     },
+     {
+      "path": "OL/가방/왼쪽 책상 가방",
+      "px": 1785,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/가방/두 번째 책상 가방",
+      "px": 2724,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/앞줄 의자",
+      "px": 167268,
+      "leftover": 189,
+      "inBgFix": 189,
+      "box": [
+       180,
+       940,
+       1434,
+       996
+      ]
+     },
+     {
+      "path": "OL/앞줄 책상",
+      "px": 91919,
+      "leftover": 62,
+      "inBgFix": 62,
+      "box": [
+       298,
+       878,
+       1421,
+       975
+      ]
+     }
+    ]
+   },
+   "thin": [
+    {
+     "name": "ML/뒷줄 책상",
+     "thin_union": 209,
+     "thin_in_current": 209,
+     "thin_in_new": 209,
+     "drawn_union": 185,
+     "drawn_in_current": 185,
+     "drawn_in_new": 185,
+     "leftover_current": 29,
+     "leftover_new": 13
+    },
+    {
+     "name": "OL/가방/왼쪽 책상 가방",
+     "thin_union": 17,
+     "thin_in_current": 17,
+     "thin_in_new": 17,
+     "drawn_union": 16,
+     "drawn_in_current": 16,
+     "drawn_in_new": 16,
+     "leftover_current": 0,
+     "leftover_new": 0
+    },
+    {
+     "name": "OL/가방/두 번째 책상 가방",
+     "thin_union": 92,
+     "thin_in_current": 92,
+     "thin_in_new": 92,
+     "drawn_union": 90,
+     "drawn_in_current": 90,
+     "drawn_in_new": 90,
+     "leftover_current": 0,
+     "leftover_new": 0
+    },
+    {
+     "name": "OL/앞줄 책상",
+     "thin_union": 912,
+     "thin_in_current": 872,
+     "thin_in_new": 910,
+     "drawn_union": 901,
+     "drawn_in_current": 861,
+     "drawn_in_new": 900,
+     "leftover_current": 55,
+     "leftover_new": 62
+    }
+   ]
+  },
+  "sonamu": {
+   "W": 2048,
+   "H": 1152,
+   "current": {
+    "layers": [
+     "ML/배경 (빈 방)",
+     "ML/호랑이 그림 액자",
+     "ML/적갈색 소파 그림자",
+     "ML/적갈색 소파",
+     "ML/오른쪽 스탠드 에어컨 그림자",
+     "ML/오른쪽 스탠드 에어컨",
+     "OL/왼쪽 흰색 화분 그림자",
+     "OL/왼쪽 흰색 화분"
+    ],
+    "bgFix": null,
+    "stack": {
+     "mean": 1.511,
+     "over24": 0.00626
+    },
+    "hideOne": [
+     {
+      "path": "ML/호랑이 그림 액자",
+      "px": 105499,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/적갈색 소파",
+      "px": 300648,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/오른쪽 스탠드 에어컨",
+      "px": 144298,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/왼쪽 흰색 화분",
+      "px": 56135,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     }
+    ]
+   },
+   "new": {
+    "layers": [
+     "ML/배경 (빈 방)",
+     "ML/호랑이 그림 액자",
+     "ML/적갈색 소파 그림자",
+     "ML/적갈색 소파",
+     "ML/오른쪽 스탠드 에어컨 그림자",
+     "ML/오른쪽 스탠드 에어컨",
+     "OL/왼쪽 흰색 화분 그림자",
+     "OL/왼쪽 흰색 화분"
+    ],
+    "bgFix": null,
+    "stack": {
+     "mean": 1.534,
+     "over24": 0.00651
+    },
+    "hideOne": [
+     {
+      "path": "ML/호랑이 그림 액자",
+      "px": 106432,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/적갈색 소파",
+      "px": 302770,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "ML/오른쪽 스탠드 에어컨",
+      "px": 144753,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     },
+     {
+      "path": "OL/왼쪽 흰색 화분",
+      "px": 58128,
+      "leftover": 0,
+      "inBgFix": 0,
+      "box": null
+     }
+    ]
+   },
+   "thin": [
+    {
+     "name": "ML/호랑이 그림 액자",
+     "thin_union": 57,
+     "thin_in_current": 37,
+     "thin_in_new": 57,
+     "drawn_union": 57,
+     "drawn_in_current": 37,
+     "drawn_in_new": 57,
+     "leftover_current": 0,
+     "leftover_new": 0
+    },
+    {
+     "name": "ML/적갈색 소파",
+     "thin_union": 279,
+     "thin_in_current": 239,
+     "thin_in_new": 232,
+     "drawn_union": 242,
+     "drawn_in_current": 202,
+     "drawn_in_new": 232,
+     "leftover_current": 0,
+     "leftover_new": 0
+    },
+    {
+     "name": "ML/오른쪽 스탠드 에어컨",
+     "thin_union": 237,
+     "thin_in_current": 222,
+     "thin_in_new": 215,
+     "drawn_union": 217,
+     "drawn_in_current": 202,
+     "drawn_in_new": 215,
+     "leftover_current": 0,
+     "leftover_new": 0
+    },
+    {
+     "name": "OL/왼쪽 흰색 화분",
+     "thin_union": 108,
+     "thin_in_current": 60,
+     "thin_in_new": 93,
+     "drawn_union": 96,
+     "drawn_in_current": 48,
+     "drawn_in_new": 92,
+     "leftover_current": 0,
+     "leftover_new": 0
+    }
+   ]
+  }
+ },
+ "runs": {
+  "normal": {
+   "ep": "dml",
+   "electron": "33.4.11",
+   "chrome": "130.0.6723.191",
+   "started": "2026-11-16T10:46:42.257Z",
+   "sonamu": {
+    "bir": {
+     "method": "birefnet",
+     "why": null,
+     "used": 4,
+     "props": 4,
+     "runs": 4,
+     "split_ms": 7158,
+     "steps": {
+      "plate": 99,
+      "outlines": 4937,
+      "edges": 4471,
+      "depth": 0,
+      "edits": 0,
+      "build": 1467,
+      "psd": 316
+     },
+     "find_ms": 1653,
+     "layers": 4,
+     "stack": {
+      "mean_diff": 1.53,
+      "share_gt20": 0.0075
+     }
+    },
+    "sam": {
+     "method": "sam",
+     "why": "off",
+     "used": 0,
+     "props": 4,
+     "runs": 0,
+     "split_ms": 2655,
+     "steps": {
+      "plate": 95,
+      "outlines": 422,
+      "edges": 0,
+      "depth": 0,
+      "edits": 0,
+      "build": 1717,
+      "psd": 279
+     },
+     "find_ms": 712,
+     "layers": 4,
+     "stack": {
+      "mean_diff": 1.51,
+      "share_gt20": 0.0069
+     }
+    }
+   },
+   "meetA": {
+    "sam": {
+     "method": "sam",
+     "why": "off",
+     "used": 0,
+     "props": 4,
+     "runs": 0,
+     "split_ms": 2267,
+     "steps": {
+      "plate": 68,
+      "outlines": 448,
+      "edges": 1,
+      "depth": 0,
+      "edits": 0,
+      "build": 1472,
+      "psd": 253
+     },
+     "find_ms": 539,
+     "layers": 2,
+     "stack": {
+      "mean_diff": 1.46,
+      "share_gt20": 0.0037
+     }
+    },
+    "bir": {
+     "method": "birefnet",
+     "why": null,
+     "used": 4,
+     "props": 4,
+     "runs": 4,
+     "split_ms": 4639,
+     "steps": {
+      "plate": 79,
+      "outlines": 1927,
+      "edges": 1482,
+      "depth": 257,
+      "edits": 50,
+      "build": 1886,
+      "psd": 267
+     },
+     "find_ms": 391,
+     "layers": 2,
+     "stack": {
+      "mean_diff": 1.36,
+      "share_gt20": 0.0025
+     }
+    }
+   },
+   "meetB": {
+    "sam": {
+     "method": "sam",
+     "why": "off",
+     "used": 0,
+     "props": 6,
+     "runs": 0,
+     "split_ms": 4442,
+     "steps": {
+      "plate": 71,
+      "outlines": 777,
+      "edges": 0,
+      "depth": 179,
+      "edits": 55,
+      "build": 2997,
+      "psd": 314
+     },
+     "find_ms": 778,
+     "layers": 8,
+     "stack": {
+      "mean_diff": 0.83,
+      "share_gt20": 0.0017
+     }
+    },
+    "bir": {
+     "method": "birefnet",
+     "why": null,
+     "used": 6,
+     "props": 6,
+     "runs": 6,
+     "split_ms": 5962,
+     "steps": {
+      "plate": 71,
+      "outlines": 3021,
+      "edges": 2178,
+      "depth": 219,
+      "edits": 54,
+      "build": 1914,
+      "psd": 332
+     },
+     "find_ms": 746,
+     "layers": 8,
+     "stack": {
+      "mean_diff": 0.77,
+      "share_gt20": 0.0014
+     }
+    }
+   },
+   "classroom": {
+    "sam": {
+     "method": "sam",
+     "why": "off",
+     "used": 0,
+     "props": 91,
+     "runs": 0,
+     "split_ms": 31037,
+     "steps": {
+      "plate": 90,
+      "outlines": 1776,
+      "edges": 0,
+      "depth": 2688,
+      "edits": 172,
+      "build": 25814,
+      "psd": 430
+     },
+     "find_ms": 1739,
+     "layers": 14,
+     "stack": {
+      "mean_diff": 2.6,
+      "share_gt20": 0.0204
+     }
+    },
+    "bir": {
+     "method": "birefnet",
+     "why": null,
+     "used": 20,
+     "props": 91,
+     "runs": 91,
+     "split_ms": 52889,
+     "steps": {
+      "plate": 90,
+      "outlines": 23630,
+      "edges": 21244,
+      "depth": 2496,
+      "edits": 162,
+      "build": 25895,
+      "psd": 430
+     },
+     "find_ms": 2347,
+     "layers": 14,
+     "stack": {
+      "mean_diff": 2.54,
+      "share_gt20": 0.02
+     }
+    }
+   },
+   "ui": {
+    "planMethod": "",
+    "runSteps": [
+     "is-ok | 빈 배경 그리기 (GPT)0초",
+     "is-ok | 윤곽 다시 맞추기 (이 PC) 6/61초",
+     "is-run | 가장자리 다듬기 (이 PC) 모델 준비",
+     "is-wait | PD가 앞뒤 판단",
+     "is-wait | 가려진 부분 그리기 (GPT)",
+     "is-wait | 레이어 조립 (이 PC)",
+     "is-wait | PSD 만들기"
+    ],
+    "method": "가장자리새 방식 (가장자리 다듬기) · 가장자리를 새 방식으로 다듬었어요 (물건 6개 중 6개).",
+    "methodKind": "is-new",
+    "info": "PSD로 저장했어요 · 레이어 9장 + 그림자 1장 (OL 1 · ML 6 · UL 2) · 14초 · GPT 약 170원",
+    "record": {
+     "edges": "birefnet",
+     "edgesNote": "가장자리를 새 방식으로 다듬었어요 (물건 6개 중 6개)."
+    },
+    "shots": [
+     "normal_meetB_1_plan",
+     "normal_meetB_2_edges_running",
+     "normal_meetB_3_done"
+    ]
+   }
+  },
+  "missing": {
+   "ep": "dml",
+   "electron": "33.4.11",
+   "chrome": "130.0.6723.191",
+   "started": "2026-11-16T10:48:55.331Z",
+   "bench": [
+    {
+     "which": "meetB",
+     "method": "sam",
+     "why": "missing",
+     "text": "가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (모델을 받지 못했어요).",
+     "model_error": "Error invoking remote method 'bae:model-ensure': Error: 가장자리 모델 (BiRefNet)을(를) 받을 수 없어요: G 드라이브 모델 창고를 찾지 못했어요. 이 모델은 창고에서만 받아요 — 관리자에게 알려 주세요.",
+     "split_ms": 4248,
+     "same_as_sam_only": true,
+     "diff_px": {
+      "UL/왼쪽 창밖 풍경": 0,
+      "UL/오른쪽 창밖 풍경": 0,
+      "ML/배경 (빈 방)": 0,
+      "ML/BG 보정 (빈 배경이 달라진 곳)": 0,
+      "ML/벽걸이 TV": 0,
+      "ML/스피커/왼쪽 스피커": 0,
+      "ML/스피커/오른쪽 스피커": 0,
+      "ML/의자/왼쪽 의자": 0,
+      "ML/의자/오른쪽 의자": 0,
+      "OL/회의 책상 그림자": 0,
+      "OL/회의 책상": 0
+     },
+     "psd": "fallback/회의실정면_missing_bir.psd"
+    },
+    {
+     "which": "classroom",
+     "method": "sam",
+     "why": "missing",
+     "text": "가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (모델을 받지 못했어요).",
+     "model_error": "Error invoking remote method 'bae:model-ensure': Error: 가장자리 모델 (BiRefNet)을(를) 받을 수 없어요: G 드라이브 모델 창고를 찾지 못했어요. 이 모델은 창고에서만 받아요 — 관리자에게 알려 주세요.",
+     "split_ms": 29359,
+     "same_as_sam_only": true,
+     "diff_px": {
+      "UL/창밖 풍경": 0,
+      "ML/배경 (빈 방)": 0,
+      "ML/BG 보정 (빈 배경이 달라진 곳)": 0,
+      "ML/기타 (자동 보충)": 0,
+      "ML/커튼/창문 왼쪽 커튼": 0,
+      "ML/커튼/창문 오른쪽 커튼": 0,
+      "ML/게시판 왼쪽 거울": 0,
+      "ML/뒤쪽 대형 게시판": 0,
+      "ML/뒤쪽 긴 수납장": 0,
+      "ML/뒷줄 의자 그림자": 0,
+      "ML/뒷줄 의자": 0,
+      "ML/뒷줄 책상 그림자": 0,
+      "ML/뒷줄 책상": 0,
+      "ML/바닥 신문지": 0,
+      "ML/오른쪽 검은 쓰레기통 그림자": 0,
+      "ML/오른쪽 검은 쓰레기통": 0,
+      "OL/가방/왼쪽 책상 가방 그림자": 0,
+      "OL/가방/왼쪽 책상 가방": 0,
+      "OL/가방/두 번째 책상 가방": 0,
+      "OL/앞줄 의자 그림자": 0,
+      "OL/앞줄 의자": 0,
+      "OL/앞줄 책상 그림자": 0,
+      "OL/앞줄 책상": 0
+     },
+     "psd": "fallback/교실_missing_bir.psd"
+    }
+   ],
+   "ui": {
+    "planMethod": "가장자리가장자리 다듬기 모델을 받지 못했어요. 나누면 지금 방식으로 나눠요.",
+    "runSteps": null,
+    "method": "가장자리지금 방식 (윤곽 모델만) · 가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (모델을 받지 못했어요).",
+    "methodKind": "is-old",
+    "info": "PSD로 저장했어요 · 레이어 9장 + 그림자 1장 (OL 1 · ML 6 · UL 2) · 6초 · GPT 약 170원",
+    "record": {
+     "edges": "sam",
+     "edgesNote": "가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (모델을 받지 못했어요)."
+    },
+    "shots": [
+     "missing_meetB_1_plan",
+     "missing_meetB_3_done"
+    ]
+   }
+  },
+  "fail-load": {
+   "ep": "dml",
+   "electron": "33.4.11",
+   "chrome": "130.0.6723.191",
+   "started": "2026-11-16T10:50:36.768Z",
+   "bench": [
+    {
+     "which": "meetB",
+     "method": "sam",
+     "why": "failed",
+     "text": "가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (이 PC에서 모델이 돌지 않았어요).",
+     "model_error": null,
+     "split_ms": 6402,
+     "same_as_sam_only": true,
+     "diff_px": {
+      "UL/왼쪽 창밖 풍경": 0,
+      "UL/오른쪽 창밖 풍경": 0,
+      "ML/배경 (빈 방)": 0,
+      "ML/BG 보정 (빈 배경이 달라진 곳)": 0,
+      "ML/벽걸이 TV": 0,
+      "ML/스피커/왼쪽 스피커": 0,
+      "ML/스피커/오른쪽 스피커": 0,
+      "ML/의자/왼쪽 의자": 0,
+      "ML/의자/오른쪽 의자": 0,
+      "OL/회의 책상 그림자": 0,
+      "OL/회의 책상": 0
+     },
+     "psd": "fallback/회의실정면_fail-load_bir.psd"
+    }
+   ],
+   "ui": {
+    "planMethod": "",
+    "runSteps": [
+     "is-ok | 빈 배경 그리기 (GPT)0초",
+     "is-ok | 윤곽 다시 맞추기 (이 PC) 6/61초",
+     "is-run | 가장자리 다듬기 (이 PC) 모델 준비",
+     "is-wait | PD가 앞뒤 판단",
+     "is-wait | 가려진 부분 그리기 (GPT)",
+     "is-wait | 레이어 조립 (이 PC)",
+     "is-wait | PSD 만들기"
+    ],
+    "method": "가장자리지금 방식 (윤곽 모델만) · 가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (이 PC에서 모델이 돌지 않았어요).",
+    "methodKind": "is-old",
+    "info": "PSD로 저장했어요 · 레이어 9장 + 그림자 1장 (OL 1 · ML 6 · UL 2) · 6초 · 저장해 둔 GPT 단계를 써서 0원 · 가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (이 PC에서 모델이 돌지 않았어요).",
+    "record": {
+     "edges": "sam",
+     "edgesNote": "가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (이 PC에서 모델이 돌지 않았어요)."
+    },
+    "shots": [
+     "fail-load_meetB_1_plan",
+     "fail-load_meetB_2_edges_running",
+     "fail-load_meetB_3_done"
+    ]
+   }
+  },
+  "fail-run": {
+   "ep": "dml",
+   "electron": "33.4.11",
+   "chrome": "130.0.6723.191",
+   "started": "2026-11-16T10:51:09.866Z",
+   "bench": [
+    {
+     "which": "meetB",
+     "method": "sam",
+     "why": "failed",
+     "text": "가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (이 PC에서 모델이 돌지 않았어요).",
+     "model_error": null,
+     "split_ms": 16658,
+     "same_as_sam_only": true,
+     "diff_px": {
+      "UL/왼쪽 창밖 풍경": 0,
+      "UL/오른쪽 창밖 풍경": 0,
+      "ML/배경 (빈 방)": 0,
+      "ML/BG 보정 (빈 배경이 달라진 곳)": 0,
+      "ML/벽걸이 TV": 0,
+      "ML/스피커/왼쪽 스피커": 0,
+      "ML/스피커/오른쪽 스피커": 0,
+      "ML/의자/왼쪽 의자": 0,
+      "ML/의자/오른쪽 의자": 0,
+      "OL/회의 책상 그림자": 0,
+      "OL/회의 책상": 0
+     },
+     "psd": "fallback/회의실정면_fail-run_bir.psd"
+    },
+    {
+     "which": "classroom",
+     "method": "sam",
+     "why": "failed",
+     "text": "가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (이 PC에서 모델이 돌지 않았어요).",
+     "model_error": null,
+     "split_ms": 33494,
+     "same_as_sam_only": true,
+     "diff_px": {
+      "UL/창밖 풍경": 0,
+      "ML/배경 (빈 방)": 0,
+      "ML/BG 보정 (빈 배경이 달라진 곳)": 0,
+      "ML/기타 (자동 보충)": 0,
+      "ML/커튼/창문 왼쪽 커튼": 0,
+      "ML/커튼/창문 오른쪽 커튼": 0,
+      "ML/게시판 왼쪽 거울": 0,
+      "ML/뒤쪽 대형 게시판": 0,
+      "ML/뒤쪽 긴 수납장": 0,
+      "ML/뒷줄 의자 그림자": 0,
+      "ML/뒷줄 의자": 0,
+      "ML/뒷줄 책상 그림자": 0,
+      "ML/뒷줄 책상": 0,
+      "ML/바닥 신문지": 0,
+      "ML/오른쪽 검은 쓰레기통 그림자": 0,
+      "ML/오른쪽 검은 쓰레기통": 0,
+      "OL/가방/왼쪽 책상 가방 그림자": 0,
+      "OL/가방/왼쪽 책상 가방": 0,
+      "OL/가방/두 번째 책상 가방": 0,
+      "OL/앞줄 의자 그림자": 0,
+      "OL/앞줄 의자": 0,
+      "OL/앞줄 책상 그림자": 0,
+      "OL/앞줄 책상": 0
+     },
+     "psd": "fallback/교실_fail-run_bir.psd"
+    }
+   ],
+   "ui": {
+    "planMethod": "",
+    "runSteps": [
+     "is-ok | 빈 배경 그리기 (GPT)0초",
+     "is-ok | 윤곽 다시 맞추기 (이 PC) 6/61초",
+     "is-run | 가장자리 다듬기 (이 PC) 모델 준비",
+     "is-wait | PD가 앞뒤 판단",
+     "is-wait | 가려진 부분 그리기 (GPT)",
+     "is-wait | 레이어 조립 (이 PC)",
+     "is-wait | PSD 만들기"
+    ],
+    "method": "가장자리지금 방식 (윤곽 모델만) · 가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (이 PC에서 모델이 돌지 않았어요).",
+    "methodKind": "is-old",
+    "info": "PSD로 저장했어요 · 레이어 9장 + 그림자 1장 (OL 1 · ML 6 · UL 2) · 17초 · GPT 약 170원",
+    "record": {
+     "edges": "sam",
+     "edgesNote": "가장자리 다듬기 모델을 쓰지 못해 지금 방식으로 나눴어요 (이 PC에서 모델이 돌지 않았어요)."
+    },
+    "shots": [
+     "fail-run_meetB_1_plan",
+     "fail-run_meetB_2_edges_running",
+     "fail-run_meetB_3_done"
+    ]
+   }
+  }
+ }
+}

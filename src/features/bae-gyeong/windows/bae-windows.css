@@ -1,0 +1,196 @@
+/*
+ * BAE경 팝업 창 틀과 창 안 부품 (계획 14d 1장 · 9장, 시안 Win*.dc.html 의 bae-pop · bae-win-* · bw-*).
+ * 창은 body 로 띄우므로 .bae-root 의 색 토큰을 받으려고 틀에도 .bae-root 를 붙인다 (.bae-root.bae-pop).
+ * 떠오르는 움직임은 Bflow 의 bf-scrim-in · bf-modal-in, 닫힘은 바로 사라짐. 동작 줄이기는 그 파일의 규칙을 따른다.
+ */
+.bae-root.bae-pop {
+  --bae-win-w: 1240px;
+  --bae-win-h: 820px;
+  --bae-win-top: 60px;
+  --bae-win-side: 440px;
+  --bae-win-row: 56px;
+  --bae-paper: 255 255 255;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  min-height: 0;
+  padding: clamp(16px, calc((100vh - var(--bae-win-h)) / 2), var(--bae-win-top)) 32px 16px;
+}
+.bae-pop-scrim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: rgb(var(--color-overlay) / 0.6);
+  cursor: default;
+}
+.bae-pop-scrim:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: -4px; }
+.bae-win {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(var(--bae-win-w), 100%);
+  height: min(var(--bae-win-h), 100%);
+  overflow: hidden;
+  border: 1px solid rgb(var(--color-bg-border));
+  border-radius: 18px;
+  background: rgb(var(--color-bg-card));
+  color: rgb(var(--color-text-primary));
+}
+.bae-win:focus { outline: none; }
+.bae-win-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 12px 8px 16px;
+  border-bottom: 1px solid rgb(var(--color-bg-border));
+}
+.bae-win-ic {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: color-mix(in srgb, rgb(var(--bae-tool)) 14%, rgb(var(--color-bg-card)));
+  color: rgb(var(--bae-tool));
+}
+.bae-win { --bae-tool: var(--bae-accent-text); }
+.bae-win-names { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+.bae-win-title { margin: 0; font-size: 1rem; font-weight: 600; line-height: 1.3; }
+.bae-win-title:focus { outline: none; }
+.bae-win-title:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 4px; }
+.bae-win-sub { margin: 0; font-size: 0.75rem; color: rgb(var(--color-text-secondary)); }
+.bae-win-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.bae-win-foot {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  min-height: var(--bae-win-row);
+  padding: 8px 16px;
+  border-top: 1px solid rgb(var(--color-bg-border));
+}
+.bae-win-note { flex: 1 1 320px; min-width: 0; margin: 0; font-size: 0.8125rem; color: rgb(var(--color-text-secondary)); }
+
+/* 아이콘 버튼 (머리의 닫기, 도구 줄) */
+.bae-ib {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgb(var(--color-text-secondary));
+  cursor: pointer;
+  transition: color var(--motion-base) var(--ease-std), background-color var(--motion-base) var(--ease-std), transform var(--motion-fast) var(--ease-snap);
+}
+.bae-ib::before { content: ""; position: absolute; inset: -6px; }
+.bae-ib:hover { background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); }
+.bae-ib:active { transform: translateY(1px); }
+.bae-ib:disabled { opacity: 0.55; cursor: not-allowed; }
+.bae-ib:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-ib[aria-pressed="true"] { background: color-mix(in srgb, rgb(var(--color-accent)) 18%, rgb(var(--color-bg-card))); color: rgb(var(--color-text-primary)); }
+
+/* 두 칸: 큰 칸 + 440px 설정 칸 */
+.bw-cols { flex: 1; display: flex; min-height: 0; }
+.bw-main { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; padding: 16px; overflow: auto; }
+.bw-side { flex: 0 0 var(--bae-win-side); display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; padding: 16px; overflow: auto; border-left: 1px solid rgb(var(--color-bg-border)); }
+.bw-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 32px; }
+.bw-bar-end { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.bw-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bw-row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.bae-field { display: flex; flex-direction: column; gap: 6px; }
+.bae-pop .bae-textarea { min-height: 56px; font-family: inherit; font-size: 0.8125rem; line-height: 1.5; }
+.bw-sel { position: relative; display: block; color: rgb(var(--color-text-secondary)); }
+.bw-sel svg { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); pointer-events: none; }
+.bw-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 24px 0 10px;
+  border: 1px solid rgb(var(--bae-field-edge));
+  border-radius: 6px;
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgb(var(--color-bg-primary));
+  color: rgb(var(--color-text-primary));
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.bw-select:focus-visible { outline-color: rgb(var(--color-accent-sub)); }
+.bae-mgroup { display: flex; flex-direction: column; gap: 4px; }
+.bae-mhead { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.bae-mhead-name { margin: 0; font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-text-secondary)); }
+.bae-mcount { font-size: 0.75rem; color: rgb(var(--color-text-secondary)); font-variant-numeric: tabular-nums; }
+.bae-mats { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bae-mrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.bae-minput {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgb(var(--bae-field-edge));
+  border-radius: 6px;
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+  background: rgb(var(--color-bg-primary));
+  color: rgb(var(--color-text-primary));
+  font-size: 0.8125rem;
+}
+.bae-minput::placeholder { color: rgb(var(--color-text-secondary)); }
+.bae-minput:focus-visible { outline-color: rgb(var(--color-accent-sub)); }
+.bw-thumb { display: block; overflow: hidden; width: 72px; height: 46px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--color-bg-primary)); }
+.bw-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bw-switch { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0; border: 0; background: transparent; color: rgb(var(--color-text-primary)); font-size: 0.8125rem; text-align: left; cursor: pointer; }
+.bw-switch:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 6px; }
+.bw-switch-track { position: relative; flex: 0 0 auto; width: 32px; height: 20px; border-radius: 999px; background: rgb(var(--bae-field-edge)); transition: background-color var(--motion-base) var(--ease-std); }
+.bw-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 999px; background: rgb(var(--color-bg-card)); transition: transform var(--motion-base) var(--ease-snap); }
+.bw-switch[aria-checked="true"] .bw-switch-track { background: rgb(var(--color-accent)); }
+.bw-switch[aria-checked="true"] .bw-switch-track::after { transform: translateX(12px); }
+.bae-style { display: flex; align-items: center; gap: 12px; }
+.bae-style-thumb { overflow: hidden; flex: none; width: 56px; height: 32px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px; background: rgb(var(--bae-paper)); }
+.bae-style-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bae-style-text { display: flex; flex-direction: column; min-width: 0; margin: 0 auto 0 0; line-height: 1.3; }
+.bae-style-name { font-size: 0.75rem; font-weight: 500; color: rgb(var(--color-text-secondary)); }
+.bae-style-sub { font-size: 0.75rem; }
+.bw-group { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.bw-group-head { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.bae-side-title { margin: 0; font-size: 0.8125rem; font-weight: 600; }
+
+/* 그림판 칸 (이미지를 칸에 맞추는 법: 14d 9장) */
+.bw-board { position: relative; flex: 1; display: grid; place-items: center; min-height: 240px; overflow: hidden; container-type: size; border-radius: 8px; background: rgb(var(--color-bg-primary)); }
+.bw-fit { max-width: 100%; max-height: 100%; }
+.bw-sheet { position: relative; overflow: hidden; background: rgb(var(--bae-paper)); }
+.bw-sheet-img { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+/* 좁은 창: 두 칸을 한 줄로 쌓고 몸이 스크롤, 640px 이하는 화면 가득 */
+@media (max-width: 1100px) {
+  .bae-win-body { overflow: auto; }
+  .bw-cols { flex-direction: column; flex: none; }
+  .bw-side { flex: none; border-left: 0; border-top: 1px solid rgb(var(--color-bg-border)); }
+  .bw-main { overflow: visible; }
+  .bw-board { flex: none; height: 420px; }
+}
+@media (max-width: 640px) {
+  .bae-root.bae-pop { padding: 0; }
+  .bae-win { width: 100%; height: 100%; border-radius: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bae-ib, .bw-switch-track, .bw-switch-track::after { transition: none; }
+  .bae-ib:active { transform: none; }
+}
