@@ -124,7 +124,7 @@ Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. G
 - 설정 '시작 › 씬 작업 링크'의 `guideFolderSuggestEnabled`(없으면 켜짐)로 끈다. 제안할 때마다 새로 읽는다.
 - 테스트는 `npm run test:scene-links`(`guideFolderSuggest*`·`workFolderSuggestIpc`).
 
-### BAE경 코멘트 경계 (9단계, 2026-11-16 — 운영 적용은 한솔 확인 뒤)
+### BAE경 코멘트 경계 (9단계, 2026-11-16 — 운영 적용 2026-11-17, 20261117083810)
 
 - 기록 한 건 = 댓글 스레드 하나(`comments.bae_job_id`, 댓글 id 는 `baec_` 로 시작). 씬 · 캐릭터 댓글과 같은 표 · 반응 · 알림 줄을 쓰지만 **BAE 줄은 표로 직접 읽고 쓰지 못한다**: `comments` · `comment_reactions` 에 제한 정책(`bae_gyeong_comments_private` · `bae_gyeong_comment_reactions_private`)이 있어 앱 열쇠로는 `bae_job_id IS NULL` 줄만 보인다(실시간도 같은 규칙으로 걸러진다). BAE 댓글은 `bae_gyeong_session_comment_*` 래퍼로만, 그 기록을 볼 수 있는 사람(만든 사람 · 검수자 · 관리자)만.
 - 알림은 서버가 정한다(`bae_gyeong_comment_notify`, 기존 `comment_notifications` 의 `auto`/`assignee` 값 그대로). 볼 수 없는 사람의 @ 는 저장할 때 빠지고, 종 목록은 읽을 때 다시 확인한다. 좋아요 · 다시 도장은 한 줄 코멘트로도 남는다(확인함은 조용히).
