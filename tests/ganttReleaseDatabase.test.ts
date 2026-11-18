@@ -217,9 +217,13 @@ test('folder creation undo cannot delete a project committed after its preflight
   try {
     // Project creation does not increment the folder revision; the empty-folder
     // inverse must therefore check children inside gantt_execute's write lock.
+    // The refusal is PT409 once the last file of the chain runs (2026-11-16): the server API retries 40001 without end.
+    await db.exec('RESET ROLE');
+    await db.exec(readFileSync(new URL('../DEVLOG/migrations/2026-11-16-conflict-errcode-pt409.sql', import.meta.url), 'utf8'));
+    await db.exec('SET ROLE anon');
     await assert.rejects(execute('alice', {
       type: 'deleteSpace', spaceId, expectedRevision: 1, requireEmpty: true,
-    }), (error: { code?: string }) => error.code === '40001');
+    }), (error: { code?: string }) => error.code === 'PT409');
     assert.equal((await read()).projects[0].id, projectId);
     assert.equal((await read()).spaces[0].revision, 1);
     const emptySpace = { ...space, id: '00000000-0000-4000-8000-000000000021', name: '빈 폴더' };

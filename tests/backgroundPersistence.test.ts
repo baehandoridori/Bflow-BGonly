@@ -85,7 +85,7 @@ test('background store forwards stairs, roads and camera colours untouched both 
 
 test('background store surfaces migration, session and conflict errors without returning demo data',async()=>{
   const {createBackgroundStore}=await load('electron/backgroundStore.ts');
-  for(const [code,message,pattern] of [['PGRST202','missing',/저장소 준비/],['42501','로그인 만료',/로그인 만료/],['40001','먼저 변경했습니다',/먼저 변경/]] as const){
+  for(const [code,message,pattern] of [['PGRST202','missing',/저장소 준비/],['42501','로그인 만료',/로그인 만료/],['PT409','먼저 변경했습니다',/먼저 변경/]] as const){
     const store=createBackgroundStore({rpc:async()=>({data:null,error:{code,message}})},{tokenFor:()=>'token'});
     await assert.rejects(store.read('alice'),pattern);
   }

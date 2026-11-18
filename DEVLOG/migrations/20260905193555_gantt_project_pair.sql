@@ -1,6 +1,8 @@
 -- Generated with Supabase CLI migration new gantt_project_pair.
 -- Apply after 20260905173804_gantt_revision_ledger.sql.
 -- Add one atomic two-project task transfer; keep existing session-only RPC grants.
+-- 2026-11-16: a re-run of this file brings back ERRCODE '40001' for stale writes, which the server API (PostgREST) retries without end;
+-- run 2026-11-16-conflict-errcode-pt409.sql again after it (last in every chain).
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '45s';
 CREATE OR REPLACE FUNCTION public.gantt_execute(p_actor_id TEXT,p_request_id TEXT,p_command JSONB)

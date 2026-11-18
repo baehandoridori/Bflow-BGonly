@@ -5,6 +5,8 @@
 -- the Data API with a forged actor. Do not describe this as stronger external authentication.
 -- Tasks are one JSONB aggregate per project. Calendar entries are projections, never copies.
 -- Lock order: calendars -> gantt_spaces -> gantt_projects -> actor/request receipt.
+-- 2026-11-16: 이 파일을 다시 실행하면 '먼저 바뀜' 충돌 번호가 40001 로 돌아간다(서버 API 가 끝없이 다시 시도한다).
+-- 그 뒤에 2026-11-16-conflict-errcode-pt409.sql 도 다시 실행한다(모든 사슬의 마지막).
 
 CREATE TABLE IF NOT EXISTS public.gantt_spaces (
   id TEXT PRIMARY KEY,
