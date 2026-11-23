@@ -12,7 +12,7 @@ import { BAE_BASE_MAX, baeBaseFieldView, baeStyleForPlace, baePlaceMode } from '
 import type { MaterialWindowProps, MakingStageProps, BaeStepView } from '../make/ui';
 import type { BaeOrderPaneView, BaeBenchView, BaeBusyView, BaeFactView, BaeJobViewProps, BaeMaterialsView, BaeRecordRowView, BaeResultToolsView, BaeReviewView, BaeStampPanelView } from '../home/benchTypes';
 import type { BaeStyleEntryView } from '../make/ui';
-import { BAE_STRIP_SRC, baeActiveLibrary, baeBoard, baeLibSrc, baeMisfit, baeOrderStale, useBaeMake, type BaeActiveAngle, type BaeActiveJob } from './useBaeMake';
+import { BAE_STRIP_SRC, baeActiveLibrary, baeBoard, baeLibSrc, baeMisfit, baeOrderStale, baeRecordEditBlock, useBaeMake, type BaeActiveAngle, type BaeActiveJob, type BaeDraftMatch } from './useBaeMake';
 import { baeLockText, baeNoiseText, baeStyleRowForBases } from './baeBases';
 import { BAE_UPSCALE_MODES, baeUpscaleButton, baeUpscaleEngineLabel, baeUpscalePlan } from '@/shared/bae/upscaleView';
 import { BAE_IMAGE_QUALITIES, baeModelChoices, baeQualityLabel } from '@/shared/bae/imageChoice';
@@ -175,8 +175,14 @@ export function activeOrderPane(j: BaeActiveJob, seconds: number): BaeOrderPaneV
   };
 }
 
-/** 작업대 2 주문서 칸 — 기록 한 건 (보기만: 요약 · 스타일 예시 · PD 메모 · 지문 · 고친 기록 · 영어 주문서). */
-export function recordOrderPane(j: BaeJob): BaeOrderPaneView | null {
+/**
+ * 작업대에서 보는 내 기록의 주문서 고치기 (2026-11-23). match = 재료 창이 그 그림 때와 같은지 (null = 아직 보는 중),
+ * onStarted = 고치기를 시작하면 작업대가 새 작업을 보이게.
+ */
+export interface BaeRecordEdit { match: BaeDraftMatch | null; onStarted(): void }
+
+/** 작업대 2 주문서 칸 — 기록 한 건 (요약 · 스타일 예시 · PD 메모 · 지문 · 고친 기록 · 영어 주문서). edit 가 있으면 한국어로 고치기도. */
+export function recordOrderPane(j: BaeJob, edit?: BaeRecordEdit): BaeOrderPaneView | null {
   const pd = j.pd;
   if (!pd?.summaryKo || j.kind === 'angle') return null;
   return {
@@ -185,7 +191,17 @@ export function recordOrderPane(j: BaeJob): BaeOrderPaneView | null {
     notes: pd.notesKo ?? [],
     director: pd.director && pd.director.ko.length ? { ko: pd.director.ko, en: pd.director.en, replacedKo: (pd.director.replaced ?? []).map((k) => DIR_MARKER_KO[k] ?? k) } : null,
     revisions: pd.revisions ?? [], prompt: pd.prompt ?? '', promptCount: pd.prompt ? promptCountText(pd.prompt).text : '',
-    revise: null, draw: null, flashAt: 0,
+    revise: edit && !baeRecordEditBlock(j) ? recordRevise(j, edit) : null, draw: null, flashAt: 0,
+  };
+}
+function recordRevise(j: BaeJob, edit: BaeRecordEdit): NonNullable<BaeOrderPaneView['revise']> {
+  const s = useBaeMake.getState();
+  return {
+    text: s.reviseText, onText: (t) => s.set('reviseText', t), onRevise: () => { void s.reviseRecord(j, undefined, edit.onStarted); },
+    busySec: null, onStop: () => undefined, again: true,
+    note: edit.match === 'empty' ? { tone: 'warn', text: '재료 창이 비어 있어요. 이 그림의 러프를 재료 창에 다시 넣어야 고칠 수 있어요.' }
+      : edit.match === 'differs' ? { tone: 'warn', text: '재료 창의 러프나 설명이 이 그림 때와 달라요. 고치면 지금 재료 창에 있는 것으로 다시 그려요.' } : null,
+    blocked: edit.match === 'empty',
   };
 }
 
@@ -377,7 +393,7 @@ const recordDesc = (j: BaeJob) => ((j.summary.request ?? '').trim() ? titleOf(j.
 const recordTitle = (j: BaeJob) => j.name || recordDesc(j);
 /** 기록의 제목 (붙인 이름, 없으면 설명 · '다른 각도 오른쪽 45°' · '레이어: 파일 이름'). */
 export const baeRecordTitle = recordTitle;
-export function recordBench(j: BaeJob, rate: number, localResult: string | null, busy?: { what: 'noise' | 'lock'; step: string }, upBusy = false): BaeBenchView {
+export function recordBench(j: BaeJob, rate: number, localResult: string | null, busy?: { what: 'noise' | 'lock'; step: string }, upBusy = false, edit?: BaeRecordEdit): BaeBenchView {
   const pd = j.pd;
   const src = localResult ?? j.images.result ?? null;
   return {
@@ -385,7 +401,7 @@ export function recordBench(j: BaeJob, rate: number, localResult: string | null,
     mat: recordMaterials(j), matAct: '',
     order: j.kind === 'angle' && j.summary.angle ? { summary: angleOrderText(j.summary.angle.memo), ask: '', notes: pd?.notesKo ?? [], style: '', pdNote: '', head: [] }
       : pd?.summaryKo ? { summary: pd.summaryKo, ask: pd.revisions?.at(-1) ?? '', notes: pd.notesKo ?? [], style: j.summary.base ? PLACE_STYLE : pd.reason ?? '', pdNote: '', head: [] } : null,
-    orderPane: recordOrderPane(j),
+    orderPane: recordOrderPane(j, edit),
     orderReady: false,
     result: src && j.status === 'done' ? { src, alt: '만든 배경 그림', aspect: j.result.w && j.result.h ? j.result.w / j.result.h : 16 / 9, facts: recordResultFacts(j, rate), tools: recordTools(j, localResult, busy, upBusy) } : null,
     review: reviewOf(j),

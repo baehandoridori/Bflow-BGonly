@@ -102,6 +102,8 @@ export interface BaeOrderPaneView {
     busySec: number | null; onStop(): void;  // 고치는 중이면 초
     again: boolean;                          // 다 그린 뒤: 고치면 새 그림
     onRemake?: () => void;                   // 재료가 맞지 않을 때 '주문서 다시 만들기'
+    note?: { tone: 'info' | 'warn'; text: string } | null;  // 기록에서 고칠 때: 재료 창이 그 그림 때와 다르면
+    blocked?: boolean;                       // 고치기 단추를 막는다 (재료 창이 비었을 때)
   } | null;
   draw: {
     tier: string; tiers: { id: string; label: string; size: [number, number]; note: string }[]; onTier(id: string): void;

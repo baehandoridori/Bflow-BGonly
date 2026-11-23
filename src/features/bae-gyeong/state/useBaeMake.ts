@@ -22,6 +22,7 @@ import { baeBasesFromDraft, baeBasesToDraft, baeEmptySwatches, baePartsKey } fro
 import { BAE_LIBRARY_DEFAULT } from '@/shared/bae/library';
 import { BAE_DEFAULT_QUALITY, BAE_IMAGE_QUALITIES } from '@/shared/bae/imageChoice';
 import type { BaeJob } from '@/shared/bae/jobs';
+import { BAE_ROUGH_SAME_MAX, baeGrayDiff, baeOrderFromRecord, baeRecordReviseBlock } from '@/shared/bae/order/fromRecord';
 import type { BaeProgress } from '@/shared/bae/makeCalls';
 import type { BaeAngleDrawCall } from '@/shared/bae/angle/calls';
 import { baeAngleGw } from '../angleAccess';
@@ -141,6 +142,11 @@ interface MakeState {
   openSame(src?: string | Blob): Promise<void>;
   submitOrder(): Promise<void>;
   revise(text?: string): Promise<void>;
+  /**
+   * 작업대에서 보던 내 기록의 주문서를 이어받아 한국어로 고치기 (앱을 다시 켜서 작업이 기록이 된 뒤에도, 2026-11-23).
+   * 새 작업으로 고쳐서 그 기록은 그대로 남는다. 재료는 지금 재료 창의 것. onStarted = 작업대가 새 작업을 보이게 (고치기를 기다리기 전에).
+   */
+  reviseRecord(rec: BaeJob, text?: string, onStarted?: () => void): Promise<void>;
   draw(): Promise<void>;
   /** 다른 각도로: 각도 창의 '이 각도로 그리기' (창은 부르는 쪽이 닫는다) */
   drawAngle(call: BaeAngleDrawCall): Promise<void>;
@@ -306,6 +312,44 @@ async function loadDraft() {
 function snapAll(): string {
   const s = useBaeMake.getState(); const b = baeBoard();
   return JSON.stringify([b.rev(), b.guide(), s.ratio, s.refs.map((r) => [r.id, r.note]), s.styleMode, s.manualPicks, s.request, s.place, s.time, s.persp, 0, baePlaceKey(s.bases), s.bases.map((x) => x.note), b.tilt()]);
+}
+/** 지금 PD 나 그림 모델을 기다리는 작업이 있으면 그 까닭 ('' = 없음). */
+function baeBusyBlock(): string {
+  const j = useBaeMake.getState().job;
+  return j && (j.phase === 'ordering' || j.phase === 'revising' || j.phase === 'drawing') ? '지금 하던 작업이 끝나면 다시 눌러 주세요.' : '';
+}
+/** 작업대에서 보는 내 기록의 주문서를 지금 고칠 수 없는 까닭 ('' = 고칠 수 있음). */
+export function baeRecordEditBlock(rec: BaeJob): string { return baeRecordReviseBlock(rec) || baeBusyBlock(); }
+
+export type BaeDraftMatch = 'same' | 'differs' | 'empty';
+/**
+ * 기록의 주문서를 고치기 전에: 재료 창(이 PC 초안)이 그 그림 때 재료와 같은지. 설명 · 비율 · 레퍼런스 수 · 기준 배경 수를 보고,
+ * 러프는 기록의 러프 미리보기와 작게 줄여 견준다. 그림을 못 읽으면 글로 본 것만 믿는다 (주의 글을 틀리게 띄우지 않게).
+ */
+export async function baeDraftVsRecord(rec: BaeJob): Promise<BaeDraftMatch> {
+  baeBoard(); await loadDraftOnce();
+  const s = useBaeMake.getState(); const sm = rec.summary ?? {};
+  if (!board || !board.hasContent()) return 'empty';
+  if ((sm.request ?? '').trim() !== s.request.trim()) return 'differs';
+  if (sm.ratio && sm.ratio !== s.ratio) return 'differs';
+  if ((Array.isArray(sm.refNotes) ? sm.refNotes.length : 0) !== s.refs.length) return 'differs';
+  if ((sm.base ? (Array.isArray(sm.base.notes) ? sm.base.notes.length : Number(sm.base.n) || 0) : 0) !== s.bases.length) return 'differs';
+  const recRough = rec.images?.rough; if (!recRough) return 'same';
+  try {
+    const inp = await prepareInputs(sources(), cache); if (!inp) return 'empty';
+    const [a, b] = await Promise.all([tinyGray(inp.rough.small), tinyGray(recRough)]);
+    return baeGrayDiff(a, b) <= BAE_ROUGH_SAME_MAX ? 'same' : 'differs';
+  } catch { return 'same'; }
+}
+/** 그림을 96×54 회색으로 (0~1). */
+async function tinyGray(src: string): Promise<Float32Array> {
+  const bmp = await createImageBitmap(await (await fetch(src)).blob());
+  const W = 96; const H = 54; const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d', { willReadFrequently: true }); if (!g) { bmp.close(); throw new Error('그림판을 못 만들었어요'); }
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.drawImage(bmp, 0, 0, W, H); bmp.close();
+  const d = g.getImageData(0, 0, W, H).data; const out = new Float32Array(W * H);
+  for (let i = 0; i < out.length; i++) out[i] = (d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114) / 255;
+  return out;
 }
 const uuid = () => crypto.randomUUID();
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -494,6 +538,21 @@ export const useBaeMake = create<MakeState>((set, get) => ({
     if (!r.ok) { set({ job: { ...cur, phase: 'ordered', reviseError: r.aborted ? null : r.message }, reviseText: r.aborted ? t : '' }); if (r.aborted) toast('그만뒀어요.'); return; }
     const order = { ...r.order, dirty: r.order.dirty || snapAll() !== before };
     set({ job: { ...cur, phase: 'ordered', order, promptText: r.promptText, orderCostUsd: r.costUsd != null ? (cur.orderCostUsd ?? 0) + r.costUsd : cur.orderCostUsd, startedAt: Date.now(), revisions: order.revisions }, manualPicks: r.manualPicks });
+  },
+
+  reviseRecord: async (rec, text, onStarted) => {
+    const t = (text ?? get().reviseText).trim();
+    if (!t) { toast('고칠 내용을 한국어로 써주세요'); return; }
+    const why = baeRecordEditBlock(rec); if (why) { toast(why); return; }
+    baeBoard(); await loadDraftOnce();
+    if (baeBusyBlock()) return;
+    const order = baeOrderFromRecord(rec, get().refs.map((r) => r.id));
+    const job: BaeActiveJob = { id: uuid(), kind: rec.kind === 'same' ? 'same' : 'new', createdAt: new Date().toISOString(), phase: 'ordered', startedAt: Date.now(), order,
+      promptText: rec.pd?.prompt ?? '', orderCostUsd: null, orderSec: null, inputs: null, partial: null, partialCount: 0, finishing: null, result: null, error: null,
+      reviseError: null, revisions: order.revisions.slice() };
+    set({ job, win: null, winAuto: false, waitingCheck: false });
+    onStarted?.();
+    await get().revise(t);
   },
 
   draw: async () => {

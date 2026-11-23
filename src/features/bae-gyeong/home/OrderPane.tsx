@@ -85,15 +85,20 @@ export function OrderPane({ v }: { v: BaeOrderPaneView }) {
       {r ? (
         <section className="bae-op-revise" aria-labelledby="bae-op-rev-h">
           <label className="bae-op-h" id="bae-op-rev-h" htmlFor="bae-op-rev-in">한국어로 고쳐 달라고 하기{r.again ? <span className="bae-op-h-sub">고친 주문서로 새 그림을 그려요. 지금 그림은 기록에 남아요</span> : null}</label>
+          {r.note ? (
+            <p className={`bae-op-status is-${r.note.tone}`} role="status">
+              {r.note.tone === 'warn' ? <AlertTriangle size={14} aria-hidden="true" /> : <Info size={14} aria-hidden="true" />}<span>{r.note.text}</span>
+            </p>
+          ) : null}
           {r.busySec != null ? (
             <p className="bae-op-busy" role="status">
               <Loader2 size={14} className="bae-spin" aria-hidden="true" /><span className="bae-num">PD가 고치는 중, {r.busySec}초째</span>
               <button type="button" className="bae-btn bae-btn-s bae-push" onClick={r.onStop}>그만두기</button>
             </p>
           ) : (
-            <form className="bae-op-revise-row" onSubmit={(e) => { e.preventDefault(); r.onRevise(); }}>
+            <form className="bae-op-revise-row" onSubmit={(e) => { e.preventDefault(); if (!r.blocked) r.onRevise(); }}>
               <input id="bae-op-rev-in" className="bae-input" value={r.text} placeholder="예) 소파를 조금 더 크게, 커튼은 빼줘 · {지문}" onChange={(e) => r.onText(e.target.value)} />
-              <button type="submit" className="bae-btn bae-btn-s" disabled={!r.text.trim()}><Wand2 size={14} aria-hidden="true" />고치기</button>
+              <button type="submit" className="bae-btn bae-btn-s" disabled={!r.text.trim() || !!r.blocked}><Wand2 size={14} aria-hidden="true" />고치기</button>
             </form>
           )}
         </section>

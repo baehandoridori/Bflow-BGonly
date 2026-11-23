@@ -16,7 +16,7 @@ import { JobView } from './records/JobView';
 import { useImageViewer } from './view/ImageViewer';
 import { MakingStage } from './make/MakingStage';
 import { BaeSettingsTab } from './settings/BaeSettingsTab';
-import { baeBoard, useBaeMake } from './state/useBaeMake';
+import { baeBoard, baeDraftVsRecord, baeRecordEditBlock, useBaeMake, type BaeDraftMatch } from './state/useBaeMake';
 import { useBaeLocal, useBaeTools, type BaeToolTarget } from './state/useBaeTools';
 import { baeUpRunning, useBaeUpscale } from './state/useBaeUpscale';
 import { useBaePcCheck } from './state/useBaePcCheck';
@@ -127,6 +127,15 @@ export default function BaeGyeongView() {
   const recordPicked = withPd(rows.find((r) => r.id === recSel) ?? null);
   // 한 건의 PD 글: 처음 열 때와 그 줄이 바뀌었을 때만 받는다 (결과 판만 바꾼 줄도 PD 글은 그대로 보여 준다)
   useEffect(() => { if (benchRecord) void jobs.loadDetail(benchRecord.id, benchRecord.updatedAt); }, [benchRecord?.id, benchRecord?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 작업대에서 보는 내 기록의 주문서 고치기 (2026-11-23): 재료 창이 그 그림 때와 같은지 본다 (그리는 손을 따라가지 않게 잠깐 쉬었다가)
+  const [recMatch, setRecMatch] = useState<{ id: string; v: BaeDraftMatch } | null>(null);
+  const recEditable = !!benchRecord && !!currentUser && benchRecord.userId === currentUser.id && !baeRecordEditBlock(benchRecord);
+  useEffect(() => {
+    if (!recEditable || !benchRecord) return;
+    let gone = false; const rec = benchRecord;
+    const t = window.setTimeout(() => { void baeDraftVsRecord(rec).then((v) => { if (!gone) setRecMatch({ id: rec.id, v }); }).catch(() => undefined); }, 600);
+    return () => { gone = true; window.clearTimeout(t); };
+  }, [recEditable, benchRecord?.id, benchRecord?.images.rough, make.boardRev, make.request, make.ratio, make.refs.length, make.bases.length]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (recordPicked) void jobs.loadDetail(recordPicked.id, recordPicked.updatedAt); }, [recordPicked?.id, recordPicked?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const localRec = useLocalResult(recordPicked?.id ?? null, recordPicked?.updatedAt ?? null);
   // 팀 기록 한 건: 목록에서 빠져도(예: '도장 없음'에서 도장을 찍음) 연 채로 둔다
@@ -383,7 +392,8 @@ export default function BaeGyeongView() {
 
   let bench = null; let busy = null;
   if (showActive && active) { const b = activeBench(rate, sec, tools.busy[active.id], upParent === active.id); bench = b.bench; busy = b.busy; }
-  else if (benchRecord) bench = recordBench(benchRecord, rate, localBench, tools.busy[benchRecord.id], upParent === benchRecord.id);
+  else if (benchRecord) bench = recordBench(benchRecord, rate, localBench, tools.busy[benchRecord.id], upParent === benchRecord.id,
+    recEditable ? { match: recMatch?.id === benchRecord.id ? recMatch.v : null, onStarted: () => setSelId(null) } : undefined);
   const activeTarget: BaeToolTarget | null = showActive && active?.result ? { jobId: active.id, variant: active.result.variant, hasLock: active.result.hasLock } : null;
   const bigLive = !!live && make.makingBig && showActive;
   if (bigLive && active?.phase === 'drawing') bigDrawId.current = active.id;
