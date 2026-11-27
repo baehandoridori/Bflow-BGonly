@@ -79,7 +79,7 @@ export interface BaeActiveJob {
   /** 그림이 다 된 때 (만드는 화면의 마무리 효과 · 작업판 결과가 처음 나타날 때) */
   doneAt?: number;
 }
-type Win = null | 'material' | 'style' | 'parts' | 'denoise' | 'upscale' | 'angle' | 'layers';
+type Win = null | 'material' | 'style' | 'parts' | 'imgedit' | 'denoise' | 'upscale' | 'angle' | 'layers';
 
 interface MakeState {
   kind: 'new' | 'same';
@@ -91,6 +91,8 @@ interface MakeState {
   lockOn: boolean;
   /** 부품 자르기 창에서 보고 있는 기준 배경 */
   partsAt: number;
+  /** 그림 고치기 창에서 고치는 재료 그림 (재료 창의 레퍼런스 · 기준 배경을 누르면, 2026-11-27) */
+  imgEdit: { kind: 'ref' | 'base'; id: number } | null;
   guide: GuideState; tilt: number; boardRev: number;
   win: Win; winAuto: boolean; styleBack: Win;
   job: BaeActiveJob | null;
@@ -138,6 +140,10 @@ interface MakeState {
   setParts(id: number, parts: BaePlacePart[]): void;
   setSwatches(id: number, sw: BaePlaceSwatches): void;
   resetSwatches(id: number): void;
+  /** 그림 고치기 창 열기 · 재료 창으로 돌아가기 · 고친 그림 쓰기 (바꿨으면 참 — 새 번호를 받아 만들어 둔 재료 · 주문서가 다시 만들어진다) */
+  openImgEdit(kind: 'ref' | 'base', id: number): void;
+  backFromImgEdit(): void;
+  applyImgEdit(blob: Blob, shapeChanged: boolean): Promise<boolean>;
   /** '같은 장소 다른 컷' 재료 창 (src 가 있으면 그 그림을 기준 배경으로 넣어서) */
   openSame(src?: string | Blob): Promise<void>;
   submitOrder(): Promise<void>;
@@ -380,7 +386,7 @@ function notifyDone(title: string, body: string) {
 
 export const useBaeMake = create<MakeState>((set, get) => ({
   kind: 'new', ratio: '16:9', tier: readTier(), place: 'auto', time: 'day', persp: 'auto', request: '',
-  refs: [], styleMode: 'auto', manualPicks: [], carryOn: true, bases: [], lockOn: readLock(), partsAt: 0,
+  refs: [], styleMode: 'auto', manualPicks: [], carryOn: true, bases: [], lockOn: readLock(), partsAt: 0, imgEdit: null,
   guide: { ...GUIDE_INITIAL }, tilt: 0, boardRev: 0,
   win: null, winAuto: false, styleBack: null,
   job: null, makingBig: true, showNotes: true, reviseText: '', message: null, submitting: false, viewVisible: false, waitingCheck: false,
@@ -388,7 +394,7 @@ export const useBaeMake = create<MakeState>((set, get) => ({
 
   set: (k, v) => set({ [k]: v } as Partial<MakeState>),
   openMaterial: (kind) => { ensureProgress(); baeBoard(); void loadDraftOnce(); set({ win: 'material', winAuto: false, kind: kind ?? get().kind, message: null }); },
-  closeWin: () => { if (get().win === 'material' || get().win === 'parts') scheduleDraftSave(0); set({ win: null, winAuto: false }); },
+  closeWin: () => { const w = get().win; if (w === 'material' || w === 'parts' || w === 'imgedit') scheduleDraftSave(0); set({ win: null, winAuto: false, imgEdit: null }); },
   openStyle: () => set((s) => ({ styleBack: s.win === 'material' ? 'material' : null, win: 'style', winAuto: false })),
   backFromStyle: () => set((s) => ({ win: s.styleBack, styleBack: null })),
   setRequest: (t) => { set({ request: t }); markStale(); },
@@ -467,6 +473,38 @@ export const useBaeMake = create<MakeState>((set, get) => ({
   setParts: (id, parts) => { patchBase(id, (b) => ({ ...b, parts })); markStale(); },
   setSwatches: (id, sw) => { patchBase(id, (b) => ({ ...b, sw })); baseChanged(); },
   resetSwatches: (id) => { swKeys.delete(id); patchBase(id, (b) => ({ ...b, sw: baeEmptySwatches() })); autoSwatches(id); },
+  openImgEdit: (kind, id) => {
+    const s = get();
+    if (kind === 'ref' ? !s.refs.some((r) => r.id === id) : !s.bases.some((b) => b.id === id)) return;
+    set({ win: 'imgedit', winAuto: false, imgEdit: { kind, id } });
+  },
+  backFromImgEdit: () => set({ win: 'material', winAuto: false, imgEdit: null }),
+  applyImgEdit: async (blob, shapeChanged) => {
+    const at = get().imgEdit; if (!at) return false;
+    const gone = () => { toast('고치던 그림이 재료 창에서 빠졌어요'); get().backFromImgEdit(); return false; };
+    try {
+      const { src, img } = await normalizeSrc(asFile(blob, 'edit.png'));
+      const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+      let dropped = 0;
+      // 새 번호를 준다: 만들어 둔 재료(작은 그림)와 주문서 속 그림 번호가 옛 그림을 가리키지 않게 (inputsKey · baePlaceKey 가 번호로 본다)
+      if (at.kind === 'ref') {
+        if (!get().refs.some((r) => r.id === at.id)) return gone();
+        const id = ++refSeq + Date.now();
+        set((s) => ({ refs: s.refs.map((r) => (r.id === at.id ? { id, src, note: r.note, img } : r)) }));
+        markStale();
+      } else {
+        const old = get().bases.find((b) => b.id === at.id); if (!old) return gone();
+        dropped = shapeChanged ? old.parts.length : 0;
+        const nb: BaePlaceBase = { id: ++baseSeq + Date.now(), src, w, h, note: old.note, parts: shapeChanged ? [] : old.parts, sw: { auto: null, off: old.sw.off, add: old.sw.add } };
+        swKeys.delete(old.id);
+        set((s) => ({ bases: s.bases.map((b) => (b.id === old.id ? nb : b)) }));
+        autoSwatches(nb.id); baseChanged();
+      }
+      set({ win: 'material', winAuto: false, imgEdit: null });
+      toast(dropped ? `고친 그림으로 바꿨어요. 부품 ${dropped}개는 지웠으니 다시 잘라 주세요` : '고친 그림으로 바꿨어요');
+      return true;
+    } catch (e) { toast(msg(e) || '고친 그림을 넣지 못했어요'); return false; }
+  },
   openSame: async (src) => {
     get().openMaterial('same');
     if (src) await get().addBaseFrom(src);

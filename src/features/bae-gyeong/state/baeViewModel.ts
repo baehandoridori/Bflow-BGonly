@@ -102,6 +102,7 @@ export function materialProps(a: { onAddRefs(files: File[]): void; isAdmin: bool
     guideUseText: s.persp === 'auto' ? '' : guideSummaryKo(s.persp, g),
     refs: s.refs.map((r) => ({ id: String(r.id), src: r.src, note: r.note })), refMax: 4,
     onAddRefs: a.onAddRefs, onRefNote: (id, note) => s.setRefNote(Number(id), note), onRemoveRef: (id) => s.removeRef(Number(id)),
+    onEditRef: (id) => s.openImgEdit('ref', Number(id)), onEditBase: (id) => s.openImgEdit('base', Number(id)),
     bases: s.bases.map((b) => ({ id: String(b.id), src: b.src, note: b.note, parts: b.parts.length })), baseMax: BAE_BASE_MAX,
     onAddBases: (files) => { void s.addBases(files); }, onBaseNote: (id, note) => s.setBaseNote(Number(id), note), onRemoveBase: (id) => s.removeBase(Number(id)),
     baseHint: fv.hint, partsButton: fv.partsButton, onOpenParts: () => s.openParts(0), lockOn: s.lockOn, onLockOn: s.setLockOn,

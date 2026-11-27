@@ -1130,6 +1130,10 @@ export interface ElectronAPI extends CalendarApiInputContract {
   onUpdateState?: (callback: (state: UpdateInfo | null) => void) => () => void;
   onUpdateReady?: (callback: (version: string, state?: UpdateInfo) => void) => () => void;
   applyUpdateNow?: () => Promise<void>;
+  // 창 전체 화면 (F11 · '전체 화면 끝내기' 띠). 미리보기 브라우저에는 없어서 화면 속 전체 화면으로 대신한다.
+  setWindowFullscreen?: (want: boolean | 'toggle') => Promise<boolean>;
+  isWindowFullscreen?: () => Promise<boolean>;
+  onWindowFullscreen?: (callback: (on: boolean) => void) => () => void;
   // 네이티브 알림
   /** v1.148.0: jump 를 주면 Windows 알림을 눌렀을 때 그대로 돌려받는다(onNativeNotificationClick). */
   showNativeNotification?: (title: string, body: string, jump?: import('../shared/nativeNotificationJump').NativeNotificationJump) => Promise<void>;

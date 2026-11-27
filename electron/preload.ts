@@ -212,6 +212,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 사용자가 토스트의 "지금 업데이트" 클릭 시 — main이 installer 적용 후 최신 버전으로 열기
   applyUpdateNow: () => ipcRenderer.invoke('update:apply-now') as Promise<void>,
 
+  // 창 전체 화면 (F11 · 위쪽 끝 '전체 화면 끝내기' 띠, 2026-11-27): 화면 속 요소가 아니라 창 자체를 켜고 끈다
+  setWindowFullscreen: (want: boolean | 'toggle') => ipcRenderer.invoke('window:set-fullscreen', want) as Promise<boolean>,
+  isWindowFullscreen: () => ipcRenderer.invoke('window:is-fullscreen') as Promise<boolean>,
+  onWindowFullscreen: (callback: (on: boolean) => void) => {
+    const handler = (_event: unknown, on: unknown) => callback(on === true);
+    ipcRenderer.on('window:fullscreen-changed', handler);
+    return () => { ipcRenderer.removeListener('window:fullscreen-changed', handler); };
+  },
+
   // 네이티브 알림 (OS 데스크톱 알림)
   showNativeNotification: (title: string, body: string, jump?: unknown) =>
     ipcRenderer.invoke('notification:show-native', title, body, jump),
