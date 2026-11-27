@@ -1,0 +1,40 @@
+/* 그림 고치기 창 (재료 창의 레퍼런스 · 기준 배경을 누르면). 크기는 재료 창처럼 넓게 — 그림을 크게 보고 고치게. */
+.bae-root.bae-pop.bae-pop-imgedit {
+  --bae-win-w: 92vw;
+  --bae-win-h: 92vh;
+  --bae-win-side: clamp(280px, 22vw, 340px);
+}
+.bae-ie-bar { gap: 6px 8px; }
+.bae-ie-sep { width: 1px; height: 20px; margin: 0 2px; background: rgb(var(--color-bg-border)); }
+.bae-ie-board { min-height: 320px; }
+.bae-ie-fit { box-shadow: 0 0 0 1px rgb(var(--color-bg-border)); }
+.bae-ie-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+.bae-ie-canvas.is-crop { cursor: crosshair; }
+.bae-ie-canvas.is-paint { cursor: none; }
+.bae-ie-canvas.is-pick { cursor: copy; }
+.bae-ie-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.bae-ie-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bae-ie-swatch { position: relative; width: 24px; height: 24px; padding: 0; border: 1px solid rgb(var(--bae-field-edge, 104 107 130)); border-radius: 6px; cursor: pointer; }
+.bae-ie-swatch::before { content: ""; position: absolute; inset: -4px; }
+.bae-ie-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px rgb(var(--color-bg-card)), 0 0 0 4px rgb(var(--bae-accent-text, var(--color-accent-sub))); }
+.bae-ie-swatch:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 3px; }
+.bae-ie-custom { display: inline-flex; cursor: pointer; }
+.bae-ie-custom input { width: 36px; height: 26px; padding: 0; border: 1px solid rgb(var(--bae-field-edge, 104 107 130)); border-radius: 6px; background: transparent; cursor: pointer; }
+.bae-ie-custom input:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+.bae-ie-size { display: grid; grid-template-columns: auto minmax(0, 1fr) 32px; align-items: center; gap: 10px; }
+.bae-ie-size-v { font-size: 0.8125rem; color: rgb(var(--color-text-secondary)); text-align: right; }
+.bae-ie-range[type="range"] { width: 100%; height: var(--bae-control-s, 32px); margin: 0; padding: 0; -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
+.bae-ie-range[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: rgb(var(--bae-field-edge, 104 107 130)); }
+.bae-ie-range[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -6px; border: 2px solid rgb(var(--color-bg-card)); border-radius: 999px; background: rgb(var(--color-accent)); }
+.bae-ie-range[type="range"]:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; border-radius: 6px; }
+
+/* 재료 창의 작은 그림: 누르면 그림 고치기 (버튼으로 감싼다) */
+.bae-mt-pic { position: relative; padding: 0; cursor: pointer; transition: border-color var(--motion-fast) var(--ease-std); }
+.bae-mt-pic:hover { border-color: rgb(var(--color-accent)); }
+.bae-mt-pic:focus-visible { outline: 2px solid rgb(var(--color-accent-sub)); outline-offset: 2px; }
+/* 누를 수 있다는 표시는 늘 보인다 (마우스를 올려야만 보이면 모른다) */
+.bae-mt-pic-ic { position: absolute; top: 3px; right: 3px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; background: rgb(0 0 0 / 0.62); color: #fff; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bae-mt-pic { transition: none; }
+}

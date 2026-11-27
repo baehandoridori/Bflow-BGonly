@@ -35,6 +35,9 @@ export interface MaterialWindowProps {
   onAddRefs(files: File[]): void;
   onRefNote(id: string, note: string): void;
   onRemoveRef(id: string): void;
+  /** 작은 그림을 누르면 그림 고치기 창 (자르기 · 돌리기 · 뒤집기 · 칠하기, 2026-11-27) */
+  onEditRef(id: string): void;
+  onEditBase(id: string): void;
   // ── 기준 배경 (같은 장소, 3단계 · HTML baseField) ──
   bases: BaeBaseView[];
   baseMax: number;             // 3

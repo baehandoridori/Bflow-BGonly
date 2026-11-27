@@ -2,14 +2,16 @@
 // 기준 배경 · 레퍼런스 · 그림체 기준 · 이어 가기 · 알림. 발의 '주문서 만들기'. 보여 주기만 하고 바뀐 것은 콜백으로 알린다.
 // 창은 앱 창의 96% × 94% 까지 넓고(bae-material.css), '투시 가이드' 묶음은 그림판이 BoardWindowContext 로 받은 자리
 // (오른쪽 칸, 그림판 바로 옆)에 그린다. 투시 종류와 '참고하게 하기'는 여기 콜백(onPersp · onGuideUse)으로 가게에 간다.
+// 기준 배경 · 레퍼런스의 작은 그림은 단추다: 누르면 그림 고치기 창(자르기 · 돌리기 · 뒤집기 · 칠하기, 2026-11-27).
 import { useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, CopyPlus, Info, Loader2, Palette, Plus, Scissors, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, CopyPlus, Info, Loader2, Palette, PenLine, Plus, Scissors, X } from 'lucide-react';
 import { BaeWindow } from './BaeWindow';
 import type { BaePlace, MaterialWindowProps } from '../make/ui';
 import { BoardWindowContext, type BoardWindowLink } from '../make/board/boardWindow';
 import './bae-stage2-windows.css';
 import './bae-stage3.css';
 import './bae-material.css';
+import './bae-image-edit.css';
 
 const PLACES: { id: BaePlace; label: string }[] = [{ id: 'auto', label: '자동' }, { id: 'interior', label: '실내' }, { id: 'exterior', label: '실외' }];
 const DIR_HELP = '이번 화만의 특별한 지시는 { }로 감싸 주세요. 개발자 지문이 되어 매뉴얼과 고정 문장보다 먼저 따라요. 예) {이번 화는 회상 장면이라 전체를 세피아 톤으로}';
@@ -120,7 +122,9 @@ export function MaterialWindow(p: MaterialWindowProps) {
                 <ul className="bae-mats">
                   {p.bases.map((b, i) => (
                     <li key={b.id} className="bae-mrow">
-                      <span className="bw-thumb bae-mt-basethumb"><img src={b.src} alt={`기준 배경 ${i + 1}`} />{b.parts ? <span className="bae-mt-pc bae-num">부품 {b.parts}</span> : null}</span>
+                      <button type="button" className="bw-thumb bae-mt-basethumb bae-mt-pic" title="눌러서 그림 고치기" aria-label={`기준 배경 ${i + 1} 그림 고치기`} onClick={() => p.onEditBase(b.id)}>
+                        <img src={b.src} alt="" />{b.parts ? <span className="bae-mt-pc bae-num">부품 {b.parts}</span> : null}<span className="bae-mt-pic-ic" aria-hidden="true"><PenLine size={11} /></span>
+                      </button>
                       <input className="bae-minput" type="text" value={b.note} onChange={(e) => p.onBaseNote(b.id, e.target.value)} placeholder="어느 쪽? 예) 소파 쪽" aria-label={`기준 배경 ${i + 1}: 어느 쪽을 본 그림인지`} />
                       <button type="button" className="bae-ib" aria-label={`기준 배경 ${i + 1} 빼기`} title="빼기" onClick={() => p.onRemoveBase(b.id)}><X size={16} aria-hidden="true" /></button>
                     </li>
@@ -162,7 +166,9 @@ export function MaterialWindow(p: MaterialWindowProps) {
               <ul className="bae-mats">
                 {p.refs.map((r, i) => (
                   <li key={r.id} className="bae-mrow">
-                    <span className="bw-thumb"><img src={r.src} alt={`레퍼런스 ${i + 1}`} /></span>
+                    <button type="button" className="bw-thumb bae-mt-pic" title="눌러서 그림 고치기" aria-label={`레퍼런스 ${i + 1} 그림 고치기`} onClick={() => p.onEditRef(r.id)}>
+                      <img src={r.src} alt="" /><span className="bae-mt-pic-ic" aria-hidden="true"><PenLine size={11} /></span>
+                    </button>
                     <input className="bae-minput" type="text" value={r.note} onChange={(e) => p.onRefNote(r.id, e.target.value)} placeholder="이 그림에서 참고할 점" aria-label={`레퍼런스 ${i + 1} 설명`} />
                     <button type="button" className="bae-ib" aria-label={`레퍼런스 ${i + 1} 빼기`} title="빼기" onClick={() => p.onRemoveRef(r.id)}><X size={16} aria-hidden="true" /></button>
                   </li>

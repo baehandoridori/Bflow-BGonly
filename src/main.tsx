@@ -68,6 +68,7 @@ import './styles/guide-folder-sheet.css';
 import './styles/motion-view-transition.css';
 import { hasUsableElectronAPI, installDevElectronAPI } from './mocks/devElectronAPI';
 import { AppMotionConfig } from './components/common/AppMotionConfig';
+import { FullscreenExitBar } from './components/layout/FullscreenExitBar';
 import { startMotionLevelSync } from './services/motionLevelSync';
 
 function shouldInstallBrowserElectronMock(): boolean {
@@ -108,7 +109,11 @@ async function bootstrap() {
         ) : PreviewApp ? (
           <PreviewApp />
         ) : (
-          <App />
+          <>
+            <App />
+            {/* 전체 화면이면 위쪽 끝 '전체 화면 끝내기' 띠 (로그인 화면에서도) */}
+            <FullscreenExitBar />
+          </>
         )}
       </AppMotionConfig>
     </React.StrictMode>

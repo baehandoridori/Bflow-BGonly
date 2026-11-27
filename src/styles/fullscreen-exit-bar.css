@@ -1,0 +1,40 @@
+/* 전체 화면일 때 위쪽 끝 '전체 화면 끝내기' 띠 (FullscreenExitBar). 움직임은 transform · opacity 만. */
+.bf-fsx-edge {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 2147483000;
+  height: 4px;
+}
+.bf-fsx {
+  position: fixed; top: 10px; left: 50%; z-index: 2147483001;
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid rgb(var(--color-bg-border));
+  border-radius: 999px;
+  background: rgb(var(--color-bg-card));
+  color: rgb(var(--color-text-primary));
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.35);
+  font-size: 0.8125rem;
+  transform: translate(-50%, -140%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform var(--motion-base, 180ms) var(--ease-out, ease), opacity var(--motion-base, 180ms) var(--ease-out, ease);
+}
+.bf-fsx.is-shown { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.bf-fsx-text { white-space: nowrap; }
+.bf-fsx-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 8px 0 12px;
+  border: 1px solid color-mix(in srgb, rgb(var(--color-accent)) 45%, rgb(var(--color-bg-border)));
+  border-radius: 999px;
+  background: color-mix(in srgb, rgb(var(--color-accent)) 16%, rgb(var(--color-bg-card)));
+  color: rgb(var(--color-text-primary));
+  font: inherit; white-space: nowrap; cursor: pointer;
+}
+.bf-fsx-btn:hover { background: color-mix(in srgb, rgb(var(--color-accent)) 26%, rgb(var(--color-bg-card))); }
+.bf-fsx-btn:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: 2px; }
+.bf-fsx-kbd {
+  padding: 1px 6px; border: 1px solid rgb(var(--color-bg-border)); border-radius: 6px;
+  font-family: inherit; font-size: 0.6875rem; font-weight: 600; line-height: 1.4; color: rgb(var(--color-text-primary) / 0.75);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bf-fsx { transition: none; }
+}

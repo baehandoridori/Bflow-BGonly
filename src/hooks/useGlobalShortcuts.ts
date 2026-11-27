@@ -7,6 +7,7 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { loadPreferences } from '@/services/settingsService';
+import { toggleAppFullscreen } from '@/utils/appFullscreen';
 
 /* ── 단축키 ID → 기본 키 (ShortcutsSection과 동기화) ── */
 
@@ -154,11 +155,8 @@ export function useGlobalShortcuts({ onReload }: UseGlobalShortcutsOptions = {})
           onReloadRef.current?.();
           break;
         case 'fullscreen':
-          if (document.fullscreenElement) {
-            document.exitFullscreen?.();
-          } else {
-            document.documentElement.requestFullscreen?.();
-          }
+          // 창 자체의 전체 화면만 켜고 끈다 (2026-11-27 — 화면 속 전체 화면과 엇갈려 빠져나오지 못하던 문제)
+          if (!e.repeat) void toggleAppFullscreen();   // 누르고 있어도 한 번만
           break;
       }
     };

@@ -1,4 +1,4 @@
-// 만들기 창들 (재료 창 · 그림체 기준 창 · 부품 자르기 창 · 노이즈 제거 창 · 4K로 키우기 창 · 다른 각도로 창 · 레이어로 나누기 창).
+// 만들기 창들 (재료 창 · 그림체 기준 창 · 부품 자르기 창 · 그림 고치기 창 · 노이즈 제거 창 · 4K로 키우기 창 · 다른 각도로 창 · 레이어로 나누기 창).
 // 창은 한 번에 하나 (14d 1장). 상태는 useBaeMake · useBaeTools · useBaeUpscale · useBaeAngle, 글자는 baeViewModel.
 import { useEffect, useState } from 'react';
 import { useBaeMake } from './useBaeMake';
@@ -9,6 +9,7 @@ import { useBaeStore } from '../useBaeStore';
 import { MaterialWindow } from '../windows/MaterialWindow';
 import { StyleWindow } from '../windows/StyleWindow';
 import { PartsWindow } from '../windows/PartsWindow';
+import { ImageEditWindow } from '../windows/ImageEditWindow';
 import { DenoiseWindow } from '../windows/DenoiseWindow';
 import { UpscaleWindow } from '../windows/UpscaleWindow';
 import { useBaeUpscale } from './useBaeUpscale';
@@ -46,7 +47,17 @@ export function BaeMakeLayer() {
   const settings = useBaeStore();
   const rate = Number((settings.row('prices')?.value as { krwPerUsd?: unknown } | undefined)?.krwPerUsd) || 1400;
 
-  if (s.win === 'material') {
+  if (s.win === 'imgedit' && s.imgEdit) {
+    const at = s.imgEdit;
+    const i = at.kind === 'ref' ? s.refs.findIndex((r) => r.id === at.id) : s.bases.findIndex((b) => b.id === at.id);
+    const pic = i < 0 ? null : at.kind === 'ref' ? { src: s.refs[i].src, note: s.refs[i].note, parts: 0 } : { src: s.bases[i].src, note: s.bases[i].note, parts: s.bases[i].parts.length };
+    if (pic) {
+      const name = `${at.kind === 'ref' ? '레퍼런스' : '기준 배경'} ${i + 1}${pic.note.trim() ? ` (${pic.note.trim().slice(0, 24)})` : ''}`;
+      return <ImageEditWindow key={`${at.kind}:${at.id}`} kind={at.kind} label={name} src={pic.src} parts={pic.parts} onApply={s.applyImgEdit} onClose={s.backFromImgEdit} />;
+    }
+  }
+  // 그림 고치기 창에서 고치던 그림이 빠졌으면 재료 창으로 (빈 화면이 되지 않게)
+  if (s.win === 'material' || s.win === 'imgedit') {
     return <MaterialWindow {...materialProps({ onAddRefs: (files) => { void s.addRefs(files); }, isAdmin: settings.access.isAdmin })} board={<BoardView board={baeBoard()} />} />;
   }
   if (s.win === 'parts' && s.bases.length) {

@@ -798,14 +798,17 @@ async function loadMainWindowBounds(): Promise<StoredMainWindowBounds | null> {
     if (!b) return null;
     // 크기 sanity
     if (b.width < 300 || b.height < 200 || b.width > 10000 || b.height > 10000) return null;
-    // 위치가 있으면 off-screen 검증 — 중심점이 어느 display 작업영역 안에 있어야 함
+    // 위치가 있으면 off-screen 검증 — 중심점과 제목줄(창 위쪽 가운데)이 어느 display 작업영역 안에 있어야 함.
+    // 제목줄이 화면 위로 나가 있으면 최소화 · 최대화 · 닫기 단추가 안 보인다 (모니터 배치가 바뀐 PC, 2026-11-27).
     if (typeof b.x === 'number' && typeof b.y === 'number') {
       const cx = b.x + b.width / 2;
       const cy = b.y + b.height / 2;
-      const inside = screen.getAllDisplays().some((d) => {
+      const ty = b.y + 12;
+      const pointIn = (px: number, py: number) => screen.getAllDisplays().some((d) => {
         const { x, y, width, height } = d.workArea;
-        return cx >= x && cx <= x + width && cy >= y && cy <= y + height;
+        return px >= x && px <= x + width && py >= y && py <= y + height;
       });
+      const inside = pointIn(cx, cy) && pointIn(cx, ty);
       if (!inside) {
         // 위치는 포기하고 크기와 최대화 상태만 유지
         return { width: b.width, height: b.height, isMaximized: b.isMaximized, isFullScreen: b.isFullScreen };
@@ -829,12 +832,15 @@ function scheduleSaveMainWindowBounds(): void {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const isMaximized = mainWindow.isMaximized();
     const isFullScreen = mainWindow.isFullScreen();
-    // maximize/fullscreen 상태의 "복원 크기" 저장 — 다음 실행 때 창을 원래 크기로 기억
+    // maximize/fullscreen 상태의 "복원 크기" 저장 — 다음 실행 때 창을 원래 크기로 기억.
+    // 전체 화면은 기억하지 않는다 (시작 때 되살리지 않음, createWindow). 전체 화면 동안은 최대화 여부를 앞서 기억한 대로 둔다.
     const raw = isMaximized || isFullScreen ? mainWindow.getNormalBounds() : mainWindow.getBounds();
     const payload: StoredMainWindowBounds = {
       x: raw.x, y: raw.y, width: raw.width, height: raw.height,
-      isMaximized, isFullScreen,
+      isMaximized: isFullScreen ? cachedMainWindowBounds?.isMaximized === true : isMaximized,
+      isFullScreen: false,
     };
+    if (!isFullScreen) cachedMainWindowBounds = payload;
     writeAppState({ mainWindowBounds: payload }).catch((err) =>
       console.warn('[window-bounds] 저장 실패:', err));
   }, 500);
@@ -871,9 +877,9 @@ function createWindow(): void {
     windowForPlaygroundBack.removeListener('app-command', handlePlaygroundAppCommand);
   });
 
-  // 저장된 최대화/전체화면 상태 복원
-  if (b?.isMaximized) mainWindow.maximize();
-  if (b?.isFullScreen) mainWindow.setFullScreen(true);
+  // 저장된 최대화 상태 복원. 전체 화면은 되살리지 않는다 (창 단추가 없는 채로 켜져서 나갈 길을 모르게 된다 — 2026-11-27).
+  // 예전 버전이 '전체 화면'으로 기억해 둔 PC 는 대신 최대화로 연다 (보던 크기와 가깝게).
+  if (b?.isMaximized || b?.isFullScreen) mainWindow.maximize();
 
   // bounds 변경 시 디바운스(500ms) 저장 — 디스크 I/O 최소화
   mainWindow.on('resize', scheduleSaveMainWindowBounds);
@@ -3788,6 +3794,28 @@ ipcMain.handle(
     return storageUploadCharacterImage(characterId, costumeId, base64Data, originalDataUrl);
   },
 );
+
+// ─── IPC 핸들러: 창 전체 화면 (2026-11-27 한솔 '가끔 전체 화면이 되고 최소화/전체/X 가 안 보여') ─────────
+// F11 은 화면 속 요소 전체 화면(requestFullscreen)이 아니라 창 자체의 전체 화면만 켜고 끈다. 예전에는 요소 전체 화면으로 들어간 뒤
+// 앱을 끄면 '전체 화면'이 기억되어 다음 실행 때 창 전체 화면으로 되살아났고, 그때 F11 은 요소 전체 화면만 켰다 껐다 해서
+// 창 단추가 없는 전체 화면에서 빠져나올 길이 없었다. 이제 한 가지 전체 화면만 쓰고, 시작 때 되살리지 않는다(createWindow).
+ipcMain.handle('window:set-fullscreen', (e, want: unknown) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win || win.isDestroyed()) return false;
+  const next = want === 'toggle' ? !win.isFullScreen() : want === true;
+  if (win.isFullScreen() !== next) win.setFullScreen(next);
+  return next;
+});
+ipcMain.handle('window:is-fullscreen', (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  return !!win && !win.isDestroyed() && win.isFullScreen();
+});
+// 전체 화면이 켜지고 꺼지면 그 창의 화면에 알린다 (위쪽 끝 '전체 화면 끝내기' 띠)
+app.on('browser-window-created', (_e, win) => {
+  const send = () => { if (!win.isDestroyed()) win.webContents.send('window:fullscreen-changed', win.isFullScreen()); };
+  win.on('enter-full-screen', send);
+  win.on('leave-full-screen', send);
+});
 
 // ─── IPC 핸들러: 네이티브 알림 ─────────────────────────────
 // v1.148.0(씬 댓글 B안 §9): 띄운 알림을 잡아 둔다 — 참조가 없으면 눌러도 click 이 안 올 수 있다(가비지 수거). 최근 20개만.
